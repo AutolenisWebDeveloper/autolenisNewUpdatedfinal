@@ -1,0 +1,55 @@
+import { requireAffiliate } from "@/lib/auth/affiliate-session";
+import { prisma } from "@/lib/prisma";
+import { Users } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+
+export const dynamic = "force-dynamic";
+
+export default async function AffiliateReferralsPage() {
+  const affiliate = await requireAffiliate();
+  const referrals = await prisma.affiliate.findMany({
+    where: { parentId: affiliate.id },
+    include: { user: { select: { email: true, createdAt: true } }, commissions: { select: { amountCents: true, status: true } } },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
+  function maskEmail(email: string) {
+    const [u, d] = email.split("@");
+    return `${u.slice(0, 2)}***@${d}`;
+  }
+
+  return (
+    <div className="p-6 md:p-8 max-w-3xl" data-testid="affiliate-referrals-page">
+      <div className="flex items-center gap-3 mb-6">
+        <Users size={22} className="text-[#0B5FD1]" />
+        <h1 className="text-xl font-bold text-slate-900">My Referrals</h1>
+        <Badge variant="secondary">{referrals.length}</Badge>
+      </div>
+      {referrals.length === 0 ? (
+        <div className="text-center py-16 text-slate-400" data-testid="no-referrals">
+          <p>No referrals yet. Share your link to grow your network.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {referrals.map((r, i) => {
+            const totalEarned = r.commissions.filter(c => c.status !== "REVERSED").reduce((s, c) => s + c.amountCents, 0);
+            return (
+              <div key={r.id} data-testid={`referral-row-${i}`}
+                className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4">
+                <div>
+                  <p className="text-sm font-medium text-slate-800">{maskEmail(r.user.email)}</p>
+                  <p className="text-xs text-slate-400">Joined {r.createdAt.toLocaleDateString()} · {r.commissions.length} deal{r.commissions.length !== 1 ? "s" : ""}</p>
+                </div>
+                <div className="text-right">
+                  <p className="font-semibold text-sm text-green-600">${(totalEarned / 100).toLocaleString()} earned</p>
+                  <Badge variant={r.status === "ACTIVE" ? "green" : "secondary"} className="text-xs mt-1">{r.status}</Badge>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

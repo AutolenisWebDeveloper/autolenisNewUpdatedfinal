@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AutoLenis — Scheduled Maintenance</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #4B0082;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .card {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 1.5rem;
+      padding: 3rem 2.5rem;
+      max-width: 480px;
+      width: 100%;
+      text-align: center;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 2rem;
+    }
+    .logo-stripes {
+      width: 28px;
+      height: 24px;
+    }
+    .logo-text {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.02em;
+    }
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.75rem;
+    }
+    p {
+      color: rgba(255,255,255,0.65);
+      font-size: 0.95rem;
+      line-height: 1.6;
+      margin-bottom: 0.75rem;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(76,175,80,0.2);
+      color: #4CAF50;
+      border: 1px solid rgba(76,175,80,0.3);
+      border-radius: 9999px;
+      padding: 0.35rem 0.9rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 1.5rem;
+    }
+    .status {
+      margin-top: 2rem;
+      font-size: 0.75rem;
+      color: rgba(255,255,255,0.35);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <svg class="logo-stripes" viewBox="0 0 28 24" fill="none">
+        <rect x="0" y="14" width="8" height="10" rx="1" transform="rotate(-40 4 18)" fill="#4CAF50"/>
+        <rect x="10" y="10" width="8" height="12" rx="1" transform="rotate(-40 14 16)" fill="#57C4E5"/>
+        <rect x="20" y="7" width="8" height="12" rx="1" transform="rotate(-40 24 13)" fill="#1565C0"/>
+      </svg>
+      <span class="logo-text">AutoLenis</span>
+    </div>
+    <div class="badge">Scheduled Maintenance</div>
+    <h1>We&apos;ll be right back</h1>
+    <p>AutoLenis is undergoing scheduled maintenance to improve your experience. We expect to be back online shortly.</p>
+    <p>Deals in progress are not affected. Your data is safe.</p>
+    <p class="status">Questions? Contact support@autolenis.com</p>
+  </div>
+</body>
+</html>

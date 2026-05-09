@@ -1,0 +1,68 @@
+name: AutoLenis CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "yarn"
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: yarn install --frozen-lockfile
+
+      - name: Generate Prisma client
+        working-directory: frontend
+        run: yarn prisma generate
+
+      - name: Lint
+        working-directory: frontend
+        run: yarn lint
+
+      - name: TypeScript check
+        working-directory: frontend
+        run: yarn typecheck
+
+      - name: Build
+        working-directory: frontend
+        run: yarn build
+        env:
+          # Build-time placeholder env vars
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder_key
+          NEXT_PUBLIC_APP_URL: https://autolenis.com
+          DATABASE_URL: postgresql://placeholder:placeholder@placeholder:5432/placeholder
+          SUPABASE_SERVICE_ROLE_KEY: placeholder_service_key
+          STRIPE_SECRET_KEY: sk_test_placeholder
+          STRIPE_WEBHOOK_SECRET: whsec_placeholder
+          DOCUSIGN_CLIENT_ID: placeholder
+          DOCUSIGN_CLIENT_SECRET: placeholder
+          DOCUSIGN_PRIVATE_KEY_BASE64: placeholder
+          MICROBILT_CLIENT_ID: placeholder
+          MICROBILT_CLIENT_SECRET: placeholder
+          MICROBILT_IPREDICT_BASE_URL: https://placeholder.microbilt.com
+          RESEND_API_KEY: re_placeholder
+          GROQ_API_KEY: gsk_placeholder
+          JWT_SECRET: placeholder_jwt_secret_min_32_chars_xxxxxxxxxxxxxxx
+          CSRF_SECRET: placeholder_csrf_secret_min_32_chars_xxxxxxxxxxxxxxx
+          EMAIL_UNSUBSCRIBE_SECRET: placeholder_unsubscribe_secret_xxxxxxxxxx
+          PREQUAL_ENCRYPTION_KEY: placeholder_encryption_key_32_byte_xxxxxxx
+          CRON_SECRET: placeholder_cron_secret_min_32_chars_xxxxxxxxxxxxxxx
+          MAINTENANCE_MODE: "false"
+          CURRENT_TERMS_VERSION: "2026-01-01"
+          OPENROAD_PARTNER_ID: placeholder

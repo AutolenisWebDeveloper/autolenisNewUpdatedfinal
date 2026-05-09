@@ -1,0 +1,77 @@
+{
+  "summary": "Iteration 22 — Admin inventory upload & management. Backend: 20/20 pytest tests PASS after fixing stale Prisma client. Frontend: data-testids all present, navigation works, history table populated, but two functional issues found: filter-query does not filter the list, and manual entry form submission silently fails (no redirect, no error displayed).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "/admin/inventory InventoryListClient",
+        "issue": "filter-query input does not filter rows. Typing 'TEST_TOYOTA' kept all 128 rows visible. Likely the search query is not wired to the API call or client-side filter.",
+        "selector": "[data-testid=\"filter-query\"]",
+        "priority": "HIGH"
+      },
+      {
+        "component": "/admin/inventory/new NewInventoryClient",
+        "issue": "Submitting the manual entry form with valid required fields (make=TEST_PW_MAZDA, model=CX5_pw, year=2024, price=2750000) does not redirect to /admin/inventory?created=<id> and no error is shown. Backend API works (verified via pytest). Form likely not converting price to integer cents, OR onSubmit handler not awaiting fetch, OR validation fails silently. URL stays at /admin/inventory/new?",
+        "selector": "[data-testid=\"submit-vehicle-btn\"]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "step_by_step_results": {
+    "BE_unauth_5_endpoints": "PASS — list/create/template/bulk/history all return 401 without admin_token cookie",
+    "BE_list_filters": "PASS — GET /api/admin/inventory returns {success, data:{items,hasMore,nextCursor,count}}; source & status filters work",
+    "BE_create_valid": "PASS — 201, sourceAdapter='manual_admin', addedByAdminId set, isActive=true",
+    "BE_create_invalid_year": "PASS — 400 VALIDATION_ERROR on year=1990",
+    "BE_create_duplicate_vin": "PASS — 409 DUPLICATE_VIN on second insert",
+    "BE_template_csv": "PASS — text/csv, 20 headers + example row",
+    "BE_bulk_upload": "PASS — 3 success / 2 failure, batchId returned, errors include row numbers",
+    "BE_history": "PASS — TEST_iter22.csv batch present in history",
+    "BE_patch_partial": "PASS — priceCents updated and persisted",
+    "BE_patch_unknown_id": "PASS — 404",
+    "BE_deactivate_reactivate": "PASS — {activate:false} flips to false, {activate:true} flips to true",
+    "BE_delete_confirmation": "PASS — without {confirmation:'DELETE'} → 400 CONFIRMATION_REQUIRED; with → 200, GET returns 404",
+    "BE_image_upload": "PASS — multipart form-data → 200 with {success:true, url}",
+    "BE_buyer_search_visibility": "PASS — manual_admin item with lane=LANE_1 appears in /api/buyer/search results",
+    "FE_inventory_list_testids": "PASS — filter-query/source/lane/status, inventory-table, open-add-vehicle-btn, open-bulk-upload-btn, open-history-btn all rendered",
+    "FE_filter_query_actually_filters": "FAIL — typing TEST_TOYOTA does not reduce row count from 128",
+    "FE_add_vehicle_navigation": "PASS — open-add-vehicle-btn → /admin/inventory/new",
+    "FE_new_form_testids": "PASS — field-make/model/year/price/vin/lane, submit-vehicle-btn, image-url-input, add-image-url-btn all rendered",
+    "FE_new_form_submit": "FAIL — Submit with valid data does not redirect, no error message shown. URL stays at /admin/inventory/new?",
+    "FE_bulk_upload_page": "PASS — download-template-btn and select-csv-btn render",
+    "FE_history_page": "PASS — history-table renders with batch row (TEST_iter22.csv 5 rows / 3 success / 2 failed)"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_inventory_iter22.py",
+    "/app/test_reports/pytest/iteration_22.xml"
+  ],
+  "action_items": [
+    "FIX: /admin/inventory filter-query input is not wired up — InventoryListClient should send the typed query as ?q= or filter client-side via state. Currently typing has no effect.",
+    "FIX: /admin/inventory/new form submit silently fails. Likely the price field is sent as a string/number instead of integer cents, or the onSubmit handler is not awaiting the response, or validation fails silently. Add visible error display + verify priceCents conversion (UI shows 'e.g. 35000' implying dollars but the API expects cents).",
+    "INFO: A stale Prisma client (missing the 'condition' field) was causing 500s on POST /api/admin/inventory. Ran `npx prisma generate` + restarted frontend supervisor — now resolved. Main agent should ensure CI/build also runs prisma generate before next deploy."
+  ],
+  "critical_code_review_comments": [
+    "BUG (now fixed by regenerating client): Prisma client must be regenerated after schema changes — the build pipeline should run `prisma generate` automatically.",
+    "POST /api/admin/inventory accepts priceCents in cents but the manual entry form placeholder is 'e.g. 35000' which suggests dollars. Verify NewInventoryClient multiplies dollars × 100 before POST, or change placeholder to clarify cents.",
+    "InventoryListClient: confirm the filter-query state is included in the API query string or in the client-side filter predicate; current behavior shows it is ignored.",
+    "All inventory routes correctly enforce admin_token via getAdminFromRequest — 401 returned consistently."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_inventory_iter22.py",
+    "Ran: yarn prisma generate (regenerated @prisma/client to include condition field)",
+    "Restarted frontend supervisor"
+  ],
+  "success_rate": {
+    "backend": "100% (20/20 pytest tests pass)",
+    "frontend": "~80% — testids/navigation/history all OK; 2 functional flows broken (filter-query, manual create submit)"
+  },
+  "test_credentials": "Admin admin@autolenis.com / MarkistAdmin@Autolenis1250$$$ + sandbox TOTP via scripts/sandbox-totp.ts",
+  "seed_data_creation": "Created multiple TEST_-prefixed inventory items (TEST_TOYOTA Camry, TEST_HONDA Civic/Accord, TEST_BMW M3 a/b/c, TEST_FORD F150, TEST_NISSAN Sentra, TEST_BUYER_<ts>, TEST_PW_MAZDA). Test fixture cleans up by issuing DELETE with {confirmation:'DELETE'} but a few items may persist if the cleanup pass races with timeouts. One InventoryUploadBatch row TEST_iter22.csv (5 rows / 3 succ / 2 fail).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend admin inventory CRUD + bulk upload + history + image upload all fully working (20/20 passing). Use scripts/sandbox-totp.ts to mint admin_token. Note that requests.Session mis-parses the multi-Set-Cookie response from /api/admin/auth/verify-mfa due to comma in Expires; tests now extract admin_token via regex. Two frontend bugs require main-agent fix: (1) filter-query input not actually filtering on /admin/inventory list, (2) manual entry form on /admin/inventory/new submits but does not redirect or show error — likely priceCents conversion mismatch (placeholder says '35000' but API expects cents). Ran `npx prisma generate` to fix prior 500 on inventoryItem.create — main agent should ensure this is in build pipeline."
+}

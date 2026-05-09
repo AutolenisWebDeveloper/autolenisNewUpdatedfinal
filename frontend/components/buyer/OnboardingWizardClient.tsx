@@ -1,0 +1,315 @@
+"use client";
+
+// Buyer onboarding — profile preferences only.
+// No credit checks, no FCRA consent, no MicroBilt, no DOB/address/employment.
+// Those live exclusively on /buyer/prequal.
+//
+// This wizard collects:
+//   1. Vehicle type preference (icon-card selector)
+//   2. New / used preference (two-option toggle)
+//   3. Communication preferences (email notifications on/off)
+//   4. Phone number, ONLY if not already on file
+//
+// On completion the buyer is routed to /buyer/prequal.
+
+import { useState, useMemo, FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { ArrowRight, Car, Truck, Bus, Zap, MoreHorizontal, CheckCircle2 } from "lucide-react";
+
+// ─── Onboarding Progress Indicator ──────────────────────────────────────────
+// Shows the buyer's position in the 3-step pre-journey:
+//   Step 1: Account created (always complete by the time this page is shown)
+//   Step 2: Profile setup (current)
+//   Step 3: Pre-Qualification (next)
+
+const ONBOARDING_STEPS = [
+  { id: 1, label: "Account" },
+  { id: 2, label: "Profile Setup" },
+  { id: 3, label: "Pre-Qualification" },
+] as const;
+
+function OnboardingProgressBar({ currentStep }: { currentStep: number }) {
+  return (
+    <div
+      className="mb-8 px-2"
+      data-testid="onboarding-progress-bar"
+      role="progressbar"
+      aria-valuenow={currentStep}
+      aria-valuemin={1}
+      aria-valuemax={ONBOARDING_STEPS.length}
+      aria-label={`Onboarding step ${currentStep} of ${ONBOARDING_STEPS.length}`}
+    >
+      <div className="flex items-center gap-0">
+        {ONBOARDING_STEPS.map((step, idx) => {
+          const done = step.id < currentStep;
+          const active = step.id === currentStep;
+          const isLast = idx === ONBOARDING_STEPS.length - 1;
+          return (
+            <div key={step.id} className="flex items-center flex-1">
+              <div className="flex flex-col items-center">
+                <div
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
+                    done
+                      ? "bg-[#0B5FD1] border-[#0B5FD1] text-white"
+                      : active
+                      ? "bg-white border-[#0B5FD1] text-[#0B5FD1]"
+                      : "bg-white border-slate-200 text-slate-400"
+                  }`}
+                  data-testid={`onboarding-step-${step.id}`}
+                >
+                  {done ? <CheckCircle2 size={14} /> : step.id}
+                </div>
+                <span
+                  className={`mt-1.5 text-xs font-medium text-center whitespace-nowrap ${
+                    done ? "text-[#0B5FD1]" : active ? "text-slate-900" : "text-slate-400"
+                  }`}
+                >
+                  {step.label}
+                </span>
+              </div>
+              {!isLast && (
+                <div
+                  className={`flex-1 h-0.5 mx-1 mb-5 transition-colors ${
+                    done ? "bg-[#0B5FD1]" : "bg-slate-200"
+                  }`}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type VehicleType = "SUV" | "Sedan" | "Truck" | "Van" | "Coupe" | "Other";
+type NewOrUsed = "NEW" | "USED";
+
+const VEHICLE_TYPES: ReadonlyArray<{ id: VehicleType; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = [
+  { id: "SUV", label: "SUV", icon: Car },
+  { id: "Sedan", label: "Sedan", icon: Car },
+  { id: "Truck", label: "Truck", icon: Truck },
+  { id: "Van", label: "Van", icon: Bus },
+  { id: "Coupe", label: "Coupe", icon: Zap },
+  { id: "Other", label: "Other", icon: MoreHorizontal },
+];
+
+interface BuyerInitial {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  onboardingComplete: boolean;
+}
+
+export default function OnboardingWizardClient({ initial }: { initial: BuyerInitial }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const phoneAlreadySet = useMemo(() => initial.phone.trim().length > 0, [initial.phone]);
+
+  const [vehicleType, setVehicleType] = useState<VehicleType | "">("");
+  const [newOrUsed, setNewOrUsed] = useState<NewOrUsed | "">("");
+  const [emailNotifications, setEmailNotifications] = useState(true);
+  const [phone, setPhone] = useState(initial.phone ?? "");
+
+  const phoneValid = !phoneAlreadySet ? phone.replace(/\D/g, "").length >= 10 : true;
+  const canSubmit = vehicleType !== "" && newOrUsed !== "" && phoneValid && !submitting;
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!canSubmit) return;
+    setError(null);
+    setSubmitting(true);
+
+    try {
+      // 1. Persist phone if newly entered
+      if (!phoneAlreadySet && phone.trim()) {
+        const profileRes = await fetch("/api/buyer/profile", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            firstName: initial.firstName,
+            lastName: initial.lastName,
+            phone: phone.trim(),
+          }),
+        });
+        if (!profileRes.ok) {
+          const data = (await profileRes.json().catch(() => ({}))) as { error?: { message?: string } };
+          throw new Error(data.error?.message ?? "Could not save your phone number");
+        }
+      }
+
+      // 2. Persist preferences (vehicle type + new/used + email notifications)
+      const prefsRes = await fetch("/api/buyer/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          emailNotifications,
+          vehicleTypePreference: vehicleType,
+          newOrUsedPreference: newOrUsed,
+        }),
+      });
+      if (!prefsRes.ok) {
+        const data = (await prefsRes.json().catch(() => ({}))) as { error?: { message?: string } };
+        throw new Error(data.error?.message ?? "Could not save your preferences");
+      }
+
+      // 3. Mark onboarding complete (no FCRA / MicroBilt call)
+      const completeRes = await fetch("/api/buyer/onboarding/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accepted: true }),
+      });
+      if (!completeRes.ok) {
+        const data = (await completeRes.json().catch(() => ({}))) as { error?: { message?: string } };
+        throw new Error(data.error?.message ?? "Could not complete onboarding");
+      }
+
+      // 4. Route to pre-qualification — onboarding ≠ prequal
+      router.push("/buyer/prequal");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="px-4 py-8 sm:px-6 md:px-8 md:py-10" data-testid="onboarding-wizard">
+      <div className="mx-auto w-full max-w-2xl">
+        {/* Feature 9 — Onboarding Progress Indicator */}
+        <OnboardingProgressBar currentStep={2} />
+
+        <header className="mb-8 text-center">
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Welcome to AutoLenis</h1>
+          <p className="mt-2 text-sm sm:text-base text-slate-500">
+            A few quick preferences so we can tailor your experience.
+          </p>
+        </header>
+
+        <form onSubmit={handleSubmit} data-testid="onboarding-form" className="space-y-10">
+          {/* ── Vehicle type ──────────────────────────────────────────── */}
+          <section data-testid="onboarding-vehicle-type">
+            <h2 className="text-base font-semibold text-slate-900 mb-1">
+              What kind of vehicle are you looking for?
+            </h2>
+            <p className="text-xs text-slate-500 mb-4">Pick the option that best matches your needs.</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {VEHICLE_TYPES.map(({ id, label, icon: Icon }) => {
+                const selected = vehicleType === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setVehicleType(id)}
+                    disabled={submitting}
+                    data-testid={`onboarding-vehicle-${id.toLowerCase()}`}
+                    aria-pressed={selected}
+                    className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 p-5 transition-all ${
+                      selected
+                        ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
+                  >
+                    <Icon size={36} className={selected ? "text-[#0B5FD1]" : "text-slate-500"} />
+                    <span className="text-sm font-medium">{label}</span>
+                    {selected && <CheckCircle2 size={14} className="text-[#0B5FD1]" />}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* ── New or used toggle ─────────────────────────────────────── */}
+          <section data-testid="onboarding-new-or-used">
+            <h2 className="text-base font-semibold text-slate-900 mb-4">New or used?</h2>
+            <div className="grid grid-cols-2 gap-3">
+              {(["NEW", "USED"] as const).map((opt) => {
+                const selected = newOrUsed === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setNewOrUsed(opt)}
+                    disabled={submitting}
+                    data-testid={`onboarding-condition-${opt.toLowerCase()}`}
+                    aria-pressed={selected}
+                    className={`rounded-xl border-2 px-4 py-4 text-sm font-medium transition-all ${
+                      selected
+                        ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
+                        : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                    }`}
+                  >
+                    {opt === "NEW" ? "New" : "Used"}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* ── Communication preferences ──────────────────────────────── */}
+          <section data-testid="onboarding-communication-prefs">
+            <h2 className="text-base font-semibold text-slate-900 mb-4">Communication preferences</h2>
+            <label className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div>
+                <p className="text-sm font-medium text-slate-900">Email notifications</p>
+                <p className="text-xs text-slate-500">
+                  Auction alerts, deal updates, and important account messages.
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                data-testid="onboarding-email-notifications"
+                checked={emailNotifications}
+                onChange={(e) => setEmailNotifications(e.target.checked)}
+                disabled={submitting}
+                className="h-5 w-5 accent-[#0B5FD1]"
+              />
+            </label>
+          </section>
+
+          {/* ── Phone number — only when missing ───────────────────────── */}
+          {!phoneAlreadySet && (
+            <section data-testid="onboarding-phone-section">
+              <h2 className="text-base font-semibold text-slate-900 mb-4">Phone number</h2>
+              <input
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                placeholder="(555) 555-5555"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                disabled={submitting}
+                data-testid="onboarding-phone"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/20"
+                required
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                We&apos;ll use this only for time-sensitive auction notifications.
+              </p>
+            </section>
+          )}
+
+          {error && (
+            <div
+              data-testid="onboarding-error"
+              className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+            >
+              {error}
+            </div>
+          )}
+
+          <Button
+            type="submit"
+            data-testid="onboarding-finish-btn"
+            disabled={!canSubmit}
+            className="w-full"
+          >
+            {submitting ? "Saving…" : "Continue to Pre-Qualification"} <ArrowRight size={15} />
+          </Button>
+        </form>
+      </div>
+    </div>
+  );
+}

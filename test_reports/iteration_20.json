@@ -1,0 +1,63 @@
+{
+  "summary": "Iteration 20 — RETEST of 3 iteration-19 fixes + typecheck + build. FIX-03/FIX-04/FIX-05 PASS. FIX-01 verified at code+DB level (Playwright form submit blocked by env limitation). FIX-02 FAILS: affiliate_ref cookie not set for /auth/signup?ref= routes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "FIX-02: Attribution cookie for /auth/signup?ref=ALYW1C3N",
+        "issue": "affiliate_ref cookie NOT in Set-Cookie response header when visiting /auth/signup?ref=ALYW1C3N. The cookie IS set for public routes (?ref= on /) but NOT for auth routes (/auth/signup, /auth/signin). Bug confirmed via curl.",
+        "affected_selectors": [],
+        "priority": "MEDIUM"
+      }
+    ],
+    "design_issues": []
+  },
+  "fix_test_results": {
+    "FIX-01": {
+      "status": "PASS (code+DB verified)",
+      "details": "signInAction in /lib/auth/actions.ts line 140: `if (role === 'AFFILIATE') redirect('/affiliate/portal/dashboard')`. Prisma DB confirms aff-live-1777010783@example.com has role=AFFILIATE. Affiliate portal dashboard returns 200 with session cookie. Playwright form submission not possible in preview env (React event handlers not firing — form submits as GET). DB and code evidence sufficient.",
+      "playwright_limitation": "Form submits as native GET in Playwright (React hydration issue in preview env). The signInAction redirect logic is correct and verified via code review + DB + portal accessibility tests."
+    },
+    "FIX-02": {
+      "status": "FAIL",
+      "details": "affiliate_ref cookie NOT present in Set-Cookie when visiting /auth/signup?ref=ALYW1C3N. curl confirms: public routes (/?ref=ALYW1C3N) DO set the cookie, but auth routes (/auth/signup?ref=) do NOT.",
+      "rca": "proxy.ts section 0 (lines 241-249) sets affiliate_ref on `response` object. Section 5 (lines 287-296, auth routes) creates a NEW NextResponse (`res`) and returns that instead of `response`. The affiliate_ref cookie is lost. The cookie IS working for public/non-auth routes.",
+      "fix": "In proxy.ts section 5, use `response` instead of creating new `res`. Set x-admin-auth-route / x-dealer-auth-route headers on `response` directly. Change `return res;` to `return response;`"
+    },
+    "FIX-03": {
+      "status": "PASS",
+      "details": "data-testid='download-png-btn' EXISTS and is visible at /affiliate/portal/income-calculator. Confirmed via Playwright browser automation with authenticated affiliate session. Button labeled 'Download PNG' is visible in the UI."
+    },
+    "FIX-04": {
+      "status": "PASS",
+      "details": "cd /app/frontend && npx tsc --noEmit → exit code 0, 0 TypeScript errors"
+    },
+    "FIX-05": {
+      "status": "PASS",
+      "details": "cd /app/frontend && npx next build → exit code 0. Output includes 'ƒ Proxy (Middleware)' confirming proxy.ts is registered as Next.js 16 middleware. Disk space 1.7GB free was sufficient."
+    }
+  },
+  "test_report_links": [],
+  "action_items": [
+    "FIX: proxy.ts section 5 (auth routes, lines 287-296) — return `response` instead of creating new `res`. Change the section to set x-admin-auth-route/x-dealer-auth-route headers on `response` directly and `return response;`. This fixes FIX-02: affiliate_ref cookie not set for /auth/signup?ref= routes.",
+    "INFO: FIX-01 Playwright test blocked by React hydration issue in preview environment (form submits as GET when Next.js HMR WebSocket is blocked). The signInAction redirect logic is correct — no code change needed. Consider running Playwright in a local environment for complete E2E validation."
+  ],
+  "critical_code_review_comments": [
+    "BUG: proxy.ts section 5 (auth routes) discards affiliate_ref cookie — creates new NextResponse (res) instead of returning original `response` that has the cookie. Fix: `return response;` with headers set on `response`.",
+    "DEAD CODE: proxy.ts section 9 (lines 366-372 'Redirect authenticated users away from auth pages') can NEVER be reached for auth routes because section 5 returns early. Section 9's isAuthRoute check will always be false by the time the code reaches it. This means authenticated users visiting /auth/signin will see the signin page (not be redirected). This is NOT a regression but is confusing dead code."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "frontend": "80% (4/5 fixes pass)"
+  },
+  "test_credentials": "Affiliate: aff-live-1777010783@example.com / testpass123, role=AFFILIATE confirmed in Prisma DB",
+  "seed_data_creation": "None - used existing affiliate user",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 20: RETEST of FIX-01/02/03/04/05. FIX-02 still failing — affiliate_ref cookie not set for /auth/signup?ref=. FIX is to change proxy.ts section 5 to return `response` not `res`. FIX-01/03/04/05 all pass. For affiliate Playwright auth: use Supabase API to get session, encode as `base64-` + base64url(JSON.stringify(session)), set as `sb-aieybibvewmvrubcpthm-auth-token` cookie. This correctly authenticates the affiliate for portal access. Note: Playwright form submission (React onSubmit) fails in preview env due to HMR blocking — use cookie injection instead.",
+  "rca_of_the_issue": "FIX-02 RCA: proxy.ts cookie loss for auth routes. Line 234: `const response = NextResponse.next(...)`. Lines 241-249: `response.cookies.set('affiliate_ref', refCode, ...)`. Lines 287-297 (section 5): `const res = NextResponse.next(...); return res;` — new response without the affiliate_ref cookie. Fix: replace `const res = NextResponse.next(...)` with using `response` directly and set headers on `response`. Affected routes: /auth/signin, /auth/signup, /auth/forgot-password, /auth/reset-password, /auth/verify-email. Public routes correctly set the cookie (section 4 returns `response`)."
+}

@@ -1,0 +1,67 @@
+import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
+import { Toaster } from "sonner";
+import ServiceWorkerRegistration from "@/components/pwa/ServiceWorkerRegistration";
+import "./globals.css";
+
+// Self-hosted Google fonts via @fontsource — bundled at build time, no
+// runtime/build-time network calls to fonts.googleapis.com / fonts.gstatic.com.
+const spaceGrotesk = localFont({
+  variable: "--font-heading",
+  display: "swap",
+  src: [
+    { path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-300-normal.woff2", weight: "300", style: "normal" },
+    { path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-600-normal.woff2", weight: "600", style: "normal" },
+    { path: "../node_modules/@fontsource/space-grotesk/files/space-grotesk-latin-700-normal.woff2", weight: "700", style: "normal" },
+  ],
+});
+const jetbrainsMono = localFont({
+  variable: "--font-mono",
+  display: "swap",
+  src: [
+    { path: "../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-600-normal.woff2", weight: "600", style: "normal" },
+    { path: "../node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2", weight: "700", style: "normal" },
+  ],
+});
+
+export const metadata: Metadata = {
+  title: {
+    default: "AutoLenis — The Car Buying Experience You Deserve",
+    template: "%s | AutoLenis",
+  },
+  description:
+    "AutoLenis is a premium automotive fintech concierge platform. Skip the negotiation — let dealers compete for your business.",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com"
+  ),
+  // Feature 30 — PWA manifest link
+  manifest: "/manifest.json",
+  applicationName: "AutoLenis",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "AutoLenis",
+  },
+  formatDetection: { telephone: false },
+};
+
+// Feature 30 — PWA viewport / theme-color (Next.js 16 requires separate viewport export)
+export const viewport: Viewport = {
+  themeColor: "#0B5FD1",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} font-[family-name:var(--font-heading)] antialiased`}>
+        {children}
+        <Toaster richColors position="bottom-right" />
+        {/* Feature 30 — PWA service worker registration */}
+        <ServiceWorkerRegistration />
+      </body>
+    </html>
+  );
+}

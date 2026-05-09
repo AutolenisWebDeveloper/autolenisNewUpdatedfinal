@@ -1,0 +1,37 @@
+// GET /api/admin/dealers/invitations — list dealer invitations
+
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/auth/admin-session";
+import { prisma } from "@/lib/prisma";
+
+export async function GET(request: NextRequest) {
+  await requireAdmin();
+  const url = new URL(request.url);
+  const status = url.searchParams.get("status");
+
+  // Mark expired invitations
+  await prisma.dealerInvitation.updateMany({
+    where: { status: "PENDING", expiresAt: { lt: new Date() } },
+    data: { status: "EXPIRED" },
+  });
+
+  const invitations = await prisma.dealerInvitation.findMany({
+    where: status ? { status: status as "PENDING" | "ACCEPTED" | "EXPIRED" | "CANCELLED" } : undefined,
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  return NextResponse.json({
+    success: true,
+    data: invitations.map(inv => ({
+      id: inv.id,
+      dealershipName: inv.dealershipName,
+      contactName: inv.contactName,
+      email: inv.email,
+      status: inv.status,
+      expiresAt: inv.expiresAt.toISOString(),
+      acceptedAt: inv.acceptedAt?.toISOString() ?? null,
+      createdAt: inv.createdAt.toISOString(),
+    })),
+  });
+}

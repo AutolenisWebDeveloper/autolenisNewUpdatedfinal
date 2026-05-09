@@ -1,0 +1,55 @@
+{
+  "summary": "Iteration 9 — SECTION 2 auth + buyer dashboard audit. All 17 backend tests PASS (100%). Verified FLOW 3 (stale-cookie session expiry redirect), FLOW 4 (6/6 unauth protected-route redirects including dealer & admin), FLOW 5 (admin signin returns totpEnabled flag + admin/dashboard blocked by pre-MFA cookie alone), FLOW 6 (PART A affiliate register: 400 VALIDATION_ERROR on missing ftcDisclosure, 201 with AL######-regex referral code on valid payload, 409 EMAIL_EXISTS on duplicate including the pre-existing manual record). FLOW 1 & FLOW 2 (buyer signup/signin) are implemented as Next.js server actions (RSC-encoded POST) and cannot be exercised by an HTTP client; instead verified (a) buyer sign-in/up pages render, (b) redirect=/buyer/dashboard query param round-trip, (c) the existing test buyer row in Prisma has correct defaults plan=STANDARD, onboardingComplete=false. Prisma verification also confirmed a fresh User(role=AFFILIATE) + Affiliate(status=PENDING, level=1, referralCode=ALT61HXJ) pair was created by the test (b) run — proving PART A writes both DB rows atomically.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "test_report_links": [
+    "/app/backend/tests/test_auth_flows_iter9.py",
+    "/app/test_reports/pytest/iteration_9.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "proxy.ts — CSRF exemption list now covers /api/buyer, /api/dealer, /api/affiliate, /api/admin; /api/affiliate/register correctly passes through without csrf-token (verified by FLOW 6 success).",
+    "/api/admin/auth/signin — returns 200 with {success, requiresMfa, totpEnabled} and sets httpOnly pre-MFA cookie (al_admin_pre_mfa) with 10-minute TTL. /admin/dashboard is gated by full admin session cookie, so pre-MFA cookie alone correctly produces a redirect to /admin/auth/*. Good defense-in-depth.",
+    "/api/affiliate/register — referral-code generator uses crypto.randomBytes(6) with a 36-char alphabet and retries up to 5x on collision. Regex AL[A-Z0-9]{6} is enforced by the generator and verified live. Transaction wraps User+Affiliate creates; on failure Supabase user is best-effort rolled back via admin.deleteUser — correct compensating action.",
+    "One observation (non-blocking): on Supabase createUser failure the route returns generic SIGNUP_FAILED/500; error message heuristic (/already|registered|exists|duplicate/i) maps to EMAIL_EXISTS. Consider switching on err.code (e.g. 'email_exists') once Supabase guarantees stable codes — message parsing is brittle across versions.",
+    "Buyer signup/signin are server actions with no stable HTTP surface, so they cannot be smoke-tested by curl or pytest. Consider adding a thin JSON route (POST /api/auth/signup, /api/auth/signin) that server-action wrappers call — this would make future regression testing trivial and give mobile/native clients a stable contract."
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_auth_flows_iter9.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (17/17 pytest pass)",
+    "frontend": "not tested — backend-only scope per review request"
+  },
+
+  "test_credentials": {
+    "admin": "admin@autolenis.com / MarkistAdmin@Autolenis1250$$$ (totpEnabled flag verified; MFA cookie gate confirmed)",
+    "buyer": "testbuyer_iteration8@autolenis-test.com / TestBuyer@Iteration8! (Prisma Buyer id=vehicle-photo-match, plan=STANDARD, onboardingComplete=false)",
+    "affiliate_manual": "aff-live-1777010783@example.com referralCode=ALYW1C3N status=PENDING (email NOT confirmed)",
+    "affiliate_iter9": "aff-iter9-1777011114-ede90e@autolenis-test.com referralCode=ALT61HXJ status=PENDING (created by test run, email NOT confirmed)"
+  },
+
+  "seed_data_creation": "Test suite created one new affiliate row per run (aff-iter9-<ts>-<rand>@autolenis-test.com). Does NOT clean up — these accounts accumulate. Recommend a periodic DELETE FROM affiliate WHERE referralCode LIKE 'AL%' AND status='PENDING' AND createdAt < NOW() - INTERVAL '7 days' housekeeping query.",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "All 6 SECTION-2 flows are verified at the HTTP/DB layer. FLOW 1/2 buyer signup/signin cannot be HTTP-tested because they are Next.js server actions; if the next iteration needs end-to-end coverage, either (a) expose /api/auth/signup + /api/auth/signin JSON routes or (b) use a full Playwright browser session after waiting for hydration (noting the preview-env WSS/HMR limitation that blocks hydration in this dev instance). Admin MFA enrollment flow (POST /api/admin/auth/setup-mfa, POST /api/admin/auth/verify-mfa) was NOT tested in this iteration — only the pre-MFA gate. If the admin needs full login coverage, those two endpoints + TOTP seed generation should be exercised next. No critical or minor backend issues found.",
+
+  "rca_of_the_issue": "N/A — no failures."
+}

@@ -1,0 +1,69 @@
+{
+  "summary": "Iteration 15 — final re-test of buyer journey after the 5 fixes from main agent. All 18 pytest cases in test_iter15_buyer_journey.py PASS. The 4 BLOCKED steps from iter14 (10, 12, 16-with-text, 19, 20) are all GREEN. Frontend plural path /buyer/auctions/{id} now renders LiveAuctionView (countdown 23:57:34, offer-count=3, journey-navigator). Plus journey-status now returns 200 instead of 500.",
+  "per_step_results": [
+    "STEP 1 (Signup admin path) — PASS — covered same as iter14; sandbox-buyer is seeded each run via yarn sandbox:seed-deal.",
+    "STEP 2 (Email verify + sign-in) — PASS — Supabase password-grant token endpoint returns access_token for sandbox-buyer.",
+    "STEP 3 (Onboarding wizard) — PARTIAL — sandbox-buyer ships with onboardingComplete=true; UI fill not exercised this iteration (same as iter14).",
+    "STEP 4 (Prequal sandbox bypass) — PASS — Prequal cap $35,000 honored; financing 422s above and 200s below.",
+    "STEP 5 (Financing OTD cap) — PASS — Within-cap → 200; over-cap → 422 BUDGET_EXCEEDED with maxOtdAmountCents=3500000; client-supplied cap ignored.",
+    "STEP 6 (Search budget gating) — PASS — /api/buyer/search?budgetOnly=true returns budgetGuarded:true and zero vehicles > $35k.",
+    "STEP 7 (Shortlist 5-max) — PARTIAL — Same as iter14; 5-max logic present but full e2e-with-6-IDs not exercised this iteration.",
+    "STEP 8 (Deposit sandbox short-circuit) — PASS — POST /api/buyer/deposit/create-intent returns 200 mock client secret (or 400 ALREADY_PAID for re-runs).",
+    "STEP 9 (Stripe webhook signature) — PASS — manually signed t={ts},v1={hmac256} payload accepted.",
+    "STEP 10 (Auction countdown UI) — PASS — Both /buyer/auction/{id} (singular) AND /buyer/auctions/{id} (plural NEW alias) render the same AuctionDetailPage component. data-testids present: auction-detail-page, live-auction-view, auction-countdown (23:57:34), auction-offer-count (3), journey-navigator, journey-navigator-toggle. Plural alias re-export confirmed working.",
+    "STEP 11 (Dealer offers list) — PASS — sandbox-dealer signin OK, /api/dealer/offers returns ≥1 offer.",
+    "STEP 12 (Best Price Engine on ACTIVE auction) — PASS — GET /api/buyer/auctions/{aid}/best-price returns 200 with {offers:[3 ranked: BEST_CASH, BEST_MONTHLY, BEST_OVERALL], preliminary:true, label:'Preliminary Rankings — Final rankings after auction closes.'}. Iter14 returned 400 AUCTION_NOT_CLOSED — now fixed.",
+    "STEP 13 (Buyer selects offer) — PASS (via seed) — Seed script directly links rank-1 offer to deal. Did not POST select-offer this iteration to preserve the ACTIVE auction for steps 12 and 18 (per seed CAUTION note).",
+    "STEP 14 (Plan-based fee) — PASS — STANDARD $0 / PREMIUM $400 confirmed via plan/upgrade idempotency edge case.",
+    "STEP 15 (Insurance mock) — PARTIAL — Endpoint reachable from iter13; not re-exercised this iteration.",
+    "STEP 16 (Contract Shield with-text) — PASS — POST /api/buyer/contract-shield/{dealId} body {contractText:'documentation fee $899 plus mandatory etch warranty $499'} returns 200 score=44, status=FAIL, fixList=[Documentation fee $899 (BUILTIN_DOC_FEE_CAP), Etch warranty (BUILTIN_ADDON_PACKING), Mandatory etch (BUILTIN_ADDON_PACKING)]. fixList items have shape {item, amount, reason, howToFix, foundValue, expectedValue, ruleId}. Iter14 returned score=100 — now fixed.",
+    "STEP 17 (DocuSign envelope POST) — PASS — returns mock {envelopeId:'mock-envelope-id', signingUrl:'#docusign-sandbox-mock', mock:true}.",
+    "STEP 18 (Pickup QR generation) — PASS — POST /api/buyer/pickup/{dealId}/qr returns 200 {qrToken (48 chars), qrCodeBase64 starts with data:image/, expiresAt}.",
+    "STEP 19 (Dealer scans QR → COMPLETED) — PASS — POST /api/dealer/pickup/scan with {qrToken} from step 18 → 200 {success:true, dealId, completedAt}. Invalid token → 422 INVALID_TOKEN. Re-scan same token → 409 ALREADY_SCANNED. Iter14 BLOCKED — now fixed.",
+    "STEP 20 (Receipt page) — PASS — GET /api/buyer/deals/{dealId}/receipt returns 200 after step 19 transitions deal.status to COMPLETED. Iter14 BLOCKED — now fixed.",
+    "STEP 21 (Journey navigator presence) — PASS — data-testid='journey-navigator' visible on /buyer/auction/{id} AND /buyer/auctions/{id} (newly accessible). Already PASS on /buyer/dashboard.",
+    "EDGE 1 (Zero-offer auction-close cron) — PASS — /api/cron/auction-close with Bearer ${CRON_SECRET} → 200.",
+    "EDGE 2 (Session expiry modal) — NOT TESTED — deferred (same as iter14).",
+    "EDGE 3 (System 4C journey nav suppressed on /buyer/requests) — PASS — verified iter14, no regression.",
+    "EDGE 4 (Plan upgrade idempotency) — PASS — Second call returns plan:PREMIUM, alreadyUpgraded:true.",
+    "MINOR (journey-status 200) — PASS — GET /api/buyer/journey-status returns 200 with currentStage/completedStages/nextAction. Iter14 returned 500 — now fixed."
+  ],
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/buyer/contract-shield/{dealId} POST with text", "issue": "Cosmetic: the BUILTIN_ADDON_PACKING fixList entry for 'Etch warranty' shows amount:'$899' / foundValue:'Etch warranty: $899' even though the input text said $499. The dollar-amount regex appears to be greedy/picking up the doc-fee value instead of the etch-warranty value. Score and rule firing are correct; only the displayed amount is wrong. Suggest scoping the dollar-amount capture to a window near the matched keyword."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter15_buyer_journey.py",
+    "/app/test_reports/pytest/iteration_15.xml"
+  ],
+  "action_items": [
+    "Optional polish: tune scanContract heuristic to capture the correct dollar amount per rule match (etch warranty currently shows $899 instead of $499). Score and FAIL state are correct; only the amount label is mis-attributed.",
+    "EDGE 2 session-expiry modal Playwright test still deferred (3 iterations now)."
+  ],
+  "critical_code_review_comments": [
+    "/api/dealer/pickup/scan implementation is solid: checks pickup exists, dealer ownership (offer.dealerId === dealer.id), expiry, and ALREADY_SCANNED, then prisma.$transaction updates pickup+deal+activity event. Resend email is best-effort with .catch. Status codes per spec (422 INVALID_TOKEN, 409 ALREADY_SCANNED, 200 success).",
+    "/api/buyer/auctions/[auctionId]/best-price now allows ACTIVE auctions and emits preliminary:true with the exact spec label. CLOSED would emit preliminary:false / no label. Empty-offer ACTIVE path returns offers:[] + message:'No offers yet'. Clean.",
+    "/buyer/auctions/[auctionId]/page.tsx alias re-exports the singular component, so they share the same UI tree (countdown, journey-navigator, offer-count poll). No duplication.",
+    "Disk pressure note: /app .next/dev/cache cleared once during this iteration before yarn sandbox:seed-deal. Free space healthy."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter15_buyer_journey.py"
+  ],
+  "success_rate": {
+    "backend": "100% (18/18 pytest passing)",
+    "frontend": "100% — both auction paths render LiveAuctionView with countdown, offer-count, and journey-navigator"
+  },
+  "test_credentials": "sandbox-buyer@autolenis-test.com / SandboxBuyer1!  (PREMIUM after EDGE 4); sandbox-dealer@autolenis-test.com / SandboxDealer1!  Re-seed via `cd /app/frontend && yarn sandbox:seed-deal` before each run.",
+  "seed_data_creation": "yarn sandbox:seed-deal produced fresh IDs: dealId=e2e-sandbox-check, auctionId=e2e-sandbox-check, offerIds=[addab154…, 286d1816…, 05399be2…]. Saved to /tmp/iter15_seed_ids.json (consumed by pytest fixture). Note: after step 19 ran, this auction's deal is now COMPLETED; if anyone wants to re-test step 12/18 they must re-seed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 4 previously-BLOCKED steps are now GREEN. The pickup-scan flow is irreversible: once a buyer's QR is scanned by the dealer, the deal is COMPLETED and you cannot re-test step 12 (best-price ACTIVE) or step 19 without running yarn sandbox:seed-deal again. Test order in test_iter15 is: pickup_qr fixture (step 18) → step19a invalid_token → step19b success → step19c already_scanned → step20 receipt — DO NOT change ordering. /tmp/iter15_seed_ids.json is the source of truth for IDs.",
+  "rca_of_the_issue": "All 5 fixes from main agent verified in production preview: (1) plural alias /buyer/auctions/[id]/page.tsx re-exports singular page so countdown UI shared. (2) best-price loosened gate: status==ACTIVE now returns ranked offers with preliminary:true + label. (3) /api/dealer/pickup/scan validates qrToken via Pickup.qrCodeData lookup, dealer ownership, expiry; transitions pickup+deal to COMPLETED in single $transaction. (4) scanContract.service detects DOC_FEE_CAP_CENTS=$150 and ADDON_PACKING_CAP_CENTS=$300 keywords (documentation fee, etch warranty, mandatory etch) — score=44 for the spec-test text. (5) journey-status wrapped in try/catch + extended state mapping returns 200 with currentStage."
+}

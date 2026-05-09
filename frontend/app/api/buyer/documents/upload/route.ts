@@ -1,0 +1,73 @@
+// POST /api/buyer/documents/upload
+// Accepts multipart/form-data: file + docType
+// Uploads to Supabase Storage "buyer-documents" bucket
+// Creates a Document record via uploadDocument() service
+import { NextRequest } from "next/server";
+import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
+import { createServiceSupabaseClient } from "@/lib/supabase";
+import { uploadDocument } from "@/lib/services/documents/document.service";
+import { DocumentType } from "@prisma/client";
+
+const MAX_BYTES     = 10 * 1024 * 1024;
+const ALLOWED_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
+const BUCKET        = "buyer-documents";
+const MIME_TO_EXT: Record<string, string> = {
+  "application/pdf": "pdf",
+  "image/jpeg":      "jpg",
+  "image/png":       "png",
+  "image/webp":      "webp",
+};
+
+export async function POST(request: NextRequest) {
+  const buyer = await getRequestBuyer(request);
+  if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
+
+  let form: FormData;
+  try { form = await request.formData(); }
+  catch { return errorResponse("INVALID_REQUEST", "Invalid form data", 400); }
+
+  const file    = form.get("file")    as File | null;
+  const docType = form.get("docType") as string | null;
+
+  if (!file) return errorResponse("VALIDATION_ERROR", "File is required", 400);
+  if (!ALLOWED_TYPES.has(file.type)) {
+    return errorResponse("VALIDATION_ERROR", "Only PDF, JPG, PNG, or WEBP files accepted", 400);
+  }
+  if (file.size > MAX_BYTES) {
+    return errorResponse("VALIDATION_ERROR", "File must be under 10 MB", 400);
+  }
+
+  // Validate DocumentType enum
+  const validTypes = Object.values(DocumentType);
+  const resolvedType: DocumentType = validTypes.includes(docType as DocumentType)
+    ? (docType as DocumentType)
+    : DocumentType.OTHER;
+
+  const supabase = createServiceSupabaseClient();
+  const ext      = MIME_TO_EXT[file.type] ?? "bin";
+  // Path includes a random UUID for entropy — path is not guessable even knowing the buyerId
+  const path     = `${buyer.id}/${crypto.randomUUID()}.${ext}`;
+  const buffer   = Buffer.from(await file.arrayBuffer());
+
+  const { error: uploadError } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, buffer, { contentType: file.type, upsert: false });
+
+  if (uploadError) {
+    console.error("[doc-upload]", uploadError);
+    return errorResponse("STORAGE_ERROR", "File upload failed. Please try again.", 500);
+  }
+
+  const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path);
+
+  const doc = await uploadDocument({
+    buyerId:   buyer.id,
+    type:      resolvedType,
+    name:      file.name,
+    url:       publicUrl,
+    mimeType:  file.type,
+    sizeBytes: file.size,
+  });
+
+  return successResponse({ documentId: doc.id, name: doc.name, type: doc.type });
+}

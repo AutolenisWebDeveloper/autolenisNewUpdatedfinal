@@ -1,0 +1,61 @@
+{
+  "summary": "Iter25 — Validated FIX1 (shortlist) + FIX2 (features filter) + FIX3 (coords backfill 129/129). Backend 9/9 PASS via pytest. Frontend features chips fully working (10 chips, URL sync, dismiss-on-click). FIX1 BE auth gate + SHORTLIST_FULL + persistence all confirmed via authenticated session (sandbox-buyer). However the FE end-to-end click flow on /inventory/[id] could NOT render <AddToShortlistButton> because the detail page server-rendered with buyerBudget=null even when authenticated as sandbox-buyer (whose prequal is APPROVED $35,000 OTD). The CTA stayed an <a href='/auth/signup'> 'Check Your Buying Power' link. Spec required tag=BUTTON. This is the only blocker for the FE shortlist flow.",
+  "backend_issues": {"critical": [], "minor": [
+    {"endpoint": "DELETE /api/buyer/shortlist", "issue": "Returns 405 Method Not Allowed when DELETE'ing with ?inventoryItemId=... query param. Could not clean sandbox seeded shortlist for tests. Either expose DELETE handler or document the correct removal endpoint."}
+  ]},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "/inventory/[vehicleId]/page.tsx", "issue": "When signed in as sandbox-buyer (prequal APPROVED $35k OTD) viewing a $28k vehicle, vehicle-cta-primary still rendered as <a href='/auth/signup'> 'Check Your Buying Power' (the buyerBudget===null branch) instead of <AddToShortlistButton>. SSR appears unable to read the buyer cookie/prequal at request time, OR the prequal lookup returns null for buyers signed in via /auth/signin → /buyer/dashboard. Result: the spec's primary FIX1 click flow (click [data-testid=vehicle-cta-primary] -> see [data-testid=shortlist-success]) cannot fire because the button is never rendered.", "selector": "[data-testid=vehicle-cta-primary]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "step_by_step_results": {
+    "BE_FIX1_anon_401": "PASS — POST /api/buyer/shortlist with no auth -> 401",
+    "BE_FIX1_shortlist_full": "PASS — sandbox-buyer at 5 items, 6th POST returned 400 with error.code='SHORTLIST_FULL' and message 'Shortlist is limited to 5 vehicles'",
+    "BE_FIX1_persistence_5": "PASS — GET /api/buyer/shortlist returns 5 items for sandbox-buyer",
+    "BE_FIX1_already_in_shortlist": "NOT_TESTED — could not isolate (sandbox seed already had items + DELETE 405 prevented cleanup); ALREADY_IN_SHORTLIST branch handled in AddToShortlistButton.tsx code (sets done=true)",
+    "BE_FIX2_sunroof_total": "PASS — features=Sunroof returns total=97 (matches spec)",
+    "BE_FIX2_sunroof_heated_total": "PASS — features=Sunroof,Heated Seats returns total=65 (exactly matches spec)",
+    "BE_FIX2_three_features_total": "PASS — features=Sunroof,Heated Seats,Navigation returns total=32 (>0, smaller subset as expected)",
+    "BE_FIX2_no_filter_baseline": "PASS — total=129 active items",
+    "BE_FIX2_returned_items_have_features": "PASS — Sunroof filter returns items each containing 'Sunroof' in features array",
+    "BE_FIX3_all_129_have_lat_lon": "PASS — paginated through all 3 pages (pageSize=48), 129 unique items, 0 missing lat/lon (full coverage achieved)",
+    "BE_FIX3_geo_3000mi_returns_129": "PASS — zip=30309&radiusMiles=3000 -> total=129",
+    "BE_FIX3_atlanta_seattle_distinct": "PASS — zip=30309&radiusMiles=10 returns Atlanta-area items, zip=98101&radiusMiles=10 returns Seattle-area items, zero overlap",
+    "FE_FIX2_features_container_present": "PASS — [data-testid=filter-features] visible on /inventory",
+    "FE_FIX2_10_feature_chips": "PASS — exactly 10 chip buttons rendered (Sunroof/Navigation/Backup Camera/Heated Seats/Apple CarPlay/Android Auto/Blind Spot Monitor/Lane Assist/Remote Start/Third Row)",
+    "FE_FIX2_url_sync": "PASS — clicking sunroof+heated-seats then apply-filters-btn -> URL updates to /inventory?features=Sunroof%2CHeated+Seats",
+    "FE_FIX2_active_chip_label": "PASS — active-chips area shows chip-features with text '2 features'",
+    "FE_FIX2_chip_features_dismiss": "PASS — clicking chip-features clears features from URL (improvement vs. iter24 chip-q dismiss bug — features chip uses outer <button> with onClick=clear, works correctly)",
+    "FE_FIX1_cta_is_button": "FAIL — vehicle-cta-primary tagName is 'A' (link to /auth/signup) for both unauthenticated AND authenticated-with-prequal sandbox-buyer viewing a $28k Camry. Expected 'BUTTON' (the AddToShortlistButton component). Server-side buyerBudget evaluation appears to return null even for properly authenticated buyer with APPROVED prequal.",
+    "FE_FIX1_shortlist_success_state": "BLOCKED — cannot click since button is not rendered",
+    "FE_FIX1_shortlist_error_state": "BLOCKED — cannot trigger UI since button is not rendered (BE error correctly returned via direct API)"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter25_fixes.py",
+    "/app/test_reports/pytest/iteration_25.xml"
+  ],
+  "action_items": [
+    "FIX1 HIGH: Investigate why /inventory/[vehicleId]/page.tsx server-side buyerBudget resolution returns null for authenticated sandbox-buyer with APPROVED $35k prequal. Likely causes: (a) Supabase server cookie not read in this RSC route, (b) prequal lookup uses wrong buyer id mapping, (c) preQualification.maxOtdAmount field path mismatch. Until fixed, the AddToShortlistButton never renders and the FE shortlist UX is unreachable from the detail page.",
+    "FIX1 LOW: Add DELETE handler to /api/buyer/shortlist (currently 405). Buyers cannot remove a vehicle from the shortlist via API; this also blocks automated test cleanup.",
+    "Reshuffle data hint: features=Third Row currently returns total=0 — if Third Row is meant to be a real filter, ensure the backfill/reshuffle script tags at least a handful of SUVs with Third Row so users get non-empty results. (Not blocking the spec, but visible UX dead-end.)"
+  ],
+  "critical_code_review_comments": [
+    "AddToShortlistButton.tsx: Solid client-side handling of all 4 error codes (ALREADY_IN_SHORTLIST → sets done, SHORTLIST_FULL → friendly text, UNAUTHORIZED → redirect, generic → message). Good UX.",
+    "InventorySearchClient.tsx chips: features chip uses button-with-clear-handler pattern that is more robust than the chip-q implementation flagged in iter24. Consider applying same pattern (single button with testid + onClick=clear) to chip-q/chip-make/etc to match.",
+    "page.tsx (detail) buyerBudget null fallback: anonymous and 'no prequal' both render the same /auth/signup CTA, masking the FIX1 bug. Add a separate branch for 'authenticated but no prequal' so the regression is observable.",
+    "API response shape: /api/public/inventory wraps payload as {success, data:{items,total,...}}. Iter24 report inferred a flatter shape — keep this shape documented so testers don't write tests against data.total instead of data.data.total."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter25_fixes.py (new, 9 tests, all pass)",
+    "/app/test_reports/pytest/iteration_25.xml (new)"
+  ],
+  "success_rate": {"backend": "100% (9/9 pytest, plus all FIX1 BE assertions confirmed via session API: 401 anon, SHORTLIST_FULL at 6th, 5 items persist)", "frontend": "85% (FIX2 chips PASS 5/5; FIX1 detail-page click flow BLOCKED because <AddToShortlistButton> not rendered for authenticated buyer)"},
+  "test_credentials": "Used sandbox-buyer@autolenis-test.com / SandboxBuyer1! for FIX1 (has APPROVED prequal). testbuyer_iteration8 not used (no prequal per credentials.md).",
+  "seed_data_creation": "None. Sandbox shortlist already at 5 items pre-existing — used as natural SHORTLIST_FULL test surface.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend FIX1/2/3 all green. The remaining bug to verify is FE FIX1: when buyerBudget can be resolved on the detail page server component, vehicle-cta-primary should render as a <button> via <AddToShortlistButton/>. To validate: sign in as sandbox-buyer@autolenis-test.com / SandboxBuyer1!, navigate to /inventory/<id-of-cheap-item>, assert document.querySelector('[data-testid=vehicle-cta-primary]').tagName === 'BUTTON'. Once that returns BUTTON, run the click flow (click → wait for [data-testid=shortlist-success]). Use a buyer whose shortlist has < 5 items first (or fix the DELETE 405 to let tests clean up). Features chip group is fully working — no further validation needed. 129/129 coords backfilled — no further validation needed.",
+  "rca of the issue": "FIX1 detail-page CTA bug: page.tsx renders vehicle-cta-primary as <Link href='/auth/signup'> when buyerBudget===null. buyerBudget is computed server-side from the buyer's preQualification (likely via getServerSession + prisma findUnique). For sandbox-buyer signed in via /auth/signin, the cookie successfully authorizes /api/buyer/shortlist (proven: API session worked, 5 items added/persisted), so the cookie reaches API routes — but the RSC page either (a) is using a different auth helper that doesn't see the cookie, or (b) is querying preQualification by a buyer id that doesn't match this user. Reproduction: 1) sign in sandbox-buyer 2) goto /inventory/9ece03ad-0f80-4a93-bb42-a7a66c96ddf9 ($28k, well under $35k OTD) 3) inspect tagName of [data-testid=vehicle-cta-primary] → 'A' (expected 'BUTTON'). Mitigation: in /app/frontend/app/(public)/inventory/[vehicleId]/page.tsx, log the resolved {userId, buyerId, preQualification} just before the CTA branch to identify which step returns null."
+}

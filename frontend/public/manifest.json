@@ -1,0 +1,26 @@
+{
+  "name": "AutoLenis",
+  "short_name": "AutoLenis",
+  "description": "The smarter way to buy your next car",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4B0082",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "automotive"],
+  "lang": "en-US",
+  "scope": "/"
+}

@@ -1,0 +1,51 @@
+{
+  "summary": "Iter30 — Re-tested admin items [5][6][6b][6c][7][12] after main agent applied the iter29 RCA fix (replaced NextResponse.cookies.delete+set with two res.headers.append('Set-Cookie', ...) calls in /api/admin/auth/verify-mfa). The fix DID NOT resolve the issue. Curl HTTP/1.1 + HTTP/2, AND a real browser via Playwright, all confirm that the response from POST /api/admin/auth/verify-mfa still emits ONE merged 'Set-Cookie' header containing both 'admin_premfa=; Max-Age=0, admin_token=eyJ...' separated by a comma. Browser cookies after MFA contain only admin_premfa (cleared) — admin_token is NEVER persisted. Consequently /admin/dashboard, /admin/requests, /admin/requests/[id], /admin/requests/analytics all bounce back to /admin/auth/signin, and pytest of /app/backend/tests/test_admin_request_apis.py fails 3/4 (the 4th 'view request' test passes only because both 200-success and 404 are accepted; in reality it's getting the HTML signin page, not the request JSON). All admin items [5][6][6b][6c][7][12] remain BLOCKED.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/admin/auth/verify-mfa", "issue": "iter29 RCA fix (res.headers.append('Set-Cookie', ...) twice) did NOT split the Set-Cookie headers on the wire. Wire output (verified with both curl --http1.1 -i and curl HTTP/2 -i) is still a single 'set-cookie:' line: 'admin_premfa=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0, admin_token=<JWT>; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400'. Browser parses only first cookie → admin_token never set → all admin pages redirect to signin. RECOMMENDED FIX: stop emitting two Set-Cookie headers entirely. Drop the admin_premfa-clear from this response — admin_premfa already has Max-Age=600 so it self-expires; or rely on subsequent middleware/route logic to prefer admin_token over admin_premfa. Emit ONLY 'admin_token=<JWT>; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400' in this response. This eliminates the merge-collision entirely.", "priority": "CRITICAL"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Admin sign-in → MFA → admin pages", "issue": "After successful MFA (200, success:true), browser document.cookie shows only 'admin_premfa' + Cloudflare cookies; no 'admin_token'. URL ends up back at /admin/auth/signin. Blocks ALL admin UI flows.", "affected_selectors": ["[data-testid=admin-mfa-input]"]}
+    ],
+    "design_issues": []
+  },
+  "test_results": {
+    "[AUTH] verify-mfa cookie split": "FAIL — wire-level two Set-Cookie headers still merged. document.cookie post-MFA = ['cf_clearance','admin_premfa','__cf_bm']. No admin_token.",
+    "[5] /admin/requests/[id] META parsing UI": "BLOCKED — admin pages redirect to signin",
+    "[6] PATCH ACTIVATE_SOURCING + checkpoint + offer happy path": "BLOCKED — pytest test_activate_sourcing_then_offer_full_flow fails on 'cp_resp.json()' because POST /api/admin/requests/[id]/checkpoints returned HTML signin page",
+    "[6b] gate enforcement (no checkpoint → 4xx)": "BLOCKED — pytest test_offer_blocked_without_active_sourcing got 200 (HTML signin page) instead of 4xx",
+    "[6c] AdminOfferComposer UI smoke": "BLOCKED — cannot reach /admin/requests/[id]",
+    "[7] buyer offer page after admin offer": "BLOCKED — depends on [6] producing an offer record",
+    "[12] /admin/requests/analytics": "BLOCKED — page redirects to /admin/auth/signin (pytest got 0/4 keyword matches)",
+    "[REGRESSION] admin signin still works": "PASS — /api/admin/auth/signin returns 200 + admin_premfa cookie set correctly (single Set-Cookie, no merge)"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_request_apis.py",
+    "/app/test_reports/pytest/iteration_30_admin.xml"
+  ],
+  "action_items": [
+    "[CRITICAL] The two-headers.append fix did NOT work — Cloudflare/HTTP-2 proxy still merges. Apply the alternative fix: in /app/frontend/app/api/admin/auth/verify-mfa/route.ts, REMOVE the admin_premfa clear entirely from the response. Emit only ONE Set-Cookie for admin_token. Rationale: admin_premfa already has Max-Age=600 (self-expires in 10 min) and once admin_token is present, middleware/route guards will prefer it. This sidesteps the proxy merge bug.",
+    "[ALTERNATIVE if [1] is unacceptable] Clear admin_premfa via a separate dummy response — e.g. have the client perform a follow-up POST to /api/admin/auth/clear-premfa after successful MFA, or do a 302 redirect from verify-mfa to /admin/dashboard so the browser issues a separate request that can clear the cookie.",
+    "[VERIFICATION] After fix, run: cd /app && pytest /app/backend/tests/test_admin_request_apis.py -v . Expect 4/4 PASS. Then re-do the Playwright admin-MFA flow and verify document.cookie includes 'admin_token'."
+  ],
+  "critical_code_review_comments": [
+    "headers.append('Set-Cookie', ...) called twice in NextResponse does NOT guarantee two separate Set-Cookie headers on the wire when the response transits Cloudflare HTTP/2. Verified empirically here: curl --http1.1 -i still shows one merged header line, and the browser cookie jar gets only the first cookie. The Web Fetch Headers spec says Set-Cookie should be the only header that doesn't combine, but the runtime + proxy chain in this preview env collapses them anyway.",
+    "Robust fix: avoid the dual-Set-Cookie scenario altogether. Drop the explicit clear of admin_premfa in the verify-mfa response — its Max-Age=600 (~10 min) is short enough that it self-expires harmlessly, and any auth-priority logic should already prefer admin_token over admin_premfa.",
+    "If clearing admin_premfa immediately is required, do it via an HTTP 302 redirect (browser follows, sends a separate request that the redirect target can use to clear the cookie), or move the clear into a middleware that runs on the next admin page hit."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "1/4 admin tests pass (only because that test accepts 404; actually got HTML signin redirect). Effective admin API test success: 0/4 due to auth-cookie infra issue. Buyer endpoints unchanged from iter29 (all PASS).",
+    "frontend": "Admin UI items [5][6c][12] all BLOCKED behind admin auth cookie issue. Buyer items already confirmed PASS in iter29 — not re-tested this round per scope."
+  },
+  "test_credentials": "Admin: admin@autolenis.com / MarkistAdmin@Autolenis1250$$$ + sandbox TOTP (script confirmed working — generates valid TOTP, signin returns 200, verify-mfa returns 200 success:true). The breakage is purely the Set-Cookie-merge issue downstream of verify-mfa.",
+  "seed_data_creation": "None. Existing request ab237fa4 (SUBMITTED) reused; could not advance state due to admin auth blocker.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "1) The current verify-mfa fix using `res.headers.append('Set-Cookie', ...)` twice has been EMPIRICALLY VERIFIED to fail — Cloudflare/proxy still merges. Do NOT assume it works without inspecting wire output. 2) Recommended next fix is to emit only ONE Set-Cookie for admin_token in verify-mfa response and let admin_premfa self-expire (it has Max-Age=600). 3) After main agent applies the new fix, run `pytest /app/backend/tests/test_admin_request_apis.py -v` and re-do Playwright admin signin → check document.cookie for 'admin_token' before exercising admin UI. 4) test_admin_request_apis.py is ready to use as-is — its assertions cover items [6], [6b], [12]; [5][6c][7] need Playwright (admin META parsing UI, AdminOfferComposer, buyer offer page after admin offer). 5) Buyer-side System 4C all PASS — no need to re-test buyer items.",
+  "rca of the issue": "Main agent applied the iter29 RCA recommendation: replaced NextResponse.cookies.delete(ADMIN_PREMFA_COOKIE) + NextResponse.cookies.set(ADMIN_TOKEN_COOKIE, ...) with two res.headers.append('Set-Cookie', '...'). However, empirical testing in this iter (curl --http1.1 -i, curl HTTP/2 -i, AND Playwright real browser) shows the wire still emits ONE 'set-cookie:' header line containing both cookies merged with a comma. Either the Next.js 16 runtime serializes Headers.append('Set-Cookie', ...) by joining values, or Cloudflare's edge proxy is collapsing them at HTTP/2 framing. Browsers (and curl cookie-jar) parse only the first cookie of a merged 'admin_premfa=...; Max-Age=0, admin_token=...' line, so admin_token is dropped. Mitigation: emit ONLY ONE Set-Cookie in this response — for admin_token. Drop the explicit admin_premfa clear since it already has Max-Age=600 and self-expires. This sidesteps the merge-collision entirely. Verify with `curl --http1.1 -i` and Playwright's document.cookie."
+}

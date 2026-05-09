@@ -1,0 +1,136 @@
+{
+  "project_name": "AutoLenis",
+  "theme": "dark",
+  "archetype": "Archetype 5 (Jewel & Luxury) with elements of Archetype 4 (Swiss & High-Contrast) for B2B flows",
+  "design_philosophy": "Fortune 500 Fintech standard. Capital, conviction, and premium trust. We are replacing generic purple/white SaaS templates with a cinematic, moody, and highly authoritative visual language. The design must project exclusivity (private 48-hour reverse auction) while maintaining strict functional clarity for numbers and data.",
+  "colors": {
+    "background": {
+      "default": "#05030A",
+      "description": "Deepest void tinted with indigo. NOT pure black."
+    },
+    "surface": {
+      "default": "#0D0817",
+      "glass": "bg-[#0D0817]/60 backdrop-blur-2xl backdrop-saturate-150",
+      "card": "#120B1F",
+      "description": "Subtle elevation using rich dark purple undertones."
+    },
+    "primary": {
+      "default": "#4B0082",
+      "hover": "#5C009E",
+      "foreground": "#FFFFFF",
+      "description": "Deep Purple. Used for large structural accents, gradients, and brand moments."
+    },
+    "accent": {
+      "default": "#4CAF50",
+      "hover": "#5ED162",
+      "foreground": "#000000",
+      "description": "Emerald Green. The 'Money/Success' color. Use strictly for primary CTAs, LANE_1 trust chips, and live savings numbers."
+    },
+    "secondary": {
+      "default": "#1565C0",
+      "hover": "#1E7AE6",
+      "foreground": "#FFFFFF",
+      "description": "Deep Blue. Used for secondary actions, LANE_2 chips, and technical/trust pillars."
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A19BB0",
+      "muted": "#6E677D"
+    },
+    "border": {
+      "default": "rgba(255, 255, 255, 0.08)",
+      "focus": "rgba(76, 175, 80, 0.5)"
+    }
+  },
+  "typography": {
+    "fonts": {
+      "heading": "Clash Display, sans-serif",
+      "body": "Satoshi, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "rules": {
+      "h1": "text-5xl sm:text-6xl font-semibold tracking-tighter text-white",
+      "h2": "text-3xl sm:text-4xl font-medium tracking-tight text-white",
+      "h3": "text-xl sm:text-2xl font-medium tracking-tight text-white",
+      "body": "text-base leading-relaxed text-[#A19BB0]",
+      "numbers": "font-mono tracking-tight",
+      "overlines": "text-xs font-bold uppercase tracking-[0.2em] text-[#4CAF50]"
+    }
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous Spacing Philosophy. Use 2-3x more spacing than typical designs to breathe luxury.",
+    "section_padding": "py-24 md:py-32",
+    "container_padding": "px-6 md:px-12",
+    "grids": {
+      "marketing": "grid-cols-1 md:grid-cols-12 gap-8 md:gap-12",
+      "bento": "grid-cols-1 md:grid-cols-8 lg:grid-cols-12 gap-6"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#4CAF50] text-black font-semibold rounded-none px-8 py-4 hover:bg-[#5ED162] transition-colors flex items-center justify-center",
+      "secondary": "bg-transparent border border-white/20 text-white font-medium rounded-none px-8 py-4 hover:bg-white/5 transition-colors",
+      "ghost": "text-white hover:text-[#4CAF50] transition-colors"
+    },
+    "cards": {
+      "marketing": "bg-[#0D0817] border border-white/10 p-8 rounded-xl shadow-2xl",
+      "pricing": "relative bg-gradient-to-b from-[#120B1F] to-[#05030A] border border-white/10 p-10 rounded-2xl. Use 'Tracing Beam' concept for the $499 flat tier.",
+      "b2b_panel": "flat background, sharp edges, 1px border border-white/10, no shadow. Density over decoration."
+    },
+    "header": {
+      "style": "fixed w-full z-50 bg-[#05030A]/70 backdrop-blur-xl border-b border-white/5"
+    },
+    "chips": {
+      "LANE_1": "bg-[#4CAF50]/10 text-[#4CAF50] border border-[#4CAF50]/20 text-xs uppercase tracking-wider px-2 py-1 rounded-sm",
+      "LANE_2": "bg-[#1565C0]/10 text-[#1565C0] border border-[#1565C0]/20 text-xs uppercase tracking-wider px-2 py-1 rounded-sm",
+      "LANE_3": "bg-white/5 text-white/70 border border-white/10 text-xs uppercase tracking-wider px-2 py-1 rounded-sm"
+    }
+  },
+  "motion": {
+    "philosophy": "Momentum and weight. Not bouncy.",
+    "hover": "transition-all duration-300 ease-out",
+    "entrance": "opacity-0 translate-y-4 to opacity-100 translate-y-0 duration-700 ease-out",
+    "scroll": "Smooth scrolling via Lenis is MANDATORY."
+  },
+  "image_urls": [
+    {
+      "category": "hero_background",
+      "url": "https://images.unsplash.com/photo-1753030505007-98ceef668415?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwzfHxsdXh1cnklMjBjYXIlMjBzdHVkaW8lMjBsaWdodGluZ3xlbnwwfHx8fDE3NzY5OTQ0NjZ8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Sleek dark Land Rover in studio lighting. Use with heavy bg-black/60 overlay and a radial gradient to ensure text readability.",
+      "placement": "Homepage Hero"
+    },
+    {
+      "category": "b2b_dealer_panel",
+      "url": "https://images.unsplash.com/photo-1758518730384-be3d205838e8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzV8MHwxfHNlYXJjaHwxfHxidXNpbmVzcyUyMHByb2Zlc3Npb25hbCUyMGhhbmRzaGFrZXxlbnwwfHx8fDE3NzY5OTQ0Njd8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Professional handshake across table. Apply deep blue/purple duotone filter or heavy dark overlay.",
+      "placement": "Dealer Signin Left Panel"
+    },
+    {
+      "category": "affiliate_network_bg",
+      "url": "https://images.unsplash.com/photo-1741704138665-57f72cf743f7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDZ8MHwxfHNlYXJjaHw0fHxhYnN0cmFjdCUyMGdyZWVuJTIwbmVvbiUyMGRhdGElMjBub2Rlc3xlbnwwfHx8fDE3NzY5OTQ0ODF8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Green glowing particles on dark background representing the 3-level commission tree.",
+      "placement": "Affiliate Page Hero / Background"
+    },
+    {
+      "category": "auth_abstract_bg",
+      "url": "https://images.pexels.com/photos/31032752/pexels-photo-31032752.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Abstract 3D render with gradient curves. Dark and elegant.",
+      "placement": "General Auth / Contact Backgrounds"
+    },
+    {
+      "category": "trust_shield",
+      "url": "https://images.unsplash.com/photo-1728756666032-d0b5552b6384?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzNzl8MHwxfHNlYXJjaHwxfHxjeWJlciUyMHNlY3VyaXR5JTIwc2hpZWxkJTIwZGFyayUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzc2OTk0NDgwfDA&ixlib=rb-4.1.0&q=85",
+      "description": "Glass object with dark blue background representing security and trust.",
+      "placement": "Trust Page Pillars"
+    }
+  ],
+  "instructions_to_main_agent": [
+    "Install and setup @phosphor-icons/react for duotone/premium iconography.",
+    "Install lenis for smooth scrolling.",
+    "Use framer-motion for page transitions and entrance animations.",
+    "Do NOT use HTML <select> or <input type='date'>. Use Shadcn Select and Calendar, heavily styled to match the dark theme.",
+    "All real numbers (Savings, Dealers, Buyers) must use the mono font (JetBrains Mono) for a 'fintech dashboard' feel.",
+    "Ensure all interactive elements have data-testid attributes.",
+    "NEVER use generic placeholder text or placeholder images. Use the provided image_urls and write confident, real-sounding copy."
+  ]
+}

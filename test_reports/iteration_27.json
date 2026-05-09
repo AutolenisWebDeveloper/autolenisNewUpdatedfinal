@@ -1,0 +1,71 @@
+{
+  "summary": "Iter27 — Frontend-only Responsive + SEO regression at 375/768/1280. Verified [A] SEO files, [B] page metadata, [C] JSON-LD, [D] PublicNav responsive, [E] Buyer Portal responsive (signed in as testbuyer_iteration8), [F] vehicle detail, [G] inventory list, [H] auth signin, [I] no console errors, [J] no double scrollbar on /buyer/dashboard. 11 of 13 spec items PASS. Found 2 SEO regressions and 1 minor responsive overflow.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Public route allowlist (proxy.ts isPublicRoute)",
+        "issue": "/contract-shield and /faq return HTTP 307 → /auth/signin?redirect=... Spec [B] explicitly lists both as public pages that must serve metadata + JSON-LD. They are missing from the PUBLIC_ROUTES allowlist in /app/frontend/proxy.ts (or equivalent middleware). Other listed public pages (/, /inventory, /pricing, /for-buyers, /refinance, /trust, /about, /contact) are reachable.",
+        "selector": "GET /contract-shield, GET /faq",
+        "priority": "HIGH"
+      },
+      {
+        "component": "Homepage <title> (lib/seo/metadata.ts PAGE_METADATA['/'])",
+        "issue": "Home page <title> is 'AutoLenis — Skip the Dealership. Let Dealers Compete for You. | AutoLenis' — contains 'AutoLenis' twice. Root app/layout.tsx applies a '%s | AutoLenis' template, but PAGE_METADATA['/'].title still ends in '... | AutoLenis' (or starts with 'AutoLenis —'). Spec [B] requires titles must NOT contain double 'AutoLenis'. Other 8 pages tested are clean (Browse Available Vehicles | AutoLenis, Pricing — Free to Start, $499 Premium Concierge | AutoLenis, etc).",
+        "selector": "<title> on GET /",
+        "priority": "MEDIUM"
+      },
+      {
+        "component": "Inventory list page at 375px (/inventory)",
+        "issue": "documentElement.scrollWidth > clientWidth on 375px viewport (overflow=True). Cards correctly reflow to 1-per-row but the row container or filter form overflows by a few px causing horizontal scroll. Home, vehicle detail, signin and buyer dashboard at 375 all return overflow=False — only /inventory does.",
+        "selector": "/inventory at 375x800",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "step_by_step_results": {
+    "[A] /robots.txt": "PASS — 200, contains User-agent rules + Sitemap line + Host line.",
+    "[A] /sitemap.xml": "PASS — 200, valid XML, 144 <loc> entries (~129 vehicle URLs + ~15 static pages).",
+    "[B] metadata clean public pages": "PASS for /inventory, /pricing, /for-buyers, /refinance, /trust, /about, /contact — title/desc/canonical/og:title/og:image/twitter:card all present, NO double AutoLenis.",
+    "[B] /": "FAIL — title contains double 'AutoLenis' suffix.",
+    "[B] /contract-shield, /faq": "FAIL — 307 redirect to /auth/signin (auth-gated). Cannot inspect metadata.",
+    "[C] Home JSON-LD": "PASS — Organization + WebSite + LocalBusiness all present (also nested PostalAddress, GeoCoordinates, SearchAction, State).",
+    "[C] Vehicle detail JSON-LD (/inventory/9ece03ad-...)": "PASS — Car schema with Brand, Offer, QuantitativeValue, vehicleIdentificationNumber=GE2GY3A9AKW86EWS8.",
+    "[D] PublicNav 1280": "PASS — hamburger hidden, full nav + Sign In + Get Started visible.",
+    "[D] PublicNav 768": "PASS — hamburger visible, drawer opens with 7 anchors (5 nav links + Sign In + Get Started Free).",
+    "[D] PublicNav 375": "PASS — hamburger visible, drawer opens with 7 anchors, no horizontal overflow on home.",
+    "[E] Buyer Portal 1280": "PASS — buyer-sidebar visible, buyer-mobile-topbar/toggle hidden, no overflow.",
+    "[E] Buyer Portal 768": "PASS — sidebar HIDDEN, buyer-mobile-topbar + buyer-mobile-menu-toggle visible. Toggle opens buyer-mobile-drawer (visible=True, 17 anchors >= 16 nav links). Backdrop visible; click backdrop → drawer closes.",
+    "[E] Buyer Portal 375": "PASS — same as 768. KPI cards (Pre-Qualification $35,000 / Shortlist / Quick Actions) render without horizontal overflow. Journey navigator 'Step 2 of 14 · Onboarding' visible.",
+    "[F] Vehicle detail 375": "PASS — overflow=False, h1 visible, VIN visible.",
+    "[F] Vehicle detail 1280": "PASS — overflow=False, h1 visible, VIN visible.",
+    "[G] Inventory 1280": "PASS — 4 cards/row (281px each), no overflow.",
+    "[G] Inventory 768": "PASS — 2 cards/row (326px each), no overflow.",
+    "[G] Inventory 375": "PARTIAL — 1 card/row (327px) BUT scrollWidth>clientWidth (small horizontal overflow). Filter form usable.",
+    "[H] Signin 1280/768/375": "PASS — no overflow, email/password/submit all visible at every breakpoint.",
+    "[I] Console errors": "PASS — zero JS console errors during navigation across all breakpoints (HMR/devtools chatter excluded as instructed).",
+    "[J] /buyer/dashboard double scrollbar": "PASS — html.overflowY=visible, body.overflowY=visible, htmlScrollH==htmlClientH, bodyScrollH==bodyClientH at 375px. No double scrollbars."
+  },
+  "test_report_links": ["/app/test_reports/iteration_27.json"],
+  "action_items": [
+    "Add '/contract-shield' and '/faq' to the PUBLIC_ROUTES allowlist in /app/frontend/proxy.ts isPublicRoute() (same fix pattern as the prior /robots.txt + /sitemap.xml fix). After fix, retest by running curl -I to verify HTTP 200 (not 307) and that <title>, og:* and JSON-LD metadata are emitted.",
+    "Clean PAGE_METADATA['/'].title in /app/frontend/lib/seo/metadata.ts so it does not include '| AutoLenis' (the root app/layout.tsx '%s | AutoLenis' template will append it). Current value renders as: 'AutoLenis — Skip the Dealership. Let Dealers Compete for You. | AutoLenis'. Either remove the trailing brand or set the title via metadata.title.absolute to bypass the template — but ensure exactly one 'AutoLenis' brand occurrence.",
+    "Investigate /inventory horizontal overflow at 375px. Card grid container or filter form likely has min-width or fixed-width child causing scrollWidth > 375. Check inventory page layout for un-wrapped flex/grid children, hardcoded card widths, or filter chip rows using 'whitespace-nowrap' without overflow-x:auto on the parent."
+  ],
+  "critical_code_review_comments": [
+    "Title-doubling regression suggests PAGE_METADATA cleanup in this iteration missed the root path '/'. A unit-style assertion that none of PAGE_METADATA values' title contain 'AutoLenis' (since the template adds it) would prevent recurrence — consider adding a small Vitest in /app/frontend/lib/seo/__tests__/metadata.test.ts.",
+    "Public-route allowlist deviation between sitemap/robots fix and content pages indicates the allowlist check is path-prefix based but missing entries. Recommend driving the allowlist from a central PUBLIC_ROUTES array used by both proxy.ts and the sitemap generator so that any page emitted in /sitemap.xml is guaranteed reachable to crawlers (currently /contract-shield and /faq may be in sitemap but redirect — bad SEO signal).",
+    "BuyerSidebar mobile drawer correctly emits data-testid for sidebar/topbar/toggle/drawer/backdrop and backdrop click closes drawer — clean implementation. 17 anchors (vs spec '16 nav links + Sign In + Get Started') is consistent with the brand link being countable in addition to the 16 nav items.",
+    "Inventory page 375px overflow is the kind of issue easy to miss without an automated overflow assertion. Consider a Playwright smoke test that asserts 'documentElement.scrollWidth <= clientWidth + 1' on the public surface for 375/768/1280."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only run)", "frontend": "85% (11/13 spec items full PASS, 1 PARTIAL [G-375], 2 FAIL [/contract-shield+/faq access; / title doubling])"},
+  "test_credentials": "testbuyer_iteration8@autolenis-test.com / TestBuyer@Iteration8! (PASS — signed in successfully, redirected to /buyer/dashboard)",
+  "seed_data_creation": "None.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "After main agent fixes (1) /contract-shield + /faq allowlist and (2) home page title doubling, retest with: curl -sI https://.../contract-shield | head -1 (expect 200), curl -sI https://.../faq | head -1 (expect 200), then re-fetch HTML and grep for <title> + meta description + application/ld+json blocks. Also re-check homepage <title> for single 'AutoLenis' occurrence. The /inventory 375 overflow is low priority — visual screenshot would help locate the offending element (likely filter chip row or a card image overflow).",
+  "rca of the issue": "(1) Public-route fix in this session whitelisted /robots.txt and /sitemap.xml in proxy.ts isPublicRoute() but missed /contract-shield and /faq. proxy.ts (or middleware.ts) currently treats any unlisted path as auth-required for cookie-less requests, returning 307 to /auth/signin. Fix: add 'contract-shield' and 'faq' to the same PUBLIC_ROUTES set. (2) Title doubling on /: lib/seo/metadata.ts PAGE_METADATA['/'].title was reset but still ends with 'AutoLenis' brand suffix while root app/layout.tsx exports metadata.title.template = '%s | AutoLenis'. Other 8 pages were correctly trimmed (e.g., 'Browse Available Vehicles' → renders as 'Browse Available Vehicles | AutoLenis'), only home was missed. (3) /inventory 375 overflow likely caused by the filter form's two-column grid or color-swatch row losing its responsive collapse below 400px; needs DOM inspection."
+}

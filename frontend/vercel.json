@@ -1,0 +1,96 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "pnpm build",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "outputDirectory": ".next",
+  "crons": [
+    {
+      "path": "/api/cron/auction-close",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/holds",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/affiliates",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/affiliate-digest",
+      "schedule": "0 14 * * 1"
+    },
+    {
+      "path": "/api/cron/contract-shield",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/sessions",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/prequal-ibv-reminders",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/prequal-stale-cleanup",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/prequal-sla-escalation",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/prequal-message-delivery",
+      "schedule": "0 */4 * * *"
+    },
+    {
+      "path": "/api/cron/prequal-purge",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/inventory-sync-full",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/inventory-sync-priority",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/inventory-stale-sweep",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/analytics-snapshot",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/health-check",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/sla-check",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/trust-check",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/workflow-automation",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/faith-verse-rotation",
+      "schedule": "1 6 * * 1"
+    },
+    {
+      "path": "/api/cron/dealer-scorecard-snapshot",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/morning-briefing",
+      "schedule": "0 11 * * *"
+    }
+  ]
+}

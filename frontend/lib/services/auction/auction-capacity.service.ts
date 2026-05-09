@@ -1,0 +1,25 @@
+// lib/services/auction/auction-capacity.service.ts
+import { prisma } from "@/lib/prisma";
+
+const DEFAULT_MAX_LOAD = 5;
+
+export async function getDealerCapacity(dealerId: string): Promise<number> {
+  const config = await prisma.dealerCapacityConfig.findUnique({ where: { dealerId } });
+  return config?.maxAuctionLoad ?? DEFAULT_MAX_LOAD;
+}
+
+export async function isDealerAtCapacity(dealerId: string): Promise<boolean> {
+  const [dealer, maxLoad] = await Promise.all([
+    prisma.dealer.findUnique({ where: { id: dealerId }, select: { currentAuctionLoad: true } }),
+    getDealerCapacity(dealerId),
+  ]);
+  return (dealer?.currentAuctionLoad ?? 0) >= maxLoad;
+}
+
+export async function upsertCapacityConfig(dealerId: string, maxLoad: number, preferredMakes: string[], priceRange?: { min?: number; max?: number }) {
+  return prisma.dealerCapacityConfig.upsert({
+    where: { dealerId },
+    create: { dealerId, maxAuctionLoad: maxLoad, preferredMakes, preferredPriceMin: priceRange?.min, preferredPriceMax: priceRange?.max },
+    update: { maxAuctionLoad: maxLoad, preferredMakes, preferredPriceMin: priceRange?.min, preferredPriceMax: priceRange?.max },
+  });
+}

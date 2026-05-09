@@ -1,0 +1,30 @@
+{
+  "summary": "Iter26 — FIX1 RETEST is FULLY GREEN. The buyer-lookup fix in /app/frontend/app/(public)/inventory/[vehicleId]/page.tsx (getBuyerBudget now uses prisma.buyer.findFirst({ where: { user: { supabaseId: user.id } } })) resolved the SSR null-budget bug. As authenticated sandbox-buyer (APPROVED $35k OTD prequal) viewing a $25k Camry, vehicle-cta-primary now renders as <BUTTON> 'Add to Shortlist' (was <A href=/auth/signup>). Full happy path verified: clean shortlist via new DELETE handler → click button → shortlist-success ' Added to your shortlist' → count=1. Add 4 more, attempt 6th → shortlist-error 'Shortlist is full (5 max). Remove one to add this vehicle.' Re-click already-shortlisted vehicle → BE 400 ALREADY_IN_SHORTLIST, FE handler sets done=true (success state shown). Anonymous regression check: CTA still <A href=/auth/signup> with 'Check Your Buying Power' (correct, unchanged).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "step_by_step_results": {
+    "FIX1_anon_cta_unchanged": "PASS — anon viewer of /inventory/9ece03ad...: tag='A', href='/auth/signup', text 'Check Your Buying Power · Free · No Credit Impact'",
+    "FIX1_authed_cta_is_BUTTON": "PASS — sandbox-buyer (APPROVED $35k prequal) viewing $25k Camry: tag='BUTTON', text='Add to Shortlist', disabled=false (was 'A' in iter25 — fix confirmed)",
+    "FIX1_DELETE_handler_works": "PASS — DELETE /api/buyer/shortlist?inventoryItemId=<id> returns 200 {success:true, data:{removed:1}} for each of the 5 seeded items. Subsequent GET returns count=0 (was 405 in iter25 — fix confirmed)",
+    "FIX1_click_add_success": "PASS — Click [data-testid=vehicle-cta-primary] → [data-testid=shortlist-success] visible with text ' Added to your shortlist'. Subsequent GET /api/buyer/shortlist returns count=1.",
+    "FIX1_already_in_shortlist": "PASS — Reload page after add and click again. BE returns 400 ALREADY_IN_SHORTLIST. FE AddToShortlistButton handler sets done=true → renders shortlist-success state ('Added to your shortlist'). No error state shown — matches spec ('UI shows shortlist-success state, since AddToShortlistButton sets done=true on this code').",
+    "FIX1_shortlist_full_5_max": "PASS — Added 4 more (5 total via API). Navigated to 6th vehicle's detail page, CTA still rendered as BUTTON. Click → [data-testid=shortlist-error] visible with text 'Shortlist is full (5 max). Remove one to add this vehicle.'",
+    "FIX1_final_cleanup": "PASS — DELETE'd all 5 items. GET shows count=0. Sandbox returned to clean state."
+  },
+  "test_report_links": ["/app/test_reports/iteration_26.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "getBuyerBudget() fix is correct and minimal — uses prisma.buyer.findFirst({ where: { user: { supabaseId: user.id } } }) which correctly traverses the User→Buyer relation via Supabase auth UUID. Pattern matches /app/frontend/lib/auth/api.ts.",
+    "DELETE /api/buyer/shortlist handler correctly scopes deleteMany by both shortlistId and inventoryItemId, preventing cross-buyer deletion. Returns {removed:count} which is honest about whether anything was removed.",
+    "AddToShortlistButton's ALREADY_IN_SHORTLIST → done=true UX choice intentionally hides the duplicate-add as success. This matches spec but might confuse a buyer who expects 'already added' feedback. Consider a distinct 'Already in your shortlist' label rather than reusing the 'Added' success state. (Optional polish — spec accepts this behavior.)",
+    "Anonymous and 'authed-but-no-prequal' both render the same /auth/signup CTA. Iter25 review already flagged this — the fix masks the fact that 'no prequal' state is indistinguishable from anon. Not a regression, but worth a follow-up branch for buyers who signed up but haven't prequal'd."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (DELETE handler + 5x DELETE + 4x POST + 1x SHORTLIST_FULL all PASS)", "frontend": "100% (5/5 FIX1 RETEST scenarios PASS — anon link, authed BUTTON, click→success, already-in-shortlist, SHORTLIST_FULL error state)"},
+  "test_credentials": "sandbox-buyer@autolenis-test.com / SandboxBuyer1! (APPROVED $35k OTD prequal)",
+  "seed_data_creation": "None. Used existing 5-item sandbox shortlist as starting point, cleaned via DELETE handler, re-populated 5 items, then cleaned again. Sandbox left in clean (count=0) state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "FIX1 (vehicle detail page CTA + shortlist click flow + DELETE handler) is FULLY VERIFIED. No further FIX1 work needed. FIX2 (features chips) and FIX3 (coords backfill) were already PASS in iter25 and were not retested per main-agent instruction. Sandbox-buyer shortlist is currently empty (clean state).",
+  "rca of the issue": "ROOT CAUSE: page.tsx getBuyerBudget() previously used `prisma.buyer.findUnique({ where: { userId: user.id } })`, but user.id from supabase.auth.getUser() is the Supabase auth UUID, not the local Prisma User.id. Buyer.userId is a FK to the local User row. The lookup always returned null, so buyerBudget was null, so the page rendered the anon /auth/signup CTA branch even for fully-authenticated buyers with prequal. FIX: switched to `prisma.buyer.findFirst({ where: { user: { supabaseId: user.id } } })` which traverses the relation correctly. CONFIRMED RESOLVED: authed buyer now sees <BUTTON>Add to Shortlist with 'Within your pre-qualified budget' badge."
+}

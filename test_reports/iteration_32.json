@@ -1,0 +1,55 @@
+{
+  "summary": "Iter32 — Static code audit of all 14 Stripe checklist items + TypeScript build verification. No live Stripe charges made. All items verified by reading source files.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/admin/payments/concierge-fee/[dealId]/refund",
+        "issue": "No idempotency guard: does not return 400 if feeRefundedAt is already set (unlike deposit refund which checks status=REFUNDED). Calling twice could create duplicate Stripe refunds. Spec does not explicitly require idempotency here, but it is a risk."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "checklist_results": {
+    "TASK1_stripe_keys_live": "PASS — sk_live_*, pk_live_*, whsec_* all confirmed in .env.local",
+    "TASK1_sandbox_short_circuit": "PASS — create-intent line 28-30: isSandboxRuntime = NODE_ENV !== 'production'; mock only if isLiveKey && isSandboxRuntime. On Vercel NODE_ENV=production so mock never fires.",
+    "TASK2_webhook_raw_body": "PASS — webhook/route.ts line 16: request.text() used, not request.json()",
+    "TASK2_idempotency": "PASS — eventId checked first (line 28-33), event recorded before side effects (line 36-38), marked processed:true after (line 274-277)",
+    "TASK3_prequal_check": "PASS — create-intent lines 12-15: prequal existence + expiresAt > now required",
+    "TASK3_already_paid": "PASS — create-intent lines 21-23: status=PAID returns 400 ALREADY_PAID",
+    "TASK3_amount_hardcoded": "PASS — create-intent line 50-51: amount: DEPOSIT_AMOUNT_CENTS only, never from body",
+    "TASK3_idempotency_key": "PASS — create-intent line 55: idempotencyKey: `deposit-buyer-${buyer.id}`",
+    "BUG1_launchAuction_inviteDealers": "PASS — webhook lines 88-94: launchAuction(createdAuction.id) and inviteDealersToAuction(createdAuction.id, deposit.buyerId) called",
+    "BUG2_admin_deposit_send_link_metadata": "PASS — deposit/send-link lines 72-79: payment_intent_data.metadata = {buyerId, depositId, type:'deposit', source:'admin_payment_link'}",
+    "BUG3_concierge_send_link_metadata": "PASS — concierge-fee/send-link lines 62-69: payment_intent_data.metadata = {buyerId, dealId, type:'concierge_fee', source:'admin_payment_link'}",
+    "BUG4_webhook_metaDealId_lookup": "PASS — webhook lines 124-130: metaDealId from pi.metadata used; stripeFeePIId set on deal (line 138)",
+    "TASK4_concierge_amount_checkout_session": "PASS — concierge-fee/send-link line 44: unit_amount: PREMIUM_FEE_REMAINING_CENTS (40000). Checkout Session created (not PaymentIntent).",
+    "TASK5_deposit_refund_roles_idempotency": "PASS — deposit/refund line 17: getAdminWithRole(['SUPER_ADMIN','FINANCE_ADMIN']); line 22 returns 400 ALREADY_REFUNDED; line 35: getStripe().refunds.create",
+    "TASK5_concierge_refund_roles_audit": "PASS — concierge-fee/refund line 17: same roles; audit log created lines 63-74; getStripe().refunds.create line 37",
+    "TASK6_deposit_page_stripe": "PASS — deposit/page.tsx line 13: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY; line 14-16: loadStripe with placeholder guard; PaymentElement used line 46",
+    "TASK7_api_version": "PASS — lib/stripe.ts line 19: apiVersion: '2026-04-22.dahlia'",
+    "TYPESCRIPT_BUILD": "PASS — `tsc --noEmit` exits 0, zero errors"
+  },
+  "test_report_links": ["/app/test_reports/iteration_32.json"],
+  "action_items": [
+    "OPTIONAL: Add idempotency guard to concierge-fee refund — check if feeRefundedAt is already set and return 400 to prevent duplicate Stripe refunds on double-call."
+  ],
+  "critical_code_review_comments": [
+    "All 4 bug fixes verified correct in source code.",
+    "Concierge refund lacks idempotency check (feeRefundedAt not checked before proceeding), unlike deposit refund which has a status=REFUNDED guard. Low risk but worth adding.",
+    "Deposit page: stripePromise is initialized at module scope with a placeholder guard — correctly skips loadStripe if pk is missing or placeholder.",
+    "create-intent: if existingDeposit.status === 'PENDING' (not PAID), it proceeds to create a new PI but does NOT reuse the existing PENDING deposit record — this could create duplicate PENDING deposits if the buyer retries. Minor edge case but could be improved.",
+    "Webhook deposit handler: if deposit.findFirst returns null (PI not linked), launchAuction/emails are silently skipped — acceptable defensive coding."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (all 14 checklist items verified PASS)", "frontend": "100% (TypeScript 0 errors, deposit page code correct)"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 14 Stripe checklist items verified PASS via static code analysis. TypeScript build passes (0 errors). Live Stripe keys confirmed in .env.local. No live charges made. One minor: concierge-fee refund missing idempotency guard. create-intent may create duplicate PENDING deposits on retry (existing PENDING deposit not reused).",
+  "rca_of_issue": "All 4 originally reported bugs (launchAuction not called, missing payment_intent_data.metadata on both send-link endpoints, webhook concierge_fee using stripeFeePIId before it was set) are confirmed fixed in source code."
+}

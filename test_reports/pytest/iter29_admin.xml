@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="4" time="6.545" timestamp="2026-04-26T17:03:25.232818+00:00" hostname="agent-env-49b8b0f6-a623-499c-8e9a-71a3b489ece5"><testcase classname="backend.tests.test_admin_request_apis" name="test_admin_can_view_request" time="3.499" /><testcase classname="backend.tests.test_admin_request_apis" name="test_offer_blocked_without_active_sourcing" time="1.551"><failure message="AssertionError: expected gate failure, got 200 body=&lt;!DOCTYPE html&gt;&lt;html lang=&quot;en&quot;&gt;&lt;head&gt;&lt;meta charSet=&quot;utf-8&quot;/&gt;&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;/&gt;&lt;link rel=&quot;stylesheet&quot; href=&quot;/_next/static/chunks/%5Broot-of-the-server%5D__10qzovg._.css&quot; data-precedence=&quot;next_static/chunks/[root-of-the-server]__10qzovg._.css&quot;/&gt;&lt;link &#10;assert 200 in (400, 409)&#10; +  where 200 = &lt;Response [200]&gt;.status_code">backend/tests/test_admin_request_apis.py:64: in test_offer_blocked_without_active_sourcing
+    assert r.status_code in (400, 409), f"expected gate failure, got {r.status_code} body={r.text[:300]}"
+E   AssertionError: expected gate failure, got 200 body=&lt;!DOCTYPE html&gt;&lt;html lang="en"&gt;&lt;head&gt;&lt;meta charSet="utf-8"/&gt;&lt;meta name="viewport" content="width=device-width, initial-scale=1"/&gt;&lt;link rel="stylesheet" href="/_next/static/chunks/%5Broot-of-the-server%5D__10qzovg._.css" data-precedence="next_static/chunks/[root-of-the-server]__10qzovg._.css"/&gt;&lt;link 
+E   assert 200 in (400, 409)
+E    +  where 200 = &lt;Response [200]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_admin_request_apis" name="test_activate_sourcing_then_offer_full_flow" time="1.209"><failure message="requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)">/root/.venv/lib/python3.11/site-packages/requests/models.py:978: in json
+    return complexjson.loads(self.text, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:337: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/json/decoder.py:355: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_admin_request_apis.py:86: in test_activate_sourcing_then_offer_full_flow
+    cp = cp_resp.json()
+         ^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/models.py:982: in json
+    raise RequestsJSONDecodeError(e.msg, e.doc, e.pos)
+E   requests.exceptions.JSONDecodeError: Expecting value: line 1 column 1 (char 0)</failure></testcase><testcase classname="backend.tests.test_admin_request_apis" name="test_admin_analytics_page_renders" time="0.130"><failure message="AssertionError: only 0/4 keywords found in analytics page; snippet=&lt;!doctype html&gt;&lt;html lang=&quot;en&quot;&gt;&lt;head&gt;&lt;meta charset=&quot;utf-8&quot;/&gt;&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;/&gt;&lt;link rel=&quot;stylesheet&quot; href=&quot;/_next/static/chunks/%5broot-of-the-server%5d__10qzovg._.css&quot; data-precedence=&quot;next_static/chunks/[root-of-the-server]__10qzovg._.css&quot;/&gt;&lt;link rel=&quot;preload&quot; as=&quot;script&quot; fetchpriority=&quot;low&quot; href=&quot;/_next/static/chunks/%5bturbopack%5d_browser_dev_hmr-client_hmr-client_ts_10z625~._.js&quot;/&gt;&lt;script src=&quot;/_next/static/chunks/node_modules_next_dist_co&#10;assert 0 &gt;= 3">backend/tests/test_admin_request_apis.py:119: in test_admin_analytics_page_renders
+    assert hits &gt;= 3, f"only {hits}/4 keywords found in analytics page; snippet={text[text.find('total'):text.find('total')+500] if 'total' in text else text[:500]}"
+E   AssertionError: only 0/4 keywords found in analytics page; snippet=&lt;!doctype html&gt;&lt;html lang="en"&gt;&lt;head&gt;&lt;meta charset="utf-8"/&gt;&lt;meta name="viewport" content="width=device-width, initial-scale=1"/&gt;&lt;link rel="stylesheet" href="/_next/static/chunks/%5broot-of-the-server%5d__10qzovg._.css" data-precedence="next_static/chunks/[root-of-the-server]__10qzovg._.css"/&gt;&lt;link rel="preload" as="script" fetchpriority="low" href="/_next/static/chunks/%5bturbopack%5d_browser_dev_hmr-client_hmr-client_ts_10z625~._.js"/&gt;&lt;script src="/_next/static/chunks/node_modules_next_dist_co
+E   assert 0 &gt;= 3</failure></testcase></testsuite></testsuites>

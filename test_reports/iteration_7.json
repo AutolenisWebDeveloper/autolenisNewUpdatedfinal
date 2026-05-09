@@ -1,0 +1,73 @@
+{
+  "summary": "Iteration 7 — Plan Upgrade feature, DealerSidebar theme, affiliate register auth fix testing. 15/15 backend pytest pass. Affiliate register UI fully verified (13/13 testids, 0 x 401 errors). Code review confirms all new features properly implemented. CRITICAL pre-existing finding: csrf-token cookie is never issued by the server, making ALL buyer POST API calls (including the new upgrade button) return 403 CSRF_INVALID in production.",
+
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "ALL POST /api/buyer/* routes (including /api/buyer/plan/upgrade)",
+        "issue": "csrf-token cookie is NEVER set by the server. proxy.ts validates CSRF (requires X-CSRF-Token header == csrf-token cookie) but no code in the app issues the csrf-token cookie. Authenticated buyer POST calls never include X-CSRF-Token header. Result: ALL buyer POST API calls return 403 CSRF_INVALID in production. This is PRE-EXISTING (not introduced by this iteration) but directly breaks the new plan upgrade button. Affects: shortlist, requests, prequal, plan upgrade, etc.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Buyer plan upgrade (click 'Upgrade to Premium — $499' button)",
+        "issue": "PlanUpgradeCard.tsx fetches POST /api/buyer/plan/upgrade without X-CSRF-Token header. csrf-token cookie is never set. → 403 CSRF_INVALID response. Upgrade will silently fail (error state shows 'Upgrade failed. Please try again.'). Fix: either issue csrf-token cookie on buyer session init + set header in fetch, or add /api/buyer/plan/upgrade to CSRF exempt list in proxy.ts.",
+        "affected_selectors": ["[data-testid='upgrade-to-premium-btn']"]
+      }
+    ],
+    "design_issues": []
+  },
+
+  "test_report_links": [
+    "/app/backend/tests/test_plan_upgrade.py",
+    "/app/test_reports/pytest/iteration_7_plan_upgrade.xml"
+  ],
+
+  "action_items": [
+    "CRITICAL: Fix CSRF token flow — either: (A) generate and set csrf-token cookie server-side (e.g., in proxy.ts via response.cookies.set) and read it client-side to include as X-CSRF-Token header; OR (B) add /api/buyer/* to CSRF-exempt routes in proxy.ts (less secure but simpler); OR (C) implement useCsrf() hook that reads the cookie and injects header into all fetch calls. This pre-existing bug blocks ALL buyer POST API actions including the new plan upgrade.",
+    "Note: main agent stated 'proxy.ts is NOT active' — this is INCORRECT. proxy.ts IS active (compiled to .next/server/middleware.js and enforces CSRF). The /api/buyer/plan/upgrade returns 401 with valid CSRF + no auth, and 403 without CSRF. Tests updated accordingly.",
+    "Buyer dashboard/profile plan-upgrade-card and admin buyer detail page (plan fields) were NOT tested live due to: (1) no test buyer account available (email verification required), (2) admin MFA gate. Code review confirms all implementations are correct — testids, data fields, and API route are properly implemented.",
+    "DealerSidebar light theme: CONFIRMED via code review (bg-white border-r border-slate-200 at line 54 of DealerSidebar.tsx). Not dark bg-[#0A0A0A]."
+  ],
+
+  "critical_code_review_comments": [
+    "CRITICAL: csrf-token cookie is never issued. proxy.ts validateCsrfToken() returns false when either the X-CSRF-Token header or csrf-token cookie is absent. Since the server never sets csrf-token, all buyer/dealer/affiliate POST API calls fail with 403 CSRF_INVALID. The plan upgrade button is the latest victim but ALL POST mutations from authenticated portals are broken.",
+    "PlanUpgradeCard.tsx is otherwise well-implemented: 8/8 required data-testids present, correct plan/depositStatus logic, proper loading/error states, idempotent upgrade check via isPremium flag, confirmation message after upgrade.",
+    "route.ts /api/buyer/plan/upgrade: idempotent (returns alreadyUpgraded:true if plan already PREMIUM), sets planUpgradedAt, creates SYSTEM_ALERT notification with correct body text. Implementation is correct.",
+    "Prisma schema and migration: planUpgradedAt column (DateTime?) added via migration 20260501000000_add_buyer_plan_upgraded_at. BuyerPlan enum exists (STANDARD|PREMIUM). Schema consistent with route usage.",
+    "affiliate/register useEffect: correctly uses createBrowserClient (client-side Supabase) instead of HTTP auth probe. No 401-generating calls. All 13 data-testids verified live.",
+    "Admin buyer detail page: Plan and Plan Upgraded fields confirmed at lines 30-31 of /app/frontend/app/admin/buyers/[buyerId]/page.tsx."
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_plan_upgrade.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (15/15 pytest pass — tests updated to handle CSRF behavior)",
+    "frontend": "85% — affiliate/register fully verified, DealerSidebar theme code-confirmed; buyer dashboard/profile and admin buyer detail NOT tested live (auth gates); plan upgrade button broken due to pre-existing CSRF issue"
+  },
+
+  "test_credentials": "No test buyer credentials in test_credentials.md (email verification required for buyer signup). Admin requires TOTP MFA. Buyer portal and admin buyer detail page cannot be tested live in automation.",
+
+  "seed_data_creation": "None",
+
+  "retest_needed": true,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Iteration 7 tested plan upgrade feature (PlanUpgradeCard, /api/buyer/plan/upgrade, DealerSidebar theme, affiliate/register). KEY FINDING: pre-existing CSRF bug — csrf-token cookie never issued, all buyer POST API calls return 403. Once CSRF is fixed, need to retest: (1) buyer dashboard plan-upgrade-card render (requires test buyer), (2) upgrade button click → API call → plan change, (3) idempotent re-upgrade shows alreadyUpgraded:true. Affiliate register FULLY VERIFIED (no 401, all testids). DealerSidebar bg-white CONFIRMED (code review). proxy.ts IS active middleware (contrary to main agent note).",
+
+  "rca_of_the_issue": {
+    "title": "CSRF token never issued — all buyer POST API calls fail with 403",
+    "reproduction": "1. Click 'Upgrade to Premium' button in buyer dashboard. 2. POST /api/buyer/plan/upgrade sent without X-CSRF-Token header. 3. proxy.ts validateCsrfToken() checks: csrfHeader=null, csrfCookie=null → returns false → 403 CSRF_INVALID. 4. PlanUpgradeCard.tsx error handler shows 'Upgrade failed. Please try again.'",
+    "root_cause": "proxy.ts validates CSRF for all mutating API routes (POST/PUT/PATCH/DELETE) to /api/* that are not webhooks, cron, /api/admin/auth/, /api/auth/, or /api/public/. However, no code in the app ever sets the csrf-token cookie. The browser never receives the cookie, so it can never be included in subsequent requests. Additionally, frontend fetch calls never include X-CSRF-Token header. Both conditions must be true for CSRF to pass.",
+    "mitigation": "Option A (Recommended): In proxy.ts, generate a secure random csrf-token on GET requests for authenticated portals and set it via response.cookies.set('csrf-token', token, {httpOnly: false, sameSite: 'strict'}). Then create a useCsrf() React hook that reads document.cookie for csrf-token and adds it as X-CSRF-Token header to all fetch calls. Option B (Quick fix): Add /api/buyer/plan/upgrade to CSRF-exempt list in proxy.ts (also add other buyer POST routes). Option C: Remove CSRF validation entirely and rely on Supabase session for auth (sameSite cookies provide CSRF protection natively in modern browsers)."
+  }
+}

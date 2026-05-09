@@ -1,0 +1,53 @@
+{
+  "summary": "Iteration 6 — Refinance lead-referral REBUILD end-to-end validation (API + UI). 14/15 pytest API tests pass. Full public UI flow (landing → eligibility → excluded-state NH → qualified submit → confirm → partner new-tab → ineligible) verified. All data-testids present in source; 18/19 public acceptance criteria met. One compliance finding: home page '/' still contains the word 'approved' (twice) in the buyer prequalification copy, violating the strict 'no approved on / page' rule in the spec.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/ (home page HTML)", "issue": "Contains the word 'approved' twice in the 'See your exact approved budget' prequalification copy. The spec lists '/' among the pages that must NOT contain the word 'approved'. This is NOT in the refinance flow itself (it's buyer prequalification copy) but fails the literal spec rule."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_refinance_lead_referral.py",
+    "/app/test_reports/pytest/iteration_6_refinance.xml"
+  ],
+  "action_items": [
+    "Decide on compliance: remove or rephrase 'See your exact approved budget' on the home page (/) to satisfy the spec's 'no \\'approved\\' on /' rule, OR confirm this buyer-prequalification copy is intentionally exempt. Same paragraph appears once in visible DOM and once in Next.js RSC payload.",
+    "Optional polish: when re-loading /refinance/confirm?leadId=<redirected-id>, the page re-renders the summary+Continue view rather than the post-redirect (refinance-redirected) state. Source has the refinance-redirected testid but it only appears AFTER clicking the Continue button (client-side state), not when returning to the URL later. Consider checking server-side status before rendering summary to avoid double-redirect. Low priority."
+  ],
+  "critical_code_review_comments": [
+    "POST /api/public/refinance qualified path (TX, year 2020, balance $18,500, FULL_TIME, consent=true) returns 201 with { success:true, data:{ leadId: cuid, qualified:true } }. CUID format confirmed (starts with 'c', length >=20).",
+    "POST /api/public/refinance with balance $1,000 (below $5k) returns 201 qualified:false with NO criterion leak in body.",
+    "POST /api/public/refinance with state=NH returns 422 { error:{code:'EXCLUDED_STATE'} }.",
+    "POST /api/public/refinance with missing fields returns 400 { error:{code:'VALIDATION_ERROR'} }.",
+    "POST /api/public/refinance/redirect with unknown leadId returns 404 { error:{code:'LEAD_NOT_FOUND'} }.",
+    "POST /api/public/refinance/redirect with QUALIFIED leadId returns 200 { data:{ redirectUrl:'https://www.openroadlending.com/applyone/?aid=1445opt_1=<leadId>', status:'REDIRECTED' } } — URL matches spec exactly (note: 'aid=1445opt_1=' WITHOUT & is intentional per user spec).",
+    "API contract note: payload keys are loanBalanceCents + monthlyPaymentCents (int cents), interestRateBand enum = UNDER_5 | 5_TO_8 | 8_TO_12 | OVER_12 | NOT_SURE, employmentStatus enum = FULL_TIME | PART_TIME | SELF_EMPLOYED | RETIRED | OTHER.",
+    "Deleted admin pages (/admin/refinance/applications, partners, rates, analytics, settings) contain NO page.tsx — Next.js routing would 404 for authenticated users. Unauthenticated curl returns 200 with the admin signin gate (same behavior as any nonexistent admin path). Effectively deleted; verified source has no deleted-page data-testid markup in response.",
+    "Landing (/refinance): h1 exact match 'See If You Qualify for a Lower Car Payment'; OpenRoad Lending brand visible; refinance-step-01/02/03 present; refinance-what-we-dont present; all 7 excluded states named (AK→Alaska, HI→Hawaii, MT→Montana, NV→Nevada, NH→New Hampshire, ND→North Dakota, WI→Wisconsin); zero forms on page; CTA routes to /refinance/eligibility; no forbidden words (approved/APR/monthly savings).",
+    "Eligibility (/refinance/eligibility): refinance-compliance-disclosure always visible; all 11 field testids present (rf-vehicle-year, rf-interest-rate-band, rf-loan-balance, rf-monthly-payment, rf-employment-status, rf-state, rf-first-name, rf-last-name, rf-email, rf-phone, rf-consent-checkbox) + rf-submit-btn. Consent label includes 'I consent to AutoLenis collecting and sharing this information with OpenRoad Lending … AutoLenis is not a lender … does not guarantee approval or any specific rate or term.'",
+    "Selecting state=NH: rf-state-excluded-message appears with 'Unfortunately, this program is not currently available in your state' AND rf-submit-btn becomes disabled — exactly per spec.",
+    "Qualified submit flow verified E2E: form fill → submit → auto-navigate to /refinance/confirm?leadId=cmoccp6dg0008wtjvq01fvna3 (live CUID); sessionStorage key 'refinance-lead' stores { leadId, qualified:true, vehicleYear:2020, loanBalance:'18500.00', state:'TX' }.",
+    "Confirm page: headline 'You May Be a Fit for Refinancing' ✓; rf-summary-year='2020', rf-summary-balance='$18,500', rf-summary-state='TX' ✓; refinance-continue-to-partner-btn (primary, purple #4B0082) + refinance-go-back-btn (secondary, href=/refinance/eligibility) ✓ (both verified in source at confirm/page.tsx lines 83/140/144/150/205); compliance disclosure present; no forbidden words.",
+    "Clicking 'Continue to Partner Application': Playwright context.expect_page fires → NEW TAB opens at 'https://www.openroadlending.com/applyone/?aid=1445opt_1=<leadId>' (exact match, verified with live CUID). confirms _blank / window.open behavior.",
+    "Ineligible page (/refinance/ineligible): refinance-ineligible-page testid ✓; polite copy 'We weren\u2019t able to connect you with our refinance partner based on the information provided.' ✓; 'This is not a credit decision and does not affect your credit score.' ✓; no criterion leak (no mention of $5,000 / vehicle year / excluded-state reason); ineligible-buyer-cta → /for-buyers ✓; ineligible-contact-cta → /contact (Send a message) ✓.",
+    "Forbidden-copy scan across /refinance, /refinance/eligibility, /refinance/confirm, /refinance/ineligible: NONE contain the word 'approved', '\\bAPR\\b', or 'monthly savings'. Compliance disclaimers use 'approval' (not 'approved') and 'rates' in disclaimer context only ('does not guarantee approval, rates, or savings'). '/' home page DOES contain 'approved' (see backend_issues.minor)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_refinance_lead_referral.py (new pytest suite — 15 tests)"
+  ],
+  "success_rate": {
+    "backend": "93% (14/15 pytest; only failure is compliance: 'approved' word on home page /)",
+    "frontend": "100% — all public refinance UI flows and testids verified end-to-end on https://e2e-sandbox-check.preview.emergentagent.com"
+  },
+  "test_credentials": "Admin credentials from /app/memory/test_credentials.md (admin@autolenis.com) NOT exercised: admin pages behind MFA. Per main agent note, MFA gate is expected and static admin bodies were verified by main agent via curl+cookie. Public UI validated fully without auth.",
+  "seed_data_creation": "Created ~3 test refinance leads via the public API during testing (TEST_ prefixed names, test emails). No cleanup attempted since there is no admin delete endpoint; leads are immutable by design.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Refinance lead-referral to OpenRoad Lending is FULLY FUNCTIONAL. Public pages all pass. API contract uses *Cents for money fields. Partner URL template with no & between aid=1445 and opt_1= is INTENTIONAL per user spec — don\u2019t flag it. Admin pages require MFA — do not retry without first setting up TOTP. One remaining compliance question: does the word 'approved' on home page (in buyer prequalification 'approved budget' copy) violate the 'no approved on /' rule, or is it exempt since it's not about refinance? Main agent should decide.",
+  "rca_of_the_issue": "Only non-passing check: HTML scan of https://e2e-sandbox-check.preview.emergentagent.com/ contains the word 'approved' in '<p>Free soft-pull prequalification in 3 minutes. See your exact approved budget — zero credit score impact.</p>' inside the 'How It Works' step-02 block. This is in the buyer prequalification context (unrelated to refinance), but the spec lists '/' among the pages that must not contain 'approved'. Mitigation: reword to 'See your exact spending budget' or similar."
+}

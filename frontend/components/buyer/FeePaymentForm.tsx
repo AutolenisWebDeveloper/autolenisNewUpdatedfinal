@@ -1,0 +1,106 @@
+"use client";
+import { useState, useEffect } from "react";
+import { loadStripe } from "@stripe/stripe-js";
+import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import { Loader2, ArrowRight } from "lucide-react";
+
+const STRIPE_PK = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
+const stripePromise = STRIPE_PK && !STRIPE_PK.includes("placeholder")
+  ? loadStripe(STRIPE_PK)
+  : null;
+
+interface Props {
+  dealId: string;
+  netFeeCents: number;
+}
+
+function CheckoutForm({ netFeeCents }: { netFeeCents: number }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!stripe || !elements) return;
+    setLoading(true);
+    setError(null);
+
+    const { error: stripeError } = await stripe.confirmPayment({
+      elements,
+      confirmParams: {
+        return_url: `${window.location.origin}/buyer/deal`,
+      },
+    });
+
+    if (stripeError) {
+      setError(stripeError.message ?? "Payment failed. Please try again.");
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} data-testid="fee-payment-form">
+      <PaymentElement className="mb-6" />
+      {error && <p className="text-xs text-red-600 mb-4">{error}</p>}
+      <button
+        type="submit"
+        disabled={!stripe || !elements || loading}
+        data-testid="submit-fee-payment-btn"
+        className="w-full flex items-center justify-center gap-2 py-4 px-6 bg-[#0B5FD1] text-white font-semibold rounded-xl hover:bg-[#0A4DB8] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+      >
+        {loading ? (
+          <><Loader2 size={15} className="animate-spin" /> Processing…</>
+        ) : (
+          <>Pay ${(netFeeCents / 100).toFixed(0)} &amp; Continue <ArrowRight size={15} /></>
+        )}
+      </button>
+    </form>
+  );
+}
+
+export default function FeePaymentForm({ dealId, netFeeCents }: Props) {
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/buyer/deals/${dealId}/fee/create-intent`, { method: "POST" })
+      .then(r => r.json())
+      .then((d: { success: boolean; data?: { clientSecret: string }; error?: { message: string } }) => {
+        if (d.success && d.data?.clientSecret) {
+          setClientSecret(d.data.clientSecret);
+        } else {
+          setFetchError(d.error?.message ?? "Could not initialize payment.");
+        }
+      })
+      .catch(() => setFetchError("Network error. Please refresh and try again."));
+  }, [dealId]);
+
+  if (fetchError) {
+    return <p className="text-sm text-red-600 text-center py-4">{fetchError}</p>;
+  }
+  if (!clientSecret) {
+    return (
+      <div className="flex items-center justify-center py-8 gap-2 text-slate-400">
+        <Loader2 size={16} className="animate-spin" /> Preparing payment…
+      </div>
+    );
+  }
+
+  if (!stripePromise) {
+    return (
+      <div className="text-center py-8" data-testid="stripe-unavailable">
+        <p className="text-sm text-red-600 font-medium">
+          Payment service temporarily unavailable.
+        </p>
+        <p className="text-xs text-[#6B7280] mt-1">Please contact support.</p>
+      </div>
+    );
+  }
+
+  return (
+    <Elements stripe={stripePromise} options={{ clientSecret }}>
+      <CheckoutForm netFeeCents={netFeeCents} />
+    </Elements>
+  );
+}

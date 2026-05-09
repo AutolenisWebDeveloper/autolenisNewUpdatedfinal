@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 12 sandbox-wide regression for AutoLenis. 54/54 backend pytest cases pass against preview URL. Covered: 11 public SSR routes (200), 2 public APIs, public dealer-application happy + duplicate (409) + validation, full admin MFA flow with sandbox TOTP + 9 admin GETs + admin users/create + admin dealers/invite + inventory search-tool/run + affiliate ACTIVE record presence, dealer JWT signin + 4 dealer GETs + invalid creds 401, all 20 cron routes 200 with Bearer CRON_SECRET + cron 401 without. Playwright verified UI sign-in for dealer (->/dealer/dashboard, no redirect loop), buyer (->/buyer/dashboard), and admin step 1 ->/admin/auth/verify-mfa (TOTP page rendered).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "/admin/signin (admin MFA flow)",
+        "issues": [
+          "SANDBOX_TESTING.md §2.1 and §5.5 reference '/admin/verify-mfa' but the actual route is '/admin/auth/verify-mfa'. Functionally working; only a doc-string discrepancy in the playbook."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter12_sandbox.py",
+    "/app/test_reports/pytest/iteration_12.xml"
+  ],
+  "action_items": [
+    "(Optional, low-priority docs) Update SANDBOX_TESTING.md to reference '/admin/auth/verify-mfa' instead of '/admin/verify-mfa' for accuracy."
+  ],
+  "critical_code_review_comments": [
+    "Public dealer-application zod schema correctly enforces dealershipName, dealershipType, state(2), city, zip(5), licenseNumber, contactName, contactEmail and returns 400 for invalid + 409 DUPLICATE_APPLICATION for re-submit of same email. Verified.",
+    "Admin MFA flow: POST /api/admin/auth/signin returns 200 {requiresMfa:true} (no admin_token yet). POST /api/admin/auth/verify-mfa with valid TOTP issues admin_token via Set-Cookie. The Set-Cookie header concatenates `admin_premfa= deletion` and `admin_token=...` separated by comma; curl's cookie jar cannot parse this — extract via regex (note kept). Browser cookie store handles it correctly.",
+    "All 13 dealer routes that import lib/auth/dealer-api.ts now correctly use requireDealerFromRequest (dealer_token JWT). Verified GET /api/dealer/leads, /api/dealer/notifications, /api/dealer/scorecard, /api/dealer/inventory all return 200 with dealer_token cookie. Dealer dashboard reachable without redirect loop.",
+    "All 20 cron endpoints return 200 with Authorization: Bearer ${CRON_SECRET}; without header returns 401 (verified for /api/cron/health-check). Auth header convention matches CRON_AUTH_HEADER='Authorization' / CRON_AUTH_PREFIX='Bearer '.",
+    "POST /api/admin/users/create requires firstName + lastName for BUYER (not fullName) — discriminated union enforces this; returns 201 on success. Documenting in test as the canonical payload.",
+    "POST /api/admin/dealers/invite requires {dealershipName, contactName, email}. Response shape is {success:true, data:{id, token, expiresAt, inviteUrl}} — note inner data wrapper. New invite is immediately visible in GET /api/admin/dealers/invitations (lowercased email).",
+    "POST /api/admin/inventory/search-tool/run with {make, model, yearMin, yearMax, limit} returns 200 with results array, sourced from internal DB when MarketCheck unavailable.",
+    "Affiliate aff-live-1777010783@example.com / ALYW1C3N is ACTIVE and visible in /api/admin/affiliates response. Verified.",
+    "DocuSign envelope creation and MicroBilt iPredict are MOCKED in sandbox (DOCUSIGN_INTEGRATION_KEY=autolenis-preview-1 placeholder + apitest.microbilt.com fallback to mockIPredict APPROVED·STRONG·$35,000 OTD). Real charges blocked by sk_live keys still being present — confirmed not exercised in tests.",
+    "Buyer Supabase password sign-in works at /auth/signin and lands on /buyer/dashboard. Dealer sign-in works at /dealer/signin and lands on /dealer/dashboard with full sidebar nav (Dashboard, Auctions, My Offers, Leads, Inventory, etc.) — no console errors."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter12_sandbox.py"
+  ],
+  "success_rate": {
+    "backend": "100% (54/54 tests passing)",
+    "frontend": "100% (3/3 portal sign-ins verified via Playwright; admin MFA step-2 verified separately via API in pytest)"
+  },
+  "test_credentials": "Per /app/memory/test_credentials.md — admin@autolenis.com / MarkistAdmin@Autolenis1250$$$ + sandbox TOTP via scripts/sandbox-totp.ts (PREQUAL_ENCRYPTION_KEY from .env.local); dealer testdealer@autolenis-test.com / TestDealer@2026!; buyer testbuyer_iteration8@autolenis-test.com / TestBuyer@Iteration8!; CRON_SECRET from /app/frontend/.env.",
+  "seed_data_creation": "Per-run TEST_iter12_buyer_{ts}@autolenis-test.com (admin-created Supabase + Buyer rows), TEST_iter12_invite_{ts}@autolenis-test.com (DealerInvitation PENDING), sandbox-iter12-{ts}@autolenis-test.com (DealerApplication PENDING + duplicate-409 record). All flagged TEST_/sandbox-iter12 for easy cleanup; no destructive writes to existing dealer/buyer/affiliate fixtures.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "test_iter12_sandbox.py is the regression suite for sandbox-wide testing. Keep in mind: (1) admin MFA verify-mfa Set-Cookie comma-joins admin_premfa and admin_token — extract token via regex `admin_token=([^;,\\s]+)` instead of using requests.Session cookie jar. (2) Admin TOTP secret rotates if scripts/sandbox-reset-admin-totp.ts is re-run — fixture re-derives current code via tsx each test session. (3) Stripe sk_live_ keys are present; do NOT exercise actual paymentIntent confirmation. (4) DocuSign + MicroBilt remain MOCKED. (5) /api/admin/auth/verify-mfa is the actual route (not /admin/verify-mfa as some docs say).",
+  "rca_of_the_issue": "N/A — no defects found in this iteration. Two initial pytest failures were due to incorrect test payload schemas on my side (BUYER needs firstName/lastName; dealer invite response is {success, data:{token, inviteUrl}} not flat). Fixed in test file; final run 54/54 green. Underlying APIs are correct per zod schemas in the route handlers."
+}
