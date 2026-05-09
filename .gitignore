@@ -345,3 +345,21 @@ credentials.json
 .credentials
 .pnpm-store/v10/files/7c/3685fbc1d030b7a03cc58537d33b1398114c39761bb93152e5f7e977e032f62076e80f8b4604c66d859ad7e50448c9bcda8d6f7c76eef2128250a07f597d27
 frontend/node_modules/.pnpm/@next+swc-linux-arm64-gnu@16.2.4/node_modules/@next/swc-linux-arm64-gnu/next-swc.linux-arm64-gnu.node
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
