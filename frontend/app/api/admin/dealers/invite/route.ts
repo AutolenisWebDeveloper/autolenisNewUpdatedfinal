@@ -1,7 +1,7 @@
 // POST /api/admin/dealers/invite — create HMAC-signed dealer invitation
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth/admin-session";
+import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { sendDealerInvitationEmail } from "@/lib/services/email/resend.service";
 import crypto from "crypto";
@@ -22,7 +22,13 @@ function generateInviteToken(email: string, dealershipName: string): string {
 }
 
 export async function POST(request: NextRequest) {
-  const admin = await requireAdmin();
+  const admin = await getAdminFromRequest(request);
+  if (!admin) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHENTICATED", message: "Admin session required" } },
+      { status: 401 },
+    );
+  }
 
   let body: unknown;
   try { body = await request.json(); } catch {

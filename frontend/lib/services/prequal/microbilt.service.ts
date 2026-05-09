@@ -105,7 +105,9 @@ export interface IPredicResult {
   maxOtdAmountCents: number;
   recommendedLoanAmountCents: number | null;
   maxLoanAmountCents: number | null;
-  ofacFlagged: boolean;
+  // null indicates an indeterminate OFAC result (timeout or upstream error) —
+  // callers must route to MANUAL_REVIEW rather than treating it as cleared.
+  ofacFlagged: boolean | null;
   expiresAt: Date;
   rawResponse: string; // AES-256-GCM encrypted
   mocked: boolean;
@@ -127,7 +129,10 @@ function mockIPredict(): IPredicResult {
   };
 }
 
-// Timeout / ERROR fallback — buyer routed to manual review
+// Timeout / ERROR fallback — buyer routed to manual review.
+// ofacFlagged is null (indeterminate) — we never reached MicroBilt's OFAC
+// check, so we cannot assert the buyer is OFAC-clear. Compliance reviews
+// the case manually via the MANUAL_REVIEW decision.
 function timeoutResult(): IPredicResult {
   return {
     decision: PreQualDecision.MANUAL_REVIEW,
@@ -135,7 +140,7 @@ function timeoutResult(): IPredicResult {
     maxOtdAmountCents: 0,
     recommendedLoanAmountCents: null,
     maxLoanAmountCents: null,
-    ofacFlagged: false,
+    ofacFlagged: null,
     expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     rawResponse: encryptRawResponse(JSON.stringify({ referred: true, reason: "TIMEOUT" })),
     mocked: false,
@@ -150,7 +155,7 @@ function errorResult(reason: string): IPredicResult {
     maxOtdAmountCents: 0,
     recommendedLoanAmountCents: null,
     maxLoanAmountCents: null,
-    ofacFlagged: false,
+    ofacFlagged: null,
     expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     rawResponse: encryptRawResponse(JSON.stringify({ referred: true, reason })),
     mocked: false,

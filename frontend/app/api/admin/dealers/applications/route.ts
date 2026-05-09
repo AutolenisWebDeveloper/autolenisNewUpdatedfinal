@@ -1,11 +1,17 @@
 // GET /api/admin/dealers/applications — list dealer applications
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth/admin-session";
+import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 
 export async function GET(request: NextRequest) {
-  await requireAdmin();
+  const admin = await getAdminFromRequest(request);
+  if (!admin) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHENTICATED", message: "Admin session required" } },
+      { status: 401 },
+    );
+  }
   const url = new URL(request.url);
   const status = url.searchParams.get("status") ?? "PENDING";
 

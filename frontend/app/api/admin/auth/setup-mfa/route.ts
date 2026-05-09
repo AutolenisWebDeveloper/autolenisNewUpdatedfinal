@@ -181,15 +181,23 @@ export async function POST(request: NextRequest) {
     mfaVerified: true,
   });
 
-  const res = NextResponse.json({ success: true });
-  res.cookies.delete(ADMIN_PREMFA_COOKIE);
-  res.cookies.set(ADMIN_TOKEN_COOKIE, adminToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 86400,
-    path: "/",
-  });
+  // Combine the pre-MFA cookie deletion + admin token issuance into a single
+  // Set-Cookie header. Emitting two separate Set-Cookie headers (one to delete
+  // the pre-MFA cookie, one to set the admin token) triggers an HTTP/2 header
+  // merge on Vercel/Edge runtimes: both values get concatenated into a single
+  // `Set-Cookie:` line, which browsers then ignore. The result is no admin
+  // session cookie at all and an immediate redirect back to /admin/auth/signin.
+  // Building one combined header string sidesteps this entirely.
+  const isProd = process.env.NODE_ENV === "production";
+  const adminCookie =
+    `${ADMIN_TOKEN_COOKIE}=${adminToken}; Path=/; Max-Age=86400; HttpOnly; SameSite=Lax` +
+    (isProd ? "; Secure" : "");
+  const expirePreMfaCookie =
+    `${ADMIN_PREMFA_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax` +
+    (isProd ? "; Secure" : "");
 
+  const res = NextResponse.json({ success: true });
+  res.headers.append("Set-Cookie", expirePreMfaCookie);
+  res.headers.append("Set-Cookie", adminCookie);
   return res;
 }

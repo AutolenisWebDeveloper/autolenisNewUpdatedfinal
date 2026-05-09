@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth/admin-session";
+import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { getLeadByLeadId } from "@/lib/services/refinance/refinance-lead.service";
 
 export const dynamic = "force-dynamic";
@@ -7,10 +7,16 @@ export const dynamic = "force-dynamic";
 // GET /api/admin/refinance/leads/[leadId] — read-only detail view.
 // Admin can NEVER make a credit decision on a lead. No approve/reject endpoint exists.
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ leadId: string }> },
 ) {
-  await requireAdmin();
+  const admin = await getAdminFromRequest(request);
+  if (!admin) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHENTICATED", message: "Admin session required" }, correlationId: crypto.randomUUID() },
+      { status: 401 },
+    );
+  }
   const { leadId } = await params;
 
   const lead = await getLeadByLeadId(leadId);

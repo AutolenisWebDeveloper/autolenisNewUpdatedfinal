@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth/admin-session";
+import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { RefinanceStatus } from "@prisma/client";
 
@@ -13,7 +13,13 @@ const VALID_STATUSES = new Set(Object.values(RefinanceStatus) as string[]);
 //   ?format=csv   (optional — returns a CSV stream for export)
 //   ?page=1
 export async function GET(request: NextRequest) {
-  await requireAdmin();
+  const admin = await getAdminFromRequest(request);
+  if (!admin) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHENTICATED", message: "Admin session required" } },
+      { status: 401 },
+    );
+  }
   const { searchParams } = request.nextUrl;
 
   const statusParam = searchParams.get("status");

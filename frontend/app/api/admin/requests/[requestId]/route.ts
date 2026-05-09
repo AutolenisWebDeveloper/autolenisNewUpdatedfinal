@@ -6,7 +6,7 @@
 //   action: "REOPEN_SOURCING"      → OFFER_DECLINED | CLOSED_NO_MATCH → ACTIVE_SOURCING
 //   action: "CREATE_DEAL"          → OFFER_ACCEPTED → DEAL_CREATED
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth/admin-session";
+import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { VehicleRequestStatus } from "@prisma/client";
 
@@ -50,7 +50,13 @@ const TRANSITIONS: Record<string, { from: VehicleRequestStatus[]; to: VehicleReq
 };
 
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const admin = await requireAdmin();
+  const admin = await getAdminFromRequest(request);
+  if (!admin) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHENTICATED", message: "Admin session required" } },
+      { status: 401 },
+    );
+  }
   const { requestId } = await params;
 
   const body = await request.json() as { action?: string; assignedAdminId?: string };

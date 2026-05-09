@@ -142,7 +142,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         decision: finalDecision,
         tier,
         maxOtdAmountCents,
-        checkOfacAlert: result.ofacFlagged,
+        checkOfacAlert: result.ofacFlagged === true,
         expiresAt: result.expiresAt,
         rawResponse: result.rawResponse,
         employmentStatus: input.employmentStatus ?? null,
@@ -156,7 +156,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         // Re-pulls only ever overwrite the existing maxOtdAmountCents when a
         // new decision arrives; the buyer-facing API never accepts this value.
         maxOtdAmountCents,
-        checkOfacAlert: result.ofacFlagged,
+        checkOfacAlert: result.ofacFlagged === true,
         expiresAt: result.expiresAt,
         rawResponse: result.rawResponse,
         employmentStatus: input.employmentStatus ?? null,

@@ -1,14 +1,20 @@
 // POST /api/admin/dealers/applications/[appId]/reject
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth/admin-session";
+import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { sendDealerApplicationRejectedEmail } from "@/lib/services/email/resend.service";
 
 interface RouteContext { params: Promise<{ appId: string }> }
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const admin = await requireAdmin();
+  const admin = await getAdminFromRequest(request);
+  if (!admin) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHENTICATED", message: "Admin session required" } },
+      { status: 401 },
+    );
+  }
   const { appId } = await params;
 
   let reason: string | undefined;

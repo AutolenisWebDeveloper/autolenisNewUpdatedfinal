@@ -1,7 +1,7 @@
 // POST /api/admin/inventory/search-tool/add — add a vehicle to inventory
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth/admin-session";
+import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -17,7 +17,13 @@ const schema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const admin = await requireAdmin();
+  const admin = await getAdminFromRequest(request);
+  if (!admin) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHENTICATED", message: "Admin session required" } },
+      { status: 401 },
+    );
+  }
 
   let body: unknown;
   try { body = await request.json(); } catch {

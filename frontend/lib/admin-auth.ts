@@ -12,9 +12,19 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { AdminRole } from "@prisma/client";
 
-const ADMIN_JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? "placeholder-must-set-jwt-secret-in-env"
-);
+// Lazy JWT secret loader — evaluated on first use, not at module load.
+// Turbopack evaluates module-level code during static page builds before
+// runtime env variables are injected. Throwing here would crash the build.
+let _adminJwtSecret: Uint8Array | null = null;
+function getAdminJwtSecret(): Uint8Array {
+  if (_adminJwtSecret) return _adminJwtSecret;
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error("JWT_SECRET environment variable is not set");
+  }
+  _adminJwtSecret = new TextEncoder().encode(secret);
+  return _adminJwtSecret;
+}
 const ADMIN_JWT_ISSUER = "autolenis-admin";
 const ADMIN_JWT_TTL = "24h";
 const TOTP_ISSUER = "AutoLenis";
@@ -195,12 +205,12 @@ export async function signAdminJwt(payload: AdminJwtPayload): Promise<string> {
     .setIssuer(ADMIN_JWT_ISSUER)
     .setIssuedAt()
     .setExpirationTime(ADMIN_JWT_TTL)
-    .sign(ADMIN_JWT_SECRET);
+    .sign(getAdminJwtSecret());
 }
 
 export async function verifyAdminJwt(token: string): Promise<AdminJwtPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, ADMIN_JWT_SECRET, {
+    const { payload } = await jwtVerify(token, getAdminJwtSecret(), {
       issuer: ADMIN_JWT_ISSUER,
     });
     return payload as unknown as AdminJwtPayload;
@@ -216,12 +226,12 @@ export async function signPreMfaToken(adminId: string): Promise<string> {
     .setIssuer(ADMIN_JWT_ISSUER)
     .setIssuedAt()
     .setExpirationTime("10m") // 10 min to complete MFA
-    .sign(ADMIN_JWT_SECRET);
+    .sign(getAdminJwtSecret());
 }
 
 export async function verifyPreMfaToken(token: string): Promise<{ adminId: string } | null> {
   try {
-    const { payload } = await jwtVerify(token, ADMIN_JWT_SECRET, { issuer: ADMIN_JWT_ISSUER });
+    const { payload } = await jwtVerify(token, getAdminJwtSecret(), { issuer: ADMIN_JWT_ISSUER });
     if (payload.scope !== "pre-mfa") return null;
     return { adminId: payload.adminId as string };
   } catch {

@@ -1,15 +1,21 @@
 // POST /api/admin/dealers/invitations/[invId]/resend
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth/admin-session";
+import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { sendDealerInvitationEmail } from "@/lib/services/email/resend.service";
 import crypto from "crypto";
 
 interface RouteContext { params: Promise<{ invId: string }> }
 
-export async function POST(_request: NextRequest, { params }: RouteContext) {
-  const admin = await requireAdmin();
+export async function POST(request: NextRequest, { params }: RouteContext) {
+  const admin = await getAdminFromRequest(request);
+  if (!admin) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHENTICATED", message: "Admin session required" } },
+      { status: 401 },
+    );
+  }
   const { invId } = await params;
 
   const inv = await prisma.dealerInvitation.findUnique({ where: { id: invId } });

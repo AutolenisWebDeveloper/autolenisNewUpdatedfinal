@@ -67,6 +67,11 @@ const PUBLIC_ROUTES = [
   "/maintenance",
   "/affiliate/register",
   "/affiliate/unsubscribed",
+  "/insurance",
+  "/status",
+  "/testimonials",
+  "/compare",
+  "/request-a-car",
 ];
 
 const AUTH_ROUTES = [

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth/admin-session";
+import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +7,13 @@ export const dynamic = "force-dynamic";
 interface Params { params: Promise<{ requestId: string }> }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const admin = await requireAdmin();
+  const admin = await getAdminFromRequest(request);
+  if (!admin) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHENTICATED", message: "Admin session required" } },
+      { status: 401 },
+    );
+  }
   const { requestId } = await params;
 
   const body = await request.json() as { notes?: string; sourceUrl?: string };
