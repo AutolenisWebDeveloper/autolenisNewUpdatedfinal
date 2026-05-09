@@ -20,7 +20,13 @@ const schema = z.object({
   firstName: z.string().min(1, "First name is required"),
   lastName: z.string().min(1, "Last name is required"),
   email: z.string().email("Valid email required"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: z.string()
+    .min(12, "Password must be at least 12 characters.")
+    .max(128)
+    .regex(
+      /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)/,
+      "Password must contain at least one uppercase letter, one lowercase letter, and one number."
+    ),
   website: z.string().url().optional().or(z.literal("")),
   promotionMethod: z.string().min(1, "Promotion method is required"),
   ftcDisclosure: z.literal(true, { errorMap: () => ({ message: "FTC disclosure acknowledgment required" }) }),

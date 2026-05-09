@@ -28,6 +28,11 @@ export async function requireAffiliate() {
     redirect("/affiliate/unsubscribed?reason=suspended");
   }
 
+  // Block rejected affiliates — application was denied; portal access must not be granted.
+  if (affiliate.status === "REJECTED") {
+    redirect("/affiliate/unsubscribed?reason=rejected");
+  }
+
   return affiliate;
 }
 

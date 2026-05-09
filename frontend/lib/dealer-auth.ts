@@ -4,8 +4,15 @@
 
 import { SignJWT, jwtVerify } from "jose";
 
+const _jwtSecretRaw = process.env.JWT_SECRET;
+if (!_jwtSecretRaw) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("JWT_SECRET is required in production");
+  }
+  console.warn("[dealer-auth] JWT_SECRET not set — using insecure placeholder");
+}
 const DEALER_JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? "placeholder-must-set-jwt-secret-in-env"
+  _jwtSecretRaw ?? "placeholder-must-set-jwt-secret-in-env"
 );
 const DEALER_JWT_ISSUER = "autolenis-dealer";
 const DEALER_JWT_TTL_DEFAULT = "7d";

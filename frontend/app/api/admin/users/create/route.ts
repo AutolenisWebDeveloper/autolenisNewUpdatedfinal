@@ -171,7 +171,7 @@ export async function POST(request: NextRequest) {
           },
         });
       });
-      await sendAdminCreatedDealerEmail(normalizedEmail, data.contactName, data.temporaryPassword, `${appUrl}/dealer/signin`);
+      await sendAdminCreatedDealerEmail(normalizedEmail, data.contactName, data.temporaryPassword, `${appUrl}/dealer/sign-in`);
 
     } else if (data.userType === "AFFILIATE") {
       const referralCode = await uniqueReferralCode();

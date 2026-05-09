@@ -3,7 +3,7 @@
 import { createServerSupabaseClient, createServiceSupabaseClient } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { UserRole, BuyerPlan } from "@prisma/client";
+import { UserRole, BuyerPlan, AffiliateStatus } from "@prisma/client";
 import { sendWelcomeEmail } from "@/lib/services/email/resend.service";
 import { getAppUrl, getSafeBuyerRedirect, getSafePortalRedirect } from "@/lib/auth/urls";
 
@@ -75,6 +75,29 @@ async function ensurePrismaUser(
       } : {}),
     },
   });
+
+  // Safety net: if role is AFFILIATE and the affiliate register route's DB
+  // transaction failed (race/crash), ensure an Affiliate record exists so the
+  // user is not orphaned. The register route pre-creates it; this only fires
+  // if it's genuinely missing.
+  if (role === UserRole.AFFILIATE) {
+    const existingAffiliate = await prisma.affiliate.findFirst({
+      where: { userId: user.id },
+    });
+    if (!existingAffiliate) {
+      await prisma.affiliate.create({
+        data: {
+          userId: user.id,
+          status: AffiliateStatus.PENDING,
+          referralCode: `AFF-${user.id.slice(0, 8).toUpperCase()}`,
+          level: 1,
+        },
+      }).catch(err =>
+        console.error("[ensurePrismaUser] affiliate create failed:", err)
+      );
+    }
+  }
+
   return user;
 }
 
