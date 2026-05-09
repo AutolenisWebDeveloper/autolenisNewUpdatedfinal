@@ -4,16 +4,17 @@
 
 import { SignJWT, jwtVerify } from "jose";
 
-const _jwtSecretRaw = process.env.JWT_SECRET;
-if (!_jwtSecretRaw) {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("JWT_SECRET is required in production");
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("JWT_SECRET is required in production");
+    }
+    console.warn("[dealer-auth] JWT_SECRET not set — using insecure placeholder");
+    return new TextEncoder().encode("placeholder-must-set-jwt-secret-in-env");
   }
-  console.warn("[dealer-auth] JWT_SECRET not set — using insecure placeholder");
+  return new TextEncoder().encode(secret);
 }
-const DEALER_JWT_SECRET = new TextEncoder().encode(
-  _jwtSecretRaw ?? "placeholder-must-set-jwt-secret-in-env"
-);
 const DEALER_JWT_ISSUER = "autolenis-dealer";
 const DEALER_JWT_TTL_DEFAULT = "7d";
 const DEALER_JWT_TTL_REMEMBER = "30d";
@@ -34,12 +35,12 @@ export async function signDealerJwt(payload: DealerJwtPayload, opts?: { remember
     .setIssuer(DEALER_JWT_ISSUER)
     .setIssuedAt()
     .setExpirationTime(ttl)
-    .sign(DEALER_JWT_SECRET);
+    .sign(getJwtSecret());
 }
 
 export async function verifyDealerJwt(token: string): Promise<DealerJwtPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, DEALER_JWT_SECRET, {
+    const { payload } = await jwtVerify(token, getJwtSecret(), {
       issuer: DEALER_JWT_ISSUER,
     });
     return payload as unknown as DealerJwtPayload;
