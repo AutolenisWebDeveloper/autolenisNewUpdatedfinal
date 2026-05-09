@@ -11,12 +11,16 @@ interface PlatformStats {
   avgAuctionBids: number;
 }
 
-const DEFAULT: PlatformStats = {
-  dealsCompleted: 1847,
-  avgSavingsDollars: 2300,
-  verifiedDealers: 312,
-  buyersServed: 3200,
-  avgAuctionBids: 4.2,
+// Initial values are zero — they match the brand-new platform state and avoid
+// the SSR/CSR mismatch that would arise from hardcoded marketing numbers
+// (1,847 deals, 312 dealers, etc.). The strip itself stays hidden until the
+// /api/public/platform-stats response confirms there is real activity to show.
+const INITIAL: PlatformStats = {
+  dealsCompleted: 0,
+  avgSavingsDollars: 0,
+  verifiedDealers: 0,
+  buyersServed: 0,
+  avgAuctionBids: 0,
 };
 
 function StatItem({ icon: Icon, value, label }: { icon: React.ElementType; value: string; label: string }) {
@@ -32,16 +36,27 @@ function StatItem({ icon: Icon, value, label }: { icon: React.ElementType; value
 }
 
 export default function StatsStrip() {
-  const [stats, setStats] = useState<PlatformStats>(DEFAULT);
+  const [stats, setStats] = useState<PlatformStats>(INITIAL);
 
   useEffect(() => {
     fetch("/api/public/platform-stats")
       .then((r) => r.json())
-      .then((d: { success: boolean; data: PlatformStats }) => {
-        if (d.success) setStats(d.data);
+      .then((d: { success?: boolean; data?: PlatformStats }) => {
+        if (d.success && d.data) setStats(d.data);
       })
       .catch(() => {});
   }, []);
+
+  // Hide the entire stats banner until the platform has real activity.
+  // For a brand-new platform every counter is zero — showing "0 Deals
+  // Completed · $0 Avg Savings · 0 Verified Dealers" undermines marketing
+  // credibility. Once any counter goes positive, the banner appears.
+  const hasLiveActivity =
+    stats.dealsCompleted > 0 ||
+    stats.buyersServed > 0 ||
+    stats.verifiedDealers > 0;
+
+  if (!hasLiveActivity) return null;
 
   return (
     <section data-testid="stats-strip" className="bg-[#0B5FD1]">
