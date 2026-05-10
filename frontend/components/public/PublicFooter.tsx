@@ -8,6 +8,7 @@ const FOOTER_LINKS = {
     { label: "Vehicles",         href: "/inventory" },
     { label: "Pricing",          href: "/pricing" },
     { label: "Request a Car",    href: "/request-a-car" },
+    { label: "Request a Vehicle", href: "/request-vehicle" },
     { label: "Compare",          href: "/compare" },
     { label: "Contract Shield",  href: "/contract-shield" },
     { label: "Insurance",        href: "/insurance" },
