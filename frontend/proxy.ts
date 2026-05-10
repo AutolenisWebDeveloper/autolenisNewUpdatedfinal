@@ -72,6 +72,9 @@ const PUBLIC_ROUTES = [
   "/testimonials",
   "/compare",
   "/request-a-car",
+  "/request-vehicle",
+  "/dealer-offer",
+  "/buyer-offer-review",
 ];
 
 const AUTH_ROUTES = [

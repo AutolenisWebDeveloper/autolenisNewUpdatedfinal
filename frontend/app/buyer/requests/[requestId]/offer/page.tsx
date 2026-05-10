@@ -13,7 +13,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, XCircle, Loader2, ArrowLeft } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, ArrowLeft, ExternalLink } from "lucide-react";
 import { toBuyerLabel } from "@/lib/services/vehicle-request/vehicle-request.service";
 
 export const dynamic = "force-dynamic";
@@ -67,6 +67,7 @@ export default async function RequestOfferPage({ params }: Props) {
   const vehicleInfo = offer.vehicleInfo as {
     year?: number; make?: string; model?: string; trim?: string;
     description?: string; otdPriceCents?: number; monthlyEstimateCents?: number;
+    vehicleUrl?: string;
   };
   const otdCents = vehicleInfo.otdPriceCents ?? offer.priceCents;
   const monthlyCents = vehicleInfo.monthlyEstimateCents ?? Math.round(offer.priceCents / 60);
@@ -85,6 +86,18 @@ export default async function RequestOfferPage({ params }: Props) {
               {vehicleInfo.trim && <span className="text-slate-400 font-normal"> {vehicleInfo.trim}</span>}
             </p>
             {vehicleInfo.description && <p className="text-sm text-slate-500 mt-1">{vehicleInfo.description}</p>}
+            {vehicleInfo.vehicleUrl && (
+              <a
+                href={vehicleInfo.vehicleUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="offer-vehicle-link"
+                className="inline-flex items-center gap-2 rounded-lg border border-[#0B5FD1] text-[#0B5FD1] text-sm font-medium px-4 py-2 hover:bg-[#0B5FD1]/5 transition-colors mt-3"
+              >
+                <ExternalLink size={14} />
+                View This Vehicle →
+              </a>
+            )}
           </div>
           <Badge className="text-sm">Offer</Badge>
         </div>

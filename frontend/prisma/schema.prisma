@@ -2871,3 +2871,88 @@ model DealerInvitation {
   @@index([token])
   @@map("dealer_invitations")
 }
+
+// ─── Vehicle Offer System ─────────────────────────────────────────────────
+// Admin-generated dealer offer links. Multiple dealers can submit competing
+// offers for one buyer request. Each submission may include up to 3 vehicle
+// alternatives. Buyers review selected offers via tokenized links and
+// accept/decline individually.
+
+model VehicleOffer {
+  id                  String    @id @default(uuid())
+  token               String    @unique @default(uuid())
+  vehicleYear         Int       @map("vehicle_year")
+  vehicleMake         String    @map("vehicle_make")
+  vehicleModel        String    @map("vehicle_model")
+  vehicleTrim         String?   @map("vehicle_trim")
+  vehicleMileage      Int?      @map("vehicle_mileage")
+  vehicleVin          String?   @map("vehicle_vin")
+  vehicleColor        String?   @map("vehicle_color")
+  vehicleCondition    String    @map("vehicle_condition")
+  askingPriceCents    Int?      @map("asking_price_cents")
+  vehicleReferenceUrl String?   @map("vehicle_reference_url")
+  buyerBudget         String    @map("buyer_budget")
+  buyerZip            String    @map("buyer_zip")
+  buyerNewOrUsed      String    @map("buyer_new_or_used")
+  buyerFinancing      String    @map("buyer_financing")
+  buyerEmail          String?   @map("buyer_email")
+  buyerName           String?   @map("buyer_name")
+  adminNotes          String?   @map("admin_notes")
+  referenceId         String?   @map("reference_id")
+  expiresAt           DateTime? @map("expires_at")
+  createdByAdminId    String    @map("created_by_admin_id")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  submissions         DealerOfferSubmission[]
+  buyerReviews        BuyerOfferReview[]
+
+  @@map("vehicle_offers")
+}
+
+model DealerOfferSubmission {
+  id             String   @id @default(uuid())
+  vehicleOfferId String   @map("vehicle_offer_id")
+  dealershipName String   @map("dealership_name")
+  contactName    String   @map("contact_name")
+  contactEmail   String   @map("contact_email")
+  contactPhone   String   @map("contact_phone")
+  vehicles       Json
+  notes          String?
+  submittedAt    DateTime @default(now()) @map("submitted_at")
+
+  vehicleOffer   VehicleOffer @relation(fields: [vehicleOfferId], references: [id], onDelete: Cascade)
+  reviewItems    BuyerOfferReviewItem[]
+
+  @@map("dealer_offer_submissions")
+}
+
+model BuyerOfferReview {
+  id             String    @id @default(uuid())
+  reviewToken    String    @unique @default(uuid()) @map("review_token")
+  vehicleOfferId String    @map("vehicle_offer_id")
+  buyerEmail     String    @map("buyer_email")
+  buyerName      String    @map("buyer_name")
+  adminMessage   String?   @map("admin_message")
+  sentAt         DateTime  @default(now()) @map("sent_at")
+  expiresAt      DateTime? @map("expires_at")
+
+  vehicleOffer   VehicleOffer @relation(fields: [vehicleOfferId], references: [id], onDelete: Cascade)
+  items          BuyerOfferReviewItem[]
+
+  @@map("buyer_offer_reviews")
+}
+
+model BuyerOfferReviewItem {
+  id                 String    @id @default(uuid())
+  buyerOfferReviewId String    @map("buyer_offer_review_id")
+  dealerSubmissionId String    @map("dealer_submission_id")
+  vehicleIndex       Int       @default(0) @map("vehicle_index")
+  status             String    @default("PENDING")
+  respondedAt        DateTime? @map("responded_at")
+  buyerNote          String?   @map("buyer_note")
+
+  review     BuyerOfferReview      @relation(fields: [buyerOfferReviewId], references: [id], onDelete: Cascade)
+  submission DealerOfferSubmission @relation(fields: [dealerSubmissionId], references: [id], onDelete: Cascade)
+
+  @@map("buyer_offer_review_items")
+}

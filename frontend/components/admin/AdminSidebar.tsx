@@ -11,7 +11,7 @@ import {
   CreditCard, FileCheck, Send,
   ClipboardCheck, ArrowDownCircle, RotateCcw, Bell,
   Trophy,
-  Map, TrendingDown, Globe, PlusCircle,
+  Map, TrendingDown, Globe, PlusCircle, Car,
 } from "lucide-react";
 
 type NavItem = {
@@ -50,6 +50,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Pickups", href: "/admin/pickups", icon: MapPin },
     { label: "E-Sign", href: "/admin/esign", icon: PenLine },
     { label: "Requests (4C)", href: "/admin/requests", icon: ClipboardList },
+    { label: "Vehicle Offers", href: "/admin/vehicle-offers/new", icon: Car },
     { label: "Dealer Health", href: "/admin/dealers/health", icon: TrendingUp },
     { label: "External Pre-Approvals", href: "/admin/external-preapprovals", icon: FileCheck },
     { label: "Insurance Requests",     href: "/admin/insurance-requests",    icon: Shield },

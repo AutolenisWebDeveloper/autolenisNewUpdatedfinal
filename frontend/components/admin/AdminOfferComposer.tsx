@@ -25,6 +25,7 @@ export default function AdminOfferComposer({
   const [model, setModel] = useState(defaultModel);
   const [trim, setTrim] = useState("");
   const [price, setPrice] = useState<string>(String(Math.round(defaultPriceCents / 100)));
+  const [vehicleUrl, setVehicleUrl] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -46,6 +47,7 @@ export default function AdminOfferComposer({
             make,
             model,
             trim: trim || undefined,
+            vehicleUrl: vehicleUrl || undefined,
             otdPriceCents: priceCents,
             monthlyEstimateCents: Math.round(priceCents / 60),
           },
@@ -97,6 +99,14 @@ export default function AdminOfferComposer({
           placeholder="OTD price ($)" data-testid="offer-price-input"
           className="rounded-md border border-slate-200 px-2.5 py-1.5 text-sm" />
       </div>
+      <input
+        value={vehicleUrl}
+        onChange={(e) => setVehicleUrl(e.target.value)}
+        placeholder="Vehicle listing URL (optional — helps buyer verify the vehicle)"
+        type="url"
+        data-testid="offer-vehicle-url-input"
+        className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-sm"
+      />
       <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
         placeholder="Buyer-facing notes (optional)" data-testid="offer-notes-input"
         className="w-full rounded-md border border-slate-200 px-2.5 py-1.5 text-sm" rows={2} />

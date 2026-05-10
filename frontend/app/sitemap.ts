@@ -25,6 +25,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE}/contact`,          priority: 0.5, changeFrequency: "monthly", lastModified: now },
     // High/medium-impact pages
     { url: `${BASE}/insurance`,         priority: 0.7, changeFrequency: "monthly", lastModified: now },
+    { url: `${BASE}/request-vehicle`,    priority: 0.7, changeFrequency: "monthly", lastModified: now },
     { url: `${BASE}/dealer-application`, priority: 0.6, changeFrequency: "monthly", lastModified: now },
     // Hope — System 25 brand differentiation page (intentionally indexed)
     { url: `${BASE}/hope`,              priority: 0.3, changeFrequency: "monthly", lastModified: now },

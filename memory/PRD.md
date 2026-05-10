@@ -106,6 +106,22 @@ Deployed live at https://autolenis.com. Database: Supabase PostgreSQL. Auth: 4 s
 - Non-standard CSV flow: dealer first visits `/dealer/inventory/column-mapping` (saves cookie) → uploads CSV on bulk-upload page → `{ rawRows }` → bulk endpoint reads cookie → applies mapping → dedupes + creates
 - Verified: `yarn typecheck` 0 errors · `yarn lint` 0 errors · `yarn build` 70s · both shapes auth-gated correctly (401 without cookie)
 
+### 2026-02-12 — Vehicle Offer System (new build)
+- **4 new Prisma models:** `VehicleOffer`, `DealerOfferSubmission`, `BuyerOfferReview`, `BuyerOfferReviewItem` (all with `@@map` snake_case). DDL block in handoff for Supabase.
+- **Page 1 — public buyer request form** at `/request-vehicle` (`app/(public)/request-vehicle/page.tsx` + `components/public/RequestVehicleFormClient.tsx`). Posts to `/api/public/request-vehicle` which logs to `Notification` (SYSTEM_ALERT) + emails admin + buyer.
+- **Page 2 — admin offer link generator** at `/admin/vehicle-offers/new`. POST `/api/admin/vehicle-offers` creates `VehicleOffer` row, returns shareable `/dealer-offer/{token}` URL with copy button.
+- **Page 3 — admin submissions detail** at `/admin/vehicle-offers/[id]`. Lists every dealer submission + per-vehicle checkbox grid; sticky bottom panel sends curated picks to buyer via `/api/admin/vehicle-offers/[id]/send-to-buyer` which creates `BuyerOfferReview` + items + emails buyer.
+- **Page 4 — public dealer submission form** at `/dealer-offer/[token]`. Reads `VehicleOffer` server-side; expired-link guard; multi-vehicle (1–3) form with per-vehicle URL, OTD price, condition, Yes/No toggles, availability. Includes amber **Broker Disclosure card** + dual mandatory checkboxes (`finder fee` + `accuracy`). POST `/api/public/dealer-offer/[token]` validates with Zod, creates `DealerOfferSubmission`, emails admin + dealer.
+- **Page 5 — dealer confirmed** at `/dealer-offer/[token]/confirmed`. Per-vehicle summary cards with View Vehicle Listing links + repeated finder-fee reminder.
+- **Page 6 — buyer review** at `/buyer-offer-review/[reviewToken]`. Premium standalone page (logo header only, no nav). Per-item card with prominent blue "View This Vehicle" CTA, OTD price, terms grid, individual Accept/Decline buttons hitting `/api/public/buyer-offer-review/[reviewToken]/respond`. Acceptance triggers admin + dealer notification emails.
+- **AdminOfferComposer enhancement:** added optional `vehicleUrl` URL field after the trim/price grid; passed through `vehicleInfo.vehicleUrl`.
+- **Buyer offer page enhancement:** `app/buyer/requests/[requestId]/offer/page.tsx` now renders an `ExternalLink` "View This Vehicle →" button under the vehicle title when `vehicleInfo.vehicleUrl` is present.
+- **Sidebar:** added `Vehicle Offers → /admin/vehicle-offers/new` (Car icon) to the Operations group.
+- **Proxy:** `/request-vehicle`, `/dealer-offer`, `/buyer-offer-review` added to `PUBLIC_ROUTES`.
+- **Sitemap:** `/request-vehicle` added at priority 0.7. Token links intentionally excluded.
+- **New email helpers:** `lib/services/email/vehicle-offers.email.ts` — `sendVehicleRequestAdminNotification`, `sendVehicleRequestConfirmation`, `sendDealerOfferAdminNotification`, `sendDealerOfferConfirmation`, `sendBuyerOfferReviewEmail`, `sendBuyerAcceptedAdminNotification`, `sendDealerAcceptanceNotification`. Uses lazy Resend client + same FROM constant pattern.
+- Verified: `pnpm typecheck` 0 errors · `pnpm lint` 0 errors (101 pre-existing warnings) · `pnpm build` 31.4s ✓ Compiled successfully · all 11 new routes appear in build manifest.
+
 ### 2026-02-12 — Pre-Launch Final Fix Pass (8 fixes complete)
 - **Fix 1 (`proxy.ts`):** Added `/insurance`, `/status`, `/testimonials`, `/compare`, `/request-a-car` to `PUBLIC_ROUTES` — 5 marketing pages no longer redirect anonymous visitors to sign-in.
 - **Fix 2 (`lib/admin-auth.ts`):** Refactored `ADMIN_JWT_SECRET` into a lazy `getAdminJwtSecret()` loader. Throws only on first use, not module load — Turbopack static page builds no longer crash when env vars are absent. All 4 callsites (`signAdminJwt`, `verifyAdminJwt`, `signPreMfaToken`, `verifyPreMfaToken`) updated.
@@ -126,6 +142,7 @@ Deployed live at https://autolenis.com. Database: Supabase PostgreSQL. Auth: 4 s
 - Verified: `yarn typecheck` 0 errors · `yarn lint` 0 errors · `yarn build` 72s · all 11 affected routes (parents + 8 new links) return HTTP 307 (auth redirect, healthy)
 
 ## Prioritized Backlog
+- P0: Run the SQL DDL block in Supabase to create `vehicle_offers`, `dealer_offer_submissions`, `buyer_offer_reviews`, `buyer_offer_review_items` tables before exercising the Vehicle Offer system in production
 - P0: Admin TOTP enrollment — sign in at /admin/auth/signin, scan QR code, save recovery codes
 - P1: Build out missing admin pages if needed (`/admin/payments/deposits`, `/admin/payments/refunds`, `/admin/manual-reviews`, `/admin/notifications`, `/admin/dealers/applications/[appId]`) — currently redirected to nearest existing route
 - P1: Buyer end-to-end signup test with real email (Resend email delivery)
