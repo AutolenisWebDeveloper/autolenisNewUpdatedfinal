@@ -143,14 +143,30 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (data.step === "AGREEMENT") {
-    await prisma.dealer.update({
+    const updatedDealer = await prisma.dealer.update({
       where: { id: dealer.id },
       data: {
         agreedToTermsAt: new Date(),
         onboardingStep: "COMPLETE",
         status: "ACTIVE",
       },
+      include: { user: { select: { email: true } } },
     });
+
+    // Fire-and-forget: send the DocuSign marketplace agreement envelope.
+    // Failures here must never block onboarding completion — the dealer is
+    // already ACTIVE and can retry from the dashboard if anything went wrong.
+    const { sendDealerMarketplaceAgreement } = await import(
+      "@/lib/services/esign/dealer-marketplace-agreement.service"
+    );
+    void sendDealerMarketplaceAgreement({
+      dealerId: updatedDealer.id,
+      email: updatedDealer.user?.email ?? "",
+      name: updatedDealer.dealershipName ?? "Dealer",
+    }).catch((err) => {
+      console.error("[dealer-onboarding/agreement] DocuSign send failed:", err);
+    });
+
     return NextResponse.json({ success: true, nextStep: "COMPLETE", redirect: "/dealer/dashboard" });
   }
 

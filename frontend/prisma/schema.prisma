@@ -122,6 +122,12 @@ model Dealer {
   agreedToTermsAt    DateTime?                 @map("agreed_to_terms_at")
   onboardingStep     String                    @default("BUSINESS_INFO") @map("onboarding_step")
 
+  // DocuSign marketplace agreement (sent at onboarding completion).
+  // Webhook flips `marketplaceAgreementSignedAt` once the envelope completes.
+  marketplaceAgreementEnvelopeId String?   @map("marketplace_agreement_envelope_id")
+  marketplaceAgreementSentAt     DateTime? @map("marketplace_agreement_sent_at")
+  marketplaceAgreementSignedAt   DateTime? @map("marketplace_agreement_signed_at")
+
   @@map("dealers")
 }
 
