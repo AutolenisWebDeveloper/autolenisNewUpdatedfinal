@@ -122,6 +122,15 @@ Deployed live at https://autolenis.com. Database: Supabase PostgreSQL. Auth: 4 s
 - **New email helpers:** `lib/services/email/vehicle-offers.email.ts` — `sendVehicleRequestAdminNotification`, `sendVehicleRequestConfirmation`, `sendDealerOfferAdminNotification`, `sendDealerOfferConfirmation`, `sendBuyerOfferReviewEmail`, `sendBuyerAcceptedAdminNotification`, `sendDealerAcceptanceNotification`. Uses lazy Resend client + same FROM constant pattern.
 - Verified: `pnpm typecheck` 0 errors · `pnpm lint` 0 errors (101 pre-existing warnings) · `pnpm build` 31.4s ✓ Compiled successfully · all 11 new routes appear in build manifest.
 
+### 2026-02-12 — Dealer DocuSign Marketplace Agreement + Admin Password Reset (resume)
+- **Schema (`prisma/schema.prisma`):** Added 3 fields to `Dealer`: `marketplaceAgreementEnvelopeId String?`, `marketplaceAgreementSentAt DateTime?`, `marketplaceAgreementSignedAt DateTime?` (snake_case @map). `npx prisma generate` applied.
+- **New service:** `lib/services/esign/dealer-marketplace-agreement.service.ts`
+  - `sendDealerMarketplaceAgreement({ dealerId, email, name })` — JWT-Grant auth → POST `/v2.1/accounts/{id}/envelopes` with `templateId = DOCUSIGN_DEALER_TEMPLATE_ID`, role "Dealer", custom fields `{ dealerId, envelopeKind: "DEALER_MARKETPLACE_AGREEMENT" }`. Persists envelope ID + sentAt. Idempotent (skips if envelope already exists). Skips silently if DocuSign env vars unset.
+  - `handleDealerMarketplaceEnvelopeCompleted(envelopeId)` — webhook handler. Looks up dealer by envelope, sets `marketplaceAgreementSignedAt`, writes `DEALER_MARKETPLACE_AGREEMENT_SIGNED` audit log.
+- **Wired into:** `app/api/dealer/onboarding/route.ts` (AGREEMENT step → fire-and-forget call after `status: ACTIVE`); `app/api/webhooks/docusign/route.ts` (tries dealer handler first, falls through to deal-envelope handler).
+- **Admin password reset:** One-shot tsx script set `Admin.passwordHash` for `markist@autolenis.com` to `AutoLenis@Admin2026!` (bcrypt 12 rounds), cleared `failedMfaAttempts` / `mfaLockedUntil` / `mfaResetAt`. Script deleted. Verified via `bcrypt.compare` → true. Recorded in `/app/memory/test_credentials.md`.
+- Verified: `npx prisma generate` ✓ · `npx tsc --noEmit` 0 errors · `npx eslint . --ext .ts,.tsx` 0 errors (99 pre-existing warnings, unchanged) · `npx next build` ✓ Compiled successfully in 30.6s · 334 routes generated.
+
 ### 2026-02-12 — Pre-Launch Final Fix Pass (8 fixes complete)
 - **Fix 1 (`proxy.ts`):** Added `/insurance`, `/status`, `/testimonials`, `/compare`, `/request-a-car` to `PUBLIC_ROUTES` — 5 marketing pages no longer redirect anonymous visitors to sign-in.
 - **Fix 2 (`lib/admin-auth.ts`):** Refactored `ADMIN_JWT_SECRET` into a lazy `getAdminJwtSecret()` loader. Throws only on first use, not module load — Turbopack static page builds no longer crash when env vars are absent. All 4 callsites (`signAdminJwt`, `verifyAdminJwt`, `signPreMfaToken`, `verifyPreMfaToken`) updated.
