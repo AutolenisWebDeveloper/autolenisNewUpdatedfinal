@@ -198,7 +198,17 @@ export async function sendBuyerOfferReviewEmail(params: {
     <p style="color:#4B5563;font-size:14px;line-height:1.6;margin:0 0 16px">We found <strong>${params.itemCount}</strong> vehicle ${plural} matching your request. Click below to review each offer and let us know which interest you.</p>
     ${params.adminMessage ? `<div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:12px;padding:14px;margin-bottom:20px"><p style="color:#0B5FD1;font-size:12px;font-weight:600;margin:0 0 4px">Message from AutoLenis:</p><p style="color:#374151;font-size:13px;margin:0;line-height:1.5">${escape(params.adminMessage)}</p></div>` : ""}
     <div style="margin:24px 0">${button(reviewUrl, "Review Your Offers →")}</div>
-    <p style="color:#94A3B8;font-size:12px;margin-top:16px">This link is personalized for you. Offers are presented by our verified dealer network.</p>`;
+    <p style="color:#94A3B8;font-size:12px;margin-top:16px">This link is personalized for you. Offers are presented by our verified dealer network.</p>
+    <hr style="border:0;border-top:1px solid #E5E7EB;margin:24px 0 16px"/>
+    <p style="color:#475569;font-size:12px;line-height:1.6;margin:0 0 8px">
+      If you already have an AutoLenis account, you can also find this offer
+      in your notifications dashboard at
+      <a href="${APP_URL}/buyer/notifications" style="color:#0B5FD1;text-decoration:none">${APP_URL}/buyer/notifications</a>.
+    </p>
+    <p style="color:#475569;font-size:12px;line-height:1.6;margin:0">
+      New to AutoLenis? <a href="${APP_URL}/auth/signup" style="color:#0B5FD1;text-decoration:none;font-weight:600">Create a free account</a>
+      to track all your offers in one place.
+    </p>`;
   const subject = `You have ${params.itemCount} vehicle ${plural} to review — AutoLenis`;
   await sendRaw(params.to, subject, wrap(inner));
 }

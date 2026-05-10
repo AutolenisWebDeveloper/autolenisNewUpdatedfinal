@@ -201,6 +201,36 @@ export default function BuyerOfferReviewClient({ review, isExpired }: { review: 
         })}
       </section>
 
+      {/* Account creation prompt */}
+      <section className="max-w-2xl mx-auto px-4 pb-8">
+        <div
+          className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-2xl p-6 text-center"
+          data-testid="buyer-review-account-prompt"
+        >
+          <h3 className="font-bold text-[#111827] mb-2">Track This Offer From Your Dashboard</h3>
+          <p className="text-sm text-[#4B5563] mb-4">
+            Create a free AutoLenis account to track this offer, view updates, and manage your vehicle search — all in one place.
+          </p>
+          <div className="flex gap-3 justify-center flex-wrap">
+            <a
+              href="/auth/signup"
+              data-testid="buyer-review-create-account-btn"
+              className="inline-flex items-center gap-2 bg-[#0B5FD1] text-white rounded-lg px-5 py-2.5 text-sm font-semibold hover:bg-[#0944a8] transition-colors"
+            >
+              Create Free Account →
+            </a>
+            <a
+              href="/auth/signin"
+              data-testid="buyer-review-signin-btn"
+              className="inline-flex items-center gap-2 border border-[#0B5FD1] text-[#0B5FD1] rounded-lg px-5 py-2.5 text-sm font-medium hover:bg-[#0B5FD1]/5 transition-colors"
+            >
+              Sign In
+            </a>
+          </div>
+          <p className="text-xs text-slate-400 mt-3">Free to join. No credit card required.</p>
+        </div>
+      </section>
+
       <footer className="border-t border-[#E5E7EB] mt-12 py-6 text-center">
         <p className="text-xs text-slate-400">
           Questions? Email us at{" "}

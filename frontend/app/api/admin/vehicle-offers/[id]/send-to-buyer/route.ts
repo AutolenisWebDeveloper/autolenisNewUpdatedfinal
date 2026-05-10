@@ -73,6 +73,36 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const reviewUrl = `${APP_URL}/buyer-offer-review/${review.reviewToken}`;
 
+  // If the buyer already has a User+Buyer account, drop a notification into
+  // their in-app inbox so the review surfaces in the authenticated dashboard
+  // alongside the email. Failures here must not break the admin response.
+  try {
+    const buyerUser = await prisma.user.findFirst({
+      where: { email: data.buyerEmail.toLowerCase() },
+      select: { id: true },
+    });
+    if (buyerUser) {
+      const buyer = await prisma.buyer.findFirst({
+        where: { userId: buyerUser.id },
+        select: { id: true },
+      });
+      if (buyer) {
+        await prisma.notification.create({
+          data: {
+            buyerId: buyer.id,
+            type: "SYSTEM_ALERT",
+            channel: "IN_APP",
+            title: "You have vehicle offers to review",
+            body: `AutoLenis found ${data.items.length} vehicle offer${data.items.length !== 1 ? "s" : ""} matching your request. Click to review.`,
+            actionUrl: `/buyer-offer-review/${review.reviewToken}`,
+          },
+        });
+      }
+    }
+  } catch (err) {
+    console.error("[send-to-buyer] in-app notification failed:", err);
+  }
+
   try {
     await sendBuyerOfferReviewEmail({
       to: data.buyerEmail,

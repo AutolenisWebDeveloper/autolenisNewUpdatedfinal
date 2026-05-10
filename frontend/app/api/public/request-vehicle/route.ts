@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
       data: {
         type: "SYSTEM_ALERT",
         channel: "IN_APP",
-        title: `Vehicle request — ${data.fullName}`,
+        title: `Vehicle Request: ${data.fullName}`,
         body: summary,
         actionUrl: "/admin/vehicle-offers/new",
         metadata: data as unknown as Parameters<typeof prisma.notification.create>[0]["data"]["metadata"],
