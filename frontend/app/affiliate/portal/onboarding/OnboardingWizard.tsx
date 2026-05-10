@@ -265,9 +265,9 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
           <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <CheckCircle2 size={32} className="text-green-600" />
           </div>
-          <h1 className="text-xl font-bold text-slate-900 mb-2">Onboarding Submitted!</h1>
+          <h1 className="text-xl font-bold text-slate-900 mb-2">Onboarding Complete!</h1>
           <p className="text-sm text-slate-600 mb-6">
-            Your application is under review. We&apos;ll notify you once it&apos;s been processed — usually within 1–2 business days.
+            Your affiliate account is active. Head to your dashboard to grab your referral link and start earning.
           </p>
           <button
             onClick={() => router.push("/affiliate/portal/dashboard")}
@@ -599,7 +599,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
           {step === 7 && (
             <div>
               <h2 className="text-lg font-bold text-slate-900 mb-1">Review &amp; Submit</h2>
-              <p className="text-sm text-slate-500 mb-6">Please review your information before submitting for approval.</p>
+              <p className="text-sm text-slate-500 mb-6">Please review your information before completing onboarding.</p>
               <div className="space-y-4">
                 {[
                   {

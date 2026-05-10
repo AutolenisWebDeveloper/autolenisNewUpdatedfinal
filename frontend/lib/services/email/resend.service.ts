@@ -416,7 +416,7 @@ export async function sendAffiliateVerificationEmail(to: string, firstName: stri
     idempotencyKey: `affiliate-verify-${to}`,
     to,
     templateId: "affiliate-verification",
-    subject: "Verify your AutoLenis Affiliate account",
+    subject: "Verify your email to activate your AutoLenis affiliate account",
     html: `
       <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
         <div style="background:#0B5FD1;padding:32px;text-align:center">
@@ -424,16 +424,16 @@ export async function sendAffiliateVerificationEmail(to: string, firstName: stri
         </div>
         <div style="padding:32px">
           <p>Hi ${firstName},</p>
-          <p>Thanks for applying to join the AutoLenis affiliate program. ${verificationLink ? "Click the button below to verify your email address." : "Please check for a separate verification email from Supabase."}</p>
+          <p>Thanks for joining the AutoLenis affiliate program. ${verificationLink ? "Click the button below to verify your email — your account will activate immediately." : "Please check for a separate verification email from Supabase to activate your account."}</p>
           ${ctaButton}
           <p style="background:#F8F9FB;border:1px solid #E5E7EB;border-radius:8px;padding:16px;margin:24px 0">
             <strong style="color:#0B5FD1">Your referral code:</strong>
             <span style="font-family:monospace;font-size:18px;color:#111827;margin-left:8px">${referralCode}</span>
             <br/>
-            <span style="color:#4B5563;font-size:13px">You can share this once our team approves your application. Applications are typically reviewed within 2 business days.</span>
+            <span style="color:#4B5563;font-size:13px">Once you verify your email, you&rsquo;ll have immediate access to your affiliate dashboard and referral link.</span>
           </p>
-          <p style="color:#4B5563;font-size:13px">Commission rates on the $499 Premium concierge fee: L1 15% · L2 3% · L3 2%.</p>
-          <p style="margin-top:24px;color:#94A3B8;font-size:12px">If you didn't apply for an AutoLenis affiliate account, you can safely ignore this email.</p>
+          <p style="color:#4B5563;font-size:13px">Commission rates on the $499 Premium concierge fee: L1 15% &middot; L2 3% &middot; L3 2%.</p>
+          <p style="margin-top:24px;color:#94A3B8;font-size:12px">If you didn&rsquo;t apply for an AutoLenis affiliate account, you can safely ignore this email.</p>
         </div>
       </div>
     `,

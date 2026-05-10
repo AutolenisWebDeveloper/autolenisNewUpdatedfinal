@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
         data: {
           userId: user.id,
           referralCode: referral,
-          status: AffiliateStatus.PENDING, // admin review before activation
+          status: AffiliateStatus.ACTIVE, // auto-activate on email verification
           level: parentId ? 2 : 1,
           parentId,
           promotionMethod,
