@@ -757,6 +757,155 @@ model VehicleRequestBuyerUpdate {
   @@map("vehicle_request_buyer_updates")
 }
 
+// Vehicle Offer System — new models
+model VehicleOffer {
+  id                  String    @id @default(uuid())
+  token               String    @unique @default(uuid())
+
+  // Vehicle details (admin fills)
+  vehicleYear         Int       @map("vehicle_year")
+  vehicleMake         String    @map("vehicle_make")
+  vehicleModel        String    @map("vehicle_model")
+  vehicleTrim         String?   @map("vehicle_trim")
+  vehicleMileage      Int?      @map("vehicle_mileage")
+  vehicleVin          String?   @map("vehicle_vin")
+  vehicleColor        String?   @map("vehicle_color")
+  vehicleInteriorColor String?  @map("vehicle_interior_color")
+  vehicleCondition    String    @map("vehicle_condition")
+  askingPriceCents    Int?      @map("asking_price_cents")
+  vehicleReferenceUrl String?   @map("vehicle_reference_url")
+
+  // Buyer context
+  buyerName           String?   @map("buyer_name")
+  buyerEmail          String?   @map("buyer_email")
+  buyerPhone          String?   @map("buyer_phone")
+  buyerCity           String?   @map("buyer_city")
+  buyerState          String?   @map("buyer_state")
+  buyerZip            String    @map("buyer_zip")
+  buyerBudget         String    @map("buyer_budget")
+  buyerMonthlyPayment String?   @map("buyer_monthly_payment")
+  buyerDownPayment    String?   @map("buyer_down_payment")
+  buyerNewOrUsed      String    @map("buyer_new_or_used")
+  buyerFinancing      String    @map("buyer_financing")
+  buyerTimeline       String?   @map("buyer_timeline")
+  buyerOpenToAlt      Boolean   @default(false) @map("buyer_open_to_alt")
+  buyerMustHave       String?   @map("buyer_must_have")
+  buyerDrivetrain     String?   @map("buyer_drivetrain")
+  buyerFuelType       String?   @map("buyer_fuel_type")
+  buyerMaxMileage     String?   @map("buyer_max_mileage")
+  buyerSeating        String?   @map("buyer_seating")
+  buyerInteriorColor  String?   @map("buyer_interior_color")
+
+  // Trade-in from buyer
+  buyerHasTradeIn     Boolean   @default(false) @map("buyer_has_trade_in")
+  buyerTradeYear      String?   @map("buyer_trade_year")
+  buyerTradeMake      String?   @map("buyer_trade_make")
+  buyerTradeModel     String?   @map("buyer_trade_model")
+  buyerTradeMileage   String?   @map("buyer_trade_mileage")
+  buyerTradePayoff    String?   @map("buyer_trade_payoff")
+  buyerTradeCondition String?   @map("buyer_trade_condition")
+  buyerTradeVin       String?   @map("buyer_trade_vin")
+  buyerTradeAccident  String?   @map("buyer_trade_accident")
+
+  adminNotes          String?   @map("admin_notes")
+  referenceId         String?   @map("reference_id")
+  requestStatus       String    @default("new") @map("request_status")
+  expiresAt           DateTime? @map("expires_at")
+  createdByAdminId    String    @map("created_by_admin_id")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  submissions         DealerOfferSubmission[]
+  buyerReviews        BuyerOfferReview[]
+  dealerInvites       VehicleOfferDealerInvite[]
+
+  @@map("vehicle_offers")
+}
+
+model VehicleOfferDealerInvite {
+  id             String    @id @default(uuid())
+  vehicleOfferId String    @map("vehicle_offer_id")
+  token          String    @unique @default(uuid())
+
+  // Dealer info entered by admin
+  dealershipName String    @map("dealership_name")
+  contactName    String?   @map("contact_name")
+  dealerEmail    String    @map("dealer_email")
+  dealerPhone    String?   @map("dealer_phone")
+
+  // Tracking
+  status         String    @default("sent")
+  sentAt         DateTime  @default(now()) @map("sent_at")
+  openedAt       DateTime? @map("opened_at")
+  submittedAt    DateTime? @map("submitted_at")
+  expiresAt      DateTime? @map("expires_at")
+
+  vehicleOffer   VehicleOffer @relation(fields: [vehicleOfferId], references: [id], onDelete: Cascade)
+  submission     DealerOfferSubmission? @relation(fields: [submissionId], references: [id])
+  submissionId   String? @unique @map("submission_id")
+
+  @@index([token])
+  @@index([vehicleOfferId])
+  @@map("vehicle_offer_dealer_invites")
+}
+
+model DealerOfferSubmission {
+  id                  String    @id @default(uuid())
+  vehicleOfferId      String    @map("vehicle_offer_id")
+  token               String    @unique @default(uuid())
+  dealershipName      String    @map("dealership_name")
+  contactName         String    @map("contact_name")
+  contactEmail        String    @map("contact_email")
+  contactPhone        String    @map("contact_phone")
+  vehiclesOffered     Json      @map("vehicles_offered")
+  notes               String?
+  finderFeeAgreed     Boolean   @map("finder_fee_agreed")
+  accuracyConfirmed   Boolean   @map("accuracy_confirmed")
+  status              String    @default("PENDING")
+  inviteId            String?   @unique @map("invite_id")
+  rejected            Boolean   @default(false)
+  rejectedAt          DateTime? @map("rejected_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  vehicleOffer        VehicleOffer @relation(fields: [vehicleOfferId], references: [id], onDelete: Cascade)
+  invite              VehicleOfferDealerInvite?
+
+  @@index([vehicleOfferId])
+  @@index([token])
+  @@map("dealer_offer_submissions")
+}
+
+model BuyerOfferReview {
+  id              String    @id @default(uuid())
+  vehicleOfferId  String    @map("vehicle_offer_id")
+  buyerName       String    @map("buyer_name")
+  buyerEmail      String    @map("buyer_email")
+  reviewToken     String    @unique @default(uuid()) @map("review_token")
+  status          String    @default("PENDING")
+  items           Json      @map("items")
+  createdByAdminId String   @map("created_by_admin_id")
+  expiresAt       DateTime? @map("expires_at")
+  respondedAt     DateTime? @map("responded_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  vehicleOffer    VehicleOffer @relation(fields: [vehicleOfferId], references: [id], onDelete: Cascade)
+  reviewItems     BuyerOfferReviewItem[]
+
+  @@index([vehicleOfferId])
+  @@index([reviewToken])
+  @@map("buyer_offer_reviews")
+}
+
+model BuyerOfferReviewItem {
+  id         String   @id @default(uuid())
+  reviewId   String   @map("review_id")
+  submission DealerOfferSubmission?
+  status     String   @default("PENDING")
+  respondedAt DateTime? @map("responded_at")
+  response   String?
+  createdAt  DateTime @default(now()) @map("created_at")
+  review     BuyerOfferReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@map("buyer_offer_review_items")
+}
+
 model VerseLibrary {
   id          String                @id @default(uuid())
   reference   String                @unique
@@ -998,7 +1147,6 @@ enum DealerStatus {
   PENDING
   ACTIVE
   SUSPENDED
-  TERMINATED
 }
 
 enum AffiliateStatus {
@@ -1008,90 +1156,53 @@ enum AffiliateStatus {
   REJECTED
 }
 
-enum InsuranceStatus {
-  NOT_STARTED
-  QUOTE_REQUESTED
-  QUOTE_RECEIVED
-  POLICY_SELECTED
-  POLICY_BOUND
-  EXTERNAL_UPLOADED
-  VERIFIED
-  FAILED
+enum PreQualDecision {
+  APPROVED
+  DECLINED
+  PENDING
+}
+
+enum PreQualTier {
+  TIER_1
+  TIER_2
+  TIER_3
 }
 
 enum AuctionStatus {
   PENDING
   ACTIVE
+  EXTENDED
   CLOSED
-  EXPIRED
-  CANCELLED
-  REOPENED
-}
-
-enum DealStatus {
-  PENDING
-  ACTIVE
-  FINANCING_PENDING
-  FEE_PENDING
-  FEE_PAID
-  INSURANCE_PENDING
-  CONTRACT_PENDING
-  CONTRACT_REVIEW
-  CONTRACT_APPROVED
-  SIGNING_PENDING
-  SIGNED
-  PICKUP_SCHEDULED
-  PICKUP_COMPLETE
-  COMPLETED
-  CANCELLED
-  REFUNDED
+  DRAFT
 }
 
 enum OfferStatus {
   DRAFT
   SUBMITTED
   ACCEPTED
-  DECLINED
+  REJECTED
   WITHDRAWN
-  EXPIRED
 }
 
-enum CommissionStatus {
+enum DealStatus {
   PENDING
-  APPROVED
-  PAID
-  REVERSED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
 }
 
-enum PreQualDecision {
-  APPROVED
-  DECLINED
-  PENDING
-  MANUAL_REVIEW
-  OFAC_ESCALATED
-  OFAC_REVIEW
-}
-
-enum PreQualTier {
-  STRONG
-  GOOD
-  FAIR
-  WEAK
-  DECLINED
-}
-
-enum DepositStatus {
-  PENDING
-  PAID
-  REFUNDED
+enum InsuranceStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
   FAILED
 }
 
 enum ESignStatus {
   PENDING
   SENT
-  DELIVERED
-  COMPLETED
+  SIGNED
   DECLINED
   VOIDED
 }
@@ -1099,10 +1210,37 @@ enum ESignStatus {
 enum PickupStatus {
   NOT_SCHEDULED
   SCHEDULED
-  CHECKED_IN
   COMPLETED
-  RESCHEDULED
-  EXCEPTION
+}
+
+enum DepositStatus {
+  PENDING
+  CONFIRMED
+  REFUNDED
+}
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+enum RiskTier {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum NotificationType {
+  SYSTEM_ALERT
+  AUCTION_INVITE
+  AUCTION_STARTED
+  AUCTION_ENDED
+  OFFER_RECEIVED
+  OFFER_ACCEPTED
+  DEAL_UPDATE
+  GENERAL_MESSAGE
 }
 
 enum NotificationChannel {
@@ -1111,48 +1249,10 @@ enum NotificationChannel {
   SMS
 }
 
-enum NotificationType {
-  AUCTION_STARTED
-  AUCTION_CLOSING_SOON
-  OFFER_RECEIVED
-  DEAL_SELECTED
-  DEAL_STAGE_CHANGED
-  CONTRACT_READY
-  CONTRACT_APPROVED
-  SIGNING_READY
-  PICKUP_SCHEDULED
-  PICKUP_READY
-  PREQUAL_APPROVED
-  PREQUAL_DECLINED
-  DEPOSIT_CONFIRMED
-  FEE_PAID
-  INSURANCE_BOUND
-  COMMISSION_EARNED
-  COMMISSION_PAID
-  REFERRAL_SIGNED_UP
-  REFERRAL_DEAL_COMPLETED
-  SYSTEM_ALERT
-  ADMIN_MESSAGE
-  REQUEST_STATUS_UPDATE
-  OFFER_SENT
-  OFFER_ACCEPTED
-  OFFER_DECLINED
-  SUPPORT_TICKET
-  PAYOUT_REQUESTED
-  PAYOUT_PAID
-  PAYOUT_FAILED
-}
-
-enum RiskTier {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
-}
-
 enum NudgeChannel {
-  IN_APP
   EMAIL
+  SMS
+  IN_APP
 }
 
 enum InventoryLane {
@@ -1163,1802 +1263,10 @@ enum InventoryLane {
 
 enum VehicleRequestStatus {
   SUBMITTED
-  INTAKE
-  ACTIVE_SOURCING
-  OFFER_READY
-  OFFER_SENT
-  OFFER_ACCEPTED
-  OFFER_DECLINED
-  DEAL_CREATED
-  CLOSED_NO_MATCH
-  CANCELLED
-  EXPIRED
-}
-
-// ─── Additional Enums (Step 5 — complete schema) ─────────────────────────────
-
-enum RefinanceStatus {
-  SUBMITTED
-  QUALIFIED
-  INELIGIBLE
-  REDIRECTED
-  EXCLUDED_STATE
-}
-
-enum DocumentStatus {
-  PENDING
-  UPLOADED
-  VERIFIED
-  REJECTED
-  EXPIRED
-}
-
-enum MessageStatus {
-  SENT
-  DELIVERED
-  READ
-}
-
-enum ThreadStatus {
-  ACTIVE
-  CLOSED
-  FLAGGED
-}
-
-enum InsuranceQuoteStatus {
-  PENDING
-  RECEIVED
-  SELECTED
-  EXPIRED
-}
-
-enum InsurancePolicyStatus {
-  ACTIVE
-  CANCELLED
-  EXPIRED
-}
-
-enum FinancingStatus {
-  PENDING
-  SELECTED
-  APPROVED
-  DECLINED
-}
-
-enum ExternalPreApprovalStatus {
-  SUBMITTED
-  REVIEWING
-  APPROVED
-  REJECTED
-  ADDITIONAL_INFO_REQUIRED
-}
-
-enum SeoHealthStatus {
-  EXCELLENT
-  GOOD
-  NEEDS_WORK
-  CRITICAL
-}
-
-enum SyncRunStatus {
-  RUNNING
-  COMPLETED
-  FAILED
-  PARTIAL
-}
-
-enum InventorySourceType {
-  AUTOTRADER
-  CARSDOTCOM
-  CARGURUS
-  TRUECAR
-  EDMUNDS
-  CUSTOM
-  DMS
-}
-
-enum DealerDiscoveryStatus {
-  DISCOVERED
-  CONTACTED
-  INVITED
-  ONBOARDING
-  ACTIVE
-  DECLINED
-}
-
-enum TradeInStatus {
-  SUBMITTED
-  REVIEWING
-  VALUED
-  ACCEPTED
-  DECLINED
-}
-
-enum TradeInCondition {
-  EXCELLENT
-  GOOD
-  FAIR
-  POOR
-}
-
-enum NudgeStage {
-  PREQUAL_IDLE
-  DEPOSIT_IDLE
-  FINANCING_IDLE
-  INSURANCE_IDLE
-  EMAIL_IDLE
-}
-
-enum PayoutStatus {
-  PENDING
-  PROCESSING
-  PAID
-  FAILED
-  REVERSED
-}
-
-enum SupportNoteType {
-  GENERAL
-  ESCALATION
-  IMPERSONATION
-  REFUND
-  COMPLAINT
-}
-
-enum ContractVersionStatus {
-  UPLOADED
-  SCANNING
-  APPROVED
-  REJECTED
-  SUPERSEDED
-}
-
-enum AdminActionType {
-  STAGE_ADVANCE
-  CANCEL
-  REFUND_TRIGGERED
-  SHIELD_OVERRIDE
-  DEALER_REMOVED
-  AUCTION_CLOSED
-  AUCTION_EXTENDED
-  IMPERSONATION_STARTED
-  STATUS_CHANGE
-}
-
-enum DocumentType {
-  SALES_CONTRACT
-  FINANCE_AGREEMENT
-  INSURANCE_PROOF
-  DRIVERS_LICENSE
-  INCOME_VERIFICATION
-  BANK_STATEMENT
-  TRADE_IN_TITLE
-  IDENTITY_VERIFICATION
-  OTHER
-}
-
-enum DocumentRequestStatus {
-  PENDING
-  SUBMITTED
-  VERIFIED
-  REJECTED
-}
-
-enum FinancingPath {
-  DEALER
-  EXTERNAL
-  CASH
-}
-
-enum FinancingScenarioType {
-  DEALER_FINANCE
-  EXTERNAL_BANK
-  CASH_PURCHASE
-}
-
-enum SeoContentType {
-  PAGE
-  BLOG
-  FAQ
-}
-
-enum SeoSchemaType {
-  ORGANIZATION
-  PRODUCT
-  FAQ_PAGE
-  HOW_TO
-}
-
-enum HealthAlertLevel {
-  P0
-  P1
-  P2
-  INFO
-}
-
-enum SlaStatus {
-  OK
-  WARNING
-  BREACHED
-}
-
-enum WorkflowType {
-  NUDGE
-  RISK_FLAG
-  DEAL_STUCK
-  AUCTION_EXPIRING
-  INVITATION_LOW
-}
-
-enum QueueItemStatus {
-  OPEN
-  ASSIGNED
-  RESOLVED
-  ESCALATED
-  CLOSED
-}
-
-enum QueueItemType {
-  OFAC_ALERT
-  CONTRACT_FAIL
-  INSURANCE_EXCEPTION
-  ESIGN_EXCEPTION
-  PICKUP_EXCEPTION
-  PREQUAL_MANUAL
-  SUPPORT_TICKET
-  SYSTEM_ALERT
-}
-
-enum ImpersonationStatus {
-  ACTIVE
-  ENDED
-}
-
-enum RefundReason {
-  NO_OFFERS
-  BUYER_REQUEST
-  FRAUD
-  ADMIN_DECISION
-}
-
-enum CancellationReason {
-  BUYER_REQUEST
-  FRAUD
-  PREQUAL_EXPIRED
-  NO_OFFERS
-  ADMIN
-}
-
-enum EscalationLevel {
-  L1
-  L2
-  L3
-  EXECUTIVE
-}
-
-enum AffiliateComplianceStatus {
-  PENDING_ACKNOWLEDGMENT
-  COMPLIANT
-  VIOLATION_FLAGGED
-  SUSPENDED
-}
-
-enum AntiCircumventionFlag {
-  CONTACT_ATTEMPT
-  EXTERNAL_DEAL
-  IDENTITY_MISMATCH
-  PAYMENT_BYPASS
-}
-
-enum IdentityVerificationStatus {
-  PENDING
-  VERIFIED
-  FAILED
-}
-
-enum MarketStatus {
-  ACTIVE
-  INACTIVE
-}
-
-enum FeedFormat {
-  XML
-  JSON
-  CSV
-}
-
-enum DealerOnboardingStatus {
-  INCOMPLETE
-  COMPLETE
-  VERIFIED
-}
-
-enum CronJobStatus {
-  RUNNING
-  COMPLETED
-  FAILED
-  SKIPPED
-}
-
-enum AffiliateTier {
-  STANDARD
-  SILVER
-  GOLD
-  PLATINUM
-}
-
-// ─── Additional Models (Step 5 — 32 missing models) ──────────────────────────
-
-model Session {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token     String   @unique
-  expiresAt DateTime @map("expires_at")
-  ipAddress String?  @map("ip_address")
-  userAgent String?  @map("user_agent")
-  createdAt DateTime @default(now()) @map("created_at")
-  @@index([userId])
-  @@map("sessions")
-}
-
-model AcceptedTerms {
-  id           String   @id @default(uuid())
-  userId       String   @map("user_id")
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  termsVersion String   @map("terms_version")
-  acceptedAt   DateTime @default(now()) @map("accepted_at")
-  ipAddress    String?  @map("ip_address")
-  @@unique([userId, termsVersion])
-  @@map("accepted_terms")
-}
-
-model ExternalPreApproval {
-  id                     String                    @id @default(uuid())
-  buyerId                String                    @map("buyer_id")
-  buyer                  Buyer                     @relation(fields: [buyerId], references: [id])
-  status                 ExternalPreApprovalStatus @default(SUBMITTED)
-  lenderName             String?                   @map("lender_name")
-  approvedAmountCents    Int?                      @map("approved_amount_cents")
-  aprRate                Float?                    @map("apr_rate")
-  termMonths             Int?                      @map("term_months")
-  expiryDate             DateTime?                 @map("expiry_date")
-  documentUrl            String?                   @map("document_url")
-  reviewedAt             DateTime?                 @map("reviewed_at")
-  reviewedBy             String?                   @map("reviewed_by")
-  rejectionReason        String?                   @map("rejection_reason")
-  additionalInfoRequired String?                   @map("additional_info_required")
-  createdAt              DateTime                  @default(now()) @map("created_at")
-  updatedAt              DateTime                  @updatedAt @map("updated_at")
-  @@map("external_pre_approvals")
-}
-
-model TradeInSubmission {
-  id               String           @id @default(uuid())
-  buyerId          String           @map("buyer_id")
-  buyer            Buyer            @relation(fields: [buyerId], references: [id])
-  vin              String?
-  year             Int
-  make             String
-  model            String
-  trim             String?
-  mileage          Int?
-  condition        TradeInCondition
-  loanStatus       String?          @map("loan_status")
-  loanBalanceCents Int?             @map("loan_balance_cents")
-  notes            String?
-  status           TradeInStatus    @default(SUBMITTED)
-  valuationCents   Int?             @map("valuation_cents")
-  valuedAt         DateTime?        @map("valued_at")
-  createdAt        DateTime         @default(now()) @map("created_at")
-  updatedAt        DateTime         @updatedAt @map("updated_at")
-  @@map("trade_in_submissions")
-}
-
-model Financing {
-  id                  String         @id @default(uuid())
-  dealId              String         @unique @map("deal_id")
-  deal                Deal           @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  path                FinancingPath
-  selectedAt          DateTime       @default(now()) @map("selected_at")
-  lenderName          String?        @map("lender_name")
-  approvedAmountCents Int?           @map("approved_amount_cents")
-  aprRate             Float?         @map("apr_rate")
-  termMonths          Int?           @map("term_months")
-  monthlyPaymentCents Int?           @map("monthly_payment_cents")
-  status              FinancingStatus @default(PENDING)
-  @@map("financing")
-}
-
-model FinancingScenario {
-  id                  String  @id @default(uuid())
-  buyerId             String  @map("buyer_id")
-  buyer               Buyer   @relation(fields: [buyerId], references: [id])
-  dealId              String? @map("deal_id")
-  name                String
-  vehiclePriceCents   Int     @map("vehicle_price_cents")
-  downPaymentCents    Int     @default(0) @map("down_payment_cents")
-  loanAmountCents     Int     @map("loan_amount_cents")
-  aprRate             Float   @map("apr_rate")
-  termMonths          Int     @map("term_months")
-  monthlyPaymentCents Int     @map("monthly_payment_cents")
-  totalCostCents      Int     @map("total_cost_cents")
-  createdAt           DateTime @default(now()) @map("created_at")
-  @@map("financing_scenarios")
-}
-
-model InsuranceQuote {
-  id              String               @id @default(uuid())
-  buyerId         String               @map("buyer_id")
-  buyer           Buyer                @relation(fields: [buyerId], references: [id])
-  dealId          String?              @map("deal_id")
-  status          InsuranceQuoteStatus @default(PENDING)
-  providerName    String?              @map("provider_name")
-  premiumCents    Int?                 @map("premium_cents")
-  coverageType    String?              @map("coverage_type")
-  deductibleCents Int?                 @map("deductible_cents")
-  expiresAt       DateTime?            @map("expires_at")
-  isMock          Boolean              @default(false) @map("is_mock")
-  createdAt       DateTime             @default(now()) @map("created_at")
-  updatedAt       DateTime             @updatedAt @map("updated_at")
-  @@map("insurance_quotes")
-}
-
-model InsurancePolicy {
-  id           String                @id @default(uuid())
-  buyerId      String                @map("buyer_id")
-  buyer        Buyer                 @relation(fields: [buyerId], references: [id])
-  dealId       String?               @map("deal_id")
-  status       InsurancePolicyStatus @default(ACTIVE)
-  policyNumber String?               @map("policy_number")
-  providerName String?               @map("provider_name")
-  proofUrl     String?               @map("proof_url")
-  effectiveDate DateTime?            @map("effective_date")
-  expiryDate   DateTime?             @map("expiry_date")
-  verifiedAt   DateTime?             @map("verified_at")
-  verifiedBy   String?               @map("verified_by")
-  isExternal   Boolean               @default(false) @map("is_external")
-  createdAt    DateTime              @default(now()) @map("created_at")
-  @@map("insurance_policies")
-}
-
-model MessageThread {
-  id            String       @id @default(uuid())
-  dealId        String?      @map("deal_id")
-  requestId     String?      @map("request_id")
-  status        ThreadStatus @default(ACTIVE)
-  lastMessageAt DateTime?    @map("last_message_at")
-  flaggedAt     DateTime?    @map("flagged_at")
-  flagReason    String?      @map("flag_reason")
-  createdAt     DateTime     @default(now()) @map("created_at")
-  messages      Message[]
-  participants  MessageThreadParticipant[]
-  @@map("message_threads")
-}
-
-model MessageThreadParticipant {
-  id         String        @id @default(uuid())
-  threadId   String        @map("thread_id")
-  thread     MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  userId     String        @map("user_id")
-  role       String
-  lastReadAt DateTime?     @map("last_read_at")
-  @@unique([threadId, userId])
-  @@map("message_thread_participants")
-}
-
-model Message {
-  id                     String                @id @default(uuid())
-  threadId               String                @map("thread_id")
-  thread                 MessageThread         @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  senderId               String                @map("sender_id")
-  content                String
-  status                 MessageStatus         @default(SENT)
-  isRedacted             Boolean               @default(false) @map("is_redacted")
-  redactReason           String?               @map("redact_reason")
-  antiCircumventionFlag  AntiCircumventionFlag? @map("anti_circumvention_flag")
-  sentAt                 DateTime              @default(now()) @map("sent_at")
-  @@index([threadId])
-  @@map("messages")
-}
-
-model Document {
-  id         String       @id @default(uuid())
-  buyerId    String?      @map("buyer_id")
-  dealerId   String?      @map("dealer_id")
-  dealId     String?      @map("deal_id")
-  type       DocumentType
-  name       String
-  url        String
-  mimeType   String?      @map("mime_type")
-  sizeBytes  Int?         @map("size_bytes")
-  isVerified Boolean      @default(false) @map("is_verified")
-  verifiedAt DateTime?    @map("verified_at")
-  verifiedBy String?      @map("verified_by")
-  uploadedAt DateTime     @default(now()) @map("uploaded_at")
-  @@map("documents")
-}
-
-model DocumentRequest {
-  id           String                @id @default(uuid())
-  dealId       String?               @map("deal_id")
-  buyerId      String?               @map("buyer_id")
-  requestedBy  String                @map("requested_by")
-  documentType DocumentType          @map("document_type")
-  reason       String?
-  status       DocumentRequestStatus @default(PENDING)
-  dueAt        DateTime?             @map("due_at")
-  fulfilledAt  DateTime?             @map("fulfilled_at")
-  createdAt    DateTime              @default(now()) @map("created_at")
-  @@map("document_requests")
-}
-
-model RefinanceApplication {
-  id                    String                    @id @default(uuid())
-  leadId                String                    @unique @default(cuid()) @map("lead_id")
-  buyerId               String?                   @map("buyer_id")
-  buyer                 Buyer?                    @relation(fields: [buyerId], references: [id])
-
-  // Identity
-  firstName             String                    @map("first_name")
-  lastName              String                    @map("last_name")
-  email                 String
-  phone                 String
-
-  // Vehicle + loan snapshot (user-reported, not verified)
-  vehicleYear           Int                       @map("vehicle_year")
-  loanBalanceCents      Int                       @map("loan_balance_cents")
-  monthlyPaymentCents   Int                       @map("monthly_payment_cents")
-  interestRateBand      String                    @map("interest_rate_band")
-  employmentStatus      String                    @map("employment_status")
-  state                 String
-
-  // Consent + audit
-  consentGiven          Boolean                   @default(false) @map("consent_given")
-  consentTimestamp      DateTime?                 @map("consent_timestamp")
-  ipHash                String?                   @map("ip_hash")
-  source                String?
-
-  // Lifecycle
-  status                RefinanceStatus           @default(SUBMITTED)
-  redirectedAt          DateTime?                 @map("redirected_at")
-  createdAt             DateTime                  @default(now()) @map("created_at")
-  updatedAt             DateTime                  @updatedAt @map("updated_at")
-
-  complianceLogs        RefinanceComplianceLog[]
-
-  @@index([status])
-  @@index([state])
-  @@index([createdAt])
-  @@map("refinance_applications")
-}
-
-model RefinanceComplianceLog {
-  id               String              @id @default(uuid())
-  applicationId    String              @map("application_id")
-  application      RefinanceApplication @relation(fields: [applicationId], references: [id])
-  tcpaConsent      Boolean             @map("tcpa_consent")
-  consentTimestamp DateTime            @map("consent_timestamp")
-  ipAddress        String?             @map("ip_address")
-  source           String?
-  @@map("refinance_compliance_logs")
-}
-
-model SeoPageConfig {
-  id             String    @id @default(uuid())
-  pageSlug       String    @unique @map("page_slug")
-  title          String?
-  description    String?
-  canonicalUrl   String?   @map("canonical_url")
-  ogTitle        String?   @map("og_title")
-  ogDescription  String?   @map("og_description")
-  ogImage        String?   @map("og_image")
-  schema         Json?
-  healthScore    Int?      @map("health_score")
-  lastAuditAt    DateTime? @map("last_audit_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
-  @@map("seo_page_configs")
-}
-
-model SeoKeyword {
-  id           String   @id @default(uuid())
-  keyword      String   @unique
-  searchVolume Int?     @map("search_volume")
-  difficulty   Int?
-  targetPages  String[] @map("target_pages")
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
-  @@map("seo_keywords")
-}
-
-model SeoHealthScore {
-  id        String         @id @default(uuid())
-  pageSlug  String         @map("page_slug")
-  score     Int
-  issues    Json           @default("[]")
-  status    SeoHealthStatus
-  auditedAt DateTime       @default(now()) @map("audited_at")
-  @@map("seo_health_scores")
-}
-
-model AdminSupportNote {
-  id           String          @id @default(uuid())
-  adminId      String          @map("admin_id")
-  targetUserId String          @map("target_user_id")
-  type         SupportNoteType
-  content      String
-  isInternal   Boolean         @default(true) @map("is_internal")
-  createdAt    DateTime        @default(now()) @map("created_at")
-  @@map("admin_support_notes")
-}
-
-model AdminImpersonation {
-  id           String              @id @default(uuid())
-  adminId      String              @map("admin_id")
-  targetUserId String              @map("target_user_id")
-  reason       String
-  status       ImpersonationStatus @default(ACTIVE)
-  startedAt    DateTime            @default(now()) @map("started_at")
-  endedAt      DateTime?           @map("ended_at")
-  @@map("admin_impersonations")
-}
-
-model NudgeConfiguration {
-  id               String     @id @default(uuid())
-  stage            NudgeStage @unique
-  inAppDelayHours  Int        @default(4) @map("in_app_delay_hours")
-  emailDelayHours  Int        @default(48) @map("email_delay_hours")
-  maxDismissals    Int        @default(3) @map("max_dismissals")
-  cooldownHours    Int        @default(48) @map("cooldown_hours")
-  isActive         Boolean    @default(true) @map("is_active")
-  updatedAt        DateTime   @updatedAt @map("updated_at")
-  @@map("nudge_configurations")
-}
-
-model DealerScorecardWeights {
-  id               String   @id @default(uuid())
-  name             String   @default("default")
-  isActive         Boolean  @default(true) @map("is_active")
-  weightWinRate    Float    @default(0.35) @map("weight_win_rate")
-  weightCompletion Float    @default(0.25) @map("weight_completion")
-  weightResponse   Float    @default(0.20) @map("weight_response")
-  weightJunkFees   Float    @default(0.20) @map("weight_junk_fees")
-  createdBy        String?  @map("created_by")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-  @@map("dealer_scorecard_weights")
-}
-
-model DealerFeedConfig {
-  id                   String     @id @default(uuid())
-  dealerId             String     @unique @map("dealer_id")
-  dealer               Dealer     @relation("DealerFeedConfig", fields: [dealerId], references: [id], onDelete: Cascade)
-  feedUrl              String     @map("feed_url")
-  format               FeedFormat
-  refreshIntervalHours Int        @default(24) @map("refresh_interval_hours")
-  isActive             Boolean    @default(true) @map("is_active")
-  lastSyncAt           DateTime?  @map("last_sync_at")
-  lastSyncStatus       String?    @map("last_sync_status")
-  createdAt            DateTime   @default(now()) @map("created_at")
-  updatedAt            DateTime   @updatedAt @map("updated_at")
-  @@map("dealer_feed_configs")
-}
-
-model MarketCoverage {
-  id           String       @id @default(uuid())
-  city         String
-  state        String
-  zip          String
-  status       MarketStatus @default(ACTIVE)
-  listingCount Int          @default(0) @map("listing_count")
-  lastSyncAt   DateTime?    @map("last_sync_at")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  @@unique([city, state])
-  @@map("market_coverage")
-}
-
-model DealerDiscovery {
-  id             String                @id @default(uuid())
-  dealerName     String                @map("dealer_name")
-  city           String?
-  state          String?
-  discoveredFrom String                @map("discovered_from")
-  inventoryCount Int                   @default(0) @map("inventory_count")
-  status         DealerDiscoveryStatus @default(DISCOVERED)
-  contactedAt    DateTime?             @map("contacted_at")
-  invitedAt      DateTime?             @map("invited_at")
-  notes          String?
-  createdAt      DateTime              @default(now()) @map("created_at")
-  updatedAt      DateTime              @updatedAt @map("updated_at")
-  @@map("dealer_discoveries")
-}
-
-model AdminInventorySearchRun {
-  id               String        @id @default(uuid())
-  triggeredBy      String        @map("triggered_by")
-  params           Json
-  status           CronJobStatus @default(RUNNING)
-  adaptersRun      Int           @default(0) @map("adapters_run")
-  vehiclesFetched  Int           @default(0) @map("vehicles_fetched")
-  vehiclesUpserted Int           @default(0) @map("vehicles_upserted")
-  healthScore      Int?          @map("health_score")
-  startedAt        DateTime      @default(now()) @map("started_at")
-  completedAt      DateTime?     @map("completed_at")
-  error            String?
-  @@map("admin_inventory_search_runs")
-}
-
-model InventorySource {
-  id                String              @id @default(uuid())
-  type              InventorySourceType
-  name              String
-  isActive          Boolean             @default(true) @map("is_active")
-  lastRunAt         DateTime?           @map("last_run_at")
-  lastRunStatus     String?             @map("last_run_status")
-  vehiclesLastCount Int?                @map("vehicles_last_count")
-  createdAt         DateTime            @default(now()) @map("created_at")
-  syncRuns          InventorySyncRun[]
-  @@map("inventory_sources")
-}
-
-model InventorySyncRun {
-  id                  String          @id @default(uuid())
-  sourceId            String          @map("source_id")
-  source              InventorySource @relation(fields: [sourceId], references: [id])
-  status              SyncRunStatus
-  vehiclesFetched     Int             @default(0) @map("vehicles_fetched")
-  vehiclesUpserted    Int             @default(0) @map("vehicles_upserted")
-  vehiclesDeactivated Int             @default(0) @map("vehicles_deactivated")
-  healthScore         Int?            @map("health_score")
-  error               String?
-  startedAt           DateTime        @default(now()) @map("started_at")
-  completedAt         DateTime?       @map("completed_at")
-  @@map("inventory_sync_runs")
-}
-
-model AffiliatePayout {
-  id            String       @id @default(uuid())
-  affiliateId   String       @map("affiliate_id")
-  affiliate     Affiliate    @relation("AffiliatePayouts", fields: [affiliateId], references: [id])
-  amountCents   Int          @map("amount_cents")
-  status        PayoutStatus @default(PENDING)
-  method        String?
-  reference     String?
-  periodStart   DateTime     @map("period_start")
-  periodEnd     DateTime     @map("period_end")
-  requestedAt   DateTime     @default(now()) @map("requested_at")
-  processedAt   DateTime?    @map("processed_at")
-  failureReason String?      @map("failure_reason")
-  @@map("affiliate_payouts")
-}
-
-model AffiliatePayoutMethod {
-  id                 String    @id @default(uuid())
-  affiliateId        String    @unique @map("affiliate_id")
-  affiliate          Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
-
-  method             String    @default("CHECK")
-  bankName           String?   @map("bank_name")
-  accountType        String?   @map("account_type")
-  routingNumberLast4 String?   @map("routing_number_last4")
-  accountNumberLast4 String?   @map("account_number_last4")
-  zelleEmail         String?   @map("zelle_email")
-  paypalEmail        String?   @map("paypal_email")
-
-  taxIdLast4         String?   @map("tax_id_last4")
-  businessName       String?   @map("business_name")
-  taxClassification  String?   @map("tax_classification")
-
-  verifiedAt         DateTime? @map("verified_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-
-  @@map("affiliate_payout_methods")
-}
-
-model AffiliateDocument {
-  id            String    @id @default(uuid())
-  affiliateId   String    @map("affiliate_id")
-  affiliate     Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
-  type          String
-  fileName      String    @map("file_name")
-  fileUrl       String    @map("file_url")
-  fileSizeBytes Int       @map("file_size_bytes")
-  status        String    @default("PENDING")
-  uploadedAt    DateTime  @default(now()) @map("uploaded_at")
-  reviewedAt    DateTime? @map("reviewed_at")
-  notes         String?
-
-  @@index([affiliateId])
-  @@map("affiliate_documents")
-}
-
-model AffiliateProfile {
-  id              String    @id @default(uuid())
-  affiliateId     String    @unique @map("affiliate_id")
-  firstName       String?   @map("first_name")
-  lastName        String?   @map("last_name")
-  phone           String?
-  dateOfBirth     String?   @map("date_of_birth")
-  addressLine1    String?   @map("address_line1")
-  addressLine2    String?   @map("address_line2")
-  city            String?
-  state           String?
-  zip             String?
-  country         String?   @default("US")
-  entityType      String?   @map("entity_type")
-  businessName    String?   @map("business_name")
-  dbaName         String?   @map("dba_name")
-  businessAddress String?   @map("business_address")
-  einLast4        String?   @map("ein_last4")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-  affiliate       Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
-  @@map("affiliate_profiles")
-}
-
-model AffiliateTaxProfile {
-  id                 String    @id @default(uuid())
-  affiliateId        String    @unique @map("affiliate_id")
-  taxClassification  String?   @map("tax_classification")
-  tinLast4           String?   @map("tin_last4")
-  tinType            String?   @map("tin_type")
-  legalName          String?   @map("legal_name")
-  certified          Boolean   @default(false)
-  certifiedAt        DateTime? @map("certified_at")
-  attestationText    String?   @map("attestation_text")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  affiliate          Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
-  @@map("affiliate_tax_profiles")
-}
-
-model AffiliatePaymentProfile {
-  id            String    @id @default(uuid())
-  affiliateId   String    @unique @map("affiliate_id")
-  payoutMethod  String?   @map("payout_method")
-  holderName    String?   @map("holder_name")
-  routingLast4  String?   @map("routing_last4")
-  accountLast4  String?   @map("account_last4")
-  accountType   String?   @map("account_type")
-  paypalEmail   String?   @map("paypal_email")
-  zellePhone    String?   @map("zelle_phone")
-  verified      Boolean   @default(false)
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-  affiliate     Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
-  @@map("affiliate_payment_profiles")
-}
-
-model AffiliateOnboardingReview {
-  id               String           @id @default(uuid())
-  affiliateId      String           @unique @map("affiliate_id")
-  status           OnboardingStatus @default(NOT_STARTED)
-  currentStep      Int              @default(1) @map("current_step")
-  submittedAt      DateTime?        @map("submitted_at")
-  reviewedAt       DateTime?        @map("reviewed_at")
-  reviewedBy       String?          @map("reviewed_by")
-  decisionNote     String?          @map("decision_note")
-  internalNotes    String?          @map("internal_notes")
-  correctionItems  String[]         @map("correction_items")
-  createdAt        DateTime         @default(now()) @map("created_at")
-  updatedAt        DateTime         @updatedAt @map("updated_at")
-  affiliate        Affiliate        @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
-  @@map("affiliate_onboarding_reviews")
-}
-
-enum OnboardingStatus {
-  NOT_STARTED
   IN_PROGRESS
-  SUBMITTED
-  UNDER_REVIEW
-  NEEDS_CORRECTION
-  APPROVED
-  REJECTED
-}
-
-model ContractVersion {
-  id              String                @id @default(uuid())
-  dealId          String                @map("deal_id")
-  deal            Deal                  @relation(fields: [dealId], references: [id])
-  documentUrl     String                @map("document_url")
-  version         Int                   @default(1)
-  uploadedBy      String                @map("uploaded_by")
-  status          ContractVersionStatus @default(UPLOADED)
-  scanRunAt       DateTime?             @map("scan_run_at")
-  approvedAt      DateTime?             @map("approved_at")
-  rejectedAt      DateTime?             @map("rejected_at")
-  rejectionReason String?               @map("rejection_reason")
-  uploadedAt      DateTime              @default(now()) @map("uploaded_at")
-  @@map("contract_versions")
-}
-
-model AuditLog {
-  id         String          @id @default(uuid())
-  adminId    String?         @map("admin_id")
-  userId     String?         @map("user_id")
-  action     AdminActionType
-  entityType String          @map("entity_type")
-  entityId   String          @map("entity_id")
-  reason     String?
-  ipAddress  String?         @map("ip_address")
-  metadata   Json?
-  createdAt  DateTime        @default(now()) @map("created_at")
-  @@index([entityType, entityId])
-  @@index([adminId])
-  @@map("audit_logs")
-}
-
-enum BriefingStatus {
-  PENDING
-  DELIVERED
-  FAILED
-}
-
-enum AffiliateLevel {
-  L1
-  L2
-  L3
-}
-
-enum NotificationPriority {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
-}
-
-enum TrustCheckStatus {
-  PASS
-  FLAG
-  BLOCK
-}
-
-enum HealthCheckStatus {
-  HEALTHY
-  DEGRADED
-  DOWN
-}
-
-enum ContractScanRuleType {
-  FEE_CAP
-  JUNK_FEE_KEYWORD
-  APR_VALIDATION
-  PAYMENT_PACKING
-  DISCLOSURE_CHECK
-  FINANCE_MARKUP
-}
-
-enum VehicleRequestPriority {
-  STANDARD
-  EXPEDITED
-  VIP
-}
-
-enum WorkflowAutomationStatus {
-  PENDING
-  TRIGGERED
-  COMPLETED
-  SKIPPED
-  FAILED
-}
-
-// ─── Completing to 136 models (60 additions) ─────────────────────────────────
-
-// Group 1: Authentication & Security
-model AdminSession {
-  id           String   @id @default(uuid())
-  adminId      String   @map("admin_id")
-  token        String   @unique
-  ipAddress    String?  @map("ip_address")
-  userAgent    String?  @map("user_agent")
-  expiresAt    DateTime @map("expires_at")
-  createdAt    DateTime @default(now()) @map("created_at")
-  @@index([adminId])
-  @@map("admin_sessions")
-}
-
-model AdminLoginLog {
-  id         String   @id @default(uuid())
-  adminId    String?  @map("admin_id")
-  email      String
-  success    Boolean
-  ipAddress  String?  @map("ip_address")
-  failReason String?  @map("fail_reason")
-  createdAt  DateTime @default(now()) @map("created_at")
-  @@map("admin_login_logs")
-}
-
-model CircumventionAttempt {
-  id         String                @id @default(uuid())
-  threadId   String                @map("thread_id")
-  messageId  String                @map("message_id")
-  userId     String                @map("user_id")
-  flag       AntiCircumventionFlag
-  pattern    String
-  detectedAt DateTime              @default(now()) @map("detected_at")
-  resolved   Boolean               @default(false)
-  resolvedBy String?               @map("resolved_by")
-  @@map("circumvention_attempts")
-}
-
-model IdentityFirewallEntry {
-  id          String                     @id @default(uuid())
-  buyerId     String?                    @map("buyer_id")
-  dealerId    String?                    @map("dealer_id")
-  flag        AntiCircumventionFlag
-  description String
-  riskScore   Int                        @default(0) @map("risk_score")
-  createdAt   DateTime                   @default(now()) @map("created_at")
-  @@map("identity_firewall_entries")
-}
-
-model AiKillSwitchLog {
-  id        String   @id @default(uuid())
-  enabled   Boolean
-  reason    String?
-  adminId   String?  @map("admin_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  @@map("ai_kill_switch_logs")
-}
-
-model WebhookEvent {
-  id         String   @id @default(uuid())
-  source     String   // stripe | docusign | microbilt
-  eventType  String   @map("event_type")
-  payload    Json
-  processed  Boolean  @default(false)
-  error      String?
-  receivedAt DateTime @default(now()) @map("received_at")
-  @@map("webhook_events")
-}
-
-model RateLimitEvent {
-  id         String   @id @default(uuid())
-  identifier String   // IP, user ID, or API key
-  endpoint   String
-  hitAt      DateTime @default(now()) @map("hit_at")
-  @@index([identifier, endpoint])
-  @@map("rate_limit_events")
-}
-
-model CsrfToken {
-  id        String   @id @default(uuid())
-  token     String   @unique
-  userId    String?  @map("user_id")
-  expiresAt DateTime @map("expires_at")
-  createdAt DateTime @default(now()) @map("created_at")
-  @@map("csrf_tokens")
-}
-
-// Group 2: Deal & Auction
-model DealStatusHistory {
-  id         String   @id @default(uuid())
-  dealId     String   @map("deal_id")
-  fromStatus String   @map("from_status")
-  toStatus   String   @map("to_status")
-  actorId    String?  @map("actor_id")
-  actorRole  String?  @map("actor_role")
-  reason     String?
-  createdAt  DateTime @default(now()) @map("created_at")
-  @@index([dealId])
-  @@map("deal_status_history")
-}
-
-model ServiceFeePayment {
-  id                String   @id @default(uuid())
-  dealId            String   @unique @map("deal_id")
-  amountCents       Int      @map("amount_cents")
-  depositCreditCents Int     @map("deposit_credit_cents")
-  netAmountCents    Int      @map("net_amount_cents")
-  stripePaymentIntentId String? @unique @map("stripe_payment_intent_id")
-  paidAt            DateTime? @map("paid_at")
-  createdAt         DateTime @default(now()) @map("created_at")
-  @@map("service_fee_payments")
-}
-
-model AuctionExtensionLog {
-  id          String   @id @default(uuid())
-  auctionId   String   @map("auction_id")
-  extendedBy  String   @map("extended_by")
-  hoursAdded  Int      @map("hours_added")
-  originalEnd DateTime @map("original_end")
-  newEnd      DateTime @map("new_end")
-  reason      String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  @@map("auction_extension_logs")
-}
-
-model DealerCapacityConfig {
-  id                  String  @id @default(uuid())
-  dealerId            String  @unique @map("dealer_id")
-  maxAuctionLoad      Int     @default(5) @map("max_auction_load")
-  preferredMakes      String[] @map("preferred_makes")
-  preferredPriceMin   Int?    @map("preferred_price_min")
-  preferredPriceMax   Int?    @map("preferred_price_max")
-  updatedAt           DateTime @updatedAt @map("updated_at")
-  @@map("dealer_capacity_configs")
-}
-
-model JunkFeePattern {
-  id          String   @id @default(uuid())
-  name        String
-  keywords    String[]
-  severity    String   @default("MEDIUM")
-  category    String   // DOCUMENTATION | PREP | ADDON | WARRANTY | INSURANCE
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  @@map("junk_fee_patterns")
-}
-
-model BestPriceCalculationLog {
-  id          String   @id @default(uuid())
-  auctionId   String   @map("auction_id")
-  termMonths  Int      @map("term_months")
-  offerCount  Int      @map("offer_count")
-  weights     Json
-  result      Json
-  calculatedAt DateTime @default(now()) @map("calculated_at")
-  @@map("best_price_calculation_logs")
-}
-
-model RevenueSnapshot {
-  id              String   @id @default(uuid())
-  period          String   // YYYY-MM
-  totalRevenue    Int      @map("total_revenue")
-  dealsCompleted  Int      @map("deals_completed")
-  avgDealValue    Int      @map("avg_deal_value")
-  projectedRevenue Int     @map("projected_revenue")
-  createdAt       DateTime @default(now()) @map("created_at")
-  @@unique([period])
-  @@map("revenue_snapshots")
-}
-
-model DealTimeline {
-  id          String   @id @default(uuid())
-  dealId      String   @map("deal_id")
-  stage       String
-  title       String
-  description String?
-  actorId     String?  @map("actor_id")
-  actorRole   String?  @map("actor_role")
-  occurredAt  DateTime @default(now()) @map("occurred_at")
-  @@index([dealId, occurredAt])
-  @@map("deal_timeline")
-}
-
-// Group 3: Offer & Search
-model SearchFilter {
-  id          String   @id @default(uuid())
-  buyerId     String   @map("buyer_id")
-  name        String?
-  make        String?
-  model       String?
-  yearMin     Int?     @map("year_min")
-  yearMax     Int?     @map("year_max")
-  priceMax    Int?     @map("price_max")
-  mileageMax  Int?     @map("mileage_max")
-  bodyStyle   String?  @map("body_style")
-  isDefault   Boolean  @default(false) @map("is_default")
-  createdAt   DateTime @default(now()) @map("created_at")
-  @@map("search_filters")
-}
-
-model BuyerInventoryPreference {
-  id              String   @id @default(uuid())
-  buyerId         String   @unique @map("buyer_id")
-  preferredMakes  String[] @map("preferred_makes")
-  preferredBodyStyles String[] @map("preferred_body_styles")
-  maxMileage      Int?     @map("max_mileage")
-  minYear         Int?     @map("min_year")
-  features        String[]
-  updatedAt       DateTime @updatedAt @map("updated_at")
-  @@map("buyer_inventory_preferences")
-}
-
-model VehicleMatchScore {
-  id              String   @id @default(uuid())
-  buyerId         String   @map("buyer_id")
-  inventoryItemId String   @map("inventory_item_id")
-  score           Float
-  factors         Json
-  calculatedAt    DateTime @default(now()) @map("calculated_at")
-  @@unique([buyerId, inventoryItemId])
-  @@map("vehicle_match_scores")
-}
-
-model VehicleComparisonSaved {
-  id          String   @id @default(uuid())
-  buyerId     String   @map("buyer_id")
-  vehicleIds  String[] @map("vehicle_ids")
-  name        String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  @@map("vehicle_comparisons_saved")
-}
-
-model InventoryPriceAlert {
-  id              String   @id @default(uuid())
-  buyerId         String   @map("buyer_id")
-  inventoryItemId String   @map("inventory_item_id")
-  targetPriceCents Int     @map("target_price_cents")
-  triggered       Boolean  @default(false)
-  triggeredAt     DateTime? @map("triggered_at")
-  createdAt       DateTime @default(now()) @map("created_at")
-  @@map("inventory_price_alerts")
-}
-
-// Group 4: Notifications & Messaging
-model NotificationPreference {
-  id               String  @id @default(uuid())
-  userId           String  @unique @map("user_id")
-  emailEnabled     Boolean @default(true) @map("email_enabled")
-  inAppEnabled     Boolean @default(true) @map("in_app_enabled")
-  auctionUpdates   Boolean @default(true) @map("auction_updates")
-  dealUpdates      Boolean @default(true) @map("deal_updates")
-  commissionUpdates Boolean @default(true) @map("commission_updates")
-  marketingEmails  Boolean @default(false) @map("marketing_emails")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-  @@map("notification_preferences")
-}
-
-model NotificationBatch {
-  id          String   @id @default(uuid())
-  type        String
-  count       Int
-  sentAt      DateTime @default(now()) @map("sent_at")
-  failed      Int      @default(0)
-  @@map("notification_batches")
-}
-
-model MessageReadReceipt {
-  id         String   @id @default(uuid())
-  messageId  String   @map("message_id")
-  userId     String   @map("user_id")
-  readAt     DateTime @default(now()) @map("read_at")
-  @@unique([messageId, userId])
-  @@map("message_read_receipts")
-}
-
-model PlatformAlert {
-  id          String           @id @default(uuid())
-  level       HealthAlertLevel
-  title       String
-  body        String
-  source      String           // cron | service | webhook
-  isResolved  Boolean          @default(false) @map("is_resolved")
-  resolvedAt  DateTime?        @map("resolved_at")
-  resolvedBy  String?          @map("resolved_by")
-  createdAt   DateTime         @default(now()) @map("created_at")
-  @@map("platform_alerts")
-}
-
-model HealthCheckLog {
-  id             String   @id @default(uuid())
-  status         String   // healthy | degraded | down
-  database       Boolean
-  inventoryHealth Int      @map("inventory_health")
-  activeAuctions Int      @map("active_auctions")
-  pendingOFAC    Int      @map("pending_ofac")
-  alerts         Json     @default("[]")
-  checkedAt      DateTime @default(now()) @map("checked_at")
-  @@map("health_check_logs")
-}
-
-// Group 5: Affiliate & Payments
-model AffiliateReferral {
-  id            String   @id @default(uuid())
-  affiliateId   String   @map("affiliate_id")
-  referredUserId String  @map("referred_user_id")
-  referralCode  String   @map("referral_code")
-  signedUpAt    DateTime @default(now()) @map("signed_up_at")
-  firstDealAt   DateTime? @map("first_deal_at")
-  totalDeals    Int       @default(0) @map("total_deals")
-  @@unique([affiliateId, referredUserId])
-  @@map("affiliate_referrals")
-}
-
-model AffiliateComplianceRecord {
-  id               String                    @id @default(uuid())
-  affiliateId      String                    @unique @map("affiliate_id")
-  status           AffiliateComplianceStatus @default(PENDING_ACKNOWLEDGMENT)
-  acknowledgedAt   DateTime?                 @map("acknowledged_at")
-  disclosureVersion String?                  @map("disclosure_version")
-  ipAddress         String?                  @map("ip_address")
-  userAgent         String?                  @map("user_agent")
-  violations       Json                      @default("[]")
-  updatedAt        DateTime                  @updatedAt @map("updated_at")
-  @@map("affiliate_compliance_records")
-}
-
-model AffiliateTierHistory {
-  id          String       @id @default(uuid())
-  affiliateId String       @map("affiliate_id")
-  fromTier    AffiliateTier
-  toTier      AffiliateTier
-  reason      String?
-  changedAt   DateTime     @default(now()) @map("changed_at")
-  @@map("affiliate_tier_history")
-}
-
-model AffiliatePayoutSchedule {
-  id            String       @id @default(uuid())
-  affiliateId   String       @unique @map("affiliate_id")
-  payoutDay     Int          @default(1) @map("payout_day") // Day of month
-  minimumCents  Int          @default(2500) @map("minimum_cents")
-  method        String       @default("BANK_TRANSFER")
-  isActive      Boolean      @default(true) @map("is_active")
-  updatedAt     DateTime     @updatedAt @map("updated_at")
-  @@map("affiliate_payout_schedules")
-}
-
-model DealerPayment {
-  id            String   @id @default(uuid())
-  dealerId      String   @map("dealer_id")
-  dealId        String?  @map("deal_id")
-  amountCents   Int      @map("amount_cents")
-  type          String   // COMMISSION | BONUS | CLAWBACK
-  status        String   @default("PENDING")
-  processedAt   DateTime? @map("processed_at")
-  createdAt     DateTime @default(now()) @map("created_at")
-  @@map("dealer_payments")
-}
-
-model SystemConfiguration {
-  id          String   @id @default(uuid())
-  key         String   @unique
-  value       Json
-  description String?
-  updatedBy   String?  @map("updated_by")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  @@map("system_configurations")
-}
-
-// Group 6: Inventory & Vehicles
-model InventoryQualityScore {
-  id              String   @id @default(uuid())
-  inventoryItemId String   @unique @map("inventory_item_id")
-  score           Int
-  photoScore      Int      @map("photo_score")
-  dataScore       Int      @map("data_score")
-  vinVerified     Boolean  @default(false) @map("vin_verified")
-  priceScore      Int      @map("price_score")
-  computedAt      DateTime @default(now()) @map("computed_at")
-  @@map("inventory_quality_scores")
-}
-
-model InventoryFeedLog {
-  id          String   @id @default(uuid())
-  dealerId    String   @map("dealer_id")
-  feedUrl     String   @map("feed_url")
-  status      String   // SUCCESS | FAILED | PARTIAL
-  vehiclesProcessed Int @default(0) @map("vehicles_processed")
-  vehiclesAdded Int   @default(0) @map("vehicles_added")
-  vehiclesUpdated Int @default(0) @map("vehicles_updated")
-  error       String?
-  startedAt   DateTime @default(now()) @map("started_at")
-  completedAt DateTime? @map("completed_at")
-  @@map("inventory_feed_logs")
-}
-
-model VehicleRequestMatchResult {
-  id            String   @id @default(uuid())
-  requestId     String   @map("request_id")
-  inventoryItemId String? @map("inventory_item_id")
-  matchScore    Float?   @map("match_score")
-  source        String   // LANE_1 | LANE_2 | LANE_3 | CUSTOM
-  priceCents    Int?     @map("price_cents")
-  notes         String?
-  foundAt       DateTime @default(now()) @map("found_at")
-  @@map("vehicle_request_match_results")
-}
-
-model BuyerCreditHistory {
-  id              String   @id @default(uuid())
-  buyerId         String   @map("buyer_id")
-  prequalId       String   @map("prequal_id")
-  inquiryType     String   @default("SOFT_PULL") @map("inquiry_type")
-  provider        String   @default("MicroBilt")
-  resultSummary   String?  @map("result_summary") // Never store raw scores
-  conductedAt     DateTime @default(now()) @map("conducted_at")
-  @@index([buyerId])
-  @@map("buyer_credit_history")
-}
-
-model TradeInValuation {
-  id                  String   @id @default(uuid())
-  tradeInId           String   @unique @map("trade_in_id")
-  marketValueCents    Int?     @map("market_value_cents")
-  tradeValueCents     Int?     @map("trade_value_cents")
-  valuationSource     String?  @map("valuation_source")
-  valuedAt            DateTime? @map("valued_at")
-  notes               String?
-  @@map("trade_in_valuations")
-}
-
-// Group 7: Documents & Contracts
-model DocumentVersion {
-  id           String   @id @default(uuid())
-  documentId   String   @map("document_id")
-  version      Int      @default(1)
-  url          String
-  sizeBytes    Int?     @map("size_bytes")
-  isActive     Boolean  @default(true) @map("is_active")
-  uploadedAt   DateTime @default(now()) @map("uploaded_at")
-  @@map("document_versions")
-}
-
-model ContractScanRuleHistory {
-  id         String   @id @default(uuid())
-  ruleId     String   @map("rule_id")
-  field      String   // Which field changed
-  oldValue   Json     @map("old_value")
-  newValue   Json     @map("new_value")
-  changedBy  String   @map("changed_by")
-  changedAt  DateTime @default(now()) @map("changed_at")
-  @@map("contract_scan_rule_history")
-}
-
-model ContractScanHistory {
-  id          String   @id @default(uuid())
-  dealId      String   @map("deal_id")
-  version     Int
-  score       Int
-  status      String
-  scanRunAt   DateTime @default(now()) @map("scan_run_at")
-  triggeredBy String?  @map("triggered_by") // "auto" | admin ID
-  @@index([dealId])
-  @@map("contract_scan_history")
-}
-
-model ExternalPreApprovalDocument {
-  id            String   @id @default(uuid())
-  preApprovalId String   @map("pre_approval_id")
-  documentUrl   String   @map("document_url")
-  mimeType      String?  @map("mime_type")
-  sizeBytes     Int?     @map("size_bytes")
-  uploadedAt    DateTime @default(now()) @map("uploaded_at")
-  verifiedAt    DateTime? @map("verified_at")
-  @@map("external_pre_approval_documents")
-}
-
-model AiContextCache {
-  id          String   @id @default(uuid())
-  buyerId     String   @unique @map("buyer_id")
-  summary     String?
-  keyFacts    Json     @default("{}")
-  concerns    Json     @default("[]")
-  lastUpdated DateTime @updatedAt @map("last_updated")
-  @@map("ai_context_cache")
-}
-
-// Group 8: Admin & Monitoring
-model SlaViolation {
-  id           String   @id @default(uuid())
-  entityType   String   @map("entity_type")
-  entityId     String   @map("entity_id")
-  slaType      String   @map("sla_type")
-  breachedAt   DateTime @map("breached_at")
-  hoursOverdue Float    @map("hours_overdue")
-  resolved     Boolean  @default(false)
-  resolvedAt   DateTime? @map("resolved_at")
-  @@map("sla_violations")
-}
-
-model CronJobLog {
-  id          String        @id @default(uuid())
-  cronName    String        @map("cron_name")
-  status      CronJobStatus
-  duration    Int?          // milliseconds
-  result      Json?
-  error       String?
-  startedAt   DateTime      @default(now()) @map("started_at")
-  completedAt DateTime?     @map("completed_at")
-  @@map("cron_job_logs")
-}
-
-model AdminBriefingHistory {
-  id          String   @id @default(uuid())
-  period      String   // YYYY-MM-DD
-  content     String
-  deliveredTo String[] @map("delivered_to")
-  model       String   @default("llama-3.3-70b-versatile")
-  createdAt   DateTime @default(now()) @map("created_at")
-  @@map("admin_briefing_history")
-}
-
-model BestPriceWeightHistory {
-  id          String   @id @default(uuid())
-  configId    String   @map("config_id")
-  weights     Json
-  changedBy   String   @map("changed_by")
-  changedAt   DateTime @default(now()) @map("changed_at")
-  @@map("best_price_weight_history")
-}
-
-model FeatureFlag {
-  id          String   @id @default(uuid())
-  key         String   @unique
-  enabled     Boolean  @default(false)
-  description String?
-  conditions  Json?    // Optional conditions (role, env, etc.)
-  updatedBy   String?  @map("updated_by")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  @@map("feature_flags")
-}
-
-model SystemConfigHistory {
-  id          String   @id @default(uuid())
-  configKey   String   @map("config_key")
-  oldValue    Json?    @map("old_value")
-  newValue    Json     @map("new_value")
-  changedBy   String   @map("changed_by")
-  changedAt   DateTime @default(now()) @map("changed_at")
-  @@map("system_config_history")
-}
-
-// Group 9: SEO & Analytics
-model SeoRedirect {
-  id          String   @id @default(uuid())
-  fromPath    String   @unique @map("from_path")
-  toPath      String   @map("to_path")
-  statusCode  Int      @default(301) @map("status_code")
-  isActive    Boolean  @default(true) @map("is_active")
-  createdAt   DateTime @default(now()) @map("created_at")
-  @@map("seo_redirects")
-}
-
-model SeoSitemapEntry {
-  id           String   @id @default(uuid())
-  url          String   @unique
-  priority     Float    @default(0.5)
-  changeFreq   String   @default("weekly") @map("change_freq")
-  lastModified DateTime @updatedAt @map("last_modified")
-  isActive     Boolean  @default(true) @map("is_active")
-  @@map("seo_sitemap_entries")
-}
-
-model AnalyticsCohort {
-  id          String   @id @default(uuid())
-  name        String
-  definition  Json
-  period      String
-  size        Int
-  metrics     Json
-  computedAt  DateTime @default(now()) @map("computed_at")
-  @@map("analytics_cohorts")
-}
-
-model FaithContentAuditLog {
-  id          String   @id @default(uuid())
-  adminId     String   @map("admin_id")
-  action      String   // VERSE_ADDED | VERSE_UPDATED | ASSIGNMENT_CHANGED | HOPE_UPDATED
-  entityId    String?  @map("entity_id")
-  description String
-  createdAt   DateTime @default(now()) @map("created_at")
-  @@map("faith_content_audit_logs")
-}
-
-// Group 10: User Preferences & Settings
-model UserPreference {
-  id        String   @id @default(uuid())
-  userId    String   @unique @map("user_id")
-  theme     String   @default("light")
-  language  String   @default("en")
-  timezone  String   @default("America/New_York")
-  metadata  Json     @default("{}")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  @@map("user_preferences")
-}
-
-model DealerVerification {
-  id           String   @id @default(uuid())
-  dealerId     String   @unique @map("dealer_id")
-  licenseNum   String?  @map("license_num")
-  state        String?
-  verified     Boolean  @default(false)
-  verifiedAt   DateTime? @map("verified_at")
-  verifiedBy   String?   @map("verified_by")
-  documents    Json      @default("[]")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  @@map("dealer_verifications")
-}
-
-model DealerLicense {
-  id           String   @id @default(uuid())
-  dealerId     String   @map("dealer_id")
-  licenseNum   String   @map("license_num")
-  state        String
-  expiresAt    DateTime? @map("expires_at")
-  documentUrl  String?   @map("document_url")
-  isActive     Boolean   @default(true) @map("is_active")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  @@map("dealer_licenses")
-}
-
-model BuyerNudgePreference {
-  id              String  @id @default(uuid())
-  buyerId         String  @unique @map("buyer_id")
-  inAppEnabled    Boolean @default(true) @map("in_app_enabled")
-  emailEnabled    Boolean @default(true) @map("email_enabled")
-  dismissedStages String[] @map("dismissed_stages")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-  @@map("buyer_nudge_preferences")
-}
-
-model AiChatSession {
-  id          String   @id @default(uuid())
-  buyerId     String   @map("buyer_id")
-  agentType   String   @default("general") @map("agent_type")
-  startedAt   DateTime @default(now()) @map("started_at")
-  endedAt     DateTime? @map("ended_at")
-  messageCount Int     @default(0) @map("message_count")
-  messages    AiChatMessage[]
-  @@map("ai_chat_sessions")
-}
-
-model AiChatMessage {
-  id        String        @id @default(uuid())
-  sessionId String        @map("session_id")
-  session   AiChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  role      String        // user | assistant
-  content   String
-  model     String?       // llama-3.3-70b-versatile | mixtral-8x7b-32768
-  sentAt    DateTime      @default(now()) @map("sent_at")
-  @@map("ai_chat_messages")
-}
-
-model InsuranceProvider {
-  id           String  @id @default(uuid())
-  name         String  @unique
-  apiKey       String? @map("api_key")
-  baseUrl      String? @map("base_url")
-  isActive     Boolean @default(true) @map("is_active")
-  isMockOnly   Boolean @default(false) @map("is_mock_only")
-  supportedStates String[] @map("supported_states")
-  createdAt    DateTime @default(now()) @map("created_at")
-  @@map("insurance_providers")
-}
-
-// ─── Dealer Application & Invitation (Area 1 & 3) ────────────────────────────
-
-enum DealerApplicationStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
-enum DealerInvitationStatus {
-  PENDING
+  MATCHED
+  OFFERED
   ACCEPTED
-  EXPIRED
+  COMPLETED
   CANCELLED
-}
-
-model DealerApplication {
-  id             String                  @id @default(uuid())
-  dealershipName String                  @map("dealership_name")
-  dealershipType String                  @map("dealership_type")
-  state          String
-  city           String
-  zip            String
-  licenseNumber  String                  @map("license_number")
-  contactName    String                  @map("contact_name")
-  contactEmail   String                  @map("contact_email")
-  contactPhone   String?                 @map("contact_phone")
-  annualVolume   String?                 @map("annual_volume")
-  notes          String?
-  status         DealerApplicationStatus @default(PENDING)
-  reviewedBy     String?                 @map("reviewed_by")
-  reviewedAt     DateTime?               @map("reviewed_at")
-  rejectReason   String?                 @map("reject_reason")
-  dealerId       String?                 @unique @map("dealer_id")
-  createdAt      DateTime                @default(now()) @map("created_at")
-  updatedAt      DateTime                @updatedAt @map("updated_at")
-
-  @@index([status])
-  @@map("dealer_applications")
-}
-
-model DealerInvitation {
-  id              String                 @id @default(uuid())
-  dealershipName  String                 @map("dealership_name")
-  contactName     String                 @map("contact_name")
-  email           String
-  personalMessage String?                @map("personal_message")
-  token           String                 @unique
-  expiresAt       DateTime               @map("expires_at")
-  status          DealerInvitationStatus @default(PENDING)
-  invitedBy       String                 @map("invited_by")
-  acceptedAt      DateTime?              @map("accepted_at")
-  dealerId        String?                @unique @map("dealer_id")
-  createdAt       DateTime               @default(now()) @map("created_at")
-  updatedAt       DateTime               @updatedAt @map("updated_at")
-
-  @@index([status])
-  @@index([token])
-  @@map("dealer_invitations")
-}
-
-// ─── Vehicle Offer System ─────────────────────────────────────────────────
-// Admin-generated dealer offer links. Multiple dealers can submit competing
-// offers for one buyer request. Each submission may include up to 3 vehicle
-// alternatives. Buyers review selected offers via tokenized links and
-// accept/decline individually.
-
-model VehicleOffer {
-  id                  String    @id @default(uuid())
-  token               String    @unique @default(uuid())
-  vehicleYear         Int       @map("vehicle_year")
-  vehicleMake         String    @map("vehicle_make")
-  vehicleModel        String    @map("vehicle_model")
-  vehicleTrim         String?   @map("vehicle_trim")
-  vehicleMileage      Int?      @map("vehicle_mileage")
-  vehicleVin          String?   @map("vehicle_vin")
-  vehicleColor        String?   @map("vehicle_color")
-  vehicleCondition    String    @map("vehicle_condition")
-  askingPriceCents    Int?      @map("asking_price_cents")
-  vehicleReferenceUrl String?   @map("vehicle_reference_url")
-  buyerBudget         String    @map("buyer_budget")
-  buyerZip            String    @map("buyer_zip")
-  buyerNewOrUsed      String    @map("buyer_new_or_used")
-  buyerFinancing      String    @map("buyer_financing")
-  buyerEmail          String?   @map("buyer_email")
-  buyerName           String?   @map("buyer_name")
-  adminNotes          String?   @map("admin_notes")
-  referenceId         String?   @map("reference_id")
-  expiresAt           DateTime? @map("expires_at")
-  createdByAdminId    String    @map("created_by_admin_id")
-  createdAt           DateTime  @default(now()) @map("created_at")
-
-  submissions         DealerOfferSubmission[]
-  buyerReviews        BuyerOfferReview[]
-
-  @@map("vehicle_offers")
-}
-
-model DealerOfferSubmission {
-  id             String   @id @default(uuid())
-  vehicleOfferId String   @map("vehicle_offer_id")
-  dealershipName String   @map("dealership_name")
-  contactName    String   @map("contact_name")
-  contactEmail   String   @map("contact_email")
-  contactPhone   String   @map("contact_phone")
-  vehicles       Json
-  notes          String?
-  submittedAt    DateTime @default(now()) @map("submitted_at")
-
-  vehicleOffer   VehicleOffer @relation(fields: [vehicleOfferId], references: [id], onDelete: Cascade)
-  reviewItems    BuyerOfferReviewItem[]
-
-  @@map("dealer_offer_submissions")
-}
-
-model BuyerOfferReview {
-  id             String    @id @default(uuid())
-  reviewToken    String    @unique @default(uuid()) @map("review_token")
-  vehicleOfferId String    @map("vehicle_offer_id")
-  buyerEmail     String    @map("buyer_email")
-  buyerName      String    @map("buyer_name")
-  adminMessage   String?   @map("admin_message")
-  sentAt         DateTime  @default(now()) @map("sent_at")
-  expiresAt      DateTime? @map("expires_at")
-
-  vehicleOffer   VehicleOffer @relation(fields: [vehicleOfferId], references: [id], onDelete: Cascade)
-  items          BuyerOfferReviewItem[]
-
-  @@map("buyer_offer_reviews")
-}
-
-model BuyerOfferReviewItem {
-  id                 String    @id @default(uuid())
-  buyerOfferReviewId String    @map("buyer_offer_review_id")
-  dealerSubmissionId String    @map("dealer_submission_id")
-  vehicleIndex       Int       @default(0) @map("vehicle_index")
-  status             String    @default("PENDING")
-  respondedAt        DateTime? @map("responded_at")
-  buyerNote          String?   @map("buyer_note")
-
-  review     BuyerOfferReview      @relation(fields: [buyerOfferReviewId], references: [id], onDelete: Cascade)
-  submission DealerOfferSubmission @relation(fields: [dealerSubmissionId], references: [id], onDelete: Cascade)
-
-  @@map("buyer_offer_review_items")
 }
