@@ -44,7 +44,19 @@ export async function GET(request: NextRequest) {
       if (resolvedRole === UserRole.BUYER) {
         await trySendEmailVerified(data.user.id, data.user.email!);
       }
-      return NextResponse.redirect(new URL(next, request.url));
+      // Fallback: if the role param was missing, check the actual DB role so
+      // affiliates always land on their portal rather than the buyer dashboard.
+      const dbUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { role: true },
+      });
+      const finalRedirect =
+        dbUser?.role === "AFFILIATE"
+          ? "/affiliate/portal/dashboard"
+          : dbUser?.role === "SUPER_ADMIN"
+            ? "/admin/dashboard"
+            : next;
+      return NextResponse.redirect(new URL(finalRedirect, request.url));
     }
   }
 
@@ -75,7 +87,18 @@ export async function GET(request: NextRequest) {
       if ((type === "email" || type === "signup" || type === "magiclink") && resolvedRole === UserRole.BUYER) {
         await trySendEmailVerified(data.user.id, data.user.email!);
       }
-      return NextResponse.redirect(new URL(next, request.url));
+      // Fallback: check DB role in case role param was absent from the redirect URL.
+      const dbUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { role: true },
+      });
+      const finalRedirect =
+        dbUser?.role === "AFFILIATE"
+          ? "/affiliate/portal/dashboard"
+          : dbUser?.role === "SUPER_ADMIN"
+            ? "/admin/dashboard"
+            : next;
+      return NextResponse.redirect(new URL(finalRedirect, request.url));
     }
   }
 

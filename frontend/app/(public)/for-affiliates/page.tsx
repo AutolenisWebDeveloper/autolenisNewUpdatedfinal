@@ -172,17 +172,18 @@ export default function ForAffiliatesPage() {
           </p>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <Link
-              href="/auth/signup"
+              href="/affiliate/register"
               data-testid="affiliate-cta-primary"
               className="inline-flex items-center justify-center gap-2 rounded-md bg-[#0B5FD1] px-8 py-4 text-sm font-semibold text-white shadow-md shadow-[#0B5FD1]/20 transition-colors hover:bg-[#0A4DB8]"
             >
-              Join the Program <ArrowRight size={16} />
+              Apply to Join <ArrowRight size={16} />
             </Link>
             <Link
-              href="#how-to-earn-section"
-              className="inline-flex items-center justify-center gap-2 rounded-md border border-[#E5E7EB] bg-white px-8 py-4 text-sm font-semibold text-[#111827] transition-colors hover:border-[#BFDBFE]"
+              href="/affiliate/signin"
+              data-testid="affiliate-cta-signin"
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-[#0B5FD1] px-8 py-4 text-sm font-semibold text-[#0B5FD1] transition-colors hover:bg-[#0B5FD1]/5"
             >
-              How It Works
+              Already an Affiliate? Sign In
             </Link>
           </div>
           <p className="mt-8 text-sm text-[#94A3B8]">
@@ -431,17 +432,18 @@ export default function ForAffiliatesPage() {
           </p>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <Link
-              href="/auth/signup"
+              href="/affiliate/register"
               data-testid="affiliate-footer-cta"
               className="inline-flex items-center justify-center gap-2 rounded-md bg-white px-8 py-4 text-sm font-semibold text-[#0B5FD1] shadow-md shadow-black/20 transition-colors hover:bg-[#EFF6FF]"
             >
-              Join the Program <ArrowRight size={16} />
+              Apply to Join <ArrowRight size={16} />
             </Link>
             <Link
-              href="/contact"
+              href="/affiliate/signin"
+              data-testid="affiliate-footer-signin"
               className="inline-flex items-center justify-center gap-2 rounded-md border border-white/40 px-8 py-4 text-sm font-semibold text-white transition-colors hover:bg-white/10"
             >
-              Contact Us
+              Already an Affiliate? Sign In
             </Link>
           </div>
         </div>

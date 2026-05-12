@@ -157,7 +157,7 @@ export default function AffiliateRegisterPage() {
           <p className="text-[#4B5563] text-sm leading-relaxed mb-2">We sent a verification link to</p>
           <p className="text-[#111827] font-semibold text-sm mb-5" data-testid="affiliate-submitted-email">{submittedEmail}</p>
           <p className="text-[#4B5563] text-sm leading-relaxed">Click the link to verify your account. Once our team reviews your application (typically within 2 business days) we'll activate your referral code and email you a link to your affiliate dashboard.</p>
-          <Link href="/auth/signin" className="mt-8 inline-block text-sm text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors font-semibold" data-testid="success-signin-link">← Back to sign in</Link>
+          <Link href="/affiliate/signin" className="mt-8 inline-block text-sm text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors font-semibold" data-testid="success-signin-link">← Back to sign in</Link>
         </div>
       </div>
     );
@@ -235,7 +235,7 @@ export default function AffiliateRegisterPage() {
           {emailExists && (
             <div className="mb-5 p-3 rounded-md border border-amber-200 bg-amber-50 text-sm text-amber-900" data-testid="affiliate-email-exists-error">
               An account with this email already exists.{" "}
-              <Link href="/auth/signin" className="font-semibold text-[#0B5FD1] hover:underline" data-testid="existing-account-signin-link">Sign in instead →</Link>
+              <Link href="/affiliate/signin" className="font-semibold text-[#0B5FD1] hover:underline" data-testid="existing-account-signin-link">Sign in instead →</Link>
             </div>
           )}
           {serverError && (
@@ -324,7 +324,7 @@ export default function AffiliateRegisterPage() {
             </button>
           </form>
           <p className="text-center text-xs text-[#94A3B8] mt-6">
-            Already an affiliate? <Link href="/auth/signin" className="text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors font-medium" data-testid="affiliate-signin-link">Sign in →</Link>
+            Already an affiliate? <Link href="/affiliate/signin" className="text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors font-medium" data-testid="affiliate-signin-link">Sign in →</Link>
           </p>
         </div>
       </div>

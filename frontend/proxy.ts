@@ -66,6 +66,7 @@ const PUBLIC_ROUTES = [
   "/legal",
   "/maintenance",
   "/affiliate/register",
+  "/affiliate/signin",
   "/affiliate/unsubscribed",
   "/insurance",
   "/status",
