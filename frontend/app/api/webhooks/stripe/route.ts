@@ -160,6 +160,49 @@ export async function POST(request: NextRequest) {
           } catch (commissionErr) {
             console.error("[stripe/webhook] commission walk failed (non-fatal):", commissionErr);
           }
+
+          // Confirmation email to the buyer that the service fee landed.
+          // Non-blocking — failures must never reject the webhook.
+          try {
+            const targetBuyerId = metaBuyerId ?? (await prisma.deal.findFirst({
+              where: whereClause,
+              select: { buyerId: true },
+            }))?.buyerId;
+            if (targetBuyerId) {
+              const buyerForEmail = await prisma.buyer.findUnique({
+                where: { id: targetBuyerId },
+                include: { user: { select: { email: true } } },
+              });
+              const buyerEmail = buyerForEmail?.user?.email;
+              const buyerName = buyerForEmail?.firstName ?? "there";
+              if (buyerEmail && process.env.RESEND_API_KEY && !process.env.RESEND_API_KEY.includes("placeholder")) {
+                const { Resend } = await import("resend");
+                const resend = new Resend(process.env.RESEND_API_KEY);
+                await resend.emails.send({
+                  from: "AutoLenis <noreply@autolenis.com>",
+                  to: buyerEmail,
+                  subject: "Your AutoLenis Service Fee Is Confirmed",
+                  text: [
+                    `Hi ${buyerName},`,
+                    "",
+                    "Your AutoLenis Service Fee has been received. Thank you!",
+                    "",
+                    "What happens next:",
+                    "1. We will review your financing details (if applicable)",
+                    "2. Your purchase contract will be prepared",
+                    "3. You will receive a DocuSign link to e-sign your agreement",
+                    "4. Once signed, we coordinate vehicle pickup",
+                    "",
+                    `Track your deal: ${process.env.NEXT_PUBLIC_APP_URL}/buyer/deal`,
+                    "",
+                    "— The AutoLenis Team",
+                  ].join("\n"),
+                });
+              }
+            }
+          } catch (emailErr) {
+            console.error("[stripe/webhook] service fee email failed (non-fatal):", emailErr);
+          }
         }
         break;
       }

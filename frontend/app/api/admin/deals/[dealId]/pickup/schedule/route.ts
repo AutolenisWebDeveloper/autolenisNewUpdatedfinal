@@ -5,6 +5,10 @@ import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { schedulePickup } from "@/lib/services/pickup/pickup.service";
+import {
+  sendPickupReadyEmail,
+  sendDealerPickupScheduledEmail,
+} from "@/lib/services/email/resend.service";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -43,6 +47,50 @@ export async function POST(request: NextRequest, { params }: Props) {
     entityId: dealId,
     metadata: { scheduledAt, location },
   });
+
+  // Notify buyer + dealer — non-blocking
+  try {
+    const dealWithAll = await prisma.deal.findUnique({
+      where: { id: dealId },
+      include: {
+        buyer: { include: { user: { select: { email: true } } } },
+        offer: {
+          include: {
+            dealer: { include: { user: { select: { email: true } } } },
+          },
+        },
+      },
+    });
+
+    const pickupDateLabel = scheduledDate.toLocaleDateString("en-US", {
+      weekday: "long", year: "numeric", month: "long", day: "numeric",
+    });
+
+    const buyerEmail = dealWithAll?.buyer?.user?.email;
+    if (buyerEmail) {
+      await sendPickupReadyEmail(buyerEmail, dealWithAll?.buyer?.firstName ?? "there", pickupDateLabel)
+        .catch(err => console.error("[pickup/schedule] buyer email failed:", err));
+    }
+
+    const dealer = dealWithAll?.offer?.dealer;
+    const dealerEmail = dealer?.user?.email;
+    if (dealerEmail) {
+      const buyerCity = dealWithAll?.buyer?.city ?? "Location";
+      const buyerState = dealWithAll?.buyer?.state ?? "TBD";
+      await sendDealerPickupScheduledEmail({
+        to: dealerEmail,
+        contactName: dealer?.dealershipName ?? "Dealer",
+        vehicleRef: `Deal ${dealId.slice(0, 8)}`,
+        buyerCity,
+        buyerState,
+        pickupWindow: `${pickupDateLabel} — ${location}`,
+        dealUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dealer/deals/${dealId}`,
+        dealId,
+      }).catch(err => console.error("[pickup/schedule] dealer email failed:", err));
+    }
+  } catch (err) {
+    console.error("[pickup/schedule] post-schedule email lookup failed:", err);
+  }
 
   return adminSuccess({ success: true });
 }

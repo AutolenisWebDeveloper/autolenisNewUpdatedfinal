@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { submitOffer } from "@/lib/services/offer/offer.service";
+import { sendDealerOfferSubmittedEmail } from "@/lib/services/email/resend.service";
 import { z } from "zod";
 
 const schema = z.object({
@@ -28,6 +29,22 @@ export async function POST(request: NextRequest) {
 
   try {
     const offer = await submitOffer({ ...parsed.data, dealerId: dealer.id });
+
+    if (dealer.user?.email) {
+      const submittedAt = (offer as { submittedAt?: Date | null }).submittedAt ?? new Date();
+      const offerId = (offer as { id: string }).id;
+      const revisionWindowExpiry = new Date(Date.now() + 30 * 60 * 1000).toLocaleString("en-US");
+      await sendDealerOfferSubmittedEmail({
+        to: dealer.user.email,
+        contactName: dealer.dealershipName,
+        vehicleRef: `Auction ${parsed.data.auctionId.slice(0, 8)}`,
+        otdPriceCents: parsed.data.otdPriceCents,
+        submittedAt: submittedAt instanceof Date ? submittedAt.toLocaleString("en-US") : String(submittedAt),
+        revisionWindowExpiry,
+        offerId,
+      }).catch((err) => console.error("[dealer/offers] submitted email failed:", err));
+    }
+
     return successResponse({ offer }, 201);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to submit offer.";

@@ -16,6 +16,10 @@ import {
   sendVehicleRequestAdminNotification,
   sendVehicleRequestConfirmation,
 } from "@/lib/services/email/vehicle-offers.email";
+import {
+  sendVehicleRequestReceived,
+  sendDealerNewBuyerOpportunityEmail,
+} from "@/lib/services/email/resend.service";
 
 const ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -209,7 +213,44 @@ export async function POST(request: NextRequest) {
       notificationId,
     }),
     sendVehicleRequestConfirmation(data.email, data.firstName),
+    // Dedicated request-received confirmation with internal requestId reference
+    notificationId
+      ? sendVehicleRequestReceived(data.email, `${data.firstName} ${data.lastName}`, notificationId)
+      : Promise.resolve(),
   ]);
+
+  // Notify active dealers of the new buyer opportunity — fire-and-forget per dealer.
+  if (notificationId) {
+    try {
+      const activeDealers = await prisma.dealer.findMany({
+        where: { status: "ACTIVE" },
+        include: { user: { select: { email: true } } },
+        take: 20,
+      });
+      const vehicleInterest = [
+        data.vehicleType,
+        data.preferredMake,
+        data.preferredModel,
+      ].filter(Boolean).join(" ") || data.vehicleType;
+      await Promise.allSettled(
+        activeDealers
+          .filter((d) => !!d.user?.email)
+          .map((dealer) =>
+            sendDealerNewBuyerOpportunityEmail({
+              to: dealer.user.email,
+              contactName: dealer.dealershipName,
+              vehicleInterest,
+              buyerCity: data.city,
+              buyerState: data.state,
+              opportunityUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dealer/opportunities`,
+              opportunityId: notificationId,
+            }),
+          ),
+      );
+    } catch (err) {
+      console.error("[request-vehicle] dealer opportunity broadcast failed:", err);
+    }
+  }
 
   return NextResponse.json({ success: true });
 }

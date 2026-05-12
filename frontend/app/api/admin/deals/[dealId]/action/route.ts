@@ -3,6 +3,10 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { DealStatus } from "@prisma/client";
 import { getStripe } from "@/lib/stripe";
+import {
+  sendDealerContractPendingEmail,
+  sendDealerContractIssuesEmail,
+} from "@/lib/services/email/resend.service";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -36,6 +40,32 @@ export async function POST(request: NextRequest, { params }: Props) {
       }
       await prisma.deal.update({ where: { id: dealId }, data: { status: newStatus as DealStatus } });
       result = { newStatus };
+
+      // Notify the dealer when a deal enters the contract-pending phase.
+      if (newStatus === "CONTRACT_PENDING" || newStatus === "CONTRACT_REVIEW") {
+        try {
+          const dealWithDealer = await prisma.deal.findUnique({
+            where: { id: dealId },
+            include: {
+              offer: {
+                include: { dealer: { include: { user: { select: { email: true } } } } },
+              },
+            },
+          });
+          const dealer = dealWithDealer?.offer?.dealer;
+          if (dealer?.user?.email) {
+            await sendDealerContractPendingEmail({
+              to: dealer.user.email,
+              contactName: dealer.dealershipName,
+              dealId,
+              vehicleRef: `Deal ${dealId.slice(0, 8)}`,
+              uploadUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dealer/deals/${dealId}`,
+            });
+          }
+        } catch (err) {
+          console.error("[deals/action] contract-pending email failed:", err);
+        }
+      }
       break;
     }
 
@@ -52,6 +82,31 @@ export async function POST(request: NextRequest, { params }: Props) {
       });
       await prisma.deal.update({ where: { id: dealId }, data: { contractShieldStatus: "PASS", contractShieldScore: 100 } });
       result = { overridden: true };
+
+      // Notify the dealer that the contract had flagged issues which the admin overrode.
+      try {
+        const dealWithDealer = await prisma.deal.findUnique({
+          where: { id: dealId },
+          include: {
+            offer: {
+              include: { dealer: { include: { user: { select: { email: true } } } } },
+            },
+          },
+        });
+        const dealer = dealWithDealer?.offer?.dealer;
+        if (dealer?.user?.email) {
+          await sendDealerContractIssuesEmail({
+            to: dealer.user.email,
+            contactName: dealer.dealershipName,
+            vehicleRef: `Deal ${dealId.slice(0, 8)}`,
+            fixItems: [reason],
+            contractUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dealer/deals/${dealId}`,
+            dealId,
+          });
+        }
+      } catch (err) {
+        console.error("[deals/action] contract-issues email failed:", err);
+      }
       break;
     }
 

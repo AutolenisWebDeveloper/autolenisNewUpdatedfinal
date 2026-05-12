@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { z } from "zod";
 import { flagDealerComplianceIssue } from "@/lib/services/admin/admin-dealer-command-center.service";
+import { prisma } from "@/lib/prisma";
+import { sendDealerComplianceNoticeEmail } from "@/lib/services/email/resend.service";
 
 interface Props { params: Promise<{ dealerId: string }> }
 
@@ -23,6 +25,23 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   try {
     const result = await flagDealerComplianceIssue(dealerId, admin.adminId, admin.email, parsed.data.reason);
+
+    try {
+      const dealer = await prisma.dealer.findUnique({
+        where: { id: dealerId },
+        include: { user: { select: { email: true } } },
+      });
+      if (dealer?.user?.email) {
+        await sendDealerComplianceNoticeEmail({
+          to: dealer.user.email,
+          contactName: dealer.dealershipName,
+          noticeDate: new Date().toISOString().slice(0, 10),
+        });
+      }
+    } catch (err) {
+      console.error("[dealers/compliance/flag] compliance notice email failed:", err);
+    }
+
     return adminSuccess(result);
   } catch (err) {
     return adminError("ACTION_FAILED", err instanceof Error ? err.message : "Flag failed", 400);

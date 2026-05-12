@@ -7,7 +7,11 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { sendDealCompleteEmail } from "@/lib/services/email/resend.service";
+import {
+  sendDealCompleteEmail,
+  sendDealerPickupCompletedEmail,
+  sendDealerPayoutInitiatedEmail,
+} from "@/lib/services/email/resend.service";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -25,6 +29,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     include: {
       pickup: true,
       buyer: { include: { user: { select: { email: true } } } },
+      offer: { include: { dealer: { include: { user: { select: { email: true } } } } } },
     },
   });
   if (!deal) return adminError("NOT_FOUND", "Deal not found", 404);
@@ -83,6 +88,36 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
   } catch (e) {
     console.error("[pickup/complete] deal complete email failed:", e);
+  }
+
+  // Notify the dealer that pickup completed (and surface payout schedule).
+  // Also trigger the payout-initiated email — the dealer payout pipeline is
+  // currently manual (no auto-process), but the dealer should know it's queued.
+  try {
+    const dealer = deal.offer?.dealer;
+    const dealerEmail = dealer?.user?.email;
+    if (dealer && dealerEmail) {
+      const vehicleRef = `Deal ${dealId.slice(0, 8)}`;
+      const otdCents = (deal.offer?.otdPriceCents as number | undefined) ?? 0;
+      await sendDealerPickupCompletedEmail({
+        to: dealerEmail,
+        contactName: dealer.dealershipName,
+        vehicleRef,
+        payoutSchedule: "Funds release within 3–5 business days",
+        dealId,
+      });
+      // TODO: when an automated dealer-payout service is added, move this to that path.
+      await sendDealerPayoutInitiatedEmail({
+        to: dealerEmail,
+        contactName: dealer.dealershipName,
+        vehicleRef,
+        amountCents: otdCents,
+        estimatedArrival: "3–5 business days",
+        payoutId: dealId,
+      }).catch((err) => console.error("[pickup/complete] payout-initiated email failed:", err));
+    }
+  } catch (e) {
+    console.error("[pickup/complete] dealer pickup completed email failed:", e);
   }
 
   return adminSuccess({

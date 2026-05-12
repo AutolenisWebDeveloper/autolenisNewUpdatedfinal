@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { sendBuyerOfferReviewEmail } from "@/lib/services/email/vehicle-offers.email";
+import { sendVehicleOfferReady } from "@/lib/services/email/resend.service";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
 
@@ -118,6 +119,10 @@ export async function POST(request: NextRequest, { params }: Params) {
   } catch (err) {
     console.error("[send-to-buyer] email failed:", err);
   }
+
+  // Dedicated "vehicle offer ready" email — fire-and-forget alongside the review link.
+  await sendVehicleOfferReady(data.buyerEmail, data.buyerName, review.id)
+    .catch((err) => console.error("[send-to-buyer] vehicle offer ready email failed:", err));
 
   await prisma.vehicleOffer.update({
     where: { id: offer.id },

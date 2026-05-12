@@ -20,6 +20,7 @@ import {
   getDocuSignConfig,
   isDocuSignConfigured,
 } from "./docusign-auth.service";
+import { sendDealerAgreementPendingEmail } from "@/lib/services/email/resend.service";
 
 export interface MarketplaceEnvelopeResult {
   envelopeId: string | null;
@@ -121,6 +122,17 @@ export async function sendDealerMarketplaceAgreement(params: {
       marketplaceAgreementSentAt: new Date(),
     },
   });
+
+  // Notify the dealer that the agreement is awaiting signature. DocuSign also
+  // emails them a signing link, but this is the AutoLenis-branded heads-up.
+  await sendDealerAgreementPendingEmail({
+    to: email,
+    contactName: name || "Dealer",
+    dealershipName: name || "your dealership",
+    signingUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dealer/onboarding`,
+  }).catch((err) =>
+    console.error("[dealer-marketplace] agreement-pending email failed:", err),
+  );
 
   return { envelopeId, error: null, skipped: false };
 }

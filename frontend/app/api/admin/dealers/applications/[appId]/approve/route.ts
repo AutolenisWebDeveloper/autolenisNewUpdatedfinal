@@ -6,7 +6,10 @@ import { getAdminFromRequest, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@supabase/supabase-js";
 import { UserRole, DealerStatus } from "@prisma/client";
-import { sendDealerApprovalEmail } from "@/lib/services/email/resend.service";
+import {
+  sendDealerApprovalEmail,
+  sendDealerApplicationApprovedEmail,
+} from "@/lib/services/email/resend.service";
 import crypto from "crypto";
 
 function adminClient() {
@@ -110,9 +113,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ error: "Database error during approval" }, { status: 500 });
   }
 
-  // Send approval email
+  // Send approval email — both the legacy credential email and the
+  // params-based "application approved" template (different templates,
+  // each guarded by its own idempotency key).
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
   try {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
     await sendDealerApprovalEmail(
       app.contactEmail,
       app.contactName,
@@ -121,6 +126,19 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     );
   } catch (err) {
     console.error("[dealer/applications/approve] Email error:", err);
+  }
+  try {
+    const claimExpiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000)
+      .toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    await sendDealerApplicationApprovedEmail({
+      to: app.contactEmail,
+      contactName: app.contactName,
+      dealershipName: app.dealershipName,
+      claimUrl: `${appUrl}/dealer/signin`,
+      expiresAt: claimExpiresAt,
+    });
+  } catch (err) {
+    console.error("[dealer/applications/approve] Approval template email error:", err);
   }
 
   return NextResponse.json({

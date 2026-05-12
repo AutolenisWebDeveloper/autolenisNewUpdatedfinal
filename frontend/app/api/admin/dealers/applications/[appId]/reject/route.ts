@@ -3,7 +3,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import { sendDealerApplicationRejectedEmail } from "@/lib/services/email/resend.service";
+import {
+  sendDealerApplicationRejectedEmail,
+  sendDealerRejectionEmail,
+} from "@/lib/services/email/resend.service";
 
 interface RouteContext { params: Promise<{ appId: string }> }
 
@@ -52,6 +55,13 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     await sendDealerApplicationRejectedEmail({ to: app.contactEmail, contactName: app.contactName, dealershipName: app.dealershipName });
   } catch (err) {
     console.error("[dealer/applications/reject] Email error:", err);
+  }
+  // Also send the legacy rejection email with optional reason text — different
+  // template/idempotency key, surfaces a reason line to the dealer.
+  try {
+    await sendDealerRejectionEmail(app.contactEmail, app.contactName, reason);
+  } catch (err) {
+    console.error("[dealer/applications/reject] Legacy rejection email error:", err);
   }
 
   return NextResponse.json({ success: true });

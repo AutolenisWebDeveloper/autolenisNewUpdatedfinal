@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import {
   sendDealerApplicationReceived,
+  sendDealerApplicationReceivedEmail,
   sendDealerApplicationAdminNotification,
 } from "@/lib/services/email/resend.service";
 
@@ -76,10 +77,18 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  // Send confirmation to dealer and notification to admin (fire and forget)
+  // Send confirmation to dealer and notification to admin (fire and forget).
+  // We send both the legacy `sendDealerApplicationReceived` (inline HTML) and the
+  // newer params-based `sendDealerApplicationReceivedEmail` (template-rendered) —
+  // they live behind separate idempotency keys and templates.
   const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL ?? "admin@autolenis.com";
-  const [dealerResult, adminResult] = await Promise.allSettled([
+  const [dealerResult, dealerTemplateResult, adminResult] = await Promise.allSettled([
     sendDealerApplicationReceived(data.contactEmail, data.contactName, data.dealershipName),
+    sendDealerApplicationReceivedEmail({
+      to: data.contactEmail,
+      contactName: data.contactName,
+      dealershipName: data.dealershipName,
+    }),
     sendDealerApplicationAdminNotification(adminEmail, {
       contactName: data.contactName,
       contactEmail: data.contactEmail,
@@ -90,6 +99,9 @@ export async function POST(request: NextRequest) {
   ]);
   if (dealerResult.status === "rejected") {
     console.error("[dealer-application] dealer email failed:", dealerResult.reason);
+  }
+  if (dealerTemplateResult.status === "rejected") {
+    console.error("[dealer-application] dealer template email failed:", dealerTemplateResult.reason);
   }
   if (adminResult.status === "rejected") {
     console.error("[dealer-application] admin email failed:", adminResult.reason);
