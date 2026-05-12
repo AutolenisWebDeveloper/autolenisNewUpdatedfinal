@@ -32,6 +32,22 @@ const TITLE_STATUSES = [
 ];
 const REQUEST_YEARS = Array.from({ length: 17 }, (_, i) => 2026 - i);
 const TRADE_YEARS = Array.from({ length: 31 }, (_, i) => 2025 - i);
+const MONTHLY_GOALS = ["Under $300", "$300–$400", "$400–$500", "$500–$600", "$600–$700", "$700–$800", "$800–$1,000", "Over $1,000"];
+const DOWN_AVAILABLE = ["$0", "$1,000–$2,000", "$2,000–$5,000", "$5,000–$10,000", "$10,000+"];
+const MONTHLY_INCOMES = ["Under $2,500", "$2,500–$4,000", "$4,000–$6,000", "$6,000–$8,000", "$8,000–$12,000", "$12,000+"];
+const HOUSING = ["Under $500", "$500–$1,000", "$1,000–$1,500", "$1,500–$2,000", "$2,000–$2,500", "$2,500+"];
+const ACCIDENT_HISTORY = ["Clean — No accidents", "1 Accident on record", "2+ Accidents", "Unknown"];
+const CONTACT_METHODS = ["Phone Call", "Text Message", "Email"] as const;
+const TIMELINES = ["ASAP", "Within 30 Days", "Within 60 Days", "Just Researching"] as const;
+
+const US_STATES = [
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+  "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+  "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+  "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+  "DC",
+];
 
 const TOTAL_STEPS = 5;
 const STEP_LABELS = ["Contact", "Vehicle", "Financing", "Trade-In", "Review"];
@@ -112,11 +128,47 @@ function SuccessState({ name }: { name: string }) {
   );
 }
 
+function ButtonGroup<T extends string>({
+  options,
+  value,
+  onChange,
+  testIdPrefix,
+  cols = 3,
+}: {
+  options: readonly T[];
+  value: T | "";
+  onChange: (v: T) => void;
+  testIdPrefix: string;
+  cols?: 2 | 3 | 4;
+}) {
+  const grid = cols === 2 ? "grid-cols-2" : cols === 3 ? "grid-cols-3" : "grid-cols-4";
+  return (
+    <div className={`grid ${grid} gap-2`}>
+      {options.map((opt) => {
+        const selected = value === opt;
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onChange(opt)}
+            data-testid={`${testIdPrefix}-${opt.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")}`}
+            className={`rounded-xl border-2 py-2.5 text-sm font-medium transition-colors ${
+              selected
+                ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+            }`}
+          >
+            {opt}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function RequestVehicleFormClient() {
-  // Wizard navigation
   const [currentStep, setCurrentStep] = useState(1);
 
-  // Submission state
   const [submitted, setSubmitted] = useState(false);
   const [submittedName, setSubmittedName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -128,6 +180,10 @@ export default function RequestVehicleFormClient() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [zip, setZip] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [contactMethod, setContactMethod] = useState<typeof CONTACT_METHODS[number] | "">("");
+  const [timeline, setTimeline] = useState<typeof TIMELINES[number] | "">("");
 
   // §2 Vehicle
   const [vehicleType, setVehicleType] = useState("");
@@ -140,9 +196,14 @@ export default function RequestVehicleFormClient() {
   const [maxYear, setMaxYear] = useState("");
   const [newOrUsed, setNewOrUsed] = useState("");
   const [specificFeatures, setSpecificFeatures] = useState("");
+  const [interiorColor, setInteriorColor] = useState("");
+  const [mustHaveFeatures, setMustHaveFeatures] = useState("");
+  const [openToAlternatives, setOpenToAlternatives] = useState<boolean | null>(null);
 
   // §3 Budget + financing
   const [budget, setBudget] = useState("");
+  const [desiredMonthlyPayment, setDesiredMonthlyPayment] = useState("");
+  const [downPaymentAvailable, setDownPaymentAvailable] = useState("");
   const [financingOption, setFinancingOption] = useState("");
   const [employmentStatus, setEmploymentStatus] = useState("");
   const [employerName, setEmployerName] = useState("");
@@ -150,6 +211,9 @@ export default function RequestVehicleFormClient() {
   const [creditScore, setCreditScore] = useState("");
   const [downPayment, setDownPayment] = useState("");
   const [monthlyPayment, setMonthlyPayment] = useState("");
+  const [monthlyIncome, setMonthlyIncome] = useState("");
+  const [housingPayment, setHousingPayment] = useState("");
+  const [coBuyer, setCoBuyer] = useState<boolean | null>(null);
   const [lenderName, setLenderName] = useState("");
   const [approvedAmount, setApprovedAmount] = useState("");
   const [apr, setApr] = useState("");
@@ -167,16 +231,17 @@ export default function RequestVehicleFormClient() {
   const [tradeMileage, setTradeMileage] = useState("");
   const [tradeColor, setTradeColor] = useState("");
   const [tradeCondition, setTradeCondition] = useState("");
+  const [tradeVin, setTradeVin] = useState("");
   const [tradePaidOff, setTradePaidOff] = useState<boolean | null>(null);
-  const [tradeLoanBalance, setTradeLoanBalance] = useState("");
+  const [tradePayoffAmount, setTradePayoffAmount] = useState("");
   const [tradeIssues, setTradeIssues] = useState("");
   const [tradeTitleStatus, setTradeTitleStatus] = useState("");
+  const [tradeAccidentHistory, setTradeAccidentHistory] = useState("");
 
   // §5 Notes + consent
   const [notes, setNotes] = useState("");
   const [agreedToContact, setAgreedToContact] = useState(false);
 
-  // NHTSA model fetch — request vehicle make
   useEffect(() => {
     if (!preferredMake || preferredMake === "Other") {
       setModels([]);
@@ -193,7 +258,6 @@ export default function RequestVehicleFormClient() {
     return () => { cancelled = true; };
   }, [preferredMake]);
 
-  // NHTSA model fetch — trade-in
   useEffect(() => {
     if (!tradeMake || tradeMake === "Other") {
       setTradeModels([]);
@@ -229,20 +293,28 @@ export default function RequestVehicleFormClient() {
           firstName.trim() && lastName.trim() &&
           /\S+@\S+\.\S+/.test(email) &&
           phone.trim().length >= 7 &&
-          zipValid,
+          zipValid && city.trim() && state && contactMethod && timeline,
         );
       case 2:
-        return Boolean(vehicleType && newOrUsed);
+        return Boolean(vehicleType && newOrUsed && openToAlternatives !== null);
       case 3:
         return Boolean(budget && financingOption);
       case 4:
-        return true; // trade-in is optional
+        if (hasTradeIn === true) {
+          return Boolean(tradeYear && tradeMake && tradeModel && tradeMileage && tradeCondition && tradePaidOff !== null && tradeAccidentHistory && tradeTitleStatus);
+        }
+        return true;
       case 5:
         return agreedToContact;
       default:
         return false;
     }
-  }, [currentStep, firstName, lastName, email, phone, zipValid, vehicleType, newOrUsed, budget, financingOption, agreedToContact]);
+  }, [
+    currentStep, firstName, lastName, email, phone, zipValid, city, state, contactMethod, timeline,
+    vehicleType, newOrUsed, openToAlternatives, budget, financingOption,
+    hasTradeIn, tradeYear, tradeMake, tradeModel, tradeMileage, tradeCondition, tradePaidOff, tradeAccidentHistory, tradeTitleStatus,
+    agreedToContact,
+  ]);
 
   const canSubmit = canProceed && currentStep === TOTAL_STEPS && !loading;
 
@@ -267,6 +339,10 @@ export default function RequestVehicleFormClient() {
       email: email.trim(),
       phone: phone.trim(),
       zip,
+      city: city.trim(),
+      state,
+      contactMethod,
+      timeline,
       vehicleType,
       preferredMake: preferredMake || undefined,
       preferredModel: (preferredMake === "Other" ? undefined : preferredModel) || undefined,
@@ -275,7 +351,12 @@ export default function RequestVehicleFormClient() {
       maxYear: maxYear ? Number(maxYear) : undefined,
       newOrUsed,
       specificFeatures: specificFeatures || undefined,
+      interiorColor: interiorColor || undefined,
+      mustHaveFeatures: mustHaveFeatures || undefined,
+      openToAlternatives: openToAlternatives === true,
       budget,
+      desiredMonthly: desiredMonthlyPayment || undefined,
+      downPaymentAvail: downPaymentAvailable || undefined,
       financingOption,
       ...(financingOption === "need_financing" && {
         employmentStatus: employmentStatus || undefined,
@@ -284,6 +365,9 @@ export default function RequestVehicleFormClient() {
         creditScore: creditScore || undefined,
         downPayment: downPayment || undefined,
         monthlyPayment: monthlyPayment || undefined,
+        monthlyIncome: monthlyIncome || undefined,
+        housingPayment: housingPayment || undefined,
+        coBuyer: coBuyer ?? undefined,
       }),
       ...(financingOption === "have_financing" && {
         lenderName: lenderName || undefined,
@@ -300,10 +384,13 @@ export default function RequestVehicleFormClient() {
         tradeMileage: tradeMileage || undefined,
         tradeColor: tradeColor || undefined,
         tradeCondition: tradeCondition || undefined,
+        tradeVin: tradeVin || undefined,
         tradePaidOff: tradePaidOff ?? undefined,
-        tradeLoanBalance: tradePaidOff === false ? tradeLoanBalance || undefined : undefined,
+        tradeLoanBalance: tradePaidOff === false ? tradePayoffAmount || undefined : undefined,
+        tradePayoffAmount: tradePaidOff === false ? tradePayoffAmount || undefined : undefined,
         tradeIssues: tradeIssues || undefined,
         tradeTitleStatus: tradeTitleStatus || undefined,
+        tradeAccidentHistory: tradeAccidentHistory || undefined,
       }),
       notes: notes || undefined,
       agreedToContact: true as const,
@@ -389,6 +476,65 @@ export default function RequestVehicleFormClient() {
                       <Input id="rv-zip" data-testid="rv-zip" placeholder="75001" maxLength={5} className="mt-1.5 max-w-[140px]" value={zip} onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))} />
                       {zip.length > 0 && !zipValid && <p className="text-xs text-red-600 mt-1">Enter a 5-digit ZIP.</p>}
                     </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="rv-city">City *</Label>
+                        <Input id="rv-city" data-testid="rv-city" placeholder="Dallas" className="mt-1.5" value={city} onChange={(e) => setCity(e.target.value.slice(0, 100))} />
+                      </div>
+                      <div>
+                        <Label htmlFor="rv-state">State *</Label>
+                        <Select id="rv-state" data-testid="rv-state" className="w-full mt-1.5" value={state} onChange={(e) => setState(e.target.value)}>
+                          <option value="">Select state</option>
+                          {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                        </Select>
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="mb-2 block">Preferred Contact Method *</Label>
+                      <div className="grid grid-cols-3 gap-2">
+                        {CONTACT_METHODS.map((opt) => {
+                          const selected = contactMethod === opt;
+                          return (
+                            <button
+                              key={opt}
+                              type="button"
+                              onClick={() => setContactMethod(opt)}
+                              data-testid={`rv-contact-${opt.toLowerCase().replace(" ", "-")}`}
+                              className={`rounded-xl border-2 py-2.5 text-sm font-medium transition-colors ${
+                                selected
+                                  ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
+                                  : "border-slate-200 text-slate-600 hover:border-slate-300"
+                              }`}
+                            >
+                              {opt}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="mb-2 block">Buying Timeline *</Label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {TIMELINES.map((opt) => {
+                          const selected = timeline === opt;
+                          return (
+                            <button
+                              key={opt}
+                              type="button"
+                              onClick={() => setTimeline(opt)}
+                              data-testid={`rv-timeline-${opt.toLowerCase().replace(/\s+/g, "-")}`}
+                              className={`rounded-xl border-2 py-2.5 text-xs font-medium transition-colors ${
+                                selected
+                                  ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
+                                  : "border-slate-200 text-slate-600 hover:border-slate-300"
+                              }`}
+                            >
+                              {opt}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 </>
               )}
@@ -399,26 +545,7 @@ export default function RequestVehicleFormClient() {
                   <div className="space-y-5">
                     <div>
                       <Label className="mb-2 block">Vehicle Type *</Label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {VEHICLE_TYPES.map((type) => {
-                          const selected = vehicleType === type;
-                          return (
-                            <button
-                              key={type}
-                              type="button"
-                              onClick={() => setVehicleType(type)}
-                              data-testid={`rv-type-${type.toLowerCase()}`}
-                              className={`rounded-xl border-2 py-3 text-sm font-medium transition-colors ${
-                                selected
-                                  ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
-                                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
-                              }`}
-                            >
-                              {type}
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <ButtonGroup options={VEHICLE_TYPES} value={vehicleType as typeof VEHICLE_TYPES[number] | ""} onChange={(v) => setVehicleType(v)} testIdPrefix="rv-type" />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
@@ -515,6 +642,57 @@ export default function RequestVehicleFormClient() {
                         maxLength={500}
                       />
                     </div>
+
+                    <div>
+                      <Label className="mb-1.5 block">Interior Color Preference (optional)</Label>
+                      <Input
+                        data-testid="rv-interior-color"
+                        placeholder="e.g. Black, Beige, Gray"
+                        value={interiorColor}
+                        onChange={(e) => setInteriorColor(e.target.value.slice(0, 100))}
+                        maxLength={100}
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="mb-1.5 block">Must-Have Features (optional)</Label>
+                      <Textarea
+                        data-testid="rv-must-have"
+                        placeholder="e.g. Panoramic sunroof, heated seats, Apple CarPlay, third row, backup camera"
+                        rows={2}
+                        value={mustHaveFeatures}
+                        onChange={(e) => setMustHaveFeatures(e.target.value.slice(0, 1000))}
+                        maxLength={1000}
+                      />
+                      <p className="text-xs text-slate-400 mt-1">List features you absolutely cannot compromise on.</p>
+                    </div>
+
+                    <div>
+                      <Label className="mb-2 block">Open to similar alternatives? *</Label>
+                      <div className="flex gap-2">
+                        {[
+                          { val: true, label: "Yes — show me alternatives" },
+                          { val: false, label: "No — this exact vehicle only" },
+                        ].map((opt) => {
+                          const selected = openToAlternatives === opt.val;
+                          return (
+                            <button
+                              key={String(opt.val)}
+                              type="button"
+                              onClick={() => setOpenToAlternatives(opt.val)}
+                              data-testid={`rv-alternatives-${opt.val ? "yes" : "no"}`}
+                              className={`flex-1 rounded-xl border-2 px-3 py-2.5 text-sm font-medium transition-colors text-left ${
+                                selected
+                                  ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
+                                  : "border-slate-200 text-slate-600 hover:border-slate-300"
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 </>
               )}
@@ -529,6 +707,23 @@ export default function RequestVehicleFormClient() {
                         <option value="">Select your budget</option>
                         {BUDGETS.map((b) => <option key={b} value={b}>{b}</option>)}
                       </Select>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <Label className="mb-1.5 block">Desired Monthly Payment (optional)</Label>
+                        <Select data-testid="rv-monthly-goal" className="w-full" value={desiredMonthlyPayment} onChange={(e) => setDesiredMonthlyPayment(e.target.value)}>
+                          <option value="">No preference</option>
+                          {MONTHLY_GOALS.map((o) => <option key={o} value={o}>{o}</option>)}
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="mb-1.5 block">Down Payment Available (optional)</Label>
+                        <Select data-testid="rv-down-payment-available" className="w-full" value={downPaymentAvailable} onChange={(e) => setDownPaymentAvailable(e.target.value)}>
+                          <option value="">No preference</option>
+                          {DOWN_AVAILABLE.map((o) => <option key={o} value={o}>{o}</option>)}
+                        </Select>
+                      </div>
                     </div>
 
                     <div>
@@ -598,6 +793,41 @@ export default function RequestVehicleFormClient() {
                               <option value="">No preference</option>
                               {PAYMENTS.map((o) => <option key={o} value={o}>{o}</option>)}
                             </Select>
+                          </div>
+                          <div>
+                            <Label className="mb-1.5 block">Monthly Gross Income</Label>
+                            <Select data-testid="rv-monthly-income" className="w-full" value={monthlyIncome} onChange={(e) => setMonthlyIncome(e.target.value)}>
+                              <option value="">Select range</option>
+                              {MONTHLY_INCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
+                            </Select>
+                          </div>
+                          <div>
+                            <Label className="mb-1.5 block">Monthly Housing Payment</Label>
+                            <Select data-testid="rv-housing-payment" className="w-full" value={housingPayment} onChange={(e) => setHousingPayment(e.target.value)}>
+                              <option value="">Select range</option>
+                              {HOUSING.map((o) => <option key={o} value={o}>{o}</option>)}
+                            </Select>
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="mb-2 block">Co-Buyer?</Label>
+                          <div className="flex gap-2">
+                            {["Yes", "No"].map((opt) => {
+                              const selected = coBuyer === (opt === "Yes");
+                              return (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  onClick={() => setCoBuyer(opt === "Yes")}
+                                  data-testid={`rv-co-buyer-${opt.toLowerCase()}`}
+                                  className={`flex-1 rounded-xl border-2 py-2.5 text-sm font-medium transition-colors ${
+                                    selected ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]" : "border-slate-200 text-slate-600 hover:border-slate-300"
+                                  }`}
+                                >
+                                  {opt}
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                         <p className="text-xs text-slate-500 bg-white rounded-lg px-3 py-2 border border-slate-100">
@@ -734,6 +964,18 @@ export default function RequestVehicleFormClient() {
                           </div>
                         </div>
 
+                        <div>
+                          <Label className="mb-1.5 block">VIN (optional)</Label>
+                          <Input
+                            data-testid="rv-trade-vin"
+                            placeholder="17-character VIN"
+                            maxLength={17}
+                            value={tradeVin}
+                            onChange={(e) => setTradeVin(e.target.value.toUpperCase().slice(0, 17))}
+                          />
+                          <p className="text-xs text-slate-400 mt-1">Found on dashboard, door jamb, or registration. Helps dealers give accurate trade-in value.</p>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-4">
                           <div>
                             <Label className="mb-1.5 block">Trim</Label>
@@ -779,10 +1021,43 @@ export default function RequestVehicleFormClient() {
                         </div>
                         {tradePaidOff === false && (
                           <div>
-                            <Label className="mb-1.5 block">Remaining Loan Balance</Label>
-                            <Input type="number" min={0} data-testid="rv-trade-loan" placeholder="8500" value={tradeLoanBalance} onChange={(e) => setTradeLoanBalance(e.target.value)} />
+                            <Label className="mb-1.5 block">Remaining Payoff Amount (approx.)</Label>
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+                              <Input
+                                type="number"
+                                min={0}
+                                data-testid="rv-trade-payoff"
+                                placeholder="8500"
+                                className="pl-7"
+                                value={tradePayoffAmount}
+                                onChange={(e) => setTradePayoffAmount(e.target.value)}
+                              />
+                            </div>
                           </div>
                         )}
+
+                        <div>
+                          <Label className="mb-2 block">Accident History *</Label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {ACCIDENT_HISTORY.map((opt) => {
+                              const selected = tradeAccidentHistory === opt;
+                              return (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  onClick={() => setTradeAccidentHistory(opt)}
+                                  data-testid={`rv-trade-accident-${opt.split(" ")[0].toLowerCase()}`}
+                                  className={`rounded-xl border-2 py-2.5 text-xs font-medium transition-colors ${
+                                    selected ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]" : "border-slate-200 text-slate-600 hover:border-slate-300"
+                                  }`}
+                                >
+                                  {opt}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
 
                         <div>
                           <Label className="mb-1.5 block">Known Issues or Damage (optional)</Label>
@@ -829,7 +1104,9 @@ export default function RequestVehicleFormClient() {
                   <div className="space-y-3 mb-5">
                     <ReviewCard label="Contact" onEdit={() => jumpTo(1)}>
                       <p className="text-sm font-semibold text-slate-800">{firstName} {lastName}</p>
-                      <p className="text-sm text-slate-500">{email} · {phone} · ZIP {zip}</p>
+                      <p className="text-sm text-slate-500">{email} · {phone}</p>
+                      <p className="text-sm text-slate-500">{city}, {state} {zip}</p>
+                      <p className="text-sm text-slate-500">{contactMethod || "—"} · {timeline || "—"}</p>
                     </ReviewCard>
 
                     <ReviewCard label="Vehicle" onEdit={() => jumpTo(2)}>
@@ -839,7 +1116,12 @@ export default function RequestVehicleFormClient() {
                       </p>
                       <p className="text-sm text-slate-500">
                         {newOrUsed} · {minYear || "Any"}–{maxYear || "Any"}
+                        {interiorColor ? ` · Interior: ${interiorColor}` : ""}
                       </p>
+                      <p className="text-sm text-slate-500">
+                        {openToAlternatives === true ? "Open to alternatives" : openToAlternatives === false ? "Specific vehicle only" : "—"}
+                      </p>
+                      {mustHaveFeatures && <p className="text-sm text-slate-500 mt-1">Must-have: {mustHaveFeatures}</p>}
                     </ReviewCard>
 
                     <ReviewCard label="Financing" onEdit={() => jumpTo(3)}>
@@ -849,8 +1131,13 @@ export default function RequestVehicleFormClient() {
                           : "Paying cash"}
                       </p>
                       <p className="text-sm text-slate-500">
-                        Budget: {budget}{financingOption === "need_financing" && creditScore ? ` · Credit: ${creditScore}` : ""}
+                        Budget: {budget}
+                        {desiredMonthlyPayment ? ` · Monthly: ${desiredMonthlyPayment}` : ""}
+                        {downPaymentAvailable ? ` · Down: ${downPaymentAvailable}` : ""}
                       </p>
+                      {financingOption === "need_financing" && creditScore && (
+                        <p className="text-sm text-slate-500">Credit: {creditScore}</p>
+                      )}
                     </ReviewCard>
 
                     {hasTradeIn === true && (
@@ -860,7 +1147,12 @@ export default function RequestVehicleFormClient() {
                         </p>
                         <p className="text-sm text-slate-500">
                           {tradeMileage ? `${Number(tradeMileage).toLocaleString()} mi · ` : ""}{tradeCondition || "—"}
+                          {tradeAccidentHistory ? ` · ${tradeAccidentHistory}` : ""}
                         </p>
+                        {tradeVin && <p className="text-sm text-slate-500 font-mono text-xs">VIN: {tradeVin}</p>}
+                        {tradePaidOff === false && tradePayoffAmount && (
+                          <p className="text-sm text-slate-500">Payoff: ${Number(tradePayoffAmount).toLocaleString()}</p>
+                        )}
                       </ReviewCard>
                     )}
                     {hasTradeIn === false && (

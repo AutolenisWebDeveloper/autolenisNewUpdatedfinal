@@ -17,11 +17,11 @@ export default async function VehicleOfferDetailPage({ params }: Props) {
     include: {
       submissions: { orderBy: { submittedAt: "asc" } },
       buyerReviews: { orderBy: { sentAt: "desc" }, take: 1 },
+      dealerInvites: { orderBy: { sentAt: "desc" } },
     },
   });
   if (!offer) notFound();
 
-  // Hand serializable data to the client component (no Date objects).
   const detail: DetailOffer = {
     id: offer.id,
     token: offer.token,
@@ -45,6 +45,7 @@ export default async function VehicleOfferDetailPage({ params }: Props) {
     referenceId: offer.referenceId,
     expiresAt: offer.expiresAt ? offer.expiresAt.toISOString() : null,
     createdAt: offer.createdAt.toISOString(),
+    requestStatus: offer.requestStatus,
     submissions: offer.submissions.map((s) => ({
       id: s.id,
       dealershipName: s.dealershipName,
@@ -54,6 +55,15 @@ export default async function VehicleOfferDetailPage({ params }: Props) {
       submittedAt: s.submittedAt.toISOString(),
       notes: s.notes,
       vehicles: s.vehicles as unknown,
+      rejected: s.rejected,
+      rejectedAt: s.rejectedAt ? s.rejectedAt.toISOString() : null,
+    })),
+    invitations: offer.dealerInvites.map((inv) => ({
+      id: inv.id,
+      dealershipName: inv.dealershipName,
+      dealerEmail: inv.dealerEmail,
+      status: inv.status,
+      sentAt: inv.sentAt.toISOString(),
     })),
     latestReview: offer.buyerReviews[0]
       ? {

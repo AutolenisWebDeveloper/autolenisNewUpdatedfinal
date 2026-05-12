@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
+import { CheckCircle2, ClipboardList, ExternalLink, Loader2 } from "lucide-react";
 
 const BUDGET_OPTIONS = [
   "Under $15,000",
@@ -25,6 +26,9 @@ const YEAR_OPTIONS = Array.from({ length: 2026 - 2010 + 1 }, (_, i) => 2010 + i)
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function VehicleOfferCreateClient() {
+  const searchParams = useSearchParams();
+  const fromRequest = searchParams?.get("fromRequest") ?? null;
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ id: string; url: string; expiresAt: string | null } | null>(null);
@@ -53,7 +57,7 @@ export default function VehicleOfferCreateClient() {
 
   // Offer settings
   const [expiresAt, setExpiresAt] = useState("");
-  const [referenceId, setReferenceId] = useState("");
+  const [referenceId, setReferenceId] = useState(fromRequest ?? "");
 
   const canSubmit =
     !loading &&
@@ -200,10 +204,17 @@ export default function VehicleOfferCreateClient() {
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="vehicle-offer-create-page">
       <h1 className="text-xl font-bold text-slate-900 mb-2">Create Dealer Offer Link</h1>
-      <p className="text-sm text-slate-500 mb-8">
+      <p className="text-sm text-slate-500 mb-6">
         Fill in the vehicle details, then copy the generated link to share with dealers.
         Multiple dealers can submit competing offers on the same link.
       </p>
+
+      {fromRequest && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-6 flex items-center gap-2 text-sm text-blue-700" data-testid="from-request-banner">
+          <ClipboardList size={14} />
+          Pre-filled from buyer request. Review vehicle details below, then generate the link.
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} data-testid="vehicle-offer-form" className="space-y-6">
         {/* Section 1 — Vehicle */}

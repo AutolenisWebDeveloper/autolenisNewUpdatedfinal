@@ -54,6 +54,8 @@ export async function sendVehicleRequestAdminNotification(params: {
   email: string;
   phone: string;
   zip: string;
+  city?: string;
+  state?: string;
   vehicleType: string;
   preferredMake?: string;
   preferredModel?: string;
@@ -62,31 +64,68 @@ export async function sendVehicleRequestAdminNotification(params: {
   budget: string;
   newOrUsed: string;
   financingNeeded: string;
+  contactMethod?: string;
+  timeline?: string;
+  interiorColor?: string;
+  mustHaveFeatures?: string;
+  openToAlternatives?: boolean;
+  desiredMonthly?: string;
+  downPaymentAvail?: string;
+  hasTradeIn?: boolean;
+  tradeYear?: string;
+  tradeMake?: string;
+  tradeModel?: string;
   notes?: string;
+  notificationId?: string;
 }) {
   const rows: [string, string][] = [
     ["Name", params.fullName],
     ["Email", params.email],
     ["Phone", params.phone],
-    ["ZIP", params.zip],
+    ["Location", `${params.city ? `${params.city}, ` : ""}${params.state ?? ""} ${params.zip}`.trim()],
+  ];
+  if (params.contactMethod) rows.push(["Preferred Contact", params.contactMethod]);
+  if (params.timeline) rows.push(["Buying Timeline", params.timeline]);
+  rows.push(
     ["Vehicle Type", params.vehicleType],
     ["Preferred Make", params.preferredMake ?? "Any"],
     ["Preferred Model", params.preferredModel ?? "Any"],
     ["Year Range", `${params.minYear ?? "Any"} – ${params.maxYear ?? "Any"}`],
-    ["Budget", params.budget],
     ["New or Used", params.newOrUsed],
+  );
+  if (params.interiorColor) rows.push(["Interior Color", params.interiorColor]);
+  if (typeof params.openToAlternatives === "boolean") {
+    rows.push(["Open to Alternatives", params.openToAlternatives ? "Yes" : "No — specific only"]);
+  }
+  if (params.mustHaveFeatures) rows.push(["Must-Have Features", params.mustHaveFeatures]);
+  rows.push(
+    ["Budget", params.budget],
     ["Financing", params.financingNeeded],
-  ];
+  );
+  if (params.desiredMonthly) rows.push(["Monthly Goal", params.desiredMonthly]);
+  if (params.downPaymentAvail) rows.push(["Down Payment Available", params.downPaymentAvail]);
+  if (typeof params.hasTradeIn === "boolean") {
+    rows.push([
+      "Trade-In",
+      params.hasTradeIn
+        ? `Yes — ${[params.tradeYear, params.tradeMake, params.tradeModel].filter(Boolean).join(" ") || "details below"}`
+        : "No",
+    ]);
+  }
   if (params.notes) rows.push(["Notes", params.notes]);
+
+  const detailUrl = params.notificationId
+    ? `${APP_URL}/admin/vehicle-requests/${params.notificationId}`
+    : `${APP_URL}/admin/vehicle-requests`;
 
   const inner = `
     <p style="color:#0B5FD1;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin:0 0 4px">New Vehicle Request</p>
     <h1 style="color:#111827;font-size:22px;font-weight:700;margin:0 0 16px">${escape(params.fullName)} wants a vehicle</h1>
     <table style="width:100%;border-collapse:collapse">
-      ${rows.map(([k, v]) => `<tr><td style="padding:8px 0;color:#6B7280;font-size:13px;width:140px">${k}</td><td style="padding:8px 0;color:#111827;font-size:13px;font-weight:500">${escape(String(v))}</td></tr>`).join("")}
+      ${rows.map(([k, v]) => `<tr><td style="padding:8px 0;color:#6B7280;font-size:13px;width:160px;vertical-align:top">${k}</td><td style="padding:8px 0;color:#111827;font-size:13px;font-weight:500">${escape(String(v))}</td></tr>`).join("")}
     </table>
     <div style="margin-top:24px">
-      ${button(`${APP_URL}/admin/vehicle-offers/new`, "Create Dealer Offer Link →")}
+      ${button(detailUrl, "View Full Request →")}
     </div>`;
   await sendRaw(ADMIN_EMAIL, `New Vehicle Request — ${params.fullName}`, wrap(inner));
 }
@@ -260,4 +299,159 @@ export async function sendDealerAcceptanceNotification(params: {
     <h1 style="color:#111827;font-size:22px;font-weight:700;margin:0 0 8px">Good news, ${escape(params.contactName)}</h1>
     <p style="color:#4B5563;font-size:14px;line-height:1.6;margin:0 0 16px">${escape(params.buyerName)} has accepted your offer for the <strong>${escape(params.vehicleLabel)}</strong>. AutoLenis will be in touch shortly to coordinate the next steps.</p>`;
   await sendRaw(params.to, `Offer accepted — ${params.vehicleLabel}`, wrap(inner));
+}
+
+// ─── Vehicle offer dealer invitation (admin sends to specific dealers) ────
+function tableRowEmail(label: string, value: string): string {
+  return `<tr>
+    <td style="color:#6B7280;font-size:13px;padding:5px 0;width:40%;vertical-align:top">${label}</td>
+    <td style="color:#111827;font-size:13px;font-weight:500;padding:5px 0">${value}</td>
+  </tr>`;
+}
+
+export async function sendVehicleOfferInvitationEmail(params: {
+  to: string;
+  contactName: string;
+  dealershipName: string;
+  submissionUrl: string;
+  expiresAt: string;
+  vehicleYear: number;
+  vehicleMake: string;
+  vehicleModel: string;
+  vehicleTrim?: string;
+  vehicleCondition: string;
+  vehicleReferenceUrl?: string;
+  buyerCity: string;
+  buyerState: string;
+  buyerZip: string;
+  buyerTimeline: string;
+  buyerBudget: string;
+  buyerMonthlyGoal?: string;
+  buyerDownPayment?: string;
+  buyerFinancing: string;
+  buyerHasTradeIn: boolean;
+  buyerTradeYear?: string;
+  buyerTradeMake?: string;
+  buyerTradeModel?: string;
+  buyerOpenToAlt: boolean;
+  adminNotes?: string;
+}) {
+  const vehicleLabel = `${params.vehicleYear} ${params.vehicleMake} ${params.vehicleModel}${params.vehicleTrim ? ` ${params.vehicleTrim}` : ""}`;
+  const subject = `New Buyer Opportunity — ${vehicleLabel} | AutoLenis`;
+
+  const inner = `
+    <h2 style="color:#111827;font-size:20px;font-weight:700;margin:0 0 4px">New Buyer Opportunity</h2>
+    <p style="color:#6B7280;font-size:13px;margin:0 0 20px">
+      Hello ${escape(params.contactName)}, AutoLenis has a motivated buyer looking for a vehicle that may match your inventory.
+    </p>
+
+    <div style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:12px 16px;margin-bottom:20px">
+      <p style="color:#92400E;font-size:13px;font-weight:600;margin:0">⏰ Offer deadline: ${escape(params.expiresAt)}</p>
+    </div>
+
+    <h3 style="color:#374151;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 10px">Vehicle Requested</h3>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px">
+      ${tableRowEmail("Vehicle", escape(vehicleLabel))}
+      ${tableRowEmail("Condition", escape(params.vehicleCondition))}
+      ${params.vehicleReferenceUrl ? tableRowEmail("Reference Unit", `<a href="${escape(params.vehicleReferenceUrl)}" style="color:#0B5FD1;text-decoration:none">View Reference Vehicle →</a>`) : ""}
+    </table>
+
+    <h3 style="color:#374151;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 10px">Buyer Overview</h3>
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px">
+      ${tableRowEmail("Location", `${escape(params.buyerCity)}, ${escape(params.buyerState)} ${escape(params.buyerZip)}`)}
+      ${tableRowEmail("Timeline", escape(params.buyerTimeline))}
+      ${tableRowEmail("Budget", escape(params.buyerBudget))}
+      ${params.buyerMonthlyGoal ? tableRowEmail("Monthly Goal", `${escape(params.buyerMonthlyGoal)}/mo`) : ""}
+      ${params.buyerDownPayment ? tableRowEmail("Down Payment", escape(params.buyerDownPayment)) : ""}
+      ${tableRowEmail("Financing", escape(params.buyerFinancing))}
+      ${tableRowEmail(
+        "Trade-In",
+        params.buyerHasTradeIn
+          ? `Yes — ${escape([params.buyerTradeYear, params.buyerTradeMake, params.buyerTradeModel].filter(Boolean).join(" "))}`
+          : "No",
+      )}
+      ${tableRowEmail("Open to Alternatives", params.buyerOpenToAlt ? "Yes" : "No — specific vehicle only")}
+    </table>
+
+    ${params.adminNotes ? `
+    <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:12px 16px;margin-bottom:20px">
+      <p style="color:#1E40AF;font-size:13px;font-weight:600;margin:0 0 4px">Notes from AutoLenis:</p>
+      <p style="color:#1E40AF;font-size:13px;margin:0;line-height:1.5">${escape(params.adminNotes)}</p>
+    </div>` : ""}
+
+    <div style="text-align:center;margin:28px 0">
+      ${button(params.submissionUrl, "Submit Your Offer →")}
+    </div>
+
+    <p style="color:#9CA3AF;font-size:11px;text-align:center;margin:16px 0 0;line-height:1.5">
+      AutoLenis is a licensed automotive buying concierge and broker.<br/>
+      A finder's fee applies upon successful completion of a sale.
+    </p>`;
+
+  await sendRaw(params.to, subject, wrap(inner));
+}
+
+// ─── Buyer interest confirmation ──────────────────────────────────────────
+export async function sendBuyerInterestConfirmationEmail(params: {
+  to: string;
+  buyerName: string;
+  vehicleLabel: string;
+  dealershipName: string;
+  offerPriceCents: number;
+}) {
+  const subject = "We received your interest — AutoLenis";
+  const price = `$${Math.round(params.offerPriceCents / 100).toLocaleString()}`;
+  const inner = `
+    <h2 style="color:#111827;font-size:20px;font-weight:700;margin:0 0 4px">Great choice, ${escape(params.buyerName)}!</h2>
+    <p style="color:#6B7280;font-size:14px;margin:0 0 20px">We received your interest in the vehicle offer below.</p>
+
+    <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:16px;margin-bottom:20px">
+      <p style="color:#14532D;font-size:14px;font-weight:600;margin:0 0 4px">${escape(params.vehicleLabel)}</p>
+      <p style="color:#166534;font-size:13px;margin:0">From ${escape(params.dealershipName)} · ${price} OTD</p>
+    </div>
+
+    <h3 style="color:#374151;font-size:13px;font-weight:600;margin:0 0 10px">What happens next:</h3>
+    <ol style="color:#4B5563;font-size:13px;line-height:1.8;margin:0 0 24px;padding-left:20px">
+      <li>An AutoLenis team member will contact you within <strong>2 business hours</strong></li>
+      <li>We'll confirm the vehicle is available and arrange a test drive if needed</li>
+      <li>We'll coordinate financing, trade-in, and paperwork</li>
+      <li>We'll facilitate a smooth, stress-free purchase</li>
+    </ol>
+
+    <p style="color:#6B7280;font-size:13px;margin:0 0 24px">Questions? Reply to this email and we'll get back to you right away.</p>
+
+    <div style="text-align:center;margin:24px 0">
+      ${button(`${APP_URL}/auth/signup`, "Create an Account to Track Your Deal →")}
+    </div>
+
+    <p style="color:#9CA3AF;font-size:11px;margin:20px 0 0">
+      You expressed interest via AutoLenis. No obligation — our team will reach out shortly.
+    </p>`;
+  await sendRaw(params.to, subject, wrap(inner));
+}
+
+// ─── Buyer asked a question about an offer ────────────────────────────────
+export async function sendBuyerQuestionEmail(params: {
+  buyerName: string;
+  buyerEmail: string;
+  dealershipName: string;
+  vehicleLabel: string;
+  question: string;
+}) {
+  const subject = `Buyer question about vehicle offer — ${params.buyerName}`;
+  const inner = `
+    <h2 style="color:#111827;font-size:20px;font-weight:700;margin:0 0 4px">Buyer Question Received</h2>
+    <p style="color:#6B7280;font-size:13px;margin:0 0 16px">
+      <strong>${escape(params.buyerName)}</strong> (${escape(params.buyerEmail)}) asked a question about an offer from <strong>${escape(params.dealershipName)}</strong>.
+    </p>
+    <div style="background:#F8F9FB;border-radius:12px;padding:16px;margin-bottom:16px">
+      <p style="color:#111827;font-size:14px;margin:0 0 4px"><strong>Vehicle:</strong> ${escape(params.vehicleLabel)}</p>
+      <p style="color:#111827;font-size:14px;margin:0 0 4px"><strong>Dealer:</strong> ${escape(params.dealershipName)}</p>
+    </div>
+    <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:14px">
+      <p style="color:#1E40AF;font-size:12px;font-weight:600;margin:0 0 6px">Question:</p>
+      <p style="color:#1E40AF;font-size:13px;margin:0;line-height:1.5;white-space:pre-line">${escape(params.question)}</p>
+    </div>
+    <p style="color:#4B5563;font-size:13px;margin-top:16px">Follow up with the buyer to answer or relay the question to the dealer.</p>`;
+  await sendRaw(ADMIN_EMAIL, subject, wrap(inner));
 }

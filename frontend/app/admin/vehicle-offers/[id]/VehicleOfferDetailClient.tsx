@@ -34,6 +34,16 @@ export type DetailSubmission = {
   submittedAt: string;
   notes: string | null;
   vehicles: unknown;
+  rejected: boolean;
+  rejectedAt: string | null;
+};
+
+export type DetailInvitation = {
+  id: string;
+  dealershipName: string;
+  dealerEmail: string;
+  status: string;
+  sentAt: string;
 };
 
 export type DetailOffer = {
@@ -59,8 +69,17 @@ export type DetailOffer = {
   referenceId: string | null;
   expiresAt: string | null;
   createdAt: string;
+  requestStatus: string;
   submissions: DetailSubmission[];
+  invitations: DetailInvitation[];
   latestReview: { reviewToken: string; buyerName: string; buyerEmail: string; sentAt: string } | null;
+};
+
+const INVITE_TONE: Record<string, string> = {
+  sent: "bg-slate-100 text-slate-600",
+  opened: "bg-blue-100 text-blue-700",
+  submitted: "bg-green-100 text-green-700",
+  expired: "bg-red-100 text-red-700",
 };
 
 type SelectedKey = string; // `${submissionId}::${vehicleIndex}`
@@ -71,15 +90,47 @@ function parseVehicles(raw: unknown): DealerVehicle[] {
   return raw as DealerVehicle[];
 }
 
-export default function VehicleOfferDetailClient({ offer, appUrl }: { offer: DetailOffer; appUrl: string }) {
+export default function VehicleOfferDetailClient({ offer: initialOffer, appUrl }: { offer: DetailOffer; appUrl: string }) {
+  const [offer, setOffer] = useState(initialOffer);
   const [selected, setSelected] = useState<Set<SelectedKey>>(new Set());
-  const [buyerName, setBuyerName] = useState(offer.buyerName ?? "");
-  const [buyerEmail, setBuyerEmail] = useState(offer.buyerEmail ?? "");
+  const [buyerName, setBuyerName] = useState(initialOffer.buyerName ?? "");
+  const [buyerEmail, setBuyerEmail] = useState(initialOffer.buyerEmail ?? "");
   const [adminMessage, setAdminMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentResult, setSentResult] = useState<{ reviewUrl: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [rejecting, setRejecting] = useState<string | null>(null);
+
+  async function handleRejectSubmission(submissionId: string) {
+    if (!confirm("Reject this dealer offer? The dealer will receive a notification.")) return;
+    setRejecting(submissionId);
+    try {
+      const res = await fetch(`/api/admin/vehicle-offers/${offer.id}/reject-submission`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ submissionId }),
+      });
+      if (res.ok) {
+        setOffer((prev) => ({
+          ...prev,
+          submissions: prev.submissions.map((s) =>
+            s.id === submissionId ? { ...s, rejected: true, rejectedAt: new Date().toISOString() } : s
+          ),
+        }));
+        // Clear any selections of this submission
+        setSelected((prev) => {
+          const next = new Set(prev);
+          for (const k of next) {
+            if (k.startsWith(`${submissionId}::`)) next.delete(k);
+          }
+          return next;
+        });
+      }
+    } finally {
+      setRejecting(null);
+    }
+  }
 
   const offerUrl = `${appUrl}/dealer-offer/${offer.token}`;
   const vehicleLabel = `${offer.vehicleYear} ${offer.vehicleMake} ${offer.vehicleModel}${offer.vehicleTrim ? ` ${offer.vehicleTrim}` : ""}`;
@@ -177,6 +228,26 @@ export default function VehicleOfferDetailClient({ offer, appUrl }: { offer: Det
         </div>
       </div>
 
+      {/* Dealer invitations */}
+      {offer.invitations.length > 0 && (
+        <div className="bg-white rounded-2xl border border-[#E5E7EB] p-5 mb-4" data-testid="invitations-card">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
+            Dealer Invitations ({offer.invitations.length})
+          </p>
+          <div className="space-y-2">
+            {offer.invitations.map((inv) => (
+              <div key={inv.id} className="flex items-center justify-between text-sm" data-testid={`invitation-${inv.id}`}>
+                <div className="min-w-0">
+                  <span className="font-medium text-slate-900">{inv.dealershipName}</span>
+                  <span className="text-slate-400 ml-2 text-xs">{inv.dealerEmail}</span>
+                </div>
+                <Badge className={INVITE_TONE[inv.status] ?? INVITE_TONE.sent}>{inv.status}</Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Submissions */}
       {totalSubmissions === 0 ? (
         <div className="bg-white rounded-2xl border-2 border-dashed border-slate-200 p-12 text-center mt-6">
@@ -195,10 +266,17 @@ export default function VehicleOfferDetailClient({ offer, appUrl }: { offer: Det
           {offer.submissions.map((s) => {
             const vehicles = parseVehicles(s.vehicles);
             return (
-              <div key={s.id} className="bg-white rounded-2xl border border-[#E5E7EB] p-6" data-testid={`submission-${s.id}`}>
-                <div className="flex items-start justify-between mb-3">
+              <div
+                key={s.id}
+                className={`bg-white rounded-2xl border p-6 ${s.rejected ? "border-red-200 opacity-75" : "border-[#E5E7EB]"}`}
+                data-testid={`submission-${s.id}`}
+              >
+                <div className="flex items-start justify-between mb-3 gap-3">
                   <div>
-                    <p className="font-bold text-[#111827]">{s.dealershipName}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-[#111827]">{s.dealershipName}</p>
+                      {s.rejected && <Badge className="bg-red-100 text-red-700 border-red-200">Rejected</Badge>}
+                    </div>
                     <p className="text-xs text-slate-400">Submitted {new Date(s.submittedAt).toLocaleString()}</p>
                   </div>
                 </div>
@@ -246,22 +324,39 @@ export default function VehicleOfferDetailClient({ offer, appUrl }: { offer: Det
                         <p className="text-xs text-slate-500 mt-2">
                           Trade-In: {v.tradeInAccepted ? "Yes" : "No"} &middot; Financing: {v.financingAvailable ? "Yes" : "No"} &middot; Warranty: {v.warrantyIncluded ? `Yes${v.warrantyDetails ? ` — ${v.warrantyDetails}` : ""}` : "No"}
                         </p>
-                        <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggle(s.id, idx)}
-                            className="h-4 w-4 rounded border-slate-300 accent-[#0B5FD1]"
-                            data-testid={`select-vehicle-${s.id}-${idx}`}
-                          />
-                          <span className="text-xs font-medium text-slate-700">Select this vehicle for buyer review</span>
-                        </label>
+                        {!s.rejected && (
+                          <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggle(s.id, idx)}
+                              className="h-4 w-4 rounded border-slate-300 accent-[#0B5FD1]"
+                              data-testid={`select-vehicle-${s.id}-${idx}`}
+                            />
+                            <span className="text-xs font-medium text-slate-700">Select this vehicle for buyer review</span>
+                          </label>
+                        )}
                       </div>
                     );
                   })}
                 </div>
 
                 {s.notes && <p className="text-xs text-slate-500 mt-3 bg-slate-50 rounded-lg p-3">Notes: {s.notes}</p>}
+
+                <div className="mt-3 pt-3 border-t border-slate-100">
+                  {!s.rejected ? (
+                    <button
+                      onClick={() => handleRejectSubmission(s.id)}
+                      disabled={rejecting === s.id}
+                      className="text-xs text-red-500 hover:text-red-700 hover:underline disabled:opacity-50"
+                      data-testid={`reject-submission-${s.id}`}
+                    >
+                      {rejecting === s.id ? "Rejecting…" : "Reject this offer"}
+                    </button>
+                  ) : (
+                    <p className="text-xs text-red-400">✗ Offer rejected{s.rejectedAt ? ` on ${new Date(s.rejectedAt).toLocaleDateString()}` : ""}</p>
+                  )}
+                </div>
               </div>
             );
           })}

@@ -44,11 +44,15 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
   const data = parsed.data;
 
-  // Validate every selected item refers to a real submission belonging to this offer
-  const submissionIds = new Set(offer.submissions.map((s) => s.id));
+  // Validate every selected item refers to a real, non-rejected submission for this offer
+  const submissionMap = new Map(offer.submissions.map((s) => [s.id, s] as const));
   for (const item of data.items) {
-    if (!submissionIds.has(item.submissionId)) {
+    const sub = submissionMap.get(item.submissionId);
+    if (!sub) {
       return adminError("INVALID_SELECTION", "Selected submission not part of this offer", 400);
+    }
+    if (sub.rejected) {
+      return adminError("INVALID_SELECTION", "Cannot send a rejected submission to the buyer", 400);
     }
   }
 
@@ -114,6 +118,11 @@ export async function POST(request: NextRequest, { params }: Params) {
   } catch (err) {
     console.error("[send-to-buyer] email failed:", err);
   }
+
+  await prisma.vehicleOffer.update({
+    where: { id: offer.id },
+    data: { requestStatus: "sent_to_buyer" },
+  }).catch((err) => console.error("[send-to-buyer] requestStatus update failed:", err));
 
   return adminSuccess({ reviewToken: review.reviewToken, reviewUrl }, 201);
 }
