@@ -33,7 +33,7 @@ export default async function DealPage() {
   const steps = [
     { label: "Deal Selected", done: true },
     { label: "Financing", done: !!deal.financingPath, href: "/buyer/deal/financing" },
-    { label: "Concierge Fee", done: !!deal.feePaidAt || buyer.plan !== "PREMIUM", href: "/buyer/deal/payment" },
+    { label: "Service Fee", done: !!deal.feePaidAt || buyer.plan !== "PREMIUM", href: "/buyer/deal/payment" },
     { label: "Insurance", done: deal.insuranceStatus !== "NOT_STARTED", href: "/buyer/insurance" },
     { label: "Contract Shield", done: deal.contractShieldStatus === "PASS", href: "/buyer/contract-shield" },
     { label: "Sign Documents", done: deal.status === "SIGNED" || deal.status === "COMPLETED", href: "/buyer/esign" },

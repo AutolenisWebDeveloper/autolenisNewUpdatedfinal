@@ -130,7 +130,7 @@ export default function DepositPage() {
           </p>
           <p data-testid="deposit-plan-credit-copy">
             {isPremium
-              ? `Your $99 deposit will be credited toward your $${PREMIUM_FEE_CENTS / 100} Premium concierge fee ($${PREMIUM_FEE_REMAINING_CENTS / 100} remaining after this).`
+              ? `Your $99 deposit will be credited toward your $${PREMIUM_FEE_CENTS / 100} AutoLenis Service Fee ($${PREMIUM_FEE_REMAINING_CENTS / 100} remaining after this).`
               : "Your $99 deposit will be credited toward your vehicle purchase at closing."}
           </p>
         </div>

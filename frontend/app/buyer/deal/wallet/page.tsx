@@ -35,7 +35,7 @@ export default async function DealWalletPage() {
           {[
             { label: "Vehicle out-the-door price", amount: deal.offer.otdPriceCents, positive: false },
             { label: "Deposit paid", amount: DEPOSIT_AMOUNT_CENTS, positive: true },
-            { label: "Concierge fee", amount: deal.feePaidAt ? deal.feeAmountCents ?? PREMIUM_FEE_CENTS : 0, positive: false },
+            { label: "Service fee", amount: deal.feePaidAt ? deal.feeAmountCents ?? PREMIUM_FEE_CENTS : 0, positive: false },
             { label: "Net deposit credit", amount: deal.feePaidAt ? DEPOSIT_AMOUNT_CENTS : 0, positive: true },
           ].map((item, i) => (
             <div key={i} data-testid={`wallet-item-${i}`} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-4 py-3">

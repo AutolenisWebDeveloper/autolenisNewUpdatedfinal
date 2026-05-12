@@ -40,9 +40,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Auctions", href: "/admin/auctions", icon: Gavel },
     { label: "Deals", href: "/admin/deals", icon: FileText },
     { label: "Offers", href: "/admin/offers", icon: DollarSign },
-    { label: "Payments", href: "/admin/payments", icon: CreditCard },
-    { label: "Deposits", href: "/admin/payments/deposits", icon: ArrowDownCircle },
-    { label: "Refunds",  href: "/admin/payments/refunds",  icon: RotateCcw },
+    { label: "Payment Hub", href: "/admin/payments", icon: CreditCard },
   ]},
   { label: "Operations", items: [
     { label: "Queues", href: "/admin/queues", icon: AlertOctagon },

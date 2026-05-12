@@ -12,6 +12,7 @@ export interface DepositRow {
   amountCents: number;
   status: string;
   createdAt: string;
+  refundedAt: string | null;
   stripePaymentIntentId: string | null;
 }
 
@@ -23,6 +24,7 @@ export interface ConciergeFeeRow {
   amountCents: number;
   feePaidAt: string | null;
   feeStatus: "PENDING" | "PAID" | "REFUNDED";
+  createdAt: string;
   stripeFeePIId: string | null;
 }
 
@@ -41,6 +43,7 @@ export async function getAdminDepositList(): Promise<DepositRow[]> {
     amountCents: d.amountCents,
     status: d.status,
     createdAt: d.createdAt.toISOString(),
+    refundedAt: d.refundedAt?.toISOString() ?? null,
     stripePaymentIntentId: d.stripePaymentIntentId ?? null,
   }));
 }
@@ -66,6 +69,7 @@ export async function getAdminConciergeFeeList(): Promise<ConciergeFeeRow[]> {
       amountCents: d.feeAmountCents ?? 40000,
       feePaidAt: d.feePaidAt?.toISOString() ?? null,
       feeStatus,
+      createdAt: d.createdAt.toISOString(),
       stripeFeePIId: d.stripeFeePIId ?? null,
     };
   });

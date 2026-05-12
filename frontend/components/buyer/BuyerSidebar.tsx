@@ -31,7 +31,7 @@ const NAV_GROUPS = [
       { label: "Financing", href: "/buyer/deal/financing", icon: FileText },
       { label: "Contract Shield", href: "/buyer/contract-shield", icon: Shield },
       { label: "Contracts", href: "/buyer/contracts", icon: FileCheck },
-      { label: "Concierge Fee", href: "/buyer/fee", icon: CreditCard },
+      { label: "Service Fee", href: "/buyer/fee", icon: CreditCard },
       { label: "Sign Documents", href: "/buyer/esign", icon: PenLine },
       { label: "Vehicle Pickup", href: "/buyer/pickup", icon: MapPin },
     ],

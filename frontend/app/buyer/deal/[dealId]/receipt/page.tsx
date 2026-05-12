@@ -68,7 +68,7 @@ export default async function ReceiptPage({ params }: Props) {
           </div>
           {isPremium && (
             <div className="flex justify-between text-sm">
-              <span className="text-[#4B5563]">Premium Concierge Fee</span>
+              <span className="text-[#4B5563]">AutoLenis Service Fee</span>
               <span className="text-[#111827]">
                 ${(PREMIUM_FEE_CENTS / 100).toFixed(2)}
               </span>
