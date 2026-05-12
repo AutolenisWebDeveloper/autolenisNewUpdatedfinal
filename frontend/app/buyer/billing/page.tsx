@@ -145,17 +145,17 @@ export default async function BillingPage() {
         )}
       </div>
 
-      {/* Concierge Fee History */}
+      {/* Service Fee History */}
       {paidDeals.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
-          <h2 className="font-semibold text-gray-900 text-base">Concierge Fee History</h2>
+          <h2 className="font-semibold text-gray-900 text-base">Service Fee History</h2>
           <div className="space-y-3">
             {paidDeals.map(d => (
               <div key={d.id}
                 className="flex items-center justify-between border-b border-gray-100 last:border-0 py-3">
                 <div>
                   <p className="text-sm font-semibold text-[#111827]">
-                    Concierge Fee — Deal #{d.id.slice(-8).toUpperCase()}
+                    Service Fee — Deal #{d.id.slice(-8).toUpperCase()}
                   </p>
                   {d.feePaidAt && (
                     <p className="text-xs text-[#6B7280] mt-0.5">

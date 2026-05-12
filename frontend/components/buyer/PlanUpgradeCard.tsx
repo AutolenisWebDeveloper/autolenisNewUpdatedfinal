@@ -15,7 +15,7 @@ interface PlanUpgradeCardProps {
 }
 
 const CONFIRMATION_MSG =
-  "You are now on the Premium plan. Your $99 deposit will be credited toward your $499 concierge fee — $400 net will be collected after you select your deal.";
+  "You are now on the Premium plan. Your $99 deposit will be credited toward your $499 service fee — $400 net will be collected after you select your deal.";
 
 export default function PlanUpgradeCard({ plan, depositStatus, planUpgradedAt }: PlanUpgradeCardProps) {
   const [loading, setLoading] = useState(false);

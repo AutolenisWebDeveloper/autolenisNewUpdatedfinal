@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Concierge Fee", robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: "Service Fee", robots: { index: false, follow: false } };
 
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
@@ -204,7 +204,7 @@ function FeePage_NoDeal({
         icon={<Banknote size={28} className="text-slate-400" />}
         iconBg="bg-slate-100"
         title="Service Fee"
-        subtitle="AutoLenis concierge fee status"
+        subtitle="AutoLenis service fee status"
       />
 
       <InfoCard testId="fee-no-deal">
@@ -215,7 +215,7 @@ function FeePage_NoDeal({
               No active deal yet
             </p>
             <p className="text-sm text-slate-600 leading-relaxed">
-              The concierge fee step becomes active once you have a deal in
+              The service fee step becomes active once you have a deal in
               progress. Start by selecting an offer from your auction.
             </p>
           </div>
@@ -331,7 +331,7 @@ function FeePage_Due({
         <HeroCard
           icon={<Shield size={28} className="text-emerald-600" />}
           iconBg="bg-emerald-100"
-          title="No Concierge Fee"
+          title="No Service Fee"
           subtitle="Standard plan — no fee required"
           badge={{ text: "Standard Plan", color: "green" }}
         />
@@ -344,10 +344,10 @@ function FeePage_Due({
             />
             <div>
               <p className="text-sm font-semibold text-slate-800 mb-1">
-                No AutoLenis concierge fee applies
+                No AutoLenis service fee applies
               </p>
               <p className="text-sm text-slate-600 leading-relaxed">
-                Standard plan buyers pay no concierge fee. Your{" "}
+                Standard plan buyers pay no service fee. Your{" "}
                 <strong>$99 Auction Access Deposit</strong> is credited toward
                 your vehicle purchase at closing.
               </p>
@@ -376,7 +376,7 @@ function FeePage_Due({
       <HeroCard
         icon={<Sparkles size={28} className="text-[#0B5FD1]" />}
         iconBg="bg-[#0B5FD1]/10"
-        title="Premium Concierge Fee"
+        title="AutoLenis Service Fee"
         subtitle="Payment required to continue"
         badge={{ text: "Premium Plan", color: "purple" }}
         status={{ text: isFeePending ? "Payment Pending" : "Due", color: "amber" }}
@@ -399,7 +399,7 @@ function FeePage_Due({
             />
             <p className="text-sm text-slate-600 leading-relaxed">
               Your $99 deposit has not been confirmed yet. Once confirmed, it
-              will be credited toward your concierge fee.
+              will be credited toward your service fee.
             </p>
           </div>
         </InfoCard>
@@ -444,11 +444,11 @@ function FeePage_Paid({
       <HeroCard
         icon={<CheckCircle2 size={28} className="text-emerald-600" />}
         iconBg="bg-emerald-100"
-        title={isPremium ? "Concierge Fee Paid" : "No Fee — Standard Plan"}
+        title={isPremium ? "Service Fee Paid" : "No Fee — Standard Plan"}
         subtitle={
           isPremium
-            ? "Your AutoLenis concierge fee has been received"
-            : "No concierge fee required — deposit credited to purchase"
+            ? "Your AutoLenis service fee has been received"
+            : "No service fee required — deposit credited to purchase"
         }
         status={{ text: "Complete", color: "green" }}
       />
@@ -524,7 +524,7 @@ function FeePage_Refunded({
         icon={<RotateCcw size={28} className="text-blue-500" />}
         iconBg="bg-blue-50"
         title="Fee Refunded"
-        subtitle="Your concierge fee has been refunded"
+        subtitle="Your service fee has been refunded"
         status={{ text: "Refunded", color: "blue" }}
       />
 
@@ -563,7 +563,7 @@ function PageShell({ children }: { children: React.ReactNode }) {
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 space-y-5 pb-12">
         <div>
           <h1 className="text-xl font-bold text-slate-900">
-            Concierge Fee
+            Service Fee
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
             AutoLenis service fee status for your deal
@@ -689,7 +689,7 @@ function FeeBreakdown({
         {isPremium ? (
           <>
             <FeeRow
-              label="Premium concierge fee (total)"
+              label="AutoLenis Service Fee (total)"
               value={formatCents(totalFeeCents)}
             />
             <FeeRow
@@ -715,7 +715,7 @@ function FeeBreakdown({
         ) : (
           <>
             <FeeRow
-              label="AutoLenis concierge fee"
+              label="AutoLenis Service Fee"
               value="$0"
               note="Standard plan — no fee"
               noteColor="green"
@@ -739,7 +739,7 @@ function FeeBreakdown({
 
       {isPremium && (
         <p className="text-xs text-slate-400 mt-4 leading-relaxed bg-slate-50 rounded-lg px-3 py-2">
-          Premium Concierge Fee: <strong>$499 total</strong> — $99 deposit
+          AutoLenis Service Fee: <strong>$499 total</strong> — $99 deposit
           credited ={" "}
           <strong>{formatCents(netFeeCents)} due to AutoLenis</strong>.
           Deposit is separately credited toward your vehicle purchase at
@@ -820,7 +820,7 @@ function PlanInfoCard({
         <p className="text-sm text-slate-600 leading-relaxed">
           {isPremium
             ? `Premium plan includes the full AutoLenis white-glove concierge service. A $499 fee applies, with your $99 deposit already credited — leaving ${formatCents(PREMIUM_FEE_REMAINING_CENTS)} due.`
-            : "Standard plan buyers pay no concierge fee. Your $99 Auction Access Deposit will be credited toward your vehicle purchase at closing."}
+            : "Standard plan buyers pay no service fee. Your $99 Auction Access Deposit will be credited toward your vehicle purchase at closing."}
         </p>
         {isPremium && !depositPaid && (
           <p className="text-xs text-amber-600 mt-1.5">

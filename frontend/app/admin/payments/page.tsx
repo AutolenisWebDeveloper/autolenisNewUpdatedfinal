@@ -24,8 +24,10 @@ export default async function AdminPaymentsPage() {
   return (
     <div className="p-6 md:p-8 max-w-7xl" data-testid="admin-payments-page">
       <div className="mb-6">
-        <h1 className="text-xl font-bold text-slate-900">Payments</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Deposit and concierge fee management</p>
+        <h1 className="text-xl font-bold text-slate-900">Payment Hub</h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Manage deposits, service fees, affiliate commissions, and refunds
+        </p>
       </div>
       <AdminPaymentsClient deposits={deposits} conciergeFees={conciergeFees} />
     </div>

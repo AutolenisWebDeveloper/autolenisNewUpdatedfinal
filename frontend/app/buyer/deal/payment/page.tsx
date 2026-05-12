@@ -28,7 +28,7 @@ export default async function DealPaymentPage() {
   if (!isPremium) {
     return (
       <div className="p-6 md:p-8 max-w-xl" data-testid="deal-payment-page">
-        <h1 className="text-xl font-bold text-[#111827] mb-6">Concierge Fee</h1>
+        <h1 className="text-xl font-bold text-[#111827] mb-6">Service Fee</h1>
 
         <div
           className="bg-white border-2 border-[#50D14E]/30 rounded-xl p-6 mb-6"
@@ -41,14 +41,14 @@ export default async function DealPaymentPage() {
             <div>
               <p className="text-sm font-bold text-[#111827] mb-1">You are on the Standard plan.</p>
               <p className="text-sm text-[#4B5563] leading-relaxed">
-                No concierge fee applies. Your $99 Auction Access Deposit will be credited toward your vehicle purchase at closing.
+                No service fee applies. Your $99 Auction Access Deposit will be credited toward your vehicle purchase at closing.
               </p>
             </div>
           </div>
 
           <div className="border-t border-[#EFF6FF] pt-4 space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-[#4B5563]">AutoLenis concierge fee</span>
+              <span className="text-[#4B5563]">AutoLenis Service Fee</span>
               <span className="font-semibold text-[#111827]">$0</span>
             </div>
             <div className="flex justify-between text-[#1A6B18]">
@@ -79,13 +79,13 @@ export default async function DealPaymentPage() {
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="deal-payment-page">
       <h1 className="text-xl font-bold text-[#111827] mb-6 flex items-center gap-2">
-        <Sparkles size={18} className="text-[#0B5FD1]" /> Premium Concierge Fee
+        <Sparkles size={18} className="text-[#0B5FD1]" /> AutoLenis Service Fee
       </h1>
 
       <div className="bg-white border border-[#E5E7EB] rounded-xl p-6 mb-6">
         <div className="space-y-3 text-sm">
           <div className="flex justify-between">
-            <span className="text-[#4B5563]">Premium concierge fee (total)</span>
+            <span className="text-[#4B5563]">AutoLenis Service Fee (total)</span>
             <span className="font-semibold text-[#111827]">${PREMIUM_FEE_CENTS / 100}</span>
           </div>
           <div className="flex justify-between text-[#1A6B18]">
@@ -98,7 +98,7 @@ export default async function DealPaymentPage() {
           </div>
         </div>
         <p className="text-xs text-[#4B5563] mt-4 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md px-3 py-2 leading-relaxed">
-          Premium Concierge Fee: <span className="font-semibold">$499 total</span> — $99 deposit already credited = <span className="font-semibold">$400 due today</span>.
+          AutoLenis Service Fee: <span className="font-semibold">$499 total</span> — $99 deposit already credited = <span className="font-semibold">$400 due today</span>.
         </p>
       </div>
 

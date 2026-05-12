@@ -1061,6 +1061,7 @@ enum CommissionStatus {
   APPROVED
   PAID
   REVERSED
+  REJECTED
 }
 
 enum PreQualDecision {
