@@ -41,6 +41,14 @@ interface CommissionRow {
   createdAt: string;
 }
 
+interface BuyerResult {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string;
+  activeDealId: string | null;
+}
+
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
@@ -175,6 +183,57 @@ function InfoBox({ text }: { text: string }) {
   );
 }
 
+// ─── Buyer Search Input ───────────────────────────────────────────────────────
+
+function BuyerSearchInput({
+  search, onSearchChange, results, selected, onSelect, onClear, loading,
+}: {
+  search: string; onSearchChange: (v: string) => void;
+  results: BuyerResult[]; selected: BuyerResult | null;
+  onSelect: (b: BuyerResult) => void; onClear: () => void;
+  loading: boolean;
+}) {
+  return (
+    <div>
+      <Label>Search Buyer *</Label>
+      {selected ? (
+        <div className="mt-1.5 flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-3 py-2">
+          <span className="text-sm text-green-800 font-medium flex-1">
+            {[selected.firstName, selected.lastName].filter(Boolean).join(" ") || selected.email} · {selected.email}
+          </span>
+          <button onClick={onClear} className="text-green-600 hover:text-green-800"><X size={14} /></button>
+        </div>
+      ) : (
+        <div className="relative mt-1.5">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={search}
+            onChange={e => onSearchChange(e.target.value)}
+            placeholder="Search buyer by name or email…"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+          />
+          {loading && (
+            <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 animate-spin" />
+          )}
+          {results.length > 0 && (
+            <div className="absolute z-10 top-full mt-1 left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+              {results.map(b => (
+                <button key={b.id} onClick={() => onSelect(b)}
+                  className="w-full text-left px-4 py-2.5 hover:bg-slate-50 border-b border-slate-50 last:border-0">
+                  <p className="text-sm font-medium text-slate-800">
+                    {[b.firstName, b.lastName].filter(Boolean).join(" ") || "(no name)"}
+                  </p>
+                  <p className="text-xs text-slate-500">{b.email}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Stripe Card Form ─────────────────────────────────────────────────────────
 
 function CardForm({ onSuccess, onError, submitLabel }: {
@@ -233,7 +292,9 @@ function StripeCardEntry({ clientSecret, onSuccess, onError, submitLabel }: {
 type DepositModal =
   | { type: "charge"; depositId: string; buyerId: string; buyerName: string }
   | { type: "link"; depositId: string; buyerId: string; buyerName: string; buyerEmail: string }
-  | { type: "refund"; depositId: string; buyerName: string; amountCents: number };
+  | { type: "refund"; depositId: string; buyerName: string; amountCents: number }
+  | { type: "new_charge_deposit" }
+  | { type: "new_link_deposit" };
 
 function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
   const [search, setSearch] = useState("");
@@ -244,6 +305,10 @@ function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [buyerSearch, setBuyerSearch] = useState("");
+  const [buyerResults, setBuyerResults] = useState<BuyerResult[]>([]);
+  const [selectedBuyer, setSelectedBuyer] = useState<BuyerResult | null>(null);
+  const [buyerSearchLoading, setBuyerSearchLoading] = useState(false);
 
   const filtered = deposits.filter(d =>
     (filter === "ALL" || d.status === filter) &&
@@ -253,9 +318,24 @@ function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
 
   const paidTotal = deposits.filter(d => d.status === "PAID").reduce((s, d) => s + d.amountCents, 0);
 
+  useEffect(() => {
+    if (buyerSearch.trim().length < 2) { setBuyerResults([]); return; }
+    setBuyerSearchLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/admin/buyers?q=${encodeURIComponent(buyerSearch)}&perPage=5`);
+        const data = await res.json() as { data?: { buyers?: BuyerResult[] } };
+        setBuyerResults(data.data?.buyers ?? []);
+      } catch { /* ignore */ }
+      finally { setBuyerSearchLoading(false); }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [buyerSearch]);
+
   function resetModal() {
     setModal(null); setLoading(false); setSuccess(false);
     setError(null); setReason(""); setClientSecret(null);
+    setBuyerSearch(""); setBuyerResults([]); setSelectedBuyer(null);
   }
 
   async function handleAction(url: string, body: object) {
@@ -271,6 +351,21 @@ function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
 
   return (
     <div>
+      <div className="flex gap-2 mb-5">
+        <button
+          onClick={() => setModal({ type: "new_charge_deposit" })}
+          className="inline-flex items-center gap-2 bg-[#0B5FD1] text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0944a8] transition-colors"
+          data-testid="deposit-charge-card-btn">
+          <CreditCard size={15} /> Charge Card — $99 Deposit
+        </button>
+        <button
+          onClick={() => setModal({ type: "new_link_deposit" })}
+          className="inline-flex items-center gap-2 border border-[#0B5FD1] text-[#0B5FD1] text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0B5FD1]/5 transition-colors"
+          data-testid="deposit-send-link-btn">
+          <Link2 size={15} /> Send Payment Link
+        </button>
+      </div>
+
       <StatsRow stats={[
         { label: "Total Collected", value: `$${paidTotal / 100}`, color: "text-green-700" },
         { label: "Paid",    value: String(deposits.filter(d => d.status === "PAID").length),    color: "text-green-700" },
@@ -393,6 +488,71 @@ function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
           )}
         </Modal>
       )}
+
+      {/* New Charge Deposit Modal */}
+      {modal?.type === "new_charge_deposit" && (
+        <Modal title="Charge Card — $99 Auction Access Deposit" onClose={resetModal}>
+          {success ? <SuccessState message="Payment processed successfully." /> :
+           clientSecret ? (
+            <StripeCardEntry clientSecret={clientSecret}
+              onSuccess={() => setSuccess(true)} onError={setError}
+              submitLabel="Charge $99 Auction Access Deposit" />
+           ) : (
+            <div className="space-y-4">
+              <BuyerSearchInput
+                search={buyerSearch} onSearchChange={setBuyerSearch}
+                results={buyerResults} selected={selectedBuyer}
+                onSelect={b => { setSelectedBuyer(b); setBuyerResults([]); setBuyerSearch(""); }}
+                onClear={() => setSelectedBuyer(null)} loading={buyerSearchLoading} />
+              <div><Label>Reason *</Label>
+                <Textarea value={reason} onChange={e => setReason(e.target.value)}
+                  placeholder="e.g. Buyer called in, ready to proceed" rows={2} className="mt-1.5" />
+              </div>
+              <Button disabled={loading || !reason.trim() || !selectedBuyer} className="w-full"
+                onClick={async () => {
+                  if (!selectedBuyer) return;
+                  const data = await handleAction("/api/admin/payments/deposit/create-intent",
+                    { buyerId: selectedBuyer.id, reason });
+                  if (data?.data?.clientSecret) setClientSecret(data.data.clientSecret);
+                }}>
+                {loading ? <><Loader2 size={14} className="animate-spin mr-1" />Creating…</> : "Create Payment Intent →"}
+              </Button>
+              {error && <ErrorMsg text={error} />}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* New Send Link Deposit Modal */}
+      {modal?.type === "new_link_deposit" && (
+        <Modal title="Send $99 Deposit Payment Link" onClose={resetModal}>
+          {success ? (
+            <SuccessState message={`Link sent to ${selectedBuyer?.email ?? "buyer"}. Buyer can pay at their convenience.`} />
+          ) : (
+            <div className="space-y-4">
+              <BuyerSearchInput
+                search={buyerSearch} onSearchChange={setBuyerSearch}
+                results={buyerResults} selected={selectedBuyer}
+                onSelect={b => { setSelectedBuyer(b); setBuyerResults([]); setBuyerSearch(""); }}
+                onClear={() => setSelectedBuyer(null)} loading={buyerSearchLoading} />
+              <div><Label>Reason *</Label>
+                <Textarea value={reason} onChange={e => setReason(e.target.value)}
+                  placeholder="e.g. Buyer requested payment link via email" rows={2} className="mt-1.5" />
+              </div>
+              <Button disabled={loading || !reason.trim() || !selectedBuyer} className="w-full"
+                onClick={async () => {
+                  if (!selectedBuyer) return;
+                  const data = await handleAction("/api/admin/payments/deposit/send-link",
+                    { buyerId: selectedBuyer.id, reason });
+                  if (data) setSuccess(true);
+                }}>
+                {loading ? <><Loader2 size={14} className="animate-spin mr-1" />Sending…</> : "Send Payment Link"}
+              </Button>
+              {error && <ErrorMsg text={error} />}
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }
@@ -402,7 +562,9 @@ function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
 type FeeModal =
   | { type: "charge"; dealId: string; buyerId: string; buyerName: string }
   | { type: "link"; dealId: string; buyerName: string; buyerEmail: string }
-  | { type: "refund"; dealId: string; buyerName: string };
+  | { type: "refund"; dealId: string; buyerName: string }
+  | { type: "new_charge_fee" }
+  | { type: "new_link_fee" };
 
 function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] }) {
   const [search, setSearch] = useState("");
@@ -413,6 +575,11 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [buyerSearch, setBuyerSearch] = useState("");
+  const [buyerResults, setBuyerResults] = useState<BuyerResult[]>([]);
+  const [selectedBuyer, setSelectedBuyer] = useState<BuyerResult | null>(null);
+  const [buyerSearchLoading, setBuyerSearchLoading] = useState(false);
+  const [dealIdInput, setDealIdInput] = useState("");
 
   const filtered = conciergeFees.filter(f =>
     (filter === "ALL" || f.feeStatus === filter) &&
@@ -423,9 +590,24 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
   const paidTotal = conciergeFees.filter(f => f.feeStatus === "PAID")
     .reduce((s, f) => s + f.amountCents, 0);
 
+  useEffect(() => {
+    if (buyerSearch.trim().length < 2) { setBuyerResults([]); return; }
+    setBuyerSearchLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/admin/buyers?q=${encodeURIComponent(buyerSearch)}&perPage=5`);
+        const data = await res.json() as { data?: { buyers?: BuyerResult[] } };
+        setBuyerResults(data.data?.buyers ?? []);
+      } catch { /* ignore */ }
+      finally { setBuyerSearchLoading(false); }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [buyerSearch]);
+
   function resetModal() {
     setModal(null); setLoading(false); setSuccess(false);
     setError(null); setReason(""); setClientSecret(null);
+    setBuyerSearch(""); setBuyerResults([]); setSelectedBuyer(null); setDealIdInput("");
   }
 
   async function handleAction(url: string, body: object) {
@@ -441,6 +623,21 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
 
   return (
     <div>
+      <div className="flex gap-2 mb-5">
+        <button
+          onClick={() => setModal({ type: "new_charge_fee" })}
+          className="inline-flex items-center gap-2 bg-[#0B5FD1] text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0944a8] transition-colors"
+          data-testid="fee-charge-card-btn">
+          <CreditCard size={15} /> Charge Card — $400 Service Fee
+        </button>
+        <button
+          onClick={() => setModal({ type: "new_link_fee" })}
+          className="inline-flex items-center gap-2 border border-[#0B5FD1] text-[#0B5FD1] text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0B5FD1]/5 transition-colors"
+          data-testid="fee-send-link-btn">
+          <Link2 size={15} /> Send Payment Link
+        </button>
+      </div>
+
       <StatsRow stats={[
         { label: "Total Collected", value: `$${paidTotal / 100}`, color: "text-green-700" },
         { label: "Paid",    value: String(conciergeFees.filter(f => f.feeStatus === "PAID").length),    color: "text-green-700" },
@@ -557,6 +754,87 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
                   if (data) setSuccess(true);
                 }}>
                 {loading ? <><Loader2 size={14} className="animate-spin mr-1" />Processing…</> : "Confirm Refund — $400"}
+              </Button>
+              {error && <ErrorMsg text={error} />}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* New Charge Fee Modal */}
+      {modal?.type === "new_charge_fee" && (
+        <Modal title="Charge Card — $400 AutoLenis Service Fee" onClose={resetModal}>
+          {success ? <SuccessState message="Service fee payment processed successfully." /> :
+           clientSecret ? (
+            <StripeCardEntry clientSecret={clientSecret}
+              onSuccess={() => setSuccess(true)} onError={setError}
+              submitLabel="Charge $400 AutoLenis Service Fee" />
+           ) : (
+            <div className="space-y-4">
+              <BuyerSearchInput
+                search={buyerSearch} onSearchChange={setBuyerSearch}
+                results={buyerResults} selected={selectedBuyer}
+                onSelect={b => { setSelectedBuyer(b); setBuyerResults([]); setBuyerSearch(""); setDealIdInput(b.activeDealId ?? ""); }}
+                onClear={() => { setSelectedBuyer(null); setDealIdInput(""); }} loading={buyerSearchLoading} />
+              <div>
+                <Label>Deal ID {selectedBuyer?.activeDealId ? "(pre-filled from active deal)" : "(optional)"}</Label>
+                <input value={dealIdInput} onChange={e => setDealIdInput(e.target.value)}
+                  placeholder="Paste deal ID or leave blank"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm mt-1.5 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20" />
+                {selectedBuyer && !selectedBuyer.activeDealId && (
+                  <p className="text-xs text-slate-400 mt-1">No active deal found — enter manually if known.</p>
+                )}
+              </div>
+              <div><Label>Reason *</Label>
+                <Textarea value={reason} onChange={e => setReason(e.target.value)}
+                  placeholder="e.g. Buyer called in, ready to proceed" rows={2} className="mt-1.5" />
+              </div>
+              <Button disabled={loading || !reason.trim() || !dealIdInput.trim()} className="w-full"
+                onClick={async () => {
+                  const data = await handleAction("/api/admin/payments/concierge-fee/create-intent",
+                    { dealId: dealIdInput.trim(), reason });
+                  if (data?.data?.clientSecret) setClientSecret(data.data.clientSecret);
+                }}>
+                {loading ? <><Loader2 size={14} className="animate-spin mr-1" />Creating…</> : "Create Payment Intent →"}
+              </Button>
+              {error && <ErrorMsg text={error} />}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* New Send Fee Link Modal */}
+      {modal?.type === "new_link_fee" && (
+        <Modal title="Send $400 Service Fee Payment Link" onClose={resetModal}>
+          {success ? (
+            <SuccessState message={`Link sent to ${selectedBuyer?.email ?? "buyer"}. Buyer can pay at their convenience.`} />
+          ) : (
+            <div className="space-y-4">
+              <BuyerSearchInput
+                search={buyerSearch} onSearchChange={setBuyerSearch}
+                results={buyerResults} selected={selectedBuyer}
+                onSelect={b => { setSelectedBuyer(b); setBuyerResults([]); setBuyerSearch(""); setDealIdInput(b.activeDealId ?? ""); }}
+                onClear={() => { setSelectedBuyer(null); setDealIdInput(""); }} loading={buyerSearchLoading} />
+              <div>
+                <Label>Deal ID {selectedBuyer?.activeDealId ? "(pre-filled from active deal)" : "(optional)"}</Label>
+                <input value={dealIdInput} onChange={e => setDealIdInput(e.target.value)}
+                  placeholder="Paste deal ID or leave blank"
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm mt-1.5 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20" />
+                {selectedBuyer && !selectedBuyer.activeDealId && (
+                  <p className="text-xs text-slate-400 mt-1">No active deal found — enter manually if known.</p>
+                )}
+              </div>
+              <div><Label>Reason *</Label>
+                <Textarea value={reason} onChange={e => setReason(e.target.value)}
+                  placeholder="e.g. Buyer ready to proceed, requested payment link" rows={2} className="mt-1.5" />
+              </div>
+              <Button disabled={loading || !reason.trim() || !dealIdInput.trim()} className="w-full"
+                onClick={async () => {
+                  const data = await handleAction("/api/admin/payments/concierge-fee/send-link",
+                    { dealId: dealIdInput.trim(), reason });
+                  if (data) setSuccess(true);
+                }}>
+                {loading ? <><Loader2 size={14} className="animate-spin mr-1" />Sending…</> : "Send Payment Link"}
               </Button>
               {error && <ErrorMsg text={error} />}
             </div>
