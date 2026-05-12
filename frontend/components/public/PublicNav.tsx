@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { Menu, X } from "lucide-react";
+import { Menu, X, ChevronDown, User, Car, DollarSign } from "lucide-react";
 import { AutoLenisLogo } from "@/components/shared/AutoLenisLogo";
 
 const NAV_LINKS = [
@@ -18,6 +18,7 @@ const NAV_LINKS = [
 export default function PublicNav() {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [signInOpen, setSignInOpen] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
@@ -55,13 +56,45 @@ export default function PublicNav() {
 
           {/* Desktop CTAs */}
           <div className="hidden lg:flex items-center gap-3 shrink-0">
-            <Link
-              href="/auth/signin"
-              data-testid="nav-signin-btn"
-              className="px-4 py-2 text-sm font-medium text-[#4B5563] hover:text-[#0B5FD1] transition-colors"
-            >
-              Sign In
-            </Link>
+            {/* Sign In dropdown */}
+            <div className="relative" onMouseLeave={() => setSignInOpen(false)}>
+              <button
+                onClick={() => setSignInOpen(o => !o)}
+                data-testid="nav-signin-btn"
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-[#4B5563] hover:text-[#0B5FD1] transition-colors"
+              >
+                Sign In
+                <ChevronDown size={14} className={`transition-transform ${signInOpen ? "rotate-180" : ""}`} />
+              </button>
+              {signInOpen && (
+                <div className="absolute right-0 top-full mt-2 w-52 bg-white border border-[#E5E7EB] rounded-xl shadow-lg overflow-hidden z-50">
+                  <Link
+                    href="/auth/signin"
+                    onClick={() => setSignInOpen(false)}
+                    className="flex items-center gap-2.5 px-4 py-3 text-sm text-[#374151] hover:bg-[#F8F9FB] hover:text-[#0B5FD1] transition-colors"
+                    data-testid="nav-signin-buyer"
+                  >
+                    <User size={14} /> Buyer Sign In
+                  </Link>
+                  <Link
+                    href="/dealer/sign-in"
+                    onClick={() => setSignInOpen(false)}
+                    className="flex items-center gap-2.5 px-4 py-3 text-sm text-[#374151] hover:bg-[#F8F9FB] hover:text-[#0B5FD1] transition-colors border-t border-[#F3F4F6]"
+                    data-testid="nav-signin-dealer"
+                  >
+                    <Car size={14} /> Dealer Sign In
+                  </Link>
+                  <Link
+                    href="/affiliate/signin"
+                    onClick={() => setSignInOpen(false)}
+                    className="flex items-center gap-2.5 px-4 py-3 text-sm text-[#374151] hover:bg-[#F8F9FB] hover:text-[#0B5FD1] transition-colors border-t border-[#F3F4F6]"
+                    data-testid="nav-signin-affiliate"
+                  >
+                    <DollarSign size={14} /> Affiliate Sign In
+                  </Link>
+                </div>
+              )}
+            </div>
             <Link
               href="/auth/signup"
               data-testid="nav-get-started-btn"
@@ -99,8 +132,10 @@ export default function PublicNav() {
             ))}
           </nav>
           <div className="flex flex-col gap-2 pt-4 border-t border-[#E5E7EB] mt-3">
-            <Link href="/auth/signin" data-testid="mobile-signin-btn" className="w-full px-4 py-2.5 text-center text-sm font-medium text-[#0B5FD1] border border-[#0B5FD1] rounded-md hover:bg-[#F0F4FF] transition-colors">Sign In</Link>
-            <Link href="/auth/signup" data-testid="mobile-get-started-btn" className="w-full px-4 py-2.5 text-center text-sm font-semibold bg-[#0B5FD1] text-white rounded-md hover:bg-[#1A6FE0] transition-colors">Get Prequalified</Link>
+            <Link href="/auth/signin" data-testid="mobile-signin-btn" onClick={() => setOpen(false)} className="w-full px-4 py-2.5 text-center text-sm font-medium text-[#0B5FD1] border border-[#0B5FD1] rounded-md hover:bg-[#F0F4FF] transition-colors">Buyer Sign In</Link>
+            <Link href="/dealer/sign-in" data-testid="mobile-signin-dealer-btn" onClick={() => setOpen(false)} className="w-full px-4 py-2.5 text-center text-sm font-medium text-[#0B5FD1] border border-[#0B5FD1] rounded-md hover:bg-[#F0F4FF] transition-colors">Dealer Sign In</Link>
+            <Link href="/affiliate/signin" data-testid="mobile-signin-affiliate-btn" onClick={() => setOpen(false)} className="w-full px-4 py-2.5 text-center text-sm font-medium text-[#0B5FD1] border border-[#0B5FD1] rounded-md hover:bg-[#F0F4FF] transition-colors">Affiliate Sign In</Link>
+            <Link href="/auth/signup" data-testid="mobile-get-started-btn" onClick={() => setOpen(false)} className="w-full px-4 py-2.5 text-center text-sm font-semibold bg-[#0B5FD1] text-white rounded-md hover:bg-[#1A6FE0] transition-colors">Get Prequalified</Link>
           </div>
         </div>
       )}
