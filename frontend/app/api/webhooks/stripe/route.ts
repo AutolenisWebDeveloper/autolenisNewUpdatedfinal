@@ -139,6 +139,48 @@ export async function POST(request: NextRequest) {
             },
           });
 
+          // Send the buyer a confirmation that their service fee was received.
+          try {
+            const updatedDeal = metaDealId
+              ? await prisma.deal.findUnique({ where: { id: metaDealId } })
+              : await prisma.deal.findFirst({ where: { stripeFeePIId: pi.id } });
+            if (updatedDeal) {
+              const buyerForEmail = await prisma.buyer.findUnique({
+                where: { id: updatedDeal.buyerId },
+                include: { user: { select: { email: true } } },
+              });
+              const buyerEmail = buyerForEmail?.user?.email;
+              const buyerName = buyerForEmail?.firstName ?? "there";
+              if (buyerEmail) {
+                const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+                const { Resend } = await import("resend");
+                const resend = new Resend(process.env.RESEND_API_KEY);
+                await resend.emails.send({
+                  from: "AutoLenis <noreply@autolenis.com>",
+                  to: buyerEmail,
+                  subject: "Your AutoLenis Service Fee Is Confirmed",
+                  text: [
+                    `Hi ${buyerName},`,
+                    "",
+                    "Your AutoLenis Service Fee has been received. Thank you!",
+                    "",
+                    "What happens next:",
+                    "1. We will review your financing details (if applicable)",
+                    "2. Your purchase contract will be prepared",
+                    "3. You will receive a DocuSign link to e-sign your agreement",
+                    "4. Once signed, we coordinate vehicle pickup",
+                    "",
+                    `Track your deal: ${appUrl}/buyer/deal`,
+                    "",
+                    "— The AutoLenis Team",
+                  ].join("\n"),
+                });
+              }
+            }
+          } catch (err) {
+            console.error("[stripe/webhook] service fee email failed:", err);
+          }
+
           // Trigger affiliate commissions — idempotent (commission service checks qualifyingEventId before creating)
           // Safe: a commission failure must never roll back the deal status update above.
           try {

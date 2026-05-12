@@ -20,6 +20,7 @@ import {
   getDocuSignConfig,
   isDocuSignConfigured,
 } from "./docusign-auth.service";
+import { sendDealerAgreementPendingEmail } from "@/lib/services/email/resend.service";
 
 export interface MarketplaceEnvelopeResult {
   envelopeId: string | null;
@@ -121,6 +122,19 @@ export async function sendDealerMarketplaceAgreement(params: {
       marketplaceAgreementSentAt: new Date(),
     },
   });
+
+  // Notify dealer that their agreement is awaiting signature — non-blocking.
+  const dealerRow = await prisma.dealer.findUnique({
+    where: { id: dealerId },
+    select: { dealershipName: true },
+  });
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+  await sendDealerAgreementPendingEmail({
+    to: email,
+    contactName: name || dealerRow?.dealershipName || "Dealer",
+    dealershipName: dealerRow?.dealershipName ?? "",
+    signingUrl: `${appUrl}/dealer/onboarding`,
+  }).catch(err => console.error("[dealer-marketplace] pending email failed:", err));
 
   return { envelopeId, error: null, skipped: false };
 }

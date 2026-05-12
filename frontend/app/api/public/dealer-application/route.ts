@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import {
   sendDealerApplicationReceived,
+  sendDealerApplicationReceivedEmail,
   sendDealerApplicationAdminNotification,
 } from "@/lib/services/email/resend.service";
 
@@ -94,6 +95,14 @@ export async function POST(request: NextRequest) {
   if (adminResult.status === "rejected") {
     console.error("[dealer-application] admin email failed:", adminResult.reason);
   }
+
+  // Templated received-confirmation (separate template/idempotency key from
+  // the plain-text sendDealerApplicationReceived above) — non-blocking.
+  await sendDealerApplicationReceivedEmail({
+    to: data.contactEmail,
+    dealershipName: data.dealershipName,
+    contactName: data.contactName,
+  }).catch(err => console.error("[dealer-application] templated received email failed:", err));
 
   return NextResponse.json({
     success: true,
