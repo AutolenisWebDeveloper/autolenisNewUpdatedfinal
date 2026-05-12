@@ -21,45 +21,60 @@ const ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 const schema = z.object({
-  firstName:         z.string().min(1).max(50),
-  lastName:          z.string().min(1).max(50),
-  email:             z.string().email(),
-  phone:             z.string().min(7).max(20),
-  zip:               z.string().regex(/^\d{5}$/, "ZIP must be 5 digits"),
-  vehicleType:       z.enum(["SUV", "Sedan", "Truck", "Van", "Coupe", "Other"]),
-  preferredMake:     z.string().max(50).optional(),
-  preferredModel:    z.string().max(80).optional(),
-  customMakeModel:   z.string().max(100).optional(),
-  minYear:           z.number().int().min(2000).max(2030).optional(),
-  maxYear:           z.number().int().min(2000).max(2030).optional(),
-  newOrUsed:         z.enum(["New", "Used", "Either"]),
-  specificFeatures:  z.string().max(500).optional(),
-  budget:            z.string().min(1).max(100),
-  financingOption:   z.enum(["need_financing", "have_financing", "no_financing"]),
-  employmentStatus:  z.string().max(50).optional(),
-  employerName:      z.string().max(100).optional(),
-  annualIncome:      z.string().max(50).optional(),
-  creditScore:       z.string().max(50).optional(),
-  downPayment:       z.string().max(50).optional(),
-  monthlyPayment:    z.string().max(50).optional(),
-  lenderName:        z.string().max(100).optional(),
-  approvedAmount:    z.string().max(20).optional(),
-  apr:               z.string().max(10).optional(),
-  preApprovalExpiry: z.string().max(20).optional(),
-  hasTradeIn:        z.boolean().optional(),
-  tradeYear:         z.string().max(10).optional(),
-  tradeMake:         z.string().max(50).optional(),
-  tradeModel:        z.string().max(80).optional(),
-  tradeTrim:         z.string().max(50).optional(),
-  tradeMileage:      z.string().max(20).optional(),
-  tradeColor:        z.string().max(30).optional(),
-  tradeCondition:    z.string().max(20).optional(),
-  tradePaidOff:      z.boolean().optional(),
-  tradeLoanBalance:  z.string().max(20).optional(),
-  tradeIssues:       z.string().max(1000).optional(),
-  tradeTitleStatus:  z.string().max(30).optional(),
-  notes:             z.string().max(1000).optional(),
-  agreedToContact:   z.literal(true),
+  firstName:           z.string().min(1).max(50),
+  lastName:            z.string().min(1).max(50),
+  email:               z.string().email(),
+  phone:               z.string().min(7).max(20),
+  zip:                 z.string().regex(/^\d{5}$/, "ZIP must be 5 digits"),
+  city:                z.string().min(1).max(100),
+  state:               z.string().min(2).max(50),
+  contactMethod:       z.enum(["Phone Call", "Text Message", "Email"]),
+  timeline:            z.enum(["ASAP", "Within 30 Days", "Within 60 Days", "Just Researching"]),
+  vehicleType:         z.enum(["SUV", "Sedan", "Truck", "Van", "Coupe", "Other"]),
+  preferredMake:       z.string().max(50).optional(),
+  preferredModel:      z.string().max(80).optional(),
+  customMakeModel:     z.string().max(100).optional(),
+  minYear:             z.number().int().min(2000).max(2030).optional(),
+  maxYear:             z.number().int().min(2000).max(2030).optional(),
+  newOrUsed:           z.enum(["New", "Used", "Either"]),
+  specificFeatures:    z.string().max(500).optional(),
+  interiorColor:       z.string().max(100).optional(),
+  mustHaveFeatures:    z.string().max(1000).optional(),
+  openToAlternatives:  z.boolean(),
+  budget:              z.string().min(1).max(100),
+  desiredMonthly:      z.string().max(50).optional(),
+  downPaymentAvail:    z.string().max(50).optional(),
+  financingOption:     z.enum(["need_financing", "have_financing", "no_financing"]),
+  employmentStatus:    z.string().max(50).optional(),
+  employerName:        z.string().max(100).optional(),
+  annualIncome:        z.string().max(50).optional(),
+  creditScore:         z.string().max(50).optional(),
+  downPayment:         z.string().max(50).optional(),
+  monthlyPayment:      z.string().max(50).optional(),
+  monthlyIncome:       z.string().max(50).optional(),
+  housingPayment:      z.string().max(50).optional(),
+  coBuyer:             z.boolean().optional(),
+  lenderName:          z.string().max(100).optional(),
+  approvedAmount:      z.string().max(20).optional(),
+  apr:                 z.string().max(10).optional(),
+  preApprovalExpiry:   z.string().max(20).optional(),
+  hasTradeIn:          z.boolean().optional(),
+  tradeYear:           z.string().max(10).optional(),
+  tradeMake:           z.string().max(50).optional(),
+  tradeModel:          z.string().max(80).optional(),
+  tradeTrim:           z.string().max(50).optional(),
+  tradeMileage:        z.string().max(20).optional(),
+  tradeColor:          z.string().max(30).optional(),
+  tradeCondition:      z.string().max(20).optional(),
+  tradeVin:            z.string().max(17).optional(),
+  tradePaidOff:        z.boolean().optional(),
+  tradeLoanBalance:    z.string().max(20).optional(),
+  tradePayoffAmount:   z.string().max(20).optional(),
+  tradeIssues:         z.string().max(1000).optional(),
+  tradeTitleStatus:    z.string().max(30).optional(),
+  tradeAccidentHistory: z.string().max(60).optional(),
+  notes:               z.string().max(1000).optional(),
+  agreedToContact:     z.literal(true),
 });
 
 type Parsed = z.infer<typeof schema>;
@@ -138,34 +153,36 @@ export async function POST(request: NextRequest) {
 
   // Persist as a SYSTEM_ALERT with the standardised "Vehicle Request:" title
   // prefix that /admin/vehicle-requests filters on.
+  let notificationId: string | undefined;
   try {
-    await prisma.notification.create({
+    const created = await prisma.notification.create({
       data: {
         type: "SYSTEM_ALERT",
         channel: "IN_APP",
         title: `Vehicle Request: ${fullName}`,
-        body: `${data.vehicleType} · ${data.budget} · ${data.financingOption} · ZIP ${data.zip}`,
+        body: `${data.vehicleType} · ${data.budget} · ${data.financingOption} · ${data.city}, ${data.state} ${data.zip}`,
         actionUrl: "/admin/vehicle-requests",
         metadata: {
           ...data,
           fullName,
+          requestStatus: "new",
           preApprovalFileUrl,
         } as unknown as Parameters<typeof prisma.notification.create>[0]["data"]["metadata"],
       },
     });
+    notificationId = created.id;
   } catch (err) {
     console.error("[request-vehicle] notification persist failed:", err);
   }
 
-  // Email the admin + send confirmation. The legacy email helper schema is
-  // narrower than the new form, so we map only the fields it knows about
-  // and pass everything else via the persisted notification metadata.
   await Promise.allSettled([
     sendVehicleRequestAdminNotification({
       fullName,
       email: data.email,
       phone: data.phone,
       zip: data.zip,
+      city: data.city,
+      state: data.state,
       vehicleType: data.vehicleType,
       preferredMake: data.preferredMake,
       preferredModel: data.preferredModel,
@@ -177,7 +194,19 @@ export async function POST(request: NextRequest) {
         data.financingOption === "need_financing" ? "Yes" :
         data.financingOption === "have_financing" ? "No" :
         "Not Sure",
+      contactMethod: data.contactMethod,
+      timeline: data.timeline,
+      interiorColor: data.interiorColor,
+      mustHaveFeatures: data.mustHaveFeatures,
+      openToAlternatives: data.openToAlternatives,
+      desiredMonthly: data.desiredMonthly,
+      downPaymentAvail: data.downPaymentAvail,
+      hasTradeIn: data.hasTradeIn,
+      tradeYear: data.tradeYear,
+      tradeMake: data.tradeMake,
+      tradeModel: data.tradeModel,
       notes: data.notes,
+      notificationId,
     }),
     sendVehicleRequestConfirmation(data.email, data.firstName),
   ]);

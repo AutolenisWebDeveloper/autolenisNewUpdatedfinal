@@ -3,22 +3,29 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, Clock, ExternalLink, Loader2, XCircle } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { CheckCircle2, Clock, ExternalLink, Loader2, MessageCircle, XCircle } from "lucide-react";
 
 export type ReviewVehicle = {
   vehicleUrl: string;
+  stockNumber?: string;
+  vin?: string;
   year: number;
   make: string;
   model: string;
   trim?: string;
   mileage?: number;
   color?: string;
+  interiorColor?: string;
   condition: string;
   offerPriceCents: number;
   tradeInAccepted: boolean;
   financingAvailable: boolean;
   warrantyIncluded: boolean;
   warrantyDetails?: string;
+  windowStickerUrl?: string;
+  carfaxUrl?: string;
+  photos?: string[];
   availability: string;
 };
 
@@ -40,6 +47,10 @@ export type ReviewData = {
 export default function BuyerOfferReviewClient({ review, isExpired }: { review: ReviewData; isExpired: boolean }) {
   const [items, setItems] = useState<ReviewItem[]>(review.items);
   const [responding, setResponding] = useState<string | null>(null);
+  const [showQuestion, setShowQuestion] = useState<Record<string, boolean>>({});
+  const [questions, setQuestions] = useState<Record<string, string>>({});
+  const [questionSent, setQuestionSent] = useState<Record<string, boolean>>({});
+  const [questionSending, setQuestionSending] = useState<string | null>(null);
 
   if (isExpired) {
     return (
@@ -75,6 +86,25 @@ export default function BuyerOfferReviewClient({ review, isExpired }: { review: 
       // Silent fail — UI stays in Pending state and user can retry.
     } finally {
       setResponding(null);
+    }
+  }
+
+  async function handleSendQuestion(itemId: string) {
+    const question = questions[itemId];
+    if (!question?.trim()) return;
+    setQuestionSending(itemId);
+    try {
+      const res = await fetch(`/api/public/buyer-offer-review/${review.reviewToken}/question`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId, question }),
+      });
+      if (res.ok) {
+        setQuestionSent((prev) => ({ ...prev, [itemId]: true }));
+        setShowQuestion((prev) => ({ ...prev, [itemId]: false }));
+      }
+    } finally {
+      setQuestionSending(null);
     }
   }
 
@@ -122,8 +152,22 @@ export default function BuyerOfferReviewClient({ review, isExpired }: { review: 
                   <Badge variant="outline">{v.condition}</Badge>
                   {v.mileage && <Badge variant="outline">{v.mileage.toLocaleString()} mi</Badge>}
                   {v.color && <Badge variant="outline">{v.color}</Badge>}
+                  {v.interiorColor && <Badge variant="outline">Interior: {v.interiorColor}</Badge>}
                 </div>
               </div>
+
+              {v.photos && v.photos.length > 0 && (
+                <div className="flex gap-2 overflow-x-auto pb-1" data-testid={`photos-${item.id}`}>
+                  {v.photos.map((url: string, pi: number) => (
+                    <img
+                      key={pi}
+                      src={url}
+                      alt={`Vehicle photo ${pi + 1}`}
+                      className="h-24 w-32 object-cover rounded-lg shrink-0 border border-slate-100"
+                    />
+                  ))}
+                </div>
+              )}
 
               <a
                 href={v.vehicleUrl}
@@ -149,6 +193,33 @@ export default function BuyerOfferReviewClient({ review, isExpired }: { review: 
                 </div>
               </div>
 
+              {(v.vin || v.stockNumber || v.windowStickerUrl || v.carfaxUrl) && (
+                <div className="grid grid-cols-2 gap-3 text-sm border-t border-slate-100 pt-3">
+                  {v.vin && (
+                    <div>
+                      <p className="text-xs text-slate-400 mb-0.5">VIN</p>
+                      <p className="font-mono text-xs text-slate-700">{v.vin}</p>
+                    </div>
+                  )}
+                  {v.stockNumber && (
+                    <div>
+                      <p className="text-xs text-slate-400 mb-0.5">Stock #</p>
+                      <p className="font-medium text-xs text-slate-700">{v.stockNumber}</p>
+                    </div>
+                  )}
+                  {v.carfaxUrl && (
+                    <a href={v.carfaxUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-[#0B5FD1] hover:underline flex items-center gap-1">
+                      <ExternalLink size={11} /> CARFAX Report
+                    </a>
+                  )}
+                  {v.windowStickerUrl && (
+                    <a href={v.windowStickerUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-[#0B5FD1] hover:underline flex items-center gap-1">
+                      <ExternalLink size={11} /> Window Sticker
+                    </a>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-3 gap-3 text-center text-xs">
                 <div className={`rounded-lg py-2 ${v.tradeInAccepted ? "bg-green-50 text-green-700" : "bg-slate-50 text-slate-500"}`}>
                   {v.tradeInAccepted ? "✓" : "✗"} Trade-In
@@ -167,25 +238,69 @@ export default function BuyerOfferReviewClient({ review, isExpired }: { review: 
               )}
 
               {item.status === "PENDING" ? (
-                <div className="flex gap-3 pt-2">
-                  <Button
-                    className="flex-1 h-11"
-                    onClick={() => handleRespond(item.id, "ACCEPTED")}
-                    disabled={isResponding}
-                    data-testid={`accept-offer-${item.id}`}
-                  >
-                    {isResponding ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                    Accept This Offer
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="flex-1 h-11"
-                    onClick={() => handleRespond(item.id, "DECLINED")}
-                    disabled={isResponding}
-                    data-testid={`decline-offer-${item.id}`}
-                  >
-                    <XCircle size={16} /> Decline
-                  </Button>
+                <div>
+                  <div className="flex gap-3 pt-2">
+                    <Button
+                      className="flex-1 h-11"
+                      onClick={() => handleRespond(item.id, "ACCEPTED")}
+                      disabled={isResponding}
+                      data-testid={`accept-offer-${item.id}`}
+                    >
+                      {isResponding ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                      Accept This Offer
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="flex-1 h-11"
+                      onClick={() => handleRespond(item.id, "DECLINED")}
+                      disabled={isResponding}
+                      data-testid={`decline-offer-${item.id}`}
+                    >
+                      <XCircle size={16} /> Decline
+                    </Button>
+                  </div>
+
+                  {questionSent[item.id] ? (
+                    <p className="text-xs text-green-600 mt-2 text-center">✓ Your question was sent — we&rsquo;ll get back to you shortly.</p>
+                  ) : !showQuestion[item.id] ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowQuestion((prev) => ({ ...prev, [item.id]: true }))}
+                      className="w-full text-xs text-slate-400 hover:text-[#0B5FD1] mt-2 py-1 hover:underline inline-flex items-center justify-center gap-1"
+                      data-testid={`ask-question-${item.id}`}
+                    >
+                      <MessageCircle size={11} /> Have a question about this offer?
+                    </button>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      <Textarea
+                        value={questions[item.id] ?? ""}
+                        onChange={(e) => setQuestions((prev) => ({ ...prev, [item.id]: e.target.value.slice(0, 500) }))}
+                        placeholder="Ask about availability, delivery, trade-in value, financing terms, etc."
+                        rows={2}
+                        className="text-sm"
+                        data-testid={`question-input-${item.id}`}
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          onClick={() => handleSendQuestion(item.id)}
+                          variant="outline"
+                          className="flex-1"
+                          disabled={!questions[item.id]?.trim() || questionSending === item.id}
+                          data-testid={`send-question-${item.id}`}
+                        >
+                          {questionSending === item.id ? <Loader2 size={14} className="animate-spin" /> : "Send Question"}
+                        </Button>
+                        <button
+                          type="button"
+                          onClick={() => setShowQuestion((prev) => ({ ...prev, [item.id]: false }))}
+                          className="text-xs text-slate-400 px-3"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className={`rounded-xl p-4 text-center ${item.status === "ACCEPTED" ? "bg-green-50 border border-green-200" : "bg-slate-50 border border-slate-200"}`}>

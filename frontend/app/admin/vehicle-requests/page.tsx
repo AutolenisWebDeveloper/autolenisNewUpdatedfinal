@@ -14,21 +14,42 @@ type RequestMeta = {
   email?: string;
   phone?: string;
   zip?: string;
+  city?: string;
+  state?: string;
   vehicleType?: string;
   preferredMake?: string;
   preferredModel?: string;
   budget?: string;
   newOrUsed?: string;
   financingNeeded?: string;
+  financingOption?: string;
+  timeline?: string;
+  requestStatus?: string;
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  new: "New",
+  sent_to_dealers: "Sent to Dealers",
+  offers_in: "Offers In",
+  sent_to_buyer: "Sent to Buyer",
+  buyer_interested: "Buyer Interested",
+  closed: "Closed",
+  lost: "Lost",
+};
+
+const STATUS_TONE: Record<string, string> = {
+  new: "bg-blue-100 text-blue-700 border-blue-200",
+  sent_to_dealers: "bg-amber-100 text-amber-700 border-amber-200",
+  offers_in: "bg-violet-100 text-violet-700 border-violet-200",
+  sent_to_buyer: "bg-cyan-100 text-cyan-700 border-cyan-200",
+  buyer_interested: "bg-green-100 text-green-700 border-green-200",
+  closed: "bg-slate-100 text-slate-600 border-slate-200",
+  lost: "bg-red-100 text-red-700 border-red-200",
 };
 
 function safeParse(meta: unknown): RequestMeta | null {
   if (!meta || typeof meta !== "object") return null;
-  try {
-    return meta as RequestMeta;
-  } catch {
-    return null;
-  }
+  return meta as RequestMeta;
 }
 
 export default async function AdminVehicleRequestsPage() {
@@ -68,39 +89,39 @@ export default async function AdminVehicleRequestsPage() {
         <div className="space-y-3">
           {requests.map((req) => {
             const meta = safeParse(req.metadata) ?? {};
+            const status = meta.requestStatus ?? "new";
             return (
-              <div
+              <Link
                 key={req.id}
+                href={`/admin/vehicle-requests/${req.id}`}
                 data-testid={`vehicle-request-row-${req.id}`}
-                className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4"
+                className="block bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-[#0B5FD1]/40 hover:shadow-sm transition-all"
               >
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-slate-900 text-sm truncate">
-                    {meta.fullName ?? "Unknown"}
-                    {meta.email ? <span className="text-slate-400 font-normal"> · {meta.email}</span> : null}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {meta.phone ? `${meta.phone} · ` : ""}
-                    {[meta.vehicleType, meta.preferredMake, meta.preferredModel].filter(Boolean).join(" ") || "Any vehicle"}
-                    {meta.budget ? ` · ${meta.budget}` : ""}
-                    {meta.zip ? ` · ZIP ${meta.zip}` : ""}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {meta.newOrUsed ? `${meta.newOrUsed} · ` : ""}
-                    {meta.financingNeeded ? `Financing: ${meta.financingNeeded} · ` : ""}
-                    Submitted {req.createdAt.toLocaleString()}
-                  </p>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="font-semibold text-slate-900 text-sm truncate">
+                        {meta.fullName ?? "Unknown"}
+                      </p>
+                      <span className={`text-[10px] font-semibold uppercase tracking-wide rounded-full border px-2 py-0.5 ${STATUS_TONE[status] ?? STATUS_TONE.new}`}>
+                        {STATUS_LABEL[status] ?? status}
+                      </span>
+                    </div>
+                    {meta.email ? <p className="text-xs text-slate-500 truncate">{meta.email}{meta.phone ? ` · ${meta.phone}` : ""}</p> : null}
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {[meta.vehicleType, meta.preferredMake, meta.preferredModel].filter(Boolean).join(" ") || "Any vehicle"}
+                      {meta.budget ? ` · ${meta.budget}` : ""}
+                      {meta.city || meta.state ? ` · ${[meta.city, meta.state].filter(Boolean).join(", ")} ${meta.zip ?? ""}`.trim() : meta.zip ? ` · ZIP ${meta.zip}` : ""}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {meta.newOrUsed ? `${meta.newOrUsed} · ` : ""}
+                      {meta.timeline ? `${meta.timeline} · ` : ""}
+                      Submitted {req.createdAt.toLocaleString()}
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-[#0B5FD1] shrink-0">View →</span>
                 </div>
-                <div className="flex items-center gap-2 ml-4">
-                  <Link
-                    href="/admin/vehicle-offers/new"
-                    data-testid={`create-offer-link-${req.id}`}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5FD1] border border-[#0B5FD1]/30 hover:bg-[#0B5FD1]/5 rounded-lg px-3 py-1.5 transition-colors"
-                  >
-                    Create Offer Link →
-                  </Link>
-                </div>
-              </div>
+              </Link>
             );
           })}
         </div>

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import {
   sendBuyerAcceptedAdminNotification,
   sendDealerAcceptanceNotification,
+  sendBuyerInterestConfirmationEmail,
 } from "@/lib/services/email/vehicle-offers.email";
 
 const schema = z.object({
@@ -105,8 +106,20 @@ export async function POST(request: NextRequest, { params }: Params) {
           buyerName: review.buyerName,
           vehicleLabel,
         }),
+        sendBuyerInterestConfirmationEmail({
+          to: review.buyerEmail,
+          buyerName: review.buyerName,
+          vehicleLabel,
+          dealershipName: item.submission.dealershipName,
+          offerPriceCents: v.offerPriceCents,
+        }),
       ]);
     }
+
+    await prisma.vehicleOffer.update({
+      where: { id: review.vehicleOfferId },
+      data: { requestStatus: "buyer_interested" },
+    }).catch((err) => console.error("[respond] requestStatus update failed:", err));
   }
 
   return NextResponse.json({

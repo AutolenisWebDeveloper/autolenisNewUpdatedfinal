@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,10 +8,16 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Clock, ExternalLink, Loader2, X } from "lucide-react";
+import { Clock, ExternalLink, Loader2, Upload, X } from "lucide-react";
 
+// PRIVACY: This type intentionally OMITS buyer name, email, and phone.
+// Dealers receive only buyer city/state/zip, financing, timeline, and trade-in details.
 export type DealerOfferData = {
   token: string;
+  inviteToken: string | null;
+  dealershipName: string | null;
+  dealerContactName: string | null;
+  dealerContactEmail: string | null;
   vehicleYear: number;
   vehicleMake: string;
   vehicleModel: string;
@@ -19,14 +25,31 @@ export type DealerOfferData = {
   vehicleMileage: number | null;
   vehicleVin: string | null;
   vehicleColor: string | null;
+  vehicleInteriorColor: string | null;
   vehicleCondition: string;
   askingPriceCents: number | null;
   vehicleReferenceUrl: string | null;
-  buyerBudget: string;
+  buyerCity: string | null;
+  buyerState: string | null;
   buyerZip: string;
+  buyerBudget: string;
+  buyerMonthlyPayment: string | null;
+  buyerDownPayment: string | null;
   buyerNewOrUsed: string;
   buyerFinancing: string;
+  buyerTimeline: string | null;
+  buyerOpenToAlt: boolean;
+  buyerHasTradeIn: boolean;
+  buyerTradeYear: string | null;
+  buyerTradeMake: string | null;
+  buyerTradeModel: string | null;
+  buyerTradeMileage: string | null;
+  buyerTradeVin: string | null;
+  buyerTradeCondition: string | null;
+  buyerTradeAccident: string | null;
+  buyerTradePayoff: string | null;
   adminNotes: string | null;
+  expiresAt: string | null;
 };
 
 const CONDITIONS = ["New", "Used", "Certified Pre-Owned"] as const;
@@ -34,35 +57,45 @@ const AVAILABILITY = ["In Stock Now", "Within 3 Days", "Within 1 Week", "Within 
 
 type DealerVehicle = {
   vehicleUrl: string;
+  stockNumber: string;
+  vin: string;
   year: string;
   make: string;
   model: string;
   trim: string;
   mileage: string;
   color: string;
+  interiorColor: string;
   condition: string;
   offerPrice: string;
   tradeInAccepted: boolean;
   financingAvailable: boolean;
   warrantyIncluded: boolean;
   warrantyDetails: string;
+  windowStickerUrl: string;
+  carfaxUrl: string;
   availability: string;
 };
 
 const emptyVehicle = (): DealerVehicle => ({
   vehicleUrl: "",
+  stockNumber: "",
+  vin: "",
   year: "",
   make: "",
   model: "",
   trim: "",
   mileage: "",
   color: "",
+  interiorColor: "",
   condition: "Used",
   offerPrice: "",
   tradeInAccepted: false,
   financingAvailable: false,
   warrantyIncluded: false,
   warrantyDetails: "",
+  windowStickerUrl: "",
+  carfaxUrl: "",
   availability: "In Stock Now",
 });
 
@@ -89,14 +122,32 @@ function ToggleYesNo({
   );
 }
 
+function DeadlineCountdown({ expiresAt }: { expiresAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const target = new Date(expiresAt).getTime();
+  const remaining = target - now;
+  if (remaining <= 0) return <span>Deadline passed</span>;
+  const totalMinutes = Math.floor(remaining / 60_000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes - days * 60 * 24) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return <span>{days}d {hours}h {minutes}m remaining</span>;
+  if (hours > 0) return <span>{hours}h {minutes}m remaining</span>;
+  return <span>{minutes}m remaining</span>;
+}
+
 export default function DealerOfferFormClient({ offer, isExpired }: { offer: DealerOfferData; isExpired: boolean }) {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [dealershipName, setDealershipName] = useState("");
-  const [contactName, setContactName] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
+  const [dealershipName, setDealershipName] = useState(offer.dealershipName ?? "");
+  const [contactName, setContactName] = useState(offer.dealerContactName ?? "");
+  const [contactEmail, setContactEmail] = useState(offer.dealerContactEmail ?? "");
   const [contactPhone, setContactPhone] = useState("");
   const [vehicles, setVehicles] = useState<DealerVehicle[]>([emptyVehicle()]);
   const [notes, setNotes] = useState("");
@@ -131,6 +182,8 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
 
   const isVehicleValid = (v: DealerVehicle) =>
     /^https?:\/\//i.test(v.vehicleUrl) &&
+    v.stockNumber.trim() &&
+    v.vin.trim().length === 17 &&
     Number(v.year) >= 2000 && Number(v.year) <= 2030 &&
     v.make.trim() && v.model.trim() &&
     v.condition && v.availability &&
@@ -160,18 +213,23 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
         contactPhone: contactPhone.trim(),
         vehicles: vehicles.map((v) => ({
           vehicleUrl: v.vehicleUrl.trim(),
+          stockNumber: v.stockNumber.trim(),
+          vin: v.vin.trim().toUpperCase(),
           year: Number(v.year),
           make: v.make.trim(),
           model: v.model.trim(),
           trim: v.trim.trim() || undefined,
           mileage: v.mileage ? Number(v.mileage) : undefined,
           color: v.color.trim() || undefined,
+          interiorColor: v.interiorColor.trim() || undefined,
           condition: v.condition,
           offerPriceCents: Math.round(Number(v.offerPrice) * 100),
           tradeInAccepted: v.tradeInAccepted,
           financingAvailable: v.financingAvailable,
           warrantyIncluded: v.warrantyIncluded,
           warrantyDetails: v.warrantyIncluded ? (v.warrantyDetails.trim() || undefined) : undefined,
+          windowStickerUrl: v.windowStickerUrl.trim() || undefined,
+          carfaxUrl: v.carfaxUrl.trim() || undefined,
           availability: v.availability,
         })),
         notes: notes.trim() || undefined,
@@ -220,6 +278,7 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
             <Badge>{offer.vehicleCondition}</Badge>
             {offer.vehicleMileage && <Badge variant="outline">{offer.vehicleMileage.toLocaleString()} mi</Badge>}
             {offer.vehicleColor && <Badge variant="outline">{offer.vehicleColor}</Badge>}
+            {offer.vehicleInteriorColor && <Badge variant="outline">Interior: {offer.vehicleInteriorColor}</Badge>}
             {offer.askingPriceCents && <Badge variant="outline">Market: ${(offer.askingPriceCents / 100).toLocaleString()}</Badge>}
           </div>
 
@@ -235,16 +294,102 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
             </a>
           )}
 
-          <div className="border-t border-slate-100 pt-4 mt-2 grid grid-cols-2 gap-3 text-sm">
-            <div><p className="text-xs text-slate-400 mb-0.5">Buyer Budget</p><p className="font-medium text-slate-700">{offer.buyerBudget}</p></div>
-            <div><p className="text-xs text-slate-400 mb-0.5">Buyer ZIP</p><p className="font-medium text-slate-700">{offer.buyerZip}</p></div>
-            <div><p className="text-xs text-slate-400 mb-0.5">Preference</p><p className="font-medium text-slate-700">{offer.buyerNewOrUsed}</p></div>
-            <div><p className="text-xs text-slate-400 mb-0.5">Financing</p><p className="font-medium text-slate-700">{offer.buyerFinancing}</p></div>
+          {/* PRIVACY: buyer name, email, phone are NOT shown to dealer */}
+          <div className="border-t border-slate-100 pt-4 mt-2">
+            <p className="text-xs uppercase tracking-wide text-slate-400 mb-2 font-semibold">Buyer Overview</p>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-xs text-slate-400 mb-0.5">Location</p>
+                <p className="font-medium text-slate-700">
+                  {[offer.buyerCity, offer.buyerState].filter(Boolean).join(", ")} {offer.buyerZip}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 mb-0.5">Buying Timeline</p>
+                <p className="font-medium text-slate-700">{offer.buyerTimeline ?? "Not specified"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 mb-0.5">Financing</p>
+                <p className="font-medium text-slate-700">{offer.buyerFinancing}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 mb-0.5">Open to Alternatives</p>
+                <p className="font-medium text-slate-700">{offer.buyerOpenToAlt ? "Yes" : "No — specific vehicle only"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 mb-0.5">Budget</p>
+                <p className="font-medium text-slate-700">{offer.buyerBudget}</p>
+              </div>
+              {offer.buyerMonthlyPayment && (
+                <div>
+                  <p className="text-xs text-slate-400 mb-0.5">Monthly Goal</p>
+                  <p className="font-medium text-slate-700">{offer.buyerMonthlyPayment}/mo</p>
+                </div>
+              )}
+              {offer.buyerDownPayment && (
+                <div>
+                  <p className="text-xs text-slate-400 mb-0.5">Down Payment</p>
+                  <p className="font-medium text-slate-700">{offer.buyerDownPayment}</p>
+                </div>
+              )}
+              <div>
+                <p className="text-xs text-slate-400 mb-0.5">Preference</p>
+                <p className="font-medium text-slate-700">{offer.buyerNewOrUsed}</p>
+              </div>
+            </div>
           </div>
+
+          {offer.buyerHasTradeIn && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mt-4">
+              <p className="text-xs font-semibold text-amber-800 mb-2 uppercase tracking-wide">Trade-In Available</p>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <p className="text-xs text-amber-600 mb-0.5">Vehicle</p>
+                  <p className="font-medium text-amber-900">
+                    {[offer.buyerTradeYear, offer.buyerTradeMake, offer.buyerTradeModel].filter(Boolean).join(" ") || "Details TBD"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-amber-600 mb-0.5">Mileage</p>
+                  <p className="font-medium text-amber-900">{offer.buyerTradeMileage ? `${Number(offer.buyerTradeMileage).toLocaleString()} mi` : "Not specified"}</p>
+                </div>
+                {offer.buyerTradeVin && (
+                  <div>
+                    <p className="text-xs text-amber-600 mb-0.5">VIN</p>
+                    <p className="font-mono text-xs font-medium text-amber-900">{offer.buyerTradeVin}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-xs text-amber-600 mb-0.5">Condition</p>
+                  <p className="font-medium text-amber-900">{offer.buyerTradeCondition ?? "Not specified"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-amber-600 mb-0.5">Accident History</p>
+                  <p className="font-medium text-amber-900">{offer.buyerTradeAccident ?? "Unknown"}</p>
+                </div>
+                {offer.buyerTradePayoff && (
+                  <div>
+                    <p className="text-xs text-amber-600 mb-0.5">Approx. Payoff</p>
+                    <p className="font-medium text-amber-900">${Number(offer.buyerTradePayoff).toLocaleString()}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {offer.adminNotes && (
             <div className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-lg p-3 mt-4">
               <p className="text-xs font-semibold text-[#0B5FD1] mb-1">Notes from AutoLenis:</p>
               <p className="text-sm text-slate-700">{offer.adminNotes}</p>
+            </div>
+          )}
+
+          {offer.expiresAt && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mt-4 flex items-center gap-2">
+              <Clock size={16} className="text-red-500 shrink-0" />
+              <p className="text-sm font-semibold text-red-700">
+                Offer deadline: <DeadlineCountdown expiresAt={offer.expiresAt} />
+              </p>
             </div>
           )}
         </div>
@@ -314,7 +459,31 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
               <div>
                 <Label htmlFor={`v-${idx}-url`} className="text-sm font-medium text-[#374151]">Vehicle Listing URL *</Label>
                 <Input id={`v-${idx}-url`} type="url" data-testid={`vehicle-${idx}-url`} className="mt-1.5" placeholder="https://..." value={v.vehicleUrl} onChange={(e) => updateVehicle(idx, { vehicleUrl: e.target.value })} required />
-                <p className="text-xs text-slate-400 mt-1">Paste the link to this exact vehicle on your website or listing platform. The buyer will use this to view it.</p>
+                <p className="text-xs text-slate-400 mt-1">Paste the link to this exact vehicle on your website. The buyer will use this to view it.</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mt-4">
+                <div>
+                  <Label className="mb-1.5 block">Stock Number *</Label>
+                  <Input
+                    value={v.stockNumber}
+                    onChange={(e) => updateVehicle(idx, { stockNumber: e.target.value.slice(0, 50) })}
+                    placeholder="Your internal stock #"
+                    data-testid={`vehicle-${idx}-stock`}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label className="mb-1.5 block">VIN *</Label>
+                  <Input
+                    value={v.vin}
+                    onChange={(e) => updateVehicle(idx, { vin: e.target.value.toUpperCase().slice(0, 17) })}
+                    placeholder="17-character VIN"
+                    maxLength={17}
+                    data-testid={`vehicle-${idx}-vin`}
+                    required
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-3 mt-4">
@@ -345,20 +514,69 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
                 <div>
                   <Label htmlFor={`v-${idx}-mileage`} className="text-sm font-medium text-[#374151]">Mileage</Label>
                   <Input id={`v-${idx}-mileage`} type="number" min={0} data-testid={`vehicle-${idx}-mileage`} className="mt-1.5" value={v.mileage} onChange={(e) => updateVehicle(idx, { mileage: e.target.value })} />
                 </div>
                 <div>
-                  <Label htmlFor={`v-${idx}-color`} className="text-sm font-medium text-[#374151]">Color</Label>
+                  <Label htmlFor={`v-${idx}-color`} className="text-sm font-medium text-[#374151]">Exterior Color</Label>
                   <Input id={`v-${idx}-color`} data-testid={`vehicle-${idx}-color`} className="mt-1.5" value={v.color} onChange={(e) => updateVehicle(idx, { color: e.target.value })} />
+                </div>
+                <div>
+                  <Label className="mb-1.5 block">Interior Color</Label>
+                  <Input
+                    value={v.interiorColor}
+                    onChange={(e) => updateVehicle(idx, { interiorColor: e.target.value })}
+                    placeholder="Black, Beige, Gray…"
+                    data-testid={`vehicle-${idx}-interior`}
+                  />
                 </div>
               </div>
 
               <div className="mt-4">
                 <Label htmlFor={`v-${idx}-price`} className="text-sm font-medium text-[#374151]">Out-the-Door Price * (full price, all fees included)</Label>
                 <Input id={`v-${idx}-price`} type="number" min={0} step="0.01" data-testid={`vehicle-${idx}-price`} className="mt-1.5" placeholder="$" value={v.offerPrice} onChange={(e) => updateVehicle(idx, { offerPrice: e.target.value })} required />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                <div>
+                  <Label className="mb-1.5 block">CARFAX URL (optional)</Label>
+                  <Input
+                    type="url"
+                    value={v.carfaxUrl}
+                    onChange={(e) => updateVehicle(idx, { carfaxUrl: e.target.value })}
+                    placeholder="https://"
+                    data-testid={`vehicle-${idx}-carfax`}
+                  />
+                </div>
+                <div>
+                  <Label className="mb-1.5 block">Window Sticker URL (optional)</Label>
+                  <Input
+                    type="url"
+                    value={v.windowStickerUrl}
+                    onChange={(e) => updateVehicle(idx, { windowStickerUrl: e.target.value })}
+                    placeholder="https://"
+                    data-testid={`vehicle-${idx}-sticker`}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <Label className="mb-1.5 block">Vehicle Photos (optional)</Label>
+                <label className="block border-2 border-dashed border-slate-200 rounded-xl p-4 text-center cursor-pointer hover:border-[#0B5FD1]/40 bg-white">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="sr-only"
+                    data-testid={`vehicle-${idx}-photos`}
+                    onChange={() => {}}
+                  />
+                  <Upload size={16} className="text-slate-400 mx-auto mb-1" />
+                  <p className="text-sm text-slate-400">Exterior, interior, odometer — helps buyer decide faster</p>
+                </label>
+                <p className="text-xs text-slate-400 mt-1">Photo upload is currently a placeholder; they will be hosted in a follow-up.</p>
               </div>
 
               <div className="grid grid-cols-1 gap-4 mt-5">

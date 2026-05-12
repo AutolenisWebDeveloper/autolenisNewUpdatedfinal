@@ -9,18 +9,24 @@ interface Props { params: Promise<{ reviewToken: string }> }
 
 type DealerVehicle = {
   vehicleUrl: string;
+  stockNumber?: string;
+  vin?: string;
   year: number;
   make: string;
   model: string;
   trim?: string;
   mileage?: number;
   color?: string;
+  interiorColor?: string;
   condition: string;
   offerPriceCents: number;
   tradeInAccepted: boolean;
   financingAvailable: boolean;
   warrantyIncluded: boolean;
   warrantyDetails?: string;
+  windowStickerUrl?: string;
+  carfaxUrl?: string;
+  photos?: string[];
   availability: string;
 };
 
