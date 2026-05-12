@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { submitOffer } from "@/lib/services/offer/offer.service";
 import { z } from "zod";
+import { sendDealerOfferSubmittedEmail } from "@/lib/services/email/resend.service";
 
 const schema = z.object({
   auctionId: z.string(), otdPriceCents: z.number().int().min(100),
@@ -28,6 +29,28 @@ export async function POST(request: NextRequest) {
 
   try {
     const offer = await submitOffer({ ...parsed.data, dealerId: dealer.id });
+
+    // Confirm submission to the dealer — non-blocking.
+    const { prisma } = await import("@/lib/prisma");
+    const dealerWithEmail = await prisma.dealer.findUnique({
+      where: { id: dealer.id },
+      include: { user: { select: { email: true } } },
+    });
+    const dealerEmail = dealerWithEmail?.user?.email;
+    if (dealerEmail) {
+      const submittedAt = new Date();
+      const revisionWindowExpiry = new Date(submittedAt.getTime() + 30 * 60_000);
+      await sendDealerOfferSubmittedEmail({
+        to: dealerEmail,
+        contactName: dealerWithEmail.dealershipName,
+        vehicleRef: `Auction ${parsed.data.auctionId.slice(0, 8)}`,
+        otdPriceCents: parsed.data.otdPriceCents,
+        submittedAt: submittedAt.toISOString(),
+        revisionWindowExpiry: revisionWindowExpiry.toISOString(),
+        offerId: offer.id,
+      }).catch(err => console.error("[dealer/offers] submission email failed:", err));
+    }
+
     return successResponse({ offer }, 201);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to submit offer.";

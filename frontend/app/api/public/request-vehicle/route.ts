@@ -16,6 +16,12 @@ import {
   sendVehicleRequestAdminNotification,
   sendVehicleRequestConfirmation,
 } from "@/lib/services/email/vehicle-offers.email";
+import {
+  sendVehicleRequestReceived,
+  sendDealerNewBuyerOpportunityEmail,
+} from "@/lib/services/email/resend.service";
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
 
 const ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -210,6 +216,38 @@ export async function POST(request: NextRequest) {
     }),
     sendVehicleRequestConfirmation(data.email, data.firstName),
   ]);
+
+  // Buyer-side dedicated confirmation (uses unified resend template).
+  if (notificationId) {
+    await sendVehicleRequestReceived(data.email, fullName, notificationId)
+      .catch(err => console.error("[request-vehicle] buyer confirmation email failed:", err));
+  }
+
+  // Notify active dealers of the new buyer opportunity — non-blocking per dealer.
+  if (notificationId) {
+    const vehicleInterest = [
+      data.preferredMake,
+      data.preferredModel,
+      data.customMakeModel,
+    ].filter(Boolean).join(" ") || data.vehicleType;
+    const activeDealers = await prisma.dealer.findMany({
+      where: { status: "ACTIVE" },
+      include: { user: { select: { email: true } } },
+      take: 20,
+    }).catch(() => [] as Array<{ id: string; dealershipName: string; user: { email: string } | null }>);
+    for (const dealer of activeDealers) {
+      if (!dealer.user?.email) continue;
+      await sendDealerNewBuyerOpportunityEmail({
+        to: dealer.user.email,
+        contactName: dealer.dealershipName,
+        vehicleInterest,
+        buyerCity: data.city,
+        buyerState: data.state,
+        opportunityUrl: `${APP_URL}/dealer/opportunities`,
+        opportunityId: notificationId,
+      }).catch(() => { /* silent per-dealer */ });
+    }
+  }
 
   return NextResponse.json({ success: true });
 }

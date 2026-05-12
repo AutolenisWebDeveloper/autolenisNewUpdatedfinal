@@ -6,7 +6,10 @@ import { getAdminFromRequest, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@supabase/supabase-js";
 import { UserRole, DealerStatus } from "@prisma/client";
-import { sendDealerApprovalEmail } from "@/lib/services/email/resend.service";
+import {
+  sendDealerApprovalEmail,
+  sendDealerApplicationApprovedEmail,
+} from "@/lib/services/email/resend.service";
 import crypto from "crypto";
 
 function adminClient() {
@@ -111,8 +114,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   // Send approval email
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
   try {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
     await sendDealerApprovalEmail(
       app.contactEmail,
       app.contactName,
@@ -122,6 +125,17 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   } catch (err) {
     console.error("[dealer/applications/approve] Email error:", err);
   }
+
+  // Templated approval notice (separate template) — non-blocking.
+  await sendDealerApplicationApprovedEmail({
+    to: app.contactEmail,
+    contactName: app.contactName,
+    dealershipName: app.dealershipName,
+    claimUrl: `${appUrl}/dealer/signin`,
+    expiresAt: new Date(Date.now() + 7 * 24 * 3600_000).toLocaleDateString("en-US", {
+      year: "numeric", month: "long", day: "numeric",
+    }),
+  }).catch(err => console.error("[dealer/applications/approve] templated approved email failed:", err));
 
   return NextResponse.json({
     success: true,

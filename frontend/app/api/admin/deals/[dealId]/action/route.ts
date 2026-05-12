@@ -3,6 +3,27 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { DealStatus } from "@prisma/client";
 import { getStripe } from "@/lib/stripe";
+import {
+  sendDealerContractPendingEmail,
+  sendDealerContractIssuesEmail,
+} from "@/lib/services/email/resend.service";
+
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+
+async function getDealerEmailForDeal(dealId: string) {
+  const d = await prisma.deal.findUnique({
+    where: { id: dealId },
+    include: {
+      offer: { include: { dealer: { include: { user: { select: { email: true } } } } } },
+    },
+  });
+  return d?.offer?.dealer
+    ? {
+        email: d.offer.dealer.user?.email ?? null,
+        dealershipName: d.offer.dealer.dealershipName,
+      }
+    : null;
+}
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -35,6 +56,21 @@ export async function POST(request: NextRequest, { params }: Props) {
         return adminError("INVALID_STATUS", "Invalid target status", 400);
       }
       await prisma.deal.update({ where: { id: dealId }, data: { status: newStatus as DealStatus } });
+
+      // Notify dealer when the deal enters a contract-pending state — non-blocking.
+      if (newStatus === "CONTRACT_PENDING" || newStatus === "CONTRACT_REVIEW") {
+        const dealerInfo = await getDealerEmailForDeal(dealId);
+        if (dealerInfo?.email) {
+          await sendDealerContractPendingEmail({
+            to: dealerInfo.email,
+            contactName: dealerInfo.dealershipName,
+            dealId,
+            vehicleRef: `Deal ${dealId.slice(0, 8)}`,
+            uploadUrl: `${APP_URL}/dealer/deals/${dealId}`,
+          }).catch(err => console.error("[deals/action] contract pending email failed:", err));
+        }
+      }
+
       result = { newStatus };
       break;
     }
@@ -51,6 +87,20 @@ export async function POST(request: NextRequest, { params }: Props) {
         },
       });
       await prisma.deal.update({ where: { id: dealId }, data: { contractShieldStatus: "PASS", contractShieldScore: 100 } });
+
+      // Notify dealer of contract issues that were overridden — non-blocking.
+      const dealerInfo = await getDealerEmailForDeal(dealId);
+      if (dealerInfo?.email) {
+        await sendDealerContractIssuesEmail({
+          to: dealerInfo.email,
+          contactName: dealerInfo.dealershipName,
+          vehicleRef: `Deal ${dealId.slice(0, 8)}`,
+          fixItems: [reason],
+          contractUrl: `${APP_URL}/dealer/deals/${dealId}`,
+          dealId,
+        }).catch(err => console.error("[deals/action] contract issues email failed:", err));
+      }
+
       result = { overridden: true };
       break;
     }

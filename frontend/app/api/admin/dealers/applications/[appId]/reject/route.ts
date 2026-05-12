@@ -3,7 +3,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import { sendDealerApplicationRejectedEmail } from "@/lib/services/email/resend.service";
+import {
+  sendDealerApplicationRejectedEmail,
+  sendDealerRejectionEmail,
+} from "@/lib/services/email/resend.service";
 
 interface RouteContext { params: Promise<{ appId: string }> }
 
@@ -53,6 +56,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   } catch (err) {
     console.error("[dealer/applications/reject] Email error:", err);
   }
+
+  // Plain-text rejection notice with optional reason — non-blocking.
+  await sendDealerRejectionEmail(app.contactEmail, app.contactName, reason)
+    .catch(err => console.error("[dealer/applications/reject] rejection email failed:", err));
 
   return NextResponse.json({ success: true });
 }
