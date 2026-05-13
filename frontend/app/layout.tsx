@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { Toaster } from "sonner";
 import ServiceWorkerRegistration from "@/components/pwa/ServiceWorkerRegistration";
+import { JsonLd } from "@/lib/seo/jsonld";
+import { entityGraphSchema } from "@/lib/seo/entity-graph";
 import "./globals.css";
 
 // Self-hosted Google fonts via @fontsource — bundled at build time, no
@@ -57,6 +59,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} font-[family-name:var(--font-heading)] antialiased`}>
+        {/* Connected entity graph — sitewide knowledge-graph backbone */}
+        <JsonLd id="ld-entity-graph" data={entityGraphSchema} />
         {children}
         <Toaster richColors position="bottom-right" />
         {/* Feature 30 — PWA service worker registration */}

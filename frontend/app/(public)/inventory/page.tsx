@@ -10,7 +10,25 @@ import { lookupZip, haversineMiles, boundingBox } from "@/lib/utils/zip-coords";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import { JsonLd, breadcrumbSchema } from "@/lib/seo/jsonld";
 
-export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.inventory);
+// SEO-safe faceted navigation: keep the canonical URL pinned to the clean
+// /inventory path and emit `noindex, follow` when any filter is applied so
+// Google doesn't waste crawl budget on duplicate filter combinations.
+export async function generateMetadata(
+  { searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> },
+): Promise<Metadata> {
+  const base = buildPageMetadata(PAGE_METADATA.inventory);
+  const params = await searchParams;
+  const hasFilters = Object.entries(params).some(
+    ([k, v]) => k !== "page" && v !== undefined && v !== "",
+  );
+  return {
+    ...base,
+    robots: hasFilters
+      ? { index: false, follow: true }
+      : { index: true, follow: true },
+  };
+}
+
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 12;

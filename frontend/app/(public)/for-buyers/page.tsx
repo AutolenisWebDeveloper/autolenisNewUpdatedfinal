@@ -19,6 +19,8 @@ import FaithVerseModule from "@/components/public/FaithVerseModule";
 import ChatWidget from "@/components/public/ChatWidget";
 import { MARKETING_IMAGES } from "@/lib/constants/marketing-images";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
+import ScrollCTA from "@/components/seo/ScrollCTA";
+import TrustBadges from "@/components/seo/TrustBadges";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.forBuyers);
 export const dynamic = "force-dynamic";
@@ -199,12 +201,16 @@ export default function ForBuyersPage() {
               <Link
                 href="/auth/signup"
                 data-testid="for-buyers-cta"
+                data-funnel-stage="bofu"
+                data-cta="check-buying-power"
                 className="inline-flex items-center gap-2 px-8 py-4 bg-[#50D14E] text-white font-semibold text-sm rounded-md hover:bg-[#3DBF3B] transition-colors shadow-md shadow-[#50D14E]/30"
               >
                 Check My Buying Power <ArrowRight size={16} />
               </Link>
               <Link
                 href="/how-it-works"
+                data-funnel-stage="tofu"
+                data-cta="learn-how-it-works"
                 className="inline-flex items-center gap-1.5 text-sm font-medium text-[#0B5FD1] hover:underline"
               >
                 See how it works <ArrowRight size={14} />
@@ -213,6 +219,9 @@ export default function ForBuyersPage() {
             <p className="text-xs text-[#94A3B8] mt-4">
               No credit score impact &bull; Takes 3 minutes &bull; No commitment required
             </p>
+            <div className="mt-6">
+              <TrustBadges />
+            </div>
           </div>
 
           {/* Hero image */}
@@ -465,6 +474,107 @@ export default function ForBuyersPage() {
         </div>
       </section>
 
+      {/* ── Objection Handling — common questions before getting started ─── */}
+      <section
+        className="py-20 bg-[#F8F9FB]"
+        aria-label="Common questions before getting started"
+        data-testid="objection-handling-section"
+      >
+        <div className="mx-auto max-w-3xl px-6 md:px-12">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0B5FD1] mb-4">
+            Before you start
+          </p>
+          <h2 className="text-3xl font-bold tracking-tight text-[#111827] mb-3">
+            Questions Before You Start
+          </h2>
+          <p className="text-[#6B7280] mb-10 max-w-xl">
+            Real answers to the doubts most buyers think about — but never ask out loud.
+          </p>
+
+          <div className="space-y-3">
+            <details
+              data-objection="cost"
+              className="group bg-white border border-[#E5E7EB] rounded-2xl open:shadow-sm"
+            >
+              <summary className="cursor-pointer list-none flex items-start justify-between gap-4 px-6 py-5">
+                <h3 className="text-base font-semibold text-[#111827]">
+                  Is AutoLenis worth the $99?
+                </h3>
+                <span className="shrink-0 h-7 w-7 rounded-full bg-[#EEF5FF] text-[#0B5FD1] flex items-center justify-center text-lg font-bold transition-transform group-open:rotate-45">
+                  +
+                </span>
+              </summary>
+              <p className="px-6 pb-5 text-sm text-[#4B5563] leading-relaxed">
+                The $99 deposit is refundable if you don&apos;t select any offer. If you do
+                buy, the $99 is credited toward the $499 Service Fee. Buyers who use
+                AutoLenis save an average of $2,300 — meaning the service typically
+                pays for itself many times over.
+              </p>
+            </details>
+
+            <details
+              data-objection="trust"
+              className="group bg-white border border-[#E5E7EB] rounded-2xl open:shadow-sm"
+            >
+              <summary className="cursor-pointer list-none flex items-start justify-between gap-4 px-6 py-5">
+                <h3 className="text-base font-semibold text-[#111827]">
+                  How do I know the dealers are legitimate?
+                </h3>
+                <span className="shrink-0 h-7 w-7 rounded-full bg-[#EEF5FF] text-[#0B5FD1] flex items-center justify-center text-lg font-bold transition-transform group-open:rotate-45">
+                  +
+                </span>
+              </summary>
+              <p className="px-6 pb-5 text-sm text-[#4B5563] leading-relaxed">
+                AutoLenis manually verifies every dealer before they join the network.
+                We check dealer licenses, reviews, and business standing. Only approved
+                dealers can submit offers. Your personal contact information is never
+                shared until you choose to proceed.
+              </p>
+            </details>
+
+            <details
+              data-objection="alternative"
+              className="group bg-white border border-[#E5E7EB] rounded-2xl open:shadow-sm"
+            >
+              <summary className="cursor-pointer list-none flex items-start justify-between gap-4 px-6 py-5">
+                <h3 className="text-base font-semibold text-[#111827]">
+                  Why not just go to a dealership directly?
+                </h3>
+                <span className="shrink-0 h-7 w-7 rounded-full bg-[#EEF5FF] text-[#0B5FD1] flex items-center justify-center text-lg font-bold transition-transform group-open:rotate-45">
+                  +
+                </span>
+              </summary>
+              <p className="px-6 pb-5 text-sm text-[#4B5563] leading-relaxed">
+                You can — and sometimes that&apos;s the right choice. AutoLenis is for buyers
+                who want multiple dealers competing simultaneously without visiting each
+                one. Our buyers save time, avoid pressure tactics, and get transparent
+                competing prices that would take weeks to collect manually.
+              </p>
+            </details>
+
+            <details
+              data-objection="commitment"
+              className="group bg-white border border-[#E5E7EB] rounded-2xl open:shadow-sm"
+            >
+              <summary className="cursor-pointer list-none flex items-start justify-between gap-4 px-6 py-5">
+                <h3 className="text-base font-semibold text-[#111827]">
+                  Am I committed to buying if I start?
+                </h3>
+                <span className="shrink-0 h-7 w-7 rounded-full bg-[#EEF5FF] text-[#0B5FD1] flex items-center justify-center text-lg font-bold transition-transform group-open:rotate-45">
+                  +
+                </span>
+              </summary>
+              <p className="px-6 pb-5 text-sm text-[#4B5563] leading-relaxed">
+                No. Creating an account and getting pre-qualified is completely free.
+                Even after paying the $99 deposit, you can decline all offers and
+                receive a full refund. You only pay the Service Fee if you select an
+                offer and proceed with a purchase.
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+
       {/* ── Faith Verse ──────────────────────────────────────────────────────── */}
       <section className="bg-[#111827] py-16 text-center" data-testid="faith-verse-section">
         <div className="mx-auto max-w-2xl px-6">
@@ -511,6 +621,14 @@ export default function ForBuyersPage() {
         chatEndpoint="/api/public/ai/chat"
         placeholder="Ask me anything about AutoLenis…"
         initialGreeting="Hi! I'm Zura, the AutoLenis concierge. Have questions about how our car-buying process works?"
+      />
+
+      {/* ── Scroll-depth sticky CTA — catches mid-scroll buyers ─────────── */}
+      <ScrollCTA
+        headline="Ready to save on your next car?"
+        cta="Get Prequalified →"
+        href="/auth/signup"
+        showAfterPx={800}
       />
     </div>
   );
