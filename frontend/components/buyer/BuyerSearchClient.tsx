@@ -461,7 +461,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
             const laneInfo = LANE_INFO[v.lane] ?? LANE_INFO.LANE_3;
             const added    = shortlisted.has(v.id);
             return (
-              <Link key={v.id} href={`/inventory/${v.id}`} data-testid={`vehicle-card-${i}`} className="block">
+              <Link key={v.id} href={`/buyer/inventory/${v.id}`} data-testid={`vehicle-card-${i}`} className="block">
                 <Card className="overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all duration-300 h-full">
                   <div className="relative aspect-[16/9] bg-slate-100">
                     {v.images[0] && (

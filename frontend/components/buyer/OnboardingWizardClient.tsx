@@ -108,14 +108,21 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
   const [submitting, setSubmitting] = useState(false);
 
   const phoneAlreadySet = useMemo(() => initial.phone.trim().length > 0, [initial.phone]);
+  const nameAlreadySet = useMemo(
+    () => initial.firstName.trim().length > 0 && initial.lastName.trim().length > 0,
+    [initial.firstName, initial.lastName],
+  );
 
   const [vehicleType, setVehicleType] = useState<VehicleType | "">("");
   const [newOrUsed, setNewOrUsed] = useState<NewOrUsed | "">("");
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [phone, setPhone] = useState(initial.phone ?? "");
+  const [firstName, setFirstName] = useState(initial.firstName ?? "");
+  const [lastName, setLastName] = useState(initial.lastName ?? "");
 
   const phoneValid = !phoneAlreadySet ? phone.replace(/\D/g, "").length >= 10 : true;
-  const canSubmit = vehicleType !== "" && newOrUsed !== "" && phoneValid && !submitting;
+  const nameValid = nameAlreadySet || (firstName.trim().length > 0 && lastName.trim().length > 0);
+  const canSubmit = vehicleType !== "" && newOrUsed !== "" && phoneValid && nameValid && !submitting;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -124,20 +131,20 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
     setSubmitting(true);
 
     try {
-      // 1. Persist phone if newly entered
-      if (!phoneAlreadySet && phone.trim()) {
+      // 1. Persist name + phone if newly entered
+      if (!phoneAlreadySet && phone.trim() || !nameAlreadySet) {
         const profileRes = await fetch("/api/buyer/profile", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            firstName: initial.firstName,
-            lastName: initial.lastName,
-            phone: phone.trim(),
+            firstName: firstName.trim() || initial.firstName,
+            lastName: lastName.trim() || initial.lastName,
+            ...(!phoneAlreadySet && phone.trim() ? { phone: phone.trim() } : {}),
           }),
         });
         if (!profileRes.ok) {
           const data = (await profileRes.json().catch(() => ({}))) as { error?: { message?: string } };
-          throw new Error(data.error?.message ?? "Could not save your phone number");
+          throw new Error(data.error?.message ?? "Could not save your profile");
         }
       }
 
@@ -189,6 +196,45 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
         </header>
 
         <form onSubmit={handleSubmit} data-testid="onboarding-form" className="space-y-10">
+          {/* ── Name — only when missing ────────────────────────────── */}
+          {!nameAlreadySet && (
+            <section data-testid="onboarding-name-section">
+              <h2 className="text-base font-semibold text-slate-900 mb-4">Your name</h2>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-700 mb-1.5 block">
+                    First Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="First name"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    disabled={submitting}
+                    data-testid="onboarding-first-name"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-700 mb-1.5 block">
+                    Last Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Last name"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    disabled={submitting}
+                    data-testid="onboarding-last-name"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    required
+                  />
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* ── Vehicle type ──────────────────────────────────────────── */}
           <section data-testid="onboarding-vehicle-type">
             <h2 className="text-base font-semibold text-slate-900 mb-1">

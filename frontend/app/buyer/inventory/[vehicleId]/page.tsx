@@ -87,6 +87,17 @@ export default async function VehicleDetailPage({ params }: Props) {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA]" data-testid="vehicle-detail-page">
+      {/* Back to Search */}
+      <div className="max-w-7xl mx-auto px-6 md:px-12 pt-6">
+        <a
+          href="/buyer/search"
+          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#0B5FD1] transition-colors"
+          data-testid="back-to-search"
+        >
+          ← Back to Search
+        </a>
+      </div>
+
       {/* Image Gallery */}
       <VehicleGallery
         images={vehicle.images}

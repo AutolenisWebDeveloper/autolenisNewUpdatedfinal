@@ -127,7 +127,7 @@ export default function ShortlistClient({ initialItems, canActivate, hasPrequal 
                 className={`relative bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 ${isDeleting ? "opacity-50 pointer-events-none" : ""}`}
               >
                 {/* Clickable image + info area */}
-                <Link href={`/inventory/${item.inventoryItemId}`} className="block group">
+                <Link href={`/buyer/inventory/${item.inventoryItemId}`} className="block group">
                   {/* Image */}
                   <div className="relative aspect-[16/9] bg-slate-100">
                     {item.images[0] ? (

@@ -633,7 +633,7 @@ export default function RequestVehicleFormClient() {
                     </div>
 
                     <div>
-                      <Label className="mb-1.5 block">Specific Features (optional)</Label>
+                      <Label className="mb-1.5 block">Specific Features</Label>
                       <Input
                         data-testid="rv-features"
                         placeholder="e.g. Black exterior, sunroof, third row, AWD…"
@@ -644,7 +644,7 @@ export default function RequestVehicleFormClient() {
                     </div>
 
                     <div>
-                      <Label className="mb-1.5 block">Interior Color Preference (optional)</Label>
+                      <Label className="mb-1.5 block">Interior Color Preference</Label>
                       <Input
                         data-testid="rv-interior-color"
                         placeholder="e.g. Black, Beige, Gray"
@@ -655,7 +655,7 @@ export default function RequestVehicleFormClient() {
                     </div>
 
                     <div>
-                      <Label className="mb-1.5 block">Must-Have Features (optional)</Label>
+                      <Label className="mb-1.5 block">Must-Have Features</Label>
                       <Textarea
                         data-testid="rv-must-have"
                         placeholder="e.g. Panoramic sunroof, heated seats, Apple CarPlay, third row, backup camera"
@@ -711,14 +711,14 @@ export default function RequestVehicleFormClient() {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <Label className="mb-1.5 block">Desired Monthly Payment (optional)</Label>
+                        <Label className="mb-1.5 block">Desired Monthly Payment</Label>
                         <Select data-testid="rv-monthly-goal" className="w-full" value={desiredMonthlyPayment} onChange={(e) => setDesiredMonthlyPayment(e.target.value)}>
                           <option value="">No preference</option>
                           {MONTHLY_GOALS.map((o) => <option key={o} value={o}>{o}</option>)}
                         </Select>
                       </div>
                       <div>
-                        <Label className="mb-1.5 block">Down Payment Available (optional)</Label>
+                        <Label className="mb-1.5 block">Down Payment Available</Label>
                         <Select data-testid="rv-down-payment-available" className="w-full" value={downPaymentAvailable} onChange={(e) => setDownPaymentAvailable(e.target.value)}>
                           <option value="">No preference</option>
                           {DOWN_AVAILABLE.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -859,27 +859,57 @@ export default function RequestVehicleFormClient() {
                         </div>
 
                         <div>
-                          <Label className="mb-1.5 block">Upload Pre-Approval Letter (optional)</Label>
-                          <label
-                            htmlFor="rv-upload-input"
-                            data-testid="rv-upload-zone"
-                            className="block border-2 border-dashed border-green-200 rounded-xl p-5 text-center cursor-pointer hover:border-[#0B5FD1]/40 bg-white"
+                          <Label className="mb-1.5 block">Upload Pre-Approval Letter</Label>
+                          <div
+                            className={`border-2 border-dashed rounded-xl p-5 text-center transition-colors cursor-pointer ${
+                              preApprovalFile
+                                ? "border-green-300 bg-green-50"
+                                : "border-slate-200 bg-white hover:border-[#0B5FD1]/40"
+                            }`}
+                            onClick={() => document.getElementById("pre-approval-upload")?.click()}
+                            data-testid="rv-prequal-upload-zone"
                           >
                             <input
-                              id="rv-upload-input"
-                              data-testid="rv-upload-input"
+                              id="pre-approval-upload"
                               type="file"
                               accept="application/pdf,image/jpeg,image/png,image/webp"
-                              className="sr-only"
-                              onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+                              className="hidden"
+                              data-testid="rv-prequal-upload-input"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  if (file.size > 10 * 1024 * 1024) {
+                                    alert("File must be under 10MB");
+                                    return;
+                                  }
+                                  setPreApprovalFile(file);
+                                }
+                              }}
                             />
-                            <Upload size={18} className="text-slate-400 mx-auto mb-1" />
+                            <Upload size={20} className={`mx-auto mb-2 ${preApprovalFile ? "text-green-500" : "text-slate-400"}`} />
                             {preApprovalFile ? (
-                              <p className="text-sm text-slate-700 font-medium">{preApprovalFile.name}</p>
+                              <div>
+                                <p className="text-sm font-semibold text-green-700">{preApprovalFile.name}</p>
+                                <p className="text-xs text-green-500 mt-0.5">
+                                  {(preApprovalFile.size / 1024).toFixed(0)} KB · Click to replace
+                                </p>
+                              </div>
                             ) : (
-                              <p className="text-sm text-slate-400">Click to upload — PDF, JPG, PNG up to 10 MB</p>
+                              <div>
+                                <p className="text-sm text-slate-500 font-medium">Click to upload pre-approval letter</p>
+                                <p className="text-xs text-slate-400 mt-0.5">PDF, JPG, or PNG · Max 10MB</p>
+                              </div>
                             )}
-                          </label>
+                          </div>
+                          {preApprovalFile && (
+                            <button
+                              type="button"
+                              onClick={() => setPreApprovalFile(null)}
+                              className="text-xs text-red-500 hover:text-red-700 mt-1.5"
+                            >
+                              Remove file
+                            </button>
+                          )}
                           {fileError && <p className="text-xs text-red-600 mt-2" data-testid="rv-file-error">{fileError}</p>}
                         </div>
                       </div>
@@ -890,7 +920,7 @@ export default function RequestVehicleFormClient() {
 
               {currentStep === 4 && (
                 <>
-                  <StepHeader title="Do you have a trade-in?" subtitle="Optional — skip if not applicable." />
+                  <StepHeader title="Do you have a trade-in?" subtitle="Skip this step if you don&rsquo;t have a trade-in." />
                   <div className="space-y-5">
                     <div className="flex gap-2">
                       {(["Yes", "No"] as const).map((opt) => {
@@ -921,7 +951,7 @@ export default function RequestVehicleFormClient() {
                     )}
 
                     {hasTradeIn === true && (
-                      <div className="space-y-4 border-t border-slate-100 pt-4">
+                      <div className="space-y-4 border-t border-slate-100 pt-4" data-testid="trade-in-fields">
                         <div className="grid grid-cols-3 gap-3">
                           <div>
                             <Label className="mb-1.5 block">Year *</Label>
@@ -939,6 +969,7 @@ export default function RequestVehicleFormClient() {
                               onChange={(e) => {
                                 setTradeMake(e.target.value);
                                 setTradeModel("");
+                                setTradeModels([]);
                               }}
                             >
                               <option value="">Make</option>
@@ -965,7 +996,7 @@ export default function RequestVehicleFormClient() {
                         </div>
 
                         <div>
-                          <Label className="mb-1.5 block">VIN (optional)</Label>
+                          <Label className="mb-1.5 block">VIN</Label>
                           <Input
                             data-testid="rv-trade-vin"
                             placeholder="17-character VIN"
@@ -1060,7 +1091,7 @@ export default function RequestVehicleFormClient() {
                         </div>
 
                         <div>
-                          <Label className="mb-1.5 block">Known Issues or Damage (optional)</Label>
+                          <Label className="mb-1.5 block">Known Issues or Damage</Label>
                           <Textarea
                             data-testid="rv-trade-issues"
                             placeholder="Any accidents, mechanical issues, damage…"
@@ -1168,7 +1199,7 @@ export default function RequestVehicleFormClient() {
                   </div>
 
                   <div className="mb-4">
-                    <Label className="mb-1.5 block">Additional Notes (optional)</Label>
+                    <Label className="mb-1.5 block">Additional Notes</Label>
                     <Textarea
                       data-testid="rv-notes"
                       placeholder="Any other details that would help us find your vehicle…"
