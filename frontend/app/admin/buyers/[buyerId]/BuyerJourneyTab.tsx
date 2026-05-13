@@ -66,9 +66,9 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
         data?: { journey: AdminBuyerJourney };
         error?: { message: string };
       };
-      if (!json.success) { setFetchError(json.error?.message ?? "Failed"); return; }
+      if (!json.success) { setFetchError(json.error?.message ?? "Failed to load"); return; }
       setJourney(json.data?.journey ?? null);
-    } catch { setFetchError("Network error"); }
+    } catch (err) { setFetchError(err instanceof Error ? err.message : "Network error"); }
     finally { setLoading(false); }
   }, [buyerId]);
 
