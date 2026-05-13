@@ -13,11 +13,15 @@ export async function GET(request: NextRequest) {
     // preQualification is already loaded on the buyer record (no Promise needed)
     const prequal = buyer.preQualification;
 
-    const [shortlist, deposit, activeAuction, activeDeal] = await Promise.all([
+    const [shortlist, deposit, activeAuction, activeDeal, adminUnlocks] = await Promise.all([
       prisma.shortlist.findUnique({ where: { buyerId: buyer.id }, include: { items: true } }),
       prisma.deposit.findFirst({ where: { buyerId: buyer.id, status: "PAID" }, orderBy: { createdAt: "desc" } }),
       prisma.auction.findFirst({ where: { buyerId: buyer.id, status: "ACTIVE" }, orderBy: { createdAt: "desc" } }),
       prisma.deal.findFirst({ where: { buyerId: buyer.id }, orderBy: { createdAt: "desc" } }),
+      prisma.adminJourneyUnlock.findMany({
+        where: { buyerId: buyer.id },
+        select: { stageId: true },
+      }),
     ]);
 
     const completedStages: string[] = ["account"];
@@ -54,6 +58,13 @@ export async function GET(request: NextRequest) {
       if (activeDeal.status === "COMPLETED") {
         completedStages.push("sign", "pickup");
         currentStage = "complete";
+      }
+    }
+
+    // Merge admin-unlocked stages so buyer can access them in the navigator
+    for (const unlock of adminUnlocks) {
+      if (!completedStages.includes(unlock.stageId)) {
+        completedStages.push(unlock.stageId);
       }
     }
 

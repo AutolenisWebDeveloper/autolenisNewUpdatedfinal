@@ -9,7 +9,16 @@ export async function GET(request: NextRequest, { params }: Props) {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
   const { buyerId } = await params;
-  const journey = await getAdminBuyerJourney(buyerId);
-  if (!journey) return adminError("NOT_FOUND", "Buyer not found", 404);
-  return adminSuccess({ journey });
+  try {
+    const journey = await getAdminBuyerJourney(buyerId);
+    if (!journey) return adminError("NOT_FOUND", "Buyer not found", 404);
+    return adminSuccess({ journey });
+  } catch (err) {
+    console.error("[admin/journey] Error:", err);
+    return adminError(
+      "JOURNEY_ERROR",
+      err instanceof Error ? err.message : "Failed to load journey",
+      500
+    );
+  }
 }
