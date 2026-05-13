@@ -124,6 +124,23 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
     }
   }
 
+  // ── Admin journey unlocks ─────────────────────────────────────────────────
+  // Admin-unlocked stages are merged into completedStages so JourneyNavigator
+  // renders them as accessible rather than locked.
+  try {
+    const adminUnlocks = await prisma.adminJourneyUnlock.findMany({
+      where: { buyerId: buyer.id },
+      select: { stageId: true },
+    });
+    for (const { stageId } of adminUnlocks) {
+      if (!completedStages.includes(stageId)) {
+        completedStages.push(stageId);
+      }
+    }
+  } catch {
+    // Non-fatal: fall back gracefully, buyer sees organic progress only
+  }
+
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-[#F8F9FA]" data-testid="buyer-portal">
       <BuyerSidebar />

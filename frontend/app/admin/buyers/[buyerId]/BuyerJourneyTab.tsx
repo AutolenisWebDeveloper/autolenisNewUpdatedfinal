@@ -14,36 +14,16 @@ import type {
 interface Props { buyerId: string }
 
 const STATUS_CFG: Record<StageStatus, {
-  icon: React.ReactNode;
-  badge: string;
-  rowBg: string;
-  label: string;
+  icon: React.ReactNode; badge: string; rowBg: string; label: string;
 }> = {
-  COMPLETE: {
-    icon: <CheckCircle2 size={15} className="text-green-600" />,
-    badge: "bg-green-100 text-green-700 border-green-200",
-    rowBg: "bg-white",
-    label: "Complete",
-  },
-  ACTIVE: {
-    icon: <Clock size={15} className="text-[#0B5FD1]" />,
-    badge: "bg-blue-100 text-[#0B5FD1] border-blue-200",
-    rowBg: "bg-blue-50/30",
-    label: "Active",
-  },
-  LOCKED: {
-    icon: <Lock size={15} className="text-slate-300" />,
-    badge: "bg-slate-100 text-slate-400 border-slate-200",
-    rowBg: "bg-white",
-    label: "Locked",
-  },
-  ADMIN_UNLOCKED: {
-    icon: <Unlock size={15} className="text-amber-500" />,
-    badge: "bg-amber-100 text-amber-700 border-amber-200",
-    rowBg: "bg-amber-50/40",
-    label: "Admin Unlocked",
-  },
+  COMPLETE:       { icon: <CheckCircle2 size={15} className="text-green-600" />,  badge: "bg-green-100 text-green-700 border-green-200",  rowBg: "bg-white",       label: "Complete"       },
+  ACTIVE:         { icon: <Clock size={15} className="text-[#0B5FD1]" />,         badge: "bg-blue-100 text-[#0B5FD1] border-blue-200",    rowBg: "bg-blue-50/30",  label: "Active"         },
+  LOCKED:         { icon: <Lock size={15} className="text-slate-300" />,           badge: "bg-slate-100 text-slate-400 border-slate-200",  rowBg: "bg-white",       label: "Locked"         },
+  ADMIN_UNLOCKED: { icon: <Unlock size={15} className="text-amber-500" />,         badge: "bg-amber-100 text-amber-700 border-amber-200",  rowBg: "bg-amber-50/40", label: "Admin Unlocked" },
 };
+
+// Stages that require an active deal to be organically completed
+const NEEDS_DEAL = new Set(["financing", "fee", "insurance", "contract", "sign", "pickup"]);
 
 export default function BuyerJourneyTab({ buyerId }: Props) {
   const [journey, setJourney] = useState<AdminBuyerJourney | null>(null);
@@ -51,14 +31,15 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [note, setNote] = useState("");
+  const [unlockNote, setUnlockNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [actionOk, setActionOk] = useState<string | null>(null);
 
+  const [completeModal, setCompleteModal] = useState<string | null>(null);
+
   const load = useCallback(async () => {
-    setLoading(true);
-    setFetchError(null);
+    setLoading(true); setFetchError(null);
     try {
       const res = await fetch(`/api/admin/buyers/${buyerId}/journey`);
       const json = await res.json() as {
@@ -68,19 +49,16 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
       };
       if (!json.success) { setFetchError(json.error?.message ?? "Failed to load"); return; }
       setJourney(json.data?.journey ?? null);
-    } catch (err) { setFetchError(err instanceof Error ? err.message : "Network error"); }
-    finally { setLoading(false); }
+    } catch (err) {
+      setFetchError(err instanceof Error ? err.message : "Network error");
+    } finally { setLoading(false); }
   }, [buyerId]);
 
   useEffect(() => { load(); }, [load]);
 
   function toggleSelect(id: string, canUnlock: boolean) {
     if (!canUnlock) return;
-    setSelected(prev => {
-      const n = new Set(prev);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
   function selectAllRemaining() {
@@ -100,17 +78,16 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
       });
       const json = await res.json() as {
         success: boolean;
-        data?: { unlockedCount?: number; lockedCount?: number };
+        data?: { unlockedCount?: number; lockedCount?: number; succeeded?: number; total?: number };
         error?: { message: string };
       };
       if (!json.success) { setActionErr(json.error?.message ?? "Failed"); return false; }
-      const n = json.data?.unlockedCount ?? json.data?.lockedCount ?? 0;
-      setActionOk(`${n} stage${n === 1 ? "" : "s"} updated.`);
-      setSelected(new Set());
-      setNote("");
-      await load();
-      return true;
-    } catch { setActionErr("Network error"); return false; }
+      const count = json.data?.unlockedCount ?? json.data?.lockedCount ?? json.data?.succeeded ?? 0;
+      const total = json.data?.total;
+      setActionOk(total ? `${count}/${total} stages updated.` : `${count} stage${count === 1 ? "" : "s"} updated.`);
+      setSelected(new Set()); setUnlockNote("");
+      await load(); return true;
+    } catch (err) { setActionErr(err instanceof Error ? err.message : "Network error"); return false; }
     finally { setBusy(false); }
   }
 
@@ -118,13 +95,17 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
     if (!unlockAll && selected.size === 0) return;
     callApi(`/api/admin/buyers/${buyerId}/journey/unlock`, {
       stageIds: unlockAll ? undefined : Array.from(selected),
-      unlockAll,
-      note: note || undefined,
+      unlockAll, note: unlockNote || undefined,
     });
   }
 
   function relock(stageId: string) {
     callApi(`/api/admin/buyers/${buyerId}/journey/lock`, { stageIds: [stageId] });
+  }
+
+  async function completeAll() {
+    if (!confirm("Complete ALL 14 stages for this buyer?\nThis writes real DB records and cannot be undone easily.")) return;
+    callApi(`/api/admin/buyers/${buyerId}/journey/complete-all`, { note: "Admin completed entire journey" });
   }
 
   if (loading) return (
@@ -140,19 +121,19 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
   );
 
   const remaining = journey.stages.filter(s => s.canAdminUnlock && s.status !== "ADMIN_UNLOCKED");
+  const hasActiveDeal = journey.stages.some(s => s.id === "select-deal" && s.status === "COMPLETE");
 
   return (
     <div className="space-y-5">
 
-      {/* Progress */}
+      {/* Progress bar */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5">
         <div className="flex items-center justify-between mb-3">
           <div>
             <p className="text-sm font-semibold text-slate-800">Journey Progress</p>
             <p className="text-xs text-slate-400 mt-0.5">
               {journey.completedCount} of {journey.totalCount} stages complete
-              {" · "}Current stage:{" "}
-              <span className="font-medium text-slate-600">{journey.currentStageId}</span>
+              {" · "}Current: <span className="font-medium text-slate-600">{journey.currentStageId}</span>
             </p>
           </div>
           <div className="text-right">
@@ -161,42 +142,33 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
           </div>
         </div>
         <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-          <div
-            className="h-2 bg-[#0B5FD1] rounded-full transition-all duration-500"
-            style={{ width: `${journey.percentComplete}%` }}
-          />
+          <div className="h-2 bg-[#0B5FD1] rounded-full transition-all duration-500"
+            style={{ width: `${journey.percentComplete}%` }} />
         </div>
       </div>
 
       {/* Admin controls */}
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
-        <p className="text-sm font-bold text-amber-800 mb-3">Admin Unlock Controls</p>
+        <p className="text-sm font-bold text-amber-800 mb-3">Admin Controls</p>
         <div className="space-y-3">
           <div>
             <label className="block text-xs font-medium text-amber-700 mb-1.5">
-              Reason / Note <span className="font-normal opacity-70">(optional — written to audit log)</span>
+              Reason / Note <span className="font-normal opacity-70">(optional — saved to audit log)</span>
             </label>
-            <textarea
-              value={note}
-              onChange={e => setNote(e.target.value)}
+            <textarea value={unlockNote} onChange={e => setUnlockNote(e.target.value)}
               placeholder="e.g. Buyer confirmed eligibility by phone. Unlocking prequal manually."
               rows={2}
-              className="w-full px-3 py-2 text-sm border border-amber-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-amber-300/40 resize-none"
-            />
+              className="w-full px-3 py-2 text-sm border border-amber-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-amber-300/40 resize-none" />
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={selectAllRemaining}
-              disabled={remaining.length === 0}
+            <button onClick={selectAllRemaining} disabled={remaining.length === 0}
               className="text-xs font-semibold border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed">
               Select All Remaining ({remaining.length})
             </button>
 
             {selected.size > 0 && (
-              <button
-                onClick={() => unlock(false)}
-                disabled={busy}
+              <button onClick={() => unlock(false)} disabled={busy}
                 className="text-xs font-bold bg-amber-500 text-white px-4 py-1.5 rounded-lg hover:bg-amber-600 flex items-center gap-1.5 disabled:opacity-50">
                 {busy ? <Loader2 size={12} className="animate-spin" /> : <Unlock size={12} />}
                 Unlock {selected.size} Stage{selected.size > 1 ? "s" : ""}
@@ -204,19 +176,20 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
             )}
 
             <button
-              onClick={() => {
-                if (!confirm("Unlock the entire buyer journey? This will be logged.")) return;
-                unlock(true);
-              }}
+              onClick={() => { if (!confirm("Unlock entire journey for this buyer?")) return; unlock(true); }}
               disabled={busy}
               className="text-xs font-bold bg-red-500 text-white px-4 py-1.5 rounded-lg hover:bg-red-600 flex items-center gap-1.5 disabled:opacity-50">
               {busy ? <Loader2 size={12} className="animate-spin" /> : <Unlock size={12} />}
               Unlock Entire Journey
             </button>
 
-            <button
-              onClick={load}
-              disabled={busy}
+            <button onClick={completeAll} disabled={busy}
+              className="text-xs font-bold bg-purple-600 text-white px-4 py-1.5 rounded-lg hover:bg-purple-700 flex items-center gap-1.5 disabled:opacity-50">
+              {busy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+              Complete Entire Journey
+            </button>
+
+            <button onClick={load} disabled={busy}
               className="text-xs border border-slate-200 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-50 flex items-center gap-1.5">
               <RefreshCw size={12} /> Refresh
             </button>
@@ -235,37 +208,31 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
         </div>
       </div>
 
-      {/* Stage table */}
+      {/* Stage list */}
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <div className="hidden md:grid grid-cols-[24px_1fr_auto_auto] gap-3 px-4 py-2.5 bg-slate-50 border-b text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-          <span />
-          <span>Stage</span>
-          <span>Status</span>
-          <span className="w-16 text-right">Actions</span>
+          <span /> <span>Stage</span> <span>Status</span>
+          <span className="w-40 text-right">Actions</span>
         </div>
 
         <div className="divide-y divide-slate-50">
           {journey.stages.map((stage: JourneyStageView, idx: number) => {
             const cfg = STATUS_CFG[stage.status];
             const isSel = selected.has(stage.id);
-            const clickable = stage.canAdminUnlock;
-
             return (
-              <div
-                key={stage.id}
+              <div key={stage.id}
                 className={[
                   "grid grid-cols-[24px_1fr_auto_auto] gap-3 px-4 py-3 items-center",
-                  cfg.rowBg,
-                  isSel ? "ring-2 ring-inset ring-amber-400" : "",
-                  clickable ? "cursor-pointer select-none" : "",
+                  cfg.rowBg, isSel ? "ring-2 ring-inset ring-amber-400" : "",
+                  stage.canAdminUnlock ? "cursor-pointer select-none" : "",
                 ].filter(Boolean).join(" ")}
-                onClick={clickable ? () => toggleSelect(stage.id, clickable) : undefined}
-                data-testid={`journey-stage-${stage.id}`}
-              >
+                onClick={stage.canAdminUnlock ? () => toggleSelect(stage.id, stage.canAdminUnlock) : undefined}
+                data-testid={`journey-stage-${stage.id}`}>
+
                 {/* Checkbox */}
                 <div className={[
                   "w-5 h-5 rounded border-2 flex items-center justify-center shrink-0",
-                  !clickable ? "border-transparent" :
+                  !stage.canAdminUnlock ? "border-transparent" :
                   isSel ? "border-amber-400 bg-amber-400" : "border-slate-200",
                 ].join(" ")}>
                   {isSel && (
@@ -280,19 +247,11 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     {cfg.icon}
-                    <span className="text-[10px] font-mono text-slate-300">
-                      {String(idx + 1).padStart(2, "0")}
-                    </span>
-                    <span className="text-sm font-semibold text-slate-800">
-                      {stage.label}
-                    </span>
-                    <code className="text-[10px] font-mono text-slate-300 hidden sm:inline">
-                      {stage.id}
-                    </code>
+                    <span className="text-[10px] font-mono text-slate-300">{String(idx + 1).padStart(2, "0")}</span>
+                    <span className="text-sm font-semibold text-slate-800">{stage.label}</span>
+                    <code className="text-[10px] font-mono text-slate-300 hidden sm:inline">{stage.id}</code>
                   </div>
-                  <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                    {stage.description}
-                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{stage.description}</p>
                   {stage.status === "ADMIN_UNLOCKED" && (
                     <p className="text-[10px] text-amber-600 mt-0.5">
                       Unlocked by {stage.adminUnlockedBy}
@@ -313,31 +272,168 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
                 </span>
 
                 {/* Action buttons */}
-                <div className="w-16 flex items-center justify-end gap-1.5">
+                <div className="w-40 flex items-center justify-end gap-1.5 shrink-0">
                   {stage.route && (
-                    <a
-                      href={stage.route}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <a href={stage.route} target="_blank" rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}
-                      className="text-slate-300 hover:text-[#0B5FD1] transition-colors"
-                      title={`Open ${stage.label} buyer page`}>
-                      <ExternalLink size={13} />
+                      className="text-xs font-medium text-slate-400 border border-slate-200 px-2 py-0.5 rounded-lg hover:text-[#0B5FD1] hover:border-[#0B5FD1]/30 flex items-center gap-1 whitespace-nowrap">
+                      <ExternalLink size={11} /> View
                     </a>
+                  )}
+                  {stage.canAdminUnlock && stage.status !== "COMPLETE" && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setCompleteModal(stage.id); }}
+                      disabled={busy}
+                      className="text-xs font-bold text-green-700 border border-green-200 px-2 py-0.5 rounded-lg hover:bg-green-50 flex items-center gap-1 whitespace-nowrap disabled:opacity-40">
+                      <CheckCircle2 size={11} /> Done
+                    </button>
                   )}
                   {stage.status === "ADMIN_UNLOCKED" && (
                     <button
                       onClick={e => { e.stopPropagation(); relock(stage.id); }}
                       disabled={busy}
-                      className="text-[10px] font-semibold text-red-500 border border-red-200 px-1.5 py-0.5 rounded-lg hover:bg-red-50 whitespace-nowrap disabled:opacity-40"
-                      data-testid={`relock-${stage.id}`}>
-                      Re-lock
+                      className="text-xs font-semibold text-red-500 border border-red-200 px-2 py-0.5 rounded-lg hover:bg-red-50 whitespace-nowrap">
+                      Lock
                     </button>
                   )}
                 </div>
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* Mark Complete Modal */}
+      {completeModal && journey && (() => {
+        const stage = journey.stages.find(s => s.id === completeModal);
+        if (!stage) return null;
+        return (
+          <MarkCompleteModal
+            stageId={stage.id}
+            stageLabel={stage.label}
+            buyerId={buyerId}
+            hasActiveDeal={hasActiveDeal}
+            needsDeal={NEEDS_DEAL.has(stage.id)}
+            onClose={() => setCompleteModal(null)}
+            onSuccess={async (label) => {
+              setCompleteModal(null);
+              setActionOk(`Stage "${label}" marked as complete.`);
+              await load();
+            }}
+          />
+        );
+      })()}
+    </div>
+  );
+}
+
+// ─── Mark Complete Modal ──────────────────────────────────────────────────────
+
+function MarkCompleteModal({
+  stageId, stageLabel, buyerId, hasActiveDeal, needsDeal, onClose, onSuccess,
+}: {
+  stageId: string;
+  stageLabel: string;
+  buyerId: string;
+  hasActiveDeal: boolean;
+  needsDeal: boolean;
+  onClose: () => void;
+  onSuccess: (label: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  const [maxOtd, setMaxOtd] = useState(50000);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch(`/api/admin/buyers/${buyerId}/journey/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stageId,
+          note: note || undefined,
+          ...(stageId === "prequal" ? { maxOtdAmountCents: maxOtd * 100 } : {}),
+        }),
+      });
+      const data = await res.json() as { success: boolean; error?: { message: string } };
+      if (!data.success) { setError(data.error?.message ?? "Failed"); return; }
+      onSuccess(stageLabel);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Network error");
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <h3 className="font-bold text-lg text-slate-900 mb-1">
+          Mark &ldquo;{stageLabel}&rdquo; as Complete
+        </h3>
+        <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+          Writes real DB records to advance the buyer. The buyer sees this stage
+          as complete immediately after their next page load.
+        </p>
+
+        {needsDeal && !hasActiveDeal && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 mb-4">
+            ⚠️ This stage requires an active deal. None found — the stage will be
+            admin-unlocked but not organically completed in the DB.
+          </div>
+        )}
+
+        {stageId === "prequal" && (
+          <div className="mb-4">
+            <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              Approved Max OTD Budget (USD)
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+              <input
+                type="number"
+                value={maxOtd}
+                onChange={e => setMaxOtd(Number(e.target.value))}
+                className="w-full pl-7 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                min={1000} step={5000} />
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              Default $50,000. Sets the buyer&apos;s approved purchase budget.
+            </p>
+          </div>
+        )}
+
+        <div className="mb-4">
+          <label className="block text-xs font-medium text-slate-700 mb-1.5">
+            Admin Note <span className="font-normal text-slate-400">(optional)</span>
+          </label>
+          <textarea
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="e.g. Completing on behalf of buyer per phone call 5/13/26"
+            rows={2}
+            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 resize-none" />
+        </div>
+
+        {error && (
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700 mb-3">
+            <AlertCircle size={12} /> {error}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button onClick={onClose}
+            className="flex-1 border border-slate-200 text-slate-600 font-medium py-2.5 rounded-xl hover:bg-slate-50 text-sm">
+            Cancel
+          </button>
+          <button onClick={submit} disabled={loading}
+            className="flex-[2] bg-[#0B5FD1] text-white font-bold py-2.5 rounded-xl hover:bg-[#0944a8] text-sm flex items-center justify-center gap-2 disabled:opacity-40">
+            {loading
+              ? <><Loader2 size={14} className="animate-spin" /> Completing…</>
+              : "✓ Mark as Complete"}
+          </button>
         </div>
       </div>
     </div>
