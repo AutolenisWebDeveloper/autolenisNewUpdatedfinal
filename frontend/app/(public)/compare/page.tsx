@@ -6,6 +6,7 @@ import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.compare);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 const TRADITIONAL_POINTS = [

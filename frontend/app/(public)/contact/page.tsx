@@ -5,6 +5,7 @@ import FaithVerseModule from "@/components/public/FaithVerseModule";
 import ContactFormClient from "@/components/public/ContactFormClient";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.contact);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 const ROUTING_CARDS = [

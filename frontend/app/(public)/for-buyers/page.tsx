@@ -21,6 +21,7 @@ import { MARKETING_IMAGES } from "@/lib/constants/marketing-images";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.forBuyers);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 // ── Data ─────────────────────────────────────────────────────────────────────

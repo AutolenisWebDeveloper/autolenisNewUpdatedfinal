@@ -22,6 +22,7 @@ import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.refinance);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 const HOW_IT_WORKS = [

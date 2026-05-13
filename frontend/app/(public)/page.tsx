@@ -14,6 +14,7 @@ export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.home);
 
 // Authenticated-buyer redirect is handled at the edge in proxy.ts — no
 // server component work needed here, so the page is fully static (ISR 1 h).
+export const dynamic = "force-dynamic";
 export const revalidate = 3600;
 
 const HOW_IT_WORKS = [

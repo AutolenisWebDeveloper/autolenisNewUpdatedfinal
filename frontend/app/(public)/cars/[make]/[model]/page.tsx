@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { JsonLd, breadcrumbSchema, itemListSchema, aggregateOfferSchema } from "@/lib/seo/jsonld";
 import { buildPageMetadata } from "@/lib/seo/metadata";
 
+export const dynamic = "force-dynamic";
 export const revalidate = 3600;
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";

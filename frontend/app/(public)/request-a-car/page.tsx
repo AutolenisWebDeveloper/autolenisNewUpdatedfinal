@@ -10,6 +10,7 @@ import {
 } from "@/lib/constants";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.requestACar);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 const STEPS = [
