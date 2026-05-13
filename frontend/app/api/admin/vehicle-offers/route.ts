@@ -4,7 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 const schema = z.object({
   vehicleYear:          z.number().int().min(2000).max(2030),

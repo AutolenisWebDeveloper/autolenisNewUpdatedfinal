@@ -20,7 +20,7 @@ export async function POST(request: Request) {
       // Use Supabase admin API to send a password reset email via Supabase's built-in flow.
       // Fall back gracefully if Supabase is unavailable (e.g. CI environment).
       try {
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+        const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
         const redirectUrl = `${appUrl}/dealer/reset-password`;
 
         const { createClient } = await import("@supabase/supabase-js");

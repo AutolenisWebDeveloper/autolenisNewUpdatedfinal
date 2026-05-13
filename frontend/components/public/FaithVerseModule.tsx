@@ -15,7 +15,7 @@ const FALLBACK_VERSE = {
 
 async function fetchVerse(pageKey: string): Promise<{ reference: string; text: string } | null> {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const baseUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").trim();
     const res = await fetch(`${baseUrl}/api/faith/verse/${pageKey}`, {
       next: { revalidate: 3600 },
     });

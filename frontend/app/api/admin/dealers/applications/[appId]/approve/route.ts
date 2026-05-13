@@ -114,7 +114,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   // Send approval email
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
   try {
     await sendDealerApprovalEmail(
       app.contactEmail,

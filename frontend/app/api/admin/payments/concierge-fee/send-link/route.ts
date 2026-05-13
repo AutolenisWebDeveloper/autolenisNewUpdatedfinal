@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
   if (deal.buyer.plan !== "PREMIUM") return adminError("NOT_PREMIUM", "Concierge fee only applies to Premium plan buyers", 400);
 
   // Create Stripe Checkout Session
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
   const session = await getStripe().checkout.sessions.create({
     mode: "payment",
     line_items: [

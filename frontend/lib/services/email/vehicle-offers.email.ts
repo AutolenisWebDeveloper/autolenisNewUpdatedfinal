@@ -30,7 +30,7 @@ async function sendRaw(to: string, subject: string, html: string): Promise<void>
   }
 }
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 const ADMIN_EMAIL = process.env.ADMIN_NOTIFICATION_EMAIL ?? "admin@autolenis.com";
 
 const wrap = (inner: string) => `

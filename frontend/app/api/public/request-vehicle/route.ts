@@ -21,7 +21,7 @@ import {
   sendDealerNewBuyerOpportunityEmail,
 } from "@/lib/services/email/resend.service";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 const ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 const MAX_FILE_BYTES = 10 * 1024 * 1024;

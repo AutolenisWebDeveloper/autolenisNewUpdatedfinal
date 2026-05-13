@@ -27,7 +27,7 @@ const DOWNLOADABLE_ASSETS: {
 
 export default async function AffiliateResourcesPage() {
   const affiliate = await requireAffiliate();
-  const referralLink = `${process.env.NEXT_PUBLIC_APP_URL}/auth/signup?ref=${affiliate.referralCode}`;
+  const referralLink = `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/auth/signup?ref=${affiliate.referralCode}`;
 
   const iconMap = {
     image: ImageIcon,

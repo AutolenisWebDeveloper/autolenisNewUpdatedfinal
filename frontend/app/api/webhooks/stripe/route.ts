@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
               const buyerEmail = buyerForEmail?.user?.email;
               const buyerName = buyerForEmail?.firstName ?? "there";
               if (buyerEmail) {
-                const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+                const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
                 const { Resend } = await import("resend");
                 const resend = new Resend(process.env.RESEND_API_KEY);
                 await resend.emails.send({

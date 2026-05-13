@@ -6,7 +6,7 @@ import {
   sendDealerInventorySyncFailureEmail,
 } from "@/lib/services/email/resend.service";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 // Cron: /api/cron/inventory-stale-sweep — Schedule: */30 * * * * (every 30 min)
 // ENH-5: Deactivate stale Lane 2/3 vehicles not seen in 48h

@@ -34,7 +34,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     data: { token: newToken, expiresAt, status: "PENDING" },
   });
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
   const inviteUrl = `${appUrl}/dealer/invite/claim?token=${newToken}`;
 
   try {

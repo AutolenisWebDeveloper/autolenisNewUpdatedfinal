@@ -15,7 +15,7 @@ import type { Prisma } from "@prisma/client";
 export const dynamic = "force-dynamic";
 export const revalidate = 3600;
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 // --- Slug helpers ----------------------------------------------------------
 

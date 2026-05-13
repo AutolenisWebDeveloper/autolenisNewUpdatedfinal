@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { sendVehicleOfferInvitationEmail } from "@/lib/services/email/vehicle-offers.email";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 const dealerSchema = z.object({
   dealershipName: z.string().min(1).max(150),

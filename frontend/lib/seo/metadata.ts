@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 const OG_IMAGE = `${APP_URL}/og-image.jpg`;
 const SITE_NAME = "AutoLenis";
 const TWITTER_HANDLE = "@autolenis";

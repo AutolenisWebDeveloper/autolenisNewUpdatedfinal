@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
           from: "AutoLenis <noreply@autolenis.com>",
           to: pq.buyer.user.email,
           subject: `Your AutoLenis prequalification expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}`,
-          text: `Your prequalification approval expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}.\n\nLog in to complete your vehicle search and pay the $99 Auction Access Deposit before it expires.\n\n${process.env.NEXT_PUBLIC_APP_URL}/buyer/deposit`,
+          text: `Your prequalification approval expires in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}.\n\nLog in to complete your vehicle search and pay the $99 Auction Access Deposit before it expires.\n\n${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/deposit`,
         });
       } catch (err) {
         console.error(`[prequal-ibv-reminders] expiry email failed:`, err);

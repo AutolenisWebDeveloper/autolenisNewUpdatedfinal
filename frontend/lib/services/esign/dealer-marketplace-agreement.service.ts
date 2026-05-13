@@ -128,7 +128,7 @@ export async function sendDealerMarketplaceAgreement(params: {
     where: { id: dealerId },
     select: { dealershipName: true },
   });
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
   await sendDealerAgreementPendingEmail({
     to: email,
     contactName: name || dealerRow?.dealershipName || "Dealer",

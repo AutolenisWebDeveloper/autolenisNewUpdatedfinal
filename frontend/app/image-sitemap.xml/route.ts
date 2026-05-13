@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-const BASE = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const BASE = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 export const dynamic = "force-dynamic";
 export const revalidate = 3600;

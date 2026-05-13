@@ -10,7 +10,7 @@ export function JsonLd({ id, data }: JsonLdProps) {
   );
 }
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 export function organizationSchema() {
   return {

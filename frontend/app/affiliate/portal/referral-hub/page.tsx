@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ReferralHubPage() {
   const affiliate = await requireAffiliate();
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
   const referralLink = `${appUrl}/auth/signup?ref=${affiliate.referralCode}`;
 
   // Generate a real QR code encoding the referral link (Reed-Solomon computed matrix)

@@ -1,5 +1,5 @@
 export function getAppUrl() {
-  return (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").replace(/\/$/, "");
+  return (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim().replace(/\/$/, "");
 }
 
 export function getSafeBuyerRedirect(value: string | null): string | null {

@@ -119,7 +119,7 @@ export async function createDealerEnvelopeFromTemplate(dealId: string): Promise<
   }
 
   // STEP B: Get embedded signing URL (Recipient View)
-  const returnUrl = config.returnUrl || `${process.env.NEXT_PUBLIC_APP_URL}/buyer/esign?signed=true`;
+  const returnUrl = config.returnUrl || `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/esign?signed=true`;
   const viewUrl   = `${envelopesUrl}/${envelopeId}/views/recipient`;
 
   let signingUrl: string;
