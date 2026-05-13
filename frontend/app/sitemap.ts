@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { prisma } from "@/lib/prisma";
 
-const BASE = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const BASE = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 // 1-hour ISR — sitemap is built from DB and should not be regenerated on every
 // request, but should refresh frequently enough to reflect new inventory.

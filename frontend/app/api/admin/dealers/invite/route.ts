@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
     },
   }).catch(() => {});
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
   const inviteUrl = `${appUrl}/dealer/invite/claim?token=${token}`;
 
   try {

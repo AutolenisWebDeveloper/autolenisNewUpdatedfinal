@@ -8,7 +8,7 @@ import AddToShortlistButton from "./AddToShortlistButton";
 import { JsonLd, vehicleSchema, breadcrumbSchema } from "@/lib/seo/jsonld";
 import { bucketFeatures } from "@/lib/utils/feature-categories";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 export const dynamic = "force-dynamic";
 

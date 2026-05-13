@@ -33,7 +33,7 @@ export default async function AffiliateDashboardPage() {
     }),
   ]);
 
-  const referralLink = `${process.env.NEXT_PUBLIC_APP_URL}/auth/signup?ref=${affiliate.referralCode}`;
+  const referralLink = `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/auth/signup?ref=${affiliate.referralCode}`;
   // Clean up email prefix: take the first segment before "." or "_", strip trailing digits,
   // then capitalise. e.g. "mark.ist678" → "Mark", "jane_doe@..." → "Jane".
   const rawPrefix = affiliate.user.email.split("@")[0];

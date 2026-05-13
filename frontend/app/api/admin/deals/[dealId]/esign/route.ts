@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { createEnvelope } from "@/lib/services/esign/esign.service";
 import { sendDealerEsignInitiatedEmail } from "@/lib/services/email/resend.service";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 interface Props { params: Promise<{ dealId: string }> }
 

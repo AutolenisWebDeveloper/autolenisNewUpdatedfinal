@@ -31,7 +31,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       where: { id: dealerId },
       include: { user: { select: { email: true } } },
     });
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
     if (dealer?.user?.email) {
       await sendDealerAccountApprovedEmail({
         to: dealer.user.email,

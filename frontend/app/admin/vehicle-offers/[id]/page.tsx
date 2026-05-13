@@ -75,5 +75,5 @@ export default async function VehicleOfferDetailPage({ params }: Props) {
       : null,
   };
 
-  return <VehicleOfferDetailClient offer={detail} appUrl={process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com"} />;
+  return <VehicleOfferDetailClient offer={detail} appUrl={(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()} />;
 }

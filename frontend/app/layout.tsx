@@ -35,7 +35,7 @@ export const metadata: Metadata = {
   description:
     "AutoLenis is a premium automotive fintech concierge platform. Skip the negotiation — let dealers compete for your business.",
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com"
+    (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()
   ),
   // Feature 30 — PWA manifest link
   manifest: "/manifest.json",

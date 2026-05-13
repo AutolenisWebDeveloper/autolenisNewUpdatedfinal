@@ -17,7 +17,7 @@ export async function getBuyerReferralStats(buyerId: string) {
 
   return {
     referralCode,
-    referralLink: `${process.env.NEXT_PUBLIC_APP_URL}/auth/signup?ref=${referralCode}`,
+    referralLink: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/auth/signup?ref=${referralCode}`,
     referralCount,
     totalEarnedCents: totalEarned,
     commissionPerDeal: Math.round(PREMIUM_FEE_CENTS * COMMISSION_RATES.LEVEL_1),

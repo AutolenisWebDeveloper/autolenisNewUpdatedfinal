@@ -14,7 +14,7 @@ import {
 } from "@/lib/services/email/resend.service";
 import { prisma } from "@/lib/prisma";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get(CRON_AUTH_HEADER);

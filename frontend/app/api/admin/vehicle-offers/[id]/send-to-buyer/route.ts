@@ -7,7 +7,7 @@ import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-
 import { sendBuyerOfferReviewEmail } from "@/lib/services/email/vehicle-offers.email";
 import { sendVehicleOfferReady } from "@/lib/services/email/resend.service";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 const itemSchema = z.object({
   submissionId: z.string().min(1),

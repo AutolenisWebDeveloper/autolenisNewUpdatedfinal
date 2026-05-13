@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
       email: normalizedEmail,
       password,
       options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?role=AFFILIATE`,
+        redirectTo: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/auth/callback?role=AFFILIATE`,
       },
     });
     if (!linkErr && linkData?.properties?.action_link) {

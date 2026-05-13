@@ -6,7 +6,7 @@ export function generateOrganizationSchema(): Record<string, unknown> {
     "@context": "https://schema.org",
     "@type": "Organization",
     "name": "AutoLenis",
-    "url": process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com",
+    "url": (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim(),
     "description": "Premium automotive concierge and reverse-auction platform",
     "sameAs": [],
   };

@@ -148,7 +148,7 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
         vehicleTrim: null,
         buyerCity: auctionForBuyer?.buyer?.city ?? "Location",
         buyerState: auctionForBuyer?.buyer?.state ?? "TBD",
-        auctionUrl: `${process.env.NEXT_PUBLIC_APP_URL}/dealer/opportunities`,
+        auctionUrl: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/dealer/opportunities`,
         expiryHours: AUCTION_DURATION_HOURS,
         auctionId,
       }).catch(err =>

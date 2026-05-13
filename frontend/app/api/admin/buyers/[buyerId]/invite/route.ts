@@ -32,7 +32,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   if (!parsed.success) return adminError("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
 
   const { reason, temporaryPassword } = parsed.data;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
 
   // Send invite email — uses idempotency so this is safe to call multiple times
   if (temporaryPassword) {

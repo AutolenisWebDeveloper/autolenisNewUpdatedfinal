@@ -38,7 +38,7 @@ export default async function ReferralPage() {
   const totalEarnedCents = earnedResult?._sum?.amountCents ?? 0;
 
   const referralLink = affiliate
-    ? `${process.env.NEXT_PUBLIC_APP_URL}/auth/signup?ref=${affiliate.referralCode}`
+    ? `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/auth/signup?ref=${affiliate.referralCode}`
     : null;
 
   return (

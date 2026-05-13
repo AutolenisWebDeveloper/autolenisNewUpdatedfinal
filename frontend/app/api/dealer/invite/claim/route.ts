@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
   });
 
   try {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
     await sendDealerWelcomeEmail({ to: invitation.email, contactName: invitation.contactName, dealershipName: invitation.dealershipName, dashboardUrl: `${appUrl}/dealer/dashboard` });
   } catch (err) {
     console.error("[dealer/invite/claim] Welcome email error:", err);

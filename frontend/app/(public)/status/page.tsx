@@ -25,7 +25,7 @@ interface HealthData {
 
 async function fetchHealth(): Promise<HealthData | null> {
   try {
-    const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const base = (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").trim();
     const res = await fetch(`${base}/api/public/health`, {
       cache: "no-store",
     });

@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Create Stripe Checkout Session
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
   const session = await getStripe().checkout.sessions.create({
     mode: "payment",
     line_items: [

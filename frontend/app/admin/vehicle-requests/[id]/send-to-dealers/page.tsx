@@ -57,7 +57,7 @@ export default async function SendToDealersPage({ params }: Props) {
       requestId={id}
       meta={meta}
       offer={serialized}
-      appUrl={process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com"}
+      appUrl={(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}
     />
   );
 }

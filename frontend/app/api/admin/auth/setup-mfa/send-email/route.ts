@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
 
     // Build the confirmation URL
     const appUrl =
-      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
+      (process.env.NEXT_PUBLIC_APP_URL?.trim()?.replace(/\/$/, "") ?? "https://autolenis.com");
     const confirmUrl = `${appUrl}/admin/auth/setup-mfa?emailToken=${plain}`;
     const expiresMinutes = Math.round(MFA_EMAIL_TOKEN_TTL_MS / 60_000);
 

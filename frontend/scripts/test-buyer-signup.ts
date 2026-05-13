@@ -13,7 +13,7 @@ async function main() {
   const password = "TestSignup-" + Math.random().toString(36).slice(2, 10) + "!1";
   const firstName = "Test";
   const lastName = "Buyer";
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://repo-mirror-check.preview.emergentagent.com";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://repo-mirror-check.preview.emergentagent.com").trim();
 
   console.log("=== AutoLenis Buyer Signup E2E Test ===");
   console.log(`To:       ${email}`);

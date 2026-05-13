@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
   }
 
   const supabaseUserId = created.user.id;
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
 
   try {
     if (data.userType === "BUYER") {

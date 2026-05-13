@@ -74,6 +74,7 @@ function getResend(): Resend | null {
 const FROM_NAME = process.env.FROM_NAME ?? "AutoLenis";
 const FROM_EMAIL = "noreply@autolenis.com";
 const FROM = `${FROM_NAME} <${FROM_EMAIL}>`;
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 // Idempotent send — check EmailSendLog before sending
 async function sendIdempotent(params: {
@@ -163,7 +164,7 @@ export async function sendWelcomeEmail(params: {
 }
 
 export async function sendAuctionActivatedEmail(to: string, buyerName: string, auctionId: string) {
-  const auctionUrl = `${process.env.NEXT_PUBLIC_APP_URL}/buyer/auctions`;
+  const auctionUrl = `${APP_URL}/buyer/auctions`;
   return sendIdempotent({
     idempotencyKey: `auction-activated-${auctionId}`,
     to,
@@ -175,7 +176,7 @@ export async function sendAuctionActivatedEmail(to: string, buyerName: string, a
 
 export async function sendOffersReadyEmail(to: string, buyerName: string, auctionId: string, offerCount: number) {
   void offerCount; // offer count not shown in email (buyers view in app)
-  const offersUrl = `${process.env.NEXT_PUBLIC_APP_URL}/buyer/auctions/${auctionId}/offers`;
+  const offersUrl = `${APP_URL}/buyer/auctions/${auctionId}/offers`;
   return sendIdempotent({
     idempotencyKey: `offers-ready-${auctionId}`,
     to,
@@ -217,7 +218,7 @@ export async function sendPrequalDeclinedEmail(to: string, buyerName: string) {
           <p>Hi ${buyerName},</p>
           <p>We were unable to pre-qualify you at this time based on your consumer report.</p>
           <p>Under the Fair Credit Reporting Act, you have the right to obtain a free copy of your consumer report from MicroBilt Corporation (1-888-217-5866, www.microbilt.com) and to dispute any inaccuracies.</p>
-          <p>You may also provide your own bank pre-approval: <a href="${process.env.NEXT_PUBLIC_APP_URL}/buyer/prequal/external">Use my own financing</a></p>
+          <p>You may also provide your own bank pre-approval: <a href="${APP_URL}/buyer/prequal/external">Use my own financing</a></p>
         </div>
       </div>
     `,
@@ -254,7 +255,7 @@ export async function sendAdverseActionEmail(params: {
 
 export async function sendDealSelectedEmail(to: string, buyerName: string, dealId: string) {
   void dealId; // used for idempotency key only
-  const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/buyer/dashboard`;
+  const dashboardUrl = `${APP_URL}/buyer/dashboard`;
   return sendIdempotent({
     idempotencyKey: `deal-selected-${dealId}`,
     to,
@@ -277,7 +278,7 @@ export async function sendPickupReadyEmail(to: string, buyerName: string, pickup
         <div style="padding:32px">
           <p>Hi ${buyerName},</p>
           <p>Your vehicle pickup is scheduled for <strong>${pickupDate}</strong>. Your QR code is available in your dashboard.</p>
-          <a href="${process.env.NEXT_PUBLIC_APP_URL}/buyer/pickup" style="display:inline-block;background:#4CAF50;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600">View QR Code</a>
+          <a href="${APP_URL}/buyer/pickup" style="display:inline-block;background:#4CAF50;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600">View QR Code</a>
         </div>
       </div>
     `,
@@ -290,7 +291,7 @@ export async function sendDepositConfirmationEmail(to: string, firstName: string
     day: "numeric",
     year: "numeric",
   });
-  const auctionsUrl = `${process.env.NEXT_PUBLIC_APP_URL}/buyer/auctions`;
+  const auctionsUrl = `${APP_URL}/buyer/auctions`;
   return sendIdempotent({
     idempotencyKey: `deposit-confirmed-${depositId}`,
     to,
@@ -307,7 +308,7 @@ export async function sendDealCompleteEmail(to: string, firstName: string, dealI
     day: "numeric",
     year: "numeric",
   });
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+  const appUrl = APP_URL;
   return sendIdempotent({
     idempotencyKey: `deal-complete-${dealId}`,
     to,
@@ -330,7 +331,7 @@ export async function sendEmailVerifiedEmail(params: {
   firstName: string;
 }) {
   const { to, firstName } = params;
-  const prequalUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com"}/buyer/prequal`;
+  const prequalUrl = `${APP_URL}/buyer/prequal`;
   return sendIdempotent({
     idempotencyKey: `email-verified-${to}`,
     to,
@@ -363,7 +364,7 @@ export async function sendContractShieldAlertEmail(params: {
   issueCount: number;
 }) {
   const { to, firstName, dealId, issueCount } = params;
-  const contractUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com"}/buyer/deal/${dealId}/contract`;
+  const contractUrl = `${APP_URL}/buyer/deal/${dealId}/contract`;
   return sendIdempotent({
     idempotencyKey: `contract-shield-alert-${dealId}`,
     to,
@@ -379,7 +380,7 @@ export async function sendContractApprovedEmail(params: {
   dealId: string;
 }) {
   const { to, firstName, dealId } = params;
-  const signUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com"}/buyer/deal/${dealId}/sign`;
+  const signUrl = `${APP_URL}/buyer/deal/${dealId}/sign`;
   return sendIdempotent({
     idempotencyKey: `contract-approved-${dealId}`,
     to,
@@ -395,7 +396,7 @@ export async function sendVehicleRequestReceived(to: string, buyerName: string, 
     idempotencyKey: `request-received-${requestId}`,
     to, templateId: "4c-request-received",
     subject: "Vehicle request received — AutoLenis",
-    html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:32px"><p>Hi ${buyerName},</p><p>Your vehicle request has been received. Our team will begin sourcing options and will update you within 3-5 business days.</p><a href="${process.env.NEXT_PUBLIC_APP_URL}/buyer/requests/${requestId}">View Request Status</a></div>`,
+    html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:32px"><p>Hi ${buyerName},</p><p>Your vehicle request has been received. Our team will begin sourcing options and will update you within 3-5 business days.</p><a href="${APP_URL}/buyer/requests/${requestId}">View Request Status</a></div>`,
   });
 }
 
@@ -404,14 +405,14 @@ export async function sendVehicleOfferReady(to: string, buyerName: string, reque
     idempotencyKey: `offer-ready-${requestId}`,
     to, templateId: "4c-offer-ready",
     subject: "A vehicle offer is ready for you — AutoLenis",
-    html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:32px"><p>Hi ${buyerName},</p><p>Our team has sourced a vehicle matching your request. An offer is ready for your review.</p><a href="${process.env.NEXT_PUBLIC_APP_URL}/buyer/requests/${requestId}/offer">View Offer</a></div>`,
+    html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:32px"><p>Hi ${buyerName},</p><p>Our team has sourced a vehicle matching your request. An offer is ready for your review.</p><a href="${APP_URL}/buyer/requests/${requestId}/offer">View Offer</a></div>`,
   });
 }
 
 export async function sendAffiliateVerificationEmail(to: string, firstName: string, referralCode: string, verificationLink?: string) {
   const ctaButton = verificationLink
     ? `<a href="${verificationLink}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600">Verify my email</a>`
-    : `<a href="${process.env.NEXT_PUBLIC_APP_URL}/auth/signin" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600">Sign in</a>`;
+    : `<a href="${APP_URL}/auth/signin" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600">Sign in</a>`;
   return sendIdempotent({
     idempotencyKey: `affiliate-verify-${to}`,
     to,
@@ -441,7 +442,7 @@ export async function sendAffiliateVerificationEmail(to: string, firstName: stri
 }
 
 export async function sendAffiliateActivationEmail(to: string, firstName: string, referralCode: string) {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = APP_URL;
   const referralLink = `${appUrl}/auth/signup?ref=${referralCode}`;
   return sendIdempotent({
     idempotencyKey: `affiliate-activate-${to}-${referralCode}`,
@@ -481,7 +482,7 @@ export async function sendAffiliateActivationEmail(to: string, firstName: string
 }
 
 export async function sendAffiliateRejectionEmail(to: string, firstName: string, reason?: string) {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = APP_URL;
   return sendIdempotent({
     idempotencyKey: `affiliate-reject-${to}-${Date.now()}`,
     to,
@@ -523,7 +524,7 @@ export async function sendAffiliateWeeklyDigest(input: {
   pendingPayoutCents: number;
   unsubscribeToken: string;
 }) {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = APP_URL;
   const referralLink = `${appUrl}/auth/signup?ref=${input.referralCode}`;
   const unsubscribeLink = `${appUrl}/api/public/affiliate/unsubscribe?token=${input.unsubscribeToken}`;
   const dollars = (c: number) => `$${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -665,7 +666,7 @@ export async function sendDealerApplicationAdminNotification(
   adminEmail: string,
   applicationData: { contactName: string; contactEmail: string; dealershipName: string; state: string; appId: string }
 ): Promise<void> {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
+  const appUrl = APP_URL;
   await sendIdempotent({
     idempotencyKey: `dealer-app-admin:${applicationData.appId}`,
     to: adminEmail,
@@ -1193,7 +1194,7 @@ export async function sendDepositPaymentLinkEmail(params: {
     to: params.to,
     templateId: "admin-deposit-payment-link",
     subject: DEPOSIT_PAYMENT_LINK_SUBJECT,
-    html: renderDepositPaymentLinkEmail({ firstName: params.firstName, checkoutUrl: params.checkoutUrl, appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com" }),
+    html: renderDepositPaymentLinkEmail({ firstName: params.firstName, checkoutUrl: params.checkoutUrl, appUrl: APP_URL }),
   });
 }
 
@@ -1205,7 +1206,7 @@ export async function sendConciergeFeePaymentLinkEmail(params: {
     to: params.to,
     templateId: "admin-concierge-fee-payment-link",
     subject: CONCIERGE_FEE_PAYMENT_LINK_SUBJECT,
-    html: renderConciergeFeePaymentLinkEmail({ firstName: params.firstName, checkoutUrl: params.checkoutUrl, appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com" }),
+    html: renderConciergeFeePaymentLinkEmail({ firstName: params.firstName, checkoutUrl: params.checkoutUrl, appUrl: APP_URL }),
   });
 }
 
