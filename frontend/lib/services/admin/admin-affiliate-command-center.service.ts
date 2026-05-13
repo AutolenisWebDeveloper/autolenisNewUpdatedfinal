@@ -264,10 +264,7 @@ export async function getAdminAffiliateDetailData(affiliateId: string) {
           user: { select: { email: true } },
         },
       },
-      notifications: {
-        orderBy: { createdAt: "desc" },
-        take: 10,
-      },
+      // notifications fetched separately below — isolate failure
       documents: {
         orderBy: { uploadedAt: "desc" },
       },
@@ -276,28 +273,63 @@ export async function getAdminAffiliateDetailData(affiliateId: string) {
 
   if (!affiliate) return null;
 
-  const [auditLogs, supportNotes, referralCount, convertedCount] =
-    await Promise.all([
-      prisma.adminAuditLog.findMany({
-        where: { entityType: "Affiliate", entityId: affiliateId },
-        orderBy: { createdAt: "desc" },
-        take: 50,
-      }),
-      prisma.adminSupportNote.findMany({
-        where: { targetUserId: affiliate.userId },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-      }),
-      prisma.buyer.count({ where: { affiliateId } }),
-      prisma.buyer.count({
-        where: {
-          affiliateId,
-          deals: { some: { status: { in: ["COMPLETED", "PICKUP_COMPLETE"] } } },
-        },
-      }),
-    ]);
+  // Fetch notifications separately so a failure doesn't kill the whole page
+  type NotificationRow = {
+    id: string; type: string; title: string; body: string;
+    readAt: Date | null; createdAt: Date;
+  };
+  let notifications: NotificationRow[] = [];
+  try {
+    notifications = await prisma.notification.findMany({
+      where: { affiliateId },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    });
+  } catch {
+    notifications = [];
+  }
 
-  // Derive compliance status
+  type AuditLogRow = {
+    id: string; action: string; adminEmail: string;
+    reason: string | null; metadata: unknown; createdAt: Date;
+  };
+  type SupportNoteRow = {
+    id: string; type: string; content: string; adminId: string; createdAt: Date;
+  };
+
+  let auditLogs: AuditLogRow[] = [];
+  let supportNotes: SupportNoteRow[] = [];
+  let referralCount = 0;
+  let convertedCount = 0;
+
+  try {
+    auditLogs = await prisma.adminAuditLog.findMany({
+      where: { entityType: "Affiliate", entityId: affiliateId },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+  } catch { auditLogs = []; }
+
+  try {
+    supportNotes = await prisma.adminSupportNote.findMany({
+      where: { targetUserId: affiliate.userId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+  } catch { supportNotes = []; }
+
+  try { referralCount = await prisma.buyer.count({ where: { affiliateId } }); } catch { referralCount = 0; }
+
+  try {
+    convertedCount = await prisma.buyer.count({
+      where: {
+        affiliateId,
+        deals: { some: { status: { in: ["COMPLETED", "PICKUP_COMPLETE"] } } },
+      },
+    });
+  } catch { convertedCount = 0; }
+
+  // Derive compliance status from audit logs
   const complianceLogs = auditLogs.filter(
     (l) =>
       l.action === "AFFILIATE_COMPLIANCE_FLAGGED" ||
@@ -306,7 +338,7 @@ export async function getAdminAffiliateDetailData(affiliateId: string) {
   let hasComplianceFlag = false;
   let complianceReason: string | null = null;
   if (complianceLogs.length > 0) {
-    const latest = complianceLogs[0];
+    const latest = complianceLogs[0]!;
     hasComplianceFlag = latest.action === "AFFILIATE_COMPLIANCE_FLAGGED";
     complianceReason = hasComplianceFlag ? (latest.reason ?? null) : null;
   }
@@ -366,7 +398,7 @@ export async function getAdminAffiliateDetailData(affiliateId: string) {
       requestedAt: p.requestedAt.toISOString(),
       processedAt: p.processedAt?.toISOString() ?? null,
     })),
-    notifications: affiliate.notifications.map((n) => ({
+    notifications: notifications.map((n) => ({
       id: n.id,
       type: n.type,
       title: n.title,
