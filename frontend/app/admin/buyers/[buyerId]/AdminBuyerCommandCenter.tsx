@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { PrequalAdminPanel } from "./PrequalAdminPanel";
+import BuyerJourneyTab from "./BuyerJourneyTab";
 import {
   User, Mail, Phone, Calendar, Clock, Edit2,
   Bell, UserCheck, PlayCircle, Flag, CheckCircle2,
@@ -841,6 +842,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
 
   const tabs = [
     { id: "overview", label: "Overview" },
+    { id: "journey",  label: "Journey" },
     { id: "payments", label: "Payments" },
     { id: "deals", label: "Deals" },
     { id: "auctions", label: "Auctions" },
@@ -1342,6 +1344,20 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
               </div>
             </SectionCard>
 
+          </div>
+        )}
+
+        {/* ─── Journey Tab ──────────────────────────────────────────────── */}
+        {activeTab === "journey" && (
+          <div className="p-6" data-testid="buyer-journey-tab">
+            <div className="mb-5">
+              <h2 className="text-base font-bold text-slate-900">Buyer Journey</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Stage-by-stage progress. Select stages below to unlock them manually.
+                All unlock actions are logged to the admin audit trail.
+              </p>
+            </div>
+            <BuyerJourneyTab buyerId={buyer.id} />
           </div>
         )}
 

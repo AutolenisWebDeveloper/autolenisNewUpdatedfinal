@@ -75,8 +75,25 @@ model Buyer {
   refinanceApplications RefinanceApplication[]
   preferences           BuyerPreferences?
   complianceEvents      ComplianceEvent[]
+  adminJourneyUnlocks   AdminJourneyUnlock[]
 
   @@map("buyers")
+}
+
+model AdminJourneyUnlock {
+  id          String   @id @default(cuid())
+  buyerId     String   @map("buyer_id")
+  stageId     String   @map("stage_id")
+  adminId     String   @map("admin_id")
+  adminEmail  String   @map("admin_email")
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  buyer Buyer @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+
+  @@unique([buyerId, stageId])
+  @@index([buyerId])
+  @@map("admin_journey_unlocks")
 }
 
 model BuyerPreferences {
