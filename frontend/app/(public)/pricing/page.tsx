@@ -7,6 +7,7 @@ import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import { JsonLd, pricingSchema } from "@/lib/seo/jsonld";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.pricing);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 const STANDARD_FEATURES = [

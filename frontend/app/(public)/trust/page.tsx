@@ -4,6 +4,7 @@ import { Shield, Lock, Eye, CheckCircle2, FileText, CreditCard, ArrowRight } fro
 import type { Metadata } from "next";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.trust);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 const TRUST_PILLARS = [

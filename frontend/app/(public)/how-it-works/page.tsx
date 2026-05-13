@@ -10,6 +10,7 @@ import { JsonLd, faqSchema } from "@/lib/seo/jsonld";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.howItWorks);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 const FAQS = [

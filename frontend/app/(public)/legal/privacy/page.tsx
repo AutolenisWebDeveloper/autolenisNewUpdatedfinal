@@ -3,6 +3,7 @@ import Link from "next/link";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.privacy);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 export default function PrivacyPage() {

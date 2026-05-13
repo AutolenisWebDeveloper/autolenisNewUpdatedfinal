@@ -20,6 +20,7 @@ import { MAX_DEALER_INVITATIONS, AUCTION_DURATION_HOURS } from "@/lib/constants"
 
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.forDealers);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 const MODEL_PILLARS = [

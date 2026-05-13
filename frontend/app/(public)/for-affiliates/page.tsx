@@ -30,6 +30,7 @@ import FaithVerseModule from "@/components/public/FaithVerseModule";
 
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.forAffiliates);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 const HOW_TO_EARN = [
