@@ -5,6 +5,7 @@ import FaithVerseModule from "@/components/public/FaithVerseModule";
 import FaqAccordionClient from "@/components/public/FaqAccordionClient";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.faq);
+export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 export default function FAQPage() {
