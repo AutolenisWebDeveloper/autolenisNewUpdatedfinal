@@ -92,6 +92,13 @@ export default async function PrequalResultPage() {
         </p>
       </div>
 
+      {prequal.maxOtdAmountCents === 3500000 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-xs text-amber-700">
+          Your pre-qualification amount is based on the income you provided.
+          To update your pre-qualification, re-submit with your current income.
+        </div>
+      )}
+
       <p className="text-xs text-slate-400 text-center mb-6">
         Expires: {prequal.expiresAt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
       </p>

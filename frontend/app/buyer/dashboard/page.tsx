@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import PlanUpgradeCard, { type DepositStatus } from "@/components/buyer/PlanUpgradeCard";
 import ProactiveNudgesPanel, { type BuyerNudge } from "@/components/buyer/ProactiveNudgesPanel";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { MapPin } from "lucide-react";
 
 export const metadata: Metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
@@ -88,6 +89,12 @@ export default async function BuyerDashboard() {
     unreadCount = await prisma.notification.count({
       where: { buyerId: buyer.id, readAt: null },
     });
+  } catch { /* non-fatal */ }
+
+  // ── Active dealer count (for no-dealer-in-area banner) ───────────────────
+  let activeDealerCount = 0;
+  try {
+    activeDealerCount = await prisma.dealer.count({ where: { status: "ACTIVE" } });
   } catch { /* non-fatal */ }
 
   // If prequal is approved, onboarding is implicitly complete
@@ -189,6 +196,30 @@ export default async function BuyerDashboard() {
       {/* Feature 16 — Proactive Nudges (only shows real state-driven nudges) */}
       {nudges.length > 0 && (
         <ProactiveNudgesPanel nudges={nudges} />
+      )}
+
+      {/* No dealers in area banner — shown when prequal approved but no active dealers */}
+      {prequalApproved && activeDealerCount === 0 && !activeAuction && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 mb-4" data-testid="no-dealer-banner">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+              <MapPin size={18} className="text-amber-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-amber-900 mb-1">No dealers in your area yet</h3>
+              <p className="text-sm text-amber-700 mb-3">
+                We&apos;re actively onboarding dealers in your area. In the meantime, you can submit a vehicle
+                request and our team will source options for you manually — no deposit required.
+              </p>
+              <a
+                href="/buyer/requests/new"
+                className="inline-flex items-center gap-2 bg-[#0B5FD1] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#0944a8] transition-colors"
+              >
+                Submit a Vehicle Request →
+              </a>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Greeting Header ─────────────────────────────────────────────── */}

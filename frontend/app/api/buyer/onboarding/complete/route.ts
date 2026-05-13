@@ -12,15 +12,27 @@ export async function POST(request: NextRequest) {
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
   const body = await request.json().catch(() => ({}));
-  const accepted = (body as { accepted?: boolean }).accepted === true;
+  const { accepted, firstName: bodyFirstName, lastName: bodyLastName } =
+    body as { accepted?: boolean; firstName?: string; lastName?: string };
   if (!accepted) {
     return errorResponse("TERMS_NOT_ACCEPTED", "Terms must be accepted to complete onboarding", 400);
   }
 
-  // Onboarding now collects only profile preferences — address/DOB/employment
-  // live on /buyer/prequal as a separate step. Only first/last name (set at
-  // signup) are required to finalize onboarding.
-  if (!buyer.firstName || !buyer.lastName) {
+  // Save name if provided and not already set
+  if (bodyFirstName && !buyer.firstName) {
+    await prisma.buyer.update({
+      where: { id: buyer.id },
+      data: {
+        firstName: String(bodyFirstName).trim(),
+        lastName: String(bodyLastName ?? "").trim(),
+      },
+    });
+    // Re-fetch to pick up newly saved name
+    const refreshed = await prisma.buyer.findUnique({ where: { id: buyer.id }, select: { firstName: true, lastName: true } });
+    if (!refreshed?.firstName || !refreshed?.lastName) {
+      return errorResponse("PROFILE_INCOMPLETE", "Complete your name before finalizing", 400);
+    }
+  } else if (!buyer.firstName || !buyer.lastName) {
     return errorResponse("PROFILE_INCOMPLETE", "Complete your name before finalizing", 400);
   }
 
