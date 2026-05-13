@@ -20,7 +20,7 @@ const SUBJECT_OPTIONS = [
 export default function ContactFormClient() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", subject: "", message: "" });
+  const [form, setForm] = useState({ name: "", email: "", phone: "", subject: "", message: "" });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,6 +31,7 @@ export default function ContactFormClient() {
       body: JSON.stringify({
         name: form.name,
         email: form.email,
+        phone: form.phone,
         subject: form.subject,
         message: form.message,
       }),
@@ -83,6 +84,23 @@ export default function ContactFormClient() {
             required
           />
         </div>
+      </div>
+
+      <div>
+        <Label htmlFor="contact-phone" className="block text-sm font-medium text-slate-700 mb-1.5">
+          Phone Number <span className="text-slate-400 font-normal text-xs">(optional)</span>
+        </Label>
+        <input
+          id="contact-phone"
+          name="phone"
+          type="tel"
+          value={form.phone}
+          onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          placeholder="(555) 000-0000"
+          autoComplete="tel"
+          className="w-full px-3.5 py-2.5 bg-[#F8F9FB] border border-[#E5E7EB] rounded-xl text-sm focus:outline-none focus:border-[#0B5FD1]/60 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors"
+          data-testid="contact-phone"
+        />
       </div>
 
       <div>

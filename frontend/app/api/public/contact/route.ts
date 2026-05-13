@@ -21,6 +21,7 @@ const ADMIN_TO = process.env.ADMIN_NOTIFICATION_EMAIL ?? "team@autolenis.com";
 const schema = z.object({
   name:    z.string().min(1).max(100),
   email:   z.string().email(),
+  phone:   z.string().max(30).optional(),
   subject: z.string().min(1).max(200),
   message: z.string().min(1).max(5000),
 });
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { name, email, subject, message } = parsed.data;
+  const { name, email, phone, subject, message } = parsed.data;
   const resend = getResend();
 
   // 1. Notify admin (non-blocking — do not fail the request if email fails).
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
       to: ADMIN_TO,
       replyTo: email,
       subject: `[Contact] ${subject} — from ${name}`,
-      text: `New contact form submission.\n\nName: ${name}\nEmail: ${email}\nSubject: ${subject}\n\nMessage:\n${message}`,
+      text: `New contact form submission.\n\nName: ${name}\nEmail: ${email}${phone ? `\nPhone: ${phone}` : ""}\nSubject: ${subject}\n\nMessage:\n${message}`,
     }).catch(err => console.error("[contact] admin notification failed:", err));
 
     // 2. Send confirmation to user (non-blocking).
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
       type: "SYSTEM_ALERT",
       title: `Contact Form: ${subject}`,
       body: `From: ${name} <${email}>\n\n${message.slice(0, 500)}${message.length > 500 ? "…" : ""}`,
-      metadata: { source: "public_contact_form", name, email, subject, fullMessage: message },
+      metadata: { source: "public_contact_form", name, email, phone: phone ?? null, subject, fullMessage: message },
     },
   }).catch(err => console.error("[contact] DB log failed:", err));
 
