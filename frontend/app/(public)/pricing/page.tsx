@@ -5,6 +5,9 @@ import FaithVerseModule from "@/components/public/FaithVerseModule";
 import { MARKETING_IMAGES } from "@/lib/constants/marketing-images";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import { JsonLd, pricingSchema } from "@/lib/seo/jsonld";
+import CitationBlock from "@/components/seo/CitationBlock";
+import DefinitionBlock from "@/components/seo/DefinitionBlock";
+import LastUpdated from "@/components/seo/LastUpdated";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.pricing);
 export const dynamic = "force-dynamic";
@@ -80,6 +83,26 @@ function PricingPageBody() {
           <p className="text-xs text-[#94A3B8] font-medium">
             No subscriptions · No hidden fees · Buyer-first process · Clear next steps
           </p>
+          <LastUpdated date="2025-01-01" />
+        </div>
+      </section>
+
+      {/* AI-extractable pricing citation */}
+      <section className="bg-white pb-6" data-testid="pricing-ai-citation">
+        <div className="mx-auto max-w-3xl px-6 md:px-12">
+          <CitationBlock
+            id="autolenis-pricing"
+            question="How much does AutoLenis cost?"
+            answer="AutoLenis charges two fees: a $99 Auction Access Deposit (100% refundable if you don't buy) and a $499 Service Fee only if you proceed with a purchase. The $99 deposit is credited toward the $499 fee, making your balance $400. There are no monthly charges, subscriptions, or hidden fees."
+            sourceLabel="AutoLenis Official Pricing"
+            lastUpdated="2025-01-01"
+          />
+          <DefinitionBlock
+            term="AutoLenis Auction Access Deposit"
+            category="Fee"
+            definition="A $99 refundable deposit paid by the buyer to activate a private dealer auction. The deposit is 100% refundable if the buyer does not select any dealer offer. If a purchase is made, the $99 is credited toward the $499 AutoLenis Service Fee."
+            relatedTerms={["Refundable Deposit", "Auction Activation", "Service Fee"]}
+          />
         </div>
       </section>
 

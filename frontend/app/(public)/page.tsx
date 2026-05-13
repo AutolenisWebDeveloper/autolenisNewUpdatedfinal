@@ -8,7 +8,7 @@ import ComparisonTable from "@/components/public/ComparisonTable";
 import SavingsCalculator from "@/components/public/SavingsCalculator";
 import HeroLiveSignal from "@/components/public/HeroLiveSignal";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
-import { JsonLd, organizationSchema, websiteSchema, localBusinessSchema, serviceSchema } from "@/lib/seo/jsonld";
+import { JsonLd, localBusinessSchema } from "@/lib/seo/jsonld";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.home);
 
@@ -64,10 +64,10 @@ const PRESS_LOGOS = ["Forbes", "Business Insider", "TechCrunch", "Automotive New
 export default function HomePage() {
   return (
     <>
-      <JsonLd id="ld-organization" data={organizationSchema()} />
-      <JsonLd id="ld-website" data={websiteSchema()} />
+      {/* Organization, Website, Service entities are emitted once in the
+          root layout via entityGraphSchema. Local-business stays here because
+          the homepage is the canonical local-business landing. */}
       <JsonLd id="ld-localbusiness" data={localBusinessSchema()} />
-      <JsonLd id="ld-service" data={serviceSchema()} />
       <HomePageBody />
     </>
   );

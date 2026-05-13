@@ -84,6 +84,33 @@ export default async function DealPage() {
           Next: {nextStep.label} <ArrowRight size={15} />
         </Button>
       )}
+
+      {/* Review flow — captured at peak satisfaction (post-purchase) */}
+      {deal.status === "COMPLETED" && (
+        <div
+          className="bg-green-50 border border-green-200 rounded-2xl p-5 mt-4"
+          data-testid="deal-review-prompt"
+        >
+          <p className="font-semibold text-green-800 mb-2">
+            Your vehicle purchase is complete.
+          </p>
+          <p className="text-sm text-green-700 mb-3">
+            We hope you love your new vehicle. Would you share your AutoLenis
+            experience to help other buyers?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="https://g.page/r/autolenis/review"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-semibold bg-white border border-green-200 text-green-700 px-3 py-1.5 rounded-lg hover:bg-green-50"
+              data-cta="leave-google-review"
+            >
+              Leave a Google Review →
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

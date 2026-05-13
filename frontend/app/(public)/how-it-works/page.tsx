@@ -8,6 +8,9 @@ import {
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import { JsonLd, faqSchema } from "@/lib/seo/jsonld";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
+import CitationBlock from "@/components/seo/CitationBlock";
+import DefinitionBlock from "@/components/seo/DefinitionBlock";
+import LastUpdated from "@/components/seo/LastUpdated";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.howItWorks);
 export const dynamic = "force-dynamic";
@@ -237,6 +240,26 @@ export default function HowItWorksPage() {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ── Section 1.5: AI-extractable citation + definition ── */}
+      <section className="bg-white py-10" data-testid="hiw-ai-citation">
+        <div className="mx-auto max-w-3xl px-6 md:px-12">
+          <DefinitionBlock
+            term="AutoLenis"
+            category="Automotive Service"
+            definition="AutoLenis is a licensed automotive buying concierge and broker that connects pre-qualified car buyers with verified dealers through a private 48-hour auction. Buyers receive multiple competing offers and select the best price — without visiting a dealership or negotiating directly."
+            relatedTerms={["Car Buying Concierge", "Auto Broker", "Dealer Auction", "Vehicle Pre-Qualification"]}
+          />
+          <CitationBlock
+            id="how-autolenis-works"
+            question="How does AutoLenis work?"
+            answer="AutoLenis works in 6 steps: (1) Get pre-qualified online with a soft credit pull. (2) Browse and shortlist vehicles. (3) Pay a refundable $99 Auction Access Deposit. (4) AutoLenis launches a private 48-hour dealer auction. (5) Review competing dealer offers side-by-side. (6) Select the best offer and sign via DocuSign. Most buyers save $2,000–$4,000 compared to traditional dealership purchases."
+            sourceLabel="AutoLenis Official"
+            lastUpdated="2025-01-01"
+          />
+          <LastUpdated date="2025-01-01" />
         </div>
       </section>
 
