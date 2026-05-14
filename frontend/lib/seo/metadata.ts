@@ -46,9 +46,11 @@ export function buildPageMetadata(input: PageMetaInput): Metadata {
 // Pre-baked metadata definitions for every public page
 export const PAGE_METADATA = {
   home: {
-    title: "Skip the Dealership. Let Dealers Compete for You.",
+    title: "AutoLenis — Where Dealers Compete for You | Car Buying Concierge",
     description:
-      "Private 48-hour reverse auctions where up to 8 vetted dealers bid for your business. Get your best price on any vehicle — or your $99 back.",
+      "Verified dealers compete for your business in a private 48-hour auction. " +
+      "Compare every offer side by side. Choose the best deal. " +
+      "AutoLenis is the buyer-first car buying concierge platform.",
     path: "/",
     keywords: [
       "car buying concierge", "reverse auction car buying", "best car deals",
