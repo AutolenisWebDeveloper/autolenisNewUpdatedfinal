@@ -1,8 +1,12 @@
+-- CreateEnum
+CREATE TYPE "AdminJourneyOverrideType" AS ENUM ('UNLOCK', 'SKIP');
+
 -- CreateTable
 CREATE TABLE "admin_journey_unlocks" (
     "id" TEXT NOT NULL,
     "buyer_id" TEXT NOT NULL,
     "stage_id" TEXT NOT NULL,
+    "type" "AdminJourneyOverrideType" NOT NULL DEFAULT 'UNLOCK',
     "admin_id" TEXT NOT NULL,
     "admin_email" TEXT NOT NULL,
     "note" TEXT,

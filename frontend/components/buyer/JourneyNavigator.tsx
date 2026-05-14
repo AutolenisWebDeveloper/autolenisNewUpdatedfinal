@@ -57,11 +57,13 @@ const STAGES = [
 interface JourneyNavigatorProps {
   currentStage?: string;
   completedStages?: string[];
+  unlockedStages?: string[];  // admin-unlocked: accessible but not complete
 }
 
 export default function JourneyNavigator({
   currentStage = "account",
   completedStages = [],
+  unlockedStages = [],
 }: JourneyNavigatorProps) {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState(false);
@@ -110,12 +112,13 @@ export default function JourneyNavigator({
         >
           <div className="flex items-center gap-1 min-w-max">
             {STAGES.map((stage, i) => {
-              const isCompleted = completedStages.includes(stage.id);
-              const isCurrent = stage.id === currentStage;
-              const isLocked = !isCompleted && !isCurrent;
-              const route = STAGE_ROUTE[stage.id] ?? null;
-              // A completed step is only clickable when a valid route exists.
-              const isClickable = isCompleted && route !== null;
+              const isCompleted  = completedStages.includes(stage.id);
+              const isUnlocked   = unlockedStages.includes(stage.id);
+              const isCurrent    = stage.id === currentStage;
+              const isLocked     = !isCompleted && !isUnlocked && !isCurrent;
+              const route        = STAGE_ROUTE[stage.id] ?? null;
+              // Completed AND unlocked stages are both clickable — unlocked still has a route
+              const isClickable  = (isCompleted || isUnlocked) && route !== null;
 
               const pill = (
                 <div
@@ -127,11 +130,16 @@ export default function JourneyNavigator({
                       ? isClickable
                         ? "bg-green-100 text-green-700 cursor-pointer hover:bg-green-200 hover:text-green-800"
                         : "bg-green-100 text-green-700"
+                      : isUnlocked
+                      ? "bg-amber-100 text-amber-700 cursor-pointer hover:bg-amber-200"
                       : "bg-slate-100 text-slate-400 cursor-not-allowed",
                   ].join(" ")}
                 >
                   {isCompleted ? (
                     <CheckCircle2 size={12} />
+                  ) : isUnlocked ? (
+                    // No icon for unlocked — accessible but not done
+                    null
                   ) : isLocked ? (
                     <Lock size={11} />
                   ) : null}

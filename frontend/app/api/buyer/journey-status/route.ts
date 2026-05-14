@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
       prisma.deal.findFirst({ where: { buyerId: buyer.id }, orderBy: { createdAt: "desc" } }),
       prisma.adminJourneyUnlock.findMany({
         where: { buyerId: buyer.id },
-        select: { stageId: true },
+        select: { stageId: true, type: true },
       }),
     ]);
 
@@ -61,16 +61,22 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Merge admin-unlocked stages so buyer can access them in the navigator
-    for (const unlock of adminUnlocks) {
-      if (!completedStages.includes(unlock.stageId)) {
-        completedStages.push(unlock.stageId);
+    // Merge admin overrides: SKIP = complete for progression, UNLOCK = accessible only
+    const unlockedStageIds: string[] = [];
+    for (const override of adminUnlocks) {
+      if (override.type === "SKIP") {
+        if (!completedStages.includes(override.stageId)) {
+          completedStages.push(override.stageId);
+        }
+      } else if (override.type === "UNLOCK") {
+        unlockedStageIds.push(override.stageId);
       }
     }
 
     return successResponse({
       currentStage,
       completedStages: Array.from(new Set(completedStages)),
+      unlockedStages: unlockedStageIds,
       nextAction: getNextAction(currentStage),
     });
   } catch (err) {

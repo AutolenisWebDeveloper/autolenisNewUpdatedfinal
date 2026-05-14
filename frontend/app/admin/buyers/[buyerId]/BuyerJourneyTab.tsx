@@ -16,10 +16,11 @@ interface Props { buyerId: string }
 const STATUS_CFG: Record<StageStatus, {
   icon: React.ReactNode; badge: string; rowBg: string; label: string;
 }> = {
-  COMPLETE:       { icon: <CheckCircle2 size={15} className="text-green-600" />,  badge: "bg-green-100 text-green-700 border-green-200",  rowBg: "bg-white",       label: "Complete"       },
-  ACTIVE:         { icon: <Clock size={15} className="text-[#0B5FD1]" />,         badge: "bg-blue-100 text-[#0B5FD1] border-blue-200",    rowBg: "bg-blue-50/30",  label: "Active"         },
-  LOCKED:         { icon: <Lock size={15} className="text-slate-300" />,           badge: "bg-slate-100 text-slate-400 border-slate-200",  rowBg: "bg-white",       label: "Locked"         },
-  ADMIN_UNLOCKED: { icon: <Unlock size={15} className="text-amber-500" />,         badge: "bg-amber-100 text-amber-700 border-amber-200",  rowBg: "bg-amber-50/40", label: "Admin Unlocked" },
+  COMPLETE:  { icon: <CheckCircle2 size={15} className="text-green-600" />,  badge: "bg-green-100 text-green-700 border-green-200",   rowBg: "bg-white",        label: "Complete"      },
+  SKIPPED:   { icon: <CheckCircle2 size={15} className="text-slate-400" />,  badge: "bg-slate-100 text-slate-500 border-slate-200",   rowBg: "bg-slate-50/60",  label: "Skipped"       },
+  ACTIVE:    { icon: <Clock size={15} className="text-[#0B5FD1]" />,         badge: "bg-blue-100 text-[#0B5FD1] border-blue-200",     rowBg: "bg-blue-50/30",   label: "Active"        },
+  LOCKED:    { icon: <Lock size={15} className="text-slate-300" />,           badge: "bg-slate-100 text-slate-400 border-slate-200",   rowBg: "bg-white",        label: "Locked"        },
+  UNLOCKED:  { icon: <Unlock size={15} className="text-amber-500" />,         badge: "bg-amber-100 text-amber-700 border-amber-200",   rowBg: "bg-amber-50/40",  label: "Admin Unlocked" },
 };
 
 // Stages that need an active deal to be organically completed
@@ -66,7 +67,7 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
   function selectAllRemaining() {
     if (!journey) return;
     setSelected(new Set(
-      journey.stages.filter(s => s.canAdminUnlock && s.status !== "ADMIN_UNLOCKED").map(s => s.id)
+      journey.stages.filter(s => s.canAdminUnlock && s.status !== "UNLOCKED").map(s => s.id)
     ));
   }
 
@@ -95,11 +96,6 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
 
   function relock(stageId: string) {
     callApi(`/api/admin/buyers/${buyerId}/journey/lock`, { stageIds: [stageId] });
-  }
-
-  async function completeAll() {
-    if (!confirm("Complete ALL 14 stages for this buyer?\nThis writes real DB records and cannot be undone easily.")) return;
-    callApi(`/api/admin/buyers/${buyerId}/journey/complete-all`, { note: "Admin completed entire journey" });
   }
 
   if (loading) return (
@@ -175,10 +171,32 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
               Unlock Entire Journey
             </button>
 
-            <button onClick={completeAll} disabled={busy}
-              className="text-xs font-bold bg-purple-600 text-white px-4 py-1.5 rounded-lg hover:bg-purple-700 flex items-center gap-1.5 disabled:opacity-50">
+            <button onClick={async () => {
+              if (!unlockNote.trim()) { setActionErr("Reason is required for complete-all"); return; }
+              if (!confirm(
+                "⚠️ RECOVERY TOOL — Complete ALL 14 stages?\n\nThis writes real DB records and is designed for edge-case recovery, not normal operations. Partial failures will not roll back.\n\nContinue?"
+              )) return;
+              setBusy(true); setActionErr(null); setActionOk(null);
+              try {
+                const res = await fetch(`/api/admin/buyers/${buyerId}/journey/complete-all`, {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ note: unlockNote }),
+                });
+                const json = await res.json() as { success: boolean; data?: { succeeded: number; total: number; results: Array<{ stageId: string; success: boolean; error?: string }> }; error?: { message: string } };
+                if (!json.success) { setActionErr(json.error?.message ?? "Failed"); return; }
+                const { succeeded, total, results } = json.data!;
+                const failed = results.filter(r => !r.success);
+                setActionOk(failed.length > 0
+                  ? `${succeeded}/${total} completed. Failed: ${failed.map(f => f.stageId).join(", ")}`
+                  : `All ${succeeded} stages completed successfully.`);
+                await load();
+              } catch (err) { setActionErr(err instanceof Error ? err.message : "Network error"); }
+              finally { setBusy(false); }
+            }} disabled={busy}
+              className="text-xs font-bold bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 flex items-center gap-1.5 disabled:opacity-40"
+              title="Recovery tool — use only for edge-case manual interventions">
               {busy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-              Complete Entire Journey
+              ⚠ Complete Entire Journey (Recovery)
             </button>
 
             <button onClick={load} disabled={busy}
@@ -240,7 +258,7 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
                     <code className="text-[10px] font-mono text-slate-300 hidden sm:inline">{stage.id}</code>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{stage.description}</p>
-                  {stage.status === "ADMIN_UNLOCKED" && (
+                  {stage.status === "UNLOCKED" && (
                     <p className="text-[10px] text-amber-600 mt-0.5">
                       Unlocked by {stage.adminUnlockedBy}
                       {stage.adminUnlockedAt ? ` · ${new Date(stage.adminUnlockedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}
@@ -263,14 +281,26 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
                       <ExternalLink size={11} /> View
                     </a>
                   )}
-                  {stage.canAdminUnlock && stage.status !== "COMPLETE" && (
-                    <button onClick={e => { e.stopPropagation(); setCompleteModal(stage.id); }}
-                      disabled={busy}
-                      className="text-xs font-bold text-green-700 border border-green-200 px-2 py-0.5 rounded-lg hover:bg-green-50 flex items-center gap-1 whitespace-nowrap disabled:opacity-40">
-                      <CheckCircle2 size={11} /> Done
-                    </button>
-                  )}
-                  {stage.status === "ADMIN_UNLOCKED" && (
+                  {stage.canAdminUnlock && stage.status !== "COMPLETE" && stage.status !== "SKIPPED" && (() => {
+                    // These stages cannot be synthetically completed — admin unlock gives access only
+                    const UNLOCK_ONLY_STAGES = new Set(["auction", "select-deal", "shortlist"]);
+                    const isUnlockOnly = UNLOCK_ONLY_STAGES.has(stage.id);
+                    return isUnlockOnly ? (
+                      <button
+                        onClick={e => { e.stopPropagation(); callApi(`/api/admin/buyers/${buyerId}/journey/unlock`, { stageIds: [stage.id], note: unlockNote || undefined }); }}
+                        disabled={busy}
+                        className="text-xs font-semibold border border-amber-200 text-amber-700 px-2 py-0.5 rounded-lg hover:bg-amber-50 flex items-center gap-1 whitespace-nowrap disabled:opacity-40">
+                        <Unlock size={11} /> Unlock
+                      </button>
+                    ) : (
+                      <button onClick={e => { e.stopPropagation(); setCompleteModal(stage.id); }}
+                        disabled={busy}
+                        className="text-xs font-bold text-green-700 border border-green-200 px-2 py-0.5 rounded-lg hover:bg-green-50 flex items-center gap-1 whitespace-nowrap disabled:opacity-40">
+                        <CheckCircle2 size={11} /> Done
+                      </button>
+                    );
+                  })()}
+                  {stage.status === "UNLOCKED" && (
                     <button onClick={e => { e.stopPropagation(); relock(stage.id); }}
                       disabled={busy}
                       className="text-xs font-semibold text-red-500 border border-red-200 px-2 py-0.5 rounded-lg hover:bg-red-50 whitespace-nowrap">

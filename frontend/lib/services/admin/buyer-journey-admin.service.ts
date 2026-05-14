@@ -1,6 +1,11 @@
 import { prisma } from "@/lib/prisma";
 
-export type StageStatus = "COMPLETE" | "ACTIVE" | "LOCKED" | "ADMIN_UNLOCKED";
+export type StageStatus =
+  | "COMPLETE"    // Organically complete in DB
+  | "SKIPPED"     // Admin bypassed with required reason — counts as complete for journey progression
+  | "UNLOCKED"    // Admin gave access — buyer can visit but hasn't completed
+  | "ACTIVE"      // Current natural stage
+  | "LOCKED";     // Not yet accessible
 
 export interface JourneyStageView {
   id: string;
@@ -75,7 +80,7 @@ export async function getAdminBuyerJourney(buyerId: string): Promise<AdminBuyerJ
           contractShieldStatus: true,
         },
       },
-      adminJourneyUnlocks: true,
+      adminJourneyUnlocks: { select: { stageId: true, type: true, createdAt: true, adminEmail: true, note: true } },
     },
   });
 
@@ -114,22 +119,23 @@ export async function getAdminBuyerJourney(buyerId: string): Promise<AdminBuyerJ
 
     let status: StageStatus;
     if (isComplete) status = "COMPLETE";
-    else if (unlock) status = "ADMIN_UNLOCKED";
+    else if (unlock?.type === "SKIP") status = "SKIPPED";
+    else if (unlock?.type === "UNLOCK") status = "UNLOCKED";
     else if (prevDone) status = "ACTIVE";
     else status = "LOCKED";
 
     return {
       id, label: meta.label, description: meta.description, route: meta.route,
       status, canAdminUnlock: !isComplete,
-      adminUnlocked: !!unlock,
+      adminUnlocked: !!unlock,  // true for both SKIP and UNLOCK overrides
       adminUnlockedAt: unlock?.createdAt.toISOString() ?? null,
       adminUnlockedBy: unlock?.adminEmail ?? null,
       adminUnlockNote: unlock?.note ?? null,
     };
   });
 
-  const completedCount = stages.filter(s => s.status === "COMPLETE").length;
-  const current = stages.find(s => s.status === "ACTIVE" || s.status === "ADMIN_UNLOCKED");
+  const completedCount = stages.filter(s => s.status === "COMPLETE" || s.status === "SKIPPED").length;
+  const current = stages.find(s => s.status === "ACTIVE" || s.status === "UNLOCKED");
 
   return {
     buyerId,
