@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   CheckCircle2, Clock, Lock, Unlock, AlertCircle,
   Loader2, RefreshCw, ExternalLink,
+  SkipForward, RotateCcw, MessageSquare, Bell, StickyNote,
 } from "lucide-react";
 import type {
   AdminBuyerJourney,
@@ -41,6 +42,20 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
 
   // Mark-complete modal
   const [completeModal, setCompleteModal] = useState<string | null>(null);
+
+  // New override modals + notes expansion
+  const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set());
+  const [skipModal, setSkipModal] = useState<string | null>(null);
+  const [reopenModal, setReopenModal] = useState<string | null>(null);
+  const [notifyModal, setNotifyModal] = useState<string | null>(null);
+
+  function toggleNotes(stageId: string) {
+    setExpandedNotes(prev => {
+      const n = new Set(prev);
+      if (n.has(stageId)) n.delete(stageId); else n.add(stageId);
+      return n;
+    });
+  }
 
   const load = useCallback(async () => {
     setLoading(true); setFetchError(null);
@@ -229,10 +244,12 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
           {journey.stages.map((stage: JourneyStageView, idx: number) => {
             const cfg = STATUS_CFG[stage.status];
             const isSel = selected.has(stage.id);
+            const notesOpen = expandedNotes.has(stage.id);
             return (
-              <div key={stage.id}
+              <div key={stage.id} className={cfg.rowBg}>
+              <div
                 className={["grid grid-cols-[24px_1fr_auto_auto] gap-3 px-4 py-3 items-center",
-                  cfg.rowBg, isSel ? "ring-2 ring-inset ring-amber-400" : "",
+                  isSel ? "ring-2 ring-inset ring-amber-400" : "",
                   stage.canAdminUnlock ? "cursor-pointer select-none" : "",
                 ].filter(Boolean).join(" ")}
                 onClick={stage.canAdminUnlock ? () => toggleSelect(stage.id, stage.canAdminUnlock) : undefined}
@@ -274,7 +291,7 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
                 </span>
 
                 {/* Action buttons */}
-                <div className="w-40 flex items-center justify-end gap-1.5 shrink-0">
+                <div className="w-40 flex items-center justify-end gap-1.5 shrink-0 flex-wrap">
                   {stage.route && (
                     <button
                       onClick={async e => {
@@ -316,7 +333,55 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
                       Lock
                     </button>
                   )}
+
+                  {stage.canSkip && (
+                    <button onClick={e => { e.stopPropagation(); setSkipModal(stage.id); }}
+                      className="text-xs font-semibold border border-purple-200 text-purple-700 px-2 py-0.5 rounded-lg hover:bg-purple-50 flex items-center gap-1">
+                      <SkipForward size={11} /> Skip
+                    </button>
+                  )}
+
+                  {stage.canReopen && (
+                    <button onClick={e => { e.stopPropagation(); setReopenModal(stage.id); }}
+                      className="text-xs font-semibold border border-orange-200 text-orange-700 px-2 py-0.5 rounded-lg hover:bg-orange-50 flex items-center gap-1">
+                      <RotateCcw size={11} /> Reopen
+                    </button>
+                  )}
+
+                  <button onClick={e => { e.stopPropagation(); setNotifyModal(stage.id); }}
+                    className="text-xs border border-slate-200 text-slate-500 px-2 py-0.5 rounded-lg hover:bg-slate-50 flex items-center gap-1"
+                    title="Send reminder to buyer">
+                    <Bell size={11} />
+                  </button>
+
+                  <button onClick={e => { e.stopPropagation(); toggleNotes(stage.id); }}
+                    className="text-xs border border-slate-200 text-slate-500 px-2 py-0.5 rounded-lg hover:bg-slate-50 flex items-center gap-1"
+                    title="Stage notes">
+                    <StickyNote size={11} />
+                    {stage.notes.length > 0 && (
+                      <span className="text-[10px] font-bold text-[#0B5FD1]">{stage.notes.length}</span>
+                    )}
+                  </button>
                 </div>
+              </div>
+
+              {notesOpen && (
+                <div className="px-12 pb-4 bg-slate-50/50 border-t border-slate-100">
+                  {stage.notes.length > 0 && (
+                    <div className="pt-3 space-y-2 mb-3">
+                      {stage.notes.map(n => (
+                        <div key={n.id} className="bg-white border border-slate-200 rounded-xl px-3 py-2">
+                          <p className="text-xs text-slate-600 whitespace-pre-wrap">{n.content}</p>
+                          <p className="text-[10px] text-slate-400 mt-1">
+                            {n.adminEmail} · {new Date(n.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <NoteInline buyerId={buyerId} stageId={stage.id} onAdded={load} />
+                </div>
+              )}
               </div>
             );
           })}
@@ -341,6 +406,42 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
           />
         );
       })()}
+
+      {skipModal && (
+        <SimpleModal
+          title="Skip Stage"
+          submitLabel="Skip Stage"
+          subtitle="This stage will be bypassed and count as complete for journey progression."
+          buyerId={buyerId} stageId={skipModal}
+          apiPath="skip" requireReason
+          onClose={() => setSkipModal(null)}
+          onSuccess={async msg => { setSkipModal(null); setActionOk(msg); await load(); }}
+        />
+      )}
+
+      {reopenModal && (
+        <SimpleModal
+          title="Reopen Stage"
+          submitLabel="Reopen Stage"
+          subtitle="This will reverse the DB state for this stage. The buyer must complete it again."
+          buyerId={buyerId} stageId={reopenModal}
+          apiPath="reopen" requireReason
+          onClose={() => setReopenModal(null)}
+          onSuccess={async msg => { setReopenModal(null); setActionOk(msg); await load(); }}
+        />
+      )}
+
+      {notifyModal && (
+        <SimpleModal
+          title="Send Reminder"
+          submitLabel="Send"
+          subtitle="Send a notification to the buyer for this stage."
+          buyerId={buyerId} stageId={notifyModal}
+          apiPath="notify" requireReason showMessage
+          onClose={() => setNotifyModal(null)}
+          onSuccess={async msg => { setNotifyModal(null); setActionOk(msg); await load(); }}
+        />
+      )}
     </div>
   );
 }
@@ -435,6 +536,141 @@ function MarkCompleteModal({
           <button onClick={submit} disabled={loading}
             className="flex-[2] bg-[#0B5FD1] text-white font-bold py-2.5 rounded-xl hover:bg-[#0944a8] text-sm flex items-center justify-center gap-2 disabled:opacity-40">
             {loading ? <><Loader2 size={14} className="animate-spin" /> Completing…</> : "✓ Mark as Complete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Inline note input ───────────────────────────────────────────────────────
+
+function NoteInline({
+  buyerId, stageId, onAdded,
+}: { buyerId: string; stageId: string; onAdded: () => void }) {
+  const [content, setContent] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    if (!content.trim()) return;
+    setSaving(true); setErr(null);
+    try {
+      const res = await fetch(`/api/admin/buyers/${buyerId}/journey/note`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stageId, content }),
+      });
+      const json = await res.json() as { success: boolean; error?: { message: string } };
+      if (!json.success) { setErr(json.error?.message ?? "Failed"); return; }
+      setContent("");
+      onAdded();
+    } catch { setErr("Network error"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="flex gap-2 pt-2">
+      <input
+        type="text"
+        value={content}
+        onChange={e => setContent(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); save(); } }}
+        placeholder="Add internal note for this stage…"
+        className="flex-1 px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 bg-white"
+      />
+      <button onClick={save} disabled={saving || !content.trim()}
+        className="text-xs font-semibold bg-[#0B5FD1] text-white px-3 py-1.5 rounded-lg hover:bg-[#0944a8] disabled:opacity-40 flex items-center gap-1">
+        {saving ? <Loader2 size={10} className="animate-spin" /> : <MessageSquare size={10} />} Add
+      </button>
+      {err && <p className="text-xs text-red-500 self-center">{err}</p>}
+    </div>
+  );
+}
+
+// ─── Reusable modal for Skip / Reopen / Notify ──────────────────────────────
+
+function SimpleModal({
+  title, submitLabel, subtitle, buyerId, stageId, apiPath, requireReason,
+  showMessage = false, onClose, onSuccess,
+}: {
+  title: string;
+  submitLabel: string;
+  subtitle?: string;
+  buyerId: string;
+  stageId: string;
+  apiPath: "skip" | "reopen" | "notify";
+  requireReason: boolean;
+  showMessage?: boolean;
+  onClose: () => void;
+  onSuccess: (msg: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (requireReason && !reason.trim()) { setErr("Reason is required"); return; }
+    setLoading(true); setErr(null);
+    try {
+      const body: Record<string, unknown> = { stageId };
+      if (reason) body.reason = reason;
+      if (showMessage && message) body.message = message;
+      const res = await fetch(
+        `/api/admin/buyers/${buyerId}/journey/${apiPath}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+      );
+      const json = await res.json() as { success: boolean; error?: { message: string } };
+      if (!json.success) { setErr(json.error?.message ?? "Action failed"); return; }
+      onSuccess(`Stage "${stageId}" ${title.toLowerCase()}d.`);
+    } catch (e) { setErr(e instanceof Error ? e.message : "Network error"); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <h3 className="font-bold text-lg text-slate-900 mb-1">{title}</h3>
+        {subtitle && <p className="text-xs text-slate-500 mb-4">{subtitle}</p>}
+
+        {showMessage && (
+          <div className="mb-4">
+            <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              Message to buyer <span className="font-normal text-slate-400">(leave blank for default)</span>
+            </label>
+            <textarea value={message} onChange={e => setMessage(e.target.value)} rows={2}
+              placeholder="Leave blank to use the default message for this stage"
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 resize-none" />
+          </div>
+        )}
+
+        {requireReason && (
+          <div className="mb-4">
+            <label className="block text-xs font-medium text-slate-700 mb-1.5">
+              Reason <span className="text-red-500">*</span>
+            </label>
+            <input type="text" value={reason} onChange={e => setReason(e.target.value)}
+              placeholder="e.g. Buyer confirmed by phone"
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20" />
+          </div>
+        )}
+
+        {err && (
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-700 mb-3">
+            <AlertCircle size={12} /> {err}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button onClick={onClose}
+            className="flex-1 border border-slate-200 text-slate-600 font-medium py-2.5 rounded-xl hover:bg-slate-50 text-sm">
+            Cancel
+          </button>
+          <button onClick={submit} disabled={loading}
+            className="flex-[2] bg-[#0B5FD1] text-white font-bold py-2.5 rounded-xl hover:bg-[#0944a8] text-sm flex items-center justify-center gap-2 disabled:opacity-40">
+            {loading ? <><Loader2 size={14} className="animate-spin" /> Working…</> : submitLabel}
           </button>
         </div>
       </div>

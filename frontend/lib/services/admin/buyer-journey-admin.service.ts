@@ -18,6 +18,14 @@ export interface JourneyStageView {
   adminUnlockedBy: string | null;
   adminUnlockNote: string | null;
   canAdminUnlock: boolean;
+  canSkip: boolean;
+  canReopen: boolean;
+  notes: Array<{
+    id: string;
+    content: string;
+    adminEmail: string;
+    createdAt: string;
+  }>;
 }
 
 export interface AdminBuyerJourney {
@@ -38,6 +46,14 @@ const ALL_STAGE_IDS = [
 ] as const;
 
 type StageId = typeof ALL_STAGE_IDS[number];
+
+// Skippable stages — non-critical, can bypass
+const SKIPPABLE_STAGES = new Set<string>(["prequal", "search", "shortlist", "financing", "insurance"]);
+
+// Reopenable stages — can reverse DB state
+const REOPENABLE_STAGES = new Set<string>([
+  "onboarding", "prequal", "financing", "fee", "insurance", "contract", "sign", "pickup",
+]);
 
 const STAGE_META: Record<StageId, { label: string; description: string; route: string | null }> = {
   "account":     { label: "Account",      route: "/buyer/dashboard",       description: "Buyer registered. User account created in the system." },
@@ -81,6 +97,10 @@ export async function getAdminBuyerJourney(buyerId: string): Promise<AdminBuyerJ
         },
       },
       adminJourneyUnlocks: { select: { stageId: true, type: true, createdAt: true, adminEmail: true, note: true } },
+      adminJourneyNotes: {
+        orderBy: { createdAt: "desc" },
+        select: { id: true, stageId: true, content: true, adminEmail: true, createdAt: true },
+      },
     },
   });
 
@@ -127,10 +147,20 @@ export async function getAdminBuyerJourney(buyerId: string): Promise<AdminBuyerJ
     return {
       id, label: meta.label, description: meta.description, route: meta.route,
       status, canAdminUnlock: !isComplete,
+      canSkip: SKIPPABLE_STAGES.has(id) && !isComplete && status !== "SKIPPED",
+      canReopen: REOPENABLE_STAGES.has(id) && (isComplete || status === "SKIPPED"),
       adminUnlocked: !!unlock,  // true for both SKIP and UNLOCK overrides
       adminUnlockedAt: unlock?.createdAt.toISOString() ?? null,
       adminUnlockedBy: unlock?.adminEmail ?? null,
       adminUnlockNote: unlock?.note ?? null,
+      notes: buyer.adminJourneyNotes
+        .filter(n => n.stageId === id)
+        .map(n => ({
+          id: n.id,
+          content: n.content,
+          adminEmail: n.adminEmail,
+          createdAt: n.createdAt.toISOString(),
+        })),
     };
   });
 
