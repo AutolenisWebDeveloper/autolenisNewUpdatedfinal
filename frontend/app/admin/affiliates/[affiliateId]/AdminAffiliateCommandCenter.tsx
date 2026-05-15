@@ -99,7 +99,7 @@ type AffiliateDetail = {
   };
   documents: Array<{
     id: string;
-    type: string;
+    type?: string;
     fileName: string;
     fileSizeBytes: number;
     status: string;
@@ -869,7 +869,7 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
                     <div>
                       <p className="text-sm font-medium text-slate-800">{doc.fileName}</p>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        {doc.type} · {(doc.fileSizeBytes / 1024).toFixed(0)} KB · {new Date(doc.uploadedAt).toLocaleDateString()}
+                        {doc.type ?? "—"} · {(doc.fileSizeBytes / 1024).toFixed(0)} KB · {new Date(doc.uploadedAt).toLocaleDateString()}
                         {doc.reviewedAt && ` · Reviewed ${new Date(doc.reviewedAt).toLocaleDateString()}`}
                       </p>
                       {doc.notes && (
