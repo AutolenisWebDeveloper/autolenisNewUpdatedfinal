@@ -10,6 +10,7 @@ import type {
   JourneyStageView,
   StageStatus,
 } from "@/lib/services/admin/buyer-journey-admin.service";
+import { openBuyerPageAsAdmin } from "@/lib/admin/preview";
 
 interface Props { buyerId: string }
 
@@ -275,11 +276,19 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
                 {/* Action buttons */}
                 <div className="w-40 flex items-center justify-end gap-1.5 shrink-0">
                   {stage.route && (
-                    <a href={stage.route} target="_blank" rel="noopener noreferrer"
-                      onClick={e => e.stopPropagation()}
-                      className="text-xs font-medium text-slate-400 border border-slate-200 px-2 py-0.5 rounded-lg hover:text-[#0B5FD1] hover:border-[#0B5FD1]/30 flex items-center gap-1 whitespace-nowrap">
+                    <button
+                      onClick={async e => {
+                        e.stopPropagation();
+                        await openBuyerPageAsAdmin({
+                          buyerId,
+                          stageRoute: stage.route!,
+                        });
+                      }}
+                      className="text-xs font-medium text-slate-400 border border-slate-200 px-2 py-0.5 rounded-lg hover:text-[#0B5FD1] hover:border-[#0B5FD1]/30 flex items-center gap-1 whitespace-nowrap"
+                      title={`Preview buyer's ${stage.label} page`}
+                    >
                       <ExternalLink size={11} /> View
-                    </a>
+                    </button>
                   )}
                   {stage.canAdminUnlock && stage.status !== "COMPLETE" && stage.status !== "SKIPPED" && (() => {
                     // These stages cannot be synthetically completed — admin unlock gives access only
