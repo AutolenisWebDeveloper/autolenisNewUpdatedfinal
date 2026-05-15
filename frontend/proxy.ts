@@ -418,6 +418,26 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   //    Public routes (including "/") must still be served for anonymous visitors.
   if (!user) {
     if (isPublicRoute(pathname)) return response;
+
+    // ── Admin preview mode bypass ────────────────────────────────────────────
+    // A valid admin_preview_token cookie lets an admin view the buyer portal
+    // without a buyer Supabase session. The buyer layout verifies the token
+    // again and loads buyer data by the token's buyerId.
+    // jwtVerify and JWT_SECRET are already imported at the top of this file.
+    if (pathname.startsWith("/buyer/")) {
+      const previewToken = request.cookies.get("admin_preview_token")?.value;
+      if (previewToken) {
+        try {
+          await jwtVerify(previewToken, JWT_SECRET);
+          // Token is valid — let the request reach the buyer layout
+          return response;
+        } catch {
+          // Token invalid or expired — fall through to sign-in redirect
+        }
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     return NextResponse.redirect(
       new URL(`/auth/signin?redirect=${encodeURIComponent(pathname)}`, request.url)
     );
