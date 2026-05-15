@@ -23,6 +23,10 @@ export async function POST(request: NextRequest, { params }: Props) {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
+  if (!["SUPER_ADMIN", "OPERATIONS_ADMIN"].includes(admin.role)) {
+    return adminError("FORBIDDEN", "SUPER_ADMIN or OPERATIONS_ADMIN required to complete journey stages", 403);
+  }
+
   const { buyerId } = await params;
   let body: unknown;
   try { body = await request.json(); } catch { body = {}; }
@@ -138,16 +142,30 @@ export async function POST(request: NextRequest, { params }: Props) {
 
         case "pickup":
           if (activeDeal && activeDeal.status !== "COMPLETED") {
+            const existingPickup = await prisma.pickup.findUnique({
+              where: { dealId: activeDeal.id },
+              select: { id: true },
+            });
+            if (existingPickup) {
+              await prisma.pickup.update({
+                where: { dealId: activeDeal.id },
+                data: { status: "COMPLETED", completedAt: new Date() },
+              });
+            } else {
+              await prisma.pickup.create({
+                data: { dealId: activeDeal.id, status: "COMPLETED", completedAt: new Date() },
+              });
+            }
             await advanceDeal("COMPLETED");
           }
           break;
       }
 
-      // Upsert admin unlock for every stage
+      // Upsert SKIP override for every stage — complete-all marks all as bypassed/done
       await prisma.adminJourneyUnlock.upsert({
         where: { buyerId_stageId: { buyerId, stageId } },
-        create: { buyerId, stageId, adminId, adminEmail, note },
-        update: { adminId, adminEmail, note },
+        create: { buyerId, stageId, type: "SKIP", adminId, adminEmail, note },
+        update: { type: "SKIP", adminId, adminEmail, note },
       });
 
       results.push({ stageId, success: true });

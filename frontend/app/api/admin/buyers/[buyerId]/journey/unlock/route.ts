@@ -20,6 +20,10 @@ export async function POST(request: NextRequest, { params }: Props) {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
+  if (!["SUPER_ADMIN", "OPERATIONS_ADMIN"].includes(admin.role)) {
+    return adminError("FORBIDDEN", "SUPER_ADMIN or OPERATIONS_ADMIN required", 403);
+  }
+
   const { buyerId } = await params;
   const buyer = await prisma.buyer.findUnique({ where: { id: buyerId }, select: { id: true } });
   if (!buyer) return adminError("NOT_FOUND", "Buyer not found", 404);
@@ -43,8 +47,8 @@ export async function POST(request: NextRequest, { params }: Props) {
     stageIds.map(stageId =>
       prisma.adminJourneyUnlock.upsert({
         where: { buyerId_stageId: { buyerId, stageId } },
-        create: { buyerId, stageId, adminId: admin.adminId, adminEmail: admin.email, note: note ?? null },
-        update: { adminId: admin.adminId, adminEmail: admin.email, note: note ?? null, createdAt: new Date() },
+        create: { buyerId, stageId, type: "UNLOCK", adminId: admin.adminId, adminEmail: admin.email, note: note ?? null },
+        update: { type: "UNLOCK", adminId: admin.adminId, adminEmail: admin.email, note: note ?? null, createdAt: new Date() },
       })
     )
   );

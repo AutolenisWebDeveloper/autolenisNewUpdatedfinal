@@ -26,6 +26,10 @@ export async function POST(request: NextRequest, { params }: Props) {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
+  if (!["SUPER_ADMIN", "OPERATIONS_ADMIN"].includes(admin.role)) {
+    return adminError("FORBIDDEN", "SUPER_ADMIN or OPERATIONS_ADMIN required to complete journey stages", 403);
+  }
+
   const { buyerId } = await params;
   const buyer = await prisma.buyer.findUnique({
     where: { id: buyerId },
@@ -217,9 +221,23 @@ export async function POST(request: NextRequest, { params }: Props) {
       break;
     }
 
-    // pickup — advance deal to COMPLETED
+    // pickup — create/update Pickup record + advance deal to COMPLETED
     case "pickup": {
       if (!activeDeal) return adminError("NO_DEAL", "No active deal found", 400);
+      const existingPickup = await prisma.pickup.findUnique({
+        where: { dealId: activeDeal.id },
+        select: { id: true },
+      });
+      if (existingPickup) {
+        await prisma.pickup.update({
+          where: { dealId: activeDeal.id },
+          data: { status: "COMPLETED", completedAt: new Date() },
+        });
+      } else {
+        await prisma.pickup.create({
+          data: { dealId: activeDeal.id, status: "COMPLETED", completedAt: new Date() },
+        });
+      }
       await advanceDeal("COMPLETED");
       action = "JOURNEY_COMPLETE_PICKUP";
       break;
@@ -229,12 +247,12 @@ export async function POST(request: NextRequest, { params }: Props) {
       return adminError("INVALID_STAGE", `Unknown stage: ${stageId}`, 400);
   }
 
-  // Always upsert an admin unlock so the stage shows as accessible to the buyer
-  // immediately via the buyer layout fix (Change 2)
+  // Upsert a SKIP override so the stage shows as complete for the buyer immediately.
+  // SKIP = admin bypassed/completed the step; buyer journey progression treats it as done.
   await prisma.adminJourneyUnlock.upsert({
     where: { buyerId_stageId: { buyerId, stageId } },
-    create: { buyerId, stageId, adminId, adminEmail, note: note ?? null },
-    update: { adminId, adminEmail, note: note ?? null },
+    create: { buyerId, stageId, type: "SKIP", adminId, adminEmail, note: note ?? null },
+    update: { type: "SKIP", adminId, adminEmail, note: note ?? null },
   });
 
   // Audit log for the completion action

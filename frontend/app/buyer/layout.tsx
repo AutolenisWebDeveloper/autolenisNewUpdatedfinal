@@ -125,20 +125,25 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
   }
 
   // ── Admin journey unlocks ─────────────────────────────────────────────────
-  // Admin-unlocked stages are merged into completedStages so JourneyNavigator
-  // renders them as accessible rather than locked.
+  // SKIP overrides count as organically complete — buyer proceeds past this stage.
+  // UNLOCK overrides grant access but the buyer still needs to complete the step.
+  const unlockedStages: string[] = [];
   try {
-    const adminUnlocks = await prisma.adminJourneyUnlock.findMany({
+    const adminOverrides = await prisma.adminJourneyUnlock.findMany({
       where: { buyerId: buyer.id },
-      select: { stageId: true },
+      select: { stageId: true, type: true },
     });
-    for (const { stageId } of adminUnlocks) {
-      if (!completedStages.includes(stageId)) {
-        completedStages.push(stageId);
+    for (const override of adminOverrides) {
+      if (override.type === "SKIP") {
+        if (!completedStages.includes(override.stageId)) {
+          completedStages.push(override.stageId);
+        }
+      } else if (override.type === "UNLOCK") {
+        unlockedStages.push(override.stageId);
       }
     }
   } catch {
-    // Non-fatal: fall back gracefully, buyer sees organic progress only
+    // Non-fatal: unlockedStages remains [] on DB error
   }
 
   return (
@@ -149,6 +154,7 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
         <JourneyNavigator
           currentStage={currentStage}
           completedStages={completedStages}
+          unlockedStages={unlockedStages}
         />
         <main className="flex-1 overflow-y-auto">
           {children}
