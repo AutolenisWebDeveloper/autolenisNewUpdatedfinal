@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
       channel: "IN_APP",
       title: "Your deal has been created",
       body: "Congratulations! Admin has matched you with a dealer. Check your deal details.",
+      actionUrl: "/buyer/deal",
     },
   });
 
