@@ -1,6 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Shield, Clock, DollarSign, Star } from "lucide-react";
+import {
+  ArrowRight,
+  BadgeCheck,
+  Clock,
+  DollarSign,
+  Shield,
+  ShieldCheck,
+  Star,
+  User,
+} from "lucide-react";
 import StatsStrip from "@/components/public/StatsStrip";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
 import FeaturedInventory from "@/components/public/FeaturedInventory";
@@ -10,7 +19,25 @@ import HeroLiveSignal from "@/components/public/HeroLiveSignal";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import { JsonLd, localBusinessSchema } from "@/lib/seo/jsonld";
 
-export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.home);
+const HOMEPAGE_BASE_METADATA = buildPageMetadata(PAGE_METADATA.home);
+const HOMEPAGE_OG_TITLE = "AutoLenis — Where Dealers Compete for You";
+const HOMEPAGE_OG_DESCRIPTION =
+  "Verified dealers compete for your business. Compare every offer. " +
+  "Choose the best deal. Complete digital concierge.";
+
+export const metadata: Metadata = {
+  ...HOMEPAGE_BASE_METADATA,
+  openGraph: {
+    ...HOMEPAGE_BASE_METADATA.openGraph,
+    title: HOMEPAGE_OG_TITLE,
+    description: HOMEPAGE_OG_DESCRIPTION,
+  },
+  twitter: {
+    ...HOMEPAGE_BASE_METADATA.twitter,
+    title: HOMEPAGE_OG_TITLE,
+    description: HOMEPAGE_OG_DESCRIPTION,
+  },
+};
 
 // Authenticated-buyer redirect is handled at the edge in proxy.ts — no
 // server component work needed here, so the page is fully static (ISR 1 h).
@@ -87,15 +114,14 @@ function HomePageBody() {
                 className="text-xs font-semibold uppercase tracking-[0.15em] text-[#0B5FD1] mb-6"
                 data-testid="hero-badge"
               >
-                The Buyer Advantage Platform
+                The Buyer-First Car Buying Platform
               </p>
               <h1 className="text-5xl sm:text-6xl font-bold tracking-tighter text-[#111827] leading-[1.05] mb-6">
-                Buy Smarter.<br />
-                Pay Less.<br />
-                <span className="text-[#0B5FD1]">No Games.</span>
+                Where Dealers<br />
+                Compete for <span className="text-[#0B5FD1]">You.</span>
               </h1>
               <p className="text-lg text-[#4B5563] max-w-xl mb-10 leading-relaxed">
-                AutoLenis gives serious buyers leverage — competitive dealer offers, transparent financing, and a premium guided experience without dealership pressure, hidden fees, or wasted time.
+                AutoLenis helps you buy with leverage. Verified dealers compete for your business, you compare real offers side by side, and you choose the deal that works best for you.
               </p>
               <div className="flex flex-wrap gap-4">
                 <Link
@@ -103,7 +129,7 @@ function HomePageBody() {
                   data-testid="hero-cta-primary"
                   className="inline-flex items-center gap-2 px-8 py-4 bg-[#0B5FD1] text-white font-semibold text-sm rounded-md hover:bg-[#1A6FE0] transition-colors shadow-md shadow-[#0B5FD1]/25"
                 >
-                  Get Prequalified <ArrowRight size={16} />
+                  Compare Dealer Offers <ArrowRight size={16} />
                 </Link>
                 <Link
                   href="/how-it-works"
@@ -113,9 +139,32 @@ function HomePageBody() {
                   See How It Works
                 </Link>
               </div>
-              <p className="mt-5 text-xs text-[#94A3B8]">
-                Soft-credit friendly &bull; Zero-risk guarantee &bull; 3-minute setup &bull; No spam
-              </p>
+              {/* Trust signal bar */}
+              <div
+                className="mt-8 flex items-center gap-5 sm:gap-6"
+                data-testid="hero-trust-bar"
+              >
+                <div className="flex items-center gap-2.5">
+                  <ShieldCheck size={20} className="text-[#0B5FD1] shrink-0" aria-hidden />
+                  <span className="text-xs font-medium text-[#4B5563] leading-tight">
+                    No dealership<br />pressure
+                  </span>
+                </div>
+                <div className="h-8 w-px bg-[#E5E7EB]" aria-hidden />
+                <div className="flex items-center gap-2.5">
+                  <User size={20} className="text-[#0B5FD1] shrink-0" aria-hidden />
+                  <span className="text-xs font-medium text-[#4B5563] leading-tight">
+                    Buyer-first<br />process
+                  </span>
+                </div>
+                <div className="h-8 w-px bg-[#E5E7EB]" aria-hidden />
+                <div className="flex items-center gap-2.5">
+                  <BadgeCheck size={20} className="text-[#0B5FD1] shrink-0" aria-hidden />
+                  <span className="text-xs font-medium text-[#4B5563] leading-tight">
+                    Complete digital<br />concierge
+                  </span>
+                </div>
+              </div>
               {/* Live activity signal */}
               <HeroLiveSignal />
             </div>

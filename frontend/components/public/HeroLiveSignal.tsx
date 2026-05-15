@@ -32,7 +32,7 @@ export default function HeroLiveSignal() {
         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
       </span>
       <span className="text-xs text-[#4B5563]">
-        <span className="font-semibold text-[#111827]">{displayCount} buyers</span> in active auctions right now
+        <span className="font-semibold text-[#111827]">{displayCount} buyers</span> currently comparing dealer offers
       </span>
     </div>
   );
