@@ -53,6 +53,47 @@ async function ensurePrismaUser(
   const existing = await prisma.user.findUnique({ where: { supabaseId: supabaseUserId } });
   if (existing) return existing;
 
+  // ── Upgrade existing guest user in place ──────────────────────────────────
+  // /api/public/request-vehicle may have pre-created a User with a
+  // `guest_<uuid>` placeholder supabaseId. When the same email signs up for
+  // real, replace the placeholder so we don't hit the unique-email constraint.
+  const existingByEmail = await prisma.user.findUnique({
+    where:   { email: email.toLowerCase() },
+    include: { buyer: { select: { id: true, isGuest: true } } },
+  });
+  if (existingByEmail && existingByEmail.supabaseId.startsWith("guest_")) {
+    const upgraded = await prisma.user.update({
+      where: { id: existingByEmail.id },
+      data:  {
+        supabaseId: supabaseUserId,
+        role,
+        ...(role === UserRole.BUYER && !existingByEmail.buyer ? {
+          buyer: {
+            create: {
+              firstName: firstName ?? email.split("@")[0],
+              lastName: lastName ?? "",
+              onboardingComplete: false,
+              plan,
+              termsAcceptedAt: termsAcceptedAt ? new Date(termsAcceptedAt) : null,
+              termsVersion: termsVersion ?? null,
+            },
+          },
+        } : {}),
+      },
+    });
+    if (existingByEmail.buyer?.isGuest) {
+      await prisma.buyer.update({
+        where: { id: existingByEmail.buyer.id },
+        data:  {
+          isGuest: false,
+          ...(termsAcceptedAt ? { termsAcceptedAt: new Date(termsAcceptedAt) } : {}),
+          ...(termsVersion ? { termsVersion } : {}),
+        },
+      }).catch(err => console.error("[ensurePrismaUser] guest buyer flip failed:", err));
+    }
+    return upgraded;
+  }
+
   const user = await prisma.user.create({
     data: {
       supabaseId: supabaseUserId,
@@ -74,7 +115,35 @@ async function ensurePrismaUser(
         },
       } : {}),
     },
+    include: role === UserRole.BUYER ? { buyer: { select: { id: true } } } : undefined,
   });
+
+  // ── Transfer guest VehicleRequests on signup ─────────────────────────────
+  // If the buyer previously submitted a request as a guest, transfer those
+  // requests to their new registered account. Non-blocking.
+  if (role === UserRole.BUYER) {
+    const newBuyerId = (user as { buyer?: { id: string } | null }).buyer?.id;
+    if (newBuyerId) {
+      prisma.buyer.findFirst({
+        where:  { user: { email: email.toLowerCase() }, isGuest: true },
+        select: { id: true },
+      }).then(async guestBuyer => {
+        if (!guestBuyer || guestBuyer.id === newBuyerId) return;
+        await Promise.all([
+          prisma.vehicleRequest.updateMany({
+            where: { buyerId: guestBuyer.id },
+            data:  { buyerId: newBuyerId },
+          }),
+          prisma.buyer.update({
+            where: { id: guestBuyer.id },
+            data:  { isGuest: false },
+          }),
+        ]);
+      }).catch(err =>
+        console.error("[ensurePrismaUser] guest transfer failed:", err)
+      );
+    }
+  }
 
   // Safety net: if role is AFFILIATE and the affiliate register route's DB
   // transaction failed (race/crash), ensure an Affiliate record exists so the

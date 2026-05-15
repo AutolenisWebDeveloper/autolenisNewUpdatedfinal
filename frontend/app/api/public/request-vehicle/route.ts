@@ -26,6 +26,18 @@ const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").tri
 const ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
+function parseBudgetToCents(budget: string): number | null {
+  const map: Record<string, number> = {
+    "Under $15,000":   1499900,
+    "$15,000–$25,000": 2500000,
+    "$25,000–$35,000": 3500000,
+    "$35,000–$50,000": 5000000,
+    "$50,000–$75,000": 7500000,
+    "$75,000+":        7500000,
+  };
+  return map[budget] ?? null;
+}
+
 const schema = z.object({
   firstName:           z.string().min(1).max(50),
   lastName:            z.string().min(1).max(50),
@@ -157,6 +169,87 @@ export async function POST(request: NextRequest) {
 
   const fullName = `${data.firstName} ${data.lastName}`.trim();
 
+  // ── Find or create buyer account ────────────────────────────────────────
+  // VehicleRequest.buyerId is NOT NULL.
+  // Resolve the buyer from the submitted email — three cases.
+  let buyerId = "";
+
+  try {
+    const existingUser = await prisma.user.findUnique({
+      where:   { email: data.email.toLowerCase() },
+      include: { buyer: { select: { id: true } } },
+    });
+
+    if (existingUser?.buyer) {
+      // Case 1: Registered buyer — link directly
+      buyerId = existingUser.buyer.id;
+    } else if (existingUser && !existingUser.buyer) {
+      // Case 2: User exists but no buyer profile — create it
+      const newBuyer = await prisma.buyer.create({
+        data: {
+          userId:    existingUser.id,
+          firstName: data.firstName,
+          lastName:  data.lastName,
+          phone:     data.phone  ?? null,
+          city:      data.city   ?? null,
+          state:     data.state  ?? null,
+          zip:       data.zip    ?? null,
+        },
+      });
+      buyerId = newBuyer.id;
+    } else {
+      // Case 3: No user at all — create guest User + Buyer.
+      // User.supabaseId is NOT NULL — use a placeholder replaced at signup.
+      const guestUser = await prisma.user.create({
+        data: {
+          supabaseId: `guest_${crypto.randomUUID()}`,
+          email:      data.email.toLowerCase(),
+          role:       "BUYER",
+        },
+      });
+      const guestBuyer = await prisma.buyer.create({
+        data: {
+          userId:    guestUser.id,
+          firstName: data.firstName,
+          lastName:  data.lastName,
+          phone:     data.phone  ?? null,
+          city:      data.city   ?? null,
+          state:     data.state  ?? null,
+          zip:       data.zip    ?? null,
+          isGuest:   true,
+        },
+      });
+      buyerId = guestBuyer.id;
+    }
+  } catch (err) {
+    console.error("[request-vehicle] buyer find/create failed:", err);
+  }
+
+  // ── Create VehicleRequest record ────────────────────────────────────────
+  // This is the canonical record the buyer offer page queries.
+  // The Notification below is for the admin queue only.
+  let vehicleRequestId: string | undefined;
+
+  if (buyerId) {
+    try {
+      const vehicleRequest = await prisma.vehicleRequest.create({
+        data: {
+          buyerId,
+          status:          "SUBMITTED",
+          makePreference:  data.preferredMake  || null,
+          modelPreference: data.preferredModel || null,
+          yearMin:         data.minYear ? Number(data.minYear) : null,
+          yearMax:         data.maxYear ? Number(data.maxYear) : null,
+          maxBudgetCents:  parseBudgetToCents(data.budget),
+          notes:           data.notes || null,
+        },
+      });
+      vehicleRequestId = vehicleRequest.id;
+    } catch (err) {
+      console.error("[request-vehicle] VehicleRequest create failed:", err);
+    }
+  }
+
   // Persist as a SYSTEM_ALERT with the standardised "Vehicle Request:" title
   // prefix that /admin/vehicle-requests filters on.
   let notificationId: string | undefined;
@@ -172,6 +265,7 @@ export async function POST(request: NextRequest) {
           ...data,
           fullName,
           requestStatus: "new",
+          vehicleRequestId: vehicleRequestId ?? null,
           preApprovalFileUrl,
         } as unknown as Parameters<typeof prisma.notification.create>[0]["data"]["metadata"],
       },
@@ -218,8 +312,10 @@ export async function POST(request: NextRequest) {
   ]);
 
   // Buyer-side dedicated confirmation (uses unified resend template).
-  if (notificationId) {
-    await sendVehicleRequestReceived(data.email, fullName, notificationId)
+  // Prefer vehicleRequestId so the link resolves to the canonical record.
+  const buyerEmailRequestId = vehicleRequestId ?? notificationId ?? "";
+  if (buyerEmailRequestId) {
+    await sendVehicleRequestReceived(data.email, fullName, buyerEmailRequestId)
       .catch(err => console.error("[request-vehicle] buyer confirmation email failed:", err));
   }
 

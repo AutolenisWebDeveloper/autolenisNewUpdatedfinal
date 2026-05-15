@@ -103,6 +103,23 @@ export async function POST(request: NextRequest, { params }: Params) {
     },
   });
 
+  // ── Link to registered dealer if email matches ──────────────────────────
+  // If contactEmail matches a registered Dealer account, link the submission
+  // so the dealer can see it in their portal alongside auction offers.
+  const registeredDealer = await prisma.dealer.findFirst({
+    where:  { user: { email: data.contactEmail.toLowerCase() } },
+    select: { id: true },
+  }).catch(() => null);
+
+  if (registeredDealer) {
+    await prisma.dealerOfferSubmission.update({
+      where: { id: submission.id },
+      data:  { dealerId: registeredDealer.id },
+    }).catch(err =>
+      console.error("[dealer-offer] dealer linkage update failed:", err)
+    );
+  }
+
   // Mark invite submitted (if applicable) + bump offer status to offers_in
   if (invite) {
     await prisma.vehicleOfferDealerInvite.update({
