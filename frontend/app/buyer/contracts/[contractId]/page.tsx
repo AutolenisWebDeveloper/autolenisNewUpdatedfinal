@@ -24,12 +24,17 @@ export default async function ContractDetailPage({ params }: Props) {
       contractScans: { orderBy: { scannedAt: "desc" } },
       eSignEnvelope: true,
       offer: { include: { dealer: { select: { dealershipName: true, tier: true } } } },
+      vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
     },
     orderBy: { createdAt: "desc" },
   });
 
   // Use deal ID as contract identifier — enforce ownership
   if (!deal || deal.id !== contractId) notFound();
+
+  const otdPriceCents = deal.offer?.otdPriceCents ?? deal.vehicleRequestOffer?.priceCents ?? 0;
+  const dealerName = deal.offer?.dealer?.dealershipName ?? "AutoLenis Concierge";
+  const dealerTier = deal.offer?.dealer?.tier ?? "STANDARD";
 
   const latestScan = deal.contractScans[0];
   const scanHistory = deal.contractScans;
@@ -60,8 +65,8 @@ export default async function ContractDetailPage({ params }: Props) {
       {/* Deal summary */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6 flex items-center justify-between" data-testid="contract-deal-summary">
         <div>
-          <p className="text-sm font-semibold text-slate-900">${(deal.offer.otdPriceCents / 100).toLocaleString()} out-the-door</p>
-          <p className="text-xs text-slate-400 mt-0.5">{deal.offer.dealer.dealershipName} · {deal.offer.dealer.tier} Dealer</p>
+          <p className="text-sm font-semibold text-slate-900">${(otdPriceCents / 100).toLocaleString()} out-the-door</p>
+          <p className="text-xs text-slate-400 mt-0.5">{dealerName} · {dealerTier} Dealer</p>
         </div>
         <Badge variant={deal.status === "COMPLETED" ? "green" : "blue"}>{deal.status.replace(/_/g, " ")}</Badge>
       </div>

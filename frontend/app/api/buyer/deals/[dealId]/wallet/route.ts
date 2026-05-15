@@ -16,12 +16,13 @@ export async function GET(request: NextRequest, { params }: Props) {
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
+  const otdPriceCents = deal.offer?.otdPriceCents ?? 0;
   const wallet = {
-    otdPriceCents: deal.offer.otdPriceCents,
+    otdPriceCents,
     depositCents: DEPOSIT_AMOUNT_CENTS,
     feeCents: deal.feePaidAt ? (deal.feeAmountCents ?? PREMIUM_FEE_CENTS) : 0,
     netFeeCents: deal.feePaidAt ? (deal.feeAmountCents ?? PREMIUM_FEE_CENTS) - DEPOSIT_AMOUNT_CENTS : 0,
-    totalPayableCents: deal.offer.otdPriceCents + (deal.feePaidAt ? (deal.feeAmountCents ?? PREMIUM_FEE_CENTS) - DEPOSIT_AMOUNT_CENTS : 0),
+    totalPayableCents: otdPriceCents + (deal.feePaidAt ? (deal.feeAmountCents ?? PREMIUM_FEE_CENTS) - DEPOSIT_AMOUNT_CENTS : 0),
   };
 
   return successResponse({ wallet });

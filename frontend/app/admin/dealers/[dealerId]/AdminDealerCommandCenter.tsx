@@ -86,7 +86,7 @@ type DealerDetail = {
   deals: Array<{
     id: string;
     status: string;
-    offerId: string;
+    offerId: string | null;
     offerStatus: string | null;
     otdPriceCents: number | null;
     createdAt: string;

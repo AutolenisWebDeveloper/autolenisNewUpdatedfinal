@@ -59,7 +59,7 @@ export async function buildBuyerContext(buyerId: string): Promise<PlatformContex
     activeDeal: activeDeal ? {
       id: activeDeal.id,
       status: activeDeal.status,
-      otdCents: activeDeal.offer.otdPriceCents,
+      otdCents: activeDeal.offer?.otdPriceCents ?? 0,
     } : undefined,
   };
 }

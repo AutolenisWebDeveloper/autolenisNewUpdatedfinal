@@ -82,7 +82,7 @@ export async function getAdminDealerKpis(): Promise<AdminDealerKpis> {
       where: { status: { in: ["COMPLETED", "PICKUP_COMPLETE", "SIGNED"] } },
     }).then(async (rows) => {
       if (rows.length === 0) return 0;
-      const offerIds = rows.map((r) => r.offerId);
+      const offerIds = rows.map((r) => r.offerId).filter((id): id is string => id !== null);
       const dealerGroups = await prisma.offer.groupBy({
         by: ["dealerId"],
         where: { id: { in: offerIds } },

@@ -53,9 +53,8 @@ export default async function AdminDealDetailPage({ params }: Props) {
             Deal #{dealId.slice(-8)}
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            {deal.buyer.firstName} {deal.buyer.lastName} ·{" "}
-            {deal.offer.dealer.dealershipName} ·{" "}
-            ${(deal.offer.otdPriceCents / 100).toLocaleString()}
+            {deal.buyer.firstName} {deal.buyer.lastName}
+            {deal.offer && <> · ${(deal.offer.otdPriceCents / 100).toLocaleString()}</>}
           </p>
         </div>
         <div className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${getDealStatusStyle(deal.status)}`}>
@@ -81,14 +80,20 @@ function getDealStatusStyle(status: string): string {
   return "bg-blue-50 text-blue-700 border-blue-200";
 }
 
-type DealWithRelations = Awaited<ReturnType<typeof prisma.deal.findUnique>> & {
-  buyer: { firstName: string; lastName: string };
-  offer: { otdPriceCents: number; feesCents: number; vehiclePriceCents: number; taxCents: number; dealerId: string };
+type DealForTimeline = {
+  createdAt: Date;
+  updatedAt: Date;
+  financingPath: string | null;
+  feePaidAt: Date | null;
+  feeAmountCents: number | null;
+  insuranceStatus: string;
+  contractShieldStatus: string | null;
+  contractShieldScore: number | null;
   eSignEnvelope: { sentAt: Date | null; completedAt: Date | null } | null;
   pickup: { scheduledAt: Date | null; completedAt: Date | null } | null;
 };
 
-function buildDealTimeline(deal: NonNullable<DealWithRelations>) {
+function buildDealTimeline(deal: DealForTimeline) {
   const stages = [
     { stage: "DEAL CREATED", timestamp: deal.createdAt, description: "Buyer selected the winning offer" },
     deal.financingPath ? { stage: "FINANCING SELECTED", timestamp: deal.updatedAt, description: `Path: ${deal.financingPath}` } : null,

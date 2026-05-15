@@ -15,7 +15,10 @@ export default async function DealPage() {
   const buyer = await requireBuyer();
   const deal = await prisma.deal.findFirst({
     where: { buyerId: buyer.id },
-    include: { offer: { include: { dealer: { select: { dealershipName: true } } } } },
+    include: {
+      offer: { include: { dealer: { select: { dealershipName: true, tier: true } } } },
+      vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
+    },
     orderBy: { createdAt: "desc" },
   });
 
@@ -29,6 +32,9 @@ export default async function DealPage() {
       </div>
     );
   }
+
+  const otdPriceCents = deal.offer?.otdPriceCents ?? deal.vehicleRequestOffer?.priceCents ?? 0;
+  const dealerName = deal.offer?.dealer?.dealershipName ?? "AutoLenis Concierge";
 
   const steps = [
     { label: "Deal Selected", done: true },
@@ -47,11 +53,9 @@ export default async function DealPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold text-slate-900">My Deal</h1>
-          {deal.offer?.dealer?.dealershipName && (
-            <p className="text-sm text-[#6B7280] mt-0.5" data-testid="deal-dealer-context">
-              {deal.offer.dealer.dealershipName}
-            </p>
-          )}
+          <p className="text-sm text-[#6B7280] mt-0.5" data-testid="deal-dealer-context">
+            {dealerName}
+          </p>
         </div>
         <Badge variant={deal.status === "COMPLETED" ? "green" : "blue"}>{deal.status.replace(/_/g, " ")}</Badge>
       </div>
@@ -59,7 +63,7 @@ export default async function DealPage() {
       {/* Price summary */}
       <div className="bg-[#0B5FD1] text-white rounded-2xl p-6 mb-6" data-testid="deal-price-summary">
         <p className="text-xs text-white/60 uppercase tracking-wider mb-1">Your Deal</p>
-        <p className="text-3xl font-bold">${(deal.offer.otdPriceCents / 100).toLocaleString()}</p>
+        <p className="text-3xl font-bold">${(otdPriceCents / 100).toLocaleString()}</p>
         <p className="text-sm text-white/60 mt-1">Out-the-door price</p>
       </div>
 

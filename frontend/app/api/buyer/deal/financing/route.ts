@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
   return successResponse({
     dealId: deal.id,
     financingPath: deal.financingPath,
-    otdPriceCents: deal.offer.otdPriceCents,
+    otdPriceCents: deal.offer?.otdPriceCents ?? 0,
     // maxOtdAmountCents is READ-ONLY from prequal — never accept from client
     maxOtdAmountCents: buyer.preQualification?.maxOtdAmountCents,
     feeCents: PREMIUM_FEE_CENTS,

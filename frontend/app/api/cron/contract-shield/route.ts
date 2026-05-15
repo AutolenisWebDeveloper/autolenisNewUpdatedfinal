@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     try {
       await prisma.contractVersion.update({ where: { id: cv.id }, data: { status: "SCANNING", scanRunAt: new Date() } });
       // Contract text would be fetched from documentUrl in production
-      await scanContract(cv.dealId, `Contract version ${cv.version}`, cv.deal.offer.dealerId);
+      await scanContract(cv.dealId, `Contract version ${cv.version}`, cv.deal.offer?.dealerId ?? "");
       await prisma.contractVersion.update({ where: { id: cv.id }, data: { status: "APPROVED" } });
       scanned++;
     } catch (err) {

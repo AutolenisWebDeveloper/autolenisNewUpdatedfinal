@@ -381,31 +381,33 @@ model Offer {
 }
 
 model Deal {
-  id                   String          @id @default(uuid())
-  buyerId              String          @map("buyer_id")
-  offerId              String          @unique @map("offer_id")
-  status               DealStatus      @default(PENDING)
-  financingPath        String?         @map("financing_path")
-  insuranceStatus      InsuranceStatus @default(NOT_STARTED) @map("insurance_status")
-  feePaidAt            DateTime?       @map("fee_paid_at")
-  feeAmountCents       Int?            @map("fee_amount_cents")
-  stripeFeePIId        String?         @map("stripe_fee_pi_id")
-  feeRefundedAt        DateTime?       @map("fee_refunded_at")
-  feeRefundedAmountCents Int?          @map("fee_refunded_amount_cents")
-  contractShieldScore  Int?            @map("contract_shield_score")
-  contractShieldStatus String?         @map("contract_shield_status")
-  riskScore            Int?            @map("risk_score")
-  riskTier             RiskTier?       @map("risk_tier")
-  createdAt            DateTime        @default(now()) @map("created_at")
-  updatedAt            DateTime        @updatedAt @map("updated_at")
-  contractScans        ContractScan[]
-  buyer                Buyer           @relation(fields: [buyerId], references: [id])
-  offer                Offer           @relation(fields: [offerId], references: [id])
-  eSignEnvelope        ESignEnvelope?
-  pickup               Pickup?
-  financing            Financing?
-  contractVersions     ContractVersion[]
-  notes                DealNote[]
+  id                    String               @id @default(uuid())
+  buyerId               String               @map("buyer_id")
+  offerId               String?              @unique @map("offer_id")
+  vehicleRequestOfferId String?              @unique @map("vehicle_request_offer_id")
+  status                DealStatus           @default(PENDING)
+  financingPath         String?              @map("financing_path")
+  insuranceStatus       InsuranceStatus      @default(NOT_STARTED) @map("insurance_status")
+  feePaidAt             DateTime?            @map("fee_paid_at")
+  feeAmountCents        Int?                 @map("fee_amount_cents")
+  stripeFeePIId         String?              @map("stripe_fee_pi_id")
+  feeRefundedAt         DateTime?            @map("fee_refunded_at")
+  feeRefundedAmountCents Int?               @map("fee_refunded_amount_cents")
+  contractShieldScore   Int?                 @map("contract_shield_score")
+  contractShieldStatus  String?              @map("contract_shield_status")
+  riskScore             Int?                 @map("risk_score")
+  riskTier              RiskTier?            @map("risk_tier")
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+  contractScans         ContractScan[]
+  buyer                 Buyer                @relation(fields: [buyerId], references: [id])
+  offer                 Offer?               @relation(fields: [offerId], references: [id])
+  vehicleRequestOffer   VehicleRequestOffer? @relation(fields: [vehicleRequestOfferId], references: [id])
+  eSignEnvelope         ESignEnvelope?
+  pickup                Pickup?
+  financing             Financing?
+  contractVersions      ContractVersion[]
+  notes                 DealNote[]
 
   @@map("deals")
 }
@@ -744,6 +746,7 @@ model VehicleRequestOffer {
   createdAt   DateTime       @default(now()) @map("created_at")
   updatedAt   DateTime       @updatedAt @map("updated_at")
   request     VehicleRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  deal        Deal?
 
   @@map("vehicle_request_offers")
 }

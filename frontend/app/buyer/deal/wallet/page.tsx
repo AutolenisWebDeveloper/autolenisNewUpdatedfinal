@@ -2,10 +2,6 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Wallet", robots: { index: false, follow: false } };
 
-// Feature 16 — Deal Financial Wallet (read-only)
-// DealWallet computes from existing deal and payment records — no new payment integration
-// D16: Read-only component — never writes payment data
-
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { PREMIUM_FEE_CENTS, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
@@ -17,7 +13,10 @@ export default async function DealWalletPage() {
   const buyer = await requireBuyer();
   const deal = await prisma.deal.findFirst({
     where: { buyerId: buyer.id },
-    include: { offer: true },
+    include: {
+      offer: true,
+      vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
+    },
     orderBy: { createdAt: "desc" },
   });
 
@@ -31,29 +30,46 @@ export default async function DealWalletPage() {
       {!deal ? (
         <p className="text-slate-500 text-sm" data-testid="wallet-no-deal">No active deal.</p>
       ) : (
-        <div className="space-y-3" data-testid="wallet-breakdown">
-          {[
-            { label: "Vehicle out-the-door price", amount: deal.offer.otdPriceCents, positive: false },
-            { label: "Deposit paid", amount: DEPOSIT_AMOUNT_CENTS, positive: true },
-            { label: "Service fee", amount: deal.feePaidAt ? deal.feeAmountCents ?? PREMIUM_FEE_CENTS : 0, positive: false },
-            { label: "Net deposit credit", amount: deal.feePaidAt ? DEPOSIT_AMOUNT_CENTS : 0, positive: true },
-          ].map((item, i) => (
-            <div key={i} data-testid={`wallet-item-${i}`} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-4 py-3">
-              <span className="text-sm text-slate-600">{item.label}</span>
-              <span className={`font-semibold text-sm ${item.positive ? "text-green-600" : "text-slate-900"}`}>
-                {item.positive ? "+" : ""}{item.amount > 0 ? `$${(item.amount / 100).toLocaleString()}` : "—"}
-              </span>
-            </div>
-          ))}
-
-          <div className="flex items-center justify-between bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl px-4 py-4 mt-4" data-testid="wallet-total">
-            <span className="font-semibold text-slate-800">Total vehicle cost</span>
-            <span className="font-bold text-[#0B5FD1] text-lg">
-              ${((deal.offer.otdPriceCents + (deal.feeAmountCents ?? 0) - DEPOSIT_AMOUNT_CENTS) / 100).toLocaleString()}
-            </span>
-          </div>
-        </div>
+        <WalletBreakdown deal={deal} />
       )}
+    </div>
+  );
+}
+
+function WalletBreakdown({ deal }: {
+  deal: {
+    feePaidAt: Date | null;
+    feeAmountCents: number | null;
+    offer: { otdPriceCents: number } | null;
+    vehicleRequestOffer: { priceCents: number } | null;
+  }
+}) {
+  const otdPriceCents = deal.offer?.otdPriceCents ?? deal.vehicleRequestOffer?.priceCents ?? 0;
+
+  const items = [
+    { label: "Vehicle out-the-door price", amount: otdPriceCents, positive: false },
+    { label: "Deposit paid", amount: DEPOSIT_AMOUNT_CENTS, positive: true },
+    { label: "Service fee", amount: deal.feePaidAt ? deal.feeAmountCents ?? PREMIUM_FEE_CENTS : 0, positive: false },
+    { label: "Net deposit credit", amount: deal.feePaidAt ? DEPOSIT_AMOUNT_CENTS : 0, positive: true },
+  ];
+
+  return (
+    <div className="space-y-3" data-testid="wallet-breakdown">
+      {items.map((item, i) => (
+        <div key={i} data-testid={`wallet-item-${i}`} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-4 py-3">
+          <span className="text-sm text-slate-600">{item.label}</span>
+          <span className={`font-semibold text-sm ${item.positive ? "text-green-600" : "text-slate-900"}`}>
+            {item.positive ? "+" : ""}{item.amount > 0 ? `$${(item.amount / 100).toLocaleString()}` : "—"}
+          </span>
+        </div>
+      ))}
+
+      <div className="flex items-center justify-between bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl px-4 py-4 mt-4" data-testid="wallet-total">
+        <span className="font-semibold text-slate-800">Total vehicle cost</span>
+        <span className="font-bold text-[#0B5FD1] text-lg">
+          ${((otdPriceCents + (deal.feeAmountCents ?? 0) - DEPOSIT_AMOUNT_CENTS) / 100).toLocaleString()}
+        </span>
+      </div>
     </div>
   );
 }
