@@ -23,6 +23,7 @@ const schema = z.object({
 });
 
 export async function POST(request: NextRequest, { params }: Props) {
+  try {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
@@ -269,4 +270,12 @@ export async function POST(request: NextRequest, { params }: Props) {
   }).catch(() => {});
 
   return adminSuccess({ stageId, action, completed: true });
+  } catch (err) {
+    console.error("[journey/complete] Unhandled error:", err);
+    return adminError(
+      "INTERNAL_ERROR",
+      err instanceof Error ? err.message : "An unexpected error occurred",
+      500
+    );
+  }
 }
