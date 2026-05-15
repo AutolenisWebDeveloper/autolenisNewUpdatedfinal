@@ -54,6 +54,7 @@ model Buyer {
   isSuspended        Boolean              @default(false) @map("is_suspended")
   suspendedAt        DateTime?            @map("suspended_at")
   suspendedReason    String?              @map("suspended_reason")
+  isGuest            Boolean              @default(false) @map("is_guest")
   createdAt          DateTime             @default(now()) @map("created_at")
   updatedAt          DateTime             @updatedAt @map("updated_at")
   auctions           Auction[]
@@ -134,6 +135,7 @@ model Dealer {
   inventory          InventoryItem[]
   notifications      Notification[]
   offers             Offer[]
+  conciergeSubmissions DealerOfferSubmission[]
   invitations        AuctionInvitation[]       @relation("DealerInvitations")
   feedConfig         DealerFeedConfig?         @relation("DealerFeedConfig")
   licenseNumber      String?                   @map("license_number")
@@ -3012,11 +3014,14 @@ model DealerOfferSubmission {
   inviteId       String?  @unique @map("invite_id")
   rejected       Boolean  @default(false)
   rejectedAt     DateTime? @map("rejected_at")
+  dealerId       String?  @map("dealer_id")
 
   vehicleOffer   VehicleOffer @relation(fields: [vehicleOfferId], references: [id], onDelete: Cascade)
+  dealer         Dealer?  @relation(fields: [dealerId], references: [id])
   reviewItems    BuyerOfferReviewItem[]
   invite         VehicleOfferDealerInvite?
 
+  @@index([dealerId])
   @@map("dealer_offer_submissions")
 }
 

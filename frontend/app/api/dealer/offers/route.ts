@@ -16,8 +16,22 @@ export async function GET(request: NextRequest) {
   const dealer = await getRequestDealer(request);
   if (!dealer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
   const { prisma } = await import("@/lib/prisma");
-  const offers = await prisma.offer.findMany({ where: { dealerId: dealer.id }, include: { auction: true }, orderBy: { createdAt: "desc" } });
-  return successResponse({ offers });
+
+  // Auction offers (System A)
+  const offers = await prisma.offer.findMany({
+    where:   { dealerId: dealer.id },
+    include: { auction: true },
+    orderBy: { createdAt: "desc" },
+  });
+
+  // Concierge submissions (System B) — linked by dealerId
+  const conciergeSubmissions = await prisma.dealerOfferSubmission.findMany({
+    where:   { dealerId: dealer.id },
+    include: { vehicleOffer: true },
+    orderBy: { submittedAt: "desc" },
+  });
+
+  return successResponse({ offers, conciergeSubmissions });
 }
 
 export async function POST(request: NextRequest) {

@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Request Offer", robots: { index: false, follow: false } };
 
-import { requireBuyer } from "@/lib/auth/session";
+import { getAuthenticatedBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, ArrowLeft, ExternalLink } from "lucide-react";
@@ -16,13 +16,38 @@ interface Props { params: Promise<{ requestId: string }> }
 
 export default async function RequestOfferPage({ params }: Props) {
   const { requestId } = await params;
-  const buyer = await requireBuyer();
+  const buyer = await getAuthenticatedBuyer();
+  if (!buyer) {
+    redirect(`/auth/signin?redirect=/buyer/requests/${requestId}/offer`);
+  }
+  if (buyer.isSuspended) redirect("/buyer/suspended");
 
-  // Owns-the-request check first; only 404 if request itself doesn't belong to buyer.
-  const req = await prisma.vehicleRequest.findFirst({
+  // Direct match — request already belongs to authenticated buyer.
+  let req = await prisma.vehicleRequest.findFirst({
     where: { id: requestId, buyerId: buyer.id },
     include: { offers: { where: { status: "SENT" }, take: 1 } },
   });
+
+  // Email re-link: a guest submission may have created the request under a
+  // separate guest Buyer with the same email. Transfer it on first access.
+  if (!req && buyer.user?.email) {
+    const reqByEmail = await prisma.vehicleRequest.findFirst({
+      where:   { id: requestId, buyer: { user: { email: buyer.user.email } } },
+      include: { offers: { where: { status: "SENT" }, take: 1 } },
+    });
+    if (reqByEmail) {
+      await prisma.vehicleRequest.update({
+        where: { id: requestId },
+        data:  { buyerId: buyer.id },
+      }).catch(() => {});
+      await prisma.buyer.updateMany({
+        where: { id: reqByEmail.buyerId, isGuest: true },
+        data:  { isGuest: false },
+      }).catch(() => {});
+      req = { ...reqByEmail, buyerId: buyer.id };
+    }
+  }
+
   if (!req) notFound();
 
   const offer = req.offers[0];
