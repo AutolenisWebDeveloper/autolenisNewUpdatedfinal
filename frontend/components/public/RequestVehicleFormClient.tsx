@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckCircle2, Loader2, Upload } from "lucide-react";
+import {
+  CheckCircle2, Loader2, Upload, Lock, ShieldCheck,
+  RefreshCw, ChevronLeft, FileText, CreditCard,
+} from "lucide-react";
 import { POPULAR_MAKES, fetchModelsForMake } from "@/lib/utils/vehicle-makes";
 
 const VEHICLE_TYPES = ["SUV", "Sedan", "Truck", "Van", "Coupe", "Other"] as const;
@@ -55,51 +55,103 @@ const STEP_LABELS = ["Contact", "Vehicle", "Financing", "Trade-In", "Review"];
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ACCEPTED_FILE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
 
-function ProgressBar({ currentStep, total, labels }: { currentStep: number; total: number; labels: string[] }) {
-  const pct = Math.round((currentStep / total) * 100);
+const SEL_CLS = [
+  "w-full h-12 rounded-xl border-2 border-[#E2E8F0] bg-white px-4",
+  "text-sm font-medium text-[#111827] cursor-pointer appearance-none",
+  "focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/15 focus:outline-none",
+  "hover:border-[#0B5FD1]/30 transition-all",
+].join(" ");
+
+const SEL_STYLE: React.CSSProperties = {
+  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+  backgroundRepeat: "no-repeat",
+  backgroundPosition: "right 16px center",
+};
+
+const INP_CLS = [
+  "h-12 rounded-xl border-[#E2E8F0] bg-white text-[#111827] font-medium",
+  "focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/15 transition-all",
+].join(" ");
+
+const AREA_CLS = [
+  "rounded-xl border-[#E2E8F0] bg-white text-[#111827] font-medium resize-none",
+  "focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/15 transition-all",
+].join(" ");
+
+const BTN_SELECTED = "border-[#0B5FD1] bg-[#0B5FD1] text-white shadow-md shadow-[#0B5FD1]/20";
+const BTN_IDLE = "border-[#E2E8F0] bg-white text-[#374151] hover:border-[#0B5FD1]/40 hover:bg-[#F8FAFF]";
+
+function PremiumStepBar({
+  currentStep, total, labels,
+}: {
+  currentStep: number; total: number; labels: string[];
+}) {
   return (
-    <div className="mb-8">
-      <div className="flex justify-between items-center mb-2">
-        <p className="text-sm font-medium text-slate-600" data-testid="rv-step-indicator">
-          Step {currentStep} of {total}
-        </p>
-        <p className="text-sm font-semibold text-[#0B5FD1]">{pct}% Complete</p>
-      </div>
-      <div className="w-full bg-slate-100 rounded-full h-2 mb-2">
-        <div
-          className="bg-[#0B5FD1] h-2 rounded-full transition-all duration-500 ease-out"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <div className="hidden sm:flex justify-between">
-        {labels.map((label, i) => (
-          <span key={label} className={`text-xs font-medium ${i + 1 <= currentStep ? "text-[#0B5FD1]" : "text-slate-300"}`}>
-            {label}
-          </span>
-        ))}
+    <div className="border-b border-[#E2E8F0] px-6 md:px-8 py-4">
+      <span className="sr-only" data-testid="rv-step-indicator">Step {currentStep} of {total}</span>
+      <div className="flex items-center">
+        {labels.map((label, i) => {
+          const step = i + 1;
+          const isComplete = step < currentStep;
+          const isActive = step === currentStep;
+          return (
+            <div key={label} className="flex items-center flex-1 last:flex-none">
+              <div className="flex flex-col items-center gap-1">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
+                  isComplete
+                    ? "bg-[#0B5FD1] text-white"
+                    : isActive
+                    ? "bg-[#0B5FD1] text-white ring-4 ring-[#0B5FD1]/15"
+                    : "bg-[#F1F5F9] text-[#94A3B8]"
+                }`}>
+                  {isComplete ? <CheckCircle2 size={14} /> : step}
+                </div>
+                <span className={`text-[10px] font-semibold hidden sm:block ${
+                  isActive || isComplete ? "text-[#0B5FD1]" : "text-[#CBD5E1]"
+                }`}>
+                  {label}
+                </span>
+              </div>
+              {i < labels.length - 1 && (
+                <div className={`flex-1 h-0.5 mx-2 transition-all duration-500 ${
+                  step < currentStep ? "bg-[#0B5FD1]" : "bg-[#E2E8F0]"
+                }`} />
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function StepHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+function StepHeader({ title, subtitle, step }: { title: string; subtitle?: string; step?: number }) {
   return (
-    <div className="mb-6">
-      <h2 className="text-lg font-bold text-[#111827]">{title}</h2>
-      {subtitle && <p className="text-sm text-slate-400 mt-0.5">{subtitle}</p>}
+    <div className="mb-7">
+      {step !== undefined && (
+        <p className="text-xs font-bold text-[#0B5FD1] uppercase tracking-widest mb-1.5">
+          Step {step}
+        </p>
+      )}
+      <h2 className="text-xl font-bold text-[#0F172A]">{title}</h2>
+      {subtitle && <p className="text-sm text-[#64748B] mt-1">{subtitle}</p>}
     </div>
   );
 }
 
 function ReviewCard({ label, onEdit, children }: { label: string; onEdit: () => void; children: React.ReactNode }) {
   return (
-    <div className="bg-slate-50 rounded-xl p-4">
+    <div className="bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] p-4">
       <div className="flex justify-between items-start gap-4">
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-slate-400 font-medium uppercase tracking-wide mb-1">{label}</p>
+          <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-widest mb-1.5">{label}</p>
           {children}
         </div>
-        <button type="button" onClick={onEdit} className="text-xs text-[#0B5FD1] hover:underline shrink-0">
+        <button
+          type="button"
+          onClick={onEdit}
+          className="text-xs font-semibold text-[#0B5FD1] hover:text-[#0944A8] shrink-0 border border-[#0B5FD1]/20 rounded-lg px-3 py-1 hover:bg-[#EFF6FF] transition-all"
+        >
           Edit
         </button>
       </div>
@@ -109,21 +161,26 @@ function ReviewCard({ label, onEdit, children }: { label: string; onEdit: () => 
 
 function SuccessState({ name }: { name: string }) {
   return (
-    <div className="bg-white rounded-2xl border border-[#E5E7EB] p-10 text-center" data-testid="rv-success">
-      <div className="w-16 h-16 rounded-2xl bg-[#ECFDF5] border border-[#A7F3D0] flex items-center justify-center mx-auto mb-5">
-        <CheckCircle2 size={28} className="text-[#059669]" />
+    <div className="bg-white rounded-2xl border border-[#E2E8F0] p-10 md:p-14 text-center shadow-sm" data-testid="rv-success">
+      <div className="w-20 h-20 rounded-2xl bg-[#ECFDF5] border border-[#A7F3D0] flex items-center justify-center mx-auto mb-6">
+        <CheckCircle2 size={36} className="text-[#059669]" />
       </div>
-      <h3 className="font-bold text-[#111827] text-xl mb-2">Request Received!</h3>
-      <p className="text-[#4B5563] mb-6">
-        Thank you, {name}. We&apos;ll reach out within 24 hours with next steps.
+      <h2 className="text-2xl font-bold text-[#0F172A] mb-2">Request Received</h2>
+      <p className="text-[#64748B] text-base mb-2">
+        Thank you, <span className="font-semibold text-[#0F172A]">{name}</span>.
       </p>
-      <a
-        href="/"
-        data-testid="rv-success-home-link"
-        className="inline-flex items-center rounded-lg bg-[#0B5FD1] text-white px-6 py-2.5 text-sm font-medium hover:bg-[#0944a8]"
-      >
-        Back to AutoLenis
-      </a>
+      <p className="text-[#64748B] text-sm mb-8 max-w-sm mx-auto">
+        Your concierge team is now sourcing dealer offers. You&apos;ll hear from us within 24 hours.
+      </p>
+      <div className="flex flex-col sm:flex-row gap-3 justify-center">
+        <a
+          href="/"
+          data-testid="rv-success-home-link"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0B5FD1] text-white px-6 py-3 text-sm font-bold hover:bg-[#0944A8] transition-colors shadow-md shadow-[#0B5FD1]/20"
+        >
+          Back to AutoLenis
+        </a>
+      </div>
     </div>
   );
 }
@@ -141,21 +198,57 @@ function ButtonGroup<T extends string>({
   testIdPrefix: string;
   cols?: 2 | 3 | 4;
 }) {
-  const grid = cols === 2 ? "grid-cols-2" : cols === 3 ? "grid-cols-3" : "grid-cols-4";
+  const grid =
+    cols === 2 ? "grid-cols-2" :
+    cols === 3 ? "sm:grid-cols-3 grid-cols-1" :
+    "sm:grid-cols-4 grid-cols-2";
   return (
-    <div className={`grid ${grid} gap-2`}>
+    <div className={`grid ${grid} gap-2.5`}>
       {options.map((opt) => {
-        const selected = value === opt;
+        const isSelected = value === opt;
         return (
           <button
             key={opt}
             type="button"
             onClick={() => onChange(opt)}
             data-testid={`${testIdPrefix}-${opt.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")}`}
-            className={`rounded-xl border-2 py-2.5 text-sm font-medium transition-colors ${
-              selected
-                ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
-                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+            className={`relative rounded-xl border-2 py-3 px-4 text-sm font-semibold transition-all duration-150 text-left ${
+              isSelected ? BTN_SELECTED : BTN_IDLE
+            }`}
+          >
+            {isSelected && (
+              <CheckCircle2 size={14} className="absolute top-2.5 right-2.5 text-white/80" />
+            )}
+            {opt}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function YesNoToggle({
+  value,
+  onChange,
+  testIdPrefix,
+}: {
+  value: boolean | null;
+  onChange: (v: boolean) => void;
+  testIdPrefix: string;
+}) {
+  return (
+    <div className="inline-flex rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] p-1 gap-1">
+      {(["Yes", "No"] as const).map((opt) => {
+        const boolVal = opt === "Yes";
+        const isSelected = value === boolVal;
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onChange(boolVal)}
+            data-testid={`${testIdPrefix}-${opt.toLowerCase()}`}
+            className={`px-6 py-2 rounded-lg text-sm font-semibold transition-all duration-150 ${
+              isSelected ? "bg-[#0B5FD1] text-white shadow-sm" : "text-[#6B7280] hover:text-[#374151]"
             }`}
           >
             {opt}
@@ -431,692 +524,360 @@ export default function RequestVehicleFormClient() {
   }
 
   return (
-    <main className="min-h-screen bg-[#F8F9FB]" data-testid="request-vehicle-page">
-      <section className="bg-white border-b border-[#E5E7EB] py-14 text-center px-4">
-        <p className="text-xs font-semibold tracking-widest text-[#0B5FD1] uppercase mb-3">Vehicle Request</p>
-        <h1 className="text-3xl sm:text-4xl font-bold text-[#111827] mb-4">Request Your Perfect Vehicle</h1>
-        <p className="text-[#4B5563] max-w-xl mx-auto text-base">
-          Tell us what you&apos;re looking for and we&apos;ll connect you with dealers who compete for your business.
-        </p>
-      </section>
+    <main className="min-h-screen bg-[#F0F4F8]" data-testid="request-vehicle-page">
+      {/* Top header bar */}
+      <div className="bg-white border-b border-[#E2E8F0]">
+        <div className="max-w-2xl mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+              <rect width="32" height="32" rx="8" fill="#0B5FD1" />
+              <path d="M8 22L16 10L24 22H8Z" fill="white" opacity="0.9" />
+            </svg>
+            <span className="font-bold text-[#0B5FD1] text-lg tracking-tight">AutoLenis</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-[#64748B]">
+            <Lock size={12} />
+            <span>Secure &amp; Encrypted</span>
+          </div>
+        </div>
+      </div>
 
-      <section className="max-w-2xl mx-auto px-4 py-12">
+      {/* Form content */}
+      <div className="max-w-2xl mx-auto px-4 py-8 md:py-12">
         {submitted ? (
           <SuccessState name={submittedName} />
         ) : (
-          <div className="bg-white rounded-2xl border border-[#E5E7EB] shadow-sm p-6 md:p-8">
-            <ProgressBar currentStep={currentStep} total={TOTAL_STEPS} labels={STEP_LABELS} />
-            <form onSubmit={handleSubmit} data-testid="request-vehicle-form">
-              {currentStep === 1 && (
-                <>
-                  <StepHeader title="Tell us about yourself" subtitle="We&rsquo;ll use this to send updates on your request." />
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="rv-first-name">First Name *</Label>
-                        <Input id="rv-first-name" data-testid="rv-first-name" placeholder="John" className="mt-1.5" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-                      </div>
-                      <div>
-                        <Label htmlFor="rv-last-name">Last Name *</Label>
-                        <Input id="rv-last-name" data-testid="rv-last-name" placeholder="Smith" className="mt-1.5" value={lastName} onChange={(e) => setLastName(e.target.value)} />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="rv-email">Email *</Label>
-                        <Input id="rv-email" type="email" data-testid="rv-email" placeholder="john@email.com" className="mt-1.5" value={email} onChange={(e) => setEmail(e.target.value)} />
-                      </div>
-                      <div>
-                        <Label htmlFor="rv-phone">Phone *</Label>
-                        <Input id="rv-phone" type="tel" data-testid="rv-phone" placeholder="(555) 000-0000" className="mt-1.5" value={phone} onChange={(e) => setPhone(e.target.value)} />
-                      </div>
-                    </div>
-                    <div>
-                      <Label htmlFor="rv-zip">ZIP Code *</Label>
-                      <Input id="rv-zip" data-testid="rv-zip" placeholder="75001" maxLength={5} className="mt-1.5 max-w-[140px]" value={zip} onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))} />
-                      {zip.length > 0 && !zipValid && <p className="text-xs text-red-600 mt-1">Enter a 5-digit ZIP.</p>}
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="rv-city">City *</Label>
-                        <Input id="rv-city" data-testid="rv-city" placeholder="Dallas" className="mt-1.5" value={city} onChange={(e) => setCity(e.target.value.slice(0, 100))} />
-                      </div>
-                      <div>
-                        <Label htmlFor="rv-state">State *</Label>
-                        <Select id="rv-state" data-testid="rv-state" className="w-full mt-1.5" value={state} onChange={(e) => setState(e.target.value)}>
-                          <option value="">Select state</option>
-                          {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
-                        </Select>
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="mb-2 block">Preferred Contact Method *</Label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {CONTACT_METHODS.map((opt) => {
-                          const selected = contactMethod === opt;
-                          return (
-                            <button
-                              key={opt}
-                              type="button"
-                              onClick={() => setContactMethod(opt)}
-                              data-testid={`rv-contact-${opt.toLowerCase().replace(" ", "-")}`}
-                              className={`rounded-xl border-2 py-2.5 text-sm font-medium transition-colors ${
-                                selected
-                                  ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
-                                  : "border-slate-200 text-slate-600 hover:border-slate-300"
-                              }`}
-                            >
-                              {opt}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="mb-2 block">Buying Timeline *</Label>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {TIMELINES.map((opt) => {
-                          const selected = timeline === opt;
-                          return (
-                            <button
-                              key={opt}
-                              type="button"
-                              onClick={() => setTimeline(opt)}
-                              data-testid={`rv-timeline-${opt.toLowerCase().replace(/\s+/g, "-")}`}
-                              className={`rounded-xl border-2 py-2.5 text-xs font-medium transition-colors ${
-                                selected
-                                  ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
-                                  : "border-slate-200 text-slate-600 hover:border-slate-300"
-                              }`}
-                            >
-                              {opt}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
+          <>
+            <p className="text-xs font-bold text-[#0B5FD1] uppercase tracking-widest mb-2 text-center">
+              Car Buying Concierge
+            </p>
+            <h1 className="text-2xl md:text-3xl font-bold text-[#0F172A] text-center mb-1">
+              Tell Us What You Want
+            </h1>
+            <p className="text-[#64748B] text-center text-sm mb-8">
+              Verified dealers compete for your business. Takes about 3 minutes.
+            </p>
 
-              {currentStep === 2 && (
-                <>
-                  <StepHeader title="What vehicle are you looking for?" />
-                  <div className="space-y-5">
-                    <div>
-                      <Label className="mb-2 block">Vehicle Type *</Label>
-                      <ButtonGroup options={VEHICLE_TYPES} value={vehicleType as typeof VEHICLE_TYPES[number] | ""} onChange={(v) => setVehicleType(v)} testIdPrefix="rv-type" />
-                    </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-[#E2E8F0] overflow-hidden">
+              <PremiumStepBar currentStep={currentStep} total={TOTAL_STEPS} labels={STEP_LABELS} />
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label className="mb-1.5 block">
-                          Make {loadingModels && <span className="text-slate-400 text-xs ml-1">Loading…</span>}
-                        </Label>
-                        <Select
-                          data-testid="rv-make"
-                          className="w-full"
-                          value={preferredMake}
-                          onChange={(e) => {
-                            setPreferredMake(e.target.value);
-                            setPreferredModel("");
-                            setCustomMakeModel("");
-                          }}
-                        >
-                          <option value="">Any Make</option>
-                          {POPULAR_MAKES.map((m) => <option key={m} value={m}>{m}</option>)}
-                        </Select>
-                      </div>
-                      <div>
-                        <Label className="mb-1.5 block">Model</Label>
-                        {preferredMake === "Other" ? (
-                          <Input
-                            data-testid="rv-custom-make-model"
-                            placeholder="Enter make and model"
-                            value={customMakeModel}
-                            onChange={(e) => setCustomMakeModel(e.target.value)}
-                          />
-                        ) : (
-                          <Select
-                            data-testid="rv-model"
-                            className="w-full"
-                            value={preferredModel}
-                            onChange={(e) => setPreferredModel(e.target.value)}
-                            disabled={!preferredMake || loadingModels}
-                          >
-                            <option value="">Any Model</option>
-                            {models.map((m) => <option key={m} value={m}>{m}</option>)}
-                          </Select>
-                        )}
-                      </div>
-                    </div>
+              <div className="px-6 md:px-8 py-8">
+                <form onSubmit={handleSubmit} data-testid="request-vehicle-form">
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <Label className="mb-1.5 block">Min Year</Label>
-                        <Select data-testid="rv-min-year" className="w-full" value={minYear} onChange={(e) => setMinYear(e.target.value)}>
-                          <option value="">No Minimum</option>
-                          {REQUEST_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
-                        </Select>
-                      </div>
-                      <div>
-                        <Label className="mb-1.5 block">Max Year</Label>
-                        <Select data-testid="rv-max-year" className="w-full" value={maxYear} onChange={(e) => setMaxYear(e.target.value)}>
-                          <option value="">No Maximum</option>
-                          {REQUEST_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
-                        </Select>
-                      </div>
-                    </div>
-
-                    <div>
-                      <Label className="mb-2 block">New or Used? *</Label>
-                      <div className="flex gap-2">
-                        {NEW_USED.map((opt) => {
-                          const selected = newOrUsed === opt;
-                          return (
-                            <button
-                              key={opt}
-                              type="button"
-                              onClick={() => setNewOrUsed(opt)}
-                              data-testid={`rv-new-used-${opt.toLowerCase()}`}
-                              className={`flex-1 rounded-xl border-2 py-2.5 text-sm font-medium transition-colors ${
-                                selected
-                                  ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
-                                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
-                              }`}
-                            >
-                              {opt}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div>
-                      <Label className="mb-1.5 block">Specific Features</Label>
-                      <Input
-                        data-testid="rv-features"
-                        placeholder="e.g. Black exterior, sunroof, third row, AWD…"
-                        value={specificFeatures}
-                        onChange={(e) => setSpecificFeatures(e.target.value.slice(0, 500))}
-                        maxLength={500}
+                  {/* ── Step 1: Contact ── */}
+                  {currentStep === 1 && (
+                    <>
+                      <StepHeader
+                        title="Tell us about yourself"
+                        subtitle="We'll use this to send updates on your request."
+                        step={1}
                       />
-                    </div>
-
-                    <div>
-                      <Label className="mb-1.5 block">Interior Color Preference</Label>
-                      <Input
-                        data-testid="rv-interior-color"
-                        placeholder="e.g. Black, Beige, Gray"
-                        value={interiorColor}
-                        onChange={(e) => setInteriorColor(e.target.value.slice(0, 100))}
-                        maxLength={100}
-                      />
-                    </div>
-
-                    <div>
-                      <Label className="mb-1.5 block">Must-Have Features</Label>
-                      <Textarea
-                        data-testid="rv-must-have"
-                        placeholder="e.g. Panoramic sunroof, heated seats, Apple CarPlay, third row, backup camera"
-                        rows={2}
-                        value={mustHaveFeatures}
-                        onChange={(e) => setMustHaveFeatures(e.target.value.slice(0, 1000))}
-                        maxLength={1000}
-                      />
-                      <p className="text-xs text-slate-400 mt-1">List features you absolutely cannot compromise on.</p>
-                    </div>
-
-                    <div>
-                      <Label className="mb-2 block">Open to similar alternatives? *</Label>
-                      <div className="flex gap-2">
-                        {[
-                          { val: true, label: "Yes — show me alternatives" },
-                          { val: false, label: "No — this exact vehicle only" },
-                        ].map((opt) => {
-                          const selected = openToAlternatives === opt.val;
-                          return (
-                            <button
-                              key={String(opt.val)}
-                              type="button"
-                              onClick={() => setOpenToAlternatives(opt.val)}
-                              data-testid={`rv-alternatives-${opt.val ? "yes" : "no"}`}
-                              className={`flex-1 rounded-xl border-2 px-3 py-2.5 text-sm font-medium transition-colors text-left ${
-                                selected
-                                  ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
-                                  : "border-slate-200 text-slate-600 hover:border-slate-300"
-                              }`}
-                            >
-                              {opt.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {currentStep === 3 && (
-                <>
-                  <StepHeader title="Budget &amp; Financing" />
-                  <div className="space-y-5">
-                    <div>
-                      <Label className="mb-1.5 block">Total Budget *</Label>
-                      <Select data-testid="rv-budget" className="w-full" value={budget} onChange={(e) => setBudget(e.target.value)}>
-                        <option value="">Select your budget</option>
-                        {BUDGETS.map((b) => <option key={b} value={b}>{b}</option>)}
-                      </Select>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <Label className="mb-1.5 block">Desired Monthly Payment</Label>
-                        <Select data-testid="rv-monthly-goal" className="w-full" value={desiredMonthlyPayment} onChange={(e) => setDesiredMonthlyPayment(e.target.value)}>
-                          <option value="">No preference</option>
-                          {MONTHLY_GOALS.map((o) => <option key={o} value={o}>{o}</option>)}
-                        </Select>
-                      </div>
-                      <div>
-                        <Label className="mb-1.5 block">Down Payment Available</Label>
-                        <Select data-testid="rv-down-payment-available" className="w-full" value={downPaymentAvailable} onChange={(e) => setDownPaymentAvailable(e.target.value)}>
-                          <option value="">No preference</option>
-                          {DOWN_AVAILABLE.map((o) => <option key={o} value={o}>{o}</option>)}
-                        </Select>
-                      </div>
-                    </div>
-
-                    <div>
-                      <Label className="mb-2 block">Financing Situation *</Label>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        {FINANCING_OPTIONS.map((opt) => {
-                          const selected = financingOption === opt.val;
-                          return (
-                            <button
-                              key={opt.val}
-                              type="button"
-                              onClick={() => setFinancingOption(opt.val)}
-                              data-testid={`rv-financing-${opt.val}`}
-                              className={`rounded-xl border-2 p-4 text-left transition-colors ${
-                                selected ? "border-[#0B5FD1] bg-[#0B5FD1]/5" : "border-slate-200 bg-white hover:border-slate-300"
-                              }`}
-                            >
-                              <p className={`text-sm font-semibold mb-0.5 ${selected ? "text-[#0B5FD1]" : "text-slate-700"}`}>
-                                {opt.label}
-                              </p>
-                              <p className="text-xs text-slate-400">{opt.desc}</p>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {financingOption === "need_financing" && (
-                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-4" data-testid="rv-need-financing-section">
-                        <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Pre-Qualification Info</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div>
-                            <Label className="mb-1.5 block">Employment Status</Label>
-                            <Select data-testid="rv-employment" className="w-full" value={employmentStatus} onChange={(e) => setEmploymentStatus(e.target.value)}>
-                              <option value="">Select</option>
-                              {EMPLOYMENT.map((o) => <option key={o} value={o}>{o}</option>)}
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">Employer Name</Label>
-                            <Input data-testid="rv-employer" placeholder="Company name" value={employerName} onChange={(e) => setEmployerName(e.target.value.slice(0, 100))} />
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">Annual Gross Income</Label>
-                            <Select data-testid="rv-income" className="w-full" value={annualIncome} onChange={(e) => setAnnualIncome(e.target.value)}>
-                              <option value="">Select</option>
-                              {INCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">Estimated Credit Score</Label>
-                            <Select data-testid="rv-credit" className="w-full" value={creditScore} onChange={(e) => setCreditScore(e.target.value)}>
-                              <option value="">Select</option>
-                              {CREDIT.map((o) => <option key={o} value={o}>{o}</option>)}
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">Desired Down Payment</Label>
-                            <Select data-testid="rv-down-payment" className="w-full" value={downPayment} onChange={(e) => setDownPayment(e.target.value)}>
-                              <option value="">No preference</option>
-                              {DOWNS.map((o) => <option key={o} value={o}>{o}</option>)}
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">Monthly Payment Target</Label>
-                            <Select data-testid="rv-monthly" className="w-full" value={monthlyPayment} onChange={(e) => setMonthlyPayment(e.target.value)}>
-                              <option value="">No preference</option>
-                              {PAYMENTS.map((o) => <option key={o} value={o}>{o}</option>)}
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">Monthly Gross Income</Label>
-                            <Select data-testid="rv-monthly-income" className="w-full" value={monthlyIncome} onChange={(e) => setMonthlyIncome(e.target.value)}>
-                              <option value="">Select range</option>
-                              {MONTHLY_INCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">Monthly Housing Payment</Label>
-                            <Select data-testid="rv-housing-payment" className="w-full" value={housingPayment} onChange={(e) => setHousingPayment(e.target.value)}>
-                              <option value="">Select range</option>
-                              {HOUSING.map((o) => <option key={o} value={o}>{o}</option>)}
-                            </Select>
-                          </div>
-                        </div>
-                        <div>
-                          <Label className="mb-2 block">Co-Buyer?</Label>
-                          <div className="flex gap-2">
-                            {["Yes", "No"].map((opt) => {
-                              const selected = coBuyer === (opt === "Yes");
-                              return (
-                                <button
-                                  key={opt}
-                                  type="button"
-                                  onClick={() => setCoBuyer(opt === "Yes")}
-                                  data-testid={`rv-co-buyer-${opt.toLowerCase()}`}
-                                  className={`flex-1 rounded-xl border-2 py-2.5 text-sm font-medium transition-colors ${
-                                    selected ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]" : "border-slate-200 text-slate-600 hover:border-slate-300"
-                                  }`}
-                                >
-                                  {opt}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <p className="text-xs text-slate-500 bg-white rounded-lg px-3 py-2 border border-slate-100">
-                          🔒 Your financial information is encrypted and never shared without your permission.
-                        </p>
-                      </div>
-                    )}
-
-                    {financingOption === "have_financing" && (
-                      <div className="bg-green-50 border border-green-200 rounded-xl p-5 space-y-4" data-testid="rv-have-financing-section">
-                        <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">Pre-Approval Details</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="sm:col-span-2">
-                            <Label className="mb-1.5 block">Lender Name *</Label>
-                            <Input data-testid="rv-lender" placeholder="Chase Bank, Navy Federal…" value={lenderName} onChange={(e) => setLenderName(e.target.value.slice(0, 100))} />
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">Approved Amount *</Label>
-                            <Input type="number" min={0} data-testid="rv-approved-amount" placeholder="35000" value={approvedAmount} onChange={(e) => setApprovedAmount(e.target.value)} />
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">APR %</Label>
-                            <Input type="number" step="0.01" min={0} data-testid="rv-apr" placeholder="4.5" value={apr} onChange={(e) => setApr(e.target.value)} />
-                          </div>
-                          <div className="sm:col-span-2">
-                            <Label className="mb-1.5 block">Expiry Date</Label>
-                            <Input type="date" data-testid="rv-expiry" value={preApprovalExpiry} onChange={(e) => setPreApprovalExpiry(e.target.value)} />
-                          </div>
-                        </div>
-
-                        <div>
-                          <Label className="mb-1.5 block">Upload Pre-Approval Letter</Label>
-                          <div
-                            className={`border-2 border-dashed rounded-xl p-5 text-center transition-colors cursor-pointer ${
-                              preApprovalFile
-                                ? "border-green-300 bg-green-50"
-                                : "border-slate-200 bg-white hover:border-[#0B5FD1]/40"
-                            }`}
-                            onClick={() => document.getElementById("pre-approval-upload")?.click()}
-                            data-testid="rv-prequal-upload-zone"
-                          >
-                            <input
-                              id="pre-approval-upload"
-                              type="file"
-                              accept="application/pdf,image/jpeg,image/png,image/webp"
-                              className="hidden"
-                              data-testid="rv-prequal-upload-input"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                  if (file.size > 10 * 1024 * 1024) {
-                                    alert("File must be under 10MB");
-                                    return;
-                                  }
-                                  setPreApprovalFile(file);
-                                }
-                              }}
+                      <div className="space-y-5">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <label className="block text-sm font-semibold text-[#374151]" htmlFor="rv-first-name">
+                              First Name <span className="text-[#EF4444]">*</span>
+                            </label>
+                            <Input
+                              id="rv-first-name"
+                              data-testid="rv-first-name"
+                              placeholder="John"
+                              className={INP_CLS}
+                              value={firstName}
+                              onChange={(e) => setFirstName(e.target.value)}
                             />
-                            <Upload size={20} className={`mx-auto mb-2 ${preApprovalFile ? "text-green-500" : "text-slate-400"}`} />
-                            {preApprovalFile ? (
-                              <div>
-                                <p className="text-sm font-semibold text-green-700">{preApprovalFile.name}</p>
-                                <p className="text-xs text-green-500 mt-0.5">
-                                  {(preApprovalFile.size / 1024).toFixed(0)} KB · Click to replace
-                                </p>
-                              </div>
-                            ) : (
-                              <div>
-                                <p className="text-sm text-slate-500 font-medium">Click to upload pre-approval letter</p>
-                                <p className="text-xs text-slate-400 mt-0.5">PDF, JPG, or PNG · Max 10MB</p>
-                              </div>
-                            )}
                           </div>
-                          {preApprovalFile && (
-                            <button
-                              type="button"
-                              onClick={() => setPreApprovalFile(null)}
-                              className="text-xs text-red-500 hover:text-red-700 mt-1.5"
-                            >
-                              Remove file
-                            </button>
-                          )}
-                          {fileError && <p className="text-xs text-red-600 mt-2" data-testid="rv-file-error">{fileError}</p>}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-
-              {currentStep === 4 && (
-                <>
-                  <StepHeader title="Do you have a trade-in?" subtitle="Skip this step if you don&rsquo;t have a trade-in." />
-                  <div className="space-y-5">
-                    <div className="flex gap-2">
-                      {(["Yes", "No"] as const).map((opt) => {
-                        const selected = (opt === "Yes" && hasTradeIn === true) || (opt === "No" && hasTradeIn === false);
-                        return (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() => setHasTradeIn(opt === "Yes")}
-                            data-testid={`rv-trade-in-${opt.toLowerCase()}`}
-                            className={`flex-1 h-12 rounded-xl border-2 text-sm font-medium transition-colors ${
-                              selected
-                                ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
-                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
-                            }`}
-                          >
-                            {opt}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {hasTradeIn !== true && (
-                      <div className="text-center py-8 text-slate-400">
-                        <p className="text-sm">No trade-in? No problem.</p>
-                        <p className="text-xs mt-1">Click Next to continue.</p>
-                      </div>
-                    )}
-
-                    {hasTradeIn === true && (
-                      <div className="space-y-4 border-t border-slate-100 pt-4" data-testid="trade-in-fields">
-                        <div className="grid grid-cols-3 gap-3">
-                          <div>
-                            <Label className="mb-1.5 block">Year *</Label>
-                            <Select data-testid="rv-trade-year" className="w-full" value={tradeYear} onChange={(e) => setTradeYear(e.target.value)}>
-                              <option value="">Year</option>
-                              {TRADE_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
-                            </Select>
+                          <div className="space-y-1.5">
+                            <label className="block text-sm font-semibold text-[#374151]" htmlFor="rv-last-name">
+                              Last Name <span className="text-[#EF4444]">*</span>
+                            </label>
+                            <Input
+                              id="rv-last-name"
+                              data-testid="rv-last-name"
+                              placeholder="Smith"
+                              className={INP_CLS}
+                              value={lastName}
+                              onChange={(e) => setLastName(e.target.value)}
+                            />
                           </div>
-                          <div>
-                            <Label className="mb-1.5 block">Make *</Label>
-                            <Select
-                              data-testid="rv-trade-make"
-                              className="w-full"
-                              value={tradeMake}
-                              onChange={(e) => {
-                                setTradeMake(e.target.value);
-                                setTradeModel("");
-                                setTradeModels([]);
-                              }}
-                            >
-                              <option value="">Make</option>
-                              {POPULAR_MAKES.map((m) => <option key={m} value={m}>{m}</option>)}
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">Model *</Label>
-                            {tradeMake === "Other" ? (
-                              <Input data-testid="rv-trade-model" value={tradeModel} onChange={(e) => setTradeModel(e.target.value)} />
-                            ) : (
-                              <Select
-                                data-testid="rv-trade-model"
-                                className="w-full"
-                                value={tradeModel}
-                                onChange={(e) => setTradeModel(e.target.value)}
-                                disabled={!tradeMake}
-                              >
-                                <option value="">Model</option>
-                                {tradeModels.map((m) => <option key={m} value={m}>{m}</option>)}
-                              </Select>
-                            )}
-                          </div>
-                        </div>
-
-                        <div>
-                          <Label className="mb-1.5 block">VIN</Label>
-                          <Input
-                            data-testid="rv-trade-vin"
-                            placeholder="17-character VIN"
-                            maxLength={17}
-                            value={tradeVin}
-                            onChange={(e) => setTradeVin(e.target.value.toUpperCase().slice(0, 17))}
-                          />
-                          <p className="text-xs text-slate-400 mt-1">Found on dashboard, door jamb, or registration. Helps dealers give accurate trade-in value.</p>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <Label className="mb-1.5 block">Trim</Label>
-                            <Input data-testid="rv-trade-trim" placeholder="EX, Sport, Limited…" value={tradeTrim} onChange={(e) => setTradeTrim(e.target.value)} />
+                          <div className="space-y-1.5">
+                            <label className="block text-sm font-semibold text-[#374151]" htmlFor="rv-email">
+                              Email <span className="text-[#EF4444]">*</span>
+                            </label>
+                            <Input
+                              id="rv-email"
+                              type="email"
+                              data-testid="rv-email"
+                              placeholder="john@email.com"
+                              className={INP_CLS}
+                              value={email}
+                              onChange={(e) => setEmail(e.target.value)}
+                            />
                           </div>
-                          <div>
-                            <Label className="mb-1.5 block">Condition *</Label>
-                            <Select data-testid="rv-trade-condition" className="w-full" value={tradeCondition} onChange={(e) => setTradeCondition(e.target.value)}>
-                              <option value="">Select</option>
-                              {TRADE_CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">Mileage *</Label>
-                            <Input type="number" min={0} data-testid="rv-trade-mileage" placeholder="45000" value={tradeMileage} onChange={(e) => setTradeMileage(e.target.value)} />
-                          </div>
-                          <div>
-                            <Label className="mb-1.5 block">Color</Label>
-                            <Input data-testid="rv-trade-color" placeholder="Silver, Black…" value={tradeColor} onChange={(e) => setTradeColor(e.target.value)} />
-                          </div>
-                        </div>
-
-                        <div>
-                          <Label className="mb-2 block">Is the vehicle paid off? *</Label>
-                          <div className="flex gap-2">
-                            {(["Yes", "No"] as const).map((opt) => {
-                              const selected = tradePaidOff === (opt === "Yes");
-                              return (
-                                <button
-                                  key={opt}
-                                  type="button"
-                                  onClick={() => setTradePaidOff(opt === "Yes")}
-                                  data-testid={`rv-trade-paid-${opt.toLowerCase()}`}
-                                  className={`flex-1 rounded-xl border-2 py-2.5 text-sm font-medium transition-colors ${
-                                    selected ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]" : "border-slate-200 text-slate-600 hover:border-slate-300"
-                                  }`}
-                                >
-                                  {opt}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        {tradePaidOff === false && (
-                          <div>
-                            <Label className="mb-1.5 block">Remaining Payoff Amount (approx.)</Label>
-                            <div className="relative">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                              <Input
-                                type="number"
-                                min={0}
-                                data-testid="rv-trade-payoff"
-                                placeholder="8500"
-                                className="pl-7"
-                                value={tradePayoffAmount}
-                                onChange={(e) => setTradePayoffAmount(e.target.value)}
-                              />
-                            </div>
-                          </div>
-                        )}
-
-                        <div>
-                          <Label className="mb-2 block">Accident History *</Label>
-                          <div className="grid grid-cols-2 gap-2">
-                            {ACCIDENT_HISTORY.map((opt) => {
-                              const selected = tradeAccidentHistory === opt;
-                              return (
-                                <button
-                                  key={opt}
-                                  type="button"
-                                  onClick={() => setTradeAccidentHistory(opt)}
-                                  data-testid={`rv-trade-accident-${opt.split(" ")[0].toLowerCase()}`}
-                                  className={`rounded-xl border-2 py-2.5 text-xs font-medium transition-colors ${
-                                    selected ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]" : "border-slate-200 text-slate-600 hover:border-slate-300"
-                                  }`}
-                                >
-                                  {opt}
-                                </button>
-                              );
-                            })}
+                          <div className="space-y-1.5">
+                            <label className="block text-sm font-semibold text-[#374151]" htmlFor="rv-phone">
+                              Phone <span className="text-[#EF4444]">*</span>
+                            </label>
+                            <Input
+                              id="rv-phone"
+                              type="tel"
+                              data-testid="rv-phone"
+                              placeholder="(555) 000-0000"
+                              className={INP_CLS}
+                              value={phone}
+                              onChange={(e) => setPhone(e.target.value)}
+                            />
                           </div>
                         </div>
 
-                        <div>
-                          <Label className="mb-1.5 block">Known Issues or Damage</Label>
-                          <Textarea
-                            data-testid="rv-trade-issues"
-                            placeholder="Any accidents, mechanical issues, damage…"
-                            rows={3}
-                            value={tradeIssues}
-                            onChange={(e) => setTradeIssues(e.target.value.slice(0, 1000))}
-                            maxLength={1000}
+                        <div className="space-y-1.5">
+                          <label className="block text-sm font-semibold text-[#374151]" htmlFor="rv-zip">
+                            ZIP Code <span className="text-[#EF4444]">*</span>
+                          </label>
+                          <Input
+                            id="rv-zip"
+                            data-testid="rv-zip"
+                            placeholder="75001"
+                            maxLength={5}
+                            className={`${INP_CLS} max-w-[140px]`}
+                            value={zip}
+                            onChange={(e) => setZip(e.target.value.replace(/\D/g, "").slice(0, 5))}
+                          />
+                          {zip.length > 0 && !zipValid && (
+                            <p className="text-xs text-red-600 mt-1">Enter a 5-digit ZIP.</p>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <label className="block text-sm font-semibold text-[#374151]" htmlFor="rv-city">
+                              City <span className="text-[#EF4444]">*</span>
+                            </label>
+                            <Input
+                              id="rv-city"
+                              data-testid="rv-city"
+                              placeholder="Dallas"
+                              className={INP_CLS}
+                              value={city}
+                              onChange={(e) => setCity(e.target.value.slice(0, 100))}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="block text-sm font-semibold text-[#374151]" htmlFor="rv-state">
+                              State <span className="text-[#EF4444]">*</span>
+                            </label>
+                            <select
+                              id="rv-state"
+                              data-testid="rv-state"
+                              className={SEL_CLS}
+                              style={SEL_STYLE}
+                              value={state}
+                              onChange={(e) => setState(e.target.value)}
+                            >
+                              <option value="">Select state</option>
+                              {US_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold text-[#374151]">
+                            Preferred Contact Method <span className="text-[#EF4444]">*</span>
+                          </p>
+                          <ButtonGroup
+                            options={CONTACT_METHODS}
+                            value={contactMethod}
+                            onChange={setContactMethod}
+                            testIdPrefix="rv-contact"
+                            cols={3}
                           />
                         </div>
 
-                        <div>
-                          <Label className="mb-2 block">Title Status *</Label>
-                          <div className="grid grid-cols-4 gap-2">
-                            {TITLE_STATUSES.map((opt) => {
-                              const selected = tradeTitleStatus === opt.val;
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold text-[#374151]">
+                            Buying Timeline <span className="text-[#EF4444]">*</span>
+                          </p>
+                          <ButtonGroup
+                            options={TIMELINES}
+                            value={timeline}
+                            onChange={setTimeline}
+                            testIdPrefix="rv-timeline"
+                            cols={4}
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── Step 2: Vehicle ── */}
+                  {currentStep === 2 && (
+                    <>
+                      <StepHeader title="What vehicle are you looking for?" step={2} />
+                      <div className="space-y-5">
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold text-[#374151]">
+                            Vehicle Type <span className="text-[#EF4444]">*</span>
+                          </p>
+                          <ButtonGroup
+                            options={VEHICLE_TYPES}
+                            value={vehicleType as typeof VEHICLE_TYPES[number] | ""}
+                            onChange={(v) => setVehicleType(v)}
+                            testIdPrefix="rv-type"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <p className="text-sm font-semibold text-[#374151]">
+                              Make {loadingModels && <span className="text-[#94A3B8] text-xs ml-1 font-normal">Loading…</span>}
+                            </p>
+                            <select
+                              data-testid="rv-make"
+                              className={SEL_CLS}
+                              style={SEL_STYLE}
+                              value={preferredMake}
+                              onChange={(e) => {
+                                setPreferredMake(e.target.value);
+                                setPreferredModel("");
+                                setCustomMakeModel("");
+                              }}
+                            >
+                              <option value="">Any Make</option>
+                              {POPULAR_MAKES.map((m) => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <p className="text-sm font-semibold text-[#374151]">Model</p>
+                            {preferredMake === "Other" ? (
+                              <Input
+                                data-testid="rv-custom-make-model"
+                                placeholder="Enter make and model"
+                                className={INP_CLS}
+                                value={customMakeModel}
+                                onChange={(e) => setCustomMakeModel(e.target.value)}
+                              />
+                            ) : (
+                              <select
+                                data-testid="rv-model"
+                                className={SEL_CLS}
+                                style={SEL_STYLE}
+                                value={preferredModel}
+                                onChange={(e) => setPreferredModel(e.target.value)}
+                                disabled={!preferredMake || loadingModels}
+                              >
+                                <option value="">Any Model</option>
+                                {models.map((m) => <option key={m} value={m}>{m}</option>)}
+                              </select>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <p className="text-sm font-semibold text-[#374151]">Min Year</p>
+                            <select
+                              data-testid="rv-min-year"
+                              className={SEL_CLS}
+                              style={SEL_STYLE}
+                              value={minYear}
+                              onChange={(e) => setMinYear(e.target.value)}
+                            >
+                              <option value="">No Minimum</option>
+                              {REQUEST_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+                            </select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <p className="text-sm font-semibold text-[#374151]">Max Year</p>
+                            <select
+                              data-testid="rv-max-year"
+                              className={SEL_CLS}
+                              style={SEL_STYLE}
+                              value={maxYear}
+                              onChange={(e) => setMaxYear(e.target.value)}
+                            >
+                              <option value="">No Maximum</option>
+                              {REQUEST_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold text-[#374151]">
+                            New or Used? <span className="text-[#EF4444]">*</span>
+                          </p>
+                          <ButtonGroup
+                            options={NEW_USED}
+                            value={newOrUsed as typeof NEW_USED[number] | ""}
+                            onChange={(v) => setNewOrUsed(v)}
+                            testIdPrefix="rv-new-used"
+                            cols={3}
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <p className="text-sm font-semibold text-[#374151]">Specific Features</p>
+                          <Input
+                            data-testid="rv-features"
+                            placeholder="e.g. Black exterior, sunroof, third row, AWD…"
+                            className={INP_CLS}
+                            value={specificFeatures}
+                            onChange={(e) => setSpecificFeatures(e.target.value.slice(0, 500))}
+                            maxLength={500}
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <p className="text-sm font-semibold text-[#374151]">Interior Color Preference</p>
+                          <Input
+                            data-testid="rv-interior-color"
+                            placeholder="e.g. Black, Beige, Gray"
+                            className={INP_CLS}
+                            value={interiorColor}
+                            onChange={(e) => setInteriorColor(e.target.value.slice(0, 100))}
+                            maxLength={100}
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <p className="text-sm font-semibold text-[#374151]">Must-Have Features</p>
+                          <Textarea
+                            data-testid="rv-must-have"
+                            placeholder="e.g. Panoramic sunroof, heated seats, Apple CarPlay, third row, backup camera"
+                            rows={2}
+                            className={AREA_CLS}
+                            value={mustHaveFeatures}
+                            onChange={(e) => setMustHaveFeatures(e.target.value.slice(0, 1000))}
+                            maxLength={1000}
+                          />
+                          <p className="text-xs text-[#94A3B8]">List features you absolutely cannot compromise on.</p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold text-[#374151]">
+                            Open to similar alternatives? <span className="text-[#EF4444]">*</span>
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            {[
+                              { val: true, label: "Yes — show me alternatives" },
+                              { val: false, label: "No — this exact vehicle only" },
+                            ].map((opt) => {
+                              const isSelected = openToAlternatives === opt.val;
                               return (
                                 <button
-                                  key={opt.val}
+                                  key={String(opt.val)}
                                   type="button"
-                                  onClick={() => setTradeTitleStatus(opt.val)}
-                                  data-testid={`rv-trade-title-${opt.val}`}
-                                  className={`rounded-xl border-2 py-2.5 text-xs font-medium transition-colors ${
-                                    selected ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]" : "border-slate-200 text-slate-600 hover:border-slate-300"
+                                  onClick={() => setOpenToAlternatives(opt.val)}
+                                  data-testid={`rv-alternatives-${opt.val ? "yes" : "no"}`}
+                                  className={`relative rounded-xl border-2 py-3 px-4 text-sm font-semibold transition-all duration-150 text-left ${
+                                    isSelected ? BTN_SELECTED : BTN_IDLE
                                   }`}
                                 >
+                                  {isSelected && (
+                                    <CheckCircle2 size={14} className="absolute top-2.5 right-2.5 text-white/80" />
+                                  )}
                                   {opt.label}
                                 </button>
                               );
@@ -1124,155 +885,743 @@ export default function RequestVehicleFormClient() {
                           </div>
                         </div>
                       </div>
-                    )}
-                  </div>
-                </>
-              )}
-
-              {currentStep === 5 && (
-                <>
-                  <StepHeader title="Review your request" subtitle="Everything look right? Edit any section or submit when ready." />
-                  <div className="space-y-3 mb-5">
-                    <ReviewCard label="Contact" onEdit={() => jumpTo(1)}>
-                      <p className="text-sm font-semibold text-slate-800">{firstName} {lastName}</p>
-                      <p className="text-sm text-slate-500">{email} · {phone}</p>
-                      <p className="text-sm text-slate-500">{city}, {state} {zip}</p>
-                      <p className="text-sm text-slate-500">{contactMethod || "—"} · {timeline || "—"}</p>
-                    </ReviewCard>
-
-                    <ReviewCard label="Vehicle" onEdit={() => jumpTo(2)}>
-                      <p className="text-sm font-semibold text-slate-800">
-                        {vehicleType} · {preferredMake || "Any make"} {preferredModel}
-                        {preferredMake === "Other" && customMakeModel ? ` (${customMakeModel})` : ""}
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        {newOrUsed} · {minYear || "Any"}–{maxYear || "Any"}
-                        {interiorColor ? ` · Interior: ${interiorColor}` : ""}
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        {openToAlternatives === true ? "Open to alternatives" : openToAlternatives === false ? "Specific vehicle only" : "—"}
-                      </p>
-                      {mustHaveFeatures && <p className="text-sm text-slate-500 mt-1">Must-have: {mustHaveFeatures}</p>}
-                    </ReviewCard>
-
-                    <ReviewCard label="Financing" onEdit={() => jumpTo(3)}>
-                      <p className="text-sm font-semibold text-slate-800">
-                        {financingOption === "need_financing" ? "Needs financing"
-                          : financingOption === "have_financing" ? `Pre-approved by ${lenderName || "lender"}`
-                          : "Paying cash"}
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        Budget: {budget}
-                        {desiredMonthlyPayment ? ` · Monthly: ${desiredMonthlyPayment}` : ""}
-                        {downPaymentAvailable ? ` · Down: ${downPaymentAvailable}` : ""}
-                      </p>
-                      {financingOption === "need_financing" && creditScore && (
-                        <p className="text-sm text-slate-500">Credit: {creditScore}</p>
-                      )}
-                    </ReviewCard>
-
-                    {hasTradeIn === true && (
-                      <ReviewCard label="Trade-In" onEdit={() => jumpTo(4)}>
-                        <p className="text-sm font-semibold text-slate-800">
-                          {tradeYear} {tradeMake} {tradeModel}
-                        </p>
-                        <p className="text-sm text-slate-500">
-                          {tradeMileage ? `${Number(tradeMileage).toLocaleString()} mi · ` : ""}{tradeCondition || "—"}
-                          {tradeAccidentHistory ? ` · ${tradeAccidentHistory}` : ""}
-                        </p>
-                        {tradeVin && <p className="text-sm text-slate-500 font-mono text-xs">VIN: {tradeVin}</p>}
-                        {tradePaidOff === false && tradePayoffAmount && (
-                          <p className="text-sm text-slate-500">Payoff: ${Number(tradePayoffAmount).toLocaleString()}</p>
-                        )}
-                      </ReviewCard>
-                    )}
-                    {hasTradeIn === false && (
-                      <ReviewCard label="Trade-In" onEdit={() => jumpTo(4)}>
-                        <p className="text-sm text-slate-500">No trade-in</p>
-                      </ReviewCard>
-                    )}
-                    {hasTradeIn === null && (
-                      <ReviewCard label="Trade-In" onEdit={() => jumpTo(4)}>
-                        <p className="text-sm text-slate-500">Not specified</p>
-                      </ReviewCard>
-                    )}
-                  </div>
-
-                  <div className="mb-4">
-                    <Label className="mb-1.5 block">Additional Notes</Label>
-                    <Textarea
-                      data-testid="rv-notes"
-                      placeholder="Any other details that would help us find your vehicle…"
-                      rows={3}
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value.slice(0, 1000))}
-                      maxLength={1000}
-                    />
-                  </div>
-
-                  <label className="flex items-start gap-2 cursor-pointer select-none mb-4" data-testid="rv-consent-label">
-                    <input
-                      type="checkbox"
-                      checked={agreedToContact}
-                      onChange={(e) => setAgreedToContact(e.target.checked)}
-                      data-testid="rv-consent-checkbox"
-                      className="h-4 w-4 mt-0.5 rounded border-slate-300 text-[#0B5FD1] focus:ring-[#0B5FD1]/30"
-                    />
-                    <span className="text-xs text-slate-600 leading-relaxed">
-                      I agree to be contacted by AutoLenis about my vehicle request. My information will not be shared without my consent.
-                    </span>
-                  </label>
-
-                  {error && (
-                    <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 mb-2">
-                      <p className="text-sm text-red-700" data-testid="rv-error">{error}</p>
-                    </div>
+                    </>
                   )}
-                </>
-              )}
 
-              {/* Navigation */}
-              <div className="flex gap-3 mt-8 pt-6 border-t border-slate-100">
-                {currentStep > 1 && (
-                  <button
-                    type="button"
-                    onClick={handleBack}
-                    data-testid="rv-back-btn"
-                    className="flex-1 h-12 rounded-xl border-2 border-slate-200 text-slate-600 text-sm font-semibold hover:border-slate-300 hover:bg-slate-50 transition-colors"
-                  >
-                    ← Back
-                  </button>
-                )}
-                {currentStep < TOTAL_STEPS && (
-                  <button
-                    type="button"
-                    onClick={handleNext}
-                    disabled={!canProceed}
-                    data-testid="rv-next-btn"
-                    className={`flex-1 h-12 rounded-xl text-sm font-semibold transition-colors ${
-                      canProceed
-                        ? "bg-[#0B5FD1] text-white hover:bg-[#0944a8]"
-                        : "bg-slate-100 text-slate-400 cursor-not-allowed"
-                    }`}
-                  >
-                    Next →
-                  </button>
-                )}
-                {currentStep === TOTAL_STEPS && (
-                  <Button
-                    type="submit"
-                    className="flex-1 h-12 text-sm font-semibold"
-                    disabled={!canSubmit}
-                    data-testid="rv-submit"
-                  >
-                    {loading ? <><Loader2 size={16} className="animate-spin mr-2" />Submitting…</> : "Submit Request →"}
-                  </Button>
-                )}
+                  {/* ── Step 3: Financing ── */}
+                  {currentStep === 3 && (
+                    <>
+                      <StepHeader title="Budget &amp; Financing" step={3} />
+                      <div className="space-y-5">
+                        <div className="space-y-1.5">
+                          <p className="text-sm font-semibold text-[#374151]">
+                            Total Budget <span className="text-[#EF4444]">*</span>
+                          </p>
+                          <select
+                            data-testid="rv-budget"
+                            className={SEL_CLS}
+                            style={SEL_STYLE}
+                            value={budget}
+                            onChange={(e) => setBudget(e.target.value)}
+                          >
+                            <option value="">Select your budget</option>
+                            {BUDGETS.map((b) => <option key={b} value={b}>{b}</option>)}
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <p className="text-sm font-semibold text-[#374151]">Desired Monthly Payment</p>
+                            <select
+                              data-testid="rv-monthly-goal"
+                              className={SEL_CLS}
+                              style={SEL_STYLE}
+                              value={desiredMonthlyPayment}
+                              onChange={(e) => setDesiredMonthlyPayment(e.target.value)}
+                            >
+                              <option value="">No preference</option>
+                              {MONTHLY_GOALS.map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <p className="text-sm font-semibold text-[#374151]">Down Payment Available</p>
+                            <select
+                              data-testid="rv-down-payment-available"
+                              className={SEL_CLS}
+                              style={SEL_STYLE}
+                              value={downPaymentAvailable}
+                              onChange={(e) => setDownPaymentAvailable(e.target.value)}
+                            >
+                              <option value="">No preference</option>
+                              {DOWN_AVAILABLE.map((o) => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold text-[#374151]">
+                            Financing Situation <span className="text-[#EF4444]">*</span>
+                          </p>
+                          <div className="grid gap-3">
+                            {FINANCING_OPTIONS.map((opt) => {
+                              const isSelected = financingOption === opt.val;
+                              return (
+                                <button
+                                  key={opt.val}
+                                  type="button"
+                                  onClick={() => setFinancingOption(opt.val)}
+                                  data-testid={`rv-financing-${opt.val}`}
+                                  className={`w-full flex items-center justify-between rounded-xl border-2 px-5 py-4 text-left transition-all duration-150 ${
+                                    isSelected ? BTN_SELECTED : BTN_IDLE
+                                  }`}
+                                >
+                                  <div>
+                                    <p className={`font-bold text-sm ${isSelected ? "text-white" : "text-[#111827]"}`}>
+                                      {opt.label}
+                                    </p>
+                                    <p className={`text-xs mt-0.5 ${isSelected ? "text-white/75" : "text-[#6B7280]"}`}>
+                                      {opt.desc}
+                                    </p>
+                                  </div>
+                                  {isSelected
+                                    ? <CheckCircle2 size={20} className="text-white/80 shrink-0" />
+                                    : <div className="w-5 h-5 rounded-full border-2 border-[#D1D5DB] shrink-0" />
+                                  }
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {financingOption === "need_financing" && (
+                          <div className="bg-[#F0F7FF] border border-[#BFDBFE] rounded-2xl p-6 space-y-5" data-testid="rv-need-financing-section">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-lg bg-[#0B5FD1] flex items-center justify-center">
+                                <CreditCard size={14} className="text-white" />
+                              </div>
+                              <p className="text-sm font-bold text-[#0B5FD1]">Financing Profile</p>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Employment Status</p>
+                                <select
+                                  data-testid="rv-employment"
+                                  className={SEL_CLS}
+                                  style={SEL_STYLE}
+                                  value={employmentStatus}
+                                  onChange={(e) => setEmploymentStatus(e.target.value)}
+                                >
+                                  <option value="">Select</option>
+                                  {EMPLOYMENT.map((o) => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Employer Name</p>
+                                <Input
+                                  data-testid="rv-employer"
+                                  placeholder="Company name"
+                                  className={INP_CLS}
+                                  value={employerName}
+                                  onChange={(e) => setEmployerName(e.target.value.slice(0, 100))}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Annual Gross Income</p>
+                                <select
+                                  data-testid="rv-income"
+                                  className={SEL_CLS}
+                                  style={SEL_STYLE}
+                                  value={annualIncome}
+                                  onChange={(e) => setAnnualIncome(e.target.value)}
+                                >
+                                  <option value="">Select</option>
+                                  {INCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Estimated Credit Score</p>
+                                <select
+                                  data-testid="rv-credit"
+                                  className={SEL_CLS}
+                                  style={SEL_STYLE}
+                                  value={creditScore}
+                                  onChange={(e) => setCreditScore(e.target.value)}
+                                >
+                                  <option value="">Select</option>
+                                  {CREDIT.map((o) => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Desired Down Payment</p>
+                                <select
+                                  data-testid="rv-down-payment"
+                                  className={SEL_CLS}
+                                  style={SEL_STYLE}
+                                  value={downPayment}
+                                  onChange={(e) => setDownPayment(e.target.value)}
+                                >
+                                  <option value="">No preference</option>
+                                  {DOWNS.map((o) => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Monthly Payment Target</p>
+                                <select
+                                  data-testid="rv-monthly"
+                                  className={SEL_CLS}
+                                  style={SEL_STYLE}
+                                  value={monthlyPayment}
+                                  onChange={(e) => setMonthlyPayment(e.target.value)}
+                                >
+                                  <option value="">No preference</option>
+                                  {PAYMENTS.map((o) => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Monthly Gross Income</p>
+                                <select
+                                  data-testid="rv-monthly-income"
+                                  className={SEL_CLS}
+                                  style={SEL_STYLE}
+                                  value={monthlyIncome}
+                                  onChange={(e) => setMonthlyIncome(e.target.value)}
+                                >
+                                  <option value="">Select range</option>
+                                  {MONTHLY_INCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Monthly Housing Payment</p>
+                                <select
+                                  data-testid="rv-housing-payment"
+                                  className={SEL_CLS}
+                                  style={SEL_STYLE}
+                                  value={housingPayment}
+                                  onChange={(e) => setHousingPayment(e.target.value)}
+                                >
+                                  <option value="">Select range</option>
+                                  {HOUSING.map((o) => <option key={o} value={o}>{o}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <p className="text-sm font-semibold text-[#374151]">Co-Buyer?</p>
+                              <YesNoToggle
+                                value={coBuyer}
+                                onChange={setCoBuyer}
+                                testIdPrefix="rv-co-buyer"
+                              />
+                            </div>
+                            <p className="text-xs text-[#64748B] bg-white rounded-lg px-3 py-2 border border-[#E2E8F0] flex items-center gap-1.5">
+                              <Lock size={11} className="text-[#94A3B8] shrink-0" />
+                              Your financial information is encrypted and never shared without your permission.
+                            </p>
+                          </div>
+                        )}
+
+                        {financingOption === "have_financing" && (
+                          <div className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-2xl p-6 space-y-5" data-testid="rv-have-financing-section">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-lg bg-[#059669] flex items-center justify-center">
+                                <CheckCircle2 size={14} className="text-white" />
+                              </div>
+                              <p className="text-sm font-bold text-[#059669]">Pre-Approval Details</p>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div className="sm:col-span-2 space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Lender Name</p>
+                                <Input
+                                  data-testid="rv-lender"
+                                  placeholder="Chase Bank, Navy Federal…"
+                                  className={INP_CLS}
+                                  value={lenderName}
+                                  onChange={(e) => setLenderName(e.target.value.slice(0, 100))}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Approved Amount</p>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  data-testid="rv-approved-amount"
+                                  placeholder="35000"
+                                  className={INP_CLS}
+                                  value={approvedAmount}
+                                  onChange={(e) => setApprovedAmount(e.target.value)}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">APR %</p>
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  min={0}
+                                  data-testid="rv-apr"
+                                  placeholder="4.5"
+                                  className={INP_CLS}
+                                  value={apr}
+                                  onChange={(e) => setApr(e.target.value)}
+                                />
+                              </div>
+                              <div className="sm:col-span-2 space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Expiry Date</p>
+                                <Input
+                                  type="date"
+                                  data-testid="rv-expiry"
+                                  className={INP_CLS}
+                                  value={preApprovalExpiry}
+                                  onChange={(e) => setPreApprovalExpiry(e.target.value)}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <p className="text-sm font-semibold text-[#374151]">Upload Pre-Approval Letter</p>
+                              <div
+                                onClick={() => document.getElementById("pre-approval-upload")?.click()}
+                                className={`relative border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all duration-150 ${
+                                  preApprovalFile
+                                    ? "border-[#0B5FD1] bg-[#EFF6FF]"
+                                    : "border-[#CBD5E1] hover:border-[#0B5FD1]/50 hover:bg-[#F8FAFF]"
+                                }`}
+                                data-testid="rv-prequal-upload-zone"
+                              >
+                                <input
+                                  id="pre-approval-upload"
+                                  type="file"
+                                  accept="application/pdf,image/jpeg,image/png,image/webp"
+                                  className="hidden"
+                                  data-testid="rv-prequal-upload-input"
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      if (file.size > 10 * 1024 * 1024) {
+                                        alert("File must be under 10MB");
+                                        return;
+                                      }
+                                      setPreApprovalFile(file);
+                                    }
+                                  }}
+                                />
+                                {preApprovalFile ? (
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-10 h-10 rounded-lg bg-[#0B5FD1]/10 flex items-center justify-center">
+                                        <FileText size={20} className="text-[#0B5FD1]" />
+                                      </div>
+                                      <div className="text-left">
+                                        <p className="text-sm font-semibold text-[#0B5FD1]">{preApprovalFile.name}</p>
+                                        <p className="text-xs text-[#64748B]">
+                                          {(preApprovalFile.size / 1024).toFixed(0)} KB
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); setPreApprovalFile(null); }}
+                                      className="text-xs text-[#EF4444] hover:underline"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <Upload size={24} className="text-[#94A3B8] mx-auto mb-2" />
+                                    <p className="text-sm font-semibold text-[#374151]">Upload pre-approval letter</p>
+                                    <p className="text-xs text-[#94A3B8] mt-1">PDF, JPG, PNG · Max 10MB</p>
+                                  </div>
+                                )}
+                              </div>
+                              {fileError && (
+                                <p className="text-xs text-red-600 mt-2" data-testid="rv-file-error">{fileError}</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── Step 4: Trade-In ── */}
+                  {currentStep === 4 && (
+                    <>
+                      <StepHeader
+                        title="Do you have a trade-in?"
+                        subtitle="Skip this step if you don't have a trade-in."
+                        step={4}
+                      />
+                      <div className="space-y-5">
+                        <div>
+                          <YesNoToggle
+                            value={hasTradeIn}
+                            onChange={setHasTradeIn}
+                            testIdPrefix="rv-trade-in"
+                          />
+                        </div>
+
+                        {hasTradeIn !== true && (
+                          <div className="text-center py-8 text-[#94A3B8]">
+                            <p className="text-sm">No trade-in? No problem.</p>
+                            <p className="text-xs mt-1">Click Next to continue.</p>
+                          </div>
+                        )}
+
+                        {hasTradeIn === true && (
+                          <div className="space-y-4 border-t border-[#E2E8F0] pt-4" data-testid="trade-in-fields">
+                            <div className="grid grid-cols-3 gap-3">
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Year <span className="text-[#EF4444]">*</span></p>
+                                <select
+                                  data-testid="rv-trade-year"
+                                  className={SEL_CLS}
+                                  style={SEL_STYLE}
+                                  value={tradeYear}
+                                  onChange={(e) => setTradeYear(e.target.value)}
+                                >
+                                  <option value="">Year</option>
+                                  {TRADE_YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Make <span className="text-[#EF4444]">*</span></p>
+                                <select
+                                  data-testid="rv-trade-make"
+                                  className={SEL_CLS}
+                                  style={SEL_STYLE}
+                                  value={tradeMake}
+                                  onChange={(e) => {
+                                    setTradeMake(e.target.value);
+                                    setTradeModel("");
+                                    setTradeModels([]);
+                                  }}
+                                >
+                                  <option value="">Make</option>
+                                  {POPULAR_MAKES.map((m) => <option key={m} value={m}>{m}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Model <span className="text-[#EF4444]">*</span></p>
+                                {tradeMake === "Other" ? (
+                                  <Input
+                                    data-testid="rv-trade-model"
+                                    className={INP_CLS}
+                                    value={tradeModel}
+                                    onChange={(e) => setTradeModel(e.target.value)}
+                                  />
+                                ) : (
+                                  <select
+                                    data-testid="rv-trade-model"
+                                    className={SEL_CLS}
+                                    style={SEL_STYLE}
+                                    value={tradeModel}
+                                    onChange={(e) => setTradeModel(e.target.value)}
+                                    disabled={!tradeMake}
+                                  >
+                                    <option value="">Model</option>
+                                    {tradeModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                                  </select>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <p className="text-sm font-semibold text-[#374151]">VIN</p>
+                              <Input
+                                data-testid="rv-trade-vin"
+                                placeholder="17-character VIN"
+                                maxLength={17}
+                                className={INP_CLS}
+                                value={tradeVin}
+                                onChange={(e) => setTradeVin(e.target.value.toUpperCase().slice(0, 17))}
+                              />
+                              <p className="text-xs text-[#94A3B8]">Found on dashboard, door jamb, or registration. Helps dealers give accurate trade-in value.</p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Trim</p>
+                                <Input
+                                  data-testid="rv-trade-trim"
+                                  placeholder="EX, Sport, Limited…"
+                                  className={INP_CLS}
+                                  value={tradeTrim}
+                                  onChange={(e) => setTradeTrim(e.target.value)}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Condition <span className="text-[#EF4444]">*</span></p>
+                                <select
+                                  data-testid="rv-trade-condition"
+                                  className={SEL_CLS}
+                                  style={SEL_STYLE}
+                                  value={tradeCondition}
+                                  onChange={(e) => setTradeCondition(e.target.value)}
+                                >
+                                  <option value="">Select</option>
+                                  {TRADE_CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Mileage <span className="text-[#EF4444]">*</span></p>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  data-testid="rv-trade-mileage"
+                                  placeholder="45000"
+                                  className={INP_CLS}
+                                  value={tradeMileage}
+                                  onChange={(e) => setTradeMileage(e.target.value)}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Color</p>
+                                <Input
+                                  data-testid="rv-trade-color"
+                                  placeholder="Silver, Black…"
+                                  className={INP_CLS}
+                                  value={tradeColor}
+                                  onChange={(e) => setTradeColor(e.target.value)}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <p className="text-sm font-semibold text-[#374151]">
+                                Is the vehicle paid off? <span className="text-[#EF4444]">*</span>
+                              </p>
+                              <YesNoToggle
+                                value={tradePaidOff}
+                                onChange={setTradePaidOff}
+                                testIdPrefix="rv-trade-paid"
+                              />
+                            </div>
+
+                            {tradePaidOff === false && (
+                              <div className="space-y-1.5">
+                                <p className="text-sm font-semibold text-[#374151]">Remaining Payoff Amount (approx.)</p>
+                                <div className="relative">
+                                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94A3B8] text-sm font-medium">$</span>
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    data-testid="rv-trade-payoff"
+                                    placeholder="8500"
+                                    className={`${INP_CLS} pl-8`}
+                                    value={tradePayoffAmount}
+                                    onChange={(e) => setTradePayoffAmount(e.target.value)}
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="space-y-2">
+                              <p className="text-sm font-semibold text-[#374151]">
+                                Accident History <span className="text-[#EF4444]">*</span>
+                              </p>
+                              <div className="grid grid-cols-2 gap-2.5">
+                                {ACCIDENT_HISTORY.map((opt) => {
+                                  const isSelected = tradeAccidentHistory === opt;
+                                  return (
+                                    <button
+                                      key={opt}
+                                      type="button"
+                                      onClick={() => setTradeAccidentHistory(opt)}
+                                      data-testid={`rv-trade-accident-${opt.split(" ")[0].toLowerCase()}`}
+                                      className={`relative rounded-xl border-2 py-3 px-4 text-sm font-semibold transition-all duration-150 text-left ${
+                                        isSelected ? BTN_SELECTED : BTN_IDLE
+                                      }`}
+                                    >
+                                      {isSelected && (
+                                        <CheckCircle2 size={14} className="absolute top-2.5 right-2.5 text-white/80" />
+                                      )}
+                                      {opt}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <p className="text-sm font-semibold text-[#374151]">Known Issues or Damage</p>
+                              <Textarea
+                                data-testid="rv-trade-issues"
+                                placeholder="Any accidents, mechanical issues, damage…"
+                                rows={3}
+                                className={AREA_CLS}
+                                value={tradeIssues}
+                                onChange={(e) => setTradeIssues(e.target.value.slice(0, 1000))}
+                                maxLength={1000}
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <p className="text-sm font-semibold text-[#374151]">
+                                Title Status <span className="text-[#EF4444]">*</span>
+                              </p>
+                              <div className="grid grid-cols-4 gap-2">
+                                {TITLE_STATUSES.map((opt) => {
+                                  const isSelected = tradeTitleStatus === opt.val;
+                                  return (
+                                    <button
+                                      key={opt.val}
+                                      type="button"
+                                      onClick={() => setTradeTitleStatus(opt.val)}
+                                      data-testid={`rv-trade-title-${opt.val}`}
+                                      className={`relative rounded-xl border-2 py-3 px-2 text-xs font-semibold transition-all duration-150 text-center ${
+                                        isSelected ? BTN_SELECTED : BTN_IDLE
+                                      }`}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── Step 5: Review ── */}
+                  {currentStep === 5 && (
+                    <>
+                      <StepHeader
+                        title="Review your request"
+                        subtitle="Everything look right? Edit any section or submit when ready."
+                        step={5}
+                      />
+                      <div className="space-y-3 mb-5">
+                        <ReviewCard label="Contact" onEdit={() => jumpTo(1)}>
+                          <p className="text-sm font-semibold text-[#111827]">{firstName} {lastName}</p>
+                          <p className="text-sm text-[#64748B]">{email} · {phone}</p>
+                          <p className="text-sm text-[#64748B]">{city}, {state} {zip}</p>
+                          <p className="text-sm text-[#64748B]">{contactMethod || "—"} · {timeline || "—"}</p>
+                        </ReviewCard>
+
+                        <ReviewCard label="Vehicle" onEdit={() => jumpTo(2)}>
+                          <p className="text-sm font-semibold text-[#111827]">
+                            {vehicleType} · {preferredMake || "Any make"} {preferredModel}
+                            {preferredMake === "Other" && customMakeModel ? ` (${customMakeModel})` : ""}
+                          </p>
+                          <p className="text-sm text-[#64748B]">
+                            {newOrUsed} · {minYear || "Any"}–{maxYear || "Any"}
+                            {interiorColor ? ` · Interior: ${interiorColor}` : ""}
+                          </p>
+                          <p className="text-sm text-[#64748B]">
+                            {openToAlternatives === true ? "Open to alternatives" : openToAlternatives === false ? "Specific vehicle only" : "—"}
+                          </p>
+                          {mustHaveFeatures && <p className="text-sm text-[#64748B] mt-1">Must-have: {mustHaveFeatures}</p>}
+                        </ReviewCard>
+
+                        <ReviewCard label="Financing" onEdit={() => jumpTo(3)}>
+                          <p className="text-sm font-semibold text-[#111827]">
+                            {financingOption === "need_financing" ? "Needs financing"
+                              : financingOption === "have_financing" ? `Pre-approved by ${lenderName || "lender"}`
+                              : "Paying cash"}
+                          </p>
+                          <p className="text-sm text-[#64748B]">
+                            Budget: {budget}
+                            {desiredMonthlyPayment ? ` · Monthly: ${desiredMonthlyPayment}` : ""}
+                            {downPaymentAvailable ? ` · Down: ${downPaymentAvailable}` : ""}
+                          </p>
+                          {financingOption === "need_financing" && creditScore && (
+                            <p className="text-sm text-[#64748B]">Credit: {creditScore}</p>
+                          )}
+                        </ReviewCard>
+
+                        {hasTradeIn === true && (
+                          <ReviewCard label="Trade-In" onEdit={() => jumpTo(4)}>
+                            <p className="text-sm font-semibold text-[#111827]">
+                              {tradeYear} {tradeMake} {tradeModel}
+                            </p>
+                            <p className="text-sm text-[#64748B]">
+                              {tradeMileage ? `${Number(tradeMileage).toLocaleString()} mi · ` : ""}{tradeCondition || "—"}
+                              {tradeAccidentHistory ? ` · ${tradeAccidentHistory}` : ""}
+                            </p>
+                            {tradeVin && <p className="text-sm text-[#64748B] font-mono text-xs">VIN: {tradeVin}</p>}
+                            {tradePaidOff === false && tradePayoffAmount && (
+                              <p className="text-sm text-[#64748B]">Payoff: ${Number(tradePayoffAmount).toLocaleString()}</p>
+                            )}
+                          </ReviewCard>
+                        )}
+                        {hasTradeIn === false && (
+                          <ReviewCard label="Trade-In" onEdit={() => jumpTo(4)}>
+                            <p className="text-sm text-[#64748B]">No trade-in</p>
+                          </ReviewCard>
+                        )}
+                        {hasTradeIn === null && (
+                          <ReviewCard label="Trade-In" onEdit={() => jumpTo(4)}>
+                            <p className="text-sm text-[#64748B]">Not specified</p>
+                          </ReviewCard>
+                        )}
+                      </div>
+
+                      <div className="mb-4 space-y-1.5">
+                        <p className="text-sm font-semibold text-[#374151]">Additional Notes</p>
+                        <Textarea
+                          data-testid="rv-notes"
+                          placeholder="Any other details that would help us find your vehicle…"
+                          rows={3}
+                          className={AREA_CLS}
+                          value={notes}
+                          onChange={(e) => setNotes(e.target.value.slice(0, 1000))}
+                          maxLength={1000}
+                        />
+                      </div>
+
+                      <label className="flex items-start gap-2 cursor-pointer select-none mb-4" data-testid="rv-consent-label">
+                        <input
+                          type="checkbox"
+                          checked={agreedToContact}
+                          onChange={(e) => setAgreedToContact(e.target.checked)}
+                          data-testid="rv-consent-checkbox"
+                          className="h-4 w-4 mt-0.5 rounded border-[#CBD5E1] text-[#0B5FD1] focus:ring-[#0B5FD1]/30"
+                        />
+                        <span className="text-xs text-[#64748B] leading-relaxed">
+                          I agree to be contacted by AutoLenis about my vehicle request. My information will not be shared without my consent.
+                        </span>
+                      </label>
+
+                      {error && (
+                        <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 mb-2">
+                          <p className="text-sm text-red-700" data-testid="rv-error">{error}</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ── Navigation ── */}
+                  <div className="flex items-center gap-4 mt-8 pt-6 border-t border-[#E2E8F0]">
+                    {currentStep > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleBack}
+                        data-testid="rv-back-btn"
+                        className="flex items-center gap-2 text-sm font-semibold text-[#64748B] hover:text-[#374151] transition-colors shrink-0"
+                      >
+                        <ChevronLeft size={16} /> Back
+                      </button>
+                    )}
+                    {currentStep < TOTAL_STEPS && (
+                      <button
+                        type="button"
+                        onClick={handleNext}
+                        disabled={!canProceed}
+                        data-testid="rv-next-btn"
+                        className="flex-1 h-12 rounded-xl bg-[#0B5FD1] text-white font-bold text-sm hover:bg-[#0944A8] disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150 shadow-md shadow-[#0B5FD1]/20 flex items-center justify-center gap-2"
+                      >
+                        Continue →
+                      </button>
+                    )}
+                    {currentStep === TOTAL_STEPS && (
+                      <button
+                        type="submit"
+                        disabled={!canSubmit}
+                        data-testid="rv-submit"
+                        className="flex-1 h-12 rounded-xl bg-[#0B5FD1] text-white font-bold text-sm hover:bg-[#0944A8] disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150 shadow-md shadow-[#0B5FD1]/20 flex items-center justify-center gap-2"
+                      >
+                        {loading
+                          ? <><Loader2 size={16} className="animate-spin" /> Submitting…</>
+                          : "Submit Vehicle Request →"
+                        }
+                      </button>
+                    )}
+                  </div>
+
+                </form>
               </div>
-            </form>
-          </div>
+            </div>
+
+            {/* Trust footer */}
+            <div className="flex items-center justify-center gap-6 mt-6 text-xs text-[#94A3B8] flex-wrap">
+              <span className="flex items-center gap-1.5"><ShieldCheck size={12} /> SSL encrypted</span>
+              <span className="flex items-center gap-1.5"><Lock size={12} /> Never sold to dealers</span>
+              <span className="flex items-center gap-1.5"><RefreshCw size={12} /> $99 deposit refundable</span>
+            </div>
+          </>
         )}
-      </section>
+      </div>
     </main>
   );
 }
