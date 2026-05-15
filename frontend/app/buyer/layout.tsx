@@ -4,16 +4,77 @@ import ChatWidget from "@/components/public/ChatWidget";
 import SessionExpiryWatcher from "@/components/buyer/SessionExpiryWatcher";
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { jwtVerify } from "jose";
+import { cookies } from "next/headers";
+
+function getPreviewSecret() {
+  const raw =
+    process.env.JWT_SECRET ??
+    process.env.NEXTAUTH_SECRET ??
+    process.env.APP_SECRET ?? "";
+  return new TextEncoder().encode(raw);
+}
 
 export default async function BuyerLayout({ children }: { children: React.ReactNode }) {
+  // ── Admin preview mode ─────────────────────────────────────────────────────
+  // Check for a valid admin preview token cookie before normal buyer auth.
+  // If present and valid: load buyer data by token's buyerId, render with banner.
+  let isAdminPreview = false;
+  let previewAdminEmail: string | null = null;
+  let previewBuyerName: string | null = null;
+  let previewBuyerId: string | null = null;
+
+  try {
+    const cookieStore = await cookies();
+    const previewToken = cookieStore.get("admin_preview_token")?.value;
+
+    if (previewToken) {
+      const { payload } = await jwtVerify(previewToken, getPreviewSecret());
+      const p = payload as {
+        buyerId: string;
+        adminId: string;
+        adminEmail: string;
+        stageRoute: string;
+        buyerName: string;
+      };
+      if (p.buyerId) {
+        isAdminPreview = true;
+        previewBuyerId = p.buyerId;
+        previewAdminEmail = p.adminEmail;
+        previewBuyerName = p.buyerName;
+      }
+    }
+  } catch {
+    // Invalid or expired token — fall through to normal buyer auth
+    isAdminPreview = false;
+    previewBuyerId = null;
+  }
+
+  // ── Buyer auth ─────────────────────────────────────────────────────────────
+  // In preview mode, skip normal session auth and load buyer by token's buyerId.
   // requireBuyer redirects to /auth/signin if not authenticated
-  const buyer = await requireBuyer();
+  let buyer: Awaited<ReturnType<typeof requireBuyer>>;
+
+  if (isAdminPreview && previewBuyerId) {
+    const previewBuyer = await prisma.buyer.findUnique({
+      where: { id: previewBuyerId },
+      include: { user: true, preQualification: true },
+    });
+    if (!previewBuyer) {
+      // Buyer not found — fall through to normal auth (will redirect to sign-in)
+      buyer = await requireBuyer();
+    } else {
+      buyer = previewBuyer as Awaited<ReturnType<typeof requireBuyer>>;
+    }
+  } else {
+    buyer = await requireBuyer();
+  }
 
   // ── Disabled / purged account guard ────────────────────────────────────────
   // If an admin has disabled login access for this buyer, render a clear
   // account-status screen instead of the full portal.  This prevents confusion
   // where a disabled buyer sees an operational UI.
-  if (buyer.disabledAt || buyer.purgedAt) {
+  if (!isAdminPreview && (buyer.disabledAt || buyer.purgedAt)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F8F9FA] p-8">
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm max-w-md w-full p-8 text-center">
@@ -147,25 +208,37 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
   }
 
   return (
-    <div className="flex flex-col lg:flex-row h-screen bg-[#F8F9FA]" data-testid="buyer-portal">
-      <BuyerSidebar />
-      <div className="flex-1 flex flex-col overflow-hidden pt-14 lg:pt-0">
-        {/* Feature 3: Journey Navigator — suppressed on /buyer/requests/* by component itself */}
-        <JourneyNavigator
-          currentStage={currentStage}
-          completedStages={completedStages}
-          unlockedStages={unlockedStages}
-        />
-        <main className="flex-1 overflow-y-auto">
-          {children}
-        </main>
-        {/* System 16 ENH — AI Concierge (Groq ONLY, kill switch checked) */}
-        <ChatWidget
-          buyerId={buyer.id}
-          agentType="general"
-          initialGreeting={`Hi ${buyer.firstName}! I'm Zura, your AutoLenis concierge. How can I help you today?`}
-        />
-        <SessionExpiryWatcher />
+    <div className="min-h-screen">
+      {/* Admin preview banner — only shown in preview mode */}
+      {isAdminPreview && (
+        <div className="sticky top-0 z-50 bg-amber-500 text-white text-xs font-bold px-4 py-2 flex items-center justify-between">
+          <span>
+            👁 ADMIN PREVIEW MODE — Viewing as {previewBuyerName ?? "buyer"} ·
+            This is what the buyer sees
+          </span>
+          <span className="opacity-75">Previewed by {previewAdminEmail} · Token expires in 5 min</span>
+        </div>
+      )}
+      <div className="flex flex-col lg:flex-row h-screen bg-[#F8F9FA]" data-testid="buyer-portal">
+        <BuyerSidebar />
+        <div className="flex-1 flex flex-col overflow-hidden pt-14 lg:pt-0">
+          {/* Feature 3: Journey Navigator — suppressed on /buyer/requests/* by component itself */}
+          <JourneyNavigator
+            currentStage={currentStage}
+            completedStages={completedStages}
+            unlockedStages={unlockedStages}
+          />
+          <main className="flex-1 overflow-y-auto">
+            {children}
+          </main>
+          {/* System 16 ENH — AI Concierge (Groq ONLY, kill switch checked) */}
+          <ChatWidget
+            buyerId={buyer.id}
+            agentType="general"
+            initialGreeting={`Hi ${buyer.firstName}! I'm Zura, your AutoLenis concierge. How can I help you today?`}
+          />
+          <SessionExpiryWatcher />
+        </div>
       </div>
     </div>
   );

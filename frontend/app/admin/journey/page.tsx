@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import Link from "next/link";
+import BuyerPickerButton from "./BuyerPickerButton";
 
 export const metadata: Metadata = { title: "Buyer Journey Map — Admin" };
 export const dynamic = "force-dynamic";
@@ -160,14 +161,7 @@ export default async function BuyerJourneyMapPage() {
                       </code>
                     </div>
                     {/* Open buyer page */}
-                    <a href={stage.route} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 text-xs font-semibold text-[#0B5FD1] border border-[#0B5FD1]/30 bg-white px-3 py-1.5 rounded-lg hover:bg-[#0B5FD1]/5 whitespace-nowrap shrink-0">
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                        <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-                      </svg>
-                      Open Buyer Page
-                    </a>
+                    <BuyerPickerButton stageRoute={stage.route} stageLabel={stage.label} />
                   </div>
                   {/* Body */}
                   <div className="px-4 pb-3">
