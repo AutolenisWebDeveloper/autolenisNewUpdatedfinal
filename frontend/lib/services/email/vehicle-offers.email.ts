@@ -181,6 +181,8 @@ export async function sendDealerOfferAdminNotification(params: {
   contactPhone: string;
   vehicles: VehicleSummary[];
   notes?: string;
+  documentUrls?: string[];
+  documentNames?: string[];
 }) {
   const detailUrl = `${APP_URL}/admin/vehicle-offers/${params.offerId}`;
   const inner = `
@@ -196,6 +198,22 @@ export async function sendDealerOfferAdminNotification(params: {
     ${params.vehicles.map(vehicleBlock).join("")}
 
     ${params.notes ? `<p style="color:#4B5563;font-size:13px;background:#F8F9FB;border-radius:8px;padding:12px;margin-top:16px"><strong>Dealer notes:</strong> ${escape(params.notes)}</p>` : ""}
+
+    ${params.documentUrls && params.documentUrls.length > 0 ? `
+      <div style="background:#EFF6FF;border-radius:12px;padding:16px;margin-top:16px;border:1px solid #BFDBFE">
+        <p style="color:#1E40AF;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;margin:0 0 10px">
+          📎 Supporting Documents (${params.documentUrls.length})
+        </p>
+        ${params.documentUrls.map((url, i) => `
+          <div style="margin-bottom:8px">
+            <a href="${escape(url)}" target="_blank" rel="noopener noreferrer"
+               style="color:#0B5FD1;font-size:13px;font-weight:600;text-decoration:none;background:#DBEAFE;border-radius:6px;padding:6px 12px;display:inline-block">
+              View ${escape(params.documentNames?.[i] ?? `Document ${i + 1}`)} →
+            </a>
+          </div>
+        `).join("")}
+      </div>
+    ` : ""}
 
     <p style="color:#475569;font-size:12px;margin-top:16px">
       AGREEMENTS:<br/>

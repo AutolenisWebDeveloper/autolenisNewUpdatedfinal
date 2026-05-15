@@ -3015,6 +3015,7 @@ model DealerOfferSubmission {
   rejected       Boolean  @default(false)
   rejectedAt     DateTime? @map("rejected_at")
   dealerId       String?  @map("dealer_id")
+  documents      Json?    // Array of { url, name, type, sizeBytes }
 
   vehicleOffer   VehicleOffer @relation(fields: [vehicleOfferId], references: [id], onDelete: Cascade)
   dealer         Dealer?  @relation(fields: [dealerId], references: [id])

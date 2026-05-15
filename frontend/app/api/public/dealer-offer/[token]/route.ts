@@ -10,6 +10,63 @@ import {
   sendDealerOfferConfirmation,
 } from "@/lib/services/email/vehicle-offers.email";
 
+const DOCS_BUCKET    = "dealer-offer-docs";
+const MAX_DOC_BYTES  = 20 * 1024 * 1024;
+const MAX_DOC_COUNT  = 5;
+const ALLOWED_DOC_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+];
+
+async function uploadDealerDoc(
+  file: File,
+  submissionId: string,
+  index: number,
+): Promise<{ url: string; name: string; type: string; sizeBytes: number } | null> {
+  if (!ALLOWED_DOC_TYPES.includes(file.type)) return null;
+  if (file.size > MAX_DOC_BYTES) return null;
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) {
+    console.error("[dealer-offer] Supabase env vars missing for upload");
+    return null;
+  }
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    const supabase = createClient(supabaseUrl, serviceKey);
+
+    const { data: buckets } = await supabase.storage.listBuckets();
+    if (!buckets?.find((b) => b.name === DOCS_BUCKET)) {
+      await supabase.storage.createBucket(DOCS_BUCKET, { public: true });
+    }
+
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+    const path     = `${submissionId}/${index}-${Date.now()}-${safeName}`;
+    const buffer   = await file.arrayBuffer();
+
+    const { error } = await supabase.storage
+      .from(DOCS_BUCKET)
+      .upload(path, buffer, { contentType: file.type, upsert: false });
+
+    if (error) {
+      console.error("[dealer-offer] upload error:", error);
+      return null;
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from(DOCS_BUCKET)
+      .getPublicUrl(path);
+
+    return { url: publicUrl, name: file.name, type: file.type, sizeBytes: file.size };
+  } catch (err) {
+    console.error("[dealer-offer] upload exception:", err);
+    return null;
+  }
+}
+
 const vehicleSchema = z.object({
   vehicleUrl:         z.string().url(),
   stockNumber:        z.string().min(1).max(50),
@@ -73,12 +130,40 @@ export async function POST(request: NextRequest, { params }: Params) {
     );
   }
 
+  // ── Parse request body (multipart with files OR plain JSON) ──────────────
   let body: unknown;
-  try { body = await request.json(); } catch {
-    return NextResponse.json(
-      { success: false, error: { code: "VALIDATION_ERROR", message: "Invalid JSON" } },
-      { status: 400 },
-    );
+  const pendingDocFiles: File[] = [];
+
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (contentType.includes("multipart/form-data")) {
+    let fd: FormData;
+    try { fd = await request.formData(); } catch {
+      return NextResponse.json(
+        { success: false, error: { code: "VALIDATION_ERROR", message: "Invalid form data" } },
+        { status: 400 },
+      );
+    }
+    const dataField = fd.get("data");
+    try {
+      body = typeof dataField === "string" ? JSON.parse(dataField) : null;
+    } catch {
+      return NextResponse.json(
+        { success: false, error: { code: "VALIDATION_ERROR", message: "Invalid data payload" } },
+        { status: 400 },
+      );
+    }
+    for (let i = 0; i < MAX_DOC_COUNT; i++) {
+      const f = fd.get(`doc${i}`);
+      if (f instanceof File && f.size > 0) pendingDocFiles.push(f);
+    }
+  } else {
+    try { body = await request.json(); } catch {
+      return NextResponse.json(
+        { success: false, error: { code: "VALIDATION_ERROR", message: "Invalid JSON" } },
+        { status: 400 },
+      );
+    }
   }
 
   const parsed = schema.safeParse(body);
@@ -102,6 +187,29 @@ export async function POST(request: NextRequest, { params }: Params) {
       inviteId:       invite?.id ?? null,
     },
   });
+
+  // ── Upload documents now that submission.id is available ────────────────
+  const uploadedDocs: Array<{ url: string; name: string; type: string; sizeBytes: number }> = [];
+
+  if (pendingDocFiles.length > 0) {
+    const results = await Promise.allSettled(
+      pendingDocFiles.slice(0, MAX_DOC_COUNT).map((file, i) =>
+        uploadDealerDoc(file, submission.id, i),
+      ),
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value) uploadedDocs.push(r.value);
+    }
+    if (uploadedDocs.length > 0) {
+      await prisma.dealerOfferSubmission.update({
+        where: { id: submission.id },
+        data: {
+          documents: uploadedDocs as unknown as
+            Parameters<typeof prisma.dealerOfferSubmission.update>[0]["data"]["documents"],
+        },
+      }).catch((err) => console.error("[dealer-offer] documents update failed:", err));
+    }
+  }
 
   // ── Link to registered dealer if email matches ──────────────────────────
   // If contactEmail matches a registered Dealer account, link the submission
@@ -145,6 +253,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       contactPhone:      data.contactPhone,
       vehicles:          data.vehicles,
       notes:             data.notes,
+      documentUrls:      uploadedDocs.map((d) => d.url),
+      documentNames:     uploadedDocs.map((d) => d.name),
     }),
     sendDealerOfferConfirmation({
       to:                data.contactEmail,
