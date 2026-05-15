@@ -429,7 +429,6 @@ export async function getAdminAffiliateDetailData(affiliateId: string) {
     },
     documents: affiliate.documents.map((d) => ({
       id: d.id,
-      type: d.type,
       fileName: d.fileName,
       fileSizeBytes: d.fileSizeBytes,
       status: d.status,
