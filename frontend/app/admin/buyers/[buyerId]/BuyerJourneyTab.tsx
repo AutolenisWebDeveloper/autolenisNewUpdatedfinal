@@ -110,7 +110,7 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
     </div>
   );
 
-  const remaining = journey.stages.filter(s => s.canAdminUnlock && s.status !== "ADMIN_UNLOCKED");
+  const remaining = journey.stages.filter(s => s.canAdminUnlock && s.status !== "UNLOCKED");
   const hasActiveDeal = journey.stages.some(s => s.id === "select-deal" && s.status === "COMPLETE");
 
   return (
