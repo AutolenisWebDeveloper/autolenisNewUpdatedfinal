@@ -40,7 +40,7 @@ export default async function DealerOfferPage({ params }: Props) {
   const isExpired = effectiveExpiry ? effectiveExpiry < new Date() : false;
 
   const data: DealerOfferData = {
-    token,
+    token: offerRow.token,
     inviteToken: inviteRow?.token ?? null,
     dealershipName: inviteRow?.dealershipName ?? null,
     dealerContactName: inviteRow?.contactName ?? null,
