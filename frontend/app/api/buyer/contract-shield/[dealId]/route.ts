@@ -39,7 +39,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   const contractText = (body as { contractText?: string }).contractText?.trim();
 
   if (contractText) {
-    const result = await scanContract(dealId, contractText, deal.offer.dealerId);
+    const result = await scanContract(dealId, contractText, deal.offer?.dealerId ?? "");
     return successResponse({ ...result, dealId });
   }
 

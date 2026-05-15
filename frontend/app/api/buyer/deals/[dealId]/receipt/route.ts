@@ -18,8 +18,8 @@ export async function GET(request: NextRequest, { params }: Props) {
 
   return successResponse({
     receipt: {
-      dealId, dealerName: deal.offer.dealer.dealershipName,
-      otdPriceCents: deal.offer.otdPriceCents, feeCents: deal.feeAmountCents ?? PREMIUM_FEE_CENTS,
+      dealId, dealerName: deal.offer?.dealer?.dealershipName ?? "AutoLenis Concierge",
+      otdPriceCents: deal.offer?.otdPriceCents ?? 0, feeCents: deal.feeAmountCents ?? PREMIUM_FEE_CENTS,
       depositCredit: DEPOSIT_AMOUNT_CENTS, completedAt: deal.updatedAt,
     },
   });

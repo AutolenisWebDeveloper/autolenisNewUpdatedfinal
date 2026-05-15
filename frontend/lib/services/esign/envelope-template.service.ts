@@ -52,7 +52,7 @@ export async function createDealerEnvelopeFromTemplate(dealId: string): Promise<
   }
 
   const buyer     = deal.buyer;
-  const otdAmount = (deal.offer.otdPriceCents / 100).toFixed(2);
+  const otdAmount = ((deal.offer?.otdPriceCents ?? 0) / 100).toFixed(2);
 
   // Get JWT access token
   let token: string;
@@ -82,7 +82,7 @@ export async function createDealerEnvelopeFromTemplate(dealId: string): Promise<
           textTabs: [
             { tabLabel: "otdAmount",  value: otdAmount },
             { tabLabel: "dealId",     value: deal.id.slice(-8).toUpperCase() },
-            { tabLabel: "dealerName", value: deal.offer.dealer.dealershipName ?? "" },
+            { tabLabel: "dealerName", value: deal.offer?.dealer?.dealershipName ?? "" },
           ],
         },
       },

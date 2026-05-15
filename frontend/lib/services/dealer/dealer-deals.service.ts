@@ -13,7 +13,7 @@ export interface DealerDealSummary {
     id: string;
     otdPriceCents: number;
     auctionId: string;
-  };
+  } | null;
 }
 
 export interface DealerDealDetail {
@@ -21,13 +21,13 @@ export interface DealerDealDetail {
   status: DealStatus;
   createdAt: Date;
   contractShieldScore: number | null;
-  contractShieldStatus: string | null; // expected values: 'PASS' | 'FAIL' | 'WARNING' | 'PENDING'
+  contractShieldStatus: string | null;
   offer: {
     id: string;
     otdPriceCents: number;
     auctionId: string;
     dealerId: string;
-  };
+  } | null;
   pickup: {
     id: string;
     status: "NOT_SCHEDULED" | "SCHEDULED" | "COMPLETE" | string;
@@ -43,7 +43,7 @@ export interface DealerPickupDeal {
   offer: {
     id: string;
     auctionId: string;
-  };
+  } | null;
   pickup: {
     id: string;
     status: "NOT_SCHEDULED" | "SCHEDULED" | "COMPLETE" | string;

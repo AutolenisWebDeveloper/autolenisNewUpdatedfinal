@@ -35,7 +35,7 @@ export default async function AdminPipelinePage() {
     const status = d.status;
     if (!acc[status]) acc[status] = { count: 0, otdTotal: 0, weight: STAGE_WEIGHTS[status] ?? 0.5 };
     acc[status].count++;
-    acc[status].otdTotal += d.offer.otdPriceCents;
+    acc[status].otdTotal += d.offer?.otdPriceCents ?? 0;
     return acc;
   }, {} as Record<string, { count: number; otdTotal: number; weight: number }>);
 

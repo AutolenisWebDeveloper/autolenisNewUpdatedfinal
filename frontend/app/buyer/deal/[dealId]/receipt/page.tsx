@@ -19,11 +19,15 @@ export default async function ReceiptPage({ params }: Props) {
           dealer: { select: { dealershipName: true, city: true, state: true } },
         },
       },
+      vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
     },
   });
   if (!deal) notFound();
 
-  const d = deal.offer.dealer;
+  const otdPriceCents = deal.offer?.otdPriceCents ?? deal.vehicleRequestOffer?.priceCents ?? 0;
+  const dealerName = deal.offer?.dealer?.dealershipName ?? "AutoLenis Concierge";
+  const dealerCity = deal.offer?.dealer?.city ?? null;
+  const dealerState = deal.offer?.dealer?.state ?? null;
   const isPremium = buyer.plan === "PREMIUM";
 
   return (
@@ -51,11 +55,13 @@ export default async function ReceiptPage({ params }: Props) {
             Dealer
           </p>
           <p className="font-bold text-[#111827] text-lg">
-            {d.dealershipName}
+            {dealerName}
           </p>
-          <p className="text-sm text-[#4B5563] mt-1">
-            {d.city}, {d.state}
-          </p>
+          {dealerCity && dealerState && (
+            <p className="text-sm text-[#4B5563] mt-1">
+              {dealerCity}, {dealerState}
+            </p>
+          )}
         </div>
 
         {/* Financials */}
@@ -63,7 +69,7 @@ export default async function ReceiptPage({ params }: Props) {
           <div className="flex justify-between text-sm">
             <span className="text-[#4B5563]">Out-the-Door Price</span>
             <span className="font-bold text-[#111827]">
-              ${(deal.offer.otdPriceCents / 100).toLocaleString()}
+              ${(otdPriceCents / 100).toLocaleString()}
             </span>
           </div>
           {isPremium && (
@@ -83,7 +89,7 @@ export default async function ReceiptPage({ params }: Props) {
           <div className="pt-3 border-t border-[#E5E7EB] flex justify-between">
             <span className="font-bold text-[#111827]">Total via AutoLenis</span>
             <span className="font-bold text-[#0B5FD1] text-lg">
-              ${((deal.offer.otdPriceCents + (isPremium ? PREMIUM_FEE_CENTS : 0)
+              ${((otdPriceCents + (isPremium ? PREMIUM_FEE_CENTS : 0)
                 - DEPOSIT_AMOUNT_CENTS) / 100).toLocaleString()}
             </span>
           </div>

@@ -212,7 +212,7 @@ export default async function DealerDashboard() {
                     </Badge>
                   </div>
                   <span className="text-xs text-slate-400">
-                    ${(deal.offer.otdPriceCents / 100).toLocaleString()}
+                    ${((deal.offer?.otdPriceCents ?? 0) / 100).toLocaleString()}
                   </span>
                 </Link>
               ))}

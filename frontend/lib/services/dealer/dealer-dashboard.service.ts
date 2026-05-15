@@ -17,7 +17,7 @@ export interface DealerDashboardDeal {
   id: string;
   status: DealStatus;
   createdAt: Date;
-  offer: { otdPriceCents: number };
+  offer: { otdPriceCents: number } | null;
 }
 
 export interface DealerDashboardPayment {

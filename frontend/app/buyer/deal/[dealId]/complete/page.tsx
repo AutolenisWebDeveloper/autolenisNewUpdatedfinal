@@ -16,9 +16,14 @@ export default async function DealCompletePage({ params }: Props) {
   const buyer = await requireBuyer();
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id, status: "COMPLETED" },
-    include: { offer: { include: { dealer: true } } },
+    include: {
+      offer: { include: { dealer: true } },
+      vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
+    },
   });
   if (!deal) notFound();
+
+  const otdPriceCents = deal.offer?.otdPriceCents ?? deal.vehicleRequestOffer?.priceCents ?? 0;
 
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="deal-complete-page">
@@ -32,7 +37,7 @@ export default async function DealCompletePage({ params }: Props) {
 
       <div className="bg-[#0B5FD1] text-white rounded-2xl p-6 mb-6" data-testid="deal-complete-summary">
         <p className="text-xs text-white/60 uppercase tracking-wider mb-1">Deal Summary</p>
-        <p className="text-2xl font-bold mb-1">${(deal.offer.otdPriceCents / 100).toLocaleString()}</p>
+        <p className="text-2xl font-bold mb-1">${(otdPriceCents / 100).toLocaleString()}</p>
         <p className="text-sm text-white/60">Out-the-door price paid</p>
       </div>
 

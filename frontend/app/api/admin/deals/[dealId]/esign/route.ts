@@ -35,7 +35,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     if (dealerEmail) {
       await sendDealerEsignInitiatedEmail({
         to: dealerEmail,
-        contactName: deal.offer.dealer.dealershipName,
+        contactName: deal.offer?.dealer?.dealershipName ?? "",
         vehicleRef: `Deal ${dealId.slice(0, 8)}`,
         signingUrl: result.signingUrl ?? `${APP_URL}/dealer/deals/${dealId}`,
         dealId,

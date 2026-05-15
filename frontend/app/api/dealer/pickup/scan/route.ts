@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Token must belong to one of this dealer's offers
-  if (pickup.deal.offer.dealerId !== dealer.id) {
+  if (pickup.deal.offer?.dealerId !== dealer.id) {
     return errorResponse("INVALID_TOKEN", "QR code is not valid for this dealer.", 422);
   }
 

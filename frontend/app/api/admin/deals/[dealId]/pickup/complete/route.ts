@@ -94,7 +94,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   const dealerEmail = deal.offer?.dealer?.user?.email;
   if (dealerEmail) {
     const vehicleRef = `Deal ${dealId.slice(0, 8)}`;
-    const dealershipName = deal.offer.dealer.dealershipName;
+    const dealershipName = deal.offer?.dealer?.dealershipName ?? "";
     await sendDealerPickupCompletedEmail({
       to: dealerEmail,
       contactName: dealershipName,

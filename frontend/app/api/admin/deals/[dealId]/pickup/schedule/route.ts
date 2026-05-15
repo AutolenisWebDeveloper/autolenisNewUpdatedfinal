@@ -80,11 +80,11 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const dealerEmail = dealWithParties?.offer?.dealer?.user?.email;
   if (dealerEmail) {
-    const dealer = dealWithParties.offer.dealer;
+    const dealer = dealWithParties.offer?.dealer;
     const vehicleRef = `Deal ${dealId.slice(0, 8)}`;
     await sendDealerPickupScheduledEmail({
       to: dealerEmail,
-      contactName: dealer.dealershipName,
+      contactName: dealer?.dealershipName ?? "",
       vehicleRef,
       buyerCity: dealWithParties.buyer?.city ?? "",
       buyerState: dealWithParties.buyer?.state ?? "",

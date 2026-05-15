@@ -2,19 +2,14 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Request Offer", robots: { index: false, follow: false } };
 
-// System 4C — Buyer offer review and respond page
-// Buyer can ACCEPT or DECLINE the offer
-// CRITICAL: Accepting does NOT automatically create a deal
-// Deal creation is admin-triggered ONLY from /admin/requests/[requestId]
-
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, XCircle, Loader2, ArrowLeft, ExternalLink } from "lucide-react";
+import { Loader2, ArrowLeft, ExternalLink } from "lucide-react";
 import { toBuyerLabel } from "@/lib/services/vehicle-request/vehicle-request.service";
+import OfferResponseButtons from "@/components/buyer/OfferResponseButtons";
 
 export const dynamic = "force-dynamic";
 interface Props { params: Promise<{ requestId: string }> }
@@ -120,21 +115,8 @@ export default async function RequestOfferPage({ params }: Props) {
       </div>
 
       {/* Accept / Decline */}
-      <div className="flex gap-3" data-testid="offer-response-buttons">
-        <form action={`/api/buyer/requests/${requestId}/offer/respond`} method="post" className="flex-1">
-          <input type="hidden" name="response" value="ACCEPT" />
-          <input type="hidden" name="offerId" value={offer.id} />
-          <Button type="submit" className="w-full" size="lg" data-testid="accept-offer-btn">
-            <CheckCircle2 size={16} /> Choose This Option
-          </Button>
-        </form>
-        <form action={`/api/buyer/requests/${requestId}/offer/respond`} method="post" className="flex-1">
-          <input type="hidden" name="response" value="DECLINE" />
-          <input type="hidden" name="offerId" value={offer.id} />
-          <Button type="submit" variant="outline" className="w-full" size="lg" data-testid="decline-offer-btn">
-            <XCircle size={16} /> Decline
-          </Button>
-        </form>
+      <div data-testid="offer-response-buttons">
+        <OfferResponseButtons offerId={offer.id} requestId={requestId} />
       </div>
       <p className="text-xs text-slate-400 text-center mt-4">
         Choosing this option does not obligate payment. Our team will follow up to complete the deal.

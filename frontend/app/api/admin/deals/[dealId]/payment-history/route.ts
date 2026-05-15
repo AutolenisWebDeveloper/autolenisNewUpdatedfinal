@@ -21,7 +21,7 @@ export async function GET(request: NextRequest, { params }: Props) {
   });
   if (!deal) return adminError("NOT_FOUND", "Deal not found", 404);
 
-  const deposit = deal.offer.auction.deposit;
+  const deposit = deal.offer?.auction?.deposit ?? null;
   const events = [];
 
   if (deposit) {
