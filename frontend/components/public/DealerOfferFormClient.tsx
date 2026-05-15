@@ -55,6 +55,16 @@ export type DealerOfferData = {
 const CONDITIONS = ["New", "Used", "Certified Pre-Owned"] as const;
 const AVAILABILITY = ["In Stock Now", "Within 3 Days", "Within 1 Week", "Within 2 Weeks"] as const;
 
+const MAX_DOC_BYTES    = 20 * 1024 * 1024;
+const MAX_DOC_COUNT    = 5;
+const ALLOWED_DOC_MIME = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+const DOC_LABELS: Record<string, string> = {
+  "application/pdf": "PDF",
+  "image/jpeg":      "JPG",
+  "image/png":       "PNG",
+  "image/webp":      "WebP",
+};
+
 type DealerVehicle = {
   vehicleUrl: string;
   stockNumber: string;
@@ -153,6 +163,30 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
   const [notes, setNotes] = useState("");
   const [finderFeeAgreed, setFinderFeeAgreed] = useState(false);
   const [confirmedAccuracy, setConfirmedAccuracy] = useState(false);
+  const [docFiles, setDocFiles]         = useState<File[]>([]);
+  const [docFileError, setDocFileError] = useState<string | null>(null);
+
+  function handleDocFiles(files: FileList | null) {
+    if (!files) return;
+    setDocFileError(null);
+    const incoming = Array.from(files);
+    for (const f of incoming) {
+      if (!ALLOWED_DOC_MIME.includes(f.type)) {
+        setDocFileError(`${f.name}: unsupported type. Use PDF, JPG, PNG, or WebP.`);
+        return;
+      }
+      if (f.size > MAX_DOC_BYTES) {
+        setDocFileError(`${f.name}: exceeds 20 MB limit.`);
+        return;
+      }
+    }
+    setDocFiles((prev) => [...prev, ...incoming].slice(0, MAX_DOC_COUNT));
+  }
+
+  function removeDoc(index: number) {
+    setDocFiles((prev) => prev.filter((_, i) => i !== index));
+    setDocFileError(null);
+  }
 
   if (isExpired) {
     return (
@@ -236,10 +270,14 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
         finderFeeAgreed: true as const,
         confirmedAccuracy: true as const,
       };
+      const fd = new FormData();
+      fd.append("data", JSON.stringify(payload));
+      docFiles.forEach((file, i) => fd.append(`doc${i}`, file, file.name));
+
+      // Do NOT set Content-Type manually — the browser sets the multipart boundary.
       const res = await fetch(`/api/public/dealer-offer/${offer.token}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: fd,
       });
       const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { code?: string; message?: string } };
       if (res.ok && data.success) {
@@ -628,6 +666,79 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
           <div className="bg-white rounded-2xl border border-[#E5E7EB] p-6">
             <Label htmlFor="do-notes" className="text-sm font-medium text-[#374151]">General Notes (optional)</Label>
             <Textarea id="do-notes" data-testid="do-notes" className="mt-1.5 min-h-[80px]" placeholder="Any additional context about your dealership or these offers." value={notes} onChange={(e) => setNotes(e.target.value.slice(0, 1000))} maxLength={1000} />
+          </div>
+
+          {/* Supporting Documents */}
+          <div className="bg-white rounded-2xl border border-[#E5E7EB] p-6 space-y-3" data-testid="dealer-offer-documents">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700">
+                Supporting Documents
+                <span className="ml-1.5 text-xs font-normal text-slate-400">(optional)</span>
+              </label>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Offer sheet, window sticker, CARFAX, or dealer invoice. PDF/JPG/PNG · Max 20 MB per file · Up to {MAX_DOC_COUNT} files.
+              </p>
+            </div>
+
+            {docFiles.length > 0 && (
+              <div className="space-y-2">
+                {docFiles.map((file, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-lg bg-[#0B5FD1]/10 flex items-center justify-center shrink-0">
+                        <Upload size={14} className="text-[#0B5FD1]" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[#0B5FD1] truncate">{file.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {DOC_LABELS[file.type] ?? file.type} ·{" "}
+                          {file.size < 1024 * 1024
+                            ? `${(file.size / 1024).toFixed(0)} KB`
+                            : `${(file.size / (1024 * 1024)).toFixed(1)} MB`}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeDoc(i)}
+                      aria-label={`Remove ${file.name}`}
+                      className="text-slate-400 hover:text-red-500 transition-colors ml-3 shrink-0"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {docFiles.length < MAX_DOC_COUNT && (
+              <label className="flex flex-col items-center justify-center w-full border-2 border-dashed border-slate-300 rounded-xl p-6 cursor-pointer bg-white hover:border-[#0B5FD1]/50 hover:bg-blue-50/30 transition-all">
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  className="sr-only"
+                  onChange={(e) => handleDocFiles(e.target.files)}
+                  data-testid="doc-upload-input"
+                />
+                <Upload size={22} className="text-slate-400 mb-2" />
+                <p className="text-sm font-semibold text-slate-600">
+                  {docFiles.length === 0 ? "Upload supporting documents" : "Add more files"}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {MAX_DOC_COUNT - docFiles.length} slot{MAX_DOC_COUNT - docFiles.length !== 1 ? "s" : ""} remaining
+                </p>
+              </label>
+            )}
+
+            {docFileError && (
+              <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+                <X size={14} className="shrink-0" /> {docFileError}
+              </div>
+            )}
           </div>
 
           {/* Consent */}

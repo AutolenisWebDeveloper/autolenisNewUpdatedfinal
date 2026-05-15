@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { CheckCircle2, ExternalLink } from "lucide-react";
+import { CheckCircle2, ExternalLink, Upload } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Offer Submitted — AutoLenis", robots: { index: false, follow: false } };
@@ -62,6 +62,23 @@ export default async function DealerOfferConfirmedPage({ params }: Props) {
             ))}
           </div>
         )}
+
+        {Array.isArray(submission?.documents) &&
+          (submission.documents as Array<{ name: string; url: string }>).length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-4 mb-6 text-left">
+              <p className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-3">
+                Documents Submitted ({(submission.documents as Array<{ name: string }>).length})
+              </p>
+              <div className="space-y-1.5">
+                {(submission.documents as Array<{ name: string; url: string }>).map((doc, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm text-[#0B5FD1]">
+                    <Upload size={12} />
+                    <span className="truncate">{doc.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
         <p className="text-xs text-slate-400 mb-6">
           AutoLenis will review your offers and contact you within 24 hours.
