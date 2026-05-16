@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { PrequalAdminPanel } from "./PrequalAdminPanel";
 import BuyerJourneyTab from "./BuyerJourneyTab";
+import LaunchAuctionPanel from "@/components/admin/LaunchAuctionPanel";
 import {
   User, Mail, Phone, Calendar, Clock, Edit2,
   Bell, UserCheck, PlayCircle, Flag, CheckCircle2,
@@ -808,10 +810,14 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
     insurancePolicies, insuranceQuotes, shortlistCount, vehicleRequests,
     activityEvents, auditLogs, supportNotes, exceptionStatus, assignedAdmin } = data;
 
+  const router = useRouter();
   const [modal, setModal] = useState<ModalType | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [activeTab, setActiveTab] = useState(initialTab ?? "overview");
   const [refreshing, setRefreshing] = useState(false);
+
+  const hasOpenAuction = auctions.some((a) => ["PENDING", "ACTIVE"].includes(a.status));
+  const buyerFullName = `${buyer.firstName ?? ""} ${buyer.lastName ?? ""}`.trim() || buyer.email;
 
   const activeDeal = deals.find((d) => !["CANCELLED", "COMPLETED", "REFUNDED"].includes(d.status));
   const depositTotal = deposits.filter((d) => d.status === "PAID").reduce((s, d) => s + d.amountCents, 0);
@@ -1523,9 +1529,9 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
         {activeTab === "auctions" && (
           <div className="space-y-3">
             {auctions.length === 0 ? (
-              <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center">
-                <Gavel size={32} className="text-slate-300 mx-auto mb-3" />
-                <p className="text-slate-500 font-medium">No auctions yet</p>
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center">
+                <Gavel size={28} className="text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-500 font-medium text-sm">No auctions yet</p>
               </div>
             ) : auctions.map((a) => (
               <div key={a.id} className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between gap-4">
@@ -1545,6 +1551,14 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
                 </div>
               </div>
             ))}
+
+            {!hasOpenAuction && (
+              <LaunchAuctionPanel
+                buyerId={buyer.id}
+                buyerName={buyerFullName}
+                onLaunched={(auctionId) => router.push(`/admin/auctions/${auctionId}`)}
+              />
+            )}
             {/* Shortlist */}
             <div className="bg-white border border-slate-200 rounded-2xl p-4">
               <div className="flex items-center gap-2 mb-2">
