@@ -57,6 +57,10 @@ export default function QuickOfferPage() {
     fetch(`/api/dealer/auctions/${auctionId}`)
       .then(r => r.json())
       .then(data => {
+        // Debug: surface dealer/auction ids so a "not invited" 404 is diagnosable.
+        const sessionDealerId = data?.data?.sessionDealerId ?? data?.sessionDealerId ?? data?.error?.sessionDealerId;
+        console.log("[quick-offer] dealerId from session:", sessionDealerId);
+        console.log("[quick-offer] auctionId:", auctionId);
         if (data.auction) setAuctionCtx(data.auction);
         else setAuctionError(data.error?.message ?? "Auction not found or you are not invited.");
       })
