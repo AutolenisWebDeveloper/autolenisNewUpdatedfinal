@@ -57,8 +57,16 @@ export default function QuickOfferPage() {
     fetch(`/api/dealer/auctions/${auctionId}`)
       .then(r => r.json())
       .then(data => {
-        if (data.auction) setAuctionCtx(data.auction);
-        else setAuctionError(data.error?.message ?? "Auction not found or you are not invited.");
+        if (data?.data?.auction) {
+          setAuctionCtx(data.data.auction);
+          console.log("[quick-offer] dealerId from session:", data.data.dealerId);
+          console.log("[quick-offer] auctionId:", auctionId);
+        } else {
+          setAuctionError(data.error?.message ?? "Auction not found or you are not invited.");
+          console.log("[quick-offer] dealerId from session:", data.error?.debug?.dealerId);
+          console.log("[quick-offer] auctionId:", auctionId);
+          if (data.error?.debug) console.log("[quick-offer] debug:", data.error.debug);
+        }
       })
       .catch(() => setAuctionError("Unable to load auction details."));
   }, [auctionId]);

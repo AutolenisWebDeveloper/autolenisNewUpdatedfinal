@@ -5,9 +5,9 @@ export function successResponse<T>(data: T, status = 200) {
   return NextResponse.json({ success: true, data }, { status });
 }
 
-export function errorResponse(code: string, message: string, status = 400) {
+export function errorResponse(code: string, message: string, status = 400, debug?: Record<string, unknown>) {
   return NextResponse.json(
-    { error: { code, message }, correlationId: crypto.randomUUID() },
+    { error: { code, message, ...(debug ? { debug } : {}) }, correlationId: crypto.randomUUID() },
     { status }
   );
 }

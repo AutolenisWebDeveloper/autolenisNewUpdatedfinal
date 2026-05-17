@@ -12,6 +12,21 @@ export async function GET(request: NextRequest, { params }: Props) {
     where: { auctionId, dealerId: dealer.id },
     include: { auction: { include: { _count: { select: { offers: true } } } } },
   });
-  if (!invitation) return errorResponse("NOT_FOUND", "Auction invitation not found", 404);
-  return successResponse({ auction: invitation.auction, invitation });
+  if (!invitation) {
+    // Diagnostics so dealers can self-diagnose mis-routed invitations (e.g.,
+    // session resolves to a different dealerId than the one that was invited).
+    const auctionExists = await prisma.auction.findUnique({
+      where: { id: auctionId },
+      select: { id: true, status: true, _count: { select: { invitations: true } } },
+    });
+    return errorResponse(
+      "NOT_FOUND",
+      auctionExists
+        ? `You are not invited to this auction. (Auction has ${auctionExists._count.invitations} invitation${auctionExists._count.invitations === 1 ? "" : "s"}.)`
+        : "Auction not found.",
+      404,
+      { dealerId: dealer.id, auctionId, auctionExists: !!auctionExists },
+    );
+  }
+  return successResponse({ auction: invitation.auction, invitation, dealerId: dealer.id });
 }
