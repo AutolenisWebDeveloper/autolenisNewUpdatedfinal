@@ -12,6 +12,9 @@ export async function GET(request: NextRequest, { params }: Props) {
     where: { auctionId, dealerId: dealer.id },
     include: { auction: { include: { _count: { select: { offers: true } } } } },
   });
-  if (!invitation) return errorResponse("NOT_FOUND", "Auction invitation not found", 404);
-  return successResponse({ auction: invitation.auction, invitation });
+  if (!invitation) {
+    console.warn("[dealer/auctions/[auctionId]] no invitation", { auctionId, sessionDealerId: dealer.id });
+    return errorResponse("NOT_FOUND", `Auction invitation not found (dealerId=${dealer.id}, auctionId=${auctionId})`, 404);
+  }
+  return successResponse({ auction: invitation.auction, invitation, sessionDealerId: dealer.id });
 }
