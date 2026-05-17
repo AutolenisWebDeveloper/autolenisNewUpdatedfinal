@@ -11,12 +11,34 @@ import {
 
 interface Props { params: Promise<{ buyerId: string }> }
 
+const outsideDealerSchema = z.object({
+  dealershipName: z.string().min(1),
+  contactName:    z.string().min(1),
+  email:          z.string().email(),
+  phone:          z.string().optional(),
+});
+
+const auctionVehicleSchema = z.object({
+  inventoryItemId: z.string().min(1).optional(),
+  year:    z.number().int().min(1900).max(2100).optional(),
+  make:    z.string().min(1).optional(),
+  model:   z.string().min(1).optional(),
+  trim:    z.string().optional(),
+  mileage: z.number().int().min(0).optional(),
+  notes:   z.string().max(2000).optional(),
+}).refine(
+  v => v.inventoryItemId || (v.year && v.make && v.model),
+  "Each vehicle needs an inventoryItemId or at minimum year+make+model",
+);
+
 const schema = z.object({
   dealerIds: z.array(z.string().min(1)).min(1, "At least one dealer is required"),
   reason: z.string().min(1, "Reason is required"),
   hours: z.number().int().positive().max(168).optional(),
   notes: z.string().max(2000).optional(),
   vehicleRequestId: z.string().min(1).optional(),
+  outsideDealers: z.array(outsideDealerSchema).max(8).optional(),
+  vehicles: z.array(auctionVehicleSchema).max(10).optional(),
 });
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -51,7 +73,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   if (!parsed.success) {
     return adminError("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
   }
-  const { dealerIds, reason, hours, notes, vehicleRequestId } = parsed.data;
+  const { dealerIds, reason, hours, notes, vehicleRequestId, outsideDealers, vehicles } = parsed.data;
 
   // Block if there is already a PENDING or ACTIVE auction for this buyer
   const openAuction = await prisma.auction.findFirst({
@@ -156,6 +178,48 @@ export async function POST(request: NextRequest, { params }: Props) {
       .catch(err => console.error("[launch-auction] vehicleRequest update failed:", err));
   }
 
+  // Attach auction vehicles (optional)
+  let attachedVehicleCount = 0;
+  if (vehicles && vehicles.length > 0) {
+    const result = await prisma.auctionVehicle.createMany({
+      data: vehicles.map(v => ({
+        auctionId: launched.id,
+        inventoryItemId: v.inventoryItemId ?? null,
+        year:    v.year    ?? null,
+        make:    v.make    ?? null,
+        model:   v.model   ?? null,
+        trim:    v.trim    ?? null,
+        mileage: v.mileage ?? null,
+        notes:   v.notes   ?? null,
+      })),
+    });
+    attachedVehicleCount = result.count;
+  }
+
+  // Outside-dealer invitations (optional)
+  let outsideInviteCount = 0;
+  const outsideInvites: { id: string; email: string; token: string; contactName: string; dealershipName: string }[] = [];
+  if (outsideDealers && outsideDealers.length > 0) {
+    await prisma.outsideAuctionInvite.createMany({
+      data: outsideDealers.map(d => ({
+        auctionId: launched.id,
+        dealershipName: d.dealershipName,
+        contactName:    d.contactName,
+        email:          d.email,
+        phone:          d.phone ?? null,
+      })),
+    });
+    const fresh = await prisma.outsideAuctionInvite.findMany({
+      where: { auctionId: launched.id, email: { in: outsideDealers.map(d => d.email) } },
+      orderBy: { sentAt: "desc" },
+    });
+    for (const d of outsideDealers) {
+      const inv = fresh.find(i => i.email === d.email);
+      if (inv) outsideInvites.push({ id: inv.id, email: inv.email, token: inv.token, contactName: d.contactName, dealershipName: d.dealershipName });
+    }
+    outsideInviteCount = outsideInvites.length;
+  }
+
   // Dealer invitation emails (non-blocking)
   const buyerCity = buyer.city ?? "Location";
   const buyerState = buyer.state ?? "TBD";
@@ -174,6 +238,23 @@ export async function POST(request: NextRequest, { params }: Props) {
       expiryHours: hours ?? AUCTION_DURATION_HOURS,
       auctionId: launched.id,
     }).catch(err => console.error(`[launch-auction] dealer email failed (${d.id}):`, err));
+  }
+
+  // Outside-dealer invitation emails (non-blocking, public token-gated URL)
+  for (const inv of outsideInvites) {
+    void sendDealerAuctionInvitationEmail({
+      to: inv.email,
+      contactName: inv.contactName,
+      vehicleMake: "Vehicle",
+      vehicleModel: "Requested",
+      vehicleYear: new Date().getFullYear(),
+      vehicleTrim: null,
+      buyerCity,
+      buyerState,
+      auctionUrl: `${APP_URL}/dealer-offer-outside/${inv.token}`,
+      expiryHours: hours ?? AUCTION_DURATION_HOURS,
+      auctionId: launched.id,
+    }).catch(err => console.error(`[launch-auction] outside dealer email failed (${inv.email}):`, err));
   }
 
   // Buyer activation email (non-blocking)
@@ -198,6 +279,8 @@ export async function POST(request: NextRequest, { params }: Props) {
         buyerId,
         dealerIds: dealers.map(d => d.id),
         dealerCount: dealers.length,
+        outsideDealerCount: outsideInviteCount,
+        vehicleCount: attachedVehicleCount,
         hours: hours ?? AUCTION_DURATION_HOURS,
         notes: notes ?? null,
         vehicleRequestId: vehicleRequestId ?? null,
@@ -213,5 +296,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     endsAt: endsAt?.toISOString() ?? null,
     dealerCount: dealers.length,
     invitedDealerIds: dealers.map(d => d.id),
+    outsideDealerCount: outsideInviteCount,
+    vehicleCount: attachedVehicleCount,
   });
 }

@@ -342,6 +342,8 @@ model Auction {
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
   invitations       AuctionInvitation[]
+  outsideInvites    OutsideAuctionInvite[]
+  vehicles          AuctionVehicle[]
   buyer             Buyer               @relation(fields: [buyerId], references: [id])
   deposit           Deposit             @relation(fields: [depositId], references: [id])
   originalAuction   Auction?            @relation("AuctionRetry", fields: [originalAuctionId], references: [id])
@@ -349,6 +351,46 @@ model Auction {
   offers            Offer[]
 
   @@map("auctions")
+}
+
+model OutsideAuctionInvite {
+  id              String    @id @default(uuid())
+  auctionId       String    @map("auction_id")
+  dealershipName  String    @map("dealership_name")
+  contactName     String    @map("contact_name")
+  email           String
+  phone           String?
+  token           String    @unique @default(uuid())
+  sentAt          DateTime  @default(now()) @map("sent_at")
+  viewedAt        DateTime? @map("viewed_at")
+  respondedAt     DateTime? @map("responded_at")
+  offerOtdCents   Int?      @map("offer_otd_cents")
+  offerVehicleCents Int?    @map("offer_vehicle_cents")
+  offerTaxCents   Int?      @map("offer_tax_cents")
+  offerFeesCents  Int?      @map("offer_fees_cents")
+  offerNotes      String?   @map("offer_notes")
+  auction         Auction   @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+
+  @@index([auctionId])
+  @@map("outside_auction_invites")
+}
+
+model AuctionVehicle {
+  id              String         @id @default(uuid())
+  auctionId       String         @map("auction_id")
+  inventoryItemId String?        @map("inventory_item_id")
+  year            Int?
+  make            String?
+  model           String?
+  trim            String?
+  mileage         Int?
+  notes           String?
+  createdAt       DateTime       @default(now()) @map("created_at")
+  auction         Auction        @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem? @relation(fields: [inventoryItemId], references: [id])
+
+  @@index([auctionId])
+  @@map("auction_vehicles")
 }
 
 model AuctionInvitation {
@@ -623,6 +665,7 @@ model InventoryItem {
   createdAt           DateTime      @default(now()) @map("created_at")
   updatedAt           DateTime      @updatedAt @map("updated_at")
   dealer              Dealer?       @relation(fields: [dealerId], references: [id])
+  auctionVehicles     AuctionVehicle[]
 
   @@index([lane, isActive])
   @@index([sourceAdapter])

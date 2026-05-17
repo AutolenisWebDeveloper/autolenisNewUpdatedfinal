@@ -26,7 +26,28 @@ export async function GET(request: NextRequest, { params }: Props) {
     include: { items: true },
   });
 
-  return adminSuccess({ shortlist, itemCount: shortlist?.items.length ?? 0, maxItems: MAX_SHORTLIST_ITEMS });
+  // Include inventory details so callers (e.g., LaunchAuctionPanel) can render
+  // a useful summary without a second round-trip.
+  const inventoryIds = (shortlist?.items ?? []).map((i) => i.inventoryItemId);
+  const inventoryItems = inventoryIds.length > 0
+    ? await prisma.inventoryItem.findMany({
+        where: { id: { in: inventoryIds } },
+        select: { id: true, year: true, make: true, model: true, trim: true, mileage: true },
+      })
+    : [];
+  const inventoryById = new Map(inventoryItems.map((it) => [it.id, it]));
+
+  const enrichedShortlist = shortlist
+    ? {
+        ...shortlist,
+        items: shortlist.items.map((item) => ({
+          ...item,
+          inventoryItem: inventoryById.get(item.inventoryItemId) ?? null,
+        })),
+      }
+    : null;
+
+  return adminSuccess({ shortlist: enrichedShortlist, itemCount: shortlist?.items.length ?? 0, maxItems: MAX_SHORTLIST_ITEMS });
 }
 
 export async function POST(request: NextRequest, { params }: Props) {
