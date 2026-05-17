@@ -75,6 +75,7 @@ const PUBLIC_ROUTES = [
   "/request-a-car",
   "/request-vehicle",
   "/dealer-offer",
+  "/dealer-offer-outside",
   "/buyer-offer-review",
 ];
 

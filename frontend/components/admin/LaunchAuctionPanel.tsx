@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Gavel, Search, Loader2, CheckCircle2, AlertCircle, X, Clock, ExternalLink,
+  ChevronDown, ChevronRight, Plus, Trash2, Car,
 } from "lucide-react";
 
 interface ActiveDealer {
@@ -14,6 +15,41 @@ interface ActiveDealer {
   currentAuctionLoad: number;
 }
 
+interface OutsideDealerInput {
+  dealershipName: string;
+  contactName: string;
+  email: string;
+  phone: string;
+}
+
+interface ManualVehicleInput {
+  year: string;
+  make: string;
+  model: string;
+  trim: string;
+  mileage: string;
+  notes: string;
+}
+
+interface ShortlistVehicle {
+  inventoryItemId: string;
+  year: number;
+  make: string;
+  model: string;
+  trim: string | null;
+  mileage: number | null;
+}
+
+type VehicleMode = "shortlist" | "manual" | "skip";
+
+function emptyOutsideDealer(): OutsideDealerInput {
+  return { dealershipName: "", contactName: "", email: "", phone: "" };
+}
+
+function emptyVehicle(): ManualVehicleInput {
+  return { year: "", make: "", model: "", trim: "", mileage: "", notes: "" };
+}
+
 interface Props {
   buyerId: string;
   buyerName: string;
@@ -23,6 +59,8 @@ interface Props {
 interface LaunchResult {
   auctionId: string;
   dealerCount: number;
+  outsideDealerCount: number;
+  vehicleCount: number;
   endsAt: string | null;
 }
 
@@ -43,6 +81,98 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [result, setResult] = useState<LaunchResult | null>(null);
+
+  // Outside dealers
+  const [outsideOpen, setOutsideOpen] = useState(false);
+  const [outsideDealers, setOutsideDealers] = useState<OutsideDealerInput[]>([]);
+
+  // Vehicles section
+  const [vehicleMode, setVehicleMode] = useState<VehicleMode>("skip");
+  const [manualVehicles, setManualVehicles] = useState<ManualVehicleInput[]>([emptyVehicle()]);
+  const [shortlist, setShortlist] = useState<ShortlistVehicle[]>([]);
+  const [shortlistLoading, setShortlistLoading] = useState(false);
+  const [shortlistError, setShortlistError] = useState<string | null>(null);
+  const [selectedShortlistIds, setSelectedShortlistIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (vehicleMode !== "shortlist") return;
+    let cancelled = false;
+    setShortlistLoading(true);
+    setShortlistError(null);
+    fetch(`/api/admin/buyers/${buyerId}/shortlist`)
+      .then(async r => {
+        const json = await r.json() as {
+          success?: boolean;
+          data?: {
+            shortlist?: {
+              items: Array<{
+                inventoryItemId: string;
+                inventoryItem: {
+                  id: string;
+                  year: number;
+                  make: string;
+                  model: string;
+                  trim: string | null;
+                  mileage: number | null;
+                } | null;
+              }>;
+            } | null;
+          };
+          error?: { message: string };
+        };
+        if (cancelled) return;
+        if (!json.success) {
+          setShortlistError(json.error?.message ?? "Failed to load shortlist");
+          setShortlist([]);
+          return;
+        }
+        const items = json.data?.shortlist?.items ?? [];
+        setShortlist(items.map(i => ({
+          inventoryItemId: i.inventoryItemId,
+          year:    i.inventoryItem?.year    ?? 0,
+          make:    i.inventoryItem?.make    ?? "",
+          model:   i.inventoryItem?.model   ?? "",
+          trim:    i.inventoryItem?.trim    ?? null,
+          mileage: i.inventoryItem?.mileage ?? null,
+        })));
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setShortlistError(err instanceof Error ? err.message : "Network error");
+        setShortlist([]);
+      })
+      .finally(() => { if (!cancelled) setShortlistLoading(false); });
+    return () => { cancelled = true; };
+  }, [vehicleMode, buyerId]);
+
+  function updateOutsideDealer(idx: number, patch: Partial<OutsideDealerInput>) {
+    setOutsideDealers(prev => prev.map((d, i) => i === idx ? { ...d, ...patch } : d));
+  }
+  function removeOutsideDealer(idx: number) {
+    setOutsideDealers(prev => prev.filter((_, i) => i !== idx));
+  }
+  function addOutsideDealer() {
+    if (outsideDealers.length >= 8) return;
+    setOutsideDealers(prev => [...prev, emptyOutsideDealer()]);
+  }
+
+  function updateManualVehicle(idx: number, patch: Partial<ManualVehicleInput>) {
+    setManualVehicles(prev => prev.map((v, i) => i === idx ? { ...v, ...patch } : v));
+  }
+  function removeManualVehicle(idx: number) {
+    setManualVehicles(prev => prev.filter((_, i) => i !== idx));
+  }
+  function addManualVehicle() {
+    if (manualVehicles.length >= 10) return;
+    setManualVehicles(prev => [...prev, emptyVehicle()]);
+  }
+  function toggleShortlistVehicle(id: string) {
+    setSelectedShortlistIds(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -103,6 +233,54 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
 
   async function launch() {
     if (!canSubmit) return;
+
+    // Build outside dealers payload (only fully filled entries)
+    const outsidePayload = outsideDealers
+      .map(d => ({
+        dealershipName: d.dealershipName.trim(),
+        contactName:    d.contactName.trim(),
+        email:          d.email.trim(),
+        phone:          d.phone.trim() || undefined,
+      }))
+      .filter(d => d.dealershipName && d.contactName && d.email);
+    for (const d of outsidePayload) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email)) {
+        setSubmitError(`Invalid outside dealer email: ${d.email}`);
+        return;
+      }
+    }
+    if (outsidePayload.length > 8) {
+      setSubmitError("Maximum 8 outside dealers per auction");
+      return;
+    }
+
+    // Build vehicles payload based on mode
+    let vehiclesPayload: Array<{
+      inventoryItemId?: string;
+      year?: number;
+      make?: string;
+      model?: string;
+      trim?: string;
+      mileage?: number;
+      notes?: string;
+    }> = [];
+    if (vehicleMode === "shortlist") {
+      vehiclesPayload = Array.from(selectedShortlistIds).map(id => ({ inventoryItemId: id }));
+    } else if (vehicleMode === "manual") {
+      for (const v of manualVehicles) {
+        const year = parseInt(v.year, 10);
+        if (!year || !v.make.trim() || !v.model.trim()) continue;
+        vehiclesPayload.push({
+          year,
+          make:    v.make.trim(),
+          model:   v.model.trim(),
+          trim:    v.trim.trim()    || undefined,
+          mileage: v.mileage ? parseInt(v.mileage, 10) : undefined,
+          notes:   v.notes.trim()   || undefined,
+        });
+      }
+    }
+
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -114,11 +292,13 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
           reason: reason.trim(),
           hours: effectiveHours,
           notes: notes.trim() || undefined,
+          outsideDealers: outsidePayload.length > 0 ? outsidePayload : undefined,
+          vehicles:       vehiclesPayload.length > 0 ? vehiclesPayload : undefined,
         }),
       });
       const json = await res.json() as {
         success?: boolean;
-        data?: { auctionId: string; dealerCount: number; endsAt: string | null };
+        data?: { auctionId: string; dealerCount: number; outsideDealerCount?: number; vehicleCount?: number; endsAt: string | null };
         error?: { message: string };
       };
       if (!json.success || !json.data) {
@@ -128,6 +308,8 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
       setResult({
         auctionId: json.data.auctionId,
         dealerCount: json.data.dealerCount,
+        outsideDealerCount: json.data.outsideDealerCount ?? 0,
+        vehicleCount: json.data.vehicleCount ?? 0,
         endsAt: json.data.endsAt,
       });
       onLaunched?.(json.data.auctionId);
@@ -147,6 +329,8 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
             <h3 className="text-sm font-bold text-slate-900">Auction launched</h3>
             <p className="text-xs text-slate-500 mt-1">
               {result.dealerCount} dealer{result.dealerCount !== 1 ? "s" : ""} invited
+              {result.outsideDealerCount > 0 && ` · ${result.outsideDealerCount} outside dealer${result.outsideDealerCount !== 1 ? "s" : ""}`}
+              {result.vehicleCount > 0 && ` · ${result.vehicleCount} vehicle${result.vehicleCount !== 1 ? "s" : ""}`}
               {result.endsAt && ` · Closes ${new Date(result.endsAt).toLocaleString()}`}
             </p>
           </div>
@@ -234,6 +418,229 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
             })}
           </div>
         ))}
+      </div>
+
+      {/* Outside Dealers (optional) */}
+      <div className="border border-slate-200 rounded-xl p-3 mb-4" data-testid="outside-dealers-section">
+        <button
+          type="button"
+          onClick={() => setOutsideOpen(o => !o)}
+          className="w-full flex items-center justify-between text-left"
+        >
+          <div className="flex items-center gap-2">
+            {outsideOpen ? <ChevronDown size={13} className="text-slate-400" /> : <ChevronRight size={13} className="text-slate-400" />}
+            <span className="text-xs font-semibold text-slate-700">
+              Invite Outside Dealers <span className="text-slate-400 font-normal">(optional)</span>
+              {outsideDealers.length > 0 && <span className="text-[#0B5FD1]"> · {outsideDealers.length}</span>}
+            </span>
+          </div>
+        </button>
+        {outsideOpen && (
+          <div className="mt-3 space-y-3">
+            {outsideDealers.length === 0 && (
+              <p className="text-[11px] text-slate-400">
+                Add up to 8 outside (non-platform) dealers. They&apos;ll receive an email with a token link to submit an offer — no AutoLenis account required.
+              </p>
+            )}
+            {outsideDealers.map((d, idx) => (
+              <div key={idx} className="border border-slate-200 rounded-lg p-3 space-y-2" data-testid={`outside-dealer-row-${idx}`}>
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Outside dealer {idx + 1}</p>
+                  <button type="button" onClick={() => removeOutsideDealer(idx)} className="text-slate-400 hover:text-red-500" aria-label="Remove">
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={d.dealershipName}
+                    onChange={e => updateOutsideDealer(idx, { dealershipName: e.target.value })}
+                    placeholder="Dealership name *"
+                    data-testid={`outside-dealer-${idx}-dealership`}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                  />
+                  <input
+                    type="text"
+                    value={d.contactName}
+                    onChange={e => updateOutsideDealer(idx, { contactName: e.target.value })}
+                    placeholder="Contact name *"
+                    data-testid={`outside-dealer-${idx}-contact`}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                  />
+                  <input
+                    type="email"
+                    value={d.email}
+                    onChange={e => updateOutsideDealer(idx, { email: e.target.value })}
+                    placeholder="Email *"
+                    data-testid={`outside-dealer-${idx}-email`}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                  />
+                  <input
+                    type="tel"
+                    value={d.phone}
+                    onChange={e => updateOutsideDealer(idx, { phone: e.target.value })}
+                    placeholder="Phone"
+                    data-testid={`outside-dealer-${idx}-phone`}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                  />
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={addOutsideDealer}
+              disabled={outsideDealers.length >= 8}
+              data-testid="outside-dealer-add-btn"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:text-[#0944a8] disabled:text-slate-300"
+            >
+              <Plus size={12} /> Add outside dealer{outsideDealers.length >= 8 ? " (max 8)" : ""}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Vehicles section */}
+      <div className="border border-slate-200 rounded-xl p-3 mb-4" data-testid="vehicles-section">
+        <div className="flex items-center gap-2 mb-3">
+          <Car size={13} className="text-slate-500" />
+          <span className="text-xs font-semibold text-slate-700">Vehicles <span className="text-slate-400 font-normal">(optional)</span></span>
+        </div>
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          {([
+            { id: "shortlist", label: "From shortlist" },
+            { id: "manual",    label: "Manual entry"  },
+            { id: "skip",      label: "Skip"          },
+          ] as const).map(opt => (
+            <button
+              type="button"
+              key={opt.id}
+              onClick={() => setVehicleMode(opt.id)}
+              data-testid={`vehicle-mode-${opt.id}`}
+              className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border ${
+                vehicleMode === opt.id
+                  ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                  : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {vehicleMode === "shortlist" && (
+          <div data-testid="vehicle-shortlist">
+            {shortlistLoading && <p className="text-[11px] text-slate-400">Loading shortlist…</p>}
+            {shortlistError && <p className="text-[11px] text-red-600">{shortlistError}</p>}
+            {!shortlistLoading && !shortlistError && shortlist.length === 0 && (
+              <p className="text-[11px] text-slate-400">No shortlisted vehicles yet. Use Manual entry or Skip.</p>
+            )}
+            <div className="space-y-1.5">
+              {shortlist.map(v => {
+                const checked = selectedShortlistIds.has(v.inventoryItemId);
+                return (
+                  <label
+                    key={v.inventoryItemId}
+                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer ${checked ? "bg-blue-50/40 border border-blue-200" : "border border-slate-200"}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleShortlistVehicle(v.inventoryItemId)}
+                      data-testid={`shortlist-vehicle-${v.inventoryItemId}`}
+                      className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B5FD1] focus:ring-0"
+                    />
+                    <span className="text-xs text-slate-700 truncate">
+                      {v.year || "—"} {v.make} {v.model}{v.trim ? ` ${v.trim}` : ""}
+                      {v.mileage ? ` · ${v.mileage.toLocaleString()} mi` : ""}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {vehicleMode === "manual" && (
+          <div className="space-y-3" data-testid="vehicle-manual">
+            {manualVehicles.map((v, idx) => (
+              <div key={idx} className="border border-slate-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Vehicle {idx + 1}</p>
+                  {manualVehicles.length > 1 && (
+                    <button type="button" onClick={() => removeManualVehicle(idx)} className="text-slate-400 hover:text-red-500" aria-label="Remove">
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  <input
+                    type="number"
+                    value={v.year}
+                    onChange={e => updateManualVehicle(idx, { year: e.target.value })}
+                    placeholder="Year *"
+                    data-testid={`manual-vehicle-${idx}-year`}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                  />
+                  <input
+                    type="text"
+                    value={v.make}
+                    onChange={e => updateManualVehicle(idx, { make: e.target.value })}
+                    placeholder="Make *"
+                    data-testid={`manual-vehicle-${idx}-make`}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                  />
+                  <input
+                    type="text"
+                    value={v.model}
+                    onChange={e => updateManualVehicle(idx, { model: e.target.value })}
+                    placeholder="Model *"
+                    data-testid={`manual-vehicle-${idx}-model`}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                  />
+                  <input
+                    type="text"
+                    value={v.trim}
+                    onChange={e => updateManualVehicle(idx, { trim: e.target.value })}
+                    placeholder="Trim"
+                    data-testid={`manual-vehicle-${idx}-trim`}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    value={v.mileage}
+                    onChange={e => updateManualVehicle(idx, { mileage: e.target.value })}
+                    placeholder="Mileage"
+                    data-testid={`manual-vehicle-${idx}-mileage`}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                  />
+                  <input
+                    type="text"
+                    value={v.notes}
+                    onChange={e => updateManualVehicle(idx, { notes: e.target.value })}
+                    placeholder="Notes"
+                    data-testid={`manual-vehicle-${idx}-notes`}
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                  />
+                </div>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={addManualVehicle}
+              disabled={manualVehicles.length >= 10}
+              data-testid="manual-vehicle-add-btn"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:text-[#0944a8] disabled:text-slate-300"
+            >
+              <Plus size={12} /> Add vehicle{manualVehicles.length >= 10 ? " (max 10)" : ""}
+            </button>
+          </div>
+        )}
+
+        {vehicleMode === "skip" && (
+          <p className="text-[11px] text-slate-400">Launch without attaching specific vehicles. You can add them later.</p>
+        )}
       </div>
 
       {/* Duration */}
