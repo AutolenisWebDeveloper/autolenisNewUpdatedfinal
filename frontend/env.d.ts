@@ -44,6 +44,10 @@ declare namespace NodeJS {
     // Communication (Resend ONLY)
     RESEND_API_KEY: string;
     FROM_NAME: string;
+    // Ops inbox for AutoLenis admin alerts (new MANUAL_REVIEW / OFAC prequals,
+    // provider errors, dealer-application notifications, morning briefings).
+    // Senders fail safe and skip if unset.
+    ADMIN_NOTIFICATION_EMAIL?: string;
 
     // AI — Groq API ONLY (no OpenAI/Anthropic/Gemini/Cohere)
     GROQ_API_KEY: string;
