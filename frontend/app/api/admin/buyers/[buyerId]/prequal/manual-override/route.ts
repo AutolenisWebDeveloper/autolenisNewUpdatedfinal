@@ -174,7 +174,9 @@ export async function POST(request: NextRequest, { params }: Props) {
       year: "numeric",
     });
 
-    let adverseActionStatus: "sent" | "duplicate" | "error" = "error";
+    // See prequal.service.ts for the SENT/DUPLICATE/FAILED/DEV_SKIPPED contract —
+    // we map on the discriminated outcome, not on the boolean `sent`.
+    let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
     let adverseActionErrorMessage: string | null = null;
     try {
       const sendResult = await sendAdverseActionEmail({
@@ -184,7 +186,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         prequalApplicationId: prequal.id,
         decisionTimestamp: prequal.updatedAt.toISOString(),
       });
-      adverseActionStatus = sendResult.sent ? "sent" : "duplicate";
+      outcome = sendResult.outcome;
     } catch (emailErr) {
       console.error("[admin/prequal/manual-override] Failed to send adverse action email:", emailErr);
       adverseActionErrorMessage =
@@ -193,9 +195,9 @@ export async function POST(request: NextRequest, { params }: Props) {
 
     try {
       const eventType =
-        adverseActionStatus === "sent"
+        outcome === "SENT"
           ? "ADVERSE_ACTION_NOTICE_SENT"
-          : adverseActionStatus === "duplicate"
+          : outcome === "DUPLICATE"
             ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
             : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
       await prisma.complianceEvent.create({
@@ -207,6 +209,7 @@ export async function POST(request: NextRequest, { params }: Props) {
             sentTo: buyer.user.email,
             sentAt: new Date().toISOString(),
             decisionTimestamp: prequal.updatedAt.toISOString(),
+            sendOutcome: outcome,
             source: "admin_manual",
             ...(adverseActionErrorMessage
               ? { errorMessage: adverseActionErrorMessage }

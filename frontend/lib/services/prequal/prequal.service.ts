@@ -256,7 +256,11 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
       day: "numeric",
       year: "numeric",
     });
-    let adverseActionStatus: "sent" | "duplicate" | "error" = "error";
+    // Branch on the discriminated `outcome` — `sent === false` alone is
+    // ambiguous (DUPLICATE / FAILED / DEV_SKIPPED). Mislabeling a Resend
+    // outage as SUPPRESSED_DUPLICATE would leave a false FCRA § 615 audit
+    // trail.
+    let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
     let adverseActionErrorMessage: string | null = null;
     try {
       const result = await sendAdverseActionEmail({
@@ -266,7 +270,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         prequalApplicationId: prequal.id,
         decisionTimestamp: prequal.updatedAt.toISOString(),
       });
-      adverseActionStatus = result.sent ? "sent" : "duplicate";
+      outcome = result.outcome;
     } catch (emailErr) {
       console.error("[prequal] Failed to send adverse action email:", emailErr);
       adverseActionErrorMessage =
@@ -275,9 +279,9 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
 
     try {
       const eventType =
-        adverseActionStatus === "sent"
+        outcome === "SENT"
           ? "ADVERSE_ACTION_NOTICE_SENT"
-          : adverseActionStatus === "duplicate"
+          : outcome === "DUPLICATE"
             ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
             : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
       await prisma.complianceEvent.create({
@@ -289,6 +293,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
             sentTo: buyer.user.email,
             sentAt: new Date().toISOString(),
             decisionTimestamp: prequal.updatedAt.toISOString(),
+            sendOutcome: outcome,
             ...(adverseActionErrorMessage
               ? { errorMessage: adverseActionErrorMessage }
               : {}),

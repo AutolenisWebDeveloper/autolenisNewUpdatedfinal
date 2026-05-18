@@ -68,7 +68,8 @@ async function main() {
     if (result.sent) {
       console.log(`✅ Resend accepted (id=${result.resendId})`);
     } else {
-      console.log(`⚠️ Email skipped or already sent (resendId=${result.resendId ?? "n/a"})`);
+      const resendId = result.outcome === "DUPLICATE" ? result.resendId : undefined;
+      console.log(`⚠️ Email skipped or already sent (outcome=${result.outcome}, resendId=${resendId ?? "n/a"})`);
     }
   } catch (e) {
     console.error("❌ Resend send failed:", e);

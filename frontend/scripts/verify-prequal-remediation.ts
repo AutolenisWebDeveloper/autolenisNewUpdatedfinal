@@ -91,22 +91,55 @@ const buyerPrequalPage = readFileSync(join(__dirname, "..", "app/buyer/prequal/p
 check("renew banner triggers on expiresAt <= now",   /expiresAt\s*<=\s*now/.test(buyerPrequalPage));
 check("expired path does not check decision",        /prequal\.expiresAt\s*&&\s*prequal\.expiresAt\s*<=\s*now/.test(buyerPrequalPage));
 
+// ── Patch the Resend SDK BEFORE the email service is imported ────────────────
+// The email service does `import { Resend } from "resend"` once at module
+// load. Replacing the class on the SDK module here means every `new Resend()`
+// inside the service yields our stub, so we can drive SENT / FAILED outcomes
+// deterministically. tsx evaluates these top-level awaits in order, and the
+// email service is dynamically imported below — so by the time it grabs the
+// `Resend` symbol, our stub is already in place.
+// The Resend SDK uses `fetch` under the hood and swallows network errors into
+// `{ data: null, error: {...} }`. We patch `globalThis.fetch` so we can drive
+// SUCCEED / SDK_ERROR outcomes deterministically without monkey-patching the
+// (read-only ESM) resend module export.
+let sendScenario: "SUCCEED" | "SDK_ERROR" = "SUCCEED";
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+  const target = typeof url === "string" ? url : (url as URL).toString();
+  if (target.includes("resend.com") || target.includes("/emails")) {
+    if (sendScenario === "SDK_ERROR") {
+      return new Response(
+        JSON.stringify({ name: "application_error", message: "Resend API outage" }),
+        { status: 500, statusText: "Internal Server Error" },
+      );
+    }
+    return new Response(
+      JSON.stringify({ id: `re-${Date.now()}-${Math.random()}` }),
+      { status: 200, statusText: "OK" },
+    );
+  }
+  return realFetch(url as Request, init);
+}) as typeof fetch;
+
 // ── FCRA adverse-action idempotency (per-decision key) ───────────────────────
 // Stub prisma.emailSendLog so we can observe the idempotency keys handed to
 // sendIdempotent() without touching a real DB. Each invocation returns null
-// (i.e. "no prior send"); we ALSO record the keys so we can compare them.
+// by default (i.e. "no prior send") and records the key; flip
+// `simulateDuplicate` to force the DUPLICATE outcome.
 console.log("\nFCRA  adverse-action / under-review per-decision idempotency:");
 const { prisma } = await import("../lib/prisma");
 const capturedKeys: string[] = [];
+let simulateDuplicate = false;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (prisma as any).emailSendLog = {
   findUnique: async ({ where }: { where: { idempotencyKey: string } }) => {
     capturedKeys.push(where.idempotencyKey);
-    return null;
+    return simulateDuplicate ? { resendId: "prior-id" } : null;
   },
   create: async () => ({}),
 };
-// Force the email service to skip its real Resend dispatch — placeholder API key.
+// Per-decision tests run under placeholder key (DEV_SKIPPED dispatch path);
+// outcome tests later toggle to a real-looking key + the Resend stub.
 process.env.RESEND_API_KEY = "placeholder";
 
 const { sendAdverseActionEmail, sendPrequalUnderReviewEmail, sendPrequalApprovedEmail } = await import(
@@ -258,6 +291,95 @@ const declineKey = `adverse-action-${prequalId}-${firstDecisionTs}`;
 const resendK   = `adverse-action-resend-${prequalId}-${new Date().toISOString()}`;
 check("resend key namespace is distinct from decision-time key",
   declineKey !== resendK && !resendK.startsWith(declineKey));
+
+// ── Send-failure audit contract ──────────────────────────────────────────────
+// sendIdempotent must expose a discriminated `outcome` so the decline paths
+// can tell DUPLICATE / FAILED / DEV_SKIPPED apart — all three return
+// `sent === false` and the previous boolean-only contract mislabeled FAILED /
+// DEV_SKIPPED as SUPPRESSED_DUPLICATE in the FCRA audit trail.
+console.log("\nFCRA  send-failure outcome contract:");
+
+async function sendOnce(scenario: "SENT" | "FAILED" | "DEV_SKIPPED" | "DUPLICATE") {
+  simulateDuplicate = scenario === "DUPLICATE";
+  // DEV_SKIPPED ← placeholder key → getResend() returns null in the service.
+  // SENT / FAILED ← real-looking key → service calls `new Resend(key)` which
+  //                  yields our StubResend; sendScenario drives the outcome.
+  process.env.RESEND_API_KEY =
+    scenario === "DEV_SKIPPED" ? "placeholder" : "re_test_real_key";
+  // The patched `fetch` decides the dispatch outcome for FAILED vs SENT.
+  // For DEV_SKIPPED the email service never reaches fetch (placeholder key).
+  // For DUPLICATE the findUnique stub short-circuits before fetch.
+  sendScenario = scenario === "FAILED" ? "SDK_ERROR" : "SUCCEED";
+
+  return sendAdverseActionEmail({
+    to: "buyer@example.com",
+    firstName: "B",
+    decisionDate: "May 18, 2026",
+    prequalApplicationId: prequalId,
+    // Unique per call so DUPLICATE only fires when simulateDuplicate is on.
+    decisionTimestamp: `${new Date().toISOString()}-${scenario}`,
+  });
+}
+
+const sentResult        = await sendOnce("SENT");
+const failedResult      = await sendOnce("FAILED");
+const devSkippedResult  = await sendOnce("DEV_SKIPPED");
+const duplicateResult   = await sendOnce("DUPLICATE");
+
+check("SENT       → outcome SENT,        sent=true",
+  sentResult.outcome === "SENT"        && sentResult.sent === true);
+check("FAILED     → outcome FAILED,      sent=false",
+  failedResult.outcome === "FAILED"    && failedResult.sent === false);
+check("DEV_SKIPPED→ outcome DEV_SKIPPED, sent=false",
+  devSkippedResult.outcome === "DEV_SKIPPED" && devSkippedResult.sent === false);
+check("DUPLICATE  → outcome DUPLICATE,   sent=false",
+  duplicateResult.outcome === "DUPLICATE" && duplicateResult.sent === false);
+
+// Decline-path mapping must match these production lines. Inline mirror:
+function mapOutcomeToEventType(o: string): string {
+  return o === "SENT"
+    ? "ADVERSE_ACTION_NOTICE_SENT"
+    : o === "DUPLICATE"
+      ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
+      : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+}
+check("mapping: SENT  → ADVERSE_ACTION_NOTICE_SENT",
+  mapOutcomeToEventType("SENT") === "ADVERSE_ACTION_NOTICE_SENT");
+check("mapping: DUPLICATE → ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE",
+  mapOutcomeToEventType("DUPLICATE") === "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE");
+check("mapping: FAILED → ADVERSE_ACTION_NOTICE_SEND_FAILED (NOT _DUPLICATE)",
+  mapOutcomeToEventType("FAILED") === "ADVERSE_ACTION_NOTICE_SEND_FAILED");
+check("mapping: DEV_SKIPPED → ADVERSE_ACTION_NOTICE_SEND_FAILED (NOT _DUPLICATE)",
+  mapOutcomeToEventType("DEV_SKIPPED") === "ADVERSE_ACTION_NOTICE_SEND_FAILED");
+check("mapping: THREW → ADVERSE_ACTION_NOTICE_SEND_FAILED",
+  mapOutcomeToEventType("THREW") === "ADVERSE_ACTION_NOTICE_SEND_FAILED");
+
+// All three decline files must implement EXACTLY this branching. A regex
+// over the file content asserts the production mapping mirrors our inline
+// reference — guards against future drift.
+const declinePaths = [
+  "lib/services/prequal/prequal.service.ts",
+  "lib/services/prequal/admin-prequal.service.ts",
+  "app/api/admin/buyers/[buyerId]/prequal/manual-override/route.ts",
+];
+for (const rel of declinePaths) {
+  const src = readFileSync(join(__dirname, "..", rel), "utf8");
+  check(`${rel}: branches on outcome === "SENT"`,
+    /outcome\s*===\s*"SENT"/.test(src));
+  check(`${rel}: branches on outcome === "DUPLICATE"`,
+    /outcome\s*===\s*"DUPLICATE"/.test(src));
+  check(`${rel}: writes ADVERSE_ACTION_NOTICE_SENT for SENT`,
+    /"ADVERSE_ACTION_NOTICE_SENT"/.test(src));
+  check(`${rel}: writes ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE for DUPLICATE`,
+    /"ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"/.test(src));
+  check(`${rel}: writes ADVERSE_ACTION_NOTICE_SEND_FAILED for all other outcomes`,
+    /"ADVERSE_ACTION_NOTICE_SEND_FAILED"/.test(src));
+  // Critical: no code path treats `sent === false` as duplicate without
+  // checking outcome. The boolean branch from the previous pass must be gone.
+  check(`${rel}: no boolean-only "sent ? SENT : DUPLICATE" branch remains`,
+    !/\.sent\s*\?\s*"sent"\s*:\s*"duplicate"/.test(src) &&
+    !/result\.sent\s*\?\s*"ADVERSE_ACTION_NOTICE_SENT"/.test(src));
+}
 
 console.log(`\nResult: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

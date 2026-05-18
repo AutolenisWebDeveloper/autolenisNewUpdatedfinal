@@ -86,6 +86,16 @@ const FROM_EMAIL = "noreply@autolenis.com";
 const FROM = `${FROM_NAME} <${FROM_EMAIL}>`;
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
+// Discriminated outcome of a send attempt. `sent` is retained for backward
+// compatibility with existing boolean callers; new logic should branch on
+// `outcome` so DUPLICATE / FAILED / DEV_SKIPPED can be told apart — they all
+// share `sent === false` but require very different audit handling.
+export type EmailSendOutcome =
+  | { sent: true;  outcome: "SENT";        resendId?: string }
+  | { sent: false; outcome: "DUPLICATE";   resendId?: string }
+  | { sent: false; outcome: "FAILED" }
+  | { sent: false; outcome: "DEV_SKIPPED" };
+
 // Idempotent send — check EmailSendLog before sending
 async function sendIdempotent(params: {
   idempotencyKey: string;
@@ -93,7 +103,7 @@ async function sendIdempotent(params: {
   subject: string;
   html: string;
   templateId: string;
-}): Promise<{ sent: boolean; resendId?: string }> {
+}): Promise<EmailSendOutcome> {
   // Check idempotency — never send duplicate emails. If the lookup fails
   // (e.g. transient DB connectivity issue), log and proceed with the send
   // rather than silently skipping it.
@@ -107,11 +117,11 @@ async function sendIdempotent(params: {
     // Non-blocking — allow send to proceed even if idempotency check fails
   }
   if (existing) {
-    return { sent: false, resendId: existing.resendId ?? undefined };
+    return { sent: false, outcome: "DUPLICATE", resendId: existing.resendId ?? undefined };
   }
 
   let resendId: string | undefined;
-  let status = "SENT";
+  let status: "SENT" | "FAILED" | "DEV_SKIPPED" = "SENT";
 
   try {
     const apiKey = process.env.RESEND_API_KEY;
@@ -133,7 +143,19 @@ async function sendIdempotent(params: {
           subject: params.subject,
           html: params.html,
         });
-        resendId = result.data?.id ?? undefined;
+        // The Resend SDK swallows network/HTTP errors internally and surfaces
+        // them via `result.error` rather than throwing. Treat any non-success
+        // response as FAILED so the audit trail records a real outage instead
+        // of silently logging as SENT with no resendId.
+        if (result.error || !result.data?.id) {
+          console.error(
+            `[EMAIL] Resend dispatch failed for ${params.to}:`,
+            result.error ?? "no id returned",
+          );
+          status = "FAILED";
+        } else {
+          resendId = result.data.id;
+        }
       }
     }
   } catch (err) {
@@ -152,7 +174,9 @@ async function sendIdempotent(params: {
     },
   });
 
-  return { sent: status === "SENT", resendId };
+  if (status === "SENT")        return { sent: true,  outcome: "SENT", resendId };
+  if (status === "FAILED")      return { sent: false, outcome: "FAILED" };
+  /* DEV_SKIPPED */              return { sent: false, outcome: "DEV_SKIPPED" };
 }
 
 // ─── Email Templates ────────────────────────────────────────────────────────

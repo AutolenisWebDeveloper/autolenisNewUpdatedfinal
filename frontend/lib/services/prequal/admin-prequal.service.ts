@@ -547,7 +547,9 @@ export async function runAdminIPredictPrequalForBuyer(
       year: "numeric",
     });
 
-    let adverseActionStatus: "sent" | "duplicate" | "error" = "error";
+    // See prequal.service.ts for the SENT/DUPLICATE/FAILED/DEV_SKIPPED contract —
+    // we map on the discriminated outcome, not on the boolean `sent`.
+    let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
     let adverseActionErrorMessage: string | null = null;
     try {
       const sendResult = await sendAdverseActionEmail({
@@ -557,7 +559,7 @@ export async function runAdminIPredictPrequalForBuyer(
         prequalApplicationId: prequal.id,
         decisionTimestamp: prequal.updatedAt.toISOString(),
       });
-      adverseActionStatus = sendResult.sent ? "sent" : "duplicate";
+      outcome = sendResult.outcome;
       adverseActionSent = sendResult.sent;
     } catch (err) {
       console.error("[admin-prequal] Failed to send adverse action email:", err);
@@ -566,9 +568,9 @@ export async function runAdminIPredictPrequalForBuyer(
 
     try {
       const eventType =
-        adverseActionStatus === "sent"
+        outcome === "SENT"
           ? "ADVERSE_ACTION_NOTICE_SENT"
-          : adverseActionStatus === "duplicate"
+          : outcome === "DUPLICATE"
             ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
             : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
       await prisma.complianceEvent.create({
@@ -580,6 +582,7 @@ export async function runAdminIPredictPrequalForBuyer(
             sentTo: buyer.user.email,
             sentAt: new Date().toISOString(),
             decisionTimestamp: prequal.updatedAt.toISOString(),
+            sendOutcome: outcome,
             source: "admin_ipredict",
             adminId,
             consentSource,
