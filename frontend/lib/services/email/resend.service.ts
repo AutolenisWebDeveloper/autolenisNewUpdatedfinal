@@ -10,6 +10,16 @@ import {
   ADVERSE_ACTION_SUBJECT,
   renderAdverseActionEmail,
 } from "./templates/adverse-action";
+import {
+  PREQUAL_UNDER_REVIEW_SUBJECT,
+  renderPrequalUnderReviewEmail,
+} from "./templates/prequal-under-review";
+import {
+  ADMIN_PREQUAL_ALERT_SUBJECT_REVIEW,
+  ADMIN_PREQUAL_ALERT_SUBJECT_PROVIDER,
+  renderAdminPrequalAlertEmail,
+  type AdminPrequalAlertKind,
+} from "./templates/admin-prequal-alert";
 import { WELCOME_EMAIL_SUBJECT, renderWelcomeEmail } from "./templates/welcome";
 import { EMAIL_VERIFIED_SUBJECT, renderEmailVerifiedEmail } from "./templates/email-verified";
 import {
@@ -76,6 +86,16 @@ const FROM_EMAIL = "noreply@autolenis.com";
 const FROM = `${FROM_NAME} <${FROM_EMAIL}>`;
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
+// Discriminated outcome of a send attempt. `sent` is retained for backward
+// compatibility with existing boolean callers; new logic should branch on
+// `outcome` so DUPLICATE / FAILED / DEV_SKIPPED can be told apart — they all
+// share `sent === false` but require very different audit handling.
+export type EmailSendOutcome =
+  | { sent: true;  outcome: "SENT";        resendId?: string }
+  | { sent: false; outcome: "DUPLICATE";   resendId?: string }
+  | { sent: false; outcome: "FAILED" }
+  | { sent: false; outcome: "DEV_SKIPPED" };
+
 // Idempotent send — check EmailSendLog before sending
 async function sendIdempotent(params: {
   idempotencyKey: string;
@@ -83,7 +103,7 @@ async function sendIdempotent(params: {
   subject: string;
   html: string;
   templateId: string;
-}): Promise<{ sent: boolean; resendId?: string }> {
+}): Promise<EmailSendOutcome> {
   // Check idempotency — never send duplicate emails. If the lookup fails
   // (e.g. transient DB connectivity issue), log and proceed with the send
   // rather than silently skipping it.
@@ -97,11 +117,11 @@ async function sendIdempotent(params: {
     // Non-blocking — allow send to proceed even if idempotency check fails
   }
   if (existing) {
-    return { sent: false, resendId: existing.resendId ?? undefined };
+    return { sent: false, outcome: "DUPLICATE", resendId: existing.resendId ?? undefined };
   }
 
   let resendId: string | undefined;
-  let status = "SENT";
+  let status: "SENT" | "FAILED" | "DEV_SKIPPED" = "SENT";
 
   try {
     const apiKey = process.env.RESEND_API_KEY;
@@ -123,7 +143,19 @@ async function sendIdempotent(params: {
           subject: params.subject,
           html: params.html,
         });
-        resendId = result.data?.id ?? undefined;
+        // The Resend SDK swallows network/HTTP errors internally and surfaces
+        // them via `result.error` rather than throwing. Treat any non-success
+        // response as FAILED so the audit trail records a real outage instead
+        // of silently logging as SENT with no resendId.
+        if (result.error || !result.data?.id) {
+          console.error(
+            `[EMAIL] Resend dispatch failed for ${params.to}:`,
+            result.error ?? "no id returned",
+          );
+          status = "FAILED";
+        } else {
+          resendId = result.data.id;
+        }
       }
     }
   } catch (err) {
@@ -142,7 +174,9 @@ async function sendIdempotent(params: {
     },
   });
 
-  return { sent: status === "SENT", resendId };
+  if (status === "SENT")        return { sent: true,  outcome: "SENT", resendId };
+  if (status === "FAILED")      return { sent: false, outcome: "FAILED" };
+  /* DEV_SKIPPED */              return { sent: false, outcome: "DEV_SKIPPED" };
 }
 
 // ─── Email Templates ────────────────────────────────────────────────────────
@@ -193,10 +227,17 @@ export async function sendPrequalApprovedEmail(params: {
   tier: string | null;
   decisionDate: Date;
   expiryDate: Date;
+  /** Optional full override of the idempotency key — used by the admin
+   *  resend endpoint so a second resend on the same day isn't silently
+   *  collapsed by the day-granular default. Buyer-facing decision-time
+   *  callers leave this unset. */
+  idempotencyKey?: string;
 }) {
   const { to, firstName, maxOtdAmountCents, tier, expiryDate } = params;
   return sendIdempotent({
-    idempotencyKey: `prequal-approved-${to}-${params.decisionDate.toISOString().slice(0, 10)}`,
+    idempotencyKey:
+      params.idempotencyKey ??
+      `prequal-approved-${to}-${params.decisionDate.toISOString().slice(0, 10)}`,
     to,
     templateId: "prequal-approved",
     subject: `You're Pre-Qualified — Here's Your Buying Power, ${firstName}`,
@@ -204,24 +245,67 @@ export async function sendPrequalApprovedEmail(params: {
   });
 }
 
-export async function sendPrequalDeclinedEmail(to: string, buyerName: string) {
+// Buyer email for MANUAL_REVIEW / OFAC_REVIEW / OFAC_ESCALATED states.
+// OFAC-silent — the copy never mentions OFAC, sanctions, or the cause; the
+// buyer only knows their application is being reviewed and to expect an
+// update within 1–2 business days.
+//
+// Idempotency: keyed on prequalApplicationId + decisionTimestamp. The prequal
+// row is upserted in place (buyerId is @unique) so the id alone is stable
+// across a buyer's lifetime — re-entering MANUAL_REVIEW after a correction
+// cycle would otherwise be silently de-duplicated and the buyer never
+// re-notified. Pass the upserted row's `updatedAt.toISOString()` so each
+// genuine decision yields a unique key while a true intra-request double-send
+// still collapses.
+export async function sendPrequalUnderReviewEmail(params: {
+  to: string;
+  firstName: string;
+  prequalApplicationId: string;
+  decisionTimestamp: string;
+}) {
   return sendIdempotent({
-    idempotencyKey: `prequal-declined-${to}`,
-    to, templateId: "prequal-declined",
-    subject: "AutoLenis prequalification — update on your application",
-    html: `
-      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-        <div style="background:#0B5FD1;padding:32px;text-align:center">
-          <h1 style="color:#fff;margin:0">Application Update</h1>
-        </div>
-        <div style="padding:32px">
-          <p>Hi ${buyerName},</p>
-          <p>We were unable to pre-qualify you at this time based on your consumer report.</p>
-          <p>Under the Fair Credit Reporting Act, you have the right to obtain a free copy of your consumer report from MicroBilt Corporation (1-888-217-5866, www.microbilt.com) and to dispute any inaccuracies.</p>
-          <p>You may also provide your own bank pre-approval: <a href="${APP_URL}/buyer/prequal/external">Use my own financing</a></p>
-        </div>
-      </div>
-    `,
+    idempotencyKey: `prequal-under-review-${params.prequalApplicationId}-${params.decisionTimestamp}`,
+    to: params.to,
+    templateId: "prequal-under-review",
+    subject: PREQUAL_UNDER_REVIEW_SUBJECT,
+    html: renderPrequalUnderReviewEmail({ firstName: params.firstName }),
+  });
+}
+
+// Admin ops alert. Routed to ADMIN_NOTIFICATION_EMAIL — never hardcoded.
+// Returns { sent: false } silently when the env var is not configured so the
+// rest of the prequal flow is never blocked on ops email availability.
+export async function sendAdminPrequalAlertEmail(params: {
+  kind: AdminPrequalAlertKind;
+  buyerId: string;
+  buyerEmail: string;
+  decision: string;
+  providerReason?: string | null;
+  prequalApplicationId: string;
+}) {
+  const to = process.env.ADMIN_NOTIFICATION_EMAIL;
+  if (!to) {
+    console.warn(
+      "[EMAIL] ADMIN_NOTIFICATION_EMAIL not set — admin prequal alert skipped",
+    );
+    return { sent: false };
+  }
+  return sendIdempotent({
+    idempotencyKey: `admin-prequal-${params.kind.toLowerCase()}-${params.prequalApplicationId}`,
+    to,
+    templateId: "admin-prequal-alert",
+    subject:
+      params.kind === "REVIEW"
+        ? ADMIN_PREQUAL_ALERT_SUBJECT_REVIEW
+        : ADMIN_PREQUAL_ALERT_SUBJECT_PROVIDER,
+    html: renderAdminPrequalAlertEmail({
+      kind: params.kind,
+      buyerId: params.buyerId,
+      buyerEmail: params.buyerEmail,
+      decision: params.decision,
+      providerReason: params.providerReason ?? null,
+      appUrl: APP_URL,
+    }),
   });
 }
 
@@ -229,18 +313,37 @@ export async function sendPrequalDeclinedEmail(to: string, buyerName: string) {
 // consumer whose AutoLenis prequalification is DECLINED based in whole or
 // in part on a consumer report (MicroBilt iPredict). See
 // `templates/adverse-action.tsx` for the legally required content.
+//
+// Idempotency: the prequal row is upserted in place (buyerId is @unique) so
+// the prequal id alone is stable across a buyer's lifetime. Now that a
+// DECLINED prequal is non-valid (D-B) and re-submittable, a second genuine
+// decline MUST send its own § 615 notice — silently de-duplicating it would
+// be a compliance violation. We key on prequalApplicationId + decisionTimestamp
+// (pass the upserted row's `updatedAt.toISOString()` — Prisma bumps it on
+// every decision write) so each genuine decline yields a unique key while an
+// accidental double-send within the same request still de-dupes.
+//
+// The buyerEmail-only fallback key is retained for callers without an id
+// (none today, but kept defensively).
 export async function sendAdverseActionEmail(params: {
   to: string;
   firstName: string;
   decisionDate: string;
-  // Optional idempotency salt — pass the prequal application id so a fresh
-  // decline (e.g. admin-decline of a re-application) sends a new notice
-  // rather than being deduplicated against an earlier one.
   prequalApplicationId?: string;
+  /** Per-decision salt — typically `updatedAt.toISOString()` of the upserted
+   *  PreQualification row. Required whenever prequalApplicationId is provided
+   *  so that re-applications produce distinct keys. */
+  decisionTimestamp?: string;
+  /** Optional full override of the idempotency key — used by the admin
+   *  resend endpoint to guarantee every resend is dispatched. Buyer-facing
+   *  decision-time callers leave this unset so the per-decision keying
+   *  above governs de-duplication. */
+  idempotencyKey?: string;
 }) {
-  const idempotencyKey = params.prequalApplicationId
-    ? `adverse-action-${params.prequalApplicationId}`
+  const defaultKey = params.prequalApplicationId
+    ? `adverse-action-${params.prequalApplicationId}-${params.decisionTimestamp ?? params.decisionDate}`
     : `adverse-action-${params.to}`;
+  const idempotencyKey = params.idempotencyKey ?? defaultKey;
   return sendIdempotent({
     idempotencyKey,
     to: params.to,

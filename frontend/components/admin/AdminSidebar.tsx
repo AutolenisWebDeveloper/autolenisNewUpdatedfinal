@@ -32,10 +32,11 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Ops Dashboard", href: "/admin/ops-dashboard", icon: Activity },
   ]},
   { label: "Users", items: [
-    { label: "Buyers",      href: "/admin/buyers",      icon: Users },
-    { label: "Journey Map", href: "/admin/journey",     icon: ClipboardList },
-    { label: "Dealers",     href: "/admin/dealers",     icon: Building2 },
-    { label: "Affiliates",  href: "/admin/affiliates",  icon: Share2 },
+    { label: "Buyers",            href: "/admin/buyers",      icon: Users },
+    { label: "Prequalifications", href: "/admin/prequal",     icon: FileCheck },
+    { label: "Journey Map",       href: "/admin/journey",     icon: ClipboardList },
+    { label: "Dealers",           href: "/admin/dealers",     icon: Building2 },
+    { label: "Affiliates",        href: "/admin/affiliates",  icon: Share2 },
   ]},
   { label: "Transactions", items: [
     { label: "Auctions", href: "/admin/auctions", icon: Gavel },

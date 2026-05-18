@@ -220,11 +220,23 @@ function buildPayload(buyer: MicroBiltBuyerPII, gate: IncomeGateResult) {
 
 export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResult> {
   // ── Sandbox bypass ──────────────────────────────────────────────────────────
+  // Mock output requires an EXPLICIT opt-in via MICROBILT_SANDBOX=true. We
+  // never fall back to mock APPROVED on misconfiguration — that would turn a
+  // production env mistake into silent fake approvals. When credentials are
+  // missing/placeholder outside sandbox mode we route to MANUAL_REVIEW
+  // (CONFIG_ERROR) so a human can fix the deployment.
   if (process.env.MICROBILT_SANDBOX === "true") return mockIPredict();
 
   const reportUrl = process.env.IPREDICT_GET_REPORT_URL;
   const clientId  = process.env.MICROBILT_CLIENT_ID;
-  if (!reportUrl || !clientId || clientId.includes("placeholder")) return mockIPredict();
+  if (!reportUrl || !clientId || clientId.includes("placeholder")) {
+    console.error(
+      "[microbilt] CONFIG_ERROR: MICROBILT_CLIENT_ID or IPREDICT_GET_REPORT_URL " +
+      "is missing or contains a placeholder, and MICROBILT_SANDBOX is not 'true'. " +
+      "Routing prequalification to MANUAL_REVIEW until deployment env is fixed.",
+    );
+    return errorResult("CONFIG_ERROR");
+  }
 
   // ── STEP 1: Compute income gate ────────────────────────────────────────────
   const hasIncome = !!args.monthlyIncomeCents && args.monthlyIncomeCents > 0;

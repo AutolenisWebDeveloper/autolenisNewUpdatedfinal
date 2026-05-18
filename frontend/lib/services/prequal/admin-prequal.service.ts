@@ -27,6 +27,8 @@ import { isPrequalValid } from "./prequal.service";
 import {
   sendPrequalApprovedEmail,
   sendAdverseActionEmail,
+  sendPrequalUnderReviewEmail,
+  sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
 
 // Expiry durations — iPredict results expire after 30 days (same as buyer path).
@@ -195,6 +197,7 @@ const PROVIDER_ERROR_REASONS = new Set([
   "NETWORK_ERROR",
   "OAUTH_FAILED",
   "IPREDICT_ERROR",
+  "CONFIG_ERROR",
 ]);
 
 function mapFinalDecisionToRunStatus(
@@ -535,6 +538,8 @@ export async function runAdminIPredictPrequalForBuyer(
   }
 
   // FCRA § 615: adverse action notice required when a consumer report caused DECLINED.
+  // ComplianceEvent reflects true send status: SUPPRESSED_DUPLICATE when the
+  // idempotency layer collapses a duplicate; nothing logged on a thrown error.
   if (finalDecision === PreQualDecision.DECLINED) {
     const decisionDateStr = new Date().toLocaleDateString("en-US", {
       month: "long",
@@ -542,30 +547,48 @@ export async function runAdminIPredictPrequalForBuyer(
       year: "numeric",
     });
 
+    // See prequal.service.ts for the SENT/DUPLICATE/FAILED/DEV_SKIPPED contract —
+    // we map on the discriminated outcome, not on the boolean `sent`.
+    let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
+    let adverseActionErrorMessage: string | null = null;
     try {
-      await sendAdverseActionEmail({
+      const sendResult = await sendAdverseActionEmail({
         to: buyer.user.email,
         firstName: input.firstName,
         decisionDate: decisionDateStr,
         prequalApplicationId: prequal.id,
+        decisionTimestamp: prequal.updatedAt.toISOString(),
       });
-      adverseActionSent = true;
+      outcome = sendResult.outcome;
+      adverseActionSent = sendResult.sent;
     } catch (err) {
       console.error("[admin-prequal] Failed to send adverse action email:", err);
+      adverseActionErrorMessage = err instanceof Error ? err.message : String(err);
     }
 
     try {
+      const eventType =
+        outcome === "SENT"
+          ? "ADVERSE_ACTION_NOTICE_SENT"
+          : outcome === "DUPLICATE"
+            ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
+            : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
       await prisma.complianceEvent.create({
         data: {
-          eventType: "ADVERSE_ACTION_NOTICE_SENT",
+          eventType,
           buyerId,
           prequalApplicationId: prequal.id,
           metadata: {
             sentTo: buyer.user.email,
             sentAt: new Date().toISOString(),
+            decisionTimestamp: prequal.updatedAt.toISOString(),
+            sendOutcome: outcome,
             source: "admin_ipredict",
             adminId,
             consentSource,
+            ...(adverseActionErrorMessage
+              ? { errorMessage: adverseActionErrorMessage }
+              : {}),
           },
         },
       });
@@ -579,6 +602,58 @@ export async function runAdminIPredictPrequalForBuyer(
     result.mocked,
     result.reason
   );
+
+  // OFAC-silent buyer email + ops alert when the run resolved to review state.
+  const needsReview =
+    finalDecision === PreQualDecision.MANUAL_REVIEW ||
+    finalDecision === PreQualDecision.OFAC_REVIEW ||
+    finalDecision === PreQualDecision.OFAC_ESCALATED;
+
+  if (needsReview) {
+    try {
+      await sendPrequalUnderReviewEmail({
+        to: buyer.user.email,
+        firstName: input.firstName,
+        prequalApplicationId: prequal.id,
+        decisionTimestamp: prequal.updatedAt.toISOString(),
+      });
+    } catch (err) {
+      console.error("[admin-prequal] Failed to send under-review email:", err);
+    }
+    try {
+      await prisma.complianceEvent.create({
+        data: {
+          eventType: "PREQUAL_UNDER_REVIEW_NOTICE_SENT",
+          buyerId,
+          prequalApplicationId: prequal.id,
+          metadata: {
+            sentTo: buyer.user.email,
+            sentAt: new Date().toISOString(),
+            decision: finalDecision,
+            source: "admin_ipredict",
+            adminId,
+          },
+        },
+      });
+    } catch (err) {
+      console.error("[admin-prequal] Failed to log under-review compliance event:", err);
+    }
+  }
+
+  if (needsReview || runStatus === "PROVIDER_ERROR") {
+    try {
+      await sendAdminPrequalAlertEmail({
+        kind: runStatus === "PROVIDER_ERROR" ? "PROVIDER_ERROR" : "REVIEW",
+        buyerId,
+        buyerEmail: buyer.user.email,
+        decision: finalDecision,
+        providerReason: result.reason,
+        prequalApplicationId: prequal.id,
+      });
+    } catch (err) {
+      console.error("[admin-prequal] Failed to send admin alert email:", err);
+    }
+  }
 
   return {
     status: runStatus,

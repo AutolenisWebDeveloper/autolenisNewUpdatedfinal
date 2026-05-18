@@ -4,6 +4,7 @@ import ChatWidget from "@/components/public/ChatWidget";
 import SessionExpiryWatcher from "@/components/buyer/SessionExpiryWatcher";
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { jwtVerify } from "jose";
 import { cookies } from "next/headers";
 
@@ -101,10 +102,7 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
   //   Subsequent steps unlock progressively per deal state machine
 
   const prequal = buyer?.preQualification;
-  const prequalApproved =
-    !!prequal &&
-    prequal.decision === "APPROVED" &&
-    prequal.expiresAt > new Date();
+  const prequalApproved = isPrequalValid(prequal ?? null);
 
   // If prequal is approved, onboarding is implicitly complete — a buyer
   // cannot receive an approved prequal without having gone through the

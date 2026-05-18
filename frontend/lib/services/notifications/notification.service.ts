@@ -34,7 +34,7 @@ export const BuyerTriggers = {
     await prisma.notification.create({ data: { buyerId, type: NotificationType.DEPOSIT_CONFIRMED, title: "$99 deposit confirmed", body: "Your auction is being prepared. Dealers will be invited shortly.", actionUrl: `/buyer/auctions` } });
   },
   async prequalApproved(buyerId: string, maxOtd: number) {
-    await prisma.notification.create({ data: { buyerId, type: NotificationType.PREQUAL_APPROVED, title: "Pre-qualification approved", body: `Your approved budget is $${(maxOtd / 100).toLocaleString()}. Start browsing vehicles.`, actionUrl: `/buyer/prequal/result` } });
+    await prisma.notification.create({ data: { buyerId, type: NotificationType.PREQUAL_APPROVED, title: "Pre-qualification approved", body: `Your approved budget is $${(maxOtd / 100).toLocaleString()}. Start browsing vehicles.`, actionUrl: `/buyer/prequal` } });
   },
   async prequalDeclined(buyerId: string) {
     await prisma.notification.create({ data: { buyerId, type: NotificationType.PREQUAL_DECLINED, title: "Application update", body: "We were unable to pre-qualify you at this time. You have the right to dispute this decision.", actionUrl: `/buyer/prequal/declined` } });

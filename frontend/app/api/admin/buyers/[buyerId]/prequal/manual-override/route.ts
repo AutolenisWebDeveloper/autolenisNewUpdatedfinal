@@ -1,12 +1,18 @@
 // POST /api/admin/buyers/[buyerId]/prequal/manual-override
+//
+// CANONICAL admin manual-override endpoint. This is the ONLY route that
+// performs a manual override — the base /prequal route holds GET only.
+// All admin UIs and integrations must POST here.
+//
 // Admin manual prequalification override — sets decision, tier, maxOtdAmountCents,
 // and expiresAt directly WITHOUT calling MicroBilt.
 //
 // This is intentionally SEPARATE from the iPredict run endpoint:
 //   - No consumer report is pulled.
 //   - Label "manual" must be used in the UI — never implied to be iPredict.
-//   - OFAC hard gate is still enforced: if checkOfacAlert is true, the decision
-//     is overridden to OFAC_REVIEW and an admin notification is created.
+//   - OFAC hard gate is MANDATORY and enforced here: if checkOfacAlert is true
+//     the decision is overridden to OFAC_REVIEW and an admin notification is
+//     created. Any future override path must preserve this gate.
 //   - AdminAuditLog + ComplianceEvent written on every action.
 //   - Adverse-action email sent when decision is DECLINED (FCRA § 615).
 
@@ -158,6 +164,9 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
 
   // FCRA § 615: adverse action notice on DECLINED decisions.
+  // ComplianceEvent reflects true send status — duplicate-suppressed sends
+  // are logged as ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE so the audit
+  // trail does not falsely claim a notice was delivered.
   if (decision === PreQualDecision.DECLINED) {
     const decisionDateStr = new Date().toLocaleDateString("en-US", {
       month: "long",
@@ -165,27 +174,46 @@ export async function POST(request: NextRequest, { params }: Props) {
       year: "numeric",
     });
 
+    // See prequal.service.ts for the SENT/DUPLICATE/FAILED/DEV_SKIPPED contract —
+    // we map on the discriminated outcome, not on the boolean `sent`.
+    let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
+    let adverseActionErrorMessage: string | null = null;
     try {
-      await sendAdverseActionEmail({
+      const sendResult = await sendAdverseActionEmail({
         to: buyer.user.email,
         firstName: buyer.firstName,
         decisionDate: decisionDateStr,
         prequalApplicationId: prequal.id,
+        decisionTimestamp: prequal.updatedAt.toISOString(),
       });
+      outcome = sendResult.outcome;
     } catch (emailErr) {
       console.error("[admin/prequal/manual-override] Failed to send adverse action email:", emailErr);
+      adverseActionErrorMessage =
+        emailErr instanceof Error ? emailErr.message : String(emailErr);
     }
 
     try {
+      const eventType =
+        outcome === "SENT"
+          ? "ADVERSE_ACTION_NOTICE_SENT"
+          : outcome === "DUPLICATE"
+            ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
+            : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
       await prisma.complianceEvent.create({
         data: {
-          eventType: "ADVERSE_ACTION_NOTICE_SENT",
+          eventType,
           buyerId: buyer.id,
           prequalApplicationId: prequal.id,
           metadata: {
             sentTo: buyer.user.email,
             sentAt: new Date().toISOString(),
+            decisionTimestamp: prequal.updatedAt.toISOString(),
+            sendOutcome: outcome,
             source: "admin_manual",
+            ...(adverseActionErrorMessage
+              ? { errorMessage: adverseActionErrorMessage }
+              : {}),
           },
         },
       });

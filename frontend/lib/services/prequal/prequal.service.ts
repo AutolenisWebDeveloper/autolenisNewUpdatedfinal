@@ -17,12 +17,33 @@ import {
 import {
   sendPrequalApprovedEmail,
   sendAdverseActionEmail,
+  sendPrequalUnderReviewEmail,
+  sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
 
-// Auction gating uses expiresAt > now() — never .status / .decision.
-export function isPrequalValid(prequal: { expiresAt: Date } | null): boolean {
+const PROVIDER_ERROR_REASONS = new Set([
+  "TIMEOUT",
+  "NETWORK_ERROR",
+  "OAUTH_FAILED",
+  "IPREDICT_ERROR",
+  "CONFIG_ERROR",
+]);
+
+function isProviderErrorReason(reason: string | undefined): boolean {
+  if (!reason) return false;
+  return PROVIDER_ERROR_REASONS.has(reason) || reason.startsWith("HTTP_");
+}
+
+// Single source of truth for prequal approval gating across the platform.
+// A prequal is "valid" only when the buyer is currently approved AND that
+// approval has not expired. Any other decision state (DECLINED / PENDING /
+// MANUAL_REVIEW / OFAC_REVIEW / OFAC_ESCALATED) returns false so the buyer
+// remains gated to the prequal step and can re-apply if applicable.
+export function isPrequalValid(
+  prequal: { decision: string; expiresAt: Date } | null,
+): boolean {
   if (!prequal) return false;
-  return prequal.expiresAt > new Date();
+  return prequal.decision === "APPROVED" && prequal.expiresAt > new Date();
 }
 
 // Buyer-safe summary — never expose raw iPredict scores or OFAC flag.
@@ -80,7 +101,10 @@ interface BuyerForPrequal {
 export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSubmission) {
   if (!input.fcraConsent) throw new Error("FCRA consent required");
 
-  // Reuse a still-valid existing prequal — never re-pull MicroBilt unnecessarily.
+  // Reuse only a still-valid APPROVED prequal — never re-pull MicroBilt for an
+  // active approval. A DECLINED / PENDING / MANUAL_REVIEW / OFAC record (even
+  // before expiresAt) is NOT treated as valid, so the buyer is allowed to
+  // re-apply through this code path and we pull a fresh report.
   const existing = await prisma.preQualification.findUnique({
     where: { buyerId: buyer.id },
   });
@@ -222,37 +246,116 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
   // FCRA § 615: Send adverse action notice on DECLINED decisions.
   // Required by law whenever a consumer report contributed to the denial.
   // Email failure must never block the response — catch and log only.
+  //
+  // The compliance event must reflect TRUE send status. A duplicate-suppressed
+  // send (sent === false) is logged as ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE
+  // so the audit trail is honest. A thrown error logs no "SENT" event.
   if (finalDecision === PreQualDecision.DECLINED) {
     const decisionDate = new Date().toLocaleDateString("en-US", {
       month: "long",
       day: "numeric",
       year: "numeric",
     });
+    // Branch on the discriminated `outcome` — `sent === false` alone is
+    // ambiguous (DUPLICATE / FAILED / DEV_SKIPPED). Mislabeling a Resend
+    // outage as SUPPRESSED_DUPLICATE would leave a false FCRA § 615 audit
+    // trail.
+    let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
+    let adverseActionErrorMessage: string | null = null;
     try {
-      await sendAdverseActionEmail({
+      const result = await sendAdverseActionEmail({
         to: buyer.user.email,
         firstName: input.firstName,
         decisionDate,
         prequalApplicationId: prequal.id,
+        decisionTimestamp: prequal.updatedAt.toISOString(),
       });
+      outcome = result.outcome;
     } catch (emailErr) {
       console.error("[prequal] Failed to send adverse action email:", emailErr);
+      adverseActionErrorMessage =
+        emailErr instanceof Error ? emailErr.message : String(emailErr);
     }
 
     try {
+      const eventType =
+        outcome === "SENT"
+          ? "ADVERSE_ACTION_NOTICE_SENT"
+          : outcome === "DUPLICATE"
+            ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
+            : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
       await prisma.complianceEvent.create({
         data: {
-          eventType: "ADVERSE_ACTION_NOTICE_SENT",
+          eventType,
           buyerId: buyer.id,
           prequalApplicationId: prequal.id,
           metadata: {
             sentTo: buyer.user.email,
             sentAt: new Date().toISOString(),
+            decisionTimestamp: prequal.updatedAt.toISOString(),
+            sendOutcome: outcome,
+            ...(adverseActionErrorMessage
+              ? { errorMessage: adverseActionErrorMessage }
+              : {}),
           },
         },
       });
     } catch (logErr) {
       console.error("[prequal] Failed to log adverse action compliance event:", logErr);
+    }
+  }
+
+  // OFAC-silent buyer notice + ops alert when the decision needs manual
+  // attention (MANUAL_REVIEW / OFAC_REVIEW / OFAC_ESCALATED).
+  const needsReview =
+    finalDecision === PreQualDecision.MANUAL_REVIEW ||
+    finalDecision === PreQualDecision.OFAC_REVIEW ||
+    finalDecision === PreQualDecision.OFAC_ESCALATED;
+
+  if (needsReview) {
+    try {
+      await sendPrequalUnderReviewEmail({
+        to: buyer.user.email,
+        firstName: input.firstName,
+        prequalApplicationId: prequal.id,
+        decisionTimestamp: prequal.updatedAt.toISOString(),
+      });
+    } catch (emailErr) {
+      console.error("[prequal] Failed to send under-review email:", emailErr);
+    }
+    try {
+      await prisma.complianceEvent.create({
+        data: {
+          eventType: "PREQUAL_UNDER_REVIEW_NOTICE_SENT",
+          buyerId: buyer.id,
+          prequalApplicationId: prequal.id,
+          metadata: {
+            sentTo: buyer.user.email,
+            sentAt: new Date().toISOString(),
+            decision: finalDecision,
+          },
+        },
+      });
+    } catch (logErr) {
+      console.error("[prequal] Failed to log under-review compliance event:", logErr);
+    }
+  }
+
+  // Admin ops alert: needs-review OR upstream provider error. Failure to send
+  // must never block the buyer response.
+  const isProviderError = isProviderErrorReason(result.reason);
+  if (needsReview || isProviderError) {
+    try {
+      await sendAdminPrequalAlertEmail({
+        kind: isProviderError ? "PROVIDER_ERROR" : "REVIEW",
+        buyerId: buyer.id,
+        buyerEmail: buyer.user.email,
+        decision: finalDecision,
+        providerReason: result.reason,
+        prequalApplicationId: prequal.id,
+      });
+    } catch (emailErr) {
+      console.error("[prequal] Failed to send admin alert email:", emailErr);
     }
   }
 
