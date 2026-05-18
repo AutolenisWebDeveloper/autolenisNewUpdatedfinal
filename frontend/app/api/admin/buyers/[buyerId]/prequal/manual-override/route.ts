@@ -175,6 +175,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     });
 
     let adverseActionStatus: "sent" | "duplicate" | "error" = "error";
+    let adverseActionErrorMessage: string | null = null;
     try {
       const sendResult = await sendAdverseActionEmail({
         to: buyer.user.email,
@@ -186,29 +187,35 @@ export async function POST(request: NextRequest, { params }: Props) {
       adverseActionStatus = sendResult.sent ? "sent" : "duplicate";
     } catch (emailErr) {
       console.error("[admin/prequal/manual-override] Failed to send adverse action email:", emailErr);
+      adverseActionErrorMessage =
+        emailErr instanceof Error ? emailErr.message : String(emailErr);
     }
 
-    if (adverseActionStatus !== "error") {
-      try {
-        await prisma.complianceEvent.create({
-          data: {
-            eventType:
-              adverseActionStatus === "sent"
-                ? "ADVERSE_ACTION_NOTICE_SENT"
-                : "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE",
-            buyerId: buyer.id,
-            prequalApplicationId: prequal.id,
-            metadata: {
-              sentTo: buyer.user.email,
-              sentAt: new Date().toISOString(),
-              decisionTimestamp: prequal.updatedAt.toISOString(),
-              source: "admin_manual",
-            },
+    try {
+      const eventType =
+        adverseActionStatus === "sent"
+          ? "ADVERSE_ACTION_NOTICE_SENT"
+          : adverseActionStatus === "duplicate"
+            ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
+            : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+      await prisma.complianceEvent.create({
+        data: {
+          eventType,
+          buyerId: buyer.id,
+          prequalApplicationId: prequal.id,
+          metadata: {
+            sentTo: buyer.user.email,
+            sentAt: new Date().toISOString(),
+            decisionTimestamp: prequal.updatedAt.toISOString(),
+            source: "admin_manual",
+            ...(adverseActionErrorMessage
+              ? { errorMessage: adverseActionErrorMessage }
+              : {}),
           },
-        });
-      } catch (logErr) {
-        console.error("[admin/prequal/manual-override] Failed to log adverse action event:", logErr);
-      }
+        },
+      });
+    } catch (logErr) {
+      console.error("[admin/prequal/manual-override] Failed to log adverse action event:", logErr);
     }
   }
 

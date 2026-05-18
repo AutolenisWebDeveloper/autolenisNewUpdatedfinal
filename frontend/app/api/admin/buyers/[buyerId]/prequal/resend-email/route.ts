@@ -4,9 +4,11 @@
 // when a buyer asks for a copy or didn't receive the original. Operational
 // roles only. Each resend is logged to AdminAuditLog.
 //
-// The resend rotates the idempotency key (suffix "-resend-<timestamp>") so it
-// bypasses the de-dup guard in sendIdempotent — the original send remains in
-// EmailSendLog untouched.
+// A manual admin resend exists specifically to bypass `sendIdempotent`'s
+// permanent de-dup. We hand both email functions a fully-qualified
+// `idempotencyKey` salted with the resend moment (millisecond precision), so
+// every resend dispatches even when the buyer's prequal hasn't changed and
+// the original send is preserved in EmailSendLog untouched.
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
@@ -57,6 +59,11 @@ export async function POST(request: NextRequest, { params }: Props) {
     return adminError("INVALID_STATE", "Buyer's current decision is not DECLINED", 400);
   }
 
+  const resendIdempotencyKey =
+    kind === "APPROVED"
+      ? `prequal-approved-resend-${prequal.id}-${stamp.toISOString()}`
+      : `adverse-action-resend-${prequal.id}-${stamp.toISOString()}`;
+
   try {
     if (kind === "APPROVED") {
       await sendPrequalApprovedEmail({
@@ -66,9 +73,9 @@ export async function POST(request: NextRequest, { params }: Props) {
         // the buyer sees on /buyer/prequal today.
         maxOtdAmountCents: prequal.maxOtdAmountCents,
         tier: prequal.tier,
-        // Force a fresh idempotency key by jittering the decisionDate stamp.
         decisionDate: stamp,
         expiryDate: prequal.expiresAt,
+        idempotencyKey: resendIdempotencyKey,
       });
     } else {
       await sendAdverseActionEmail({
@@ -76,11 +83,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         firstName: buyer.firstName,
         decisionDate: stamp.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
         prequalApplicationId: prequal.id,
-        // A resend is, by definition, distinct from any genuine decision-time
-        // send for this prequal — salt with the resend timestamp so the
-        // idempotency layer doesn't collapse it against the original notice
-        // or any prior resend.
-        decisionTimestamp: `resend-${stamp.toISOString()}`,
+        idempotencyKey: resendIdempotencyKey,
       });
     }
   } catch (err) {

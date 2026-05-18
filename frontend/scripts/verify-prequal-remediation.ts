@@ -109,7 +109,7 @@ const capturedKeys: string[] = [];
 // Force the email service to skip its real Resend dispatch — placeholder API key.
 process.env.RESEND_API_KEY = "placeholder";
 
-const { sendAdverseActionEmail, sendPrequalUnderReviewEmail } = await import(
+const { sendAdverseActionEmail, sendPrequalUnderReviewEmail, sendPrequalApprovedEmail } = await import(
   "../lib/services/email/resend.service"
 );
 
@@ -186,6 +186,78 @@ check(
   "under-review: same id + same timestamp → same key (double-send still de-dupes)",
   capturedKeys.length === 2 && capturedKeys[0] === capturedKeys[1],
 );
+
+// ── Admin resend endpoint must always dispatch ──────────────────────────────
+// Two consecutive resends of the same unchanged prequal must produce DIFFERENT
+// idempotency keys — the resend is the admin's explicit override of the
+// idempotency layer, not a re-decision. We simulate the resend route's exact
+// key-construction logic.
+console.log("\nADMIN  resend endpoint per-click idempotency:");
+function resendKey(kind: "APPROVED" | "ADVERSE_ACTION", prequalId: string, stamp: Date) {
+  return kind === "APPROVED"
+    ? `prequal-approved-resend-${prequalId}-${stamp.toISOString()}`
+    : `adverse-action-resend-${prequalId}-${stamp.toISOString()}`;
+}
+
+// Source-level assertion — the resend route must build its own per-click key
+// and pass it as `idempotencyKey` to BOTH email functions.
+const resendRoute = readFileSync(
+  join(__dirname, "..", "app/api/admin/buyers/[buyerId]/prequal/resend-email/route.ts"),
+  "utf8",
+);
+check("resend route builds resend-moment idempotency key",
+  /idempotencyKey:\s*resendIdempotencyKey/.test(resendRoute) &&
+  /prequal-approved-resend-.*stamp\.toISOString/.test(resendRoute) &&
+  /adverse-action-resend-.*stamp\.toISOString/.test(resendRoute));
+
+// End-to-end key capture via the email functions' new idempotencyKey override.
+for (const kind of ["APPROVED", "ADVERSE_ACTION"] as const) {
+  capturedKeys.length = 0;
+  const firstStamp = new Date("2026-05-18T09:00:00.000Z");
+  const secondStamp = new Date("2026-05-18T09:00:00.500Z"); // 500ms later
+  const k1 = resendKey(kind, prequalId, firstStamp);
+  const k2 = resendKey(kind, prequalId, secondStamp);
+
+  if (kind === "APPROVED") {
+    await sendPrequalApprovedEmail({
+      to: "buyer@example.com", firstName: "B",
+      maxOtdAmountCents: 3500000, tier: "GOOD",
+      decisionDate: firstStamp, expiryDate: new Date(),
+      idempotencyKey: k1,
+    });
+    await sendPrequalApprovedEmail({
+      to: "buyer@example.com", firstName: "B",
+      maxOtdAmountCents: 3500000, tier: "GOOD",
+      decisionDate: secondStamp, expiryDate: new Date(),
+      idempotencyKey: k2,
+    });
+  } else {
+    await sendAdverseActionEmail({
+      to: "buyer@example.com", firstName: "B",
+      decisionDate: "May 18, 2026",
+      prequalApplicationId: prequalId,
+      idempotencyKey: k1,
+    });
+    await sendAdverseActionEmail({
+      to: "buyer@example.com", firstName: "B",
+      decisionDate: "May 18, 2026",
+      prequalApplicationId: prequalId,
+      idempotencyKey: k2,
+    });
+  }
+  check(
+    `${kind} resend: two clicks → different keys (both dispatch)`,
+    capturedKeys.length === 2 && capturedKeys[0] !== capturedKeys[1] &&
+    capturedKeys[0] === k1 && capturedKeys[1] === k2,
+    `keys=[${capturedKeys.join(", ")}]`,
+  );
+}
+
+// Resend key must NOT collide with the original decision-time key.
+const declineKey = `adverse-action-${prequalId}-${firstDecisionTs}`;
+const resendK   = `adverse-action-resend-${prequalId}-${new Date().toISOString()}`;
+check("resend key namespace is distinct from decision-time key",
+  declineKey !== resendK && !resendK.startsWith(declineKey));
 
 console.log(`\nResult: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

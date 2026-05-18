@@ -257,6 +257,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
       year: "numeric",
     });
     let adverseActionStatus: "sent" | "duplicate" | "error" = "error";
+    let adverseActionErrorMessage: string | null = null;
     try {
       const result = await sendAdverseActionEmail({
         to: buyer.user.email,
@@ -268,28 +269,34 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
       adverseActionStatus = result.sent ? "sent" : "duplicate";
     } catch (emailErr) {
       console.error("[prequal] Failed to send adverse action email:", emailErr);
+      adverseActionErrorMessage =
+        emailErr instanceof Error ? emailErr.message : String(emailErr);
     }
 
-    if (adverseActionStatus !== "error") {
-      try {
-        await prisma.complianceEvent.create({
-          data: {
-            eventType:
-              adverseActionStatus === "sent"
-                ? "ADVERSE_ACTION_NOTICE_SENT"
-                : "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE",
-            buyerId: buyer.id,
-            prequalApplicationId: prequal.id,
-            metadata: {
-              sentTo: buyer.user.email,
-              sentAt: new Date().toISOString(),
-              decisionTimestamp: prequal.updatedAt.toISOString(),
-            },
+    try {
+      const eventType =
+        adverseActionStatus === "sent"
+          ? "ADVERSE_ACTION_NOTICE_SENT"
+          : adverseActionStatus === "duplicate"
+            ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
+            : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+      await prisma.complianceEvent.create({
+        data: {
+          eventType,
+          buyerId: buyer.id,
+          prequalApplicationId: prequal.id,
+          metadata: {
+            sentTo: buyer.user.email,
+            sentAt: new Date().toISOString(),
+            decisionTimestamp: prequal.updatedAt.toISOString(),
+            ...(adverseActionErrorMessage
+              ? { errorMessage: adverseActionErrorMessage }
+              : {}),
           },
-        });
-      } catch (logErr) {
-        console.error("[prequal] Failed to log adverse action compliance event:", logErr);
-      }
+        },
+      });
+    } catch (logErr) {
+      console.error("[prequal] Failed to log adverse action compliance event:", logErr);
     }
   }
 

@@ -203,10 +203,17 @@ export async function sendPrequalApprovedEmail(params: {
   tier: string | null;
   decisionDate: Date;
   expiryDate: Date;
+  /** Optional full override of the idempotency key — used by the admin
+   *  resend endpoint so a second resend on the same day isn't silently
+   *  collapsed by the day-granular default. Buyer-facing decision-time
+   *  callers leave this unset. */
+  idempotencyKey?: string;
 }) {
   const { to, firstName, maxOtdAmountCents, tier, expiryDate } = params;
   return sendIdempotent({
-    idempotencyKey: `prequal-approved-${to}-${params.decisionDate.toISOString().slice(0, 10)}`,
+    idempotencyKey:
+      params.idempotencyKey ??
+      `prequal-approved-${to}-${params.decisionDate.toISOString().slice(0, 10)}`,
     to,
     templateId: "prequal-approved",
     subject: `You're Pre-Qualified — Here's Your Buying Power, ${firstName}`,
@@ -303,10 +310,16 @@ export async function sendAdverseActionEmail(params: {
    *  PreQualification row. Required whenever prequalApplicationId is provided
    *  so that re-applications produce distinct keys. */
   decisionTimestamp?: string;
+  /** Optional full override of the idempotency key — used by the admin
+   *  resend endpoint to guarantee every resend is dispatched. Buyer-facing
+   *  decision-time callers leave this unset so the per-decision keying
+   *  above governs de-duplication. */
+  idempotencyKey?: string;
 }) {
-  const idempotencyKey = params.prequalApplicationId
+  const defaultKey = params.prequalApplicationId
     ? `adverse-action-${params.prequalApplicationId}-${params.decisionTimestamp ?? params.decisionDate}`
     : `adverse-action-${params.to}`;
+  const idempotencyKey = params.idempotencyKey ?? defaultKey;
   return sendIdempotent({
     idempotencyKey,
     to: params.to,

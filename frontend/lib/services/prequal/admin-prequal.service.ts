@@ -548,6 +548,7 @@ export async function runAdminIPredictPrequalForBuyer(
     });
 
     let adverseActionStatus: "sent" | "duplicate" | "error" = "error";
+    let adverseActionErrorMessage: string | null = null;
     try {
       const sendResult = await sendAdverseActionEmail({
         to: buyer.user.email,
@@ -560,31 +561,36 @@ export async function runAdminIPredictPrequalForBuyer(
       adverseActionSent = sendResult.sent;
     } catch (err) {
       console.error("[admin-prequal] Failed to send adverse action email:", err);
+      adverseActionErrorMessage = err instanceof Error ? err.message : String(err);
     }
 
-    if (adverseActionStatus !== "error") {
-      try {
-        await prisma.complianceEvent.create({
-          data: {
-            eventType:
-              adverseActionStatus === "sent"
-                ? "ADVERSE_ACTION_NOTICE_SENT"
-                : "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE",
-            buyerId,
-            prequalApplicationId: prequal.id,
-            metadata: {
-              sentTo: buyer.user.email,
-              sentAt: new Date().toISOString(),
-              decisionTimestamp: prequal.updatedAt.toISOString(),
-              source: "admin_ipredict",
-              adminId,
-              consentSource,
-            },
+    try {
+      const eventType =
+        adverseActionStatus === "sent"
+          ? "ADVERSE_ACTION_NOTICE_SENT"
+          : adverseActionStatus === "duplicate"
+            ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
+            : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+      await prisma.complianceEvent.create({
+        data: {
+          eventType,
+          buyerId,
+          prequalApplicationId: prequal.id,
+          metadata: {
+            sentTo: buyer.user.email,
+            sentAt: new Date().toISOString(),
+            decisionTimestamp: prequal.updatedAt.toISOString(),
+            source: "admin_ipredict",
+            adminId,
+            consentSource,
+            ...(adverseActionErrorMessage
+              ? { errorMessage: adverseActionErrorMessage }
+              : {}),
           },
-        });
-      } catch (err) {
-        console.error("[admin-prequal] Failed to log adverse action compliance event:", err);
-      }
+        },
+      });
+    } catch (err) {
+      console.error("[admin-prequal] Failed to log adverse action compliance event:", err);
     }
   }
 
