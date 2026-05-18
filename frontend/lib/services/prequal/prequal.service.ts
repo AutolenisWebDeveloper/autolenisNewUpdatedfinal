@@ -246,37 +246,50 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
   // FCRA § 615: Send adverse action notice on DECLINED decisions.
   // Required by law whenever a consumer report contributed to the denial.
   // Email failure must never block the response — catch and log only.
+  //
+  // The compliance event must reflect TRUE send status. A duplicate-suppressed
+  // send (sent === false) is logged as ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE
+  // so the audit trail is honest. A thrown error logs no "SENT" event.
   if (finalDecision === PreQualDecision.DECLINED) {
     const decisionDate = new Date().toLocaleDateString("en-US", {
       month: "long",
       day: "numeric",
       year: "numeric",
     });
+    let adverseActionStatus: "sent" | "duplicate" | "error" = "error";
     try {
-      await sendAdverseActionEmail({
+      const result = await sendAdverseActionEmail({
         to: buyer.user.email,
         firstName: input.firstName,
         decisionDate,
         prequalApplicationId: prequal.id,
+        decisionTimestamp: prequal.updatedAt.toISOString(),
       });
+      adverseActionStatus = result.sent ? "sent" : "duplicate";
     } catch (emailErr) {
       console.error("[prequal] Failed to send adverse action email:", emailErr);
     }
 
-    try {
-      await prisma.complianceEvent.create({
-        data: {
-          eventType: "ADVERSE_ACTION_NOTICE_SENT",
-          buyerId: buyer.id,
-          prequalApplicationId: prequal.id,
-          metadata: {
-            sentTo: buyer.user.email,
-            sentAt: new Date().toISOString(),
+    if (adverseActionStatus !== "error") {
+      try {
+        await prisma.complianceEvent.create({
+          data: {
+            eventType:
+              adverseActionStatus === "sent"
+                ? "ADVERSE_ACTION_NOTICE_SENT"
+                : "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE",
+            buyerId: buyer.id,
+            prequalApplicationId: prequal.id,
+            metadata: {
+              sentTo: buyer.user.email,
+              sentAt: new Date().toISOString(),
+              decisionTimestamp: prequal.updatedAt.toISOString(),
+            },
           },
-        },
-      });
-    } catch (logErr) {
-      console.error("[prequal] Failed to log adverse action compliance event:", logErr);
+        });
+      } catch (logErr) {
+        console.error("[prequal] Failed to log adverse action compliance event:", logErr);
+      }
     }
   }
 
@@ -293,6 +306,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         to: buyer.user.email,
         firstName: input.firstName,
         prequalApplicationId: prequal.id,
+        decisionTimestamp: prequal.updatedAt.toISOString(),
       });
     } catch (emailErr) {
       console.error("[prequal] Failed to send under-review email:", emailErr);

@@ -217,16 +217,23 @@ export async function sendPrequalApprovedEmail(params: {
 // Buyer email for MANUAL_REVIEW / OFAC_REVIEW / OFAC_ESCALATED states.
 // OFAC-silent — the copy never mentions OFAC, sanctions, or the cause; the
 // buyer only knows their application is being reviewed and to expect an
-// update within 1–2 business days. Keyed off prequalApplicationId so a fresh
-// review (e.g. a re-application that lands in MANUAL_REVIEW again) sends a
-// new notice rather than being de-duplicated against an earlier one.
+// update within 1–2 business days.
+//
+// Idempotency: keyed on prequalApplicationId + decisionTimestamp. The prequal
+// row is upserted in place (buyerId is @unique) so the id alone is stable
+// across a buyer's lifetime — re-entering MANUAL_REVIEW after a correction
+// cycle would otherwise be silently de-duplicated and the buyer never
+// re-notified. Pass the upserted row's `updatedAt.toISOString()` so each
+// genuine decision yields a unique key while a true intra-request double-send
+// still collapses.
 export async function sendPrequalUnderReviewEmail(params: {
   to: string;
   firstName: string;
   prequalApplicationId: string;
+  decisionTimestamp: string;
 }) {
   return sendIdempotent({
-    idempotencyKey: `prequal-under-review-${params.prequalApplicationId}`,
+    idempotencyKey: `prequal-under-review-${params.prequalApplicationId}-${params.decisionTimestamp}`,
     to: params.to,
     templateId: "prequal-under-review",
     subject: PREQUAL_UNDER_REVIEW_SUBJECT,
@@ -275,17 +282,30 @@ export async function sendAdminPrequalAlertEmail(params: {
 // consumer whose AutoLenis prequalification is DECLINED based in whole or
 // in part on a consumer report (MicroBilt iPredict). See
 // `templates/adverse-action.tsx` for the legally required content.
+//
+// Idempotency: the prequal row is upserted in place (buyerId is @unique) so
+// the prequal id alone is stable across a buyer's lifetime. Now that a
+// DECLINED prequal is non-valid (D-B) and re-submittable, a second genuine
+// decline MUST send its own § 615 notice — silently de-duplicating it would
+// be a compliance violation. We key on prequalApplicationId + decisionTimestamp
+// (pass the upserted row's `updatedAt.toISOString()` — Prisma bumps it on
+// every decision write) so each genuine decline yields a unique key while an
+// accidental double-send within the same request still de-dupes.
+//
+// The buyerEmail-only fallback key is retained for callers without an id
+// (none today, but kept defensively).
 export async function sendAdverseActionEmail(params: {
   to: string;
   firstName: string;
   decisionDate: string;
-  // Optional idempotency salt — pass the prequal application id so a fresh
-  // decline (e.g. admin-decline of a re-application) sends a new notice
-  // rather than being deduplicated against an earlier one.
   prequalApplicationId?: string;
+  /** Per-decision salt — typically `updatedAt.toISOString()` of the upserted
+   *  PreQualification row. Required whenever prequalApplicationId is provided
+   *  so that re-applications produce distinct keys. */
+  decisionTimestamp?: string;
 }) {
   const idempotencyKey = params.prequalApplicationId
-    ? `adverse-action-${params.prequalApplicationId}`
+    ? `adverse-action-${params.prequalApplicationId}-${params.decisionTimestamp ?? params.decisionDate}`
     : `adverse-action-${params.to}`;
   return sendIdempotent({
     idempotencyKey,

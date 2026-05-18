@@ -75,10 +75,12 @@ export async function POST(request: NextRequest, { params }: Props) {
         to: buyer.user.email,
         firstName: buyer.firstName,
         decisionDate: stamp.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
-        // Suffix the prequal id with a resend marker so sendIdempotent will
-        // generate a new EmailSendLog row rather than de-duplicating against
-        // the original notice.
-        prequalApplicationId: `${prequal.id}-resend-${stamp.getTime()}`,
+        prequalApplicationId: prequal.id,
+        // A resend is, by definition, distinct from any genuine decision-time
+        // send for this prequal — salt with the resend timestamp so the
+        // idempotency layer doesn't collapse it against the original notice
+        // or any prior resend.
+        decisionTimestamp: `resend-${stamp.toISOString()}`,
       });
     }
   } catch (err) {

@@ -164,6 +164,9 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
 
   // FCRA § 615: adverse action notice on DECLINED decisions.
+  // ComplianceEvent reflects true send status — duplicate-suppressed sends
+  // are logged as ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE so the audit
+  // trail does not falsely claim a notice was delivered.
   if (decision === PreQualDecision.DECLINED) {
     const decisionDateStr = new Date().toLocaleDateString("en-US", {
       month: "long",
@@ -171,32 +174,41 @@ export async function POST(request: NextRequest, { params }: Props) {
       year: "numeric",
     });
 
+    let adverseActionStatus: "sent" | "duplicate" | "error" = "error";
     try {
-      await sendAdverseActionEmail({
+      const sendResult = await sendAdverseActionEmail({
         to: buyer.user.email,
         firstName: buyer.firstName,
         decisionDate: decisionDateStr,
         prequalApplicationId: prequal.id,
+        decisionTimestamp: prequal.updatedAt.toISOString(),
       });
+      adverseActionStatus = sendResult.sent ? "sent" : "duplicate";
     } catch (emailErr) {
       console.error("[admin/prequal/manual-override] Failed to send adverse action email:", emailErr);
     }
 
-    try {
-      await prisma.complianceEvent.create({
-        data: {
-          eventType: "ADVERSE_ACTION_NOTICE_SENT",
-          buyerId: buyer.id,
-          prequalApplicationId: prequal.id,
-          metadata: {
-            sentTo: buyer.user.email,
-            sentAt: new Date().toISOString(),
-            source: "admin_manual",
+    if (adverseActionStatus !== "error") {
+      try {
+        await prisma.complianceEvent.create({
+          data: {
+            eventType:
+              adverseActionStatus === "sent"
+                ? "ADVERSE_ACTION_NOTICE_SENT"
+                : "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE",
+            buyerId: buyer.id,
+            prequalApplicationId: prequal.id,
+            metadata: {
+              sentTo: buyer.user.email,
+              sentAt: new Date().toISOString(),
+              decisionTimestamp: prequal.updatedAt.toISOString(),
+              source: "admin_manual",
+            },
           },
-        },
-      });
-    } catch (logErr) {
-      console.error("[admin/prequal/manual-override] Failed to log adverse action event:", logErr);
+        });
+      } catch (logErr) {
+        console.error("[admin/prequal/manual-override] Failed to log adverse action event:", logErr);
+      }
     }
   }
 

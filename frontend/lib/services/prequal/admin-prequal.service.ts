@@ -538,6 +538,8 @@ export async function runAdminIPredictPrequalForBuyer(
   }
 
   // FCRA § 615: adverse action notice required when a consumer report caused DECLINED.
+  // ComplianceEvent reflects true send status: SUPPRESSED_DUPLICATE when the
+  // idempotency layer collapses a duplicate; nothing logged on a thrown error.
   if (finalDecision === PreQualDecision.DECLINED) {
     const decisionDateStr = new Date().toLocaleDateString("en-US", {
       month: "long",
@@ -545,35 +547,44 @@ export async function runAdminIPredictPrequalForBuyer(
       year: "numeric",
     });
 
+    let adverseActionStatus: "sent" | "duplicate" | "error" = "error";
     try {
-      await sendAdverseActionEmail({
+      const sendResult = await sendAdverseActionEmail({
         to: buyer.user.email,
         firstName: input.firstName,
         decisionDate: decisionDateStr,
         prequalApplicationId: prequal.id,
+        decisionTimestamp: prequal.updatedAt.toISOString(),
       });
-      adverseActionSent = true;
+      adverseActionStatus = sendResult.sent ? "sent" : "duplicate";
+      adverseActionSent = sendResult.sent;
     } catch (err) {
       console.error("[admin-prequal] Failed to send adverse action email:", err);
     }
 
-    try {
-      await prisma.complianceEvent.create({
-        data: {
-          eventType: "ADVERSE_ACTION_NOTICE_SENT",
-          buyerId,
-          prequalApplicationId: prequal.id,
-          metadata: {
-            sentTo: buyer.user.email,
-            sentAt: new Date().toISOString(),
-            source: "admin_ipredict",
-            adminId,
-            consentSource,
+    if (adverseActionStatus !== "error") {
+      try {
+        await prisma.complianceEvent.create({
+          data: {
+            eventType:
+              adverseActionStatus === "sent"
+                ? "ADVERSE_ACTION_NOTICE_SENT"
+                : "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE",
+            buyerId,
+            prequalApplicationId: prequal.id,
+            metadata: {
+              sentTo: buyer.user.email,
+              sentAt: new Date().toISOString(),
+              decisionTimestamp: prequal.updatedAt.toISOString(),
+              source: "admin_ipredict",
+              adminId,
+              consentSource,
+            },
           },
-        },
-      });
-    } catch (err) {
-      console.error("[admin-prequal] Failed to log adverse action compliance event:", err);
+        });
+      } catch (err) {
+        console.error("[admin-prequal] Failed to log adverse action compliance event:", err);
+      }
     }
   }
 
@@ -595,6 +606,7 @@ export async function runAdminIPredictPrequalForBuyer(
         to: buyer.user.email,
         firstName: input.firstName,
         prequalApplicationId: prequal.id,
+        decisionTimestamp: prequal.updatedAt.toISOString(),
       });
     } catch (err) {
       console.error("[admin-prequal] Failed to send under-review email:", err);

@@ -91,6 +91,102 @@ const buyerPrequalPage = readFileSync(join(__dirname, "..", "app/buyer/prequal/p
 check("renew banner triggers on expiresAt <= now",   /expiresAt\s*<=\s*now/.test(buyerPrequalPage));
 check("expired path does not check decision",        /prequal\.expiresAt\s*&&\s*prequal\.expiresAt\s*<=\s*now/.test(buyerPrequalPage));
 
+// ── FCRA adverse-action idempotency (per-decision key) ───────────────────────
+// Stub prisma.emailSendLog so we can observe the idempotency keys handed to
+// sendIdempotent() without touching a real DB. Each invocation returns null
+// (i.e. "no prior send"); we ALSO record the keys so we can compare them.
+console.log("\nFCRA  adverse-action / under-review per-decision idempotency:");
+const { prisma } = await import("../lib/prisma");
+const capturedKeys: string[] = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(prisma as any).emailSendLog = {
+  findUnique: async ({ where }: { where: { idempotencyKey: string } }) => {
+    capturedKeys.push(where.idempotencyKey);
+    return null;
+  },
+  create: async () => ({}),
+};
+// Force the email service to skip its real Resend dispatch — placeholder API key.
+process.env.RESEND_API_KEY = "placeholder";
+
+const { sendAdverseActionEmail, sendPrequalUnderReviewEmail } = await import(
+  "../lib/services/email/resend.service"
+);
+
+const prequalId = "PRQ-stable-id-123";
+const firstDecisionTs  = "2026-05-10T10:00:00.000Z";
+const secondDecisionTs = "2026-05-12T14:30:00.000Z";
+
+// Two distinct declines for the SAME prequal id must produce DIFFERENT keys.
+capturedKeys.length = 0;
+await sendAdverseActionEmail({
+  to: "buyer@example.com", firstName: "B", decisionDate: "May 10, 2026",
+  prequalApplicationId: prequalId, decisionTimestamp: firstDecisionTs,
+});
+await sendAdverseActionEmail({
+  to: "buyer@example.com", firstName: "B", decisionDate: "May 12, 2026",
+  prequalApplicationId: prequalId, decisionTimestamp: secondDecisionTs,
+});
+check(
+  "two adverse-action sends, same id + different timestamps → different keys",
+  capturedKeys.length === 2 && capturedKeys[0] !== capturedKeys[1],
+  `keys=[${capturedKeys.join(", ")}]`,
+);
+check(
+  "adverse-action key includes prequal id + decisionTimestamp",
+  capturedKeys[0] === `adverse-action-${prequalId}-${firstDecisionTs}` &&
+  capturedKeys[1] === `adverse-action-${prequalId}-${secondDecisionTs}`,
+);
+
+// Genuine intra-request double-send (same id, same timestamp) must still collapse.
+capturedKeys.length = 0;
+await sendAdverseActionEmail({
+  to: "buyer@example.com", firstName: "B", decisionDate: "May 10, 2026",
+  prequalApplicationId: prequalId, decisionTimestamp: firstDecisionTs,
+});
+await sendAdverseActionEmail({
+  to: "buyer@example.com", firstName: "B", decisionDate: "May 10, 2026",
+  prequalApplicationId: prequalId, decisionTimestamp: firstDecisionTs,
+});
+check(
+  "adverse-action: same id + same timestamp → same key (double-send still de-dupes)",
+  capturedKeys.length === 2 && capturedKeys[0] === capturedKeys[1],
+);
+
+// Under-review notice — identical contract.
+capturedKeys.length = 0;
+await sendPrequalUnderReviewEmail({
+  to: "buyer@example.com", firstName: "B",
+  prequalApplicationId: prequalId, decisionTimestamp: firstDecisionTs,
+});
+await sendPrequalUnderReviewEmail({
+  to: "buyer@example.com", firstName: "B",
+  prequalApplicationId: prequalId, decisionTimestamp: secondDecisionTs,
+});
+check(
+  "two under-review sends, same id + different timestamps → different keys",
+  capturedKeys.length === 2 && capturedKeys[0] !== capturedKeys[1],
+  `keys=[${capturedKeys.join(", ")}]`,
+);
+check(
+  "under-review key includes prequal id + decisionTimestamp",
+  capturedKeys[0] === `prequal-under-review-${prequalId}-${firstDecisionTs}` &&
+  capturedKeys[1] === `prequal-under-review-${prequalId}-${secondDecisionTs}`,
+);
+capturedKeys.length = 0;
+await sendPrequalUnderReviewEmail({
+  to: "buyer@example.com", firstName: "B",
+  prequalApplicationId: prequalId, decisionTimestamp: firstDecisionTs,
+});
+await sendPrequalUnderReviewEmail({
+  to: "buyer@example.com", firstName: "B",
+  prequalApplicationId: prequalId, decisionTimestamp: firstDecisionTs,
+});
+check(
+  "under-review: same id + same timestamp → same key (double-send still de-dupes)",
+  capturedKeys.length === 2 && capturedKeys[0] === capturedKeys[1],
+);
+
 console.log(`\nResult: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
 }
