@@ -11,7 +11,7 @@
 //   panel → ipredict_form → ipredict_confirm → ipredict_running → ipredict_result
 //   panel → override_form → override_running → override_result
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -287,6 +287,79 @@ export function PrequalAdminPanel({
   });
 
   const [formError, setFormError] = useState<string | null>(null);
+
+  // ── History + Resend actions ───────────────────────────────────────────────
+  interface ComplianceEventEntry {
+    id: string;
+    eventType: string;
+    prequalApplicationId: string | null;
+    metadata: unknown;
+    createdAt: string;
+  }
+  interface AdminAuditEntry {
+    id: string;
+    action: string;
+    adminEmail: string;
+    reason: string | null;
+    metadata: unknown;
+    createdAt: string;
+  }
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [complianceEvents, setComplianceEvents] = useState<ComplianceEventEntry[]>([]);
+  const [adminAuditLogs, setAdminAuditLogs] = useState<AdminAuditEntry[]>([]);
+  const [resendStatus, setResendStatus] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
+  const [resending, setResending] = useState<"APPROVED" | "ADVERSE_ACTION" | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/admin/buyers/${buyerId}/prequal/history`);
+      const json = await res.json() as {
+        success?: boolean;
+        data?: { complianceEvents: ComplianceEventEntry[]; adminAuditLogs: AdminAuditEntry[] };
+      };
+      if (json.success && json.data) {
+        setComplianceEvents(json.data.complianceEvents);
+        setAdminAuditLogs(json.data.adminAuditLogs);
+      }
+    } catch {
+      // Non-fatal — surface as empty list
+    }
+    setHistoryLoading(false);
+  }, [buyerId]);
+
+  useEffect(() => {
+    if (historyOpen && complianceEvents.length === 0 && adminAuditLogs.length === 0 && !historyLoading) {
+      void loadHistory();
+    }
+  }, [historyOpen, complianceEvents.length, adminAuditLogs.length, historyLoading, loadHistory]);
+
+  const resendEmail = useCallback(async (kind: "APPROVED" | "ADVERSE_ACTION") => {
+    setResendStatus(null);
+    setResending(kind);
+    try {
+      const res = await fetch(`/api/admin/buyers/${buyerId}/prequal/resend-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind }),
+      });
+      const json = await res.json() as { success?: boolean; error?: { message: string } };
+      if (!res.ok || !json.success) {
+        setResendStatus({ kind: "error", message: json.error?.message ?? "Failed to send email" });
+      } else {
+        setResendStatus({
+          kind: "ok",
+          message: kind === "APPROVED" ? "Approval email re-sent." : "Adverse-action email re-sent.",
+        });
+        // Refresh history so the new audit entry shows up
+        await loadHistory();
+      }
+    } catch {
+      setResendStatus({ kind: "error", message: "Network error. Please try again." });
+    }
+    setResending(null);
+  }, [buyerId, loadHistory]);
 
   // ── Refresh panel data via GET endpoint ────────────────────────────────────
   const refreshPanelData = useCallback(async () => {
@@ -609,6 +682,114 @@ export function PrequalAdminPanel({
             >
               Manual Admin Prequalification Override
             </Button>
+          </div>
+
+          {/* Resend decision email */}
+          {currentPrequal && (currentPrequal.decision === "APPROVED" || currentPrequal.decision === "DECLINED") && (
+            <div className="border border-slate-200 rounded-xl p-4 bg-white" data-testid="prequal-resend-section">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                Resend Decision Email
+              </p>
+              <p className="text-xs text-slate-400 mb-3">
+                Re-send the {currentPrequal.decision === "APPROVED" ? "approval" : "FCRA adverse-action"} email to the buyer. The original send is preserved in the email log.
+              </p>
+              {resendStatus && (
+                <div
+                  data-testid="prequal-resend-status"
+                  className={`mb-3 text-xs px-3 py-2 rounded border ${resendStatus.kind === "ok" ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-red-50 border-red-200 text-red-700"}`}
+                >
+                  {resendStatus.message}
+                </div>
+              )}
+              {currentPrequal.decision === "APPROVED" ? (
+                <Button
+                  variant="outline"
+                  onClick={() => resendEmail("APPROVED")}
+                  data-testid="btn-resend-approval"
+                  disabled={resending !== null}
+                >
+                  {resending === "APPROVED" ? "Sending…" : "Resend Approval Email"}
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  onClick={() => resendEmail("ADVERSE_ACTION")}
+                  data-testid="btn-resend-adverse-action"
+                  disabled={resending !== null}
+                >
+                  {resending === "ADVERSE_ACTION" ? "Sending…" : "Resend Adverse-Action Email"}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {/* History */}
+          <div className="border border-slate-200 rounded-xl bg-white" data-testid="prequal-history-section">
+            <button
+              type="button"
+              onClick={() => setHistoryOpen((o) => !o)}
+              className="w-full flex items-center justify-between px-4 py-3 text-left"
+              data-testid="prequal-history-toggle"
+            >
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  Compliance &amp; Audit History
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  ComplianceEvents (emails, notices) and AdminAuditLog entries for this buyer's prequal.
+                </p>
+              </div>
+              {historyOpen ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+            </button>
+            {historyOpen && (
+              <div className="border-t border-slate-100 px-4 py-3 space-y-4">
+                {historyLoading && (
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Loader2 size={12} className="animate-spin" /> Loading history…
+                  </div>
+                )}
+                {!historyLoading && (
+                  <>
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">Compliance events ({complianceEvents.length})</p>
+                      {complianceEvents.length === 0 ? (
+                        <p className="text-xs text-slate-400">No compliance events recorded.</p>
+                      ) : (
+                        <ul className="space-y-1.5 max-h-64 overflow-y-auto pr-1" data-testid="prequal-compliance-events">
+                          {complianceEvents.map((e) => (
+                            <li key={e.id} className="text-xs flex items-start justify-between gap-3 border-b border-slate-50 pb-1.5 last:border-0">
+                              <span className="font-mono text-slate-700">{e.eventType}</span>
+                              <span className="text-slate-400 shrink-0">{fmtDateTime(e.createdAt)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">Admin audit log ({adminAuditLogs.length})</p>
+                      {adminAuditLogs.length === 0 ? (
+                        <p className="text-xs text-slate-400">No admin actions recorded.</p>
+                      ) : (
+                        <ul className="space-y-1.5 max-h-64 overflow-y-auto pr-1" data-testid="prequal-admin-audit-logs">
+                          {adminAuditLogs.map((a) => (
+                            <li key={a.id} className="text-xs border-b border-slate-50 pb-1.5 last:border-0">
+                              <div className="flex items-start justify-between gap-3">
+                                <span className="font-mono text-slate-700">{a.action}</span>
+                                <span className="text-slate-400 shrink-0">{fmtDateTime(a.createdAt)}</span>
+                              </div>
+                              <p className="text-slate-500 mt-0.5">
+                                {a.adminEmail}
+                                {a.reason ? ` — ${a.reason}` : ""}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

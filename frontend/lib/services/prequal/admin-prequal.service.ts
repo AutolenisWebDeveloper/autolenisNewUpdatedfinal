@@ -27,6 +27,8 @@ import { isPrequalValid } from "./prequal.service";
 import {
   sendPrequalApprovedEmail,
   sendAdverseActionEmail,
+  sendPrequalUnderReviewEmail,
+  sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
 
 // Expiry durations — iPredict results expire after 30 days (same as buyer path).
@@ -195,6 +197,7 @@ const PROVIDER_ERROR_REASONS = new Set([
   "NETWORK_ERROR",
   "OAUTH_FAILED",
   "IPREDICT_ERROR",
+  "CONFIG_ERROR",
 ]);
 
 function mapFinalDecisionToRunStatus(
@@ -579,6 +582,57 @@ export async function runAdminIPredictPrequalForBuyer(
     result.mocked,
     result.reason
   );
+
+  // OFAC-silent buyer email + ops alert when the run resolved to review state.
+  const needsReview =
+    finalDecision === PreQualDecision.MANUAL_REVIEW ||
+    finalDecision === PreQualDecision.OFAC_REVIEW ||
+    finalDecision === PreQualDecision.OFAC_ESCALATED;
+
+  if (needsReview) {
+    try {
+      await sendPrequalUnderReviewEmail({
+        to: buyer.user.email,
+        firstName: input.firstName,
+        prequalApplicationId: prequal.id,
+      });
+    } catch (err) {
+      console.error("[admin-prequal] Failed to send under-review email:", err);
+    }
+    try {
+      await prisma.complianceEvent.create({
+        data: {
+          eventType: "PREQUAL_UNDER_REVIEW_NOTICE_SENT",
+          buyerId,
+          prequalApplicationId: prequal.id,
+          metadata: {
+            sentTo: buyer.user.email,
+            sentAt: new Date().toISOString(),
+            decision: finalDecision,
+            source: "admin_ipredict",
+            adminId,
+          },
+        },
+      });
+    } catch (err) {
+      console.error("[admin-prequal] Failed to log under-review compliance event:", err);
+    }
+  }
+
+  if (needsReview || runStatus === "PROVIDER_ERROR") {
+    try {
+      await sendAdminPrequalAlertEmail({
+        kind: runStatus === "PROVIDER_ERROR" ? "PROVIDER_ERROR" : "REVIEW",
+        buyerId,
+        buyerEmail: buyer.user.email,
+        decision: finalDecision,
+        providerReason: result.reason,
+        prequalApplicationId: prequal.id,
+      });
+    } catch (err) {
+      console.error("[admin-prequal] Failed to send admin alert email:", err);
+    }
+  }
 
   return {
     status: runStatus,

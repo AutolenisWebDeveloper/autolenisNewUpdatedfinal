@@ -1,12 +1,18 @@
 // POST /api/admin/buyers/[buyerId]/prequal/manual-override
+//
+// CANONICAL admin manual-override endpoint. This is the ONLY route that
+// performs a manual override — the base /prequal route holds GET only.
+// All admin UIs and integrations must POST here.
+//
 // Admin manual prequalification override — sets decision, tier, maxOtdAmountCents,
 // and expiresAt directly WITHOUT calling MicroBilt.
 //
 // This is intentionally SEPARATE from the iPredict run endpoint:
 //   - No consumer report is pulled.
 //   - Label "manual" must be used in the UI — never implied to be iPredict.
-//   - OFAC hard gate is still enforced: if checkOfacAlert is true, the decision
-//     is overridden to OFAC_REVIEW and an admin notification is created.
+//   - OFAC hard gate is MANDATORY and enforced here: if checkOfacAlert is true
+//     the decision is overridden to OFAC_REVIEW and an admin notification is
+//     created. Any future override path must preserve this gate.
 //   - AdminAuditLog + ComplianceEvent written on every action.
 //   - Adverse-action email sent when decision is DECLINED (FCRA § 615).
 

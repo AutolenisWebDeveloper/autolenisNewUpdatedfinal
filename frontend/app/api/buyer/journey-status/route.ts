@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,11 @@ export async function GET(request: NextRequest) {
       completedStages.push("onboarding");
       currentStage = "prequal";
     }
-    if (prequal) {
+    // Prequal stage is complete ONLY when the buyer holds a non-expired
+    // APPROVED prequal. DECLINED / PENDING / MANUAL_REVIEW / OFAC_REVIEW /
+    // OFAC_ESCALATED / expired records must keep the buyer on the prequal step
+    // — this matches the gating in app/buyer/layout.tsx.
+    if (isPrequalValid(prequal)) {
       completedStages.push("prequal");
       currentStage = "search";
     }

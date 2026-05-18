@@ -10,6 +10,16 @@ import {
   ADVERSE_ACTION_SUBJECT,
   renderAdverseActionEmail,
 } from "./templates/adverse-action";
+import {
+  PREQUAL_UNDER_REVIEW_SUBJECT,
+  renderPrequalUnderReviewEmail,
+} from "./templates/prequal-under-review";
+import {
+  ADMIN_PREQUAL_ALERT_SUBJECT_REVIEW,
+  ADMIN_PREQUAL_ALERT_SUBJECT_PROVIDER,
+  renderAdminPrequalAlertEmail,
+  type AdminPrequalAlertKind,
+} from "./templates/admin-prequal-alert";
 import { WELCOME_EMAIL_SUBJECT, renderWelcomeEmail } from "./templates/welcome";
 import { EMAIL_VERIFIED_SUBJECT, renderEmailVerifiedEmail } from "./templates/email-verified";
 import {
@@ -204,24 +214,60 @@ export async function sendPrequalApprovedEmail(params: {
   });
 }
 
-export async function sendPrequalDeclinedEmail(to: string, buyerName: string) {
+// Buyer email for MANUAL_REVIEW / OFAC_REVIEW / OFAC_ESCALATED states.
+// OFAC-silent — the copy never mentions OFAC, sanctions, or the cause; the
+// buyer only knows their application is being reviewed and to expect an
+// update within 1–2 business days. Keyed off prequalApplicationId so a fresh
+// review (e.g. a re-application that lands in MANUAL_REVIEW again) sends a
+// new notice rather than being de-duplicated against an earlier one.
+export async function sendPrequalUnderReviewEmail(params: {
+  to: string;
+  firstName: string;
+  prequalApplicationId: string;
+}) {
   return sendIdempotent({
-    idempotencyKey: `prequal-declined-${to}`,
-    to, templateId: "prequal-declined",
-    subject: "AutoLenis prequalification — update on your application",
-    html: `
-      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-        <div style="background:#0B5FD1;padding:32px;text-align:center">
-          <h1 style="color:#fff;margin:0">Application Update</h1>
-        </div>
-        <div style="padding:32px">
-          <p>Hi ${buyerName},</p>
-          <p>We were unable to pre-qualify you at this time based on your consumer report.</p>
-          <p>Under the Fair Credit Reporting Act, you have the right to obtain a free copy of your consumer report from MicroBilt Corporation (1-888-217-5866, www.microbilt.com) and to dispute any inaccuracies.</p>
-          <p>You may also provide your own bank pre-approval: <a href="${APP_URL}/buyer/prequal/external">Use my own financing</a></p>
-        </div>
-      </div>
-    `,
+    idempotencyKey: `prequal-under-review-${params.prequalApplicationId}`,
+    to: params.to,
+    templateId: "prequal-under-review",
+    subject: PREQUAL_UNDER_REVIEW_SUBJECT,
+    html: renderPrequalUnderReviewEmail({ firstName: params.firstName }),
+  });
+}
+
+// Admin ops alert. Routed to ADMIN_NOTIFICATION_EMAIL — never hardcoded.
+// Returns { sent: false } silently when the env var is not configured so the
+// rest of the prequal flow is never blocked on ops email availability.
+export async function sendAdminPrequalAlertEmail(params: {
+  kind: AdminPrequalAlertKind;
+  buyerId: string;
+  buyerEmail: string;
+  decision: string;
+  providerReason?: string | null;
+  prequalApplicationId: string;
+}) {
+  const to = process.env.ADMIN_NOTIFICATION_EMAIL;
+  if (!to) {
+    console.warn(
+      "[EMAIL] ADMIN_NOTIFICATION_EMAIL not set — admin prequal alert skipped",
+    );
+    return { sent: false };
+  }
+  return sendIdempotent({
+    idempotencyKey: `admin-prequal-${params.kind.toLowerCase()}-${params.prequalApplicationId}`,
+    to,
+    templateId: "admin-prequal-alert",
+    subject:
+      params.kind === "REVIEW"
+        ? ADMIN_PREQUAL_ALERT_SUBJECT_REVIEW
+        : ADMIN_PREQUAL_ALERT_SUBJECT_PROVIDER,
+    html: renderAdminPrequalAlertEmail({
+      kind: params.kind,
+      buyerId: params.buyerId,
+      buyerEmail: params.buyerEmail,
+      decision: params.decision,
+      providerReason: params.providerReason ?? null,
+      appUrl: APP_URL,
+    }),
   });
 }
 

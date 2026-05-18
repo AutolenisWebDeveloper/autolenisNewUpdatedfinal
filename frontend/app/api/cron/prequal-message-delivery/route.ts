@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   for (const pq of pending) {
     const existing = await prisma.notification.findFirst({ where: { buyerId: pq.buyerId, type: "PREQUAL_APPROVED" } });
     if (!existing) {
-      await prisma.notification.create({ data: { buyerId: pq.buyerId, type: "PREQUAL_APPROVED", title: "Pre-qualification approved", body: `Your approved budget is $${(pq.maxOtdAmountCents / 100).toLocaleString()}.`, actionUrl: "/buyer/prequal/result" } }).catch(() => {});
+      await prisma.notification.create({ data: { buyerId: pq.buyerId, type: "PREQUAL_APPROVED", title: "Pre-qualification approved", body: `Your approved budget is $${(pq.maxOtdAmountCents / 100).toLocaleString()}.`, actionUrl: "/buyer/prequal" } }).catch(() => {});
     }
   }
   return NextResponse.json({ success: true, data: { delivered: pending.length } });

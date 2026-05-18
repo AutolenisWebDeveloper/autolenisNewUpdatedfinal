@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
     APPROVED: "APPROVED",
     DECLINED: "REJECTED",
     MANUAL_REVIEW: "ADDITIONAL_INFO_REQUIRED",
+    OFAC_REVIEW: "PENDING",
     OFAC_ESCALATED: "PENDING",
     PENDING: "PENDING",
   };
