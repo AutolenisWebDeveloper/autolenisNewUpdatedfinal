@@ -161,7 +161,7 @@ export default async function CrmOverviewPage() {
   return (
     <div className="p-6 space-y-6">
       <header>
-        <h1 className="text-xl font-bold text-white">CRM Overview</h1>
+        <h1 className="text-xl font-bold text-gray-900">CRM Overview</h1>
         <p className="text-sm text-gray-500 mt-1">
           Operational snapshot across the entire contact lifecycle.
         </p>
@@ -172,35 +172,35 @@ export default async function CrmOverviewPage() {
         {overdue > 0 && (
           <Link
             href="/admin/crm/tasks"
-            className="flex items-center gap-3 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 hover:bg-red-500/15 transition-colors"
+            className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 hover:bg-red-50 transition-colors"
           >
-            <AlertTriangle className="w-5 h-5 text-red-400" />
+            <AlertTriangle className="w-5 h-5 text-red-600" />
             <div className="flex-1">
-              <div className="text-sm font-semibold text-red-300">
+              <div className="text-sm font-semibold text-red-700">
                 {overdue} overdue task{overdue === 1 ? '' : 's'}
               </div>
-              <div className="text-xs text-red-300/70">
+              <div className="text-xs text-red-700/70">
                 Tasks past their due date need attention.
               </div>
             </div>
-            <ArrowRight className="w-4 h-4 text-red-300" />
+            <ArrowRight className="w-4 h-4 text-red-700" />
           </Link>
         )}
         {unread > 0 && (
           <Link
             href="/admin/crm/inbox"
-            className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/30 rounded-xl px-4 py-3 hover:bg-blue-500/15 transition-colors"
+            className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/30 rounded-xl px-4 py-3 hover:bg-blue-50 transition-colors"
           >
-            <Inbox className="w-5 h-5 text-blue-400" />
+            <Inbox className="w-5 h-5 text-blue-600" />
             <div className="flex-1">
-              <div className="text-sm font-semibold text-blue-300">
+              <div className="text-sm font-semibold text-blue-700">
                 {unread} unread message{unread === 1 ? '' : 's'}
               </div>
-              <div className="text-xs text-blue-300/70">
+              <div className="text-xs text-blue-700/70">
                 Inbound conversations awaiting reply.
               </div>
             </div>
-            <ArrowRight className="w-4 h-4 text-blue-300" />
+            <ArrowRight className="w-4 h-4 text-blue-700" />
           </Link>
         )}
       </div>
@@ -216,12 +216,12 @@ export default async function CrmOverviewPage() {
       </div>
 
       {/* Lifecycle funnel */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <section className="bg-white border border-gray-200 rounded-xl p-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-white">Lifecycle Funnel</h2>
+          <h2 className="text-sm font-semibold text-gray-900">Lifecycle Funnel</h2>
           <Link
             href="/admin/crm/contacts"
-            className="text-xs text-blue-400 hover:text-blue-300"
+            className="text-xs text-blue-600 hover:text-blue-700"
           >
             View contacts →
           </Link>
@@ -232,14 +232,14 @@ export default async function CrmOverviewPage() {
             const pct = (count / maxStage) * 100;
             return (
               <div key={stage} className="flex items-center gap-3 text-xs">
-                <div className="w-32 text-gray-400 shrink-0">{STAGE_LABEL[stage]}</div>
-                <div className="flex-1 h-5 bg-gray-950 rounded overflow-hidden">
+                <div className="w-32 text-gray-500 shrink-0">{STAGE_LABEL[stage]}</div>
+                <div className="flex-1 h-5 bg-white rounded overflow-hidden">
                   <div
                     className={`h-full ${STAGE_BAR[stage]} transition-all`}
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <div className="w-12 text-right text-gray-300 tabular-nums">{count}</div>
+                <div className="w-12 text-right text-gray-400 tabular-nums">{count}</div>
               </div>
             );
           })}
@@ -248,18 +248,18 @@ export default async function CrmOverviewPage() {
 
       <div className="grid lg:grid-cols-3 gap-5">
         {/* Activity feed */}
-        <section className="lg:col-span-2 bg-gray-900 border border-gray-800 rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-white mb-4">Recent Activity</h2>
+        <section className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-gray-900 mb-4">Recent Activity</h2>
           {events.length === 0 ? (
             <div className="py-10 text-center">
-              <Activity className="w-10 h-10 text-gray-700 mx-auto mb-2" />
+              <Activity className="w-10 h-10 text-gray-400 mx-auto mb-2" />
               <p className="text-sm text-gray-500">No activity yet</p>
-              <p className="text-[11px] text-gray-700">
+              <p className="text-[11px] text-gray-400">
                 Timeline events will appear here as contacts move through the funnel.
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-gray-800/60">
+            <div className="divide-y divide-gray-200">
               {events.map((ev) => {
                 const v = timelineVisual(ev.event_type);
                 const Icon = v.icon;
@@ -272,17 +272,17 @@ export default async function CrmOverviewPage() {
                   <Link
                     key={ev.id}
                     href={`/admin/crm/contacts/${ev.contact_id}`}
-                    className="flex items-start gap-3 py-2.5 hover:bg-gray-800/30 -mx-2 px-2 rounded-lg transition-colors"
+                    className="flex items-start gap-3 py-2.5 hover:bg-gray-50 -mx-2 px-2 rounded-lg transition-colors"
                   >
                     <Icon className={`w-4 h-4 mt-0.5 ${v.color}`} />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm">
                         <span className={v.color}>{v.label}</span>{' '}
                         <span className="text-gray-500">·</span>{' '}
-                        <span className="text-white">{name}</span>
+                        <span className="text-gray-900">{name}</span>
                       </div>
                     </div>
-                    <div className="text-[11px] text-gray-600 shrink-0 tabular-nums">
+                    <div className="text-[11px] text-gray-500 shrink-0 tabular-nums">
                       {relativeTime(ev.created_at)}
                     </div>
                   </Link>
@@ -293,8 +293,8 @@ export default async function CrmOverviewPage() {
         </section>
 
         {/* Quick actions */}
-        <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-white mb-4">Quick Actions</h2>
+        <section className="bg-white border border-gray-200 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-gray-900 mb-4">Quick Actions</h2>
           <div className="space-y-2">
             <QuickAction href="/admin/crm/campaigns"   icon={Send}      label="New Campaign" />
             <QuickAction href="/admin/crm/automations" icon={Zap}       label="New Workflow" />
@@ -322,22 +322,22 @@ function MetricCard({
     accent === 'blue'
       ? 'border-blue-500/30 bg-blue-500/5'
       : accent === 'red'
-        ? 'border-red-500/30 bg-red-500/5'
+        ? 'border-red-200 bg-red-500/5'
         : accent === 'emerald'
           ? 'border-emerald-500/30 bg-emerald-500/5'
-          : 'border-gray-800 bg-gray-900';
+          : 'border-gray-200 bg-white';
   const iconColor =
     accent === 'blue'
-      ? 'text-blue-400'
+      ? 'text-blue-600'
       : accent === 'red'
-        ? 'text-red-400'
+        ? 'text-red-600'
         : accent === 'emerald'
-          ? 'text-emerald-400'
+          ? 'text-emerald-700'
           : 'text-gray-500';
   return (
     <div className={`border rounded-xl p-4 ${accentClass}`}>
       <Icon className={`w-5 h-5 ${iconColor}`} />
-      <div className="mt-3 text-2xl font-bold text-white tabular-nums">{value}</div>
+      <div className="mt-3 text-2xl font-bold text-gray-900 tabular-nums">{value}</div>
       <div className="mt-0.5 text-[11px] text-gray-500">{label}</div>
     </div>
   );
@@ -355,11 +355,11 @@ function QuickAction({
   return (
     <Link
       href={href}
-      className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-gray-950 hover:bg-gray-800/60 border border-gray-800 hover:border-gray-700 text-sm text-gray-300 hover:text-white transition-colors"
+      className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-white hover:bg-gray-100 border border-gray-200 hover:border-gray-300 text-sm text-gray-400 hover:text-gray-900 transition-colors"
     >
       <Icon className="w-4 h-4 text-blue-500" />
       <span className="flex-1">{label}</span>
-      <ArrowRight className="w-3.5 h-3.5 text-gray-600" />
+      <ArrowRight className="w-3.5 h-3.5 text-gray-500" />
     </Link>
   );
 }

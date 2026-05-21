@@ -8,12 +8,12 @@ import type { CampaignStatus, CampaignType } from '@/lib/types/crm';
 export const dynamic = 'force-dynamic';
 
 const STATUS_BADGE: Record<CampaignStatus, string> = {
-  draft: 'bg-gray-700/40 text-gray-400',
-  scheduled: 'bg-blue-500/15 text-blue-300',
-  running: 'bg-yellow-500/15 text-yellow-400',
-  paused: 'bg-orange-500/15 text-orange-400',
-  completed: 'bg-emerald-500/15 text-emerald-400',
-  cancelled: 'bg-red-500/15 text-red-400',
+  draft: 'bg-gray-700/40 text-gray-500',
+  scheduled: 'bg-blue-50 text-blue-700',
+  running: 'bg-yellow-50 text-yellow-700',
+  paused: 'bg-orange-50 text-orange-700',
+  completed: 'bg-emerald-50 text-emerald-700',
+  cancelled: 'bg-red-50 text-red-600',
 };
 
 const TYPE_ICON: Record<CampaignType, typeof Mail> = {
@@ -55,13 +55,13 @@ export default async function CampaignDetailPage({
       <header className="mb-6">
         <Link
           href="/admin/crm/campaigns"
-          className="flex items-center gap-1 text-xs text-gray-500 hover:text-white transition-colors mb-3"
+          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 transition-colors mb-3"
         >
           <ChevronLeft className="w-3.5 h-3.5" /> Campaigns
         </Link>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-white">{campaign.name}</h1>
+            <h1 className="text-xl font-bold text-gray-900">{campaign.name}</h1>
             <div className="flex items-center gap-3 mt-1.5">
               <span className="inline-flex items-center gap-1 text-xs text-gray-500">
                 <TypeIcon className="w-3.5 h-3.5" /> {campaign.type}
@@ -92,7 +92,7 @@ export default async function CampaignDetailPage({
         <MetricCard label="Suppressed" value={campaign.suppressed_count} tone="muted" />
       </div>
 
-      <section className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+      <section className="bg-white border border-gray-200 rounded-xl p-5">
         <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-3">
           Recipient breakdown
         </div>
@@ -104,12 +104,12 @@ export default async function CampaignDetailPage({
             return (
               <div key={status}>
                 <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="text-gray-400 capitalize">{status}</span>
-                  <span className="text-gray-300 font-mono">
+                  <span className="text-gray-500 capitalize">{status}</span>
+                  <span className="text-gray-400 font-mono">
                     {count.toLocaleString()} ({pct.toFixed(1)}%)
                   </span>
                 </div>
-                <div className="h-1.5 bg-gray-950 rounded-full overflow-hidden">
+                <div className="h-1.5 bg-white rounded-full overflow-hidden">
                   <div
                     className="h-full bg-blue-500"
                     style={{ width: `${Math.min(pct, 100)}%` }}
@@ -119,7 +119,7 @@ export default async function CampaignDetailPage({
             );
           })}
           {Object.keys(summary).length === 0 && (
-            <div className="text-xs text-gray-600 italic">
+            <div className="text-xs text-gray-500 italic">
               No recipients written yet — campaign hasn{`'`}t started fan-out.
             </div>
           )}
@@ -140,13 +140,13 @@ function MetricCard({
 }) {
   const toneClass =
     tone === 'warn'
-      ? 'text-yellow-400'
+      ? 'text-yellow-700'
       : tone === 'muted'
         ? 'text-gray-500'
-        : 'text-white';
+        : 'text-gray-900';
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-      <div className="text-[10px] uppercase tracking-wider text-gray-600">{label}</div>
+    <div className="bg-white border border-gray-200 rounded-xl p-4">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
       <div className={`text-xl font-bold ${toneClass} mt-0.5 tabular-nums`}>
         {value.toLocaleString()}
       </div>

@@ -7,12 +7,12 @@ import type { Campaign, CampaignStatus, CampaignType } from '@/lib/types/crm';
 export const dynamic = 'force-dynamic';
 
 const STATUS_BADGE: Record<CampaignStatus, string> = {
-  draft: 'bg-gray-700/40 text-gray-400',
-  scheduled: 'bg-blue-500/15 text-blue-300',
-  running: 'bg-yellow-500/15 text-yellow-400 animate-pulse',
-  paused: 'bg-orange-500/15 text-orange-400',
-  completed: 'bg-emerald-500/15 text-emerald-400',
-  cancelled: 'bg-red-500/15 text-red-400',
+  draft: 'bg-gray-700/40 text-gray-500',
+  scheduled: 'bg-blue-50 text-blue-700',
+  running: 'bg-yellow-50 text-yellow-700 animate-pulse',
+  paused: 'bg-orange-50 text-orange-700',
+  completed: 'bg-emerald-50 text-emerald-700',
+  cancelled: 'bg-red-50 text-red-600',
 };
 
 const TYPE_ICON: Record<CampaignType, typeof Mail> = {
@@ -51,7 +51,7 @@ export default async function CampaignsPage() {
     <div className="p-6 max-w-6xl mx-auto">
       <header className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
+          <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             <Send className="w-5 h-5 text-blue-500" />
             Campaigns
           </h1>
@@ -61,36 +61,36 @@ export default async function CampaignsPage() {
         </div>
         <Link
           href="/admin/crm/campaigns/new"
-          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-3.5 py-2 rounded-lg transition-colors"
+          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-gray-900 text-sm font-medium px-3.5 py-2 rounded-lg transition-colors"
         >
           <Plus className="w-4 h-4" /> New Campaign
         </Link>
       </header>
 
       {loadError ? (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 text-sm text-red-300">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
           Failed to load campaigns: {loadError}
         </div>
       ) : campaigns.length === 0 ? (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center">
-          <Send className="w-12 h-12 text-gray-700 mx-auto mb-3" />
-          <p className="text-sm text-gray-400 font-medium">No campaigns yet</p>
-          <p className="text-xs text-gray-600 mt-1 max-w-sm mx-auto">
+        <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
+          <Send className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+          <p className="text-sm text-gray-500 font-medium">No campaigns yet</p>
+          <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
             Campaigns send to a segment using one template (email) or message body (SMS),
             with suppression + DNC + consent gates enforced at fan-out time.
           </p>
           <Link
             href="/admin/crm/campaigns/new"
-            className="inline-flex items-center gap-1.5 mt-4 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-3.5 py-2 rounded-lg transition-colors"
+            className="inline-flex items-center gap-1.5 mt-4 bg-blue-600 hover:bg-blue-500 text-gray-900 text-sm font-medium px-3.5 py-2 rounded-lg transition-colors"
           >
             <Plus className="w-4 h-4" /> New Campaign
           </Link>
         </div>
       ) : (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-gray-800">
+              <tr className="border-b border-gray-200">
                 <th className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Name</th>
                 <th className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Type</th>
                 <th className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Status</th>
@@ -99,21 +99,21 @@ export default async function CampaignsPage() {
                 <th className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-5 py-3">Created</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-800/50">
+            <tbody className="divide-y divide-gray-200">
               {campaigns.map((c) => {
                 const Icon = TYPE_ICON[c.type];
                 return (
-                  <tr key={c.id} className="hover:bg-gray-800/30 transition-colors">
+                  <tr key={c.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-5 py-3">
                       <Link
                         href={`/admin/crm/campaigns/${c.id}`}
-                        className="text-sm font-medium text-white hover:text-blue-300 transition-colors"
+                        className="text-sm font-medium text-gray-900 hover:text-blue-700 transition-colors"
                       >
                         {c.name}
                       </Link>
                     </td>
                     <td className="px-5 py-3">
-                      <span className="inline-flex items-center gap-1 text-[11px] text-gray-400">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-gray-500">
                         <Icon className="w-3 h-3" />
                         {c.type}
                       </span>
@@ -123,10 +123,10 @@ export default async function CampaignsPage() {
                         {c.status}
                       </span>
                     </td>
-                    <td className="px-5 py-3 text-xs text-gray-300 font-mono">
+                    <td className="px-5 py-3 text-xs text-gray-400 font-mono">
                       {c.recipient_count.toLocaleString()}
                     </td>
-                    <td className="px-5 py-3 text-xs text-gray-300 font-mono">
+                    <td className="px-5 py-3 text-xs text-gray-400 font-mono">
                       {c.sent_count.toLocaleString()}
                     </td>
                     <td className="px-5 py-3 text-xs text-gray-500">{relativeTime(c.created_at)}</td>

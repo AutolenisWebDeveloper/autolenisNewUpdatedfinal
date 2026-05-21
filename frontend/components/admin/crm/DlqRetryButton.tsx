@@ -33,12 +33,12 @@ export function DlqRetryButton({ id }: { id: string }) {
         type="button"
         onClick={onClick}
         disabled={pending}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-gray-900 rounded-lg transition-colors"
       >
         {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCw className="w-3.5 h-3.5" />}
         Retry
       </button>
-      {error && <span className="text-[10px] text-red-400">{error}</span>}
+      {error && <span className="text-[10px] text-red-600">{error}</span>}
     </div>
   );
 }

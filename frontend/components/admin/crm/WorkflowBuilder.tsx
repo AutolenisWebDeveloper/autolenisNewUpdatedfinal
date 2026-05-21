@@ -501,10 +501,10 @@ export function WorkflowBuilder({
   return (
     <div className="flex flex-col h-full">
       {/* Top bar */}
-      <header className="border-b border-gray-800 bg-gray-950/80 backdrop-blur px-6 py-3 flex items-center gap-4">
+      <header className="border-b border-gray-200 bg-white/80 backdrop-blur px-6 py-3 flex items-center gap-4">
         <Link
           href="/admin/crm/automations"
-          className="text-gray-500 hover:text-gray-300 flex items-center gap-1 text-sm"
+          className="text-gray-500 hover:text-gray-400 flex items-center gap-1 text-sm"
         >
           <ChevronLeft className="w-4 h-4" />
           Workflows
@@ -515,16 +515,16 @@ export function WorkflowBuilder({
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="bg-transparent text-base font-semibold text-white outline-none focus:bg-gray-900 px-2 py-1 rounded -mx-2 w-full max-w-md"
+            className="bg-transparent text-base font-semibold text-gray-900 outline-none focus:bg-white px-2 py-1 rounded -mx-2 w-full max-w-md"
           />
-          <div className="flex items-center gap-2 text-[11px] text-gray-600 mt-0.5">
+          <div className="flex items-center gap-2 text-[11px] text-gray-500 mt-0.5">
             <span
               className={cn(
                 'inline-flex items-center gap-1 px-2 py-0.5 rounded border uppercase text-[10px] font-semibold',
-                status === 'active' && 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-                status === 'draft' && 'bg-gray-700/40 text-gray-300 border-gray-700',
-                status === 'paused' && 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
-                status === 'archived' && 'bg-gray-700/30 text-gray-500 border-gray-800',
+                status === 'active' && 'bg-emerald-50 text-emerald-700 border-emerald-500/30',
+                status === 'draft' && 'bg-gray-700/40 text-gray-400 border-gray-300',
+                status === 'paused' && 'bg-yellow-50 text-yellow-700 border-yellow-200',
+                status === 'archived' && 'bg-gray-700/30 text-gray-500 border-gray-200',
               )}
             >
               {status}
@@ -542,7 +542,7 @@ export function WorkflowBuilder({
         <button
           type="button"
           onClick={() => setShowHistory((s) => !s)}
-          className="border border-gray-700 hover:border-gray-600 text-gray-400 text-sm px-3 py-2 rounded-lg flex items-center gap-2 transition-colors"
+          className="border border-gray-300 hover:border-gray-400 text-gray-500 text-sm px-3 py-2 rounded-lg flex items-center gap-2 transition-colors"
         >
           <History className="w-4 h-4" />
           <span className="hidden md:inline">History</span>
@@ -552,7 +552,7 @@ export function WorkflowBuilder({
           type="button"
           onClick={() => save()}
           disabled={saving}
-          className="border border-gray-700 hover:border-gray-600 text-gray-300 text-sm px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50 transition-colors"
+          className="border border-gray-300 hover:border-gray-400 text-gray-400 text-sm px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50 transition-colors"
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           Save draft
@@ -563,7 +563,7 @@ export function WorkflowBuilder({
             type="button"
             onClick={pause}
             disabled={activating}
-            className="bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 border border-yellow-500/30 text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50"
+            className="bg-yellow-100 hover:bg-yellow-500/30 text-yellow-700 border border-yellow-200 text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50"
           >
             {activating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             Pause
@@ -573,7 +573,7 @@ export function WorkflowBuilder({
             type="button"
             onClick={activate}
             disabled={activating}
-            className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50 transition-colors"
+            className="bg-blue-600 hover:bg-blue-500 text-gray-900 text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 disabled:opacity-50 transition-colors"
           >
             {activating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             {status === 'paused' ? 'Resume' : 'Activate'}
@@ -582,7 +582,7 @@ export function WorkflowBuilder({
       </header>
 
       {error && (
-        <div className="bg-red-500/10 border-b border-red-500/30 px-6 py-2.5 text-xs text-red-300 flex items-center gap-2">
+        <div className="bg-red-50 border-b border-red-200 px-6 py-2.5 text-xs text-red-700 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           {error}
         </div>
@@ -593,15 +593,15 @@ export function WorkflowBuilder({
         <main className="flex-1 overflow-y-auto p-8">
           <div className="max-w-3xl mx-auto">
             {/* Trigger picker */}
-            <section className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+            <section className="bg-white border border-gray-200 rounded-xl p-5 mb-6">
               <div className="flex items-center gap-2 mb-3">
-                <Zap className="w-4 h-4 text-blue-400" />
-                <h2 className="text-sm font-semibold text-white">Trigger</h2>
+                <Zap className="w-4 h-4 text-blue-600" />
+                <h2 className="text-sm font-semibold text-gray-900">Trigger</h2>
               </div>
               <select
                 value={triggerType}
                 onChange={(e) => setTriggerType(e.target.value as WorkflowTriggerType)}
-                className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500 outline-none"
+                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:border-blue-500 outline-none"
               >
                 {TRIGGER_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -614,7 +614,7 @@ export function WorkflowBuilder({
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Workflow description (optional, for internal reference)"
                 rows={2}
-                className="mt-3 w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-xs text-gray-300 focus:border-blue-500 outline-none resize-none"
+                className="mt-3 w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-400 focus:border-blue-500 outline-none resize-none"
               />
             </section>
 
@@ -631,7 +631,7 @@ export function WorkflowBuilder({
         </main>
 
         {/* Right panel — config drawer / history */}
-        <aside className="w-96 border-l border-gray-800 bg-gray-900/50 overflow-y-auto">
+        <aside className="w-96 border-l border-gray-200 bg-gray-50 overflow-y-auto">
           {showHistory ? (
             <VersionHistoryPanel
               versions={versions}
@@ -665,7 +665,7 @@ export function WorkflowBuilder({
             />
           ) : (
             <div className="p-6 text-center">
-              <Settings className="w-8 h-8 text-gray-700 mx-auto mb-3" />
+              <Settings className="w-8 h-8 text-gray-400 mx-auto mb-3" />
               <p className="text-xs text-gray-500">
                 Click a node to configure it, or add a new step using the + buttons in the canvas.
               </p>
@@ -704,7 +704,7 @@ function ChainEditor({
     <div className={cn('flex flex-col items-center', depth === 0 && 'mt-2')}>
       <AddStepButton onAdd={(type) => onAdd(parentPath, type, 0)} small />
       {steps.length === 0 && depth === 0 && (
-        <p className="text-xs text-gray-600 mt-2 mb-2">No steps yet. Add the first action above.</p>
+        <p className="text-xs text-gray-500 mt-2 mb-2">No steps yet. Add the first action above.</p>
       )}
       {steps.map((step, idx) => {
         const path = [...parentPath, `${idx}`];
@@ -719,29 +719,29 @@ function ChainEditor({
               type="button"
               onClick={() => onSelect(path)}
               className={cn(
-                'w-full max-w-md bg-gray-900 border rounded-xl p-3.5 text-left transition-all group',
+                'w-full max-w-md bg-white border rounded-xl p-3.5 text-left transition-all group',
                 isSelected
                   ? 'border-blue-500 ring-1 ring-blue-500/40'
-                  : 'border-gray-800 hover:border-gray-700',
+                  : 'border-gray-200 hover:border-gray-300',
               )}
             >
               <div className="flex items-start gap-3">
                 <div
                   className={cn(
                     'w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0',
-                    step.node.type === 'condition' && 'bg-purple-500/15 text-purple-400',
-                    step.node.type === 'delay' && 'bg-yellow-500/15 text-yellow-400',
-                    step.node.type.startsWith('action.send') && 'bg-blue-500/15 text-blue-400',
-                    step.node.type === 'action.createTask' && 'bg-emerald-500/15 text-emerald-400',
-                    step.node.type === 'action.updateStage' && 'bg-orange-500/15 text-orange-400',
+                    step.node.type === 'condition' && 'bg-purple-50 text-purple-700',
+                    step.node.type === 'delay' && 'bg-yellow-50 text-yellow-700',
+                    step.node.type.startsWith('action.send') && 'bg-blue-50 text-blue-600',
+                    step.node.type === 'action.createTask' && 'bg-emerald-50 text-emerald-700',
+                    step.node.type === 'action.updateStage' && 'bg-orange-50 text-orange-700',
                     step.node.type === 'action.notifyAdmin' && 'bg-pink-500/15 text-pink-400',
-                    step.node.type === 'action.endWorkflow' && 'bg-red-500/15 text-red-400',
+                    step.node.type === 'action.endWorkflow' && 'bg-red-50 text-red-600',
                   )}
                 >
                   <Icon className="w-4 h-4" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-white">{nodeLabel(step.node.type)}</div>
+                  <div className="text-sm font-medium text-gray-900">{nodeLabel(step.node.type)}</div>
                   <div className="text-[11px] text-gray-500 truncate">
                     {summarizeNode(step.node, templates)}
                   </div>
@@ -752,7 +752,7 @@ function ChainEditor({
                     e.stopPropagation();
                     if (confirm('Remove this step?')) onRemove(parentPath, idx);
                   }}
-                  className="text-gray-700 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
                   title="Remove"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -828,13 +828,13 @@ function BranchColumn({
     <div
       className={cn(
         'border rounded-lg p-3 flex flex-col items-center',
-        color === 'emerald' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5',
+        color === 'emerald' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-200 bg-red-500/5',
       )}
     >
       <div
         className={cn(
           'text-[10px] font-semibold uppercase tracking-wider mb-1',
-          color === 'emerald' ? 'text-emerald-400' : 'text-red-400',
+          color === 'emerald' ? 'text-emerald-700' : 'text-red-600',
         )}
       >
         {label}
@@ -867,15 +867,15 @@ function AddStepButton({ onAdd, small }: { onAdd: (type: WorkflowNodeType) => vo
         className={cn(
           'mt-2 flex items-center gap-1.5 rounded-full border transition-colors',
           small
-            ? 'border-gray-700 hover:border-blue-500 text-gray-400 hover:text-blue-400 text-[11px] px-2.5 py-1'
-            : 'border-gray-700 hover:border-blue-500 text-gray-500 hover:text-blue-400 text-[11px] px-3 py-1 my-1',
+            ? 'border-gray-300 hover:border-blue-500 text-gray-500 hover:text-blue-600 text-[11px] px-2.5 py-1'
+            : 'border-gray-300 hover:border-blue-500 text-gray-500 hover:text-blue-600 text-[11px] px-3 py-1 my-1',
         )}
       >
         <Plus className="w-3 h-3" />
         Add step
       </button>
       {open && (
-        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-20 bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-2 w-64 max-h-80 overflow-y-auto">
+        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-20 bg-white border border-gray-300 rounded-lg shadow-xl p-2 w-64 max-h-80 overflow-y-auto">
           {ADD_PALETTE.map((p) => {
             const Icon = p.icon;
             return (
@@ -886,11 +886,11 @@ function AddStepButton({ onAdd, small }: { onAdd: (type: WorkflowNodeType) => vo
                   onAdd(p.type);
                   setOpen(false);
                 }}
-                className="w-full flex items-start gap-2.5 px-2 py-2 rounded-md hover:bg-gray-800 text-left"
+                className="w-full flex items-start gap-2.5 px-2 py-2 rounded-md hover:bg-gray-100 text-left"
               >
-                <Icon className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                <Icon className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
                 <div className="min-w-0">
-                  <div className="text-xs font-medium text-white">{p.label}</div>
+                  <div className="text-xs font-medium text-gray-900">{p.label}</div>
                   <div className="text-[10px] text-gray-500">{p.description}</div>
                 </div>
               </button>
@@ -930,13 +930,13 @@ function NodeConfigPanel({
     <div className="p-5 flex flex-col h-full">
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Icon className="w-4 h-4 text-gray-400" />
-          <h3 className="text-sm font-semibold text-white">{nodeLabel(step.node.type)}</h3>
+          <Icon className="w-4 h-4 text-gray-500" />
+          <h3 className="text-sm font-semibold text-gray-900">{nodeLabel(step.node.type)}</h3>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="text-gray-600 hover:text-gray-300"
+          className="text-gray-500 hover:text-gray-400"
         >
           <X className="w-4 h-4" />
         </button>
@@ -949,7 +949,7 @@ function NodeConfigPanel({
               <select
                 value={(cfg.template_id as string) ?? ''}
                 onChange={(e) => setConfig({ template_id: e.target.value || null, template_slug: undefined })}
-                className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+                className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
               >
                 <option value="">— Select a template —</option>
                 {templates.map((t) => (
@@ -957,8 +957,8 @@ function NodeConfigPanel({
                 ))}
               </select>
               {Boolean(cfg.template_slug) && !cfg.template_id && (
-                <p className="text-[10px] text-yellow-400 mt-1">
-                  Prebuilt placeholder: <code className="text-gray-300">{String(cfg.template_slug)}</code>.
+                <p className="text-[10px] text-yellow-700 mt-1">
+                  Prebuilt placeholder: <code className="text-gray-400">{String(cfg.template_slug)}</code>.
                   Pick a real template before activating.
                 </p>
               )}
@@ -967,7 +967,7 @@ function NodeConfigPanel({
               <select
                 value={(cfg.email_type as string) ?? 'transactional'}
                 onChange={(e) => setConfig({ email_type: e.target.value })}
-                className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+                className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
               >
                 <option value="transactional">Transactional</option>
                 <option value="marketing">Marketing (requires opt-in)</option>
@@ -985,10 +985,10 @@ function NodeConfigPanel({
               value={(cfg.body as string) ?? ''}
               onChange={(e) => setConfig({ body: e.target.value })}
               rows={5}
-              className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none resize-none"
+              className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none resize-none"
               placeholder="Hi {{firstName}}, your AutoLenis deposit is waiting…"
             />
-            <p className="text-[10px] text-gray-600 mt-1">
+            <p className="text-[10px] text-gray-500 mt-1">
               {(cfg.body as string)?.length ?? 0} chars — keep under 320 for single concat
             </p>
           </Field>
@@ -1005,8 +1005,8 @@ function NodeConfigPanel({
                   className={cn(
                     'text-[11px] px-2 py-1.5 rounded border transition-colors',
                     cfg.duration === p.value
-                      ? 'border-blue-500 bg-blue-500/10 text-blue-400'
-                      : 'border-gray-800 text-gray-400 hover:border-gray-700',
+                      ? 'border-blue-500 bg-blue-500/10 text-blue-600'
+                      : 'border-gray-200 text-gray-500 hover:border-gray-300',
                   )}
                 >
                   {p.label}
@@ -1018,7 +1018,7 @@ function NodeConfigPanel({
               value={(cfg.duration as string) ?? ''}
               onChange={(e) => setConfig({ duration: e.target.value })}
               placeholder="Custom: 10m, 4h, 2d…"
-              className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+              className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
             />
           </Field>
         )}
@@ -1029,7 +1029,7 @@ function NodeConfigPanel({
               <select
                 value={(cfg.field as string) ?? 'lifecycle_stage'}
                 onChange={(e) => setConfig({ field: e.target.value, op: '', value: '' })}
-                className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+                className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
               >
                 {CONDITION_FIELDS.map((f) => (
                   <option key={f.value} value={f.value}>{f.label}</option>
@@ -1040,7 +1040,7 @@ function NodeConfigPanel({
               <select
                 value={(cfg.op as string) ?? ''}
                 onChange={(e) => setConfig({ op: e.target.value })}
-                className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+                className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
               >
                 <option value="">— Select —</option>
                 {(CONDITION_FIELDS.find((f) => f.value === cfg.field)?.ops ?? []).map((op) => (
@@ -1054,7 +1054,7 @@ function NodeConfigPanel({
                   <select
                     value={(cfg.value as string) ?? ''}
                     onChange={(e) => setConfig({ value: e.target.value })}
-                    className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+                    className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
                   >
                     <option value="">— Select stage —</option>
                     {LIFECYCLE_STAGES.map((s) => (
@@ -1066,7 +1066,7 @@ function NodeConfigPanel({
                     type="text"
                     value={(cfg.value as string) ?? ''}
                     onChange={(e) => setConfig({ value: e.target.value })}
-                    className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+                    className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
                   />
                 )}
               </Field>
@@ -1081,7 +1081,7 @@ function NodeConfigPanel({
                 type="text"
                 value={(cfg.title as string) ?? ''}
                 onChange={(e) => setConfig({ title: e.target.value })}
-                className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+                className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
               />
             </Field>
             <Field label="Description (optional)">
@@ -1089,7 +1089,7 @@ function NodeConfigPanel({
                 value={(cfg.description as string) ?? ''}
                 onChange={(e) => setConfig({ description: e.target.value })}
                 rows={3}
-                className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none resize-none"
+                className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none resize-none"
               />
             </Field>
             <div className="grid grid-cols-2 gap-2">
@@ -1097,7 +1097,7 @@ function NodeConfigPanel({
                 <select
                   value={(cfg.priority as string) ?? 'medium'}
                   onChange={(e) => setConfig({ priority: e.target.value })}
-                  className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+                  className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -1111,7 +1111,7 @@ function NodeConfigPanel({
                   min={1}
                   value={(cfg.due_in_hours as number) ?? 24}
                   onChange={(e) => setConfig({ due_in_hours: Number(e.target.value) })}
-                  className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+                  className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
                 />
               </Field>
             </div>
@@ -1123,7 +1123,7 @@ function NodeConfigPanel({
             <select
               value={(cfg.stage as string) ?? ''}
               onChange={(e) => setConfig({ stage: e.target.value })}
-              className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+              className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
             >
               <option value="">— Select —</option>
               {LIFECYCLE_STAGES.map((s) => (
@@ -1141,7 +1141,7 @@ function NodeConfigPanel({
                 value={(cfg.subject as string) ?? ''}
                 onChange={(e) => setConfig({ subject: e.target.value })}
                 placeholder="[AutoLenis] Action required"
-                className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+                className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
               />
             </Field>
             <Field label="Message">
@@ -1149,7 +1149,7 @@ function NodeConfigPanel({
                 value={(cfg.message as string) ?? ''}
                 onChange={(e) => setConfig({ message: e.target.value })}
                 rows={5}
-                className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none resize-none"
+                className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none resize-none"
               />
             </Field>
             <Field label="Admin email (optional override)" help="Defaults to ADMIN_EMAIL env var.">
@@ -1157,14 +1157,14 @@ function NodeConfigPanel({
                 type="email"
                 value={(cfg.admin_email as string) ?? ''}
                 onChange={(e) => setConfig({ admin_email: e.target.value })}
-                className="w-full bg-gray-950 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-white focus:border-blue-500 outline-none"
+                className="w-full bg-white border border-gray-300 rounded-md px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 outline-none"
               />
             </Field>
           </>
         )}
 
         {step.node.type === 'action.endWorkflow' && (
-          <p className="text-xs text-gray-500 bg-gray-950 border border-gray-800 rounded-lg p-3">
+          <p className="text-xs text-gray-500 bg-white border border-gray-200 rounded-lg p-3">
             This node ends the workflow immediately. No subsequent steps will run.
           </p>
         )}
@@ -1175,7 +1175,7 @@ function NodeConfigPanel({
         onClick={() => {
           if (confirm('Remove this step?')) onDelete();
         }}
-        className="mt-6 text-xs text-red-400/80 hover:text-red-300 flex items-center gap-1.5"
+        className="mt-6 text-xs text-red-600/80 hover:text-red-700 flex items-center gap-1.5"
       >
         <Trash2 className="w-3.5 h-3.5" />
         Remove this step
@@ -1195,11 +1195,11 @@ function Field({
 }) {
   return (
     <div>
-      <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+      <label className="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
         {label}
       </label>
       {children}
-      {help && <p className="text-[10px] text-gray-600 mt-1">{help}</p>}
+      {help && <p className="text-[10px] text-gray-500 mt-1">{help}</p>}
     </div>
   );
 }
@@ -1242,13 +1242,13 @@ function VersionHistoryPanel({
     <div className="p-5">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <History className="w-4 h-4 text-gray-400" />
-          <h3 className="text-sm font-semibold text-white">Version history</h3>
+          <History className="w-4 h-4 text-gray-500" />
+          <h3 className="text-sm font-semibold text-gray-900">Version history</h3>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="text-gray-600 hover:text-gray-300"
+          className="text-gray-500 hover:text-gray-400"
         >
           <X className="w-4 h-4" />
         </button>
@@ -1260,16 +1260,16 @@ function VersionHistoryPanel({
           {versions.map((v) => (
             <li
               key={v.id}
-              className="flex items-center justify-between border border-gray-800 rounded-lg px-3 py-2"
+              className="flex items-center justify-between border border-gray-200 rounded-lg px-3 py-2"
             >
               <div>
-                <div className="text-xs font-medium text-white">
+                <div className="text-xs font-medium text-gray-900">
                   v{v.version}
                   {v.version === currentVersion && (
-                    <span className="ml-2 text-[10px] text-blue-400">current</span>
+                    <span className="ml-2 text-[10px] text-blue-600">current</span>
                   )}
                 </div>
-                <div className="text-[10px] text-gray-600">
+                <div className="text-[10px] text-gray-500">
                   {new Date(v.created_at).toLocaleString()}
                 </div>
               </div>
@@ -1278,7 +1278,7 @@ function VersionHistoryPanel({
                   type="button"
                   onClick={() => restore(v.id)}
                   disabled={!!restoring}
-                  className="text-[11px] text-blue-400 hover:text-blue-300 disabled:opacity-50"
+                  className="text-[11px] text-blue-600 hover:text-blue-700 disabled:opacity-50"
                 >
                   {restoring === v.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Restore'}
                 </button>

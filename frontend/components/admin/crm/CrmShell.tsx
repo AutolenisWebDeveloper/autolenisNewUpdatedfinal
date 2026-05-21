@@ -20,6 +20,7 @@ import {
   X,
   Bell,
   UserPlus,
+  ChevronLeft,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GlobalSearch } from './GlobalSearch';
@@ -44,7 +45,7 @@ const SECTIONS: NavSection[] = [
       { href: '/admin/crm',          label: 'Overview', icon: LayoutDashboard, exact: true },
       { href: '/admin/crm/contacts', label: 'Contacts', icon: Users },
       { href: '/admin/crm/leads',    label: 'Leads',    icon: UserPlus },
-      { href: '/admin/crm/inbox',    label: 'Inbox',    icon: Inbox,        badge: 'unread' },
+      { href: '/admin/crm/inbox',    label: 'Messages', icon: Inbox,        badge: 'unread' },
       { href: '/admin/crm/tasks',    label: 'Tasks',    icon: CheckSquare,  badge: 'overdue' },
     ],
   },
@@ -120,11 +121,11 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="min-h-screen bg-white text-gray-900">
       {/* Top bar */}
-      <header className="sticky top-0 z-40 h-14 bg-gray-950/95 backdrop-blur border-b border-gray-800 flex items-center px-4 lg:pl-60">
+      <header className="sticky top-0 z-40 h-14 bg-white/95 backdrop-blur border-b border-gray-200 flex items-center px-4 lg:pl-60">
         <button
-          className="lg:hidden p-2 -ml-2 text-gray-400 hover:text-white rounded-md hover:bg-gray-800/60"
+          className="lg:hidden p-2 -ml-2 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100"
           onClick={() => setMobileOpen(true)}
           aria-label="Open navigation"
         >
@@ -133,17 +134,17 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
         <div className="flex-1 flex items-center justify-center px-4">
           <button
             onClick={() => setSearchOpen(true)}
-            className="flex items-center gap-2 text-sm text-gray-500 bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 rounded-lg px-3 py-1.5 w-full max-w-md transition-colors"
+            className="flex items-center gap-2 text-sm text-gray-500 bg-white hover:bg-gray-50 border border-gray-300 hover:border-gray-400 rounded-lg px-3 py-1.5 w-full max-w-md transition-colors"
           >
             <Search className="w-4 h-4" />
             <span className="flex-1 text-left">Search contacts…</span>
-            <kbd className="text-[10px] text-gray-600 bg-gray-950 border border-gray-800 px-1.5 py-0.5 rounded">
+            <kbd className="text-[10px] text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded">
               ⌘K
             </kbd>
           </button>
         </div>
         <button
-          className="p-2 text-gray-500 hover:text-gray-300 rounded-md hover:bg-gray-800/60"
+          className="p-2 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100"
           aria-label="Notifications"
         >
           <Bell className="w-5 h-5" />
@@ -153,7 +154,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
       {/* Mobile overlay */}
       {mobileOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-40 bg-black/60"
+          className="lg:hidden fixed inset-0 z-40 bg-black/30"
           onClick={() => setMobileOpen(false)}
         />
       )}
@@ -161,16 +162,16 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed top-0 left-0 z-50 w-56 h-screen bg-gray-900 border-r border-gray-800 flex flex-col transition-transform',
+          'fixed top-0 left-0 z-50 w-56 h-screen bg-white border-r border-gray-200 flex flex-col transition-transform',
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
         )}
       >
-        <div className="h-14 px-5 flex items-center justify-between border-b border-gray-800">
-          <Link href="/admin/crm" className="text-sm font-bold text-white tracking-tight">
-            AutoLenis <span className="text-blue-500">CRM</span>
+        <div className="h-14 px-5 flex items-center justify-between border-b border-gray-200">
+          <Link href="/admin/crm" className="text-sm font-bold text-gray-900 tracking-tight">
+            AutoLenis <span className="text-blue-600">CRM</span>
           </Link>
           <button
-            className="lg:hidden p-1 text-gray-500 hover:text-gray-300"
+            className="lg:hidden p-1 text-gray-500 hover:text-gray-900"
             onClick={() => setMobileOpen(false)}
             aria-label="Close navigation"
           >
@@ -178,10 +179,19 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
+        <div className="px-3 pt-3 pb-1">
+          <Link
+            href="/admin/dashboard"
+            className="flex items-center gap-2 px-3 py-2 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" /> Admin Console
+          </Link>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-6">
           {SECTIONS.map((section) => (
             <div key={section.title}>
-              <div className="px-2 pb-2 text-[10px] font-semibold text-gray-600 uppercase tracking-wider">
+              <div className="px-2 pb-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
                 {section.title}
               </div>
               <div className="space-y-0.5">
@@ -199,10 +209,10 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                       key={item.href}
                       href={item.href}
                       className={cn(
-                        'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors',
+                        'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors border-l-2',
                         active
-                          ? 'bg-blue-600 text-white'
-                          : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/60',
+                          ? 'bg-blue-50 text-blue-700 border-l-blue-600 font-medium'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50 border-l-transparent',
                       )}
                     >
                       <Icon className="w-4 h-4 shrink-0" />
@@ -212,8 +222,8 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
                           className={cn(
                             'text-[10px] font-semibold px-1.5 py-0.5 rounded-full',
                             item.badge === 'unread'
-                              ? 'bg-blue-500/20 text-blue-300'
-                              : 'bg-red-500/20 text-red-300',
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-red-100 text-red-700',
                           )}
                         >
                           {badgeVal > 99 ? '99+' : badgeVal}
@@ -226,19 +236,10 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
             </div>
           ))}
         </nav>
-
-        <div className="px-5 py-3 border-t border-gray-800">
-          <Link
-            href="/admin/dashboard"
-            className="text-[11px] text-gray-600 hover:text-gray-400 transition-colors"
-          >
-            ← Back to admin
-          </Link>
-        </div>
       </aside>
 
       {/* Main content */}
-      <main className="lg:pl-56 min-h-[calc(100vh-56px)]">{children}</main>
+      <main className="lg:pl-56 min-h-[calc(100vh-56px)] bg-white">{children}</main>
 
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
