@@ -13,8 +13,22 @@ function getSupabase(): SupabaseClient {
   );
 }
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+// Lazy-init these clients so module load (e.g. Next.js page-data collection at
+// build time) doesn't crash when env vars are absent. They're only invoked
+// inside Inngest steps at runtime.
+let _resend: Resend | null = null;
+function getResend(): Resend {
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
+}
+
+let _twilioClient: ReturnType<typeof twilio> | null = null;
+function getTwilio(): ReturnType<typeof twilio> {
+  if (!_twilioClient) {
+    _twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  }
+  return _twilioClient;
+}
 
 async function acquireIdempotencyGuard(supabase: SupabaseClient, key: string): Promise<boolean> {
   const hash = crypto.createHash('sha256').update(key).digest('hex');
@@ -128,7 +142,7 @@ export const emailSendFn = inngest.createFunction(
       }
 
       const sendResult = await step.run('dispatch-resend', async () => {
-        const out = await resend.emails.send({
+        const out = await getResend().emails.send({
           from: process.env.RESEND_FROM_EMAIL!,
           to: data.email,
           subject: data.subject,
@@ -230,7 +244,7 @@ export const smsSendFn = inngest.createFunction(
       }
 
       const result = await step.run('dispatch-twilio', async () =>
-        twilioClient.messages.create({
+        getTwilio().messages.create({
           from: process.env.TWILIO_FROM_NUMBER!,
           to: standardized,
           body: `${data.body}\n\nReply STOP to opt out.`,
