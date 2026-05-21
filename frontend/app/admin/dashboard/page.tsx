@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   AlertOctagon, Users, Gavel, FileText, TrendingUp, Activity,
   DollarSign, Shield, Share2, PenLine, Brain, Building2,
-  ChevronRight, AlertTriangle, ClipboardList, MessageSquare, BookOpen,
+  ChevronRight, AlertTriangle, ClipboardList, MessageSquare, BookOpen, Inbox,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -152,6 +152,7 @@ export default async function AdminDashboard() {
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
+                { label: "CRM & Communications", href: "/admin/crm", icon: Inbox, testId: "admin-quicklink-crm" },
                 { label: "Queues", href: "/admin/queues", icon: AlertOctagon, testId: "admin-quicklink-exception-queues" },
                 { label: "Activity", href: "/admin/activity", icon: Activity, testId: "admin-quicklink-activity-feed" },
                 { label: "Finance", href: "/admin/finance", icon: DollarSign },
