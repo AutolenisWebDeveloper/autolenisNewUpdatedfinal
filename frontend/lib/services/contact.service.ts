@@ -1,6 +1,23 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizeEmail, normalizePhone } from '../utils/phone';
-import type { Contact, ContactInput, ContactUpdate, LifecycleStage } from '../types/crm';
+import type {
+  Contact,
+  ContactInput,
+  ContactUpdate,
+  LifecycleStage,
+  WorkflowTriggerType,
+} from '../types/crm';
+
+// Lifecycle stages that map 1:1 to a workflow trigger_type. Stages without a
+// corresponding trigger (e.g. 'inactive') do not enroll on stage change —
+// the inactivity scanner handles those out-of-band.
+const STAGE_TO_TRIGGER: Partial<Record<LifecycleStage, WorkflowTriggerType>> = {
+  deposit_pending: 'deposit_pending',
+  deposit_paid: 'deposit_paid',
+  auction_active: 'auction_started',
+  offer_received: 'offer_received',
+  purchase_completed: 'purchase_completed',
+};
 
 export class ContactService {
   // Dedup priority: email match → phone match → insert. Consent merges upward
@@ -224,6 +241,25 @@ export class ContactService {
         before_state: { lifecycle_stage: before?.lifecycle_stage },
         after_state: { lifecycle_stage: newStage },
       });
+    }
+
+    // Workflow trigger fan-out. Lazy import keeps the engine out of bundles
+    // that only need contact CRUD, and isolates a workflow failure from
+    // blocking the stage update itself.
+    const triggerType = STAGE_TO_TRIGGER[newStage];
+    if (triggerType && before?.lifecycle_stage !== newStage) {
+      try {
+        const { WorkflowEngine } = await import('./workflow.engine');
+        await WorkflowEngine.triggerForEvent(supabase, triggerType, id, {
+          previous_stage: before?.lifecycle_stage,
+          new_stage: newStage,
+          source: 'stage_change',
+        });
+      } catch (err) {
+        // Stage update has already committed — log and continue so callers
+        // never see a workflow side-effect masquerade as a CRM failure.
+        console.error('[contact] workflow trigger failed', triggerType, id, err);
+      }
     }
 
     return data as Contact;
