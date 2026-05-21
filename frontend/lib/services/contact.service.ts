@@ -144,11 +144,15 @@ export class ContactService {
       .maybeSingle();
   }
 
+  // adminId is required for attribution. Pass null only when no authenticated
+  // admin session is available — in that case the audit_log write is skipped
+  // entirely rather than recorded against a placeholder UUID. An unlogged
+  // mutation is preferable to a fraudulently attributed one.
   static async updateContact(
     supabase: SupabaseClient,
     id: string,
     updates: ContactUpdate,
-    adminId: string
+    adminId: string | null
   ): Promise<Contact> {
     const { data: before } = await supabase
       .from('contacts')
@@ -169,14 +173,16 @@ export class ContactService {
 
     if (error) throw error;
 
-    await supabase.from('admin_audit_log').insert({
-      admin_id: adminId,
-      action: 'UPDATE_CONTACT',
-      entity_type: 'contact',
-      entity_id: id,
-      before_state: before,
-      after_state: data,
-    });
+    if (adminId) {
+      await supabase.from('admin_audit_log').insert({
+        admin_id: adminId,
+        action: 'UPDATE_CONTACT',
+        entity_type: 'contact',
+        entity_id: id,
+        before_state: before,
+        after_state: data,
+      });
+    }
 
     return data as Contact;
   }
@@ -185,7 +191,7 @@ export class ContactService {
     supabase: SupabaseClient,
     id: string,
     newStage: LifecycleStage,
-    adminId: string
+    adminId: string | null
   ): Promise<Contact> {
     const { data: before } = await supabase
       .from('contacts')
@@ -209,14 +215,16 @@ export class ContactService {
       created_by: adminId,
     });
 
-    await supabase.from('admin_audit_log').insert({
-      admin_id: adminId,
-      action: 'UPDATE_LIFECYCLE_STAGE',
-      entity_type: 'contact',
-      entity_id: id,
-      before_state: { lifecycle_stage: before?.lifecycle_stage },
-      after_state: { lifecycle_stage: newStage },
-    });
+    if (adminId) {
+      await supabase.from('admin_audit_log').insert({
+        admin_id: adminId,
+        action: 'UPDATE_LIFECYCLE_STAGE',
+        entity_type: 'contact',
+        entity_id: id,
+        before_state: { lifecycle_stage: before?.lifecycle_stage },
+        after_state: { lifecycle_stage: newStage },
+      });
+    }
 
     return data as Contact;
   }
@@ -224,18 +232,20 @@ export class ContactService {
   static async softDeleteContact(
     supabase: SupabaseClient,
     id: string,
-    adminId: string
+    adminId: string | null
   ): Promise<void> {
     await supabase
       .from('contacts')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', id);
 
-    await supabase.from('admin_audit_log').insert({
-      admin_id: adminId,
-      action: 'SOFT_DELETE_CONTACT',
-      entity_type: 'contact',
-      entity_id: id,
-    });
+    if (adminId) {
+      await supabase.from('admin_audit_log').insert({
+        admin_id: adminId,
+        action: 'SOFT_DELETE_CONTACT',
+        entity_type: 'contact',
+        entity_id: id,
+      });
+    }
   }
 }
