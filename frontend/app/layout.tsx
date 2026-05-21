@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { Toaster } from "sonner";
 import ServiceWorkerRegistration from "@/components/pwa/ServiceWorkerRegistration";
+import Clarity from "@/components/seo/Clarity";
 import { JsonLd } from "@/lib/seo/jsonld";
 import { entityGraphSchema } from "@/lib/seo/entity-graph";
 import "./globals.css";
@@ -65,6 +66,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Toaster richColors position="bottom-right" />
         {/* Feature 30 — PWA service worker registration */}
         <ServiceWorkerRegistration />
+        {/* Microsoft Clarity session replay (production only, requires NEXT_PUBLIC_CLARITY_ID) */}
+        <Clarity />
       </body>
     </html>
   );
