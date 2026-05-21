@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   TrendingUp,
   CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 import { getServiceSupabase } from '@/lib/supabase-service';
@@ -87,7 +88,12 @@ export default async function AnalyticsPage({
 // FUNNEL
 // ──────────────────────────────────────────────────────────────────────────
 async function FunnelTab({ analytics }: { analytics: AnalyticsService }) {
-  const funnel = await analytics.getFunnel();
+  let funnel;
+  try {
+    funnel = await analytics.getFunnel();
+  } catch (err) {
+    return <TabError section="Funnel" error={err} />;
+  }
   const maxCount = Math.max(1, ...funnel.stages.map((s) => s.count));
 
   return (
@@ -179,7 +185,12 @@ async function FunnelTab({ analytics }: { analytics: AnalyticsService }) {
 // CAMPAIGNS
 // ──────────────────────────────────────────────────────────────────────────
 async function CampaignsTab({ analytics }: { analytics: AnalyticsService }) {
-  const rows = await analytics.getCampaignMetrics();
+  let rows;
+  try {
+    rows = await analytics.getCampaignMetrics();
+  } catch (err) {
+    return <TabError section="Campaigns" error={err} />;
+  }
 
   return (
     <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -271,7 +282,12 @@ async function CampaignsTab({ analytics }: { analytics: AnalyticsService }) {
 // AUTOMATIONS
 // ──────────────────────────────────────────────────────────────────────────
 async function AutomationsTab({ analytics }: { analytics: AnalyticsService }) {
-  const rows = await analytics.getAutomationMetrics();
+  let rows;
+  try {
+    rows = await analytics.getAutomationMetrics();
+  } catch (err) {
+    return <TabError section="Automations" error={err} />;
+  }
   return (
     <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
       <header className="px-5 py-4 border-b border-gray-200">
@@ -352,7 +368,12 @@ async function AutomationsTab({ analytics }: { analytics: AnalyticsService }) {
 // DEALERS
 // ──────────────────────────────────────────────────────────────────────────
 async function DealersTab({ analytics }: { analytics: AnalyticsService }) {
-  const rows = await analytics.getDealerMetrics();
+  let rows;
+  try {
+    rows = await analytics.getDealerMetrics();
+  } catch (err) {
+    return <TabError section="Dealers" error={err} />;
+  }
   return (
     <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
       <header className="px-5 py-4 border-b border-gray-200">
@@ -409,7 +430,12 @@ async function DealersTab({ analytics }: { analytics: AnalyticsService }) {
 // AFFILIATES
 // ──────────────────────────────────────────────────────────────────────────
 async function AffiliatesTab({ analytics }: { analytics: AnalyticsService }) {
-  const rows = await analytics.getAffiliateMetrics();
+  let rows;
+  try {
+    rows = await analytics.getAffiliateMetrics();
+  } catch (err) {
+    return <TabError section="Affiliates" error={err} />;
+  }
   return (
     <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
       <header className="px-5 py-4 border-b border-gray-200">
@@ -469,7 +495,12 @@ async function AffiliatesTab({ analytics }: { analytics: AnalyticsService }) {
 // REVENUE
 // ──────────────────────────────────────────────────────────────────────────
 async function RevenueTab({ analytics }: { analytics: AnalyticsService }) {
-  const r = await analytics.getRevenueMetrics();
+  let r;
+  try {
+    r = await analytics.getRevenueMetrics();
+  } catch (err) {
+    return <TabError section="Revenue" error={err} />;
+  }
   return (
     <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <RevenueCard
@@ -530,7 +561,12 @@ function RevenueCard({
 // REPUTATION
 // ──────────────────────────────────────────────────────────────────────────
 async function ReputationTab({ analytics }: { analytics: AnalyticsService }) {
-  const r = await analytics.getReputationMetrics();
+  let r;
+  try {
+    r = await analytics.getReputationMetrics();
+  } catch (err) {
+    return <TabError section="Reputation" error={err} />;
+  }
   const banner =
     r.reputation_status === 'critical'
       ? { className: 'bg-red-50 border-red-200 text-red-700', icon: ShieldAlert, text: 'CRITICAL — bounce or complaint rate is past the carrier threshold. Sender reputation at risk.' }
@@ -655,6 +691,36 @@ function EmptyState({
       <p className="text-sm text-gray-500">{title}</p>
       <p className="text-[11px] text-gray-400 mt-1">{subtitle}</p>
     </div>
+  );
+}
+
+// Per-tab fallback. Keeps the rest of the analytics page renderable when a
+// single section's query fails (matview missing, RLS, dependent table empty),
+// rather than crashing the whole route.
+function TabError({ section, error }: { section: string; error: unknown }) {
+  if (process.env.NODE_ENV !== 'production') {
+    // Surface the cause in dev so the source of the failure is obvious.
+    // eslint-disable-next-line no-console
+    console.error(`[analytics:${section}]`, error);
+  }
+  const message =
+    error instanceof Error ? error.message : 'Unknown error fetching analytics.';
+  return (
+    <section className="bg-white border border-red-200 rounded-xl p-5">
+      <div className="flex items-start gap-3">
+        <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">
+            {section} analytics unavailable
+          </h2>
+          <p className="text-xs text-gray-500 mt-1">
+            We couldn&rsquo;t load this section. Other tabs may still work. Try
+            refreshing in a moment.
+          </p>
+          <p className="text-[11px] text-red-700 mt-2 font-mono break-all">{message}</p>
+        </div>
+      </div>
+    </section>
   );
 }
 
