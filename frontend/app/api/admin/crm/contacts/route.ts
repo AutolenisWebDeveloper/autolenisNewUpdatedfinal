@@ -1,8 +1,18 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
-import type { Contact } from '@/lib/types/crm';
+import { ContactService } from '@/lib/services/contact.service';
+import type { Contact, ContactInput, ContactSource } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
+
+const VALID_SOURCES: ContactSource[] = [
+  'buyer_signup',
+  'dealer_signup',
+  'affiliate_signup',
+  'public_form',
+  'sms_inbound',
+  'import',
+];
 
 const DEFAULT_PER_PAGE = 50;
 const MAX_PER_PAGE = 100;
@@ -49,4 +59,52 @@ export async function GET(req: Request) {
     per_page: perPage,
     has_more: (count ?? 0) > to + 1,
   });
+}
+
+export async function POST(req: Request) {
+  let body: Partial<ContactInput> & { notes?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'INVALID_JSON' }, { status: 400 });
+  }
+
+  if (!body.email && !body.phone) {
+    return NextResponse.json(
+      { error: 'EMAIL_OR_PHONE_REQUIRED' },
+      { status: 400 },
+    );
+  }
+
+  const source = (body.source ?? 'public_form') as ContactSource;
+  if (!VALID_SOURCES.includes(source)) {
+    return NextResponse.json({ error: 'INVALID_SOURCE' }, { status: 400 });
+  }
+
+  const supabase = getServiceSupabase();
+  try {
+    const contact = await ContactService.upsertContact(supabase, {
+      email: body.email ?? null,
+      phone: body.phone ?? null,
+      firstName: body.firstName,
+      lastName: body.lastName,
+      source,
+      consentEmail: !!body.consentEmail,
+      consentSms: !!body.consentSms,
+      consentText: body.consentText,
+    });
+
+    if (body.notes) {
+      await supabase
+        .from('contacts')
+        .update({ notes: body.notes })
+        .eq('id', contact.id);
+      contact.notes = body.notes;
+    }
+
+    return NextResponse.json({ contact }, { status: 201 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'CREATE_FAILED';
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 }

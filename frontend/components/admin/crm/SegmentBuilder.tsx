@@ -288,25 +288,25 @@ export function SegmentBuilder(props: Props) {
         <div className="flex items-center gap-3">
           <Link
             href="/admin/crm/segments"
-            className="flex items-center gap-1 text-xs text-gray-500 hover:text-white transition-colors"
+            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 transition-colors"
           >
             <ChevronLeft className="w-3.5 h-3.5" /> Segments
           </Link>
-          <span className="text-gray-700">/</span>
-          <h1 className="text-base font-bold text-white">
+          <span className="text-gray-400">/</span>
+          <h1 className="text-base font-bold text-gray-900">
             {props.mode === 'create' ? 'New segment' : props.segment.name}
           </h1>
         </div>
         <div className="flex items-center gap-3">
           {savedAt && (
-            <span className="flex items-center gap-1 text-[11px] text-emerald-400">
+            <span className="flex items-center gap-1 text-[11px] text-emerald-700">
               <CheckCircle2 className="w-3.5 h-3.5" /> Saved
             </span>
           )}
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             {props.mode === 'create' ? 'Create' : 'Save'}
@@ -315,14 +315,14 @@ export function SegmentBuilder(props: Props) {
       </header>
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-xs text-red-300 mb-4 flex items-start gap-2">
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-xs text-red-700 mb-4 flex items-start gap-2">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-4">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+          <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
             <div>
               <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 Name
@@ -331,7 +331,7 @@ export function SegmentBuilder(props: Props) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Marketing-opted leads"
-                className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 transition-colors"
+                className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition-colors"
               />
             </div>
             <div>
@@ -342,24 +342,24 @@ export function SegmentBuilder(props: Props) {
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="What does this audience represent?"
-                className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 transition-colors"
+                className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition-colors"
               />
             </div>
           </div>
 
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 Rules
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-gray-500">Match</span>
-                <div className="flex bg-gray-950 border border-gray-800 rounded-md p-0.5 text-[10px] font-medium">
+                <div className="flex bg-white border border-gray-200 rounded-md p-0.5 text-[10px] font-medium">
                   <button
                     onClick={() => setConditions((prev) => ({ ...prev, match: 'all' }))}
                     className={cn(
                       'px-2.5 py-1 rounded',
-                      conditions.match === 'all' ? 'bg-blue-600 text-white' : 'text-gray-500',
+                      conditions.match === 'all' ? 'bg-blue-600 text-gray-900' : 'text-gray-500',
                     )}
                   >
                     ALL
@@ -368,7 +368,7 @@ export function SegmentBuilder(props: Props) {
                     onClick={() => setConditions((prev) => ({ ...prev, match: 'any' }))}
                     className={cn(
                       'px-2.5 py-1 rounded',
-                      conditions.match === 'any' ? 'bg-blue-600 text-white' : 'text-gray-500',
+                      conditions.match === 'any' ? 'bg-blue-600 text-gray-900' : 'text-gray-500',
                     )}
                   >
                     ANY
@@ -383,14 +383,14 @@ export function SegmentBuilder(props: Props) {
                 return (
                   <div
                     key={idx}
-                    className="grid grid-cols-12 gap-2 items-center bg-gray-950 border border-gray-800 rounded-lg p-2.5"
+                    className="grid grid-cols-12 gap-2 items-center bg-white border border-gray-200 rounded-lg p-2.5"
                   >
                     <select
                       value={rule.field}
                       onChange={(e) =>
                         updateRule(idx, { field: e.target.value as SegmentField })
                       }
-                      className="col-span-4 bg-gray-900 border border-gray-800 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-white transition-colors"
+                      className="col-span-4 bg-white border border-gray-200 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-gray-900 transition-colors"
                     >
                       {FIELDS.map((f) => (
                         <option key={f.field} value={f.field}>
@@ -403,7 +403,7 @@ export function SegmentBuilder(props: Props) {
                       onChange={(e) =>
                         updateRule(idx, { op: e.target.value as SegmentOperator })
                       }
-                      className="col-span-3 bg-gray-900 border border-gray-800 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-white transition-colors"
+                      className="col-span-3 bg-white border border-gray-200 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-gray-900 transition-colors"
                     >
                       {def.operators.map((o) => (
                         <option key={o.value} value={o.value}>
@@ -412,14 +412,14 @@ export function SegmentBuilder(props: Props) {
                       ))}
                     </select>
                     {def.type === 'boolean' ? (
-                      <div className="col-span-4 text-[11px] text-gray-600 italic px-2">
+                      <div className="col-span-4 text-[11px] text-gray-500 italic px-2">
                         (no value needed)
                       </div>
                     ) : def.type === 'enum' ? (
                       <select
                         value={(rule.value as string) ?? ''}
                         onChange={(e) => updateRule(idx, { value: e.target.value })}
-                        className="col-span-4 bg-gray-900 border border-gray-800 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-white transition-colors"
+                        className="col-span-4 bg-white border border-gray-200 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-gray-900 transition-colors"
                       >
                         {def.options!.map((o) => (
                           <option key={o.value} value={o.value}>
@@ -432,19 +432,19 @@ export function SegmentBuilder(props: Props) {
                         type="date"
                         value={(rule.value as string) ?? ''}
                         onChange={(e) => updateRule(idx, { value: e.target.value })}
-                        className="col-span-4 bg-gray-900 border border-gray-800 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-white transition-colors"
+                        className="col-span-4 bg-white border border-gray-200 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-gray-900 transition-colors"
                       />
                     ) : (
                       <input
                         value={(rule.value as string) ?? ''}
                         onChange={(e) => updateRule(idx, { value: e.target.value })}
                         placeholder="value"
-                        className="col-span-4 bg-gray-900 border border-gray-800 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-white placeholder-gray-600 transition-colors"
+                        className="col-span-4 bg-white border border-gray-200 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-gray-900 placeholder-gray-400 transition-colors"
                       />
                     )}
                     <button
                       onClick={() => removeRule(idx)}
-                      className="col-span-1 flex items-center justify-center text-gray-600 hover:text-red-400 transition-colors"
+                      className="col-span-1 flex items-center justify-center text-gray-500 hover:text-red-600 transition-colors"
                       aria-label="Remove rule"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -456,7 +456,7 @@ export function SegmentBuilder(props: Props) {
 
             <button
               onClick={addRule}
-              className="mt-3 flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              className="mt-3 flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 transition-colors"
             >
               <Plus className="w-3.5 h-3.5" /> Add rule
             </button>
@@ -464,12 +464,12 @@ export function SegmentBuilder(props: Props) {
         </div>
 
         <div>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 sticky top-6">
+          <div className="bg-white border border-gray-200 rounded-xl p-5 sticky top-6">
             <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
               Live preview
             </div>
             <div className="flex items-baseline gap-2">
-              <div className="text-3xl font-bold text-white tabular-nums">
+              <div className="text-3xl font-bold text-gray-900 tabular-nums">
                 {countLoading ? (
                   <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
                 ) : count !== null ? (
@@ -483,11 +483,11 @@ export function SegmentBuilder(props: Props) {
               </div>
             </div>
             {countError && (
-              <div className="mt-2 text-[11px] text-red-400 flex items-start gap-1">
+              <div className="mt-2 text-[11px] text-red-600 flex items-start gap-1">
                 <AlertTriangle className="w-3 h-3 mt-0.5" /> {countError}
               </div>
             )}
-            <div className="mt-4 text-[11px] text-gray-600 leading-relaxed">
+            <div className="mt-4 text-[11px] text-gray-500 leading-relaxed">
               Live count is computed against the contacts table (excluding
               soft-deleted rows). Campaign fan-out re-runs the same query at send
               time — a stale count never causes a stale send list.

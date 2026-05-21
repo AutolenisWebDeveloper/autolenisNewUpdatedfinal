@@ -14,6 +14,8 @@ import { successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { UserRole, AffiliateStatus } from "@prisma/client";
 import { sendAffiliateVerificationEmail } from "@/lib/services/email/resend.service";
+import { ContactService } from "@/lib/services/contact.service";
+import { getServiceSupabase } from "@/lib/supabase-service";
 import crypto from "crypto";
 
 const schema = z.object({
@@ -151,6 +153,7 @@ export async function POST(request: NextRequest) {
   // 5. Create Prisma User + Affiliate in a transaction
   let referral: string;
   let unsubscribeToken: string;
+  let affiliateId = "";
   try {
     referral = await uniqueReferralCode();
     unsubscribeToken = crypto.randomBytes(24).toString("hex");
@@ -164,7 +167,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      await tx.affiliate.create({
+      const affiliate = await tx.affiliate.create({
         data: {
           userId: user.id,
           referralCode: referral,
@@ -177,6 +180,7 @@ export async function POST(request: NextRequest) {
           unsubscribeToken,
         },
       });
+      affiliateId = affiliate.id;
     });
   } catch (err) {
     // Roll back the Supabase user we created
@@ -195,6 +199,25 @@ export async function POST(request: NextRequest) {
     // Non-fatal — user can still use "Resend" flow later
     // eslint-disable-next-line no-console
     console.error("[affiliate/register] Verification email failed", err);
+  }
+
+  // 7. Sync into CRM contacts (non-fatal — signup completes even if this fails)
+  try {
+    const crmSupabase = getServiceSupabase();
+    const contact = await ContactService.upsertContact(crmSupabase, {
+      email: normalizedEmail,
+      firstName,
+      lastName,
+      source: 'affiliate_signup',
+      consentEmail: true,
+      consentText: 'AutoLenis affiliate registration',
+    });
+    if (affiliateId) {
+      await ContactService.linkContactIdentity(crmSupabase, contact.id, 'affiliate', affiliateId);
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[affiliate/register] CRM contact sync failed", err);
   }
 
   return successResponse(

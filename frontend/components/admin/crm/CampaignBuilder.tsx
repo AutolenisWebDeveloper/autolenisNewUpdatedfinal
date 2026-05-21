@@ -171,11 +171,11 @@ export function CampaignBuilder() {
       <header className="mb-6">
         <Link
           href="/admin/crm/campaigns"
-          className="flex items-center gap-1 text-xs text-gray-500 hover:text-white transition-colors mb-2"
+          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 transition-colors mb-2"
         >
           <ChevronLeft className="w-3.5 h-3.5" /> Campaigns
         </Link>
-        <h1 className="text-xl font-bold text-white">New campaign</h1>
+        <h1 className="text-xl font-bold text-gray-900">New campaign</h1>
       </header>
 
       {/* Stepper */}
@@ -189,9 +189,9 @@ export function CampaignBuilder() {
               <div
                 className={cn(
                   'flex items-center gap-2',
-                  active && 'text-white',
-                  complete && 'text-emerald-400',
-                  !active && !complete && 'text-gray-600',
+                  active && 'text-gray-900',
+                  complete && 'text-emerald-700',
+                  !active && !complete && 'text-gray-500',
                 )}
               >
                 <div
@@ -199,7 +199,7 @@ export function CampaignBuilder() {
                     'w-7 h-7 rounded-full flex items-center justify-center border-2',
                     active && 'border-blue-500 bg-blue-500/10',
                     complete && 'border-emerald-500 bg-emerald-500/10',
-                    !active && !complete && 'border-gray-700',
+                    !active && !complete && 'border-gray-300',
                   )}
                 >
                   {complete ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
@@ -212,7 +212,7 @@ export function CampaignBuilder() {
                 <div
                   className={cn(
                     'flex-1 h-px mx-3',
-                    complete ? 'bg-emerald-500/50' : 'bg-gray-800',
+                    complete ? 'bg-emerald-500/50' : 'bg-gray-50',
                   )}
                 />
               )}
@@ -222,12 +222,12 @@ export function CampaignBuilder() {
       </div>
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-xs text-red-300 mb-4 flex items-start gap-2">
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-xs text-red-700 mb-4 flex items-start gap-2">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
         </div>
       )}
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 min-h-[280px]">
+      <div className="bg-white border border-gray-200 rounded-xl p-6 min-h-[280px]">
         {/* Step 1 — Type */}
         {step === 1 && (
           <div className="space-y-5">
@@ -239,7 +239,7 @@ export function CampaignBuilder() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. October deposit reminders"
-                className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 transition-colors"
+                className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition-colors"
               />
             </div>
             <div>
@@ -285,10 +285,10 @@ export function CampaignBuilder() {
                   <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading segments…
                 </div>
               ) : segments.length === 0 ? (
-                <div className="mt-1 text-xs text-yellow-400 flex items-start gap-2">
+                <div className="mt-1 text-xs text-yellow-700 flex items-start gap-2">
                   <AlertTriangle className="w-3.5 h-3.5 mt-0.5" />
                   No segments yet —{' '}
-                  <Link href="/admin/crm/segments/new" className="text-blue-400 underline">
+                  <Link href="/admin/crm/segments/new" className="text-blue-600 underline">
                     create one
                   </Link>{' '}
                   before launching a campaign.
@@ -297,7 +297,7 @@ export function CampaignBuilder() {
                 <select
                   value={segmentId}
                   onChange={(e) => setSegmentId(e.target.value)}
-                  className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white transition-colors"
+                  className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
                 >
                   <option value="">Select a segment…</option>
                   {segments.map((s) => (
@@ -310,7 +310,7 @@ export function CampaignBuilder() {
             </div>
 
             {selectedSegment && (
-              <div className="bg-gray-950 border border-gray-800 rounded-xl p-4">
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
                 <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
                   Recipient preview
                 </div>
@@ -370,10 +370,10 @@ export function CampaignBuilder() {
                     <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading templates…
                   </div>
                 ) : templates.length === 0 ? (
-                  <div className="mt-1 text-xs text-yellow-400 flex items-start gap-2">
+                  <div className="mt-1 text-xs text-yellow-700 flex items-start gap-2">
                     <AlertTriangle className="w-3.5 h-3.5 mt-0.5" />
                     No active templates —{' '}
-                    <Link href="/admin/crm/templates/new" className="text-blue-400 underline">
+                    <Link href="/admin/crm/templates/new" className="text-blue-600 underline">
                       create one
                     </Link>
                     .
@@ -383,7 +383,7 @@ export function CampaignBuilder() {
                     <select
                       value={templateId}
                       onChange={(e) => setTemplateId(e.target.value)}
-                      className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white transition-colors"
+                      className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
                     >
                       <option value="">Select a template…</option>
                       {templates.map((t) => (
@@ -394,7 +394,7 @@ export function CampaignBuilder() {
                     </select>
                     {selectedTemplate && (
                       <div className="mt-2 text-[11px] text-gray-500">
-                        Subject: <span className="text-gray-300">{selectedTemplate.subject}</span>
+                        Subject: <span className="text-gray-400">{selectedTemplate.subject}</span>
                       </div>
                     )}
                   </>
@@ -412,9 +412,9 @@ export function CampaignBuilder() {
                   onChange={(e) => setSmsBody(e.target.value)}
                   rows={4}
                   placeholder="Hey {{firstName}}, your deposit window closes in 24h…"
-                  className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-gray-600 resize-y transition-colors"
+                  className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-xs text-gray-900 font-mono placeholder-gray-400 resize-y transition-colors"
                 />
-                <div className="flex items-center justify-between mt-1.5 text-[10px] text-gray-600">
+                <div className="flex items-center justify-between mt-1.5 text-[10px] text-gray-500">
                   <span>
                     {smsBody.length} chars · {smsSegments} segment{smsSegments > 1 ? 's' : ''}
                   </span>
@@ -454,9 +454,9 @@ export function CampaignBuilder() {
                   value={scheduledAt}
                   onChange={(e) => setScheduledAt(e.target.value)}
                   min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
-                  className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white transition-colors"
+                  className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
                 />
-                <div className="text-[10px] text-gray-600 mt-1">
+                <div className="text-[10px] text-gray-500 mt-1">
                   Picked up within 5 minutes of this time by the scheduled-campaign cron.
                 </div>
               </div>
@@ -467,7 +467,7 @@ export function CampaignBuilder() {
         {/* Step 5 — Confirm */}
         {step === 5 && preview && (
           <div className="space-y-4">
-            <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-xs text-red-200 flex items-start gap-2">
+            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-xs text-red-700 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
               <div>
                 You{`'`}re about to send this campaign to{' '}
@@ -476,7 +476,7 @@ export function CampaignBuilder() {
               </div>
             </div>
 
-            <dl className="bg-gray-950 border border-gray-800 rounded-xl divide-y divide-gray-800 text-sm">
+            <dl className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-200 text-sm">
               <Row k="Name" v={name} />
               <Row k="Type" v={type} />
               <Row k="Segment" v={selectedSegment?.name ?? '—'} />
@@ -500,7 +500,7 @@ export function CampaignBuilder() {
         <button
           onClick={() => setStep((s) => Math.max(1, s - 1))}
           disabled={step === 1}
-          className="flex items-center gap-1 text-xs text-gray-500 hover:text-white transition-colors disabled:opacity-30"
+          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 transition-colors disabled:opacity-30"
         >
           <ChevronLeft className="w-3.5 h-3.5" /> Back
         </button>
@@ -509,7 +509,7 @@ export function CampaignBuilder() {
           <button
             onClick={() => setStep((s) => s + 1)}
             disabled={!canAdvance()}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
           >
             Continue <ChevronRight className="w-4 h-4" />
           </button>
@@ -517,7 +517,7 @@ export function CampaignBuilder() {
           <button
             onClick={handleLaunch}
             disabled={submitting || !preview || preview.will_receive === 0}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
           >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             {scheduleMode === 'now' ? 'Launch campaign' : 'Schedule campaign'}
@@ -548,11 +548,11 @@ function TypeCard({
         'text-left rounded-xl border-2 p-4 transition-colors',
         active
           ? 'border-blue-500 bg-blue-500/10'
-          : 'border-gray-800 bg-gray-950 hover:border-gray-700',
+          : 'border-gray-200 bg-white hover:border-gray-300',
       )}
     >
-      <Icon className={cn('w-5 h-5 mb-2', active ? 'text-blue-400' : 'text-gray-500')} />
-      <div className="text-sm font-semibold text-white">{label}</div>
+      <Icon className={cn('w-5 h-5 mb-2', active ? 'text-blue-600' : 'text-gray-500')} />
+      <div className="text-sm font-semibold text-gray-900">{label}</div>
       <div className="text-[11px] text-gray-500 mt-1 leading-relaxed">{description}</div>
     </button>
   );
@@ -576,10 +576,10 @@ function ScheduleCard({
         'text-left rounded-xl border-2 p-4 transition-colors',
         active
           ? 'border-blue-500 bg-blue-500/10'
-          : 'border-gray-800 bg-gray-950 hover:border-gray-700',
+          : 'border-gray-200 bg-white hover:border-gray-300',
       )}
     >
-      <div className="text-sm font-semibold text-white">{label}</div>
+      <div className="text-sm font-semibold text-gray-900">{label}</div>
       <div className="text-[11px] text-gray-500 mt-1 leading-relaxed">{description}</div>
     </button>
   );
@@ -597,10 +597,10 @@ function Stat({
   big?: boolean;
 }) {
   const toneClass =
-    tone === 'good' ? 'text-emerald-400' : tone === 'warn' ? 'text-yellow-400' : 'text-white';
+    tone === 'good' ? 'text-emerald-700' : tone === 'warn' ? 'text-yellow-700' : 'text-gray-900';
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider text-gray-600">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
       <div className={cn('font-bold tabular-nums', big ? 'text-2xl' : 'text-lg', toneClass)}>
         {value.toLocaleString()}
       </div>
@@ -612,7 +612,7 @@ function Row({ k, v }: { k: string; v: string | number }) {
   return (
     <div className="flex justify-between px-4 py-2.5">
       <span className="text-[11px] uppercase tracking-wider text-gray-500">{k}</span>
-      <span className="text-sm text-white">{String(v)}</span>
+      <span className="text-sm text-gray-900">{String(v)}</span>
     </div>
   );
 }

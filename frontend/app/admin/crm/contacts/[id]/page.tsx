@@ -5,7 +5,6 @@ import {
   Phone,
   Globe,
   Calendar,
-  MessageSquare,
   AlertTriangle,
   Pencil,
   Plus,
@@ -19,6 +18,7 @@ import { ContactService } from '@/lib/services/contact.service';
 import type { TimelineEvent, CRMTask } from '@/lib/types/crm';
 import { StageBadge } from '@/components/admin/crm/StageBadge';
 import { timelineVisual } from '@/components/admin/crm/TimelineIcon';
+import { ContactActions } from '@/components/admin/crm/ContactActions';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +46,7 @@ const PRIORITY_DOT: Record<string, string> = {
   urgent: 'bg-red-500',
   high: 'bg-orange-500',
   medium: 'bg-yellow-500',
-  low: 'bg-gray-500',
+  low: 'bg-gray-400',
 };
 
 export default async function ContactDetailPage({
@@ -90,10 +90,10 @@ export default async function ContactDetailPage({
     contact.utm_source || contact.utm_medium || contact.utm_campaign || contact.source_url;
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-6 space-y-5 bg-white min-h-screen">
       <Link
         href="/admin/crm/contacts"
-        className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+        className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
       >
         <ChevronLeft className="w-3.5 h-3.5" />
         Back to contacts
@@ -103,31 +103,31 @@ export default async function ContactDetailPage({
         {/* Left column — profile */}
         <div className="space-y-4">
           {/* Identity */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
             <div className="flex justify-end -mt-1 -mr-1">
               <button
-                className="p-1.5 text-gray-500 hover:text-gray-300 rounded-md hover:bg-gray-800/60"
+                className="p-1.5 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100"
                 aria-label="Edit contact"
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
             </div>
             <div className="flex flex-col items-center text-center -mt-4">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center text-2xl font-bold text-white">
+              <div className="w-20 h-20 rounded-full bg-blue-600 flex items-center justify-center text-2xl font-bold text-white">
                 {initials}
               </div>
-              <h2 className="mt-3 text-base font-semibold text-white">{name}</h2>
+              <h2 className="mt-3 text-base font-semibold text-gray-900">{name}</h2>
               <div className="mt-1.5">
                 <StageBadge stage={contact.lifecycle_stage} />
               </div>
             </div>
 
             {contact.do_not_contact && (
-              <div className="mt-4 flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <div className="mt-4 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                 <div>
-                  <div className="text-xs font-semibold text-red-300">Do not contact</div>
-                  <div className="text-[11px] text-red-300/70 mt-0.5">
+                  <div className="text-xs font-semibold text-red-700">Do not contact</div>
+                  <div className="text-[11px] text-red-600 mt-0.5">
                     This contact has opted out. No outbound messages will be sent.
                   </div>
                 </div>
@@ -141,24 +141,19 @@ export default async function ContactDetailPage({
               <DetailRow icon={Calendar} label={`Added ${formatDate(contact.created_at)}`} />
             </div>
 
-            <div className="mt-5 grid grid-cols-2 gap-2">
-              <button
-                disabled={!contact.email || !contact.consent_email}
-                className="flex items-center justify-center gap-1.5 text-xs font-medium border border-gray-700 hover:border-gray-600 text-gray-300 hover:text-white rounded-lg px-3 py-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <Mail className="w-3.5 h-3.5" /> Email
-              </button>
-              <button
-                disabled={!contact.phone || !contact.consent_sms}
-                className="flex items-center justify-center gap-1.5 text-xs font-medium border border-gray-700 hover:border-gray-600 text-gray-300 hover:text-white rounded-lg px-3 py-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <MessageSquare className="w-3.5 h-3.5" /> SMS
-              </button>
-            </div>
+            <ContactActions
+              contactId={contact.id}
+              email={contact.email}
+              phone={contact.phone}
+              consentEmail={contact.consent_email}
+              consentSms={contact.consent_sms}
+              doNotContact={contact.do_not_contact}
+              name={name}
+            />
           </div>
 
           {/* Consent */}
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
               Consent
             </h3>
@@ -167,7 +162,7 @@ export default async function ContactDetailPage({
               <ConsentRow label="Email consent" granted={contact.consent_email} />
             </div>
             {contact.consent_at && (
-              <div className="mt-3 text-[11px] text-gray-600">
+              <div className="mt-3 text-[11px] text-gray-500">
                 Captured {formatDate(contact.consent_at)}
               </div>
             )}
@@ -175,7 +170,7 @@ export default async function ContactDetailPage({
 
           {/* Attribution */}
           {hasAttribution && (
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
                 Attribution
               </h3>
@@ -198,12 +193,12 @@ export default async function ContactDetailPage({
 
           {/* Open tasks */}
           {tasks.length > 0 && (
-            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Open Tasks
                 </h3>
-                <button className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-0.5">
+                <button className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-0.5">
                   <Plus className="w-3 h-3" /> Add
                 </button>
               </div>
@@ -218,15 +213,15 @@ export default async function ContactDetailPage({
                     >
                       <span
                         className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
-                          PRIORITY_DOT[task.priority] ?? 'bg-gray-500'
+                          PRIORITY_DOT[task.priority] ?? 'bg-gray-400'
                         }`}
                       />
                       <div className="flex-1 min-w-0">
-                        <div className="text-white truncate">{task.title}</div>
+                        <div className="text-gray-900 truncate">{task.title}</div>
                         {task.due_at && (
                           <div
                             className={`text-[11px] mt-0.5 ${
-                              overdue ? 'text-red-400' : 'text-gray-600'
+                              overdue ? 'text-red-600' : 'text-gray-500'
                             }`}
                           >
                             {overdue ? 'Overdue · ' : 'Due '}
@@ -244,14 +239,14 @@ export default async function ContactDetailPage({
 
         {/* Right column — timeline */}
         <div className="lg:col-span-2">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-semibold text-white">Activity Timeline</h2>
+              <h2 className="text-sm font-semibold text-gray-900">Activity Timeline</h2>
               <div className="flex items-center gap-2">
-                <button className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-600 rounded-md px-2.5 py-1 transition-colors">
+                <button className="text-xs text-gray-700 hover:text-gray-900 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-2.5 py-1 transition-colors">
                   Add Note
                 </button>
-                <button className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-600 rounded-md px-2.5 py-1 transition-colors">
+                <button className="text-xs text-gray-700 hover:text-gray-900 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-2.5 py-1 transition-colors">
                   Add Task
                 </button>
               </div>
@@ -259,14 +254,14 @@ export default async function ContactDetailPage({
 
             {timeline.length === 0 ? (
               <div className="py-16 text-center">
-                <Clock className="w-10 h-10 text-gray-700 mx-auto mb-2" />
-                <p className="text-sm text-gray-500">No activity yet</p>
-                <p className="text-[11px] text-gray-700 mt-1">
+                <Clock className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                <p className="text-sm text-gray-700">No activity yet</p>
+                <p className="text-[11px] text-gray-500 mt-1">
                   Events appear here as the contact moves through the funnel.
                 </p>
               </div>
             ) : (
-              <div className="divide-y divide-gray-800/60">
+              <div className="divide-y divide-gray-200">
                 {timeline.map((ev) => {
                   const v = timelineVisual(ev.event_type);
                   const Icon = v.icon;
@@ -280,12 +275,12 @@ export default async function ContactDetailPage({
                           <span className={v.color}>{v.label}</span>
                         </div>
                         {ev.event_data && Object.keys(ev.event_data).length > 0 && (
-                          <div className="text-[11px] text-gray-600 mt-0.5 truncate">
+                          <div className="text-[11px] text-gray-500 mt-0.5 truncate">
                             {summarizeEventData(ev.event_data)}
                           </div>
                         )}
                       </div>
-                      <div className="text-[11px] text-gray-600 shrink-0 tabular-nums">
+                      <div className="text-[11px] text-gray-500 shrink-0 tabular-nums">
                         {formatDate(ev.created_at)}
                       </div>
                     </div>
@@ -302,8 +297,8 @@ export default async function ContactDetailPage({
 
 function DetailRow({ icon: Icon, label }: { icon: typeof Mail; label: string }) {
   return (
-    <div className="flex items-center gap-2.5 text-gray-300">
-      <Icon className="w-3.5 h-3.5 text-gray-600 shrink-0" />
+    <div className="flex items-center gap-2.5 text-gray-700">
+      <Icon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
       <span className="text-sm truncate">{label}</span>
     </div>
   );
@@ -312,10 +307,10 @@ function DetailRow({ icon: Icon, label }: { icon: typeof Mail; label: string }) 
 function ConsentRow({ label, granted }: { label: string; granted: boolean }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-gray-400 text-xs">{label}</span>
+      <span className="text-gray-600 text-xs">{label}</span>
       <span
         className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-          granted ? 'bg-emerald-500/15 text-emerald-400' : 'bg-gray-800 text-gray-500'
+          granted ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'
         }`}
       >
         {granted ? <Check className="w-3 h-3" /> : <XIcon className="w-3 h-3" />}
@@ -328,8 +323,8 @@ function ConsentRow({ label, granted }: { label: string; granted: boolean }) {
 function AttributionRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start gap-2">
-      <span className="text-gray-600 font-mono shrink-0 w-24">{label}</span>
-      <span className="text-gray-300 break-all">{value}</span>
+      <span className="text-gray-400 font-mono shrink-0 w-24">{label}</span>
+      <span className="text-gray-700 break-all">{value}</span>
     </div>
   );
 }
@@ -344,4 +339,3 @@ function summarizeEventData(data: Record<string, unknown>): string {
   }
   return parts.join(' · ');
 }
-

@@ -5,6 +5,8 @@ import { getSafeBuyerRedirect } from "@/lib/auth/urls";
 import { UserRole, BuyerPlan } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendEmailVerifiedEmail } from "@/lib/services/email/resend.service";
+import { ContactService } from "@/lib/services/contact.service";
+import { getServiceSupabase } from "@/lib/supabase-service";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -43,6 +45,7 @@ export async function GET(request: NextRequest) {
       }
       if (resolvedRole === UserRole.BUYER) {
         await trySendEmailVerified(data.user.id, data.user.email!);
+        await syncBuyerContact(user.id, data.user.email!, meta);
       }
       // Fallback: if the role param was missing, check the actual DB role so
       // affiliates always land on their portal rather than the buyer dashboard.
@@ -86,6 +89,7 @@ export async function GET(request: NextRequest) {
       }
       if ((type === "email" || type === "signup" || type === "magiclink") && resolvedRole === UserRole.BUYER) {
         await trySendEmailVerified(data.user.id, data.user.email!);
+        await syncBuyerContact(user.id, data.user.email!, meta);
       }
       // Fallback: check DB role in case role param was absent from the redirect URL.
       const dbUser = await prisma.user.findUnique({
@@ -103,6 +107,37 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.redirect(new URL("/auth/signin?error=callback_failed", request.url));
+}
+
+// Sync the newly verified buyer into the CRM contacts table. Idempotent —
+// upsertContact dedupes by email and linkContactIdentity has a unique constraint
+// on (entity_type, entity_id). Best-effort: never blocks the redirect.
+async function syncBuyerContact(
+  userId: string,
+  email: string,
+  meta: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const buyer = await prisma.buyer.findFirst({
+      where: { userId },
+      select: { id: true, firstName: true, lastName: true, phone: true },
+    });
+    if (!buyer) return;
+
+    const crmSupabase = getServiceSupabase();
+    const contact = await ContactService.upsertContact(crmSupabase, {
+      email,
+      phone: buyer.phone ?? null,
+      firstName: buyer.firstName ?? (meta.firstName as string | undefined),
+      lastName: buyer.lastName ?? (meta.lastName as string | undefined),
+      source: 'buyer_signup',
+      consentEmail: true,
+      consentText: 'AutoLenis buyer registration',
+    });
+    await ContactService.linkContactIdentity(crmSupabase, contact.id, 'buyer', buyer.id);
+  } catch (err) {
+    console.error("[auth/callback] CRM contact sync failed:", err);
+  }
 }
 
 // Idempotent: sends the "email verified" confirmation email only once per buyer.

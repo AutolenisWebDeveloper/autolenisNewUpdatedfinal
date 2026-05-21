@@ -32,7 +32,7 @@ export function AnalyticsTabs({
   }
 
   return (
-    <div className="border-b border-gray-800">
+    <div className="border-b border-gray-200">
       <nav className="-mb-px flex gap-1 overflow-x-auto">
         {tabs.map((t) => {
           const Icon = t.icon;
@@ -45,8 +45,8 @@ export function AnalyticsTabs({
               className={cn(
                 'flex items-center gap-2 px-4 py-2.5 text-sm border-b-2 -mb-px whitespace-nowrap transition-colors',
                 isActive
-                  ? 'border-blue-500 text-white'
-                  : 'border-transparent text-gray-500 hover:text-gray-300'
+                  ? 'border-blue-500 text-gray-900'
+                  : 'border-transparent text-gray-500 hover:text-gray-400'
               )}
             >
               <Icon className="w-4 h-4" />

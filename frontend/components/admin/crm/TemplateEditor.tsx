@@ -192,13 +192,13 @@ export function TemplateEditor(props: Props) {
         <div className="flex items-center gap-3">
           <Link
             href="/admin/crm/templates"
-            className="flex items-center gap-1 text-xs text-gray-500 hover:text-white transition-colors"
+            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 transition-colors"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
             Templates
           </Link>
-          <span className="text-gray-700">/</span>
-          <h1 className="text-base font-bold text-white">
+          <span className="text-gray-400">/</span>
+          <h1 className="text-base font-bold text-gray-900">
             {props.mode === 'create' ? 'New template' : props.template.name}
           </h1>
           {props.mode === 'edit' && (
@@ -209,7 +209,7 @@ export function TemplateEditor(props: Props) {
         </div>
         <div className="flex items-center gap-3">
           {savedAt && (
-            <span className="flex items-center gap-1 text-[11px] text-emerald-400">
+            <span className="flex items-center gap-1 text-[11px] text-emerald-700">
               <CheckCircle2 className="w-3.5 h-3.5" /> Saved
             </span>
           )}
@@ -219,7 +219,7 @@ export function TemplateEditor(props: Props) {
           <button
             onClick={handleSave}
             disabled={saving || !dirty}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             {props.mode === 'create' ? 'Create' : 'Save'}
@@ -228,7 +228,7 @@ export function TemplateEditor(props: Props) {
       </header>
 
       {error && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-xs text-red-300 mb-4 flex items-start gap-2">
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-xs text-red-700 mb-4 flex items-start gap-2">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
           {error}
         </div>
@@ -236,7 +236,7 @@ export function TemplateEditor(props: Props) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Editor column */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+        <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
           <div>
             <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
               Name
@@ -245,7 +245,7 @@ export function TemplateEditor(props: Props) {
               value={form.name}
               onChange={(e) => set('name', e.target.value)}
               placeholder="e.g. Welcome email"
-              className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 transition-colors"
+              className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition-colors"
             />
           </div>
 
@@ -257,7 +257,7 @@ export function TemplateEditor(props: Props) {
               <select
                 value={form.category}
                 onChange={(e) => set('category', e.target.value as EmailTemplateCategory)}
-                className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white transition-colors"
+                className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
               >
                 <option value="transactional">Transactional</option>
                 <option value="marketing">Marketing</option>
@@ -271,7 +271,7 @@ export function TemplateEditor(props: Props) {
               <select
                 value={form.status}
                 onChange={(e) => set('status', e.target.value as EmailTemplateStatus)}
-                className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white transition-colors"
+                className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
               >
                 <option value="draft">Draft</option>
                 <option value="active">Active</option>
@@ -288,7 +288,7 @@ export function TemplateEditor(props: Props) {
               value={form.subject}
               onChange={(e) => set('subject', e.target.value)}
               placeholder="Welcome to AutoLenis, {{firstName}}"
-              className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 transition-colors"
+              className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition-colors"
             />
           </div>
 
@@ -297,7 +297,7 @@ export function TemplateEditor(props: Props) {
               <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
                 HTML body
               </label>
-              <div className="text-[10px] text-gray-600">
+              <div className="text-[10px] text-gray-500">
                 {form.html_body.length.toLocaleString()} chars
               </div>
             </div>
@@ -306,7 +306,7 @@ export function TemplateEditor(props: Props) {
               onChange={(e) => set('html_body', e.target.value)}
               rows={14}
               spellCheck={false}
-              className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-gray-600 resize-y transition-colors"
+              className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-xs text-gray-900 font-mono placeholder-gray-400 resize-y transition-colors"
             />
           </div>
 
@@ -320,7 +320,7 @@ export function TemplateEditor(props: Props) {
               rows={4}
               spellCheck={false}
               placeholder="Auto-generated from HTML when blank"
-              className="mt-1 w-full bg-gray-950 border border-gray-800 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-xs text-white font-mono placeholder-gray-600 resize-y transition-colors"
+              className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-xs text-gray-900 font-mono placeholder-gray-400 resize-y transition-colors"
             />
           </div>
 
@@ -334,7 +334,7 @@ export function TemplateEditor(props: Props) {
                   key={token}
                   type="button"
                   onClick={() => insertToken(token)}
-                  className="text-[10px] font-mono bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 px-2 py-0.5 rounded transition-colors"
+                  className="text-[10px] font-mono bg-blue-500/10 hover:bg-blue-100 border border-blue-500/30 text-blue-700 px-2 py-0.5 rounded transition-colors"
                 >
                   {`{{${token}}}`}
                 </button>
@@ -343,7 +343,7 @@ export function TemplateEditor(props: Props) {
           </div>
 
           {props.mode === 'edit' && props.versions.length > 0 && (
-            <div className="border-t border-gray-800 pt-3">
+            <div className="border-t border-gray-200 pt-3">
               <div className="flex items-center gap-2 text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
                 <History className="w-3 h-3" /> Version history
               </div>
@@ -351,11 +351,11 @@ export function TemplateEditor(props: Props) {
                 {props.versions.map((v) => (
                   <div
                     key={v.id}
-                    className="flex items-center justify-between text-xs px-2 py-1.5 rounded hover:bg-gray-800/40"
+                    className="flex items-center justify-between text-xs px-2 py-1.5 rounded hover:bg-gray-100/40"
                   >
-                    <span className="font-mono text-gray-400">v{v.version}</span>
+                    <span className="font-mono text-gray-500">v{v.version}</span>
                     <span className="text-gray-500 truncate max-w-xs">{v.subject}</span>
-                    <span className="text-[10px] text-gray-600">
+                    <span className="text-[10px] text-gray-500">
                       {new Date(v.created_at).toLocaleDateString()}
                     </span>
                   </div>
@@ -366,14 +366,14 @@ export function TemplateEditor(props: Props) {
         </div>
 
         {/* Preview column */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl flex flex-col min-h-[500px]">
-          <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
-            <div className="flex bg-gray-950 border border-gray-800 rounded-md p-0.5 text-[10px] font-medium">
+        <div className="bg-white border border-gray-200 rounded-xl flex flex-col min-h-[500px]">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+            <div className="flex bg-white border border-gray-200 rounded-md p-0.5 text-[10px] font-medium">
               <button
                 onClick={() => setView('preview')}
                 className={cn(
                   'flex items-center gap-1 px-2.5 py-1 rounded',
-                  view === 'preview' ? 'bg-gray-800 text-white' : 'text-gray-500',
+                  view === 'preview' ? 'bg-gray-50 text-gray-900' : 'text-gray-500',
                 )}
               >
                 <Eye className="w-3 h-3" /> Preview
@@ -382,7 +382,7 @@ export function TemplateEditor(props: Props) {
                 onClick={() => setView('html')}
                 className={cn(
                   'flex items-center gap-1 px-2.5 py-1 rounded',
-                  view === 'html' ? 'bg-gray-800 text-white' : 'text-gray-500',
+                  view === 'html' ? 'bg-gray-50 text-gray-900' : 'text-gray-500',
                 )}
               >
                 <Code className="w-3 h-3" /> HTML
@@ -392,16 +392,16 @@ export function TemplateEditor(props: Props) {
           </div>
 
           {preview?.warnings && (
-            <div className="px-5 py-2 border-b border-gray-800 space-y-1">
+            <div className="px-5 py-2 border-b border-gray-200 space-y-1">
               {preview.warnings.missing_unsubscribe && (
-                <div className="flex items-start gap-2 text-[11px] text-yellow-400">
+                <div className="flex items-start gap-2 text-[11px] text-yellow-700">
                   <AlertTriangle className="w-3 h-3 mt-0.5" />
                   Marketing template missing {`{{unsubscribeUrl}}`} — footer will be auto-appended,
                   but inline unsubscribe is recommended.
                 </div>
               )}
               {preview.warnings.unknown_variables.length > 0 && (
-                <div className="flex items-start gap-2 text-[11px] text-yellow-400">
+                <div className="flex items-start gap-2 text-[11px] text-yellow-700">
                   <AlertTriangle className="w-3 h-3 mt-0.5" />
                   Unknown variables:{' '}
                   <span className="font-mono">
@@ -412,16 +412,16 @@ export function TemplateEditor(props: Props) {
             </div>
           )}
 
-          <div className="px-5 py-3 border-b border-gray-800">
-            <div className="text-[10px] uppercase tracking-wider text-gray-600">Subject</div>
-            <div className="text-sm text-white truncate">
+          <div className="px-5 py-3 border-b border-gray-200">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500">Subject</div>
+            <div className="text-sm text-gray-900 truncate">
               {preview?.rendered.subject ?? form.subject ?? '—'}
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto">
             {!preview ? (
-              <div className="flex items-center justify-center h-full text-xs text-gray-600">
+              <div className="flex items-center justify-center h-full text-xs text-gray-500">
                 Preview appears once the subject and HTML are filled in.
               </div>
             ) : view === 'preview' ? (
@@ -432,7 +432,7 @@ export function TemplateEditor(props: Props) {
                 sandbox=""
               />
             ) : (
-              <pre className="text-[11px] text-gray-300 font-mono p-4 whitespace-pre-wrap break-words">
+              <pre className="text-[11px] text-gray-400 font-mono p-4 whitespace-pre-wrap break-words">
                 {preview.rendered.html}
               </pre>
             )}

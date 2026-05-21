@@ -34,7 +34,7 @@ export function RefreshAnalyticsButton() {
         type="button"
         onClick={onClick}
         disabled={pending}
-        className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium border border-gray-700 hover:border-gray-600 text-gray-300 rounded-lg disabled:opacity-50 transition-colors"
+        className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium border border-gray-300 hover:border-gray-400 text-gray-400 rounded-lg disabled:opacity-50 transition-colors"
       >
         {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
         Refresh analytics

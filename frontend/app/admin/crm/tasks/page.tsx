@@ -92,21 +92,21 @@ export default function TasksPage() {
     <div className="p-6 space-y-5">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-white">Tasks</h1>
+          <h1 className="text-xl font-bold text-gray-900">Tasks</h1>
           <p className="text-sm text-gray-500 mt-1">
             Open work items across the platform — manual and system-generated.
           </p>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
         >
           <Plus className="w-4 h-4" /> Add Task
         </button>
       </header>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 border-b border-gray-800">
+      <div className="flex gap-1 border-b border-gray-200">
         <FilterTab
           active={filter === 'all'}
           onClick={() => setFilter('all')}
@@ -130,29 +130,29 @@ export default function TasksPage() {
       </div>
 
       {/* Task list */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         {loading ? (
           <div className="py-16 flex items-center justify-center">
             <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-16 text-center">
-            <CheckSquare className="w-12 h-12 text-gray-700 mx-auto mb-2" />
-            <p className="text-sm text-gray-400 font-medium">
+            <CheckSquare className="w-12 h-12 text-gray-400 mx-auto mb-2" />
+            <p className="text-sm text-gray-500 font-medium">
               {filter === 'all'
                 ? 'No open tasks'
                 : filter === 'overdue'
                   ? 'No overdue tasks'
                   : 'No urgent tasks'}
             </p>
-            <p className="text-xs text-gray-600 mt-1">
+            <p className="text-xs text-gray-500 mt-1">
               {filter === 'all'
                 ? 'Tasks created here or by automations will appear in this list.'
                 : 'Keep up the good work — nothing pressing right now.'}
             </p>
           </div>
         ) : (
-          <ul className="divide-y divide-gray-800/60">
+          <ul className="divide-y divide-gray-200">
             {filtered.map((task) => {
               const overdue = !!task.due_at && new Date(task.due_at).getTime() < now;
               const contactName = task.contact
@@ -160,7 +160,7 @@ export default function TasksPage() {
                   task.contact.email
                 : null;
               return (
-                <li key={task.id} className="flex items-start gap-3 px-4 py-3 hover:bg-gray-800/30">
+                <li key={task.id} className="flex items-start gap-3 px-4 py-3 hover:bg-gray-50">
                   <button
                     onClick={() => completeTask(task.id)}
                     aria-label="Complete task"
@@ -168,9 +168,9 @@ export default function TasksPage() {
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-white">{task.title}</span>
+                      <span className="text-sm font-medium text-gray-900">{task.title}</span>
                       {task.scope === 'system' && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold bg-purple-500/15 text-purple-300 px-1.5 py-0.5 rounded-full">
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded-full">
                           <Zap className="w-2.5 h-2.5" /> Auto
                         </span>
                       )}
@@ -184,12 +184,12 @@ export default function TasksPage() {
                       {contactName && task.contact && (
                         <Link
                           href={`/admin/crm/contacts/${task.contact.id}`}
-                          className="text-blue-400 hover:text-blue-300"
+                          className="text-blue-600 hover:text-blue-700"
                         >
                           {contactName}
                         </Link>
                       )}
-                      <span className={overdue ? 'text-red-400' : 'text-gray-600'}>
+                      <span className={overdue ? 'text-red-600' : 'text-gray-500'}>
                         {overdue && task.due_at ? 'Overdue · ' : ''}
                         {formatDue(task.due_at)}
                       </span>
@@ -233,22 +233,22 @@ function FilterTab({
   accent?: 'red' | 'orange';
 }) {
   const accentText =
-    accent === 'red' ? 'text-red-400' : accent === 'orange' ? 'text-orange-400' : 'text-gray-400';
+    accent === 'red' ? 'text-red-600' : accent === 'orange' ? 'text-orange-700' : 'text-gray-500';
   return (
     <button
       onClick={onClick}
       className={cn(
         '-mb-px px-3 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2',
         active
-          ? 'border-blue-500 text-white'
-          : 'border-transparent text-gray-500 hover:text-gray-300',
+          ? 'border-blue-500 text-gray-900'
+          : 'border-transparent text-gray-500 hover:text-gray-400',
       )}
     >
       {label}
       <span
         className={cn(
-          'text-[10px] font-semibold rounded-full px-1.5 py-0.5 bg-gray-800',
-          active ? 'text-white' : accentText,
+          'text-[10px] font-semibold rounded-full px-1.5 py-0.5 bg-gray-50',
+          active ? 'text-gray-900' : accentText,
         )}
       >
         {count}
@@ -304,18 +304,18 @@ function AddTaskModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
-        className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md"
+        className="bg-white border border-gray-300 rounded-xl p-6 w-full max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-white">New Task</h3>
+          <h3 className="text-base font-semibold text-gray-900">New Task</h3>
           <button
             onClick={onClose}
-            className="p-1 text-gray-500 hover:text-gray-300"
+            className="p-1 text-gray-500 hover:text-gray-400"
             aria-label="Close"
           >
             <X className="w-4 h-4" />
@@ -329,7 +329,7 @@ function AddTaskModal({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What needs to happen?"
-              className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 transition-colors"
+              className="w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition-colors"
             />
           </div>
           <div>
@@ -338,7 +338,7 @@ function AddTaskModal({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
-              className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white resize-none transition-colors"
+              className="w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 resize-none transition-colors"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -347,7 +347,7 @@ function AddTaskModal({
               <select
                 value={priority}
                 onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white transition-colors"
+                className="w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
               >
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
@@ -361,7 +361,7 @@ function AddTaskModal({
                 type="datetime-local"
                 value={dueAt}
                 onChange={(e) => setDueAt(e.target.value)}
-                className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-white transition-colors"
+                className="w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
               />
             </div>
           </div>
@@ -371,24 +371,24 @@ function AddTaskModal({
               value={contactId}
               onChange={(e) => setContactId(e.target.value)}
               placeholder="UUID of contact, or leave blank for admin task"
-              className="w-full bg-gray-950 border border-gray-700 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-xs font-mono text-white placeholder-gray-700 transition-colors"
+              className="w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-xs font-mono text-gray-900 placeholder-gray-400 transition-colors"
             />
           </div>
         </div>
 
-        {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
+        {error && <p className="text-xs text-red-600 mt-3">{error}</p>}
 
         <div className="flex justify-end gap-2 mt-5">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-400 hover:text-white border border-gray-700 hover:border-gray-600 rounded-lg transition-colors"
+            className="px-4 py-2 text-sm text-gray-500 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={!title.trim() || submitting}
-            className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-gray-900 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting ? 'Creating…' : 'Create Task'}
           </button>

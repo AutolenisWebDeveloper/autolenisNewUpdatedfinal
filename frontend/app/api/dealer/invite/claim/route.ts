@@ -6,6 +6,8 @@ import { createClient } from "@supabase/supabase-js";
 import { UserRole, DealerStatus } from "@prisma/client";
 import { signDealerJwt, DEALER_TOKEN_COOKIE } from "@/lib/dealer-auth";
 import { sendDealerWelcomeEmail } from "@/lib/services/email/resend.service";
+import { ContactService } from "@/lib/services/contact.service";
+import { getServiceSupabase } from "@/lib/supabase-service";
 import { z } from "zod";
 
 const schema = z.object({
@@ -107,6 +109,26 @@ export async function POST(request: NextRequest) {
     await sendDealerWelcomeEmail({ to: invitation.email, contactName: invitation.contactName, dealershipName: invitation.dealershipName, dashboardUrl: `${appUrl}/dealer/dashboard` });
   } catch (err) {
     console.error("[dealer/invite/claim] Welcome email error:", err);
+  }
+
+  // Sync into CRM contacts (non-fatal)
+  try {
+    const crmSupabase = getServiceSupabase();
+    const [firstName, ...rest] = (invitation.contactName ?? "").split(" ");
+    const lastName = rest.join(" ");
+    const contact = await ContactService.upsertContact(crmSupabase, {
+      email: invitation.email.toLowerCase(),
+      firstName: firstName || invitation.dealershipName,
+      lastName,
+      source: 'dealer_signup',
+      consentEmail: true,
+      consentText: 'AutoLenis dealer onboarding',
+    });
+    if (dealerId) {
+      await ContactService.linkContactIdentity(crmSupabase, contact.id, 'dealer', dealerId);
+    }
+  } catch (err) {
+    console.error("[dealer/invite/claim] CRM contact sync failed:", err);
   }
 
   const res = NextResponse.json({ success: true, redirect: "/dealer/onboarding" });

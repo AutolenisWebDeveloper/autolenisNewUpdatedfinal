@@ -2,15 +2,15 @@ import type { LifecycleStage } from '@/lib/types/crm';
 import { cn } from '@/lib/utils';
 
 const STAGE_STYLES: Record<LifecycleStage, { label: string; classes: string }> = {
-  lead:               { label: 'Lead',               classes: 'bg-gray-700 text-gray-300' },
-  prequal_started:    { label: 'Prequal Started',    classes: 'bg-yellow-500/15 text-yellow-400' },
-  prequal_completed:  { label: 'Prequal Completed',  classes: 'bg-yellow-500/20 text-yellow-300' },
-  deposit_pending:    { label: 'Deposit Pending',    classes: 'bg-orange-500/15 text-orange-400' },
-  deposit_paid:       { label: 'Deposit Paid',       classes: 'bg-green-500/15 text-green-400' },
-  auction_active:     { label: 'Auction Active',     classes: 'bg-blue-500/15 text-blue-400' },
-  offer_received:     { label: 'Offer Received',     classes: 'bg-purple-500/15 text-purple-400' },
-  purchase_completed: { label: 'Purchased',          classes: 'bg-emerald-500/15 text-emerald-400' },
-  inactive:           { label: 'Inactive',           classes: 'bg-gray-700/50 text-gray-500' },
+  lead:               { label: 'Lead',               classes: 'bg-gray-100 text-gray-600' },
+  prequal_started:    { label: 'Prequal Started',    classes: 'bg-yellow-50 text-yellow-700' },
+  prequal_completed:  { label: 'Prequal Completed',  classes: 'bg-yellow-100 text-yellow-800' },
+  deposit_pending:    { label: 'Deposit Pending',    classes: 'bg-orange-50 text-orange-700' },
+  deposit_paid:       { label: 'Deposit Paid',       classes: 'bg-green-50 text-green-700' },
+  auction_active:     { label: 'Auction Active',     classes: 'bg-blue-50 text-blue-700' },
+  offer_received:     { label: 'Offer Received',     classes: 'bg-purple-50 text-purple-700' },
+  purchase_completed: { label: 'Purchased',          classes: 'bg-emerald-50 text-emerald-700' },
+  inactive:           { label: 'Inactive',           classes: 'bg-gray-100 text-gray-500' },
 };
 
 export function StageBadge({
