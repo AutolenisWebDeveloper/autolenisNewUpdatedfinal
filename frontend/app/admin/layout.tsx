@@ -16,6 +16,18 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
 
   const admin = await requireAdmin();
+
+  // CRM + Operations route in the Phase 2 CRM shell — full-viewport dark
+  // chrome with its own sidebar. The CRM layout owns the canvas; the default
+  // admin sidebar/chat widget would otherwise double up.
+  const pathname = headersList.get("x-pathname") ?? "";
+  const isCrmShell =
+    pathname.startsWith("/admin/crm") || pathname.startsWith("/admin/operations");
+
+  if (isCrmShell) {
+    return <>{children}</>;
+  }
+
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-[#F4F6FA]" data-testid="admin-portal">
       <AdminSidebar adminRole={admin.role} />
