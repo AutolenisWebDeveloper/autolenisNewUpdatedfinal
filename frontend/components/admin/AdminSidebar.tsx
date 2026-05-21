@@ -58,6 +58,9 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Contracts", href: "/admin/contracts", icon: Shield },
     { label: "Comms", href: "/admin/comms", icon: Send },
   ]},
+  { label: "CRM & Communications", items: [
+    { label: "CRM", href: "/admin/crm", icon: LayoutDashboard },
+  ]},
   { label: "Inventory", items: [
     { label: "Inventory", href: "/admin/inventory", icon: Package },
     { label: "Add Vehicle", href: "/admin/inventory/new", icon: Package },
