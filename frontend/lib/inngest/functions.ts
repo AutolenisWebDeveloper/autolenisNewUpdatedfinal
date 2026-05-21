@@ -4,7 +4,9 @@ import { Resend } from 'resend';
 import twilio from 'twilio';
 import { inngest } from './client';
 import { SuppressionService } from '../services/suppression.service';
+import { TemplateService } from '../services/template.service';
 import { normalizePhone } from '../utils/phone';
+import type { TemplateVariable } from '../types/crm';
 
 function getSupabase(): SupabaseClient {
   return createClient(
@@ -90,9 +92,18 @@ export const emailSendFn = inngest.createFunction(
     const data = event.data as {
       contactId?: string;
       email: string;
-      subject: string;
-      html: string;
+      // Direct payload path — used by ad-hoc admin sends and Phase 1
+      // transactional triggers. Phase 3 templated path is below.
+      subject?: string;
+      html?: string;
       text?: string;
+      // Templated path — render via TemplateService at dispatch time.
+      templateId?: string;
+      templateVariables?: Partial<Record<TemplateVariable | string, string | number | null>>;
+      // Campaign integration — when set, the recipient row gets stamped with
+      // the resend id so the bounce/complaint webhook can attribute deliveries.
+      campaignId?: string;
+      campaignRecipientId?: string;
       type?: 'transactional' | 'marketing';
       idempotencyKey?: string;
     };
@@ -141,13 +152,39 @@ export const emailSendFn = inngest.createFunction(
         return { status: 'CONSENT_GATED' };
       }
 
+      // Resolve the actual subject/html/text. Two paths:
+      //  - templateId present → render via TemplateService (Phase 3 path)
+      //  - else fall back to the direct subject/html payload (Phase 1 path)
+      const rendered = await step.run('resolve-content', async () => {
+        if (data.templateId) {
+          const baseVars: Record<string, string> = {
+            firstName: contact?.first_name ?? '',
+            lastName: contact?.last_name ?? '',
+            fullName: [contact?.first_name, contact?.last_name].filter(Boolean).join(' '),
+            supportEmail: process.env.SUPPORT_EMAIL ?? '',
+            dashboardUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/buyer/dashboard`,
+            unsubscribeUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/unsubscribe`,
+          };
+          const vars = { ...baseVars, ...(data.templateVariables ?? {}) };
+          return TemplateService.renderTemplate(supabase, data.templateId, vars);
+        }
+        if (!data.subject || !data.html) {
+          throw new Error('EMAIL_PAYLOAD_INCOMPLETE');
+        }
+        return {
+          subject: data.subject,
+          html: data.html,
+          text: data.text ?? '',
+        };
+      });
+
       const sendResult = await step.run('dispatch-resend', async () => {
         const out = await getResend().emails.send({
           from: process.env.RESEND_FROM_EMAIL!,
           to: data.email,
-          subject: data.subject,
-          text: data.text ?? '',
-          html: data.html,
+          subject: rendered.subject,
+          text: rendered.text,
+          html: rendered.html,
           headers: {
             'List-Unsubscribe': `<${process.env.NEXT_PUBLIC_APP_URL}/unsubscribe>`,
           },
@@ -156,12 +193,30 @@ export const emailSendFn = inngest.createFunction(
         return out.data;
       });
 
+      if (data.campaignRecipientId) {
+        await step.run('update-campaign-recipient', async () => {
+          await supabase
+            .from('campaign_recipients')
+            .update({
+              status: 'sent',
+              sent_at: new Date().toISOString(),
+              resend_id: sendResult?.id ?? null,
+            })
+            .eq('id', data.campaignRecipientId);
+        });
+      }
+
       if (data.contactId) {
         await step.run('log-timeline', async () => {
           await supabase.from('contact_timeline_events').insert({
             contact_id: data.contactId,
             event_type: 'email_sent',
-            event_data: { resend_id: sendResult?.id, subject: data.subject },
+            event_data: {
+              resend_id: sendResult?.id,
+              subject: rendered.subject,
+              template_id: data.templateId ?? null,
+              campaign_id: data.campaignId ?? null,
+            },
           });
         });
       }

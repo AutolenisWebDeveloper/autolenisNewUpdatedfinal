@@ -143,3 +143,155 @@ export type EmailSuppressionReason =
 
 export type SmsSuppressionReason =
   | 'stop' | 'admin_added' | 'invalid' | 'carrier_block';
+
+// ----------------------------------------------------------------------------
+// Phase 3 — Messaging, Campaigns, Segmentation
+// Mirrors migrations/02_phase3_messaging.sql
+// ----------------------------------------------------------------------------
+
+export type EmailTemplateCategory = 'transactional' | 'marketing' | 'automation';
+export type EmailTemplateStatus = 'active' | 'inactive' | 'draft';
+
+// The 12 supported template variables. Keep in sync with TemplateService.SUPPORTED_VARIABLES.
+export type TemplateVariable =
+  | 'firstName' | 'lastName' | 'fullName'
+  | 'vehicleMake' | 'vehicleModel' | 'vehicleYear'
+  | 'dashboardUrl' | 'depositUrl' | 'auctionUrl' | 'offerUrl'
+  | 'supportEmail' | 'unsubscribeUrl';
+
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  category: EmailTemplateCategory;
+  html_body: string;
+  text_body: string | null;
+  variables: string[];
+  thumbnail_url: string | null;
+  status: EmailTemplateStatus;
+  version: number;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmailTemplateVersion {
+  id: string;
+  template_id: string;
+  version: number;
+  subject: string;
+  html_body: string;
+  text_body: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface EmailTemplateInput {
+  name: string;
+  subject: string;
+  category?: EmailTemplateCategory;
+  html_body: string;
+  text_body?: string | null;
+  variables?: string[];
+  status?: EmailTemplateStatus;
+}
+
+export type EmailTemplateUpdate = Partial<EmailTemplateInput>;
+
+export interface RenderedTemplate {
+  subject: string;
+  html: string;
+  text: string;
+}
+
+// Segments — conditions JSONB structure validated at the service layer.
+export type SegmentOperator =
+  | 'eq' | 'neq'
+  | 'contains' | 'not_contains'
+  | 'gte' | 'lte'
+  | 'is_true' | 'is_false'
+  | 'before' | 'after';
+
+export type SegmentField =
+  | 'lifecycle_stage'
+  | 'consent_sms'
+  | 'consent_email'
+  | 'do_not_contact'
+  | 'source'
+  | 'utm_source'
+  | 'utm_campaign'
+  | 'created_at';
+
+export interface SegmentRule {
+  field: SegmentField;
+  op: SegmentOperator;
+  value: string | number | boolean | null;
+}
+
+export interface SegmentConditions {
+  match: 'all' | 'any';
+  rules: SegmentRule[];
+}
+
+export interface Segment {
+  id: string;
+  name: string;
+  description: string | null;
+  conditions: SegmentConditions;
+  contact_count: number;
+  last_counted_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Campaigns
+export type CampaignType = 'email' | 'sms' | 'mixed';
+export type CampaignStatus =
+  | 'draft' | 'scheduled' | 'running' | 'paused' | 'completed' | 'cancelled';
+
+export interface Campaign {
+  id: string;
+  name: string;
+  type: CampaignType;
+  status: CampaignStatus;
+  segment_id: string | null;
+  template_id: string | null;
+  sms_body: string | null;
+  scheduled_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  recipient_count: number;
+  sent_count: number;
+  delivered_count: number;
+  opened_count: number;
+  clicked_count: number;
+  bounced_count: number;
+  failed_count: number;
+  unsubscribed_count: number;
+  suppressed_count: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CampaignRecipientStatus =
+  | 'pending' | 'sent' | 'delivered' | 'opened' | 'clicked'
+  | 'bounced' | 'failed' | 'unsubscribed' | 'suppressed';
+
+export interface CampaignRecipient {
+  id: string;
+  campaign_id: string;
+  contact_id: string;
+  status: CampaignRecipientStatus;
+  sent_at: string | null;
+  delivered_at: string | null;
+  opened_at: string | null;
+  clicked_at: string | null;
+  unsubscribed_at: string | null;
+  error_message: string | null;
+  resend_id: string | null;
+  twilio_sid: string | null;
+  created_at: string;
+}
