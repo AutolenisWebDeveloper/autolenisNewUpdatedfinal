@@ -681,6 +681,31 @@ export const inactivityScannerFn = inngest.createFunction(
   },
 );
 
+// ---------------------------------------------------------------------------
+// ANALYTICS REFRESH — daily REFRESH MATERIALIZED VIEW
+// ---------------------------------------------------------------------------
+// The lifecycle funnel dashboard reads mv_funnel_metrics (Phase 5). The
+// matview is refreshed CONCURRENTLY at 2am every day; that keeps the funnel
+// dashboard reading a pre-aggregated surface no matter how large the
+// contacts table grows, without blocking concurrent dashboard reads during
+// the refresh itself.
+export const analyticsRefreshFn = inngest.createFunction(
+  { id: 'analytics-refresh', name: 'Analytics Refresh', retries: 2 },
+  { cron: '0 2 * * *' },
+  async ({ step }) => {
+    const supabase = getSupabase();
+    const { error } = await step.run('refresh-mv', async () =>
+      supabase.rpc('refresh_analytics_views')
+    );
+    if (error) {
+      // Don't dead-letter — the next day's run will pick up the same data.
+      // Surface as a structured failure so Inngest's retry policy applies.
+      throw new Error(`analytics_refresh_failed: ${error.message}`);
+    }
+    return { status: 'OK', refreshed_at: new Date().toISOString() };
+  },
+);
+
 export const inngestFunctions = [
   emailSendFn,
   smsSendFn,
@@ -688,4 +713,5 @@ export const inngestFunctions = [
   scheduledCampaignCronFn,
   workflowResumeFn,
   inactivityScannerFn,
+  analyticsRefreshFn,
 ];
