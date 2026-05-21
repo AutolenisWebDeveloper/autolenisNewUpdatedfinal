@@ -589,9 +589,103 @@ export const scheduledCampaignCronFn = inngest.createFunction(
   }
 );
 
+// ---------------------------------------------------------------------------
+// WORKFLOW RESUME WORKER — picks up enrollments suspended by a delay node
+// ---------------------------------------------------------------------------
+// The engine emits autolenis/workflow.resume with a future ts (= now + delay).
+// Inngest holds the event until then, then dispatches it here. The handler
+// is a thin shell — all the logic lives in WorkflowEngine so the same code
+// path is exercised by initial enrollment and by post-delay resumption.
+export const workflowResumeFn = inngest.createFunction(
+  { id: 'workflow-resume-worker', name: 'Workflow Resume', retries: 3 },
+  { event: 'autolenis/workflow.resume' },
+  async (ctx) => {
+    const { event, step } = ctx;
+    const data = event.data as { enrollment_id: string; node_id: string };
+    const supabase = getSupabase();
+
+    // Lazy import — keeps the module graph for the rest of the workers light
+    // and avoids pulling workflow.engine into edge-runtime bundles unless a
+    // workflow actually resumes.
+    const { WorkflowEngine } = await import('../services/workflow.engine');
+
+    try {
+      await step.run('resume-enrollment', async () =>
+        WorkflowEngine.resumeEnrollment(supabase, data.enrollment_id, data.node_id),
+      );
+      return { status: 'OK' };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (isFinalAttempt(ctx as unknown as Record<string, unknown>)) {
+        await moveJobToDeadLetter(
+          supabase,
+          (ctx as unknown as { runId?: string }).runId ?? 'unknown',
+          'autolenis/workflow.resume',
+          data,
+          message,
+        );
+      }
+      throw err;
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// INACTIVITY SCANNER — emits buyer_inactive triggers for early-stage contacts
+// ---------------------------------------------------------------------------
+// Runs hourly; finds contacts in early stages whose updated_at is > 72h ago
+// and whose lifecycle hasn't already progressed. Emits a manual trigger event
+// per contact, capped at 500 per run to bound the per-tick cost. Workflows
+// listening for `buyer_inactive` then enroll the contact via the API.
+export const inactivityScannerFn = inngest.createFunction(
+  { id: 'inactivity-scanner', name: 'Inactivity Scanner', retries: 1 },
+  { cron: '0 * * * *' }, // hourly on the hour
+  async ({ step }) => {
+    const supabase = getSupabase();
+    const cutoff = new Date(Date.now() - 72 * 3600 * 1000).toISOString();
+    const EARLY_STAGES = ['lead', 'prequal_started', 'prequal_completed', 'deposit_pending'];
+
+    const stale = await step.run('find-stale-contacts', async () => {
+      const { data } = await supabase
+        .from('contacts')
+        .select('id')
+        .in('lifecycle_stage', EARLY_STAGES)
+        .lt('updated_at', cutoff)
+        .is('deleted_at', null)
+        .eq('do_not_contact', false)
+        .limit(500);
+      return data ?? [];
+    });
+
+    if (stale.length === 0) return { status: 'NO_STALE_CONTACTS' };
+
+    // Drive enrollment via the engine directly (rather than a fan-out event)
+    // because the per-contact unique constraint on workflow_enrollments
+    // already dedups — we don't need Inngest's idempotency layer on top.
+    await step.run('enroll-stale', async () => {
+      const { WorkflowEngine } = await import('../services/workflow.engine');
+      for (const row of stale) {
+        try {
+          await WorkflowEngine.triggerForEvent(supabase, 'buyer_inactive', row.id as string, {
+            source: 'inactivity_scanner',
+            scanned_at: new Date().toISOString(),
+          });
+        } catch (err) {
+          // One contact's failure must not block the rest of the batch.
+          console.error('[inactivity-scanner] enroll failed', row.id, err);
+        }
+      }
+    });
+
+    return { status: 'OK', scanned: stale.length };
+  },
+);
+
 export const inngestFunctions = [
   emailSendFn,
   smsSendFn,
   campaignFanoutFn,
   scheduledCampaignCronFn,
+  workflowResumeFn,
+  inactivityScannerFn,
 ];

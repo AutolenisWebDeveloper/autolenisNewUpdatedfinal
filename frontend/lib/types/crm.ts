@@ -295,3 +295,140 @@ export interface CampaignRecipient {
   twilio_sid: string | null;
   created_at: string;
 }
+
+// ----------------------------------------------------------------------------
+// Phase 4 — Automation Engine + Workflow Builder
+// Mirrors migrations/03_phase4_automation.sql
+// ----------------------------------------------------------------------------
+
+export type WorkflowStatus = 'draft' | 'active' | 'paused' | 'archived';
+
+// Trigger types map 1:1 to the system events that can enroll a contact into
+// a workflow. The string literal is also used as workflows.trigger_type in DB.
+export type WorkflowTriggerType =
+  | 'buyer_signup'
+  | 'vehicle_request_submitted'
+  | 'deposit_pending'
+  | 'deposit_paid'
+  | 'auction_started'
+  | 'offer_received'
+  | 'offer_selected'
+  | 'docusign_signed'
+  | 'purchase_completed'
+  | 'refinance_inquiry'
+  | 'dealer_invited'
+  | 'affiliate_signup'
+  | 'buyer_inactive'
+  | 'manual';
+
+// Node types — kept as a closed union so the engine can exhaustively switch.
+export type WorkflowNodeType =
+  | 'trigger'
+  | 'condition'
+  | 'delay'
+  | 'action.sendEmail'
+  | 'action.sendSms'
+  | 'action.createTask'
+  | 'action.updateStage'
+  | 'action.assignAdmin'
+  | 'action.notifyAdmin'
+  | 'action.endWorkflow';
+
+export type WorkflowConditionField =
+  | 'lifecycle_stage'
+  | 'consent_sms'
+  | 'consent_email'
+  | 'do_not_contact'
+  | 'source'
+  | 'utm_source'
+  | 'utm_campaign'
+  | 'tags';
+
+export type WorkflowConditionOp =
+  | 'eq' | 'neq'
+  | 'is_true' | 'is_false'
+  | 'contains' | 'not_contains'
+  | 'has_tag' | 'not_has_tag';
+
+export interface WorkflowNode {
+  id: string;
+  type: WorkflowNodeType;
+  // Free-form config keyed per node type. Validated by WorkflowService at
+  // activation time — drafts may have incomplete config.
+  config: Record<string, unknown>;
+  // Builder UI position — opaque to the engine, used only for layout.
+  position?: { x: number; y: number };
+}
+
+export interface WorkflowEdge {
+  from: string;
+  to: string;
+  // Only set on edges leaving a condition node. 'true' / 'false' selects the
+  // branch the engine follows based on rule evaluation.
+  branch?: 'true' | 'false';
+}
+
+export interface WorkflowGraph {
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+}
+
+export interface Workflow {
+  id: string;
+  name: string;
+  description: string | null;
+  status: WorkflowStatus;
+  trigger_type: WorkflowTriggerType;
+  trigger_config: Record<string, unknown>;
+  nodes: WorkflowGraph;
+  version: number;
+  is_prebuilt: boolean;
+  prebuilt_key: string | null;
+  created_by: string | null;
+  activated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowInput {
+  name: string;
+  description?: string | null;
+  trigger_type: WorkflowTriggerType;
+  trigger_config?: Record<string, unknown>;
+  nodes?: WorkflowGraph;
+  prebuilt_key?: string | null;
+  is_prebuilt?: boolean;
+}
+
+export type WorkflowUpdate = Partial<Omit<Workflow, 'id' | 'created_at' | 'updated_at' | 'version'>>;
+
+export type WorkflowEnrollmentStatus =
+  | 'active' | 'completed' | 'exited' | 'failed' | 'paused';
+
+export interface WorkflowEnrollment {
+  id: string;
+  workflow_id: string;
+  contact_id: string;
+  status: WorkflowEnrollmentStatus;
+  current_node_id: string | null;
+  trigger_data: Record<string, unknown>;
+  enrolled_at: string;
+  completed_at: string | null;
+  exited_at: string | null;
+  exit_reason: string | null;
+}
+
+export type WorkflowExecutionStatus =
+  | 'success' | 'failed' | 'skipped' | 'pending' | 'suspended';
+
+export interface WorkflowExecutionLog {
+  id: string;
+  enrollment_id: string;
+  node_id: string;
+  node_type: string;
+  status: WorkflowExecutionStatus;
+  input_data: Record<string, unknown>;
+  output_data: Record<string, unknown>;
+  error_message: string | null;
+  executed_at: string;
+}
