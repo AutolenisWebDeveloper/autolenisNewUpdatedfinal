@@ -12,6 +12,7 @@ import {
   AlertOctagon,
   ExternalLink,
   Loader2,
+  ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useDebounce } from '@/lib/hooks/use-debounce';
@@ -24,9 +25,17 @@ type ConversationListItem = {
   channel: string;
   unread_count: number;
   status: ConversationStatus;
+  assigned_to: string | null;
   last_message_at: string;
   contact: { first_name: string | null; last_name: string | null; email: string | null } | null;
   last_message: { body: string; direction: string; created_at: string } | null;
+};
+
+type AdminOption = {
+  id: string;
+  email: string;
+  role: string;
+  is_self: boolean;
 };
 
 const STATUS_DOT: Record<ConversationStatus, string> = {
@@ -69,7 +78,11 @@ export default function InboxPage() {
   const [reply, setReply] = useState('');
   const [replyMode, setReplyMode] = useState<'sms' | 'note'>('sms');
   const [sending, setSending] = useState(false);
+  const [admins, setAdmins] = useState<AdminOption[]>([]);
+  const [escalateOpen, setEscalateOpen] = useState(false);
+  const [escalating, setEscalating] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const escalateRef = useRef<HTMLDivElement>(null);
 
   // Fetch conversations on mount + when filter changes.
   useEffect(() => {
@@ -139,6 +152,34 @@ export default function InboxPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Lazy-load the admin roster the first time the escalate menu opens — keeps
+  // the inbox shell snappy while still giving the picker fresh data.
+  useEffect(() => {
+    if (!escalateOpen || admins.length > 0) return;
+    let cancelled = false;
+    fetch('/api/admin/crm/admins')
+      .then((r) => r.json())
+      .then((json) => {
+        if (!cancelled) setAdmins((json.data as AdminOption[]) ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setAdmins([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [escalateOpen, admins.length]);
+
+  // Close the escalate dropdown on outside-click.
+  useEffect(() => {
+    if (!escalateOpen) return;
+    function onDocClick(e: MouseEvent) {
+      if (!escalateRef.current?.contains(e.target as Node)) setEscalateOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [escalateOpen]);
+
   const filteredConversations = useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase();
     if (!q) return conversations;
@@ -187,6 +228,31 @@ export default function InboxPage() {
     setConversations((prev) =>
       prev.map((c) => (c.id === selectedId ? { ...c, status: 'resolved' } : c)),
     );
+  }
+
+  async function handleEscalate(adminId: string) {
+    if (!selectedId || escalating) return;
+    setEscalating(true);
+    try {
+      const res = await fetch(`/api/admin/crm/conversations/${selectedId}/escalate`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_id: adminId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'ESCALATE_FAILED' }));
+        alert(`Failed to escalate: ${err.error ?? res.statusText}`);
+        return;
+      }
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === selectedId ? { ...c, status: 'escalated', assigned_to: adminId } : c,
+        ),
+      );
+      setEscalateOpen(false);
+    } finally {
+      setEscalating(false);
+    }
   }
 
   return (
@@ -333,9 +399,61 @@ export default function InboxPage() {
               >
                 <CheckCircle2 className="w-3.5 h-3.5" /> Resolve
               </button>
-              <button className="flex items-center gap-1.5 text-xs font-medium text-orange-400 hover:text-orange-300 border border-orange-500/30 hover:border-orange-500/50 rounded-md px-2.5 py-1 transition-colors">
-                <AlertOctagon className="w-3.5 h-3.5" /> Escalate
-              </button>
+              <div className="relative" ref={escalateRef}>
+                <button
+                  onClick={() => setEscalateOpen((v) => !v)}
+                  disabled={escalating}
+                  className="flex items-center gap-1.5 text-xs font-medium text-orange-400 hover:text-orange-300 border border-orange-500/30 hover:border-orange-500/50 rounded-md px-2.5 py-1 transition-colors disabled:opacity-50"
+                >
+                  {escalating ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <AlertOctagon className="w-3.5 h-3.5" />
+                  )}
+                  Escalate
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                {escalateOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-64 bg-gray-900 border border-gray-800 rounded-lg shadow-xl z-20 overflow-hidden">
+                    <div className="px-3 py-2 border-b border-gray-800">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                        Assign escalation to
+                      </div>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto py-1">
+                      {admins.length === 0 ? (
+                        <div className="px-3 py-4 text-center text-xs text-gray-600">
+                          <Loader2 className="w-4 h-4 text-gray-700 animate-spin mx-auto" />
+                        </div>
+                      ) : (
+                        admins.map((a) => (
+                          <button
+                            key={a.id}
+                            onClick={() => handleEscalate(a.id)}
+                            disabled={escalating}
+                            className="w-full text-left px-3 py-2 hover:bg-gray-800/60 transition-colors disabled:opacity-50 flex items-center justify-between gap-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-xs font-medium text-white truncate">
+                                {a.email}
+                                {a.is_self && (
+                                  <span className="ml-1.5 text-[9px] font-semibold text-blue-400">
+                                    (you)
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-gray-500">{a.role}</div>
+                            </div>
+                            {selectedConversation?.assigned_to === a.id && (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            )}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
               <Link
                 href={`/admin/crm/contacts/${selectedConversation.contact_id}`}
                 className="flex items-center gap-1 text-xs text-gray-400 hover:text-white"
