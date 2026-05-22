@@ -77,6 +77,8 @@ const PUBLIC_ROUTES = [
   "/dealer-offer",
   "/dealer-offer-outside",
   "/buyer-offer-review",
+  "/lp",
+  "/thank-you",
 ];
 
 const AUTH_ROUTES = [
