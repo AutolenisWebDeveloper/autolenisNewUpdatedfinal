@@ -85,20 +85,32 @@ export async function POST(request: NextRequest) {
             },
           });
           if (deposit) {
-            const createdAuction = await prisma.auction.create({
-              data: {
-                buyerId: deposit.buyerId,
-                depositId: deposit.id,
-                status: "PENDING",
-              },
+            // Auction.depositId is unique. Use upsert so a webhook retry (e.g.
+            // after a transient 5xx from a downstream side-effect) does not
+            // throw P2002 and trap the event in a permanent failure loop.
+            const existingAuction = await prisma.auction.findUnique({
+              where: { depositId: deposit.id },
+              select: { id: true },
             });
-            // Notify buyer in-app
-            await prisma.notification.create({
-              data: { buyerId: deposit.buyerId, title: "Auction activated!", body: "Your $99 deposit was received. Your private auction is being prepared.", type: "AUCTION_STARTED" },
-            });
+            const createdAuction = existingAuction
+              ? existingAuction
+              : await prisma.auction.create({
+                  data: {
+                    buyerId: deposit.buyerId,
+                    depositId: deposit.id,
+                    status: "PENDING",
+                  },
+                });
+            // Notify buyer in-app — only on the first time we create the auction
+            // so retries don't spam duplicate in-app notifications.
+            if (!existingAuction) {
+              await prisma.notification.create({
+                data: { buyerId: deposit.buyerId, title: "Auction activated!", body: "Your $99 deposit was received. Your private auction is being prepared.", type: "AUCTION_STARTED" },
+              });
+            }
 
             // BUG1 FIX: Launch auction and invite dealers (was missing — dealers were never notified)
-            if (createdAuction) {
+            if (createdAuction && !existingAuction) {
               await launchAuction(createdAuction.id).catch((err: unknown) =>
                 console.error("[stripe/webhook] launchAuction failed:", err)
               );
@@ -107,11 +119,13 @@ export async function POST(request: NextRequest) {
               );
             }
 
-            // Send deposit confirmation and auction activated emails
-            // buyer is fetched via nullable Prisma include, so firstName may be absent
+            // Send deposit confirmation and auction activated emails — only
+            // the first time we process this deposit's success event. Webhook
+            // retries (e.g. transient 5xx downstream of email send) must not
+            // re-trigger transactional emails.
             const buyerEmail = deposit.buyer?.user?.email;
             const buyerName = deposit.buyer?.firstName?.trim() || "valued customer";
-            if (buyerEmail) {
+            if (buyerEmail && !existingAuction) {
               try {
                 await sendDepositConfirmationEmail(buyerEmail, buyerName, deposit.id);
               } catch (e) {
