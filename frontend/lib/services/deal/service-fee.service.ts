@@ -6,11 +6,18 @@ import { PREMIUM_FEE_CENTS, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 export async function createFeePaymentIntent(dealId: string, buyerId: string) {
   const stripe = getStripe();
   const netFee = PREMIUM_FEE_CENTS - DEPOSIT_AMOUNT_CENTS; // $400 net
-  const pi = await stripe.paymentIntents.create({
-    amount: netFee,
-    currency: "usd",
-    metadata: { dealId, buyerId, type: "concierge_fee" },
-  });
+  // Idempotency key scoped to the deal so concurrent buyer clicks reuse the
+  // same Stripe PaymentIntent instead of spawning duplicates. Stripe retains
+  // idempotency keys for 24h; on the rare case of a buyer returning a day
+  // later we fall through to a fresh PI, which is the correct behavior.
+  const pi = await stripe.paymentIntents.create(
+    {
+      amount: netFee,
+      currency: "usd",
+      metadata: { dealId, buyerId, type: "concierge_fee" },
+    },
+    { idempotencyKey: `concierge-fee-${dealId}` },
+  );
   return { clientSecret: pi.client_secret, paymentIntentId: pi.id, netFeeCents: netFee };
 }
 

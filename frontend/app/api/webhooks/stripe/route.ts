@@ -24,18 +24,32 @@ export async function POST(request: NextRequest) {
     return new NextResponse("Webhook signature invalid", { status: 400 });
   }
 
-  // D3: Check PaymentProviderEvent.eventId FIRST — return 200 on duplicate without processing side effects
+  // D3: Idempotency — atomic claim on PaymentProviderEvent.eventId.
+  // Two concurrent Stripe retries can both pass a findUnique check, so we
+  // rely on the unique-index error from create() to detect duplicates. The
+  // first writer wins; the loser returns 200 so Stripe stops retrying.
   const existing = await prisma.paymentProviderEvent.findUnique({
     where: { eventId: event.id },
+    select: { processed: true },
   });
-  if (existing) {
+  if (existing?.processed) {
     return NextResponse.json({ received: true, duplicate: true });
   }
-
-  // Record event BEFORE processing (idempotency)
-  await prisma.paymentProviderEvent.create({
-    data: { eventId: event.id, eventType: event.type, payload: JSON.parse(JSON.stringify(event)), processed: false },
-  });
+  if (!existing) {
+    try {
+      await prisma.paymentProviderEvent.create({
+        data: { eventId: event.id, eventType: event.type, payload: JSON.parse(JSON.stringify(event)), processed: false },
+      });
+    } catch (err) {
+      const code = (err as { code?: string } | null)?.code;
+      if (code === "P2002") {
+        // Another retry won the race. Ack so Stripe stops retrying — the
+        // winner is responsible for the side effects.
+        return NextResponse.json({ received: true, duplicate: true });
+      }
+      throw err;
+    }
+  }
 
   try {
     switch (event.type) {
