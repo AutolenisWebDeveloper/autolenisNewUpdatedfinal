@@ -726,55 +726,25 @@ function buildUnsubUrl(email: string): string {
   return `${base}/unsubscribe?email=${encodeURIComponent(email)}`;
 }
 
-function lpRecoveryEmail(args: {
-  firstName: string | null;
-  preheader: string;
-  headline: string;
-  body: string;
-  ctaLabel: string;
-  resumeUrl: string;
-  unsubscribeUrl: string;
-  finalTouch?: boolean;
-}): { html: string; text: string } {
-  const greeting = args.firstName ? `Hi ${args.firstName},` : 'Hi there,';
-  const finalLine = args.finalTouch
-    ? `<p style="margin:20px 0 0;font-size:13px;color:#6b7280;">If you would prefer we close your file, just reply STOP and we will remove your details.</p>`
-    : '';
-  const html = `
-<!doctype html>
-<html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
-  <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">${args.preheader}</span>
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
-    <tr><td align="center" style="padding:32px 16px;">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="560" style="max-width:560px;background:#ffffff;border-radius:16px;padding:32px;">
-        <tr><td>
-          <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:2px;color:#0B5FD1;text-transform:uppercase;">AutoLenis</p>
-          <h1 style="margin:0 0 16px;font-size:24px;line-height:1.25;color:#0f172a;font-weight:700;">${args.headline}</h1>
-          <p style="margin:0 0 16px;font-size:15px;line-height:1.55;color:#334155;">${greeting}</p>
-          <p style="margin:0 0 24px;font-size:15px;line-height:1.55;color:#334155;">${args.body}</p>
-          <p style="margin:0 0 8px;">
-            <a href="${args.resumeUrl}" style="display:inline-block;background:#0B5FD1;color:#ffffff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:12px;font-size:15px;">${args.ctaLabel}</a>
-          </p>
-          ${finalLine}
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body></html>`.trim();
-
-  const text = [
-    args.headline,
-    '',
-    greeting,
-    '',
-    args.body.replace(/<[^>]+>/g, ''),
-    '',
-    `${args.ctaLabel}: ${args.resumeUrl}`,
-    '',
-    `Unsubscribe: ${args.unsubscribeUrl}`,
-  ].join('\n');
-
-  return { html, text };
+// Load + render a recovery template by its template_key. Inactive/missing
+// rows surface as null so the caller can skip silently (admin disabled it)
+// or throw and let Inngest retry (transient DB error or seed not yet applied).
+async function renderRecoveryTemplate(
+  supabase: SupabaseClient,
+  templateKey: string,
+  variables: Partial<Record<TemplateVariable | string, string | number | null>>,
+): Promise<{ subject: string; html: string; text: string } | null> {
+  const template = await TemplateService.getTemplateByKey(supabase, templateKey);
+  if (!template) {
+    // Missing → seed migration hasn't run or row was deleted. Throw so Inngest
+    // retries; a permanently-missing template will dead-letter after 2 retries.
+    throw new Error(`recovery_template_missing: ${templateKey}`);
+  }
+  if (template.status !== 'active') {
+    // Inactive → marketing turned it off on purpose. Skip without retrying.
+    return null;
+  }
+  return TemplateService.renderInline(template, variables);
 }
 
 export const formAbandonmentFn = inngest.createFunction(
@@ -815,26 +785,23 @@ export const formAbandonmentFn = inngest.createFunction(
     await step.run('send-touch-1', async () => {
       const supabase = getSupabase();
       if (await SuppressionService.isEmailSuppressed(supabase, contact_email)) return;
-      const subject = `${first_name ? first_name + ', your' : 'Your'} auction request is waiting`;
-      const { html, text } = lpRecoveryEmail({
-        firstName: first_name,
-        preheader: 'You started a request — finish it in 60 seconds and dealers can begin competing.',
-        headline: 'Your auction request is waiting',
-        body:
-          'You started a request on AutoLenis but did not finish. The form takes about 60 seconds to complete, and your vehicle type and budget are what tell us which verified dealers to invite to compete for your business.',
-        ctaLabel: 'Complete my request',
+      // firstName defaults to 'There' so the subject stays grammatical when
+      // we never captured a name ("There, your auction request is waiting").
+      const rendered = await renderRecoveryTemplate(supabase, 'abandonment_touch_1', {
+        firstName: first_name ?? 'There',
         resumeUrl,
         unsubscribeUrl,
       });
+      if (!rendered) return;
       await inngest.send({
         name: 'autolenis/email.send',
         data: {
           contactId:      contact_id,
           email:          contact_email,
           type:           'marketing',
-          subject,
-          html,
-          text,
+          subject:        rendered.subject,
+          html:           rendered.html,
+          text:           rendered.text,
           idempotencyKey: `${idempotency_key}-touch1`,
         },
       });
@@ -856,26 +823,21 @@ export const formAbandonmentFn = inngest.createFunction(
     await step.run('send-touch-2', async () => {
       const supabase = getSupabase();
       if (await SuppressionService.isEmailSuppressed(supabase, contact_email)) return;
-      const subject = 'The auction room is still empty';
-      const { html, text } = lpRecoveryEmail({
-        firstName: first_name,
-        preheader: 'Verified dealers are waiting on your details before they can submit offers.',
-        headline: 'The auction room is still empty',
-        body:
-          'Verified dealers in your area are on the platform — but no one can submit an offer until your request is complete. No dealer has seen your information yet. When you finish the form, up to 8 dealers compete in a 48-hour auction so you compare offers side-by-side.',
-        ctaLabel: 'Open my auction',
+      const rendered = await renderRecoveryTemplate(supabase, 'abandonment_touch_2', {
+        firstName: first_name ?? 'There',
         resumeUrl,
         unsubscribeUrl,
       });
+      if (!rendered) return;
       await inngest.send({
         name: 'autolenis/email.send',
         data: {
           contactId:      contact_id,
           email:          contact_email,
           type:           'marketing',
-          subject,
-          html,
-          text,
+          subject:        rendered.subject,
+          html:           rendered.html,
+          text:           rendered.text,
           idempotencyKey: `${idempotency_key}-touch2`,
         },
       });
@@ -897,33 +859,29 @@ export const formAbandonmentFn = inngest.createFunction(
     await step.run('send-touch-3', async () => {
       const supabase = getSupabase();
       if (await SuppressionService.isEmailSuppressed(supabase, contact_email)) return;
-      const subject = 'Last chance — we will close your file';
-      const { html, text } = lpRecoveryEmail({
-        firstName: first_name,
-        preheader: 'This is the last email. Finish the request or reply STOP and we will close your file.',
-        headline: 'Last chance — we will close your file',
-        body:
-          'This is the last email we will send about your request. You have two options: complete the form in 60 seconds, or reply STOP and we will close your file. No hard feelings — your time is yours.',
-        ctaLabel: 'Complete my request',
+      const rendered = await renderRecoveryTemplate(supabase, 'abandonment_touch_3', {
+        firstName: first_name ?? 'There',
         resumeUrl,
         unsubscribeUrl,
-        finalTouch: true,
       });
-      await inngest.send({
-        name: 'autolenis/email.send',
-        data: {
-          contactId:      contact_id,
-          email:          contact_email,
-          type:           'marketing',
-          subject,
-          html,
-          text,
-          idempotencyKey: `${idempotency_key}-touch3`,
-        },
-      });
+      if (rendered) {
+        await inngest.send({
+          name: 'autolenis/email.send',
+          data: {
+            contactId:      contact_id,
+            email:          contact_email,
+            type:           'marketing',
+            subject:        rendered.subject,
+            html:           rendered.html,
+            text:           rendered.text,
+            idempotencyKey: `${idempotency_key}-touch3`,
+          },
+        });
+      }
 
       // Mark inactive — but only if still 'lead'. A contact who advanced
-      // mid-sleep should not be regressed.
+      // mid-sleep should not be regressed. Runs even when the template is
+      // inactive so the lifecycle bookkeeping stays consistent.
       await supabase
         .from('contacts')
         .update({ lifecycle_stage: 'inactive' })
@@ -978,26 +936,21 @@ export const exitIntentFn = inngest.createFunction(
     await step.run('send-exit-recovery', async () => {
       const supabase = getSupabase();
       if (await SuppressionService.isEmailSuppressed(supabase, contact_email)) return;
-      const subject = 'Still looking for the right deal?';
-      const { html, text } = lpRecoveryEmail({
-        firstName: first_name,
-        preheader: 'A quick note from AutoLenis — no commitment, just a thought.',
-        headline: 'Still looking for the right deal?',
-        body:
-          'You stopped by AutoLenis earlier. No commitment was made, no pressure here. If you are still searching for a vehicle, the platform lets dealers compete for your business so you never negotiate alone. Takes about 60 seconds to start.',
-        ctaLabel: 'See how it works',
-        resumeUrl: returnUrl,
+      const rendered = await renderRecoveryTemplate(supabase, 'exit_intent_recovery', {
+        firstName: first_name ?? 'There',
+        returnUrl,
         unsubscribeUrl,
       });
+      if (!rendered) return;
       await inngest.send({
         name: 'autolenis/email.send',
         data: {
           contactId:      contact_id,
           email:          contact_email,
           type:           'marketing',
-          subject,
-          html,
-          text,
+          subject:        rendered.subject,
+          html:           rendered.html,
+          text:           rendered.text,
           idempotencyKey: `${idempotency_key}-recovery`,
         },
       });

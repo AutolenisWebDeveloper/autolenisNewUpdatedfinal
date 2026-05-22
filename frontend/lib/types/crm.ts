@@ -152,15 +152,20 @@ export type SmsSuppressionReason =
 export type EmailTemplateCategory = 'transactional' | 'marketing' | 'automation';
 export type EmailTemplateStatus = 'active' | 'inactive' | 'draft';
 
-// The 12 supported template variables. Keep in sync with TemplateService.SUPPORTED_VARIABLES.
+// The supported template variables. Keep in sync with TemplateService.SUPPORTED_VARIABLES.
+// resumeUrl / returnUrl power the LP abandonment + exit-intent recovery flows.
 export type TemplateVariable =
   | 'firstName' | 'lastName' | 'fullName'
   | 'vehicleMake' | 'vehicleModel' | 'vehicleYear'
   | 'dashboardUrl' | 'depositUrl' | 'auctionUrl' | 'offerUrl'
+  | 'resumeUrl' | 'returnUrl'
   | 'supportEmail' | 'unsubscribeUrl';
 
 export interface EmailTemplate {
   id: string;
+  // Stable handle for automation/system templates (e.g. 'abandonment_touch_1').
+  // Null for admin-authored marketing templates.
+  template_key: string | null;
   name: string;
   subject: string;
   category: EmailTemplateCategory;

@@ -9,13 +9,14 @@ import type {
   TemplateVariable,
 } from '../types/crm';
 
-// The 12 platform-supported variables. Anything outside this set is left as
-// a literal {{...}} in the rendered output so missing data is visible during
-// QA instead of silently swallowed.
+// Platform-supported variables. Anything outside this set is left as a literal
+// {{...}} in the rendered output so missing data is visible during QA instead
+// of silently swallowed. resumeUrl / returnUrl power the LP recovery flows.
 const SUPPORTED_VARIABLES: readonly TemplateVariable[] = [
   'firstName', 'lastName', 'fullName',
   'vehicleMake', 'vehicleModel', 'vehicleYear',
   'dashboardUrl', 'depositUrl', 'auctionUrl', 'offerUrl',
+  'resumeUrl', 'returnUrl',
   'supportEmail', 'unsubscribeUrl',
 ] as const;
 
@@ -104,6 +105,21 @@ export class TemplateService {
       .from('email_templates')
       .select('*')
       .eq('id', id)
+      .maybeSingle();
+    if (error) throw error;
+    return (data as EmailTemplate | null) ?? null;
+  }
+
+  // Stable-key lookup for automation/system templates (e.g. LP recovery flow).
+  // Returns the row as-is; callers decide how to handle inactive/missing.
+  static async getTemplateByKey(
+    supabase: SupabaseClient,
+    templateKey: string,
+  ): Promise<EmailTemplate | null> {
+    const { data, error } = await supabase
+      .from('email_templates')
+      .select('*')
+      .eq('template_key', templateKey)
       .maybeSingle();
     if (error) throw error;
     return (data as EmailTemplate | null) ?? null;

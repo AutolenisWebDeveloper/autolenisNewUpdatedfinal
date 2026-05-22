@@ -25,6 +25,8 @@ const SAMPLE: Record<TemplateVariable, string> = {
   depositUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/buyer/deposit`,
   auctionUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/buyer/auction`,
   offerUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/buyer/offers`,
+  resumeUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/lp/default?resume=1`,
+  returnUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/lp/default?resume=1`,
   supportEmail: process.env.SUPPORT_EMAIL ?? 'support@autolenis.com',
   unsubscribeUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/unsubscribe?token=sample`,
 };
