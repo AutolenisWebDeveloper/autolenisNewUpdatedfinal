@@ -404,6 +404,112 @@ export async function sendDepositConfirmationEmail(to: string, firstName: string
   });
 }
 
+// "Contract signed" confirmation. Sent on DocuSign envelope.completed.
+// Idempotency-keyed on the DocuSign envelope id so retried webhook deliveries
+// cannot re-send the email.
+export async function sendContractSignedEmail(params: {
+  to: string;
+  firstName: string;
+  dealId: string;
+  envelopeId: string;
+}) {
+  const { to, firstName, dealId, envelopeId } = params;
+  const dealUrl = `${APP_URL}/buyer/deal`;
+  return sendIdempotent({
+    idempotencyKey: `contract-signed-${envelopeId}`,
+    to,
+    templateId: "contract-signed",
+    subject: "Your AutoLenis contract is signed",
+    html: `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+        <div style="background:#0B5FD1;padding:32px;text-align:center">
+          <h1 style="color:#fff;margin:0;font-size:22px">Contract Signed</h1>
+        </div>
+        <div style="padding:32px;color:#1f2937;line-height:1.7;font-size:14px">
+          <p>Hi ${firstName},</p>
+          <p>Your AutoLenis purchase contract has been signed. Your deal is moving to the next stage — we'll be in touch when your pickup is scheduled.</p>
+          <a href="${dealUrl}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">View deal status →</a>
+          <p style="margin-top:32px;color:#94A3B8;font-size:12px">Reference: deal ${dealId}</p>
+        </div>
+      </div>
+    `,
+  });
+}
+
+// Concierge / service-fee payment receipt. Uses the idempotent send rail so
+// a webhook retry never produces a duplicate receipt for the same PI.
+export async function sendConciergeFeeConfirmationEmail(params: {
+  to: string;
+  firstName: string;
+  dealId: string;
+  paymentIntentId: string;
+}) {
+  const { to, firstName, dealId, paymentIntentId } = params;
+  const dealUrl = `${APP_URL}/buyer/deal`;
+  return sendIdempotent({
+    idempotencyKey: `concierge-fee-confirmed-${paymentIntentId}`,
+    to,
+    templateId: "concierge-fee-confirmed",
+    subject: "Your AutoLenis Service Fee Is Confirmed",
+    html: `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+        <div style="background:#0B5FD1;padding:32px;text-align:center">
+          <h1 style="color:#fff;margin:0;font-size:22px">Service Fee Confirmed</h1>
+        </div>
+        <div style="padding:32px;color:#1f2937;line-height:1.7;font-size:14px">
+          <p>Hi ${firstName},</p>
+          <p>Your AutoLenis Service Fee has been received. Thank you!</p>
+          <p style="margin-top:24px;font-weight:600">What happens next</p>
+          <ol style="margin:8px 0 24px;padding-left:20px;color:#4B5563">
+            <li>We review your financing details (if applicable)</li>
+            <li>Your purchase contract is prepared</li>
+            <li>You receive a DocuSign link to e-sign your agreement</li>
+            <li>Once signed, we coordinate vehicle pickup</li>
+          </ol>
+          <a href="${dealUrl}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">Track your deal →</a>
+          <p style="margin-top:32px;color:#94A3B8;font-size:12px">Reference: deal ${dealId}</p>
+        </div>
+      </div>
+    `,
+  });
+}
+
+// Refund receipt. Sent when a deposit or fee refund is processed.
+export async function sendRefundConfirmationEmail(params: {
+  to: string;
+  firstName: string;
+  amountCents: number;
+  reason: string;
+  /** Stripe refund or charge id — used as idempotency seed so re-processing
+   *  the same refund event never emits a duplicate receipt. */
+  refundId: string;
+}) {
+  const { to, firstName, amountCents, reason, refundId } = params;
+  const dashboardUrl = `${APP_URL}/buyer/dashboard`;
+  const amount = `$${(amountCents / 100).toFixed(2)}`;
+  return sendIdempotent({
+    idempotencyKey: `refund-confirmed-${refundId}`,
+    to,
+    templateId: "refund-confirmed",
+    subject: `Your AutoLenis refund of ${amount} has been processed`,
+    html: `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+        <div style="background:#0B5FD1;padding:32px;text-align:center">
+          <h1 style="color:#fff;margin:0;font-size:22px">Refund Processed</h1>
+        </div>
+        <div style="padding:32px;color:#1f2937;line-height:1.7;font-size:14px">
+          <p>Hi ${firstName},</p>
+          <p>We've processed a refund of <strong>${amount}</strong> back to your original payment method.</p>
+          ${reason ? `<p style="background:#F8F9FB;border-left:3px solid #0B5FD1;padding:12px 16px;margin:16px 0;color:#4B5563"><strong>Reason:</strong> ${reason}</p>` : ""}
+          <p>Most banks post refunds within 5–10 business days.</p>
+          <a href="${dashboardUrl}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">Back to dashboard →</a>
+          <p style="margin-top:32px;color:#94A3B8;font-size:12px">Reference: ${refundId}</p>
+        </div>
+      </div>
+    `,
+  });
+}
+
 export async function sendDealCompleteEmail(to: string, firstName: string, dealId: string) {
   void dealId; // used for idempotency key only
   const completionDate = new Date().toLocaleDateString("en-US", {

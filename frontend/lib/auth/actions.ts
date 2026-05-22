@@ -422,6 +422,9 @@ export async function resetPasswordAction(formData: FormData): Promise<AuthResul
   if (!password || password.length < 8) return { error: "Password must be at least 8 characters." };
   if (password !== confirm) return { error: "Passwords do not match." };
 
+  // Capture the email so we can route post-reset to the role-correct dashboard.
+  let resetEmail: string | null = null;
+
   if (tokenHash) {
     const { createClient } = await import("@supabase/supabase-js");
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -451,12 +454,36 @@ export async function resetPasswordAction(formData: FormData): Promise<AuthResul
     );
     const { error } = await authedClient.auth.updateUser({ password });
     if (error) return { error: "Failed to reset password. Your link may have expired." };
+    resetEmail = data.user?.email ?? null;
   } else {
     const supabase = await createServerSupabaseClient();
+    const { data: { user } } = await supabase.auth.getUser();
     const { error } = await supabase.auth.updateUser({ password });
     if (error) return { error: "Failed to reset password. Your link may have expired." };
+    resetEmail = user?.email ?? null;
   }
 
+  // Establish a real cookie session with the new password so the buyer is
+  // signed in directly into their dashboard — no detour through /auth/signin.
+  if (resetEmail) {
+    const cookieClient = await createServerSupabaseClient();
+    const { data: signInData, error: signInError } = await cookieClient.auth.signInWithPassword({
+      email: resetEmail,
+      password,
+    });
+    if (!signInError && signInData.user) {
+      const dbUser = await prisma.user.findUnique({
+        where: { supabaseId: signInData.user.id },
+        select: { role: true },
+      });
+      const role = dbUser?.role ?? (signInData.user.user_metadata?.role as string | undefined) ?? "BUYER";
+      if (role === "AFFILIATE") redirect("/affiliate/portal/dashboard");
+      if (role === "DEALER") redirect("/dealer/dashboard");
+      redirect("/buyer/dashboard");
+    }
+  }
+
+  // Fallback if we could not establish a session — direct the user to sign in.
   redirect("/auth/signin?reset=success");
 }
 

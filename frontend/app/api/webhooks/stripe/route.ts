@@ -6,6 +6,8 @@ import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS } from "@/lib/constants";
 import {
   sendDepositConfirmationEmail,
   sendAuctionActivatedEmail,
+  sendConciergeFeeConfirmationEmail,
+  sendRefundConfirmationEmail,
 } from "@/lib/services/email/resend.service";
 import { walkCommissionTree } from "@/lib/services/affiliate/commission.service";
 import { launchAuction } from "@/lib/services/auction/auction.service";
@@ -168,6 +170,8 @@ export async function POST(request: NextRequest) {
           });
 
           // Send the buyer a confirmation that their service fee was received.
+          // Routed through the idempotent send rail so webhook retries cannot
+          // produce a duplicate receipt for the same payment intent.
           try {
             const updatedDeal = metaDealId
               ? await prisma.deal.findUnique({ where: { id: metaDealId } })
@@ -180,28 +184,11 @@ export async function POST(request: NextRequest) {
               const buyerEmail = buyerForEmail?.user?.email;
               const buyerName = buyerForEmail?.firstName ?? "there";
               if (buyerEmail) {
-                const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
-                const { Resend } = await import("resend");
-                const resend = new Resend(process.env.RESEND_API_KEY);
-                await resend.emails.send({
-                  from: "AutoLenis <noreply@autolenis.com>",
+                await sendConciergeFeeConfirmationEmail({
                   to: buyerEmail,
-                  subject: "Your AutoLenis Service Fee Is Confirmed",
-                  text: [
-                    `Hi ${buyerName},`,
-                    "",
-                    "Your AutoLenis Service Fee has been received. Thank you!",
-                    "",
-                    "What happens next:",
-                    "1. We will review your financing details (if applicable)",
-                    "2. Your purchase contract will be prepared",
-                    "3. You will receive a DocuSign link to e-sign your agreement",
-                    "4. Once signed, we coordinate vehicle pickup",
-                    "",
-                    `Track your deal: ${appUrl}/buyer/deal`,
-                    "",
-                    "— The AutoLenis Team",
-                  ].join("\n"),
+                  firstName: buyerName,
+                  dealId: updatedDeal.id,
+                  paymentIntentId: pi.id,
                 });
               }
             }
@@ -286,6 +273,26 @@ export async function POST(request: NextRequest) {
               body:    "Your $99 Auction Access Deposit refund has been processed. Allow 3–5 business days.",
             },
           }).catch(() => {});
+
+          // Email receipt for the refund — idempotency-keyed on the Stripe
+          // charge id so retries of the same event never re-send.
+          try {
+            const buyerForEmail = await prisma.buyer.findUnique({
+              where: { id: deposit.buyerId },
+              include: { user: { select: { email: true } } },
+            });
+            if (buyerForEmail?.user?.email) {
+              await sendRefundConfirmationEmail({
+                to: buyerForEmail.user.email,
+                firstName: buyerForEmail.firstName ?? "there",
+                amountCents: charge.amount_refunded,
+                reason: "Auction Access Deposit refund",
+                refundId: charge.id,
+              });
+            }
+          } catch (err) {
+            console.error("[stripe/webhook] deposit refund email failed:", err);
+          }
           break;
         }
 
@@ -304,6 +311,25 @@ export async function POST(request: NextRequest) {
               metadata:   { piId, chargeId: charge.id },
             },
           }).catch(() => {});
+
+          // Receipt to the buyer for the concierge / service fee refund.
+          try {
+            const buyerForEmail = await prisma.buyer.findUnique({
+              where: { id: deal.buyerId },
+              include: { user: { select: { email: true } } },
+            });
+            if (buyerForEmail?.user?.email) {
+              await sendRefundConfirmationEmail({
+                to: buyerForEmail.user.email,
+                firstName: buyerForEmail.firstName ?? "there",
+                amountCents: charge.amount_refunded,
+                reason: "AutoLenis Service Fee refund",
+                refundId: charge.id,
+              });
+            }
+          } catch (err) {
+            console.error("[stripe/webhook] fee refund email failed:", err);
+          }
         }
         break;
       }
