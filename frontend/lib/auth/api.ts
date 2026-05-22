@@ -16,15 +16,32 @@ export function errorResponse(code: string, message: string, status = 400) {
   );
 }
 
-// Get authenticated user from request (for API routes)
+// Get authenticated user from request (for API routes).
+//
+// Supabase may rotate the access/refresh token pair when `getUser()` runs near
+// expiry. We forward those rotated cookies into Next's mutable cookie store so
+// the next request on the same session keeps working — silently dropping them
+// (as an empty setAll() does) eventually 401s the buyer mid-session.
 export async function getRequestUser(request: NextRequest) {
+  const { cookies } = await import("next/headers");
+  const cookieStore = await cookies();
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
         getAll() { return request.cookies.getAll(); },
-        setAll() {},
+        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // Called from a context where cookies are read-only (e.g. a GET
+            // server component). Safe to ignore — the next mutating call will
+            // persist the refreshed token.
+          }
+        },
       },
     }
   );

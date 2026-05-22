@@ -5,7 +5,12 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { UserRole, BuyerPlan, AffiliateStatus } from "@prisma/client";
 import { sendWelcomeEmail } from "@/lib/services/email/resend.service";
-import { getAppUrl, getSafeBuyerRedirect, getSafePortalRedirect } from "@/lib/auth/urls";
+import {
+  getAppUrl,
+  getSafeBuyerRedirect,
+  getSafeAffiliateRedirect,
+  getSafeDealerRedirect,
+} from "@/lib/auth/urls";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -299,7 +304,9 @@ export async function signInAction(formData: FormData): Promise<AuthResult> {
   const email = (formData.get("email") as string)?.toLowerCase()?.trim();
   const password = formData.get("password") as string;
   const remember = formData.get("remember") === "1" || formData.get("remember") === "on";
-  const redirectParam = getSafePortalRedirect((formData.get("redirect") as string)?.trim() || null);
+  // Hold the raw param; we resolve it against the *signed-in role* below so a
+  // buyer can never be redirected into /dealer/* or /affiliate/* and vice-versa.
+  const rawRedirect = (formData.get("redirect") as string)?.trim() || null;
 
   if (!email || !password) {
     return { error: "Incorrect email or password" };
@@ -351,13 +358,15 @@ export async function signInAction(formData: FormData): Promise<AuthResult> {
           return { error: "Incorrect email or password" };
       }
     }
-    redirect("/affiliate/portal/dashboard");
+    redirect(getSafeAffiliateRedirect(rawRedirect) ?? "/affiliate/portal/dashboard");
   }
-  if (role === "DEALER") redirect("/dealer/dashboard");
+  if (role === "DEALER") {
+    redirect(getSafeDealerRedirect(rawRedirect) ?? "/dealer/dashboard");
+  }
 
   // Default: ensure buyer record exists then send to buyer dashboard
   await ensurePrismaUser(data.user.id, email, UserRole.BUYER);
-  redirect(redirectParam ?? "/buyer/dashboard");
+  redirect(getSafeBuyerRedirect(rawRedirect) ?? "/buyer/dashboard");
 }
 
 // ─── Sign Out ─────────────────────────────────────────────────────────────

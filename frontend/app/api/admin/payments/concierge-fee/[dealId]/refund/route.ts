@@ -7,6 +7,7 @@ import { getAdminWithRole, adminSuccess, adminError, getClientIp } from "@/lib/a
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { getStripe } from "@/lib/stripe";
+import { PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -32,21 +33,46 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const { reason } = parsed.data;
 
-  // Attempt Stripe refund if real PI exists
+  // Verify the PI is in `succeeded` state before issuing a refund. Without
+  // this guard a misclick on a pending or failed deal would either error out
+  // of Stripe (leaving us with a confusing 4xx) or — worse — mark the deal as
+  // refunded in our DB while the money never moved.
+  let stripeRefundId: string | null = null;
   if (deal.stripeFeePIId && !deal.stripeFeePIId.startsWith("pi_fee_admin_")) {
     try {
-      await getStripe().refunds.create({ payment_intent: deal.stripeFeePIId });
-    } catch {
-      // Log but allow admin override to proceed
+      const pi = await getStripe().paymentIntents.retrieve(deal.stripeFeePIId);
+      if (pi.status !== "succeeded") {
+        return adminError(
+          "STRIPE_PI_NOT_SUCCEEDED",
+          `Cannot refund: Stripe PaymentIntent status is "${pi.status}", expected "succeeded".`,
+          400,
+        );
+      }
+      const refund = await getStripe().refunds.create(
+        { payment_intent: deal.stripeFeePIId },
+        { idempotencyKey: `refund-concierge-fee-${dealId}` },
+      );
+      stripeRefundId = refund.id;
+    } catch (stripeErr) {
+      const code = (stripeErr as { code?: string } | null)?.code;
+      const msg = (stripeErr as { message?: string } | null)?.message ?? "Unknown Stripe error";
+      if (code !== "charge_already_refunded") {
+        console.error("[concierge-fee/refund] Stripe refund failed:", { code, msg, dealId });
+        return adminError("STRIPE_REFUND_FAILED", `Stripe refund failed: ${msg}`, 502);
+      }
+      console.warn("[concierge-fee/refund] charge already refunded out-of-band — syncing DB only:", { dealId });
     }
   }
 
-  // Mark fee as refunded using dedicated fields (not clearing feePaidAt)
+  // Mark fee as refunded using dedicated fields (not clearing feePaidAt).
+  // Fall back to the net charged amount (PREMIUM_FEE_REMAINING_CENTS) when
+  // the deal row predates feeAmountCents being recorded — never a hardcoded literal.
+  const refundedAmountCents = deal.feeAmountCents ?? PREMIUM_FEE_REMAINING_CENTS;
   const updated = await prisma.deal.update({
     where: { id: dealId },
     data: {
       feeRefundedAt: new Date(),
-      feeRefundedAmountCents: deal.feeAmountCents ?? 40000,
+      feeRefundedAmountCents: refundedAmountCents,
     },
   });
 
@@ -57,7 +83,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       type: "DEAL_STAGE_CHANGED",
       channel: "IN_APP",
       title: "Concierge fee refunded",
-      body: `Your $${(deal.feeAmountCents ?? 40000) / 100} concierge fee has been refunded. Please allow 3–5 business days.`,
+      body: `Your $${refundedAmountCents / 100} concierge fee has been refunded. Please allow 3–5 business days.`,
     },
   });
 
@@ -70,7 +96,13 @@ export async function POST(request: NextRequest, { params }: Props) {
       entityId: dealId,
       reason,
       ipAddress: getClientIp(request),
-      metadata: { buyerId: deal.buyerId, feeAmountCents: deal.feeAmountCents, stripeFeePIId: deal.stripeFeePIId },
+      metadata: {
+        buyerId: deal.buyerId,
+        feeAmountCents: deal.feeAmountCents,
+        stripeFeePIId: deal.stripeFeePIId,
+        stripeRefundId,
+        refundedAmountCents,
+      },
     },
   });
 
@@ -78,6 +110,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     dealId,
     feeStatus: "REFUNDED",
     buyerNotified: true,
-    feeAmountCents: deal.feeAmountCents ?? 40000,
+    feeAmountCents: refundedAmountCents,
+    stripeRefundId,
   });
 }

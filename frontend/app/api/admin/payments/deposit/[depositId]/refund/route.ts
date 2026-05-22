@@ -29,12 +29,38 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const { reason } = parsed.data;
 
-  // Attempt Stripe refund if a real payment intent exists
+  // Attempt Stripe refund if a real payment intent exists.
+  // Verify the PI is actually in `succeeded` state before issuing a refund —
+  // refunding a non-succeeded PI is an error path Stripe returns 4xx for, and
+  // we'd rather catch the divergence here than mark the deposit REFUNDED in our
+  // DB while the money never actually leaves Stripe.
+  let stripeRefundId: string | null = null;
   if (deposit.stripePaymentIntentId && !deposit.stripePaymentIntentId.startsWith("pi_admin_")) {
     try {
-      await getStripe().refunds.create({ payment_intent: deposit.stripePaymentIntentId });
-    } catch {
-      // Log but continue — admin override can force the state change
+      const pi = await getStripe().paymentIntents.retrieve(deposit.stripePaymentIntentId);
+      if (pi.status !== "succeeded") {
+        return adminError(
+          "STRIPE_PI_NOT_SUCCEEDED",
+          `Cannot refund: Stripe PaymentIntent status is "${pi.status}", expected "succeeded".`,
+          400,
+        );
+      }
+      const refund = await getStripe().refunds.create(
+        { payment_intent: deposit.stripePaymentIntentId },
+        { idempotencyKey: `refund-deposit-${depositId}` },
+      );
+      stripeRefundId = refund.id;
+    } catch (stripeErr) {
+      const code = (stripeErr as { code?: string } | null)?.code;
+      const msg = (stripeErr as { message?: string } | null)?.message ?? "Unknown Stripe error";
+      // `charge_already_refunded` means the money already left Stripe — safe to
+      // sync our DB state. Any other error means the refund did NOT happen and
+      // we must NOT mark the deposit as refunded.
+      if (code !== "charge_already_refunded") {
+        console.error("[deposit/refund] Stripe refund failed:", { code, msg, depositId });
+        return adminError("STRIPE_REFUND_FAILED", `Stripe refund failed: ${msg}`, 502);
+      }
+      console.warn("[deposit/refund] charge already refunded out-of-band — syncing DB only:", { depositId });
     }
   }
 
@@ -63,7 +89,12 @@ export async function POST(request: NextRequest, { params }: Props) {
       entityId: depositId,
       reason,
       ipAddress: getClientIp(request),
-      metadata: { buyerId: deposit.buyerId, amountCents: deposit.amountCents, refundedAt: updated.refundedAt?.toISOString() },
+      metadata: {
+        buyerId: deposit.buyerId,
+        amountCents: deposit.amountCents,
+        refundedAt: updated.refundedAt?.toISOString(),
+        stripeRefundId,
+      },
     },
   });
 
