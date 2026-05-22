@@ -6,6 +6,8 @@ export type BuyerThreadSummary = {
   id: string;
   status: string;
   lastMessageAt: Date | null;
+  dealId: string | null;
+  requestId: string | null;
   messages: Array<{
     content: string;
     isRedacted: boolean;
@@ -44,6 +46,8 @@ export async function getBuyerMessageThreads(buyerUserId: string): Promise<Buyer
     id: t.id,
     status: t.status as string,
     lastMessageAt: t.lastMessageAt,
+    dealId: t.dealId,
+    requestId: t.requestId,
     messages: t.messages.map((m) => ({
       content: m.content,
       isRedacted: m.isRedacted,

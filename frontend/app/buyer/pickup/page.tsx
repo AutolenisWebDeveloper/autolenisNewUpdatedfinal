@@ -78,10 +78,19 @@ export default async function PickupPage() {
                   isExpiringSoon ? "text-amber-600" :
                                    "text-[#10B981]"
                 }`}>
-                  {isExpired      && "⚠ QR code expired — contact support to regenerate"}
+                  {isExpired      && "⚠ QR code expired"}
                   {isExpiringSoon && `⚠ QR code expires soon: ${expiresAt.toLocaleString()}`}
                   {!isExpired && !isExpiringSoon && `✓ Valid until ${expiresAt.toLocaleDateString()}`}
                 </p>
+              )}
+              {isExpired && (
+                <a
+                  href="/buyer/messages"
+                  data-testid="qr-expired-contact-support"
+                  className="inline-flex items-center gap-1.5 mt-3 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors"
+                >
+                  Message support to regenerate →
+                </a>
               )}
             </div>
           )}

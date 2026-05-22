@@ -17,15 +17,42 @@ import TradeInValuationWidget from "@/components/buyer/TradeInValuationWidget";
 const CONDITIONS = ["Excellent — like new, no mechanical issues", "Good — minor wear, fully functional", "Fair — visible wear, some issues", "Poor — significant issues"];
 const LOAN_STATUSES = ["Paid off — no loan", "Have a loan — positive equity", "Have a loan — negative equity (underwater)", "Unsure"];
 
+type ExistingTradeIn = {
+  id: string;
+  year: number;
+  make: string;
+  model: string;
+  trim: string | null;
+  status: string;
+  valuationCents: number | null;
+};
+
 export default function TradeInPage() {
   const searchParams = useSearchParams();
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadingExisting, setLoadingExisting] = useState(true);
+  const [existingTradeIn, setExistingTradeIn] = useState<ExistingTradeIn | null>(null);
   const [form, setForm] = useState({
     vin: "", year: "", make: "", model: "", trim: "", mileage: "",
     condition: "", loanStatus: "", loanBalance: "", notes: ""
   });
+
+  // Check for existing trade-in submission on mount
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/buyer/trade-in")
+      .then((r) => r.json())
+      .then((d: { success?: boolean; data?: { tradeIns?: ExistingTradeIn[] } }) => {
+        if (cancelled) return;
+        const latest = d.data?.tradeIns?.[0];
+        if (latest) setExistingTradeIn(latest);
+      })
+      .catch(() => { /* non-fatal — buyer can still submit */ })
+      .finally(() => { if (!cancelled) setLoadingExisting(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   // Pre-fill support via URL params
   useEffect(() => {
@@ -61,16 +88,51 @@ export default function TradeInPage() {
     else { const d = await res.json() as { error?: { message?: string } }; setError(d.error?.message ?? "Submission failed"); }
   }
 
-  if (submitted) {
+  if (loadingExisting) {
     return (
-      <div className="p-6 md:p-8 max-w-lg text-center" data-testid="trade-in-success">
-        <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-          <CheckCircle2 size={28} className="text-green-600" />
+      <div className="p-6 md:p-8 max-w-xl" data-testid="trade-in-loading">
+        <div className="h-7 w-48 bg-slate-100 rounded-md animate-pulse mb-6" />
+        <div className="space-y-4">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
+          ))}
         </div>
-        <h2 className="text-xl font-bold text-slate-900 mb-2">Trade-in submitted</h2>
-        <p className="text-slate-500 text-sm leading-relaxed">
-          Your trade-in information has been saved. Dealers will see this when reviewing your auction and can factor it into their offers.
-        </p>
+      </div>
+    );
+  }
+
+  if (submitted || existingTradeIn) {
+    const ti = existingTradeIn;
+    return (
+      <div className="p-6 md:p-8 max-w-lg" data-testid="trade-in-success">
+        <div className="text-center">
+          <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 size={28} className="text-green-600" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">Trade-in submitted</h2>
+          <p className="text-slate-500 text-sm leading-relaxed mb-6">
+            Your trade-in information has been saved. Dealers will see this when reviewing your auction and can factor it into their offers.
+          </p>
+        </div>
+        {ti && (
+          <div className="bg-white border border-slate-200 rounded-xl p-5 text-left space-y-2" data-testid="trade-in-summary">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Your trade-in</p>
+            <p className="text-base font-semibold text-slate-900">
+              {ti.year} {ti.make} {ti.model}{ti.trim ? ` ${ti.trim}` : ""}
+            </p>
+            <p className="text-xs text-slate-500">
+              Status: <span className="font-medium text-slate-700">{ti.status.replace(/_/g, " ")}</span>
+            </p>
+            {ti.valuationCents != null && (
+              <p className="text-sm text-slate-700">
+                Estimated trade value:{" "}
+                <span className="font-semibold text-emerald-700">
+                  ${(ti.valuationCents / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                </span>
+              </p>
+            )}
+          </div>
+        )}
       </div>
     );
   }

@@ -36,12 +36,33 @@ export default async function SearchPage() {
   const availableModelsByMake = await getModelsByMake();
 
   return (
-    <Suspense>
+    <Suspense fallback={<SearchSkeleton />}>
       <BuyerSearchClient
         maxBudgetCents={maxBudgetCents}
         buyerZip={buyerZip}
         availableModelsByMake={availableModelsByMake}
       />
     </Suspense>
+  );
+}
+
+function SearchSkeleton() {
+  return (
+    <div className="p-6 md:p-8 max-w-7xl" data-testid="search-skeleton">
+      <div className="h-8 w-48 bg-slate-100 rounded-md animate-pulse mb-6" />
+      <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
+        <div className="hidden lg:block space-y-3">
+          <div className="h-10 bg-slate-100 rounded-lg animate-pulse" />
+          <div className="h-10 bg-slate-100 rounded-lg animate-pulse" />
+          <div className="h-10 bg-slate-100 rounded-lg animate-pulse" />
+          <div className="h-10 bg-slate-100 rounded-lg animate-pulse" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="bg-white border border-slate-200 rounded-xl h-56 animate-pulse" />
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }

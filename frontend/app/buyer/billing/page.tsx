@@ -165,7 +165,7 @@ export default async function BillingPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-bold text-[#111827]">
-                    ${((d.feeAmountCents ?? 0) / 100).toFixed(0)}
+                    {formatCurrency(d.feeAmountCents ?? 0)}
                   </span>
                   <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
                     d.feePaidAt ? "bg-[#ECFDF5] text-[#065F46]" : "bg-[#FFFBEB] text-amber-800"

@@ -24,8 +24,12 @@ export default async function ContractsPage() {
         <h1 className="text-xl font-bold text-slate-900">Contracts</h1>
       </div>
       {deals.length === 0 ? (
-        <div className="text-center py-16 text-slate-400" data-testid="no-contracts">
-          <p>No contracts yet</p>
+        <div className="text-center py-16 bg-white border border-slate-200 rounded-xl" data-testid="no-contracts">
+          <FileText size={32} className="text-slate-200 mx-auto mb-3" />
+          <p className="font-medium text-slate-600 mb-1">No contracts yet</p>
+          <p className="text-sm text-slate-400 max-w-sm mx-auto px-6">
+            Once you accept a dealer offer, your purchase contract will appear here for review and signing.
+          </p>
         </div>
       ) : (
         <div className="space-y-3">

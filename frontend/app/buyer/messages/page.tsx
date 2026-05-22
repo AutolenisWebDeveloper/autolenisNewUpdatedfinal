@@ -59,7 +59,13 @@ export default async function MessagesPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="font-semibold text-slate-900 text-sm">Support Thread</p>
+                      <p className="font-semibold text-slate-900 text-sm">
+                        {t.dealId
+                          ? `Deal #${t.dealId.slice(-8).toUpperCase()}`
+                          : t.requestId
+                          ? `Request #${t.requestId.slice(-8).toUpperCase()}`
+                          : "Support"}
+                      </p>
                       {hasUnread && (
                         <span className="inline-block w-2 h-2 rounded-full bg-[#0B5FD1]" data-testid={`unread-dot-${t.id}`} />
                       )}
