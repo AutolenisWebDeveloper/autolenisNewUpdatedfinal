@@ -6,6 +6,7 @@ import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dea
 import { createServiceSupabaseClient } from "@/lib/supabase";
 import { DocumentType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { writeDealerAudit } from "@/lib/services/audit/dealer-audit.service";
 
 const MAX_BYTES = 20 * 1024 * 1024; // 20 MB
 const BUCKET = "dealer-documents";
@@ -69,6 +70,20 @@ export async function POST(request: NextRequest) {
       url:       publicUrl,
       mimeType:  file.type,
       sizeBytes: file.size,
+    },
+  });
+
+  await writeDealerAudit({
+    action: "DEALER_DOCUMENT_UPLOADED",
+    dealerId: dealer.id,
+    entityType: "Document",
+    entityId: doc.id,
+    metadata: {
+      name: doc.name,
+      mimeType: doc.mimeType,
+      sizeBytes: doc.sizeBytes,
+      type: doc.type,
+      storagePath: path,
     },
   });
 

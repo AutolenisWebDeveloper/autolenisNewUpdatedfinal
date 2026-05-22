@@ -5,6 +5,7 @@
 import { prisma } from "@/lib/prisma";
 import { OfferStatus } from "@prisma/client";
 import { MAX_OFFER_REVISIONS } from "@/lib/constants";
+import { writeDealerAudit } from "@/lib/services/audit/dealer-audit.service";
 
 const APR_SUSPICIOUS_THRESHOLD = 29.0;
 // Allow up to 1 cent rounding tolerance when summing OTD components
@@ -157,6 +158,18 @@ export async function submitOffer(input: OfferInput) {
     },
   }).catch(() => {});
 
+  await writeDealerAudit({
+    action: "DEALER_OFFER_SUBMITTED",
+    dealerId: input.dealerId,
+    entityType: "Offer",
+    entityId: offer.id,
+    metadata: {
+      auctionId: input.auctionId,
+      otdPriceCents: input.otdPriceCents,
+      includesFinancing: input.includesFinancing ?? false,
+    },
+  });
+
   return offer;
 }
 
@@ -219,6 +232,20 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
     await tx.offer.update({ where: { id: offerId }, data: { status: OfferStatus.WITHDRAWN } });
     return created;
   }, { isolationLevel: "Serializable" });
+
+  await writeDealerAudit({
+    action: "DEALER_OFFER_REVISED",
+    dealerId,
+    entityType: "Offer",
+    entityId: revised.id,
+    metadata: {
+      auctionId: original.auctionId,
+      originalOfferId: offerId,
+      previousOtdPriceCents: original.otdPriceCents,
+      newOtdPriceCents: merged.otdPriceCents,
+      version: revised.version,
+    },
+  });
 
   return revised;
 }

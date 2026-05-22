@@ -220,18 +220,26 @@ export async function POST(request: NextRequest, { params }: Props) {
     outsideInviteCount = outsideInvites.length;
   }
 
-  // Dealer invitation emails (non-blocking)
+  // Dealer invitation emails (non-blocking).
+  // Use the first attached auction vehicle so the email shows concrete make/
+  // model/year instead of "Vehicle Requested" placeholders. Falls back to
+  // current year only when no vehicle was attached at launch time.
   const buyerCity = buyer.city ?? "Location";
   const buyerState = buyer.state ?? "TBD";
+  const primaryVehicle = vehicles?.[0];
+  const emailVehicleYear = primaryVehicle?.year ?? new Date().getFullYear();
+  const emailVehicleMake = primaryVehicle?.make ?? "Vehicle";
+  const emailVehicleModel = primaryVehicle?.model ?? "Requested";
+  const emailVehicleTrim = primaryVehicle?.trim ?? null;
   for (const d of dealers) {
     if (!d.user?.email) continue;
     void sendDealerAuctionInvitationEmail({
       to: d.user.email,
       contactName: d.dealershipName ?? "Dealer",
-      vehicleMake: "Vehicle",
-      vehicleModel: "Requested",
-      vehicleYear: new Date().getFullYear(),
-      vehicleTrim: null,
+      vehicleMake: emailVehicleMake,
+      vehicleModel: emailVehicleModel,
+      vehicleYear: emailVehicleYear,
+      vehicleTrim: emailVehicleTrim,
       buyerCity,
       buyerState,
       auctionUrl: `${APP_URL}/dealer/auctions/${launched.id}`,
@@ -245,10 +253,10 @@ export async function POST(request: NextRequest, { params }: Props) {
     void sendDealerAuctionInvitationEmail({
       to: inv.email,
       contactName: inv.contactName,
-      vehicleMake: "Vehicle",
-      vehicleModel: "Requested",
-      vehicleYear: new Date().getFullYear(),
-      vehicleTrim: null,
+      vehicleMake: emailVehicleMake,
+      vehicleModel: emailVehicleModel,
+      vehicleYear: emailVehicleYear,
+      vehicleTrim: emailVehicleTrim,
       buyerCity,
       buyerState,
       auctionUrl: `${APP_URL}/dealer-offer-outside/${inv.token}`,

@@ -33,6 +33,10 @@
       "schedule": "0 8 * * *"
     },
     {
+      "path": "/api/cron/dealer-invitation-reminder",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/cron/prequal-stale-cleanup",
       "schedule": "0 2 * * *"
     },
