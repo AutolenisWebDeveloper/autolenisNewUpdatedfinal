@@ -8,7 +8,7 @@ import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { PreQualTier } from "@prisma/client";
 import { z } from "zod";
-import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS } from "@/lib/constants";
 import { moveBuyerWorkflowStage } from "@/lib/services/admin/admin-buyer-command-center.service";
 
 interface Props { params: Promise<{ buyerId: string }> }
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest, { params }: Props) {
           if (activeDeal && !activeDeal.feePaidAt) {
             await prisma.deal.update({
               where: { id: activeDeal.id },
-              data: { feePaidAt: new Date(), feeAmountCents: 49900, status: "FEE_PAID" },
+              data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS, status: "FEE_PAID" },
             });
           }
           break;
