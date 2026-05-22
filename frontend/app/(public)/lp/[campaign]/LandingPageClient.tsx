@@ -365,15 +365,15 @@ export default function LandingPageClient({
 
       <main className="bg-white text-slate-900 pb-24 lg:pb-0">
         {/* ── SECTION 2: HERO ──────────────────────────────────────────────── */}
-        <section className="pt-28 pb-16 px-5 bg-white relative overflow-hidden">
+        <section className="min-h-screen flex items-center pt-20 pb-16 bg-white relative overflow-hidden">
           <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-bl from-blue-50/70 to-transparent pointer-events-none" />
-          <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-12 items-center relative z-10">
+          <div className="max-w-6xl mx-auto px-5 grid lg:grid-cols-2 gap-12 items-center relative z-10 w-full">
             {/* LEFT COLUMN */}
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-4">
                 BUYER-FIRST AUTOMOTIVE CONCIERGE
               </p>
-              <h1 className="text-5xl sm:text-6xl font-black tracking-tight text-slate-900 leading-[1.05] mb-5">
+              <h1 className="text-5xl sm:text-6xl lg:text-7xl font-black tracking-tight text-slate-900 leading-[1.05] mb-5">
                 {headline}
               </h1>
               <p className="text-lg text-slate-500 leading-relaxed max-w-lg mb-8">
@@ -410,8 +410,9 @@ export default function LandingPageClient({
             </div>
 
             {/* RIGHT COLUMN — live auction dashboard card */}
-            <div className="flex justify-center lg:justify-end">
-              <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 p-6 max-w-sm w-full">
+            <div className="flex justify-center lg:justify-end relative">
+              <div className="absolute inset-0 bg-[#0B5FD1]/10 blur-3xl rounded-3xl pointer-events-none" />
+              <div className="relative bg-white rounded-3xl shadow-2xl border border-slate-200 p-6 max-w-md w-full">
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <p className="text-xs text-slate-500">Your Request</p>
@@ -461,16 +462,15 @@ export default function LandingPageClient({
                 <div className="mt-4 flex gap-3">
                   <div className="flex-1 bg-blue-50 rounded-xl p-3">
                     <p className="text-[10px] text-slate-500">Estimated Savings</p>
-                    <p className="text-lg font-bold font-mono text-[#0B5FD1]">$2,341</p>
+                    <p className="text-2xl font-bold font-mono text-[#0B5FD1]">$2,341</p>
                     <p className="text-[10px] text-slate-400">vs. market avg</p>
                   </div>
-                  <div className="flex-1 bg-slate-50 border border-slate-200 rounded-xl p-3">
-                    <div className="flex items-center gap-1 mb-1">
-                      <Shield size={10} className="text-[#0B5FD1]" />
-                      <p className="text-[9px] font-bold text-[#0B5FD1]">Contract Shield™</p>
-                    </div>
-                    <p className="text-[10px] font-semibold text-slate-700">Protected</p>
-                    <p className="text-[9px] text-slate-400">Review highlights before you buy.</p>
+                  <div className="flex-1 bg-green-50 border border-green-200 rounded-xl p-3">
+                    <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                      <Shield size={9} /> PROTECTED
+                    </span>
+                    <p className="text-[10px] font-bold text-slate-800 mt-1.5">Contract Shield™</p>
+                    <p className="text-[9px] text-slate-500">Review highlights before you buy.</p>
                   </div>
                 </div>
               </div>
@@ -481,25 +481,30 @@ export default function LandingPageClient({
         {/* ── SECTION 3: FORM (immediately below hero) ─────────────────────── */}
         <section
           ref={formRef}
-          className="py-14 px-5 bg-gradient-to-b from-slate-50 to-white"
+          className="py-20 bg-gradient-to-b from-slate-50 to-white"
           id="request"
         >
-          <div className="max-w-xl mx-auto">
+          <div className="max-w-lg mx-auto px-5">
             <div className="text-center mb-8">
               <p className="text-[11px] font-bold text-[#0B5FD1] uppercase tracking-[0.2em] mb-2">
                 START YOUR DEALER AUCTION
               </p>
-              <h2 className="text-3xl font-black text-slate-900 mb-2 tracking-tight">
+              <h2 className="text-3xl sm:text-4xl font-black text-slate-900 mb-2 tracking-tight">
                 Tell us what you&rsquo;re looking for.
               </h2>
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-slate-500 mb-5">
                 Step {formStep + 1} of 2 · Takes about 60 seconds.
               </p>
+              <div className="flex items-center justify-center gap-4 flex-wrap text-xs text-slate-500">
+                <span className="flex items-center gap-1.5"><Lock size={12} className="text-[#0B5FD1]" /> 100% Secure</span>
+                <span className="flex items-center gap-1.5"><CheckCircle2 size={12} className="text-[#0B5FD1]" /> No Credit Impact</span>
+                <span className="flex items-center gap-1.5"><CheckCircle2 size={12} className="text-[#0B5FD1]" /> No Obligation</span>
+              </div>
             </div>
 
             <form
               onSubmit={handleSubmit}
-              className="bg-white border border-slate-200 rounded-3xl p-7 shadow-xl"
+              className="bg-white border border-slate-200 rounded-3xl p-8 shadow-2xl"
               noValidate
             >
               {submitted ? (
@@ -599,9 +604,9 @@ export default function LandingPageClient({
                     type="button"
                     onClick={handleStep0Next}
                     data-testid="lp-form-step0-next"
-                    className="w-full bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors"
+                    className="w-full bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-black text-lg py-4 rounded-2xl shadow-lg shadow-[#0B5FD1]/20 flex items-center justify-center gap-2 transition-colors"
                   >
-                    Continue <ArrowRight size={16} />
+                    Continue <ArrowRight size={18} />
                   </button>
                 </div>
               ) : (
@@ -660,9 +665,9 @@ export default function LandingPageClient({
                       type="submit"
                       disabled={submitting}
                       data-testid="lp-form-submit"
-                      className="flex-1 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-60"
+                      className="flex-1 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-black text-lg py-4 rounded-2xl shadow-lg shadow-[#0B5FD1]/20 flex items-center justify-center gap-2 transition-colors disabled:opacity-60"
                     >
-                      {submitting ? "Submitting…" : <>Activate Dealer Auction <ArrowRight size={16} /></>}
+                      {submitting ? "Submitting…" : <>Activate Dealer Auction <ArrowRight size={18} /></>}
                     </button>
                   </div>
                   <p className="text-[11px] text-slate-400 text-center">
@@ -680,8 +685,8 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 4: METRICS STRIP ─────────────────────────────────────── */}
-        <section className="bg-[#0F172A] py-10 px-5">
-          <div className="max-w-5xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-8 text-center">
+        <section className="bg-[#0F172A] py-14">
+          <div className="max-w-5xl mx-auto px-5 grid grid-cols-2 sm:grid-cols-4 gap-8 text-center">
             {[
               { number: "Thousands", label: "In Reported Buyer Savings"   },
               { number: "500+",      label: "Verified Dealer Partners"     },
@@ -697,8 +702,8 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 5: TRUST BAR ─────────────────────────────────────────── */}
-        <section className="py-8 px-5 bg-white border-y border-slate-100">
-          <div className="max-w-5xl mx-auto">
+        <section className="py-12 bg-white border-y border-slate-100">
+          <div className="max-w-5xl mx-auto px-5">
             <p className="text-center text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 mb-5">
               Trusted by Thousands of Smarter Car Buyers
             </p>
@@ -726,8 +731,8 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 6: PROBLEM ───────────────────────────────────────────── */}
-        <section className="py-20 px-5 bg-white">
-          <div className="max-w-5xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
+        <section className="py-20 bg-white">
+          <div className="max-w-5xl mx-auto px-5 grid lg:grid-cols-2 gap-12 items-center">
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-3">
                 THE PROBLEM
@@ -777,8 +782,8 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 7: SOLUTION ──────────────────────────────────────────── */}
-        <section className="py-20 px-5 bg-slate-50">
-          <div className="max-w-5xl mx-auto grid lg:grid-cols-2 gap-12 items-center">
+        <section className="py-20 bg-slate-50">
+          <div className="max-w-5xl mx-auto px-5 grid lg:grid-cols-2 gap-12 items-center">
             {/* LEFT — condensed offer card */}
             <div className="flex justify-center">
               <div className="bg-white rounded-3xl shadow-xl border border-slate-200 p-5 max-w-xs w-full">
@@ -858,8 +863,8 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 8: HOW IT WORKS ──────────────────────────────────────── */}
-        <section className="py-20 px-5 bg-white">
-          <div className="max-w-5xl mx-auto">
+        <section className="py-24 bg-white">
+          <div className="max-w-5xl mx-auto px-5">
             <div className="text-center mb-12">
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-3">
                 HOW IT WORKS
@@ -911,8 +916,8 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 9: WHY BUYERS LOVE AUTOLENIS ─────────────────────────── */}
-        <section className="py-20 px-5 bg-slate-50">
-          <div className="max-w-5xl mx-auto">
+        <section className="py-24 bg-slate-50">
+          <div className="max-w-5xl mx-auto px-5">
             <div className="text-center mb-12">
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-3">
                 WHY BUYERS LOVE AUTOLENIS
@@ -970,9 +975,9 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 10: CONTRACT SHIELD ──────────────────────────────────── */}
-        <section className="bg-[#0F172A] py-20 px-5 relative overflow-hidden">
+        <section className="bg-[#0F172A] py-24 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-[#0B5FD1]/10 to-transparent pointer-events-none" />
-          <div className="max-w-5xl mx-auto grid lg:grid-cols-2 gap-12 items-center relative z-10">
+          <div className="max-w-5xl mx-auto px-5 grid lg:grid-cols-2 gap-12 items-center relative z-10">
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-400 mb-3">
                 CONTRACT SHIELD™
@@ -1036,8 +1041,8 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 11: COMPARISON TABLE ─────────────────────────────────── */}
-        <section className="py-20 px-5 bg-white">
-          <div className="max-w-4xl mx-auto">
+        <section className="py-24 bg-white">
+          <div className="max-w-4xl mx-auto px-5">
             <div className="text-center mb-10">
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-3">
                 THE DIFFERENCE
@@ -1087,8 +1092,8 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 12: SOCIAL PROOF ─────────────────────────────────────── */}
-        <section className="py-20 px-5 bg-slate-50" id="proof">
-          <div className="max-w-5xl mx-auto">
+        <section className="py-24 bg-slate-50" id="proof">
+          <div className="max-w-5xl mx-auto px-5">
             <div className="text-center mb-10">
               <h2 className="text-4xl font-black text-slate-900 tracking-tight mb-2">
                 What Buyers Are Saying
@@ -1127,8 +1132,8 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 13: FAQ ──────────────────────────────────────────────── */}
-        <section className="py-20 px-5 bg-white" id="faq">
-          <div className="max-w-3xl mx-auto">
+        <section className="py-24 bg-white" id="faq">
+          <div className="max-w-3xl mx-auto px-5">
             <h2 className="text-4xl font-black text-slate-900 text-center mb-10 tracking-tight">
               Common Questions
             </h2>
@@ -1176,9 +1181,9 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 14: FINAL CTA ────────────────────────────────────────── */}
-        <section className="bg-[#0F172A] py-24 px-5 relative overflow-hidden">
+        <section className="bg-[#0F172A] py-24 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-[#0B5FD1]/15 to-transparent pointer-events-none" />
-          <div className="max-w-3xl mx-auto text-center relative z-10">
+          <div className="max-w-3xl mx-auto px-5 text-center relative z-10">
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-400 mb-4">
               START TODAY
             </p>
@@ -1214,8 +1219,8 @@ export default function LandingPageClient({
         </section>
 
         {/* ── FOOTER ───────────────────────────────────────────────────────── */}
-        <footer className="bg-[#0F172A] border-t border-white/10 py-12 px-5">
-          <div className="max-w-6xl mx-auto">
+        <footer className="bg-[#0F172A] border-t border-white/10 py-12">
+          <div className="max-w-6xl mx-auto px-5">
             <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-8 mb-10">
               <div className="lg:col-span-2">
                 <p className="font-black text-white text-lg mb-2">AutoLenis</p>
@@ -1399,7 +1404,7 @@ export default function LandingPageClient({
 
 // ── Tiny presentational helpers ────────────────────────────────────────────
 const inputCls =
-  "w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/15 transition";
+  "w-full bg-white border border-slate-300 rounded-xl px-4 py-3.5 text-base text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/15 transition";
 
 function Field({
   label,
