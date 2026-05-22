@@ -355,7 +355,7 @@ export default async function PrequalPage() {
             <Link
               href="/buyer/search"
               data-testid="prequal-search-vehicles-btn"
-              className="flex-1 flex items-center justify-center gap-2 bg-[#0B5FD1] hover:bg-[#4e2575] text-white font-semibold py-3.5 px-6 rounded-xl transition-colors text-sm shadow-md shadow-[#0B5FD1]/20"
+              className="flex-1 flex items-center justify-center gap-2 bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white font-semibold py-3.5 px-6 rounded-xl transition-colors text-sm shadow-md shadow-[#0B5FD1]/20"
             >
               Browse Vehicles Within My Budget
               <ArrowRight size={16} />

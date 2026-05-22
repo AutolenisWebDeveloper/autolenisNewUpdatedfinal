@@ -348,7 +348,7 @@ function FeePage_Due({
               </p>
               <p className="text-sm text-slate-600 leading-relaxed">
                 Standard plan buyers pay no service fee. Your{" "}
-                <strong>$99 Auction Access Deposit</strong> is credited toward
+                <strong>{formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Deposit</strong> is credited toward
                 your vehicle purchase at closing.
               </p>
             </div>
@@ -398,7 +398,7 @@ function FeePage_Due({
               className="text-amber-500 mt-0.5 shrink-0"
             />
             <p className="text-sm text-slate-600 leading-relaxed">
-              Your $99 deposit has not been confirmed yet. Once confirmed, it
+              Your {formatCents(DEPOSIT_AMOUNT_CENTS)} deposit has not been confirmed yet. Once confirmed, it
               will be credited toward your service fee.
             </p>
           </div>
@@ -693,7 +693,7 @@ function FeeBreakdown({
               value={formatCents(totalFeeCents)}
             />
             <FeeRow
-              label="$99 Auction Access Deposit credited"
+              label={`${formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Deposit credited`}
               value={`−${formatCents(depositCreditCents)}`}
               highlight
               note={
@@ -721,7 +721,7 @@ function FeeBreakdown({
               noteColor="green"
             />
             <FeeRow
-              label="$99 deposit"
+              label={`${formatCents(DEPOSIT_AMOUNT_CENTS)} deposit`}
               value="Credited to vehicle purchase"
               note="Applied at closing"
               noteColor="green"
@@ -739,7 +739,7 @@ function FeeBreakdown({
 
       {isPremium && (
         <p className="text-xs text-slate-400 mt-4 leading-relaxed bg-slate-50 rounded-lg px-3 py-2">
-          AutoLenis Service Fee: <strong>$499 total</strong> — $99 deposit
+          AutoLenis Service Fee: <strong>{formatCents(PREMIUM_FEE_CENTS)} total</strong> — {formatCents(DEPOSIT_AMOUNT_CENTS)} deposit
           credited ={" "}
           <strong>{formatCents(netFeeCents)} due to AutoLenis</strong>.
           Deposit is separately credited toward your vehicle purchase at
@@ -819,12 +819,12 @@ function PlanInfoCard({
         </p>
         <p className="text-sm text-slate-600 leading-relaxed">
           {isPremium
-            ? `Premium plan includes the full AutoLenis white-glove concierge service. A $499 fee applies, with your $99 deposit already credited — leaving ${formatCents(PREMIUM_FEE_REMAINING_CENTS)} due.`
-            : "Standard plan buyers pay no service fee. Your $99 Auction Access Deposit will be credited toward your vehicle purchase at closing."}
+            ? `Premium plan includes the full AutoLenis white-glove concierge service. A ${formatCents(PREMIUM_FEE_CENTS)} fee applies, with your ${formatCents(DEPOSIT_AMOUNT_CENTS)} deposit already credited — leaving ${formatCents(PREMIUM_FEE_REMAINING_CENTS)} due.`
+            : `Standard plan buyers pay no service fee. Your ${formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Deposit will be credited toward your vehicle purchase at closing.`}
         </p>
         {isPremium && !depositPaid && (
           <p className="text-xs text-amber-600 mt-1.5">
-            Note: Your $99 deposit has not yet been confirmed. Once confirmed,
+            Note: Your {formatCents(DEPOSIT_AMOUNT_CENTS)} deposit has not yet been confirmed. Once confirmed,
             it will reduce your balance to {formatCents(PREMIUM_FEE_REMAINING_CENTS)}.
           </p>
         )}
@@ -846,7 +846,7 @@ function CtaLink({
     <Link
       href={href}
       data-testid={testId}
-      className="flex items-center justify-center gap-2 w-full bg-[#0B5FD1] hover:bg-[#4e2575] text-white font-semibold py-3.5 px-6 rounded-xl transition-colors text-sm shadow-md shadow-[#0B5FD1]/20"
+      className="flex items-center justify-center gap-2 w-full bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white font-semibold py-3.5 px-6 rounded-xl transition-colors text-sm shadow-md shadow-[#0B5FD1]/20"
     >
       {children}
     </Link>

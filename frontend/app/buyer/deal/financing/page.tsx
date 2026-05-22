@@ -20,6 +20,8 @@ export default function FinancingPage() {
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [initialPath, setInitialPath] = useState<string | null>(null);
+  const [loadingInitial, setLoadingInitial] = useState(true);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/buyer/deal/financing")
@@ -30,19 +32,31 @@ export default function FinancingPage() {
           setInitialPath(d.data.financingPath);
         }
       })
-      .catch((err: unknown) => { console.error("[financing] Failed to load current financing path:", err); });
+      .catch((err: unknown) => { console.error("[financing] Failed to load current financing path:", err); })
+      .finally(() => setLoadingInitial(false));
   }, []);
 
   async function saveChoice() {
     if (!selected) return;
     setLoading(true);
-    const res = await fetch("/api/buyer/deal/financing", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ financingPath: selected }),
-    });
-    setLoading(false);
-    if (res.ok) setSaved(true);
+    setSaveError(null);
+    try {
+      const res = await fetch("/api/buyer/deal/financing", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ financingPath: selected }),
+      });
+      if (res.ok) {
+        setSaved(true);
+      } else {
+        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        setSaveError(body.error?.message ?? "We couldn't save your financing choice. Please try again.");
+      }
+    } catch {
+      setSaveError("Network error — please check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (saved) {
@@ -81,6 +95,21 @@ export default function FinancingPage() {
         <p className="text-xs text-center text-[#9CA3AF] mt-3">
           You can change your financing selection at any time before signing.
         </p>
+      </div>
+    );
+  }
+
+  if (loadingInitial) {
+    return (
+      <div className="p-6 md:p-8 max-w-xl" data-testid="financing-loading">
+        <div className="h-7 w-56 bg-slate-100 rounded-md animate-pulse mb-2" />
+        <div className="h-4 w-72 bg-slate-100 rounded-md animate-pulse mb-6" />
+        <div className="space-y-3 mb-6">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="h-24 bg-slate-100 rounded-xl animate-pulse" />
+          ))}
+        </div>
+        <div className="h-12 bg-slate-100 rounded-xl animate-pulse" />
       </div>
     );
   }
@@ -124,6 +153,12 @@ export default function FinancingPage() {
           Open <ArrowRight size={11} />
         </Link>
       </div>
+
+      {saveError && (
+        <p className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-md mb-3" data-testid="financing-save-error">
+          {saveError}
+        </p>
+      )}
 
       <Button className="w-full" size="lg" onClick={saveChoice} disabled={!selected || loading} data-testid="financing-save-btn">
         {loading ? "Saving…" : initialPath ? "Update Financing Choice" : "Confirm Financing Choice"} <ArrowRight size={15} />

@@ -27,8 +27,12 @@ export default async function ActivityPage() {
       </div>
 
       {events.length === 0 ? (
-        <div className="text-center py-16 text-slate-400" data-testid="no-activity">
-          <p>No activity yet</p>
+        <div className="text-center py-16 bg-white border border-slate-200 rounded-xl" data-testid="no-activity">
+          <Clock size={32} className="text-slate-200 mx-auto mb-3" />
+          <p className="font-medium text-slate-600 mb-1">No activity yet</p>
+          <p className="text-sm text-slate-400 max-w-sm mx-auto px-6">
+            Your account activity timeline will appear here as you complete steps in your AutoLenis journey.
+          </p>
         </div>
       ) : (
         <div className="space-y-2">

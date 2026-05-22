@@ -29,7 +29,13 @@ export default async function ESignPage() {
       </div>
 
       {!deal ? (
-        <p className="text-slate-500 text-sm" data-testid="esign-no-deal">No deal ready for signing.</p>
+        <div className="text-center py-12 bg-white border border-slate-200 rounded-xl" data-testid="esign-no-deal">
+          <PenLine size={32} className="text-slate-200 mx-auto mb-3" />
+          <p className="font-medium text-slate-600 mb-1">Nothing to sign yet</p>
+          <p className="text-sm text-slate-400 max-w-sm mx-auto px-6">
+            Once you accept a dealer offer and your contract is prepared, your signing package will appear here.
+          </p>
+        </div>
       ) : !envelope ? (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center" data-testid="esign-pending">
           <p className="text-slate-600 text-sm">Your signing package is being prepared. You will receive an email when it&apos;s ready.</p>
