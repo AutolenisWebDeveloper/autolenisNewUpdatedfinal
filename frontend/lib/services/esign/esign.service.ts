@@ -101,7 +101,10 @@ export async function handleEnvelopeCompleted(docusignEnvelopeId: string): Promi
   if (!envelope) return;
   await prisma.eSignEnvelope.update({ where: { id: envelope.id }, data: { status: ESignStatus.COMPLETED, completedAt: new Date() } });
   await prisma.deal.update({ where: { id: envelope.dealId }, data: { status: "SIGNED" } });
-  const deal = await prisma.deal.findUnique({ where: { id: envelope.dealId } });
+  const deal = await prisma.deal.findUnique({
+    where: { id: envelope.dealId },
+    include: { buyer: { include: { user: { select: { email: true } } } } },
+  });
   if (deal) {
     await prisma.notification.create({
       data: {
@@ -111,6 +114,21 @@ export async function handleEnvelopeCompleted(docusignEnvelopeId: string): Promi
         type: "DEAL_STAGE_CHANGED",
       },
     }).catch(() => {});
+
+    const buyerEmail = deal.buyer?.user?.email;
+    if (buyerEmail) {
+      try {
+        const { sendContractSignedEmail } = await import("../email/resend.service");
+        await sendContractSignedEmail({
+          to: buyerEmail,
+          firstName: deal.buyer.firstName ?? "there",
+          dealId: deal.id,
+          envelopeId: docusignEnvelopeId,
+        });
+      } catch (err) {
+        console.error("[esign] contract signed email failed:", err);
+      }
+    }
   }
   await prisma.adminAuditLog.create({
     data: {

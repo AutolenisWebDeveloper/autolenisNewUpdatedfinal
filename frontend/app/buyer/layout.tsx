@@ -6,7 +6,8 @@ import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { jwtVerify } from "jose";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 
 function getPreviewSecret() {
   const raw =
@@ -108,6 +109,25 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
   // cannot receive an approved prequal without having gone through the
   // onboarding flow. This guards against the DB flag being stale.
   const onboardingComplete = buyer?.onboardingComplete === true || prequalApproved;
+
+  // ── Onboarding gate ───────────────────────────────────────────────────────
+  // A buyer who hasn't completed onboarding can only see /buyer/dashboard
+  // (which renders the onboarding CTA) and /buyer/onboarding itself.
+  // Any other buyer route is bounced back so the wizard cannot be skipped.
+  // Admin preview mode bypasses this so support can see what the buyer sees.
+  if (!isAdminPreview && !onboardingComplete) {
+    const reqHeaders = await headers();
+    const pathname = reqHeaders.get("x-pathname") ?? "";
+    const allowedWithoutOnboarding =
+      pathname === "/buyer/dashboard" ||
+      pathname === "/buyer/onboarding" ||
+      pathname === "/buyer/suspended" ||
+      pathname === "/buyer/profile" ||
+      pathname.startsWith("/buyer/settings");
+    if (pathname.startsWith("/buyer/") && !allowedWithoutOnboarding) {
+      redirect("/buyer/onboarding");
+    }
+  }
 
   // Fetch shortlist item count — only needed when prequal is approved
   let shortlistCount = 0;

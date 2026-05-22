@@ -10,6 +10,11 @@ export async function getAuthenticatedBuyer() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
+  // Defense-in-depth: even if a session cookie exists, refuse to load buyer
+  // data for an unverified email. signInWithPassword already gates on this,
+  // but a forged or stale cookie should not be enough to load /buyer/*.
+  if (!user.email_confirmed_at) return null;
+
   try {
     return await prisma.buyer.findFirst({
       where: { user: { supabaseId: user.id } },
@@ -52,6 +57,13 @@ export async function getAuthenticatedBuyer() {
 // ─── Require authenticated buyer (server component helper) ─────────────────
 
 export async function requireBuyer() {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/auth/signin");
+  // Unverified buyer with a valid session — route to the verification screen
+  // rather than silently signing them out at the buyer dashboard.
+  if (!user.email_confirmed_at) redirect("/auth/verify-email");
+
   const buyer = await getAuthenticatedBuyer();
   if (!buyer) redirect("/auth/signin");
   if (buyer.isSuspended) redirect("/buyer/suspended");
