@@ -706,6 +706,307 @@ export const analyticsRefreshFn = inngest.createFunction(
   },
 );
 
+// ---------------------------------------------------------------------------
+// LP FORM ABANDONMENT — 3-touch recovery sequence
+// ---------------------------------------------------------------------------
+// Triggered when a buyer completes Step 1 of the LP form but does not submit
+// Step 2 within the recovery window. Each touch re-checks the contact's
+// lifecycle stage before sending; once they advance past 'lead' the workflow
+// exits cleanly so a converting buyer is never spammed by their own past.
+//
+// Emails flow through autolenis/email.send so suppression, DNC, and consent
+// gates are inherited from the central dispatcher (no direct Resend calls).
+function buildLpRecoveryUrl(campaign: string | null | undefined): string {
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? '';
+  return `${base}/lp/${campaign || 'default'}?resume=1`;
+}
+
+function buildUnsubUrl(email: string): string {
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? '';
+  return `${base}/unsubscribe?email=${encodeURIComponent(email)}`;
+}
+
+function lpRecoveryEmail(args: {
+  firstName: string | null;
+  preheader: string;
+  headline: string;
+  body: string;
+  ctaLabel: string;
+  resumeUrl: string;
+  unsubscribeUrl: string;
+  finalTouch?: boolean;
+}): { html: string; text: string } {
+  const greeting = args.firstName ? `Hi ${args.firstName},` : 'Hi there,';
+  const finalLine = args.finalTouch
+    ? `<p style="margin:20px 0 0;font-size:13px;color:#6b7280;">If you would prefer we close your file, just reply STOP and we will remove your details.</p>`
+    : '';
+  const html = `
+<!doctype html>
+<html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
+  <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">${args.preheader}</span>
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
+    <tr><td align="center" style="padding:32px 16px;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="560" style="max-width:560px;background:#ffffff;border-radius:16px;padding:32px;">
+        <tr><td>
+          <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:2px;color:#0B5FD1;text-transform:uppercase;">AutoLenis</p>
+          <h1 style="margin:0 0 16px;font-size:24px;line-height:1.25;color:#0f172a;font-weight:700;">${args.headline}</h1>
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.55;color:#334155;">${greeting}</p>
+          <p style="margin:0 0 24px;font-size:15px;line-height:1.55;color:#334155;">${args.body}</p>
+          <p style="margin:0 0 8px;">
+            <a href="${args.resumeUrl}" style="display:inline-block;background:#0B5FD1;color:#ffffff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:12px;font-size:15px;">${args.ctaLabel}</a>
+          </p>
+          ${finalLine}
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`.trim();
+
+  const text = [
+    args.headline,
+    '',
+    greeting,
+    '',
+    args.body.replace(/<[^>]+>/g, ''),
+    '',
+    `${args.ctaLabel}: ${args.resumeUrl}`,
+    '',
+    `Unsubscribe: ${args.unsubscribeUrl}`,
+  ].join('\n');
+
+  return { html, text };
+}
+
+export const formAbandonmentFn = inngest.createFunction(
+  {
+    id: 'lp-form-abandonment',
+    name: 'LP Form Abandonment Recovery',
+    retries: 2,
+  },
+  { event: 'autolenis/lead.form_abandoned' },
+  async ({ event, step }) => {
+    const { contact_id, contact_email, first_name, campaign, idempotency_key } =
+      event.data as {
+        contact_id: string;
+        contact_email: string;
+        first_name: string | null;
+        campaign: string | null;
+        idempotency_key: string;
+      };
+
+    const resumeUrl = buildLpRecoveryUrl(campaign);
+    const unsubscribeUrl = buildUnsubUrl(contact_email);
+
+    // Wait one hour before the first touch. If the buyer completes Step 2
+    // within this window, the next completion-check exits the workflow.
+    await step.sleep('wait-before-first-touch', '1h');
+
+    const alreadyCompleted = await step.run('check-completion', async () => {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from('contacts')
+        .select('lifecycle_stage')
+        .eq('id', contact_id)
+        .single();
+      return data?.lifecycle_stage !== 'lead';
+    });
+    if (alreadyCompleted) return { status: 'skipped', reason: 'contact_completed_form' };
+
+    await step.run('send-touch-1', async () => {
+      const supabase = getSupabase();
+      if (await SuppressionService.isEmailSuppressed(supabase, contact_email)) return;
+      const subject = `${first_name ? first_name + ', your' : 'Your'} auction request is waiting`;
+      const { html, text } = lpRecoveryEmail({
+        firstName: first_name,
+        preheader: 'You started a request — finish it in 60 seconds and dealers can begin competing.',
+        headline: 'Your auction request is waiting',
+        body:
+          'You started a request on AutoLenis but did not finish. The form takes about 60 seconds to complete, and your vehicle type and budget are what tell us which verified dealers to invite to compete for your business.',
+        ctaLabel: 'Complete my request',
+        resumeUrl,
+        unsubscribeUrl,
+      });
+      await inngest.send({
+        name: 'autolenis/email.send',
+        data: {
+          contactId:      contact_id,
+          email:          contact_email,
+          type:           'marketing',
+          subject,
+          html,
+          text,
+          idempotencyKey: `${idempotency_key}-touch1`,
+        },
+      });
+    });
+
+    await step.sleep('wait-before-second-touch', '23h');
+
+    const completedAfterTouch1 = await step.run('check-completion-2', async () => {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from('contacts')
+        .select('lifecycle_stage')
+        .eq('id', contact_id)
+        .single();
+      return data?.lifecycle_stage !== 'lead';
+    });
+    if (completedAfterTouch1) return { status: 'skipped_after_touch1', reason: 'contact_completed_form' };
+
+    await step.run('send-touch-2', async () => {
+      const supabase = getSupabase();
+      if (await SuppressionService.isEmailSuppressed(supabase, contact_email)) return;
+      const subject = 'The auction room is still empty';
+      const { html, text } = lpRecoveryEmail({
+        firstName: first_name,
+        preheader: 'Verified dealers are waiting on your details before they can submit offers.',
+        headline: 'The auction room is still empty',
+        body:
+          'Verified dealers in your area are on the platform — but no one can submit an offer until your request is complete. No dealer has seen your information yet. When you finish the form, up to 8 dealers compete in a 48-hour auction so you compare offers side-by-side.',
+        ctaLabel: 'Open my auction',
+        resumeUrl,
+        unsubscribeUrl,
+      });
+      await inngest.send({
+        name: 'autolenis/email.send',
+        data: {
+          contactId:      contact_id,
+          email:          contact_email,
+          type:           'marketing',
+          subject,
+          html,
+          text,
+          idempotencyKey: `${idempotency_key}-touch2`,
+        },
+      });
+    });
+
+    await step.sleep('wait-before-final-touch', '72h');
+
+    const completedAfterTouch2 = await step.run('check-completion-3', async () => {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from('contacts')
+        .select('lifecycle_stage')
+        .eq('id', contact_id)
+        .single();
+      return data?.lifecycle_stage !== 'lead';
+    });
+    if (completedAfterTouch2) return { status: 'skipped_after_touch2', reason: 'contact_completed_form' };
+
+    await step.run('send-touch-3', async () => {
+      const supabase = getSupabase();
+      if (await SuppressionService.isEmailSuppressed(supabase, contact_email)) return;
+      const subject = 'Last chance — we will close your file';
+      const { html, text } = lpRecoveryEmail({
+        firstName: first_name,
+        preheader: 'This is the last email. Finish the request or reply STOP and we will close your file.',
+        headline: 'Last chance — we will close your file',
+        body:
+          'This is the last email we will send about your request. You have two options: complete the form in 60 seconds, or reply STOP and we will close your file. No hard feelings — your time is yours.',
+        ctaLabel: 'Complete my request',
+        resumeUrl,
+        unsubscribeUrl,
+        finalTouch: true,
+      });
+      await inngest.send({
+        name: 'autolenis/email.send',
+        data: {
+          contactId:      contact_id,
+          email:          contact_email,
+          type:           'marketing',
+          subject,
+          html,
+          text,
+          idempotencyKey: `${idempotency_key}-touch3`,
+        },
+      });
+
+      // Mark inactive — but only if still 'lead'. A contact who advanced
+      // mid-sleep should not be regressed.
+      await supabase
+        .from('contacts')
+        .update({ lifecycle_stage: 'inactive' })
+        .eq('id', contact_id)
+        .eq('lifecycle_stage', 'lead');
+    });
+
+    return { status: 'completed', touches_sent: 3 };
+  }
+);
+
+// ---------------------------------------------------------------------------
+// LP EXIT INTENT NURTURE — single recovery email after a 30-minute delay
+// ---------------------------------------------------------------------------
+// Lighter than form abandonment because the contact never engaged the form —
+// they only submitted an email on the way out. A single nudge respects the
+// implied lower intent; the inactivity scanner picks them up after 72h if
+// still stuck in 'lead'.
+export const exitIntentFn = inngest.createFunction(
+  {
+    id: 'lp-exit-intent-nurture',
+    name: 'LP Exit Intent Nurture',
+    retries: 2,
+  },
+  { event: 'autolenis/lead.exit_intent_captured' },
+  async ({ event, step }) => {
+    const { contact_id, contact_email, first_name, campaign, idempotency_key } =
+      event.data as {
+        contact_id: string;
+        contact_email: string;
+        first_name: string | null;
+        campaign: string | null;
+        idempotency_key: string;
+      };
+
+    const returnUrl = buildLpRecoveryUrl(campaign);
+    const unsubscribeUrl = buildUnsubUrl(contact_email);
+
+    await step.sleep('wait-before-exit-touch', '30m');
+
+    const completed = await step.run('check-completion', async () => {
+      const supabase = getSupabase();
+      const { data } = await supabase
+        .from('contacts')
+        .select('lifecycle_stage')
+        .eq('id', contact_id)
+        .single();
+      return data?.lifecycle_stage !== 'lead';
+    });
+    if (completed) return { status: 'skipped', reason: 'completed_form' };
+
+    await step.run('send-exit-recovery', async () => {
+      const supabase = getSupabase();
+      if (await SuppressionService.isEmailSuppressed(supabase, contact_email)) return;
+      const subject = 'Still looking for the right deal?';
+      const { html, text } = lpRecoveryEmail({
+        firstName: first_name,
+        preheader: 'A quick note from AutoLenis — no commitment, just a thought.',
+        headline: 'Still looking for the right deal?',
+        body:
+          'You stopped by AutoLenis earlier. No commitment was made, no pressure here. If you are still searching for a vehicle, the platform lets dealers compete for your business so you never negotiate alone. Takes about 60 seconds to start.',
+        ctaLabel: 'See how it works',
+        resumeUrl: returnUrl,
+        unsubscribeUrl,
+      });
+      await inngest.send({
+        name: 'autolenis/email.send',
+        data: {
+          contactId:      contact_id,
+          email:          contact_email,
+          type:           'marketing',
+          subject,
+          html,
+          text,
+          idempotencyKey: `${idempotency_key}-recovery`,
+        },
+      });
+    });
+
+    return { status: 'completed' };
+  }
+);
+
 export const inngestFunctions = [
   emailSendFn,
   smsSendFn,
@@ -714,4 +1015,6 @@ export const inngestFunctions = [
   workflowResumeFn,
   inactivityScannerFn,
   analyticsRefreshFn,
+  formAbandonmentFn,
+  exitIntentFn,
 ];

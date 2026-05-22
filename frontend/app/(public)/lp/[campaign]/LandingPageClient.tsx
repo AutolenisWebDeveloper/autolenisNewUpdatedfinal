@@ -112,6 +112,13 @@ export default function LandingPageClient({
 
   const [showExitIntent, setShowExitIntent] = useState(false);
   const exitIntentShown = useRef(false);
+  const [exitEmail, setExitEmail] = useState("");
+  const [exitIntentSubmitted, setExitIntentSubmitted] = useState(false);
+
+  // Session-recovery: true when Step 1 fields were rehydrated from sessionStorage
+  // on mount. Drives the "Welcome back" banner. Cleared once the buyer opts to
+  // start fresh or submits the full form.
+  const [formRestored, setFormRestored] = useState(false);
 
   // Capture UTM params on mount so they ride along with the submit payload.
   const [utm, setUtm] = useState<UtmData>({
@@ -139,6 +146,48 @@ export default function LandingPageClient({
     trackFunnelEvent("lp_view", { campaign });
   }, [campaign]);
 
+  // Session-recovery on mount: rehydrate Step 1 fields if the buyer saved them
+  // within the last 24h. Also auto-scrolls to the form when the abandonment
+  // email CTA passes ?resume=1 so they land on the form, not the hero.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const saved = sessionStorage.getItem("al_form_step1");
+      if (saved) {
+        const parsed = JSON.parse(saved) as {
+          firstName?: string;
+          lastName?: string;
+          email?: string;
+          phone?: string;
+          zip?: string;
+          savedAt?: number;
+        };
+        const ageMs = Date.now() - (parsed.savedAt ?? 0);
+        if (ageMs > 24 * 60 * 60 * 1000) {
+          sessionStorage.removeItem("al_form_step1");
+        } else {
+          setFirstName(parsed.firstName ?? "");
+          setLastName(parsed.lastName ?? "");
+          setEmail(parsed.email ?? "");
+          setPhone(parsed.phone ?? "");
+          setZip(parsed.zip ?? "");
+          setFormRestored(true);
+        }
+      }
+    } catch {
+      // sessionStorage may be unavailable (private browsing) — ignore.
+    }
+
+    const resumeParam = new URLSearchParams(window.location.search).get("resume");
+    if (resumeParam === "1") {
+      // Defer until after first paint so the form has been laid out.
+      setTimeout(() => {
+        formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 600);
+    }
+  }, []);
+
   // Exit-intent on desktop only (mobile has the sticky CTA).
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -165,6 +214,46 @@ export default function LandingPageClient({
       return;
     }
     setSubmitError(null);
+
+    // Fire-and-forget partial-lead capture. Intentionally not awaited and
+    // errors are swallowed — a CRM hiccup must never delay the buyer's
+    // transition to Step 2 or surface an error on their screen.
+    fetch("/api/public/crm/partial-lead", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        firstName,
+        lastName,
+        email,
+        phone,
+        zip,
+        smsConsent:   !!phone,
+        campaign,
+        utm_source:   utm.utm_source,
+        utm_medium:   utm.utm_medium,
+        utm_campaign: utm.utm_campaign,
+        source_url:   utm.source_url,
+      }),
+    }).catch(() => {});
+
+    // Persist Step 1 for in-session recovery if the buyer leaves and returns
+    // within 24h. Cleared on successful full submission.
+    try {
+      sessionStorage.setItem(
+        "al_form_step1",
+        JSON.stringify({
+          firstName,
+          lastName,
+          email,
+          phone,
+          zip,
+          savedAt: Date.now(),
+        }),
+      );
+    } catch {
+      // sessionStorage may be unavailable (private browsing) — ignore.
+    }
+
     trackFunnelEvent("lp_form_step_complete", { step: 0, campaign });
     setFormStep(1);
   }
@@ -215,6 +304,14 @@ export default function LandingPageClient({
       if (typeof window !== "undefined") {
         window.fbq?.("track", "Lead", { currency: "USD", value: 0 });
         window.ttq?.track("SubmitForm");
+      }
+
+      // Successful submission — clear session-recovery cache so a future
+      // visit doesn't restore a request the buyer has already completed.
+      try {
+        sessionStorage.removeItem("al_form_step1");
+      } catch {
+        // ignore
       }
 
       setSubmitted(true);
@@ -572,6 +669,31 @@ export default function LandingPageClient({
                 </div>
               ) : formStep === 0 ? (
                 <div className="space-y-4">
+                  {formRestored && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
+                      <CheckCircle2 size={14} className="text-blue-600 shrink-0" />
+                      <span>Welcome back — your details have been restored.</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormRestored(false);
+                          setFirstName("");
+                          setLastName("");
+                          setEmail("");
+                          setPhone("");
+                          setZip("");
+                          try {
+                            sessionStorage.removeItem("al_form_step1");
+                          } catch {
+                            // ignore
+                          }
+                        }}
+                        className="ml-auto text-blue-500 hover:text-blue-700 underline"
+                      >
+                        Start fresh
+                      </button>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="First name" required>
                       <input
@@ -788,19 +910,72 @@ export default function LandingPageClient({
             <h3 className="text-xl font-bold text-slate-900 mb-2">
               The dealership is still waiting for you.
             </h3>
-            <p className="text-sm text-slate-500 mb-5">
-              You came here for a reason. One request. Up to 8 dealers compete. You choose on your terms.
-            </p>
-            <button
-              onClick={() => {
-                trackFunnelEvent("lp_exit_intent_cta", { campaign });
-                setShowExitIntent(false);
-                scrollToForm();
-              }}
-              className="w-full bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-bold py-3 rounded-xl"
-            >
-              Start My Dealer Auction
-            </button>
+            {exitIntentSubmitted ? (
+              <div className="text-sm text-slate-600">
+                <p className="mb-4">
+                  Thanks — we&rsquo;ll send you a quick note shortly with a link back to your request.
+                </p>
+                <button
+                  onClick={() => {
+                    setShowExitIntent(false);
+                    scrollToForm();
+                  }}
+                  className="w-full bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-bold py-3 rounded-xl"
+                >
+                  Or finish it now
+                </button>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-slate-500 mb-4">
+                  Drop your email and we&rsquo;ll save your spot — up to 8 dealers competing,
+                  you choose on your terms.
+                </p>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!exitEmail || !exitEmail.includes("@")) return;
+
+                    // Fire-and-forget — never block the modal UX on a CRM hiccup.
+                    fetch("/api/public/crm/exit-intent", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        email:        exitEmail,
+                        campaign,
+                        utm_source:   utm.utm_source,
+                        utm_medium:   utm.utm_medium,
+                        utm_campaign: utm.utm_campaign,
+                        source_url:   utm.source_url,
+                      }),
+                    }).catch(() => {});
+
+                    trackFunnelEvent("lp_exit_intent_cta", { campaign });
+                    setExitIntentSubmitted(true);
+                  }}
+                  className="space-y-2"
+                >
+                  <input
+                    type="email"
+                    value={exitEmail}
+                    onChange={(e) => setExitEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                    required
+                    className={inputCls}
+                  />
+                  <button
+                    type="submit"
+                    className="w-full bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-bold py-3 rounded-xl"
+                  >
+                    Save my spot
+                  </button>
+                </form>
+                <p className="text-[10px] text-slate-400 mt-3 text-center">
+                  No spam. Unsubscribe any time.
+                </p>
+              </>
+            )}
           </div>
         </div>
       )}
