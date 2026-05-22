@@ -44,9 +44,11 @@ const schema = z.object({
   email:               z.string().email(),
   phone:               z.string().min(7).max(20),
   zip:                 z.string().regex(/^\d{5}$/, "ZIP must be 5 digits"),
-  city:                z.string().min(1).max(100),
-  state:               z.string().min(2).max(50),
-  contactMethod:       z.enum(["Phone Call", "Text Message", "Email"]),
+  // city/state become optional so LP-form submissions (which only collect ZIP)
+  // can pass. The full /request-vehicle form still supplies both.
+  city:                z.string().max(100).optional().default(""),
+  state:               z.string().max(50).optional().default(""),
+  contactMethod:       z.enum(["Phone Call", "Text Message", "Email"]).optional().default("Email"),
   timeline:            z.enum(["ASAP", "Within 30 Days", "Within 60 Days", "Just Researching"]),
   vehicleType:         z.enum(["SUV", "Sedan", "Truck", "Van", "Coupe", "Other"]),
   preferredMake:       z.string().max(50).optional(),
@@ -54,15 +56,15 @@ const schema = z.object({
   customMakeModel:     z.string().max(100).optional(),
   minYear:             z.number().int().min(2000).max(2030).optional(),
   maxYear:             z.number().int().min(2000).max(2030).optional(),
-  newOrUsed:           z.enum(["New", "Used", "Either"]),
+  newOrUsed:           z.enum(["New", "Used", "Either"]).optional().default("Either"),
   specificFeatures:    z.string().max(500).optional(),
   interiorColor:       z.string().max(100).optional(),
   mustHaveFeatures:    z.string().max(1000).optional(),
-  openToAlternatives:  z.boolean(),
+  openToAlternatives:  z.boolean().optional().default(false),
   budget:              z.string().min(1).max(100),
   desiredMonthly:      z.string().max(50).optional(),
   downPaymentAvail:    z.string().max(50).optional(),
-  financingOption:     z.enum(["need_financing", "have_financing", "no_financing"]),
+  financingOption:     z.enum(["need_financing", "have_financing", "no_financing"]).optional().default("no_financing"),
   employmentStatus:    z.string().max(50).optional(),
   employerName:        z.string().max(100).optional(),
   annualIncome:        z.string().max(50).optional(),
@@ -93,6 +95,14 @@ const schema = z.object({
   tradeAccidentHistory: z.string().max(60).optional(),
   notes:               z.string().max(1000).optional(),
   agreedToContact:     z.literal(true),
+  // ── LP attribution + consent (optional; populated by /lp/[campaign] form) ──
+  utm_source:   z.string().max(100).optional().nullable(),
+  utm_medium:   z.string().max(100).optional().nullable(),
+  utm_campaign: z.string().max(100).optional().nullable(),
+  source_url:   z.string().max(500).optional().nullable(),
+  campaign:     z.string().max(60).optional().nullable(),
+  consent_email: z.boolean().optional(),
+  consent_sms:   z.boolean().optional(),
 });
 
 type Parsed = z.infer<typeof schema>;
@@ -242,11 +252,99 @@ export async function POST(request: NextRequest) {
           yearMax:         data.maxYear ? Number(data.maxYear) : null,
           maxBudgetCents:  parseBudgetToCents(data.budget),
           notes:           data.notes || null,
+          // LP attribution
+          utmSource:   data.utm_source   ?? null,
+          utmMedium:   data.utm_medium   ?? null,
+          utmCampaign: data.utm_campaign ?? null,
+          sourceUrl:   data.source_url   ?? null,
+          ipAddress:   request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
         },
       });
       vehicleRequestId = vehicleRequest.id;
     } catch (err) {
       console.error("[request-vehicle] VehicleRequest create failed:", err);
+    }
+  }
+
+  // ─── CRM PIPELINE — runs after VehicleRequest write ──────────────────────
+  // Non-fatal: a CRM sync failure must never block the buyer's submission.
+  if (vehicleRequestId) {
+    try {
+      const { getServiceSupabase } = await import("@/lib/supabase-service");
+      const { ContactService } = await import("@/lib/services/contact.service");
+      const { WorkflowEngine } = await import("@/lib/services/workflow.engine");
+      const supabase = getServiceSupabase();
+      const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? undefined;
+
+      // 1. Upsert contact (dedup on email + phone, consent merges upward).
+      const contact = await ContactService.upsertContact(supabase, {
+        email:        data.email,
+        phone:        data.phone,
+        firstName:    data.firstName,
+        lastName:     data.lastName,
+        source:       "public_form",
+        utmSource:    data.utm_source   ?? undefined,
+        utmMedium:    data.utm_medium   ?? undefined,
+        utmCampaign:  data.utm_campaign ?? undefined,
+        sourceUrl:    data.source_url   ?? undefined,
+        ipAddress:    ip,
+        consentEmail: data.consent_email ?? true,  // implied by submission
+        consentSms:   data.consent_sms   ?? false,
+        consentText:  "AutoLenis Landing Page — vehicle request form",
+      });
+
+      // 2. Link contact ↔ buyer (polymorphic identity).
+      if (buyerId) {
+        await ContactService.linkContactIdentity(supabase, contact.id, "buyer", buyerId);
+      }
+
+      // 3. Advance lifecycle stage if still a fresh lead. Other stages
+      //    (deposit_paid, auction_active, etc.) are not downgraded.
+      if (contact.lifecycle_stage === "lead") {
+        await ContactService.updateLifecycleStage(
+          supabase,
+          contact.id,
+          "prequal_started",
+          null,
+        );
+      }
+
+      // 4. Timeline note — visible on the admin contact detail page.
+      await supabase.from("contact_timeline_events").insert({
+        contact_id: contact.id,
+        event_type: "note_added",
+        event_data: {
+          body:
+            `Landing page vehicle request submitted. ` +
+            `Vehicle: ${data.vehicleType ?? "Not specified"}. ` +
+            `Budget: ${data.budget ?? "Not specified"}. ` +
+            `Timeline: ${data.timeline ?? "Not specified"}. ` +
+            `Campaign: ${data.campaign ?? "organic"}.`,
+          source: "lp_form",
+          vehicle_request_id: vehicleRequestId,
+        },
+        created_by: null,
+      });
+
+      // 5. Trigger the vehicle_request_submitted workflow (prebuilt sequence).
+      //    updateLifecycleStage above only fires triggers mapped in
+      //    STAGE_TO_TRIGGER — prequal_started is not mapped, so we call the
+      //    workflow engine directly here.
+      await WorkflowEngine.triggerForEvent(
+        supabase,
+        "vehicle_request_submitted",
+        contact.id,
+        {
+          vehicle_type: data.vehicleType,
+          budget:       data.budget,
+          timeline:     data.timeline,
+          campaign:     data.campaign ?? null,
+          utm_source:   data.utm_source ?? null,
+          vehicle_request_id: vehicleRequestId,
+        },
+      );
+    } catch (crmErr) {
+      console.error("[request-vehicle] CRM pipeline sync failed:", crmErr);
     }
   }
 

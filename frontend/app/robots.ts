@@ -7,7 +7,10 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        disallow: ["/buyer/", "/dealer/", "/affiliate/portal/", "/admin/", "/api/", "/auth/"],
+        disallow: [
+          "/buyer/", "/dealer/", "/affiliate/portal/", "/admin/", "/api/", "/auth/",
+          "/lp/", "/thank-you",
+        ],
       },
     ],
     sitemap: [`${base}/sitemap.xml`, `${base}/image-sitemap.xml`],

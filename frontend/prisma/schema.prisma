@@ -701,6 +701,12 @@ model VehicleRequest {
   assignedAdminId String?                                @map("assigned_admin_id")
   cancelledAt     DateTime?                              @map("cancelled_at")
   cancelReason    String?                                @map("cancel_reason")
+  // Attribution — populated when the request originates from a landing page.
+  utmSource       String?                                @map("utm_source")
+  utmMedium       String?                                @map("utm_medium")
+  utmCampaign     String?                                @map("utm_campaign")
+  sourceUrl       String?                                @map("source_url")
+  ipAddress       String?                                @map("ip_address")
   createdAt       DateTime                               @default(now()) @map("created_at")
   updatedAt       DateTime                               @updatedAt @map("updated_at")
   buyerUpdates    VehicleRequestBuyerUpdate[]
