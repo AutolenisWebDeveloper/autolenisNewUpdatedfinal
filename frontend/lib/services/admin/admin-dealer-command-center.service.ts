@@ -13,11 +13,19 @@ export interface DealerListFilters {
   status?: string;
   tier?: string;
   inventoryStatus?: string;
+  /** Filter to dealers holding active inventory of this condition (New / Used / Certified) */
+  inventoryType?: string;
+  /** Filter by dealer service area — matched against the dealer's state code */
+  serviceArea?: string;
   auctionParticipation?: boolean;
   complianceIssue?: boolean;
   page?: number;
   perPage?: number;
 }
+
+// Deal statuses that count as a "won" deal for a dealer (offer accepted and
+// the deal carried forward). Mirrors the won-deal definition used in KPIs.
+const WON_DEAL_STATUSES = ["COMPLETED", "PICKUP_COMPLETE", "SIGNED"] as const;
 
 export interface AdminDealerKpis {
   total: number;
@@ -124,7 +132,7 @@ export async function getAdminDealerKpis(): Promise<AdminDealerKpis> {
 // ─── Dealer List ──────────────────────────────────────────────────────────────
 
 export async function getAdminDealerListData(filters: DealerListFilters = {}) {
-  const { q, status, tier, page = 1, perPage = 50 } = filters;
+  const { q, status, tier, inventoryType, serviceArea, page = 1, perPage = 50 } = filters;
 
   const where: Record<string, unknown> = {};
 
@@ -139,6 +147,15 @@ export async function getAdminDealerListData(filters: DealerListFilters = {}) {
   if (status) where.status = status;
   if (tier) where.tier = tier;
 
+  // Service area = dealer state (exact 2-letter match, case-insensitive).
+  if (serviceArea) where.state = { equals: serviceArea, mode: "insensitive" };
+
+  // Inventory type = dealer holds at least one active inventory item of the
+  // given condition.
+  if (inventoryType) {
+    where.inventory = { some: { isActive: true, condition: { equals: inventoryType, mode: "insensitive" } } };
+  }
+
   const [dealers, total] = await Promise.all([
     prisma.dealer.findMany({
       where,
@@ -151,11 +168,6 @@ export async function getAdminDealerListData(filters: DealerListFilters = {}) {
             invitations: true,
           },
         },
-        offers: {
-          where: { deal: { isNot: null } },
-          select: { id: true, deal: { select: { id: true, status: true } } },
-          take: 5,
-        },
       },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * perPage,
@@ -164,44 +176,66 @@ export async function getAdminDealerListData(filters: DealerListFilters = {}) {
     prisma.dealer.count({ where }),
   ]);
 
-  // Get compliance status for dealers
   const dealerIds = dealers.map((d) => d.id);
-  const [flaggedLogs, resolvedLogs] = await Promise.all([
+
+  // Compliance status, active bids, won deals, and approval dates are resolved
+  // in batch over the current page rather than via per-row N+1 queries.
+  const [flaggedLogs, resolvedLogs, approvedLogs, submittedOfferGroups, wonDealOffers] = await Promise.all([
     dealerIds.length > 0
       ? prisma.adminAuditLog.findMany({
-          where: {
-            action: "DEALER_COMPLIANCE_FLAGGED",
-            entityType: "Dealer",
-            entityId: { in: dealerIds },
-          },
+          where: { action: "DEALER_COMPLIANCE_FLAGGED", entityType: "Dealer", entityId: { in: dealerIds } },
           orderBy: { createdAt: "desc" },
           select: { entityId: true, createdAt: true },
         })
       : Promise.resolve([]),
     dealerIds.length > 0
       ? prisma.adminAuditLog.findMany({
-          where: {
-            action: "DEALER_COMPLIANCE_RESOLVED",
-            entityType: "Dealer",
-            entityId: { in: dealerIds },
-          },
+          where: { action: "DEALER_COMPLIANCE_RESOLVED", entityType: "Dealer", entityId: { in: dealerIds } },
           orderBy: { createdAt: "desc" },
           select: { entityId: true, createdAt: true },
         })
       : Promise.resolve([]),
+    dealerIds.length > 0
+      ? prisma.adminAuditLog.findMany({
+          where: { action: "DEALER_APPROVED", entityType: "Dealer", entityId: { in: dealerIds } },
+          orderBy: { createdAt: "desc" },
+          select: { entityId: true, createdAt: true },
+        })
+      : Promise.resolve([]),
+    dealerIds.length > 0
+      ? prisma.offer.groupBy({
+          by: ["dealerId"],
+          where: { dealerId: { in: dealerIds }, status: "SUBMITTED" },
+          _count: { _all: true },
+        })
+      : Promise.resolve([] as Array<{ dealerId: string; _count: { _all: number } }>),
+    dealerIds.length > 0
+      ? prisma.offer.findMany({
+          where: { dealerId: { in: dealerIds }, deal: { is: { status: { in: [...WON_DEAL_STATUSES] } } } },
+          select: { dealerId: true },
+        })
+      : Promise.resolve([] as Array<{ dealerId: string }>),
   ]);
 
   const latestFlaggedMap = new Map<string, Date>();
   for (const log of flaggedLogs) {
-    if (!latestFlaggedMap.has(log.entityId)) {
-      latestFlaggedMap.set(log.entityId, log.createdAt);
-    }
+    if (!latestFlaggedMap.has(log.entityId)) latestFlaggedMap.set(log.entityId, log.createdAt);
   }
   const latestResolvedMap = new Map<string, Date>();
   for (const log of resolvedLogs) {
-    if (!latestResolvedMap.has(log.entityId)) {
-      latestResolvedMap.set(log.entityId, log.createdAt);
-    }
+    if (!latestResolvedMap.has(log.entityId)) latestResolvedMap.set(log.entityId, log.createdAt);
+  }
+  const approvalDateMap = new Map<string, Date>();
+  for (const log of approvedLogs) {
+    if (!approvalDateMap.has(log.entityId)) approvalDateMap.set(log.entityId, log.createdAt);
+  }
+  const activeBidsMap = new Map<string, number>();
+  for (const g of submittedOfferGroups) {
+    if (g.dealerId) activeBidsMap.set(g.dealerId, g._count._all);
+  }
+  const wonDealsMap = new Map<string, number>();
+  for (const o of wonDealOffers) {
+    if (o.dealerId) wonDealsMap.set(o.dealerId, (wonDealsMap.get(o.dealerId) ?? 0) + 1);
   }
 
   const rows = dealers.map((d) => {
@@ -224,7 +258,9 @@ export async function getAdminDealerListData(filters: DealerListFilters = {}) {
       inventoryCount: d._count.inventory,
       offerCount: d._count.offers,
       invitationCount: d._count.invitations,
-      dealsCount: d.offers.filter((o) => o.deal !== null).length,
+      activeBids: activeBidsMap.get(d.id) ?? 0,
+      dealsWon: wonDealsMap.get(d.id) ?? 0,
+      approvalDate: approvalDateMap.get(d.id)?.toISOString() ?? null,
       hasComplianceFlag,
       createdAt: d.createdAt.toISOString(),
     };

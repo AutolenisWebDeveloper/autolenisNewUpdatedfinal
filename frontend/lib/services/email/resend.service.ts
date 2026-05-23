@@ -53,6 +53,7 @@ import { DEALER_INVITATION_SUBJECT, renderDealerInvitationEmail } from "./templa
 import { DEALER_WELCOME_SUBJECT, renderDealerWelcomeEmail } from "./templates/dealer-welcome";
 import { DEALER_AGREEMENT_PENDING_SUBJECT, renderDealerAgreementPendingEmail } from "./templates/dealer-agreement-pending";
 import { DEALER_ACCOUNT_APPROVED_SUBJECT, renderDealerAccountApprovedEmail } from "./templates/dealer-account-approved";
+import { DEALER_ACCOUNT_REINSTATED_SUBJECT, renderDealerAccountReinstatedEmail } from "./templates/dealer-account-reinstated";
 import { DEALER_ACCOUNT_SUSPENDED_SUBJECT, renderDealerAccountSuspendedEmail } from "./templates/dealer-account-suspended";
 import { DEALER_ACCOUNT_TERMINATED_SUBJECT, renderDealerAccountTerminatedEmail } from "./templates/dealer-account-terminated";
 import { DEALER_AUCTION_INVITATION_SUBJECT, renderDealerAuctionInvitationEmail } from "./templates/dealer-auction-invitation";
@@ -1158,6 +1159,20 @@ export async function sendDealerAccountSuspendedEmail(params: {
     templateId: "dealer-account-suspended",
     subject: DEALER_ACCOUNT_SUSPENDED_SUBJECT,
     html: renderDealerAccountSuspendedEmail({ contactName: params.contactName, dealershipName: params.dealershipName, reasonCategory: params.reasonCategory, adminContactEmail: params.adminContactEmail }),
+  });
+}
+
+export async function sendDealerAccountReinstatedEmail(params: {
+  to: string; contactName: string; dealershipName: string; dashboardUrl: string;
+}) {
+  return sendIdempotent({
+    // Per-reinstatement idempotency key — a dealer may be suspended and
+    // reinstated more than once over their lifetime.
+    idempotencyKey: `dealer-account-reinstated-${params.to}-${Date.now()}`,
+    to: params.to,
+    templateId: "dealer-account-reinstated",
+    subject: DEALER_ACCOUNT_REINSTATED_SUBJECT,
+    html: renderDealerAccountReinstatedEmail({ contactName: params.contactName, dealershipName: params.dealershipName, dashboardUrl: params.dashboardUrl }),
   });
 }
 

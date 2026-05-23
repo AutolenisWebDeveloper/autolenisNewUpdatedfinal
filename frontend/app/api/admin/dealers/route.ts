@@ -14,6 +14,8 @@ export async function GET(request: NextRequest) {
     q: searchParams.get("q") ?? undefined,
     status: searchParams.get("status") ?? undefined,
     tier: searchParams.get("tier") ?? undefined,
+    inventoryType: searchParams.get("inventoryType") ?? undefined,
+    serviceArea: searchParams.get("serviceArea") ?? undefined,
     page: searchParams.get("page") ? Number(searchParams.get("page")) : undefined,
     perPage: searchParams.get("perPage") ? Number(searchParams.get("perPage")) : undefined,
   };
