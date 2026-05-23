@@ -4,9 +4,19 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { ArrowRight, Clock } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+import { bucketBudgetCents } from "@/lib/utils/buyer-budget";
+import AuctionDeadlineCountdown from "@/components/dealer/AuctionDeadlineCountdown";
 
 interface Props { params: Promise<{ auctionId: string }> }
+
+export const dynamic = "force-dynamic";
+
+function vehicleLabel(v: { year: number | null; make: string | null; model: string | null; trim: string | null } | undefined): string {
+  if (!v) return "Vehicle details pending";
+  const parts = [v.year, v.make, v.model, v.trim].filter(Boolean);
+  return parts.length > 0 ? parts.join(" ") : "Vehicle details pending";
+}
 
 export default async function DealerAuctionDetailPage({ params }: Props) {
   const { auctionId } = await params;
@@ -14,60 +24,193 @@ export default async function DealerAuctionDetailPage({ params }: Props) {
 
   const invitation = await prisma.auctionInvitation.findFirst({
     where: { auctionId, dealerId: dealer.id },
-    include: { auction: true },
+    select: { id: true, sentAt: true, viewedAt: true, respondedAt: true },
   });
   if (!invitation) notFound();
+
+  const auction = await prisma.auction.findUnique({
+    where: { id: auctionId },
+    select: {
+      id: true,
+      status: true,
+      startedAt: true,
+      endsAt: true,
+      closedAt: true,
+      buyerId: true,
+      vehicles: {
+        select: {
+          id: true,
+          year: true,
+          make: true,
+          model: true,
+          trim: true,
+          mileage: true,
+          notes: true,
+          inventoryItem: {
+            select: {
+              vin: true,
+              exteriorColor: true,
+              interiorColor: true,
+              bodyType: true,
+              transmission: true,
+              fuelType: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!auction) notFound();
+
+  const prequal = await prisma.preQualification.findUnique({
+    where: { buyerId: auction.buyerId },
+    select: { maxOtdAmountCents: true },
+  });
+  const budget = prequal?.maxOtdAmountCents ? bucketBudgetCents(prequal.maxOtdAmountCents) : null;
 
   const myOffer = await prisma.offer.findFirst({
     where: { auctionId, dealerId: dealer.id },
     orderBy: { createdAt: "desc" },
   });
 
-  const isActive = invitation.auction.status === "ACTIVE";
-  const now = new Date();
-  const timeLeft = invitation.auction.endsAt ? invitation.auction.endsAt.getTime() - now.getTime() : 0;
-  const hoursLeft = Math.max(0, Math.floor(timeLeft / 3600000));
+  const isActive = auction.status === "ACTIVE";
+  const isExpired = auction.endsAt ? auction.endsAt.getTime() <= Date.now() : false;
+  const canBid = isActive && !isExpired;
+  const primaryVehicle = auction.vehicles[0];
+
+  // Mark first-view (best-effort) so admin reporting reflects engagement.
+  if (!invitation.viewedAt) {
+    await prisma.auctionInvitation
+      .update({ where: { id: invitation.id }, data: { viewedAt: new Date() } })
+      .catch(() => {});
+  }
 
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="dealer-auction-detail-page">
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6">
         <h1 className="text-xl font-bold text-slate-900">Auction Invitation</h1>
-        <Badge variant={isActive ? "green" : "gray"}>{invitation.auction.status}</Badge>
+        <Badge variant={isActive ? "green" : "gray"}>{auction.status}</Badge>
       </div>
 
-      {isActive && timeLeft > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-center gap-3" data-testid="auction-deadline-alert">
-          <Clock size={18} className="text-amber-500" />
-          <div>
-            <p className="font-semibold text-amber-800 text-sm">{hoursLeft} hours remaining</p>
-            <p className="text-xs text-amber-600">Submit your offer before the auction closes</p>
-          </div>
-        </div>
+      {canBid && auction.endsAt && (
+        <AuctionDeadlineCountdown
+          endsAtIso={auction.endsAt.toISOString()}
+          serverNowIso={new Date().toISOString()}
+        />
       )}
 
-      {/* Anonymous buyer context — no buyer identity revealed */}
+      {/* Vehicle specifications */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="auction-vehicle">
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Vehicle</p>
+        <p className="text-lg font-semibold text-slate-900 mb-2">{vehicleLabel(primaryVehicle)}</p>
+        {primaryVehicle && (
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-600">
+            {primaryVehicle.mileage != null && (
+              <>
+                <dt className="text-slate-400">Mileage</dt>
+                <dd>{primaryVehicle.mileage.toLocaleString()} mi</dd>
+              </>
+            )}
+            {primaryVehicle.inventoryItem?.vin && (
+              <>
+                <dt className="text-slate-400">VIN</dt>
+                <dd className="font-mono text-xs">{primaryVehicle.inventoryItem.vin}</dd>
+              </>
+            )}
+            {primaryVehicle.inventoryItem?.exteriorColor && (
+              <>
+                <dt className="text-slate-400">Exterior</dt>
+                <dd>{primaryVehicle.inventoryItem.exteriorColor}</dd>
+              </>
+            )}
+            {primaryVehicle.inventoryItem?.interiorColor && (
+              <>
+                <dt className="text-slate-400">Interior</dt>
+                <dd>{primaryVehicle.inventoryItem.interiorColor}</dd>
+              </>
+            )}
+            {primaryVehicle.inventoryItem?.transmission && (
+              <>
+                <dt className="text-slate-400">Transmission</dt>
+                <dd>{primaryVehicle.inventoryItem.transmission}</dd>
+              </>
+            )}
+            {primaryVehicle.inventoryItem?.fuelType && (
+              <>
+                <dt className="text-slate-400">Fuel</dt>
+                <dd>{primaryVehicle.inventoryItem.fuelType}</dd>
+              </>
+            )}
+            {primaryVehicle.inventoryItem?.bodyType && (
+              <>
+                <dt className="text-slate-400">Body</dt>
+                <dd>{primaryVehicle.inventoryItem.bodyType}</dd>
+              </>
+            )}
+          </dl>
+        )}
+        {primaryVehicle?.notes && (
+          <p className="text-xs text-slate-500 mt-3 pt-3 border-t border-slate-100">{primaryVehicle.notes}</p>
+        )}
+      </div>
+
+      {/* Anonymous buyer context — budget range only, no identity */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="auction-context">
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Auction Context</p>
-        <div className="space-y-2 text-sm text-slate-600">
-          <p>• Pre-qualified buyer with confirmed budget</p>
-          <p>• Private 48-hour auction</p>
-          <p>• Buyer identity revealed only after deal selection</p>
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Buyer</p>
+        <div className="space-y-1 text-sm text-slate-700">
+          <p>
+            <span className="text-slate-400">Approved budget:</span>{" "}
+            <span className="font-semibold" data-testid="buyer-budget-range">
+              {budget?.label ?? "Not specified"}
+            </span>
+          </p>
+          <p className="text-xs text-slate-500 mt-2">
+            Pre-qualified buyer. Identity is revealed to you only if your offer is selected.
+          </p>
         </div>
       </div>
 
-      {/* My offer status */}
+      {/* My offer status — read-only after submission */}
       {myOffer ? (
         <div className="bg-green-50 border border-green-200 rounded-xl p-5 mb-6" data-testid="my-offer-submitted">
-          <p className="font-semibold text-green-800 mb-1">Offer submitted</p>
-          <p className="text-2xl font-bold text-green-900 mb-1">${(myOffer.otdPriceCents / 100).toLocaleString()}</p>
-          <Badge variant={myOffer.status === "ACCEPTED" ? "green" : "secondary"}>{myOffer.status}</Badge>
-          {myOffer.status === "SUBMITTED" && myOffer.version < 2 && isActive && (
-            <Link href={`/dealer/offers/${myOffer.id}`} className="block mt-3 text-xs text-green-700 hover:underline" data-testid="revise-offer-link">
+          <div className="flex flex-wrap items-baseline gap-2 mb-2">
+            <p className="font-semibold text-green-800">Your offer (read-only)</p>
+            <Badge variant={myOffer.status === "ACCEPTED" ? "green" : "secondary"}>{myOffer.status}</Badge>
+            {myOffer.version > 1 && <span className="text-xs text-green-700">v{myOffer.version}</span>}
+          </div>
+          <p className="text-2xl font-bold text-green-900 mb-3">
+            ${(myOffer.otdPriceCents / 100).toLocaleString()} OTD
+          </p>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-green-900">
+            <dt className="text-green-700">Vehicle</dt>
+            <dd>${(myOffer.vehiclePriceCents / 100).toLocaleString()}</dd>
+            <dt className="text-green-700">Tax</dt>
+            <dd>${(myOffer.taxCents / 100).toLocaleString()}</dd>
+            <dt className="text-green-700">Fees</dt>
+            <dd>${(myOffer.feesCents / 100).toLocaleString()}</dd>
+            {myOffer.includesFinancing && myOffer.aprRate != null && myOffer.termMonths != null && (
+              <>
+                <dt className="text-green-700">Financing</dt>
+                <dd>{myOffer.aprRate.toFixed(2)}% / {myOffer.termMonths} mo</dd>
+              </>
+            )}
+          </dl>
+          {canBid && myOffer.version < 2 && myOffer.status === "SUBMITTED" && (
+            <Link
+              href={`/dealer/offers/${myOffer.id}`}
+              className="block mt-4 text-xs font-semibold text-green-800 hover:underline"
+              data-testid="revise-offer-link"
+            >
               Revise offer (1 revision allowed) →
             </Link>
           )}
+          {!canBid && (
+            <p className="text-xs text-green-700 mt-4">
+              Auction closed — revisions are no longer accepted.
+            </p>
+          )}
         </div>
-      ) : isActive ? (
+      ) : canBid ? (
         <div className="text-center py-8" data-testid="no-offer-yet">
           <p className="text-slate-500 text-sm mb-4">You haven&apos;t submitted an offer yet.</p>
           <Button href={`/dealer/quick-offer/${auctionId}`} data-testid="submit-offer-from-detail-btn">
@@ -75,12 +218,21 @@ export default async function DealerAuctionDetailPage({ params }: Props) {
           </Button>
         </div>
       ) : (
-        <p className="text-slate-400 text-sm" data-testid="auction-closed-no-offer">This auction closed without your offer.</p>
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-5" data-testid="auction-closed-no-offer">
+          <p className="font-semibold text-slate-700 mb-1">Auction closed without your offer</p>
+          <p className="text-xs text-slate-500">
+            This invitation is now in your archive. You can review market insights below to inform future bids.
+          </p>
+        </div>
       )}
 
-      {!isActive && (
+      {!canBid && (
         <div className="mt-4">
-          <Link href={`/dealer/auctions/${auctionId}/insights`} className="text-sm text-[#0B5FD1] font-semibold hover:underline" data-testid="view-insights-link">
+          <Link
+            href={`/dealer/auctions/${auctionId}/insights`}
+            className="text-sm text-[#0B5FD1] font-semibold hover:underline"
+            data-testid="view-insights-link"
+          >
             View post-auction insights →
           </Link>
         </div>

@@ -33,6 +33,26 @@ export async function DELETE(request: NextRequest, { params }: Props) {
   const { id } = await params;
   const dealer = await getRequestDealer(request);
   if (!dealer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
-  await prisma.inventoryItem.updateMany({ where: { id, dealerId: dealer.id }, data: { isActive: false } });
+
+  // Block archiving items currently reserved by an ACTIVE auction so the
+  // auction's AuctionVehicle reference never dangles.
+  const reservedIn = await prisma.auctionVehicle.findFirst({
+    where: { inventoryItemId: id, auction: { status: "ACTIVE" } },
+    select: { auctionId: true },
+  });
+  if (reservedIn) {
+    return errorResponse(
+      "RESERVED",
+      "This vehicle is reserved by an active auction and cannot be archived until the auction closes.",
+      409,
+    );
+  }
+
+  // Soft delete — isActive=false keeps the row queryable for audit and
+  // historical bid/deal references.
+  await prisma.inventoryItem.updateMany({
+    where: { id, dealerId: dealer.id },
+    data: { isActive: false },
+  });
   return successResponse({ deactivated: true });
 }

@@ -3,7 +3,7 @@ import { getDealerDealById } from "@/lib/services/dealer/dealer-deals.service";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Handshake } from "lucide-react";
+import { Handshake, Mail, Phone, MapPin } from "lucide-react";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,6 @@ interface Props {
   params: Promise<{ dealId: string }>;
 }
 
-// Ordered stages that map to the DealStatus enum values shown to dealers
 const STAGES = [
   "ACTIVE",
   "CONTRACT_PENDING",
@@ -24,13 +23,6 @@ const STAGES = [
   "COMPLETED",
 ] as const;
 
-const CHECKLIST_ITEMS = [
-  "Title in hand",
-  "Reconditioning complete",
-  "Photos verified",
-  "Sale documents prepared",
-];
-
 export default async function DealerDealDetailPage({ params }: Props) {
   const { dealId } = await params;
   const dealer = await requireDealer();
@@ -39,7 +31,31 @@ export default async function DealerDealDetailPage({ params }: Props) {
   if (!deal) notFound();
 
   const currentStageIndex = STAGES.indexOf(deal.status as typeof STAGES[number]);
-  const contactVisible = ["SIGNED", "PICKUP_SCHEDULED", "PICKUP_COMPLETE", "COMPLETED"].includes(deal.status);
+  // Buyer identity revealed once dealer has won (deal exists & status is no
+  // longer PENDING). We gate display on a slightly later milestone to mirror
+  // the buyer-side contract: contact appears once the deal moves past
+  // contract review, when coordination becomes necessary.
+  const contactVisible = deal.status !== "PENDING";
+  const offer = deal.offer;
+  const buyer = deal.buyer;
+
+  // Next-action CTA — exactly one primary action per stage.
+  const nextAction = ((): { label: string; href: string } | null => {
+    switch (deal.status) {
+      case "CONTRACT_PENDING":
+        return { label: "Upload purchase agreement", href: "/dealer/contracts" };
+      case "CONTRACT_REVIEW":
+        return { label: "Awaiting Contract Shield review", href: "/dealer/contracts" };
+      case "CONTRACT_APPROVED":
+      case "SIGNING_PENDING":
+        return { label: "Sign contract", href: "/dealer/contracts" };
+      case "SIGNED":
+      case "PICKUP_SCHEDULED":
+        return { label: "Coordinate pickup", href: "/dealer/pickups" };
+      default:
+        return null;
+    }
+  })();
 
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-deal-detail-page">
@@ -50,13 +66,31 @@ export default async function DealerDealDetailPage({ params }: Props) {
         ← Back to Deals
       </Link>
 
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6">
         <Handshake size={22} className="text-[#0B5FD1]" />
         <h1 className="text-xl font-bold text-slate-900">Deal Progress</h1>
         <Badge variant="secondary" className="text-xs font-mono">
           #{deal.id.slice(0, 8)}
         </Badge>
+        <Badge variant={deal.status === "COMPLETED" ? "green" : "secondary"}>
+          {deal.status.replace(/_/g, " ")}
+        </Badge>
       </div>
+
+      {nextAction && (
+        <div
+          className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+          data-testid="deal-next-action"
+        >
+          <div>
+            <p className="text-xs font-semibold text-[#0B5FD1] uppercase tracking-wider">Next action</p>
+            <p className="text-sm font-semibold text-slate-900 mt-1">{nextAction.label}</p>
+          </div>
+          <Button href={nextAction.href} className="shrink-0 min-h-[44px]">
+            Continue →
+          </Button>
+        </div>
+      )}
 
       {/* Stage Timeline */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="stage-timeline">
@@ -100,39 +134,111 @@ export default async function DealerDealDetailPage({ params }: Props) {
         </div>
       </div>
 
-      {/* Delivery Prep Checklist */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="delivery-checklist">
-        <p className="text-sm font-semibold text-slate-800 mb-3">Vehicle Delivery Prep Checklist</p>
-        <div className="space-y-2">
-          {CHECKLIST_ITEMS.map((item) => (
-            <label key={item} className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                className="w-4 h-4 rounded accent-[#0B5FD1]"
-                data-testid={`checklist-${item.toLowerCase().replace(/\s+/g, "-")}`}
-              />
-              <span className="text-sm text-slate-700">{item}</span>
-            </label>
-          ))}
+      {/* Agreed price */}
+      {offer && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="agreed-price-section">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+            Agreed Price
+          </p>
+          <p className="text-3xl font-bold text-slate-900 mb-3">
+            ${(offer.otdPriceCents / 100).toLocaleString()} OTD
+          </p>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+            <dt className="text-slate-500">Vehicle</dt>
+            <dd className="text-slate-900">${(offer.vehiclePriceCents / 100).toLocaleString()}</dd>
+            <dt className="text-slate-500">Tax</dt>
+            <dd className="text-slate-900">${(offer.taxCents / 100).toLocaleString()}</dd>
+            <dt className="text-slate-500">Fees</dt>
+            <dd className="text-slate-900">${(offer.feesCents / 100).toLocaleString()}</dd>
+            {offer.includesFinancing && offer.aprRate != null && offer.termMonths != null && (
+              <>
+                <dt className="text-slate-500">Financing</dt>
+                <dd className="text-slate-900">{offer.aprRate.toFixed(2)}% / {offer.termMonths} mo</dd>
+              </>
+            )}
+          </dl>
         </div>
-      </div>
+      )}
+
+      {/* Contract Shield (read-only) */}
+      {(deal.contractShieldStatus || deal.contractShieldScore != null) && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="contract-shield-status">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+            Contract Shield review (read-only)
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            {deal.contractShieldStatus && (
+              <Badge variant="secondary">{deal.contractShieldStatus}</Badge>
+            )}
+            {deal.contractShieldScore != null && (
+              <span className="text-sm text-slate-700">
+                Score: <span className="font-semibold">{deal.contractShieldScore}</span>
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            Reviewed by AutoLenis. You&apos;ll be notified when the review completes.
+          </p>
+        </div>
+      )}
 
       {/* Document Upload */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="document-upload-section">
         <p className="text-sm font-semibold text-slate-800 mb-3">Documents</p>
-        <Button href="/dealer/contracts/upload" variant="secondary" className="text-sm">
-          Upload Contract / Document
+        <Button href="/dealer/contracts" variant="secondary" className="text-sm min-h-[44px]">
+          Manage contracts & documents
         </Button>
       </div>
 
       {/* Buyer Contact */}
       <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="buyer-contact-section">
-        <p className="text-sm font-semibold text-slate-800 mb-2">Buyer Contact</p>
-        {contactVisible ? (
-          <p className="text-sm text-slate-600">Contact available upon scheduling.</p>
+        <p className="text-sm font-semibold text-slate-800 mb-3">Buyer Contact</p>
+        {contactVisible && buyer ? (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
+            <dt className="text-slate-500">Name</dt>
+            <dd className="text-slate-900 font-medium" data-testid="buyer-name">
+              {buyer.firstName} {buyer.lastName}
+            </dd>
+            {buyer.email && (
+              <>
+                <dt className="text-slate-500 flex items-center gap-1"><Mail size={12} /> Email</dt>
+                <dd>
+                  <a
+                    href={`mailto:${buyer.email}`}
+                    className="text-[#0B5FD1] hover:underline break-all min-h-[44px] inline-flex items-center"
+                    data-testid="buyer-email"
+                  >
+                    {buyer.email}
+                  </a>
+                </dd>
+              </>
+            )}
+            {buyer.phone && (
+              <>
+                <dt className="text-slate-500 flex items-center gap-1"><Phone size={12} /> Phone</dt>
+                <dd>
+                  <a
+                    href={`tel:${buyer.phone}`}
+                    className="text-[#0B5FD1] hover:underline min-h-[44px] inline-flex items-center"
+                    data-testid="buyer-phone"
+                  >
+                    {buyer.phone}
+                  </a>
+                </dd>
+              </>
+            )}
+            {(buyer.city || buyer.state) && (
+              <>
+                <dt className="text-slate-500 flex items-center gap-1"><MapPin size={12} /> Location</dt>
+                <dd className="text-slate-900">
+                  {[buyer.city, buyer.state, buyer.zip].filter(Boolean).join(", ")}
+                </dd>
+              </>
+            )}
+          </dl>
         ) : (
-          <p className="text-sm text-slate-400">
-            Contact information will be available once the deal progresses to signing.
+          <p className="text-sm text-slate-500">
+            Buyer identity is revealed here once the deal has been formed. Stay tuned.
           </p>
         )}
       </div>

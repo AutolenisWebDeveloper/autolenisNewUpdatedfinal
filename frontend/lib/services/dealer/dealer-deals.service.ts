@@ -22,11 +22,32 @@ export interface DealerDealDetail {
   createdAt: Date;
   contractShieldScore: number | null;
   contractShieldStatus: string | null;
+  financingPath: string | null;
   offer: {
     id: string;
     otdPriceCents: number;
+    vehiclePriceCents: number;
+    taxCents: number;
+    feesCents: number;
+    includesFinancing: boolean;
+    aprRate: number | null;
+    termMonths: number | null;
     auctionId: string;
     dealerId: string;
+  } | null;
+  // Buyer contact is included here ONLY for deals where the dealer's offer
+  // was the accepted one. The findFirst query below filters by
+  // offer.dealerId so a dealer can never reach a Deal record that isn't
+  // their own win. Buyer identity is therefore safe to expose on this
+  // endpoint.
+  buyer: {
+    firstName: string;
+    lastName: string;
+    phone: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    email: string | null;
   } | null;
   pickup: {
     id: string;
@@ -75,7 +96,7 @@ export async function getDealerDeals(dealerId: string): Promise<DealerDealSummar
  * Returns a single deal for the given dealer, or null if not found / not owned.
  */
 export async function getDealerDealById(dealId: string, dealerId: string): Promise<DealerDealDetail | null> {
-  return prisma.deal.findFirst({
+  const deal = await prisma.deal.findFirst({
     where: { id: dealId, offer: { dealerId } },
     select: {
       id: true,
@@ -83,7 +104,32 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
       createdAt: true,
       contractShieldScore: true,
       contractShieldStatus: true,
-      offer: { select: { id: true, otdPriceCents: true, auctionId: true, dealerId: true } },
+      financingPath: true,
+      offer: {
+        select: {
+          id: true,
+          otdPriceCents: true,
+          vehiclePriceCents: true,
+          taxCents: true,
+          feesCents: true,
+          includesFinancing: true,
+          aprRate: true,
+          termMonths: true,
+          auctionId: true,
+          dealerId: true,
+        },
+      },
+      buyer: {
+        select: {
+          firstName: true,
+          lastName: true,
+          phone: true,
+          city: true,
+          state: true,
+          zip: true,
+          user: { select: { email: true } },
+        },
+      },
       pickup: {
         select: {
           id: true,
@@ -94,6 +140,29 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
       },
     },
   });
+  if (!deal) return null;
+
+  return {
+    id: deal.id,
+    status: deal.status,
+    createdAt: deal.createdAt,
+    contractShieldScore: deal.contractShieldScore,
+    contractShieldStatus: deal.contractShieldStatus,
+    financingPath: deal.financingPath,
+    offer: deal.offer,
+    buyer: deal.buyer
+      ? {
+          firstName: deal.buyer.firstName,
+          lastName: deal.buyer.lastName,
+          phone: deal.buyer.phone,
+          city: deal.buyer.city,
+          state: deal.buyer.state,
+          zip: deal.buyer.zip,
+          email: deal.buyer.user?.email ?? null,
+        }
+      : null,
+    pickup: deal.pickup,
+  };
 }
 
 /**
