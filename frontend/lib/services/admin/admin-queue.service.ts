@@ -5,7 +5,7 @@ export type QueueType = "OFAC_ALERT" | "CONTRACT_FAIL" | "INSURANCE_EXCEPTION" |
 
 export async function getQueueItems(queueType: QueueType, limit = 20) {
   switch (queueType) {
-    case "OFAC_ALERT": return prisma.preQualification.findMany({ where: { checkOfacAlert: true, decision: "OFAC_ESCALATED" }, include: { buyer: { select: { firstName: true, lastName: true } } }, take: limit });
+    case "OFAC_ALERT": return prisma.preQualification.findMany({ where: { checkOfacAlert: true, decision: { in: ["OFAC_REVIEW", "OFAC_ESCALATED"] } }, include: { buyer: { select: { firstName: true, lastName: true } } }, take: limit, orderBy: { updatedAt: "desc" } });
     case "CONTRACT_FAIL": return prisma.contractScan.findMany({ where: { status: "FAIL" }, include: { deal: { include: { buyer: { select: { firstName: true, lastName: true } } } } }, take: limit });
     case "PREQUAL_MANUAL": return prisma.preQualification.findMany({ where: { decision: "MANUAL_REVIEW" }, take: limit });
     case "SYSTEM_ALERT": return prisma.notification.findMany({ where: { type: "SYSTEM_ALERT", readAt: null }, take: limit, orderBy: { createdAt: "desc" } });
@@ -107,7 +107,7 @@ export async function resolveQueueItem(queueType: QueueType, itemId: string, adm
 
 export async function getQueueCounts(): Promise<Record<QueueType, number>> {
   const [ofac, contractFail, prequal, systemAlerts, insuranceException, esignException, pickupException, supportTickets] = await Promise.all([
-    prisma.preQualification.count({ where: { checkOfacAlert: true, decision: "OFAC_ESCALATED" } }),
+    prisma.preQualification.count({ where: { checkOfacAlert: true, decision: { in: ["OFAC_REVIEW", "OFAC_ESCALATED"] } } }),
     prisma.contractScan.count({ where: { status: "FAIL" } }),
     prisma.preQualification.count({ where: { decision: "MANUAL_REVIEW" } }),
     prisma.notification.count({ where: { type: "SYSTEM_ALERT", readAt: null } }),
