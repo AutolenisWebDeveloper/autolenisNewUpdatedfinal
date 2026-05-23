@@ -3,7 +3,13 @@
 
 import { prisma } from "@/lib/prisma";
 import { AuctionStatus, Prisma } from "@prisma/client";
-import { AUCTION_DURATION_HOURS } from "@/lib/constants";
+import { AUCTION_DURATION_HOURS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
+import { releaseAuctionLoad } from "@/lib/services/auction/dealer-invitation.service";
+import { rankOffers } from "@/lib/services/offer/best-price.service";
+import {
+  sendOffersReadyEmail,
+  sendDealerAuctionClosedNoWinnerEmail,
+} from "@/lib/services/email/resend.service";
 
 export async function createAuction(buyerId: string, depositId: string) {
   return prisma.auction.create({
@@ -39,6 +45,77 @@ export async function extendAuction(auctionId: string, hours: number, extendedBy
     where: { id: auctionId },
     data: { endsAt: newEnd, extendedAt: new Date(), extendedBy, extendReason: reason },
   });
+}
+
+// Post-close processing for a single auction: release dealer load, rank
+// offers, and notify the buyer (plus invited dealers when there is no winner).
+// Shared by the auction-close cron and the admin manual-close action so the
+// two paths never diverge. Safe to call more than once — the buyer/dealer
+// emails are idempotency-keyed in resend.service.
+export async function processAuctionClose(auctionId: string): Promise<{ offers: number }> {
+  const auction = await prisma.auction.findUnique({
+    where: { id: auctionId },
+    select: { id: true, buyerId: true, _count: { select: { offers: true } } },
+  });
+  if (!auction) return { offers: 0 };
+
+  await releaseAuctionLoad(auctionId);
+
+  if (auction._count.offers > 0) {
+    await rankOffers(auctionId).catch(err =>
+      console.error(`[processAuctionClose] rankOffers failed for ${auctionId}:`, err)
+    );
+
+    await prisma.notification.create({
+      data: {
+        buyerId: auction.buyerId,
+        title: `Your auction closed — ${auction._count.offers} offer${auction._count.offers !== 1 ? "s" : ""} ready`,
+        body: "Review your ranked offers and select your best deal.",
+        type: "OFFER_RECEIVED",
+        actionUrl: `/buyer/auction/${auctionId}/offers`,
+      },
+    }).catch(() => {});
+
+    const buyer = await prisma.buyer.findUnique({
+      where: { id: auction.buyerId },
+      select: { firstName: true, user: { select: { email: true } } },
+    });
+    if (buyer?.user?.email) {
+      await sendOffersReadyEmail(
+        buyer.user.email,
+        buyer.firstName ?? "there",
+        auctionId,
+        auction._count.offers,
+      ).catch(err => console.error(`[processAuctionClose] buyer email failed for ${auctionId}:`, err));
+    }
+  } else {
+    await prisma.notification.create({
+      data: {
+        buyerId: auction.buyerId,
+        title: "Auction closed — no offers received",
+        body: `Your ${DEPOSIT_AMOUNT_USD} deposit will be refunded within 3 business days. You may request a specific vehicle.`,
+        type: "DEAL_STAGE_CHANGED",
+      },
+    }).catch(() => {});
+
+    const invitedDealers = await prisma.auctionInvitation.findMany({
+      where: { auctionId },
+      include: { dealer: { include: { user: { select: { email: true } } } } },
+    }).catch(() => []);
+    const vehicleRef = `Auction ${auctionId.slice(0, 8)}`;
+    for (const inv of invitedDealers) {
+      const email = inv.dealer?.user?.email;
+      if (!email) continue;
+      await sendDealerAuctionClosedNoWinnerEmail({
+        to: email,
+        contactName: inv.dealer.dealershipName,
+        vehicleRef,
+        auctionId,
+      }).catch(() => {});
+    }
+  }
+
+  return { offers: auction._count.offers };
 }
 
 // Close all expired auctions — called by auction-close cron

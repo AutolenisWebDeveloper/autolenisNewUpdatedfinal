@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 import { AUCTION_DURATION_HOURS } from "@/lib/constants";
 import { sendDealerAuctionInvitationEmail } from "@/lib/services/email/resend.service";
+import { processAuctionClose } from "@/lib/services/auction/auction.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 interface Props { params: Promise<{ auctionId: string }> }
@@ -29,8 +30,13 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   switch (action) {
     case "AUCTION_CLOSED": {
+      if (["CLOSED", "CANCELLED", "COMPLETED"].includes(auction.status)) {
+        return adminError("INVALID_STATE", `Auction is already ${auction.status.toLowerCase()}`, 400);
+      }
       await prisma.auction.update({ where: { id: auctionId }, data: { status: "CLOSED", closedAt: new Date() } });
-      result = { closed: true };
+      // Mirror the auction-close cron: release dealer load, rank offers, notify buyer/dealers.
+      const { offers } = await processAuctionClose(auctionId);
+      result = { closed: true, offers };
       break;
     }
     case "AUCTION_EXTENDED": {
@@ -41,7 +47,22 @@ export async function POST(request: NextRequest, { params }: Props) {
         where: { id: auctionId },
         data: { endsAt: newEnd, extendedAt: new Date(), extendedBy: admin.adminId, extendReason: reason },
       });
-      result = { newEndsAt: newEnd.toISOString() };
+
+      // Notify every invited dealer that the deadline moved — they have more time to bid.
+      const invitations = await prisma.auctionInvitation.findMany({ where: { auctionId }, select: { dealerId: true } });
+      if (invitations.length > 0) {
+        await prisma.notification.createMany({
+          data: invitations.map(inv => ({
+            dealerId: inv.dealerId,
+            type: "AUCTION_STARTED" as const,
+            channel: "IN_APP" as const,
+            title: "Auction deadline extended",
+            body: `The deadline for auction ${auctionId.slice(0, 8)} was extended. You now have until ${newEnd.toLocaleString()} to submit or revise your offer.`,
+          })),
+        }).catch(err => console.error("[auctions/action] extend dealer notify failed:", err));
+      }
+
+      result = { newEndsAt: newEnd.toISOString(), dealersNotified: invitations.length };
       break;
     }
     case "DEALER_REMOVED": {
@@ -116,7 +137,32 @@ export async function POST(request: NextRequest, { params }: Props) {
       }
 
       await prisma.auction.update({ where: { id: auctionId }, data: { status: "CANCELLED" } });
-      result = { refunded: true };
+
+      // Notify the buyer their auction was cancelled and deposit refunded.
+      await prisma.notification.create({
+        data: {
+          buyerId: auction.buyerId,
+          type: "DEAL_STAGE_CHANGED",
+          title: "Auction cancelled",
+          body: "Your auction was cancelled and your deposit refunded. Please allow 3–5 business days for funds to appear.",
+        },
+      }).catch(err => console.error("[auctions/action] cancel buyer notify failed:", err));
+
+      // Notify every invited dealer the auction was cancelled.
+      const cancelInvitations = await prisma.auctionInvitation.findMany({ where: { auctionId }, select: { dealerId: true } });
+      if (cancelInvitations.length > 0) {
+        await prisma.notification.createMany({
+          data: cancelInvitations.map(inv => ({
+            dealerId: inv.dealerId,
+            type: "AUCTION_STARTED" as const,
+            channel: "IN_APP" as const,
+            title: "Auction cancelled",
+            body: `Auction ${auctionId.slice(0, 8)} was cancelled by the platform. No further action is needed.`,
+          })),
+        }).catch(err => console.error("[auctions/action] cancel dealer notify failed:", err));
+      }
+
+      result = { refunded: true, dealersNotified: cancelInvitations.length };
       break;
     }
     case "AUCTION_REOPENED": {

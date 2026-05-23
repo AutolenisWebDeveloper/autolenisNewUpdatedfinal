@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, Clock, AlertTriangle, Loader2, StickyNote } from "lucide-react";
 import AdminPaymentActionsClient from "@/components/admin/AdminPaymentActionsClient";
+import { PREMIUM_FEE_CENTS } from "@/lib/constants";
 
 const TABS = ["Overview", "Billing", "Insurance", "E-Sign", "Pickup", "Refunds", "Notes"] as const;
 type Tab = typeof TABS[number];
@@ -207,7 +208,7 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
                 { label: "Dealer Fees", value: `$${(deal.offer.feesCents / 100).toLocaleString()}` },
                 { label: "OTD Total", value: `$${(deal.offer.otdPriceCents / 100).toLocaleString()}` },
                 { label: "Financing Path", value: deal.financingPath ?? "Not selected" },
-                { label: "Concierge Fee", value: deal.feePaidAt ? `$${(deal.feeAmountCents ?? 49900) / 100} — paid ${new Date(deal.feePaidAt).toLocaleDateString()}` : "Not yet paid" },
+                { label: "Concierge Fee", value: deal.feePaidAt ? `$${(deal.feeAmountCents ?? PREMIUM_FEE_CENTS) / 100} — paid ${new Date(deal.feePaidAt).toLocaleDateString()}` : "Not yet paid" },
               ].map(f => (
                 <div key={f.label} className="flex items-center justify-between py-2.5 border-b border-slate-100 last:border-0 text-sm">
                   <span className="text-slate-500">{f.label}</span>
