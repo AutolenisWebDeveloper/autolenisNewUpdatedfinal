@@ -8,6 +8,7 @@ import {
   sendDealerAuctionInvitationEmail,
   sendAuctionActivatedEmail,
 } from "@/lib/services/email/resend.service";
+import { syncBuyerLifecycleToCrm } from "@/lib/services/admin/buyer-crm-sync";
 
 interface Props { params: Promise<{ buyerId: string }> }
 
@@ -296,6 +297,14 @@ export async function POST(request: NextRequest, { params }: Props) {
       },
     },
   }).catch(err => console.error("[launch-auction] audit log failed:", err));
+
+  // Buyer journey advances to auction_active — mirror onto the CRM contact.
+  await syncBuyerLifecycleToCrm(
+    buyerId,
+    "auction_active",
+    { adminId: admin.adminId, adminEmail: admin.email },
+    buyer.user?.email,
+  );
 
   return adminSuccess({
     auctionId: launched.id,

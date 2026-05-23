@@ -33,6 +33,7 @@ interface BuyerRow {
   disabledAt: string | null;
   purgedAt: string | null;
   createdAt: string;
+  lastActivityAt?: string | null;
 }
 
 interface Props {
@@ -147,6 +148,11 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
   const [query, setQuery] = useState("");
   const [onboardingFilter, setOnboardingFilter] = useState("");
   const [exceptionOnly, setExceptionOnly] = useState(false);
+  const [prequalFilter, setPrequalFilter] = useState("");
+  const [hasActiveDeal, setHasActiveDeal] = useState(false);
+  const [hasActiveAuction, setHasActiveAuction] = useState(false);
+  const [registeredAfter, setRegisteredAfter] = useState("");
+  const [registeredBefore, setRegisteredBefore] = useState("");
   const [lifecycleStatus, setLifecycleStatus] = useState<"active" | "archived" | "disabled" | "purged" | "all">("active");
   const [showFilters, setShowFilters] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -199,16 +205,23 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
     if (query) params.q = query;
     if (onboardingFilter) params.onboardingStatus = onboardingFilter;
     if (exceptionOnly) params.exceptionOnly = "true";
+    if (prequalFilter) params.prequalStatus = prequalFilter;
+    if (hasActiveDeal) params.hasActiveDeal = "true";
+    if (hasActiveAuction) params.hasActiveAuction = "true";
+    if (registeredAfter) params.registeredAfter = registeredAfter;
+    if (registeredBefore) params.registeredBefore = registeredBefore;
     params.lifecycleStatus = overrideLifecycle ?? lifecycleStatus;
     fetchBuyers(params);
-  }, [query, onboardingFilter, exceptionOnly, lifecycleStatus, fetchBuyers]);
+  }, [query, onboardingFilter, exceptionOnly, prequalFilter, hasActiveDeal, hasActiveAuction, registeredAfter, registeredBefore, lifecycleStatus, fetchBuyers]);
 
   const clearFilters = () => {
     setQuery(""); setOnboardingFilter(""); setExceptionOnly(false);
+    setPrequalFilter(""); setHasActiveDeal(false); setHasActiveAuction(false);
+    setRegisteredAfter(""); setRegisteredBefore("");
     fetchBuyers({ lifecycleStatus });
   };
 
-  const hasFilters = !!(query || onboardingFilter || exceptionOnly);
+  const hasFilters = !!(query || onboardingFilter || exceptionOnly || prequalFilter || hasActiveDeal || hasActiveAuction || registeredAfter || registeredBefore);
 
   function openActionModal(
     type: typeof actionModal extends null ? never : NonNullable<typeof actionModal>["type"],
@@ -497,6 +510,40 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
                 <option value="pending">Pending</option>
               </select>
             </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Prequal Status</label>
+              <select
+                value={prequalFilter}
+                onChange={(e) => setPrequalFilter(e.target.value)}
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+              >
+                <option value="">All</option>
+                <option value="APPROVED">Approved</option>
+                <option value="DECLINED">Declined</option>
+                <option value="PENDING">Pending</option>
+                <option value="MANUAL_REVIEW">Manual Review</option>
+                <option value="OFAC_REVIEW">OFAC Review</option>
+                <option value="none">No Prequal</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Registered After</label>
+              <input
+                type="date"
+                value={registeredAfter}
+                onChange={(e) => setRegisteredAfter(e.target.value)}
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Registered Before</label>
+              <input
+                type="date"
+                value={registeredBefore}
+                onChange={(e) => setRegisteredBefore(e.target.value)}
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+              />
+            </div>
             <div className="flex items-end pb-0.5">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -506,6 +553,28 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
                   className="w-4 h-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500"
                 />
                 <span className="text-sm font-medium text-slate-700">Exceptions only</span>
+              </label>
+            </div>
+            <div className="flex items-end pb-0.5">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={hasActiveDeal}
+                  onChange={(e) => setHasActiveDeal(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+                />
+                <span className="text-sm font-medium text-slate-700">Has active deal</span>
+              </label>
+            </div>
+            <div className="flex items-end pb-0.5">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={hasActiveAuction}
+                  onChange={(e) => setHasActiveAuction(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500"
+                />
+                <span className="text-sm font-medium text-slate-700">Has active auction</span>
               </label>
             </div>
           </div>
@@ -529,9 +598,21 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
         </div>
 
         {loading && (
-          <div className="py-16 flex items-center justify-center">
-            <RefreshCw size={20} className="animate-spin text-slate-400" />
-            <span className="ml-2 text-slate-400 text-sm">Loading buyers…</span>
+          <div className="divide-y divide-slate-50" data-testid="buyers-skeleton" aria-busy="true">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-5 py-3.5 animate-pulse">
+                <div className="w-4 h-4 rounded bg-slate-200" />
+                <div className="flex-1 min-w-0">
+                  <div className="h-3.5 w-40 bg-slate-200 rounded mb-1.5" />
+                  <div className="h-2.5 w-56 bg-slate-100 rounded" />
+                </div>
+                <div className="hidden lg:block h-3 w-44 bg-slate-100 rounded" />
+                <div className="hidden lg:block h-5 w-20 bg-slate-100 rounded-full" />
+                <div className="hidden lg:block h-5 w-20 bg-slate-100 rounded-full" />
+                <div className="hidden lg:block h-3 w-16 bg-slate-100 rounded" />
+                <div className="h-7 w-16 bg-slate-100 rounded-lg" />
+              </div>
+            ))}
           </div>
         )}
 
@@ -591,7 +672,10 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
                     <span className="text-red-500" title="Exception"><Flag size={10} /></span>
                   )}
                 </div>
-                <span className="text-[11px] text-slate-400 truncate">{b.id.slice(-8)} · {fmtDate(b.createdAt)}</span>
+                <span className="text-[11px] text-slate-400 truncate">
+                  {b.id.slice(-8)} · Reg {fmtDate(b.createdAt)}
+                  {b.lastActivityAt ? <> · Active {fmtDate(b.lastActivityAt)}</> : null}
+                </span>
               </div>
               <div className="items-center min-w-0 hidden lg:flex">
                 <span className="text-sm text-slate-600 truncate">{b.email}</span>

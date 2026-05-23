@@ -803,7 +803,7 @@ type ModalType =
   | "archiveBuyer" | "restoreBuyer" | "disableAccess" | "reactivateAccess"
   | "deleteBuyer" | "privacyPurge"
   | "suspendAccount" | "unsuspendAccount" | "resetPassword"
-  | "upgradePlan" | "downgradePlan";
+  | "upgradePlan" | "downgradePlan" | "overrideDeposit";
 
 export default function AdminBuyerCommandCenter({ data, availability, initialTab, prequalPanelExtras }: Props) {
   const { buyer, preQualification, deals, auctions, deposits, documents,
@@ -1066,6 +1066,15 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
           submitLabel="Downgrade to Standard" destructive requireReason
           onCancel={() => setModal(null)}
           onConfirm={async (reason) => { await doAction("plan", { plan: "STANDARD", reason }, "Buyer downgraded to Standard"); }}
+        />
+      )}
+      {modal === "overrideDeposit" && (
+        <ConfirmModal
+          title="Override Deposit (mark PAID)"
+          description={`Record a PAID Auction Access Deposit for ${buyer.firstName} ${buyer.lastName} without Stripe. Use only for verified manual/offline payments — the buyer is notified and the journey advances to deposit_paid.`}
+          submitLabel="Mark Deposit Paid" requireReason
+          onCancel={() => setModal(null)}
+          onConfirm={async (reason) => { await doAction("deposit/override", { reason }, "Deposit override recorded — buyer notified"); }}
         />
       )}
 
@@ -1372,7 +1381,17 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <SectionCard title="Deposits" icon={<CreditCard size={15} />}>
               {deposits.length === 0 ? (
-                <p className="text-slate-400 text-sm text-center py-4">No deposits on file</p>
+                <div className="text-center py-4">
+                  <p className="text-slate-400 text-sm">No deposits on file</p>
+                  {!buyer.purgedAt && (
+                    <button
+                      onClick={() => setModal("overrideDeposit")}
+                      className="mt-3 inline-flex items-center gap-1.5 px-3 py-2 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-xl text-xs font-semibold transition-colors"
+                    >
+                      <CreditCard size={12} /> Override Deposit (mark PAID)
+                    </button>
+                  )}
+                </div>
               ) : (
                 <>
                   <div className="mb-3 flex items-center justify-between">
@@ -1397,6 +1416,14 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
                       >{d.status}</Badge>
                     </div>
                   ))}
+                  {!deposits.some((d) => d.status === "PAID") && !buyer.purgedAt && (
+                    <button
+                      onClick={() => setModal("overrideDeposit")}
+                      className="mt-3 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-xl text-xs font-semibold transition-colors"
+                    >
+                      <CreditCard size={12} /> Override Deposit (mark PAID)
+                    </button>
+                  )}
                   <div className="pt-3 flex gap-3">
                     <Link href="/admin/payments/deposits" className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />All Deposits</Link>
                     <Link href="/admin/payments/refunds" className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />Refunds</Link>
