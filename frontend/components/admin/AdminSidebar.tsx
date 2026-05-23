@@ -49,6 +49,8 @@ const NAV_GROUPS: NavGroup[] = [
   ]},
   { label: "Operations", items: [
     { label: "Queues", href: "/admin/queues", icon: AlertOctagon },
+    { label: "Compliance", href: "/admin/compliance", icon: Shield },
+    { label: "OFAC Review", href: "/admin/compliance/ofac", icon: AlertOctagon },
     { label: "Manual Reviews", href: "/admin/manual-reviews", icon: ClipboardCheck },
     { label: "Pickups", href: "/admin/pickups", icon: MapPin },
     { label: "E-Sign", href: "/admin/esign", icon: PenLine },
