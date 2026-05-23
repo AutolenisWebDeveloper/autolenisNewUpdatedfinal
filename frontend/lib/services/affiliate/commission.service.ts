@@ -1,5 +1,5 @@
 // lib/services/affiliate/commission.service.ts
-// 3-level commission model — L1=15%, L2=3%, L3=2%
+// 3-level commission model — rates sourced from COMMISSION_RATES in lib/constants.ts
 // D2: COMMISSION_RATES from lib/constants.ts ONLY — never inline
 // Commission walk depth: maximum 3 levels — no L4 or L5
 

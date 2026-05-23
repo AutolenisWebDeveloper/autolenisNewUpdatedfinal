@@ -642,7 +642,7 @@ export async function sendAffiliateVerificationEmail(to: string, firstName: stri
             <br/>
             <span style="color:#4B5563;font-size:13px">Once you verify your email, you&rsquo;ll have immediate access to your affiliate dashboard and referral link.</span>
           </p>
-          <p style="color:#4B5563;font-size:13px">Commission rates on the $499 Premium concierge fee: L1 15% &middot; L2 3% &middot; L3 2%.</p>
+          <p style="color:#4B5563;font-size:13px">Commission rates on the $499 Premium concierge fee: L1 15% &middot; L2 3% &middot; L3 3%.</p>
           <p style="margin-top:24px;color:#94A3B8;font-size:12px">If you didn&rsquo;t apply for an AutoLenis affiliate account, you can safely ignore this email.</p>
         </div>
       </div>
@@ -679,7 +679,7 @@ export async function sendAffiliateActivationEmail(to: string, firstName: string
             <ul style="margin:0;padding-left:20px;color:#4B5563;font-size:13px;line-height:1.7">
               <li>Share your link or code with anyone shopping for a car.</li>
               <li>When they complete a deal, you earn <strong>15% of the $499 concierge fee ($74.85)</strong>.</li>
-              <li>Their referrals earn you L2 (3%) and L3 (2%) commissions — up to 3 levels deep.</li>
+              <li>Their referrals earn you L2 (3%) and L3 (3%) commissions — up to 3 levels deep.</li>
               <li>Payouts process automatically every two weeks.</li>
             </ul>
           </div>

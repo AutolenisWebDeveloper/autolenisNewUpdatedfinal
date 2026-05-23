@@ -16,9 +16,9 @@ export default function AffiliateTermsPage() {
         <ul className="list-none space-y-2 ml-0">
           <li><strong>Level 1 (Direct Referral):</strong> 15% — $74.85 per completed deal</li>
           <li><strong>Level 2:</strong> 3% — $14.97 per completed deal originated by an L1 referral</li>
-          <li><strong>Level 3:</strong> 2% — $9.98 per completed deal originated by an L2 referral</li>
+          <li><strong>Level 3:</strong> 3% — $14.97 per completed deal originated by an L2 referral</li>
         </ul>
-        <p>Total maximum commission payout across all levels: 20% of the concierge fee. No Level 4 or Level 5 commissions exist under any circumstances.</p>
+        <p>Total maximum commission payout across all levels: 21% of the concierge fee. No Level 4 or Level 5 commissions exist under any circumstances.</p>
         <h2 className="text-lg font-semibold text-slate-900 mt-8">3. Commission Triggers</h2>
         <p>Commissions are triggered only upon successful payment of the AutoLenis $499 concierge fee (Stripe checkout.session.completed event with type=service_fee). Commissions are not earned on deposits, refunds, or cancelled deals.</p>
         <h2 className="text-lg font-semibold text-slate-900 mt-8">4. Commission Reversals</h2>

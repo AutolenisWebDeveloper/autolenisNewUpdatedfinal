@@ -106,7 +106,7 @@ function downloadProjectionPng(
   // ── Disclaimer ───────────────────────────────────────────────────────────────
   ctx.fillStyle = "rgba(255,255,255,0.25)";
   ctx.font = "10px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-  ctx.fillText("Projection based on your inputs. Actual earnings vary. L1=15%, L2=3%, L3=2% of $499 fee.", 40, 395);
+  ctx.fillText(`Projection based on your inputs. Actual earnings vary. L1=${Math.round(L1_RATE * 100)}%, L2=${Math.round(L2_RATE * 100)}%, L3=${Math.round(L3_RATE * 100)}% of $${FEE.toFixed(0)} fee.`, 40, 395);
 
   // ── Download ─────────────────────────────────────────────────────────────────
   const link = document.createElement("a");

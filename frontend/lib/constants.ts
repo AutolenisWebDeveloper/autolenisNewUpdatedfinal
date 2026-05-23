@@ -35,13 +35,15 @@ export const AUCTION_EXTENSION_HOURS = 24;
 
 // ─── Commission Rates (3-level ONLY — D2) ─────────────────────────────────────
 // L4 and L5 do not exist. Commission walk depth: maximum 3 levels.
+// Rate is persisted on each Commission row at creation time, so changes here
+// only affect future commissions — historical PAID records remain immutable.
 export const COMMISSION_RATES = {
   LEVEL_1: 0.15, // 15% — paid to the direct referrer
   LEVEL_2: 0.03, // 3%  — paid to the L1 affiliate's referrer
-  LEVEL_3: 0.02, // 2%  — paid to the L2 affiliate's referrer
+  LEVEL_3: 0.03, // 3%  — paid to the L2 affiliate's referrer
 } as const;
 
-// Total max commission payout across all levels: 20%
+// Total max commission payout across all levels: 21%
 export const MAX_COMMISSION_TOTAL =
   COMMISSION_RATES.LEVEL_1 + COMMISSION_RATES.LEVEL_2 + COMMISSION_RATES.LEVEL_3;
 
