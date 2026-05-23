@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
+import { getAdminActor } from '@/lib/auth/admin-actor';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +12,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const body = (await req.json()) as {
     status?: string;
     completed_at?: string | null;
@@ -46,6 +50,14 @@ export async function PATCH(
       event_data: { task_id: data.id, title: data.title },
     });
   }
+
+  await writeCrmAuditLog(supabase, actor, {
+    action: 'CRM_TASK_UPDATED',
+    entity_type: 'crm_task',
+    entity_id: id,
+    new_state: data,
+    metadata: { fields_changed: Object.keys(patch).filter((k) => k !== 'updated_at') },
+  });
 
   return NextResponse.json({ task: data });
 }

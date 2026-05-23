@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminFromRequest } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +31,13 @@ export async function POST(request: NextRequest, { params }: Params) {
       notes: body.notes.trim(),
       sourceUrl: body.sourceUrl ?? null,
     },
+  });
+
+  await createAuditLog(admin, request, {
+    action: "VEHICLE_REQUEST_RESEARCH_NOTE_ADDED",
+    entityType: "VehicleRequest",
+    entityId: requestId,
+    metadata: { logId: log.id, sourceUrl: body.sourceUrl ?? null },
   });
 
   return NextResponse.json({ success: true, data: { log } }, { status: 201 });

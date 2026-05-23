@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { getAllVerses, upsertVerse } from "@/lib/services/faith/faith.service";
 import { z } from "zod";
 
@@ -21,5 +21,11 @@ export async function POST(request: NextRequest) {
   const parsed = schema.safeParse(body);
   if (!parsed.success) return adminError("VALIDATION_ERROR", parsed.error.message, 400);
   const verse = await upsertVerse(parsed.data.reference, parsed.data.text, parsed.data.book, parsed.data.chapter, parsed.data.verse);
+  await createAuditLog(admin, request, {
+    action: "FAITH_VERSE_UPSERTED",
+    entityType: "FaithVerse",
+    entityId: (verse as { id?: string })?.id ?? parsed.data.reference,
+    metadata: { reference: parsed.data.reference, book: parsed.data.book },
+  });
   return adminSuccess({ verse }, 201);
 }

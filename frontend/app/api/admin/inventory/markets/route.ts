@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -19,5 +19,11 @@ export async function POST(request: NextRequest) {
   const parsed = schema.safeParse(body);
   if (!parsed.success) return adminError("VALIDATION_ERROR", parsed.error.message, 400);
   const market = await prisma.marketCoverage.upsert({ where: { city_state: { city: parsed.data.city, state: parsed.data.state } }, create: parsed.data, update: {} });
+  await createAuditLog(admin, request, {
+    action: "INVENTORY_MARKET_UPSERTED",
+    entityType: "MarketCoverage",
+    entityId: market.id,
+    metadata: { city: parsed.data.city, state: parsed.data.state, zip: parsed.data.zip },
+  });
   return adminSuccess({ market }, 201);
 }

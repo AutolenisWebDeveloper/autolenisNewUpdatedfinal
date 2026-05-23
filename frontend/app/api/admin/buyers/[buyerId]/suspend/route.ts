@@ -52,6 +52,18 @@ export async function POST(request: NextRequest, { params }: Props) {
     select: { id: true, isSuspended: true, suspendedAt: true },
   });
 
+  // Notify the buyer of the suspension. Recorded before session revocation so
+  // it persists in the buyer's notification history. Best-effort — never blocks.
+  await prisma.notification.create({
+    data: {
+      buyerId,
+      type: "ADMIN_MESSAGE",
+      channel: "IN_APP",
+      title: "Your account has been suspended",
+      body: `Your AutoLenis account has been suspended. Reason: ${reason}. Contact support@autolenis.com if you believe this is in error.`,
+    },
+  }).catch((err) => console.error("[buyer/suspend] notification failed:", err));
+
   // Revoke all active Supabase sessions for this buyer immediately
   try {
     await supabase.auth.admin.signOut(buyer.user.supabaseId, "global");

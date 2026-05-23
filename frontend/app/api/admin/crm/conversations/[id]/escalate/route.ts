@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
-import { getAdminActorId } from '@/lib/auth/admin-actor';
+import { getAdminActor } from '@/lib/auth/admin-actor';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
 
   let body: EscalateBody = {};
@@ -27,12 +30,8 @@ export async function PATCH(
     // Empty body is allowed — falls through to caller-as-assignee.
   }
 
-  const callerId = await getAdminActorId();
+  const callerId = actor.adminId;
   const assigneeId = body.admin_id ?? callerId;
-
-  if (!assigneeId) {
-    return NextResponse.json({ error: 'UNAUTHENTICATED' }, { status: 401 });
-  }
 
   const { data: before, error: fetchError } = await supabase
     .from('conversations')
@@ -79,16 +78,13 @@ export async function PATCH(
       created_by: callerId,
     });
 
-  if (callerId) {
-    await supabase.from('admin_audit_log').insert({
-      admin_id: callerId,
-      action: 'ESCALATE_CONVERSATION',
-      entity_type: 'conversation',
-      entity_id: id,
-      before_state: { status: before.status, assigned_to: before.assigned_to },
-      after_state: { status: 'escalated', assigned_to: assigneeId },
-    });
-  }
+  await writeCrmAuditLog(supabase, actor, {
+    action: 'ESCALATE_CONVERSATION',
+    entity_type: 'conversation',
+    entity_id: id,
+    previous_state: { status: before.status, assigned_to: before.assigned_to },
+    new_state: { status: 'escalated', assigned_to: assigneeId },
+  });
 
   return NextResponse.json({
     ok: true,

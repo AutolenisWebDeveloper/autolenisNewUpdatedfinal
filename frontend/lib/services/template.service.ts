@@ -8,6 +8,7 @@ import type {
   RenderedTemplate,
   TemplateVariable,
 } from '../types/crm';
+import { writeCrmAuditLog, type CrmAuditActor } from './admin/crm-audit';
 
 // Platform-supported variables. Anything outside this set is left as a literal
 // {{...}} in the rendered output so missing data is visible during QA instead
@@ -165,9 +166,10 @@ export class TemplateService {
   static async createTemplate(
     supabase: SupabaseClient,
     input: EmailTemplateInput,
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<EmailTemplate> {
     const variables = input.variables ?? this.extractVariables(input.subject, input.html_body);
+    const adminId = actor?.adminId ?? null;
 
     const { data, error } = await supabase
       .from('email_templates')
@@ -198,15 +200,12 @@ export class TemplateService {
       created_by: adminId,
     });
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'CREATE_EMAIL_TEMPLATE',
-        entity_type: 'email_template',
-        entity_id: data.id,
-        after_state: data,
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'CREATE_EMAIL_TEMPLATE',
+      entity_type: 'email_template',
+      entity_id: data.id,
+      new_state: data,
+    });
 
     return data as EmailTemplate;
   }
@@ -218,8 +217,9 @@ export class TemplateService {
     supabase: SupabaseClient,
     id: string,
     updates: EmailTemplateUpdate,
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<EmailTemplate> {
+    const adminId = actor?.adminId ?? null;
     const before = await this.getTemplate(supabase, id);
     if (!before) throw new Error('TEMPLATE_NOT_FOUND');
 
@@ -269,16 +269,13 @@ export class TemplateService {
 
     if (error) throw error;
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'UPDATE_EMAIL_TEMPLATE',
-        entity_type: 'email_template',
-        entity_id: id,
-        before_state: before,
-        after_state: data,
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'UPDATE_EMAIL_TEMPLATE',
+      entity_type: 'email_template',
+      entity_id: id,
+      previous_state: before,
+      new_state: data,
+    });
 
     return data as EmailTemplate;
   }

@@ -28,7 +28,9 @@ export interface DealerListRow {
   inventoryCount: number;
   offerCount: number;
   invitationCount: number;
-  dealsCount: number;
+  activeBids: number;
+  dealsWon: number;
+  approvalDate: string | null;
   hasComplianceFlag: boolean;
   createdAt: string;
 }
@@ -97,6 +99,8 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [tierFilter, setTierFilter] = useState("");
+  const [inventoryTypeFilter, setInventoryTypeFilter] = useState("");
+  const [serviceAreaFilter, setServiceAreaFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -149,15 +153,18 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
     if (query) params.q = query;
     if (statusFilter) params.status = statusFilter;
     if (tierFilter) params.tier = tierFilter;
+    if (inventoryTypeFilter) params.inventoryType = inventoryTypeFilter;
+    if (serviceAreaFilter) params.serviceArea = serviceAreaFilter.trim();
     fetchDealers(params);
-  }, [query, statusFilter, tierFilter, fetchDealers]);
+  }, [query, statusFilter, tierFilter, inventoryTypeFilter, serviceAreaFilter, fetchDealers]);
 
   const clearFilters = () => {
     setQuery(""); setStatusFilter(""); setTierFilter("");
+    setInventoryTypeFilter(""); setServiceAreaFilter("");
     fetchDealers({ page: "1", perPage: String(perPage) });
   };
 
-  const hasFilters = !!(query || statusFilter || tierFilter);
+  const hasFilters = !!(query || statusFilter || tierFilter || inventoryTypeFilter || serviceAreaFilter);
 
   function openAction(type: ActionType, dealerId: string, dealerName: string) {
     setActionInput("");
@@ -383,6 +390,30 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
                 <option value="PLATINUM">Platinum</option>
               </select>
             </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Inventory Type</label>
+              <select
+                value={inventoryTypeFilter}
+                onChange={(e) => setInventoryTypeFilter(e.target.value)}
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+              >
+                <option value="">Any Inventory</option>
+                <option value="New">New</option>
+                <option value="Used">Used</option>
+                <option value="Certified Pre-Owned">Certified Pre-Owned</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Service Area (State)</label>
+              <input
+                value={serviceAreaFilter}
+                onChange={(e) => setServiceAreaFilter(e.target.value.toUpperCase().slice(0, 2))}
+                onKeyDown={(e) => e.key === "Enter" && applyFilters()}
+                placeholder="e.g. TX"
+                maxLength={2}
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 w-24 uppercase focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+              />
+            </div>
           </div>
         )}
       </div>
@@ -391,15 +422,28 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         {/* Table Header */}
         <div className="hidden lg:grid grid-cols-[2fr_1.5fr_1fr_1fr_0.8fr_0.8fr_0.7fr_0.6fr_0.6fr_0.7fr_100px] gap-2 px-5 py-3 border-b border-slate-100 bg-slate-50/50">
-          {["Dealership", "Email", "Phone", "City/State", "Status", "Tier", "Inventory", "Auctions", "Deals", "Last Activity", "Actions"].map((h) => (
+          {["Dealership", "Email", "Phone", "City/State", "Status", "Tier", "Inventory", "Active Bids", "Won Deals", "Approval Date", "Actions"].map((h) => (
             <span key={h} className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{h}</span>
           ))}
         </div>
 
         {loading && (
-          <div className="py-16 flex items-center justify-center">
-            <RefreshCw size={20} className="animate-spin text-slate-400" />
-            <span className="ml-2 text-slate-400 text-sm">Loading dealers…</span>
+          <div className="divide-y divide-slate-50" data-testid="dealers-skeleton" aria-busy="true">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-5 py-3.5 animate-pulse">
+                <div className="flex-1 min-w-0">
+                  <div className="h-3.5 w-44 bg-slate-200 rounded mb-1.5" />
+                  <div className="h-2.5 w-40 bg-slate-100 rounded" />
+                </div>
+                <div className="hidden lg:block h-3 w-40 bg-slate-100 rounded" />
+                <div className="hidden lg:block h-5 w-16 bg-slate-100 rounded-full" />
+                <div className="hidden lg:block h-5 w-16 bg-slate-100 rounded-full" />
+                <div className="hidden lg:block h-3 w-10 bg-slate-100 rounded" />
+                <div className="hidden lg:block h-3 w-10 bg-slate-100 rounded" />
+                <div className="hidden lg:block h-3 w-20 bg-slate-100 rounded" />
+                <div className="h-7 w-16 bg-slate-100 rounded-lg" />
+              </div>
+            ))}
           </div>
         )}
 
@@ -474,19 +518,19 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
               <span className="text-sm font-medium text-slate-700">{d.inventoryCount}</span>
             </div>
 
-            {/* Active Auctions */}
+            {/* Active Bids */}
             <div className="items-center hidden lg:flex">
-              <span className="text-sm font-medium text-slate-700">{d.invitationCount}</span>
+              <span className="text-sm font-medium text-slate-700">{d.activeBids}</span>
             </div>
 
             {/* Won Deals */}
             <div className="items-center hidden lg:flex">
-              <span className="text-sm font-medium text-slate-700">{d.dealsCount}</span>
+              <span className="text-sm font-medium text-slate-700">{d.dealsWon}</span>
             </div>
 
-            {/* Last Activity */}
+            {/* Approval Date */}
             <div className="items-center hidden lg:flex">
-              <span className="text-xs text-slate-400">{fmtDate(d.createdAt)}</span>
+              <span className="text-xs text-slate-400">{d.approvalDate ? fmtDate(d.approvalDate) : "—"}</span>
             </div>
 
             {/* Actions */}

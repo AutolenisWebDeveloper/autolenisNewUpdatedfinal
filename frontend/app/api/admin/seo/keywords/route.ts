@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAdminWithRole, adminSuccess, adminError, OPERATIONAL_ROLES } from "@/lib/auth/admin-api";
+import { getAdminWithRole, adminSuccess, adminError, OPERATIONAL_ROLES, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -46,6 +46,13 @@ export async function POST(request: NextRequest) {
       targetPages: data.targetPages,
       isActive: true,
     },
+  });
+
+  await createAuditLog(admin, request, {
+    action: "SEO_KEYWORD_UPSERTED",
+    entityType: "SeoKeyword",
+    entityId: keyword.id,
+    metadata: { keyword: data.keyword, searchVolume: data.searchVolume, difficulty: data.difficulty },
   });
 
   return adminSuccess({ keyword }, 201);

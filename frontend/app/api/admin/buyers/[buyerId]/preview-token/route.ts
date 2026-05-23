@@ -4,7 +4,7 @@
 // Expires in 5 minutes. Stateless JWT — no DB storage needed.
 
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminError, adminSuccess, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { SignJWT } from "jose";
 import { z } from "zod";
@@ -60,6 +60,13 @@ export async function POST(request: NextRequest, { params }: Props) {
     .setIssuedAt()
     .setExpirationTime("5m")
     .sign(getSecret());
+
+  await createAuditLog(admin, request, {
+    action: "BUYER_IMPERSONATION_PREVIEW_STARTED",
+    entityType: "Buyer",
+    entityId: buyerId,
+    metadata: { stageRoute, ttlSeconds: 300 },
+  });
 
   return adminSuccess({ token, expiresIn: 300 });
 }

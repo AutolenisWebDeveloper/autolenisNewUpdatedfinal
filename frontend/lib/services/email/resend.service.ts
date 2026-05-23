@@ -5,6 +5,16 @@
 
 import { Resend } from "resend";
 import { prisma } from "@/lib/prisma";
+import { PREMIUM_FEE_CENTS, PREMIUM_FEE_USD, COMMISSION_RATES, formatCentsAsUsd } from "@/lib/constants";
+
+// L1 affiliate commission on the Premium concierge fee.
+// Derived from constants so a fee or rate change is reflected automatically.
+const L1_PREMIUM_FEE_COMMISSION_USD = formatCentsAsUsd(
+  Math.round(PREMIUM_FEE_CENTS * COMMISSION_RATES.LEVEL_1),
+);
+const L1_PCT_LABEL = `${Math.round(COMMISSION_RATES.LEVEL_1 * 100)}%`;
+const L2_PCT_LABEL = `${Math.round(COMMISSION_RATES.LEVEL_2 * 100)}%`;
+const L3_PCT_LABEL = `${Math.round(COMMISSION_RATES.LEVEL_3 * 100)}%`;
 import { prequalApprovedHtml } from "./templates/prequal-approved";
 import {
   ADVERSE_ACTION_SUBJECT,
@@ -43,6 +53,7 @@ import { DEALER_INVITATION_SUBJECT, renderDealerInvitationEmail } from "./templa
 import { DEALER_WELCOME_SUBJECT, renderDealerWelcomeEmail } from "./templates/dealer-welcome";
 import { DEALER_AGREEMENT_PENDING_SUBJECT, renderDealerAgreementPendingEmail } from "./templates/dealer-agreement-pending";
 import { DEALER_ACCOUNT_APPROVED_SUBJECT, renderDealerAccountApprovedEmail } from "./templates/dealer-account-approved";
+import { DEALER_ACCOUNT_REINSTATED_SUBJECT, renderDealerAccountReinstatedEmail } from "./templates/dealer-account-reinstated";
 import { DEALER_ACCOUNT_SUSPENDED_SUBJECT, renderDealerAccountSuspendedEmail } from "./templates/dealer-account-suspended";
 import { DEALER_ACCOUNT_TERMINATED_SUBJECT, renderDealerAccountTerminatedEmail } from "./templates/dealer-account-terminated";
 import { DEALER_AUCTION_INVITATION_SUBJECT, renderDealerAuctionInvitationEmail } from "./templates/dealer-auction-invitation";
@@ -642,7 +653,7 @@ export async function sendAffiliateVerificationEmail(to: string, firstName: stri
             <br/>
             <span style="color:#4B5563;font-size:13px">Once you verify your email, you&rsquo;ll have immediate access to your affiliate dashboard and referral link.</span>
           </p>
-          <p style="color:#4B5563;font-size:13px">Commission rates on the $499 Premium concierge fee: L1 15% &middot; L2 3% &middot; L3 3%.</p>
+          <p style="color:#4B5563;font-size:13px">Commission rates on the ${PREMIUM_FEE_USD} Premium concierge fee: L1 ${L1_PCT_LABEL} &middot; L2 ${L2_PCT_LABEL} &middot; L3 ${L3_PCT_LABEL}.</p>
           <p style="margin-top:24px;color:#94A3B8;font-size:12px">If you didn&rsquo;t apply for an AutoLenis affiliate account, you can safely ignore this email.</p>
         </div>
       </div>
@@ -678,8 +689,8 @@ export async function sendAffiliateActivationEmail(to: string, firstName: string
             <p style="margin:0 0 8px;color:#111827;font-size:13px;font-weight:600">How it works</p>
             <ul style="margin:0;padding-left:20px;color:#4B5563;font-size:13px;line-height:1.7">
               <li>Share your link or code with anyone shopping for a car.</li>
-              <li>When they complete a deal, you earn <strong>15% of the $499 concierge fee ($74.85)</strong>.</li>
-              <li>Their referrals earn you L2 (3%) and L3 (3%) commissions — up to 3 levels deep.</li>
+              <li>When they complete a deal, you earn <strong>${L1_PCT_LABEL} of the ${PREMIUM_FEE_USD} concierge fee (${L1_PREMIUM_FEE_COMMISSION_USD})</strong>.</li>
+              <li>Their referrals earn you L2 (${L2_PCT_LABEL}) and L3 (${L3_PCT_LABEL}) commissions — up to 3 levels deep.</li>
               <li>Payouts process automatically every two weeks.</li>
             </ul>
           </div>
@@ -715,6 +726,55 @@ export async function sendAffiliateRejectionEmail(to: string, firstName: string,
           <p>If any of these change in the future, you're welcome to reapply.</p>
           <p>In the meantime, you can still use AutoLenis as a buyer to find your own next vehicle.</p>
           <a href="${appUrl}/for-buyers" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin-top:8px">Explore as a buyer</a>
+          <p style="margin-top:32px;color:#94A3B8;font-size:12px">— The AutoLenis Team</p>
+        </div>
+      </div>
+    `,
+  });
+}
+
+export async function sendAffiliateSuspendedEmail(to: string, firstName: string, reason: string) {
+  return sendIdempotent({
+    // Per-suspension idempotency key — an affiliate may be suspended more than once.
+    idempotencyKey: `affiliate-suspended-${to}-${Date.now()}`,
+    to,
+    templateId: "affiliate-suspended",
+    subject: "Your AutoLenis affiliate account has been suspended",
+    html: `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+        <div style="background:#FEF2F2;padding:32px;text-align:center;border-bottom:3px solid #DC2626">
+          <h1 style="color:#111827;margin:0;font-size:22px">Account suspended</h1>
+        </div>
+        <div style="padding:32px;color:#4B5563;line-height:1.7">
+          <p>Hi ${firstName},</p>
+          <p>Your AutoLenis affiliate account has been suspended. While suspended, your referral links remain active for attribution but you will not accrue new commissions and payouts are paused.</p>
+          <p style="background:#F8F9FB;border-left:3px solid #DC2626;padding:12px 16px;margin:16px 0;font-size:13px"><strong style="color:#111827">Reason:</strong> ${reason}</p>
+          <p>If you believe this is a mistake or would like to discuss reinstatement, please contact our team.</p>
+          <a href="mailto:support@autolenis.com" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin-top:8px">Contact Support</a>
+          <p style="margin-top:32px;color:#94A3B8;font-size:12px">— The AutoLenis Team</p>
+        </div>
+      </div>
+    `,
+  });
+}
+
+export async function sendAffiliateReinstatedEmail(to: string, firstName: string) {
+  const appUrl = APP_URL;
+  return sendIdempotent({
+    // Per-reinstatement idempotency key — repeat suspend→reinstate cycles each send.
+    idempotencyKey: `affiliate-reinstated-${to}-${Date.now()}`,
+    to,
+    templateId: "affiliate-reinstated",
+    subject: "Your AutoLenis affiliate account has been reinstated",
+    html: `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+        <div style="background:#F0FDF4;padding:32px;text-align:center;border-bottom:3px solid #16A34A">
+          <h1 style="color:#111827;margin:0;font-size:22px">Welcome back</h1>
+        </div>
+        <div style="padding:32px;color:#4B5563;line-height:1.7">
+          <p>Hi ${firstName},</p>
+          <p>Good news — your AutoLenis affiliate account has been reinstated and is active again. You can resume sharing your referral link and earning commissions right away.</p>
+          <a href="${appUrl}/affiliate/portal/dashboard" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin-top:8px">Go to my dashboard</a>
           <p style="margin-top:32px;color:#94A3B8;font-size:12px">— The AutoLenis Team</p>
         </div>
       </div>
@@ -1148,6 +1208,20 @@ export async function sendDealerAccountSuspendedEmail(params: {
     templateId: "dealer-account-suspended",
     subject: DEALER_ACCOUNT_SUSPENDED_SUBJECT,
     html: renderDealerAccountSuspendedEmail({ contactName: params.contactName, dealershipName: params.dealershipName, reasonCategory: params.reasonCategory, adminContactEmail: params.adminContactEmail }),
+  });
+}
+
+export async function sendDealerAccountReinstatedEmail(params: {
+  to: string; contactName: string; dealershipName: string; dashboardUrl: string;
+}) {
+  return sendIdempotent({
+    // Per-reinstatement idempotency key — a dealer may be suspended and
+    // reinstated more than once over their lifetime.
+    idempotencyKey: `dealer-account-reinstated-${params.to}-${Date.now()}`,
+    to: params.to,
+    templateId: "dealer-account-reinstated",
+    subject: DEALER_ACCOUNT_REINSTATED_SUBJECT,
+    html: renderDealerAccountReinstatedEmail({ contactName: params.contactName, dealershipName: params.dealershipName, dashboardUrl: params.dashboardUrl }),
   });
 }
 

@@ -1,6 +1,6 @@
 // POST /api/admin/payments/deposit/create-intent
-// Admin creates a Stripe payment intent for the $99 deposit on behalf of a buyer.
-// Amount is ALWAYS 9900 cents — from lib/constants.ts. NEVER accept amount from client.
+// Admin creates a Stripe payment intent for the Auction Access Deposit on behalf of a buyer.
+// Amount is ALWAYS from lib/constants.ts. NEVER accept amount from client.
 // Intent ID is stored on the Deposit record.
 
 import { NextRequest } from "next/server";
@@ -8,7 +8,7 @@ import { getAdminWithRole, adminSuccess, adminError } from "@/lib/auth/admin-api
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { getStripe } from "@/lib/stripe";
-import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { DEPOSIT_AMOUNT_CENTS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 
 const schema = z.object({
   buyerId: z.string().min(1),
@@ -33,10 +33,10 @@ export async function POST(request: NextRequest) {
   let intentId: string;
   try {
     const intent = await getStripe().paymentIntents.create({
-      amount: DEPOSIT_AMOUNT_CENTS, // 9900 — server-side constant
+      amount: DEPOSIT_AMOUNT_CENTS, // server-side constant from constants.ts
       currency: "usd",
       metadata: { buyerId, type: "deposit", source: "admin_initiated" },
-      description: "AutoLenis $99 Auction Access Deposit (admin-initiated)",
+      description: `AutoLenis ${DEPOSIT_AMOUNT_USD} Auction Access Deposit (admin-initiated)`,
     }, {
       idempotencyKey: `deposit-admin-${buyerId}`,
     });

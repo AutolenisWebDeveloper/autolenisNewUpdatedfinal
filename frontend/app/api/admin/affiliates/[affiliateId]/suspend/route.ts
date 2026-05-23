@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { z } from "zod";
 import { suspendAffiliateByAdmin } from "@/lib/services/admin/admin-affiliate-command-center.service";
+import { prisma } from "@/lib/prisma";
+import { sendAffiliateSuspendedEmail } from "@/lib/services/email/resend.service";
 
 interface Props { params: Promise<{ affiliateId: string }> }
 
@@ -23,6 +25,18 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   try {
     const result = await suspendAffiliateByAdmin(affiliateId, admin.adminId, admin.email, parsed.data.reason);
+
+    // Notify affiliate of suspension with reason — non-blocking.
+    const affiliate = await prisma.affiliate.findUnique({
+      where: { id: affiliateId },
+      include: { user: { select: { email: true } } },
+    });
+    if (affiliate?.user?.email) {
+      const firstName = affiliate.user.email.split("@")[0];
+      await sendAffiliateSuspendedEmail(affiliate.user.email, firstName, parsed.data.reason)
+        .catch(err => console.error("[affiliates/suspend] suspension email failed:", err));
+    }
+
     return adminSuccess(result);
   } catch (err) {
     return adminError("ACTION_FAILED", err instanceof Error ? err.message : "Suspend failed", 400);

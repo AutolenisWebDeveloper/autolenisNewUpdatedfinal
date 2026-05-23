@@ -6,8 +6,9 @@
 //   action: "REOPEN_SOURCING"      → OFFER_DECLINED | CLOSED_NO_MATCH → ACTIVE_SOURCING
 //   action: "CREATE_DEAL"          → OFFER_ACCEPTED → DEAL_CREATED
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminFromRequest } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 import { VehicleRequestStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,7 @@ const TRANSITIONS: Record<string, { from: VehicleRequestStatus[]; to: VehicleReq
     ],
     to: VehicleRequestStatus.CLOSED_NO_MATCH,
     eventType: "CLOSED_NO_MATCH",
-    buyerUpdate: { title: "No match found", body: "We were unable to find a vehicle that matches your request. Your $99 deposit is fully refundable." },
+    buyerUpdate: { title: "No match found", body: `We were unable to find a vehicle that matches your request. Your ${DEPOSIT_AMOUNT_USD} deposit is fully refundable.` },
   },
   REOPEN_SOURCING: {
     from: [VehicleRequestStatus.OFFER_DECLINED, VehicleRequestStatus.CLOSED_NO_MATCH],
@@ -100,6 +101,18 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       data: { requestId, title: transition.buyerUpdate.title, body: transition.buyerUpdate.body },
     });
   }
+
+  await createAuditLog(admin, request, {
+    action: `VEHICLE_REQUEST_${transition.eventType}`,
+    entityType: "VehicleRequest",
+    entityId: requestId,
+    metadata: {
+      action: body.action,
+      fromStatus: req.status,
+      toStatus: transition.to,
+      assignedAdminId: body.assignedAdminId ?? null,
+    },
+  });
 
   return NextResponse.json({ success: true, data: { request: updated } });
 }

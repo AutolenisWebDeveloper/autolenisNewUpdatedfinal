@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
-import { getAdminActorId } from '@/lib/auth/admin-actor';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import type { ContactUpdate } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
@@ -42,12 +42,13 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const body = (await req.json()) as ContactUpdate;
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
 
   try {
-    const updated = await ContactService.updateContact(supabase, id, body, adminId);
+    const updated = await ContactService.updateContact(supabase, id, body, actor);
     return NextResponse.json({ contact: updated });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'UPDATE_FAILED';
@@ -60,9 +61,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
 
-  await ContactService.softDeleteContact(supabase, id, adminId);
+  await ContactService.softDeleteContact(supabase, id, actor);
   return NextResponse.json({ deleted: true });
 }

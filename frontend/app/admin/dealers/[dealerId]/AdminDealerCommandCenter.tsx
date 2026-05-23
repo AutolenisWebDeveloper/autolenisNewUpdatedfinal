@@ -1285,31 +1285,34 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
         {/* ── Compliance Tab ── */}
         {activeTab === "compliance" && (
           <div className="max-w-2xl space-y-5">
-            <SectionCard title="Compliance Status" icon={<Shield size={14} />}>
+            <SectionCard title="OFAC / Compliance Review" icon={<Shield size={14} />}>
               {complianceStatus.hasFlag ? (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4">
                   <div className="flex items-center gap-2 mb-1">
                     <ShieldAlert size={15} className="text-red-600" />
-                    <span className="text-sm font-semibold text-red-700">Active Compliance Flag</span>
+                    <span className="text-sm font-semibold text-red-700">Under review — flag active</span>
                   </div>
+                  <p className="text-xs text-red-500 mt-0.5">Dealer is flagged for OFAC / sanctions / compliance review. Clear the flag to resume standing.</p>
                   {complianceStatus.reason && (
-                    <p className="text-sm text-red-600 mt-1">{complianceStatus.reason}</p>
+                    <p className="text-sm text-red-600 mt-1.5"><span className="font-medium">Reason:</span> {complianceStatus.reason}</p>
                   )}
                 </div>
               ) : (
-                <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 flex items-center gap-2">
-                  <CheckCircle2 size={15} className="text-green-600" />
-                  <span className="text-sm font-medium text-green-700">No active compliance issues</span>
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={15} className="text-green-600" />
+                    <span className="text-sm font-medium text-green-700">Clear — no active OFAC / compliance flag</span>
+                  </div>
                 </div>
               )}
               <div className="flex gap-3">
                 {!complianceStatus.hasFlag ? (
                   <button onClick={() => setModal("compliance-flag")} className="flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">
-                    <Flag size={13} /> Flag Issue
+                    <Flag size={13} /> Flag for Review
                   </button>
                 ) : (
                   <button onClick={() => setModal("compliance-resolve")} className="flex items-center gap-2 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-semibold transition-colors">
-                    <CheckCircle2 size={13} /> Resolve Issue
+                    <CheckCircle2 size={13} /> Clear Flag
                   </button>
                 )}
               </div>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminFromRequest } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +38,13 @@ export async function POST(request: NextRequest, { params }: Params) {
       actorRole: "ADMIN",
       payload: { checkpointId, name: cp.name },
     },
+  });
+
+  await createAuditLog(admin, request, {
+    action: "VEHICLE_REQUEST_CHECKPOINT_COMPLETED",
+    entityType: "VehicleRequest",
+    entityId: requestId,
+    metadata: { checkpointId, name: cp.name },
   });
 
   return NextResponse.json({ success: true, data: { checkpoint: updated } });

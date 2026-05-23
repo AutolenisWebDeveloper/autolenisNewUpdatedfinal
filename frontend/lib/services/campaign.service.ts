@@ -6,6 +6,7 @@ import type {
 } from '../types/crm';
 import { SegmentService } from './segment.service';
 import { SuppressionService } from './suppression.service';
+import { writeCrmAuditLog, type CrmAuditActor } from './admin/crm-audit';
 
 const VALID_STATUSES: CampaignStatus[] = [
   'draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled',
@@ -145,7 +146,7 @@ export class CampaignService {
   static async createCampaign(
     supabase: SupabaseClient,
     input: CampaignInput,
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<Campaign> {
     if (!input.name?.trim()) throw new Error('NAME_REQUIRED');
     if (!input.segment_id) throw new Error('SEGMENT_REQUIRED');
@@ -167,21 +168,18 @@ export class CampaignService {
         template_id: input.template_id ?? null,
         sms_body: input.sms_body ?? null,
         scheduled_at: scheduled?.toISOString() ?? null,
-        created_by: adminId,
+        created_by: actor?.adminId ?? null,
       })
       .select('*')
       .single();
     if (error) throw error;
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'CREATE_CAMPAIGN',
-        entity_type: 'campaign',
-        entity_id: data.id,
-        after_state: data,
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'CREATE_CAMPAIGN',
+      entity_type: 'campaign',
+      entity_id: data.id,
+      new_state: data,
+    });
 
     return data as Campaign;
   }
@@ -190,7 +188,7 @@ export class CampaignService {
     supabase: SupabaseClient,
     id: string,
     status: CampaignStatus,
-    adminId: string | null,
+    actor: CrmAuditActor | null,
     extra: Record<string, unknown> = {},
   ): Promise<Campaign> {
     if (!VALID_STATUSES.includes(status)) throw new Error('STATUS_INVALID');
@@ -202,15 +200,12 @@ export class CampaignService {
       .single();
     if (error) throw error;
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'UPDATE_CAMPAIGN_STATUS',
-        entity_type: 'campaign',
-        entity_id: id,
-        after_state: { status, ...extra },
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'UPDATE_CAMPAIGN_STATUS',
+      entity_type: 'campaign',
+      entity_id: id,
+      new_state: { status, ...extra },
+    });
     return data as Campaign;
   }
 }

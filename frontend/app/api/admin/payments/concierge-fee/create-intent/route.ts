@@ -1,6 +1,6 @@
 // POST /api/admin/payments/concierge-fee/create-intent
-// Admin creates a Stripe payment intent for the $400 Premium concierge fee.
-// Amount is ALWAYS PREMIUM_FEE_REMAINING_CENTS (40000) from constants.ts.
+// Admin creates a Stripe payment intent for the Premium concierge fee balance.
+// Amount is ALWAYS PREMIUM_FEE_REMAINING_CENTS from constants.ts.
 // NEVER accept financial amounts from the client.
 
 import { NextRequest } from "next/server";
@@ -8,7 +8,12 @@ import { getAdminWithRole, adminSuccess, adminError } from "@/lib/auth/admin-api
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { getStripe } from "@/lib/stripe";
-import { PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
+import {
+  PREMIUM_FEE_REMAINING_CENTS,
+  PREMIUM_FEE_USD,
+  PREMIUM_FEE_REMAINING_USD,
+  DEPOSIT_AMOUNT_USD,
+} from "@/lib/constants";
 
 const schema = z.object({
   dealId: z.string().min(1),
@@ -37,10 +42,10 @@ export async function POST(request: NextRequest) {
   let intentId: string;
   try {
     const intent = await getStripe().paymentIntents.create({
-      amount: PREMIUM_FEE_REMAINING_CENTS, // 40000 ($400) — server-side constant
+      amount: PREMIUM_FEE_REMAINING_CENTS, // server-side constant from constants.ts
       currency: "usd",
       metadata: { buyerId: deal.buyerId, dealId, type: "concierge_fee", source: "admin_initiated" },
-      description: "AutoLenis Premium Concierge Fee ($499 total, $99 deposit credited, $400 due)",
+      description: `AutoLenis Premium Concierge Fee (${PREMIUM_FEE_USD} total, ${DEPOSIT_AMOUNT_USD} deposit credited, ${PREMIUM_FEE_REMAINING_USD} due)`,
     }, {
       idempotencyKey: `concierge-fee-admin-${dealId}`,
     });
@@ -74,6 +79,6 @@ export async function POST(request: NextRequest) {
     dealId,
     stripePaymentIntentId: intentId,
     amountCents: PREMIUM_FEE_REMAINING_CENTS,
-    displayMessage: `$499 total — $99 deposit credited = $400 due`,
+    displayMessage: `${PREMIUM_FEE_USD} total — ${DEPOSIT_AMOUNT_USD} deposit credited = ${PREMIUM_FEE_REMAINING_USD} due`,
   }, 201);
 }

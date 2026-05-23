@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAdminWithRole, adminSuccess, adminError, OPERATIONAL_ROLES } from "@/lib/auth/admin-api";
+import { getAdminWithRole, adminSuccess, adminError, OPERATIONAL_ROLES, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -32,6 +32,13 @@ export async function PATCH(request: NextRequest, { params }: Props) {
     where: { id },
     data: parsed.data,
   });
+  await createAuditLog(admin, request, {
+    action: "SEO_KEYWORD_UPDATED",
+    entityType: "SeoKeyword",
+    entityId: id,
+    previousState: existing as unknown as Record<string, unknown>,
+    newState: keyword as unknown as Record<string, unknown>,
+  });
   return adminSuccess({ keyword });
 }
 
@@ -47,6 +54,12 @@ export async function DELETE(request: NextRequest, { params }: Props) {
   const keyword = await prisma.seoKeyword.update({
     where: { id },
     data: { isActive: false },
+  });
+  await createAuditLog(admin, request, {
+    action: "SEO_KEYWORD_DEACTIVATED",
+    entityType: "SeoKeyword",
+    entityId: id,
+    metadata: { keyword: existing.keyword },
   });
   return adminSuccess({ keyword });
 }

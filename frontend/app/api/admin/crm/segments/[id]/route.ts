@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { SegmentService } from '@/lib/services/segment.service';
-import { getAdminActorId } from '@/lib/auth/admin-actor';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,11 +28,12 @@ export async function PATCH(
     return NextResponse.json({ error: 'INVALID_JSON' }, { status: 400 });
   }
 
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
 
   try {
-    const segment = await SegmentService.updateSegment(supabase, id, body, adminId);
+    const segment = await SegmentService.updateSegment(supabase, id, body, actor);
     return NextResponse.json({ segment });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'UPDATE_FAILED';

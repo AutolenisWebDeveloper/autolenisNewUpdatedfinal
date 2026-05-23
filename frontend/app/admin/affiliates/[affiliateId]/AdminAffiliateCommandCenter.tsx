@@ -117,7 +117,8 @@ interface Props {
 
 type ModalType =
   | "approve" | "reject" | "suspend" | "reactivate"
-  | "note" | "profile-edit" | "compliance-flag" | "compliance-resolve";
+  | "note" | "profile-edit" | "compliance-flag" | "compliance-resolve"
+  | "clawback" | "payout";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -260,6 +261,66 @@ function ConfirmModal({
   );
 }
 
+const PAYOUT_METHODS = ["ACH Transfer", "Zelle", "PayPal", "Check", "Venmo", "Other"] as const;
+
+function PayoutModal({ amountCents, onCancel, onConfirm }: {
+  amountCents: number;
+  onCancel: () => void;
+  onConfirm: (paymentMethod: string, paymentReference: string, note: string) => Promise<void>;
+}) {
+  const [method, setMethod] = useState<string>(PAYOUT_METHODS[0]);
+  const [reference, setReference] = useState("");
+  const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!reference.trim()) { setError("Payment reference is required"); return; }
+    setLoading(true); setError(null);
+    try { await onConfirm(method, reference.trim(), note.trim()); }
+    catch (err) { setError(err instanceof Error ? err.message : "Payout failed"); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 w-full max-w-md">
+        <div className="flex items-start justify-between mb-4">
+          <h3 className="font-bold text-lg text-slate-900">Initiate Payout</h3>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 ml-2"><X size={18} /></button>
+        </div>
+        <p className="text-slate-600 text-sm mb-4">
+          Record payout of <strong>{fmtCents(amountCents)}</strong> for this approved commission. The affiliate is notified once recorded.
+        </p>
+        {error && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 text-red-700 text-sm mb-3">{error}</div>}
+        <form onSubmit={submit} className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Payment Method</label>
+            <select value={method} onChange={(e) => setMethod(e.target.value)} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white">
+              {PAYOUT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Payment Reference</label>
+            <input value={reference} onChange={(e) => setReference(e.target.value)} required placeholder="Transaction ID / check no." className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Note (optional)</label>
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Internal note" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onCancel} className="flex-1 border border-slate-200 text-slate-600 rounded-xl py-2.5 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
+            <button type="submit" disabled={loading || !reference.trim()} className="flex-1 rounded-xl py-2.5 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition-colors">
+              {loading ? "Processing..." : "Record Payout"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function AddNoteModal({ affiliateId, onClose, onSuccess }: {
   affiliateId: string; onClose: () => void; onSuccess: () => void;
 }) {
@@ -382,6 +443,8 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
   const [activeTab, setActiveTab] = useState(initialTab ?? "overview");
   const [refreshing, setRefreshing] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  // Target commission for payout / clawback actions.
+  const [commissionTarget, setCommissionTarget] = useState<{ id: string; amountCents: number } | null>(null);
 
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
@@ -397,6 +460,17 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
 
   async function doAction(endpoint: string, body: Record<string, string>, successMsg: string) {
     const res = await fetch("/api/admin/affiliates/" + affiliate.id + "/" + endpoint, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await res.json() as { success?: boolean; data?: unknown; error?: { message: string } };
+    if (!res.ok) throw new Error(d.error?.message ?? "Action failed");
+    handleSuccess(successMsg);
+  }
+
+  // Commission endpoints live under /api/admin/affiliates/commissions/{id}/...
+  async function doCommissionAction(commissionId: string, action: string, body: Record<string, string>, successMsg: string) {
+    const res = await fetch("/api/admin/affiliates/commissions/" + commissionId + "/" + action, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -497,6 +571,24 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
           submitLabel="Resolve Issue" requireReason={true}
           onCancel={() => setModal(null)}
           onConfirm={async (reason) => { await doAction("compliance/resolve", { reason }, "Compliance issue resolved"); }}
+        />
+      )}
+      {modal === "clawback" && commissionTarget && (
+        <ConfirmModal
+          title="Claw Back Commission"
+          description={`Claw back ${fmtCents(commissionTarget.amountCents)}? An offsetting reversal record is created — the original commission is never modified. The affiliate is notified.`}
+          submitLabel="Claw Back" destructive requireReason={true}
+          onCancel={() => { setModal(null); setCommissionTarget(null); }}
+          onConfirm={async (reason) => { await doCommissionAction(commissionTarget.id, "clawback", { reason }, "Commission clawed back"); }}
+        />
+      )}
+      {modal === "payout" && commissionTarget && (
+        <PayoutModal
+          amountCents={commissionTarget.amountCents}
+          onCancel={() => { setModal(null); setCommissionTarget(null); }}
+          onConfirm={async (paymentMethod, paymentReference, note) => {
+            await doCommissionAction(commissionTarget.id, "mark-paid", { paymentMethod, paymentReference, ...(note ? { note } : {}) }, "Payout recorded — affiliate notified");
+          }}
         />
       )}
 
@@ -801,22 +893,47 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
               </div>
             ) : (
               <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-                <div className="hidden lg:grid grid-cols-[2fr_0.7fr_0.7fr_1fr_1fr_1fr_1fr] gap-2 px-5 py-3 border-b border-slate-100 bg-slate-50/50">
-                  {["Deal ID", "Level", "Rate", "Amount", "Status", "Paid At", "Created"].map(h => (
+                <div className="hidden lg:grid grid-cols-[1.6fr_0.5fr_0.5fr_0.9fr_0.9fr_0.9fr_0.9fr_1.4fr] gap-2 px-5 py-3 border-b border-slate-100 bg-slate-50/50">
+                  {["Deal ID", "Level", "Rate", "Amount", "Status", "Paid At", "Created", "Actions"].map(h => (
                     <span key={h} className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{h}</span>
                   ))}
                 </div>
-                {commissions.map((c) => (
-                  <div key={c.id} className="grid lg:grid-cols-[2fr_0.7fr_0.7fr_1fr_1fr_1fr_1fr] gap-2 px-5 py-3.5 border-b border-slate-50 hover:bg-slate-50/70 transition-colors">
+                {commissions.map((c) => {
+                  const canPayout = c.status === "APPROVED";
+                  const canClawback = (c.status === "APPROVED" || c.status === "PAID") && c.amountCents > 0;
+                  return (
+                  <div key={c.id} className="grid lg:grid-cols-[1.6fr_0.5fr_0.5fr_0.9fr_0.9fr_0.9fr_0.9fr_1.4fr] gap-2 px-5 py-3.5 border-b border-slate-50 hover:bg-slate-50/70 transition-colors items-center">
                     <span className="text-xs font-mono text-slate-600">···{c.dealId.slice(-12)}</span>
                     <span className="text-xs text-slate-700">{c.level}</span>
                     <span className="text-xs text-slate-700">{(c.rate * 100).toFixed(1)}%</span>
-                    <span className="text-sm font-semibold text-slate-800">{fmtCents(c.amountCents)}</span>
+                    <span className={"text-sm font-semibold " + (c.amountCents < 0 ? "text-red-600" : "text-slate-800")}>{fmtCents(c.amountCents)}</span>
                     <CommissionStatusBadge status={c.status} />
                     <span className="text-xs text-slate-500">{fmtDate(c.paidAt)}</span>
                     <span className="text-xs text-slate-400">{fmtDate(c.createdAt)}</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {canPayout && (
+                        <button
+                          onClick={() => { setCommissionTarget({ id: c.id, amountCents: c.amountCents }); setModal("payout"); }}
+                          className="px-2.5 py-1 text-[11px] font-semibold bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                        >
+                          Initiate Payout
+                        </button>
+                      )}
+                      {canClawback && (
+                        <button
+                          onClick={() => { setCommissionTarget({ id: c.id, amountCents: c.amountCents }); setModal("clawback"); }}
+                          className="px-2.5 py-1 text-[11px] font-semibold bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg transition-colors"
+                        >
+                          Claw Back
+                        </button>
+                      )}
+                      {!canPayout && !canClawback && (
+                        <span className="text-[11px] text-slate-300">—</span>
+                      )}
+                    </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

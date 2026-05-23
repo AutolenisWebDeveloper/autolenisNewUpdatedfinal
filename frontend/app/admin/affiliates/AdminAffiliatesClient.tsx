@@ -26,6 +26,9 @@ export interface AffiliateListRow {
   payoutsCount: number;
   childrenCount: number;
   referralsCount: number;
+  totalEarnedCents: number;
+  pendingPayoutCents: number;
+  earningsTier: string;
   hasComplianceFlag: boolean;
   createdAt: string;
 }
@@ -95,6 +98,9 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [levelFilter, setLevelFilter] = useState("");
+  const [earningsTierFilter, setEarningsTierFilter] = useState("");
+  const [registeredAfter, setRegisteredAfter] = useState("");
+  const [registeredBefore, setRegisteredBefore] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -146,15 +152,19 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
     if (query) params.q = query;
     if (statusFilter) params.status = statusFilter;
     if (levelFilter) params.level = levelFilter;
+    if (earningsTierFilter) params.earningsTier = earningsTierFilter;
+    if (registeredAfter) params.registeredAfter = registeredAfter;
+    if (registeredBefore) params.registeredBefore = registeredBefore;
     fetchAffiliates(params);
-  }, [query, statusFilter, levelFilter, fetchAffiliates]);
+  }, [query, statusFilter, levelFilter, earningsTierFilter, registeredAfter, registeredBefore, fetchAffiliates]);
 
   const clearFilters = () => {
     setQuery(""); setStatusFilter(""); setLevelFilter("");
+    setEarningsTierFilter(""); setRegisteredAfter(""); setRegisteredBefore("");
     fetchAffiliates({ page: "1", perPage: String(perPage) });
   };
 
-  const hasFilters = !!(query || statusFilter || levelFilter);
+  const hasFilters = !!(query || statusFilter || levelFilter || earningsTierFilter || registeredAfter || registeredBefore);
 
   function openAction(type: ActionType, affiliateId: string, affiliateEmail: string) {
     setActionInput("");
@@ -358,6 +368,38 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
                 <option value="4">Level 4</option>
               </select>
             </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Earnings Tier</label>
+              <select
+                value={earningsTierFilter}
+                onChange={(e) => setEarningsTierFilter(e.target.value)}
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+              >
+                <option value="">All Tiers</option>
+                <option value="none">None ($0)</option>
+                <option value="low">Low (&lt; $100)</option>
+                <option value="mid">Mid ($100–$1k)</option>
+                <option value="high">High (&gt; $1k)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Registered After</label>
+              <input
+                type="date"
+                value={registeredAfter}
+                onChange={(e) => setRegisteredAfter(e.target.value)}
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Registered Before</label>
+              <input
+                type="date"
+                value={registeredBefore}
+                onChange={(e) => setRegisteredBefore(e.target.value)}
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+              />
+            </div>
           </div>
         )}
       </div>
@@ -365,15 +407,28 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
       {/* Table */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="hidden lg:grid grid-cols-[2fr_1.2fr_0.8fr_0.7fr_0.8fr_0.8fr_1fr_100px] gap-2 px-5 py-3 border-b border-slate-100 bg-slate-50/50">
-          {["Email", "Referral Code", "Status", "Level", "Referrals", "Commissions", "Joined", "Actions"].map((h) => (
+          {["Email", "Referral Code", "Status", "Referrals", "Total Earned", "Pending Payout", "Joined", "Actions"].map((h) => (
             <span key={h} className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">{h}</span>
           ))}
         </div>
 
         {loading && (
-          <div className="py-16 flex items-center justify-center">
-            <RefreshCw size={20} className="animate-spin text-slate-400" />
-            <span className="ml-2 text-slate-400 text-sm">Loading affiliates…</span>
+          <div className="divide-y divide-slate-50" data-testid="affiliates-skeleton" aria-busy="true">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-5 py-3.5 animate-pulse">
+                <div className="flex-1 min-w-0">
+                  <div className="h-3.5 w-48 bg-slate-200 rounded mb-1.5" />
+                  <div className="h-2.5 w-20 bg-slate-100 rounded" />
+                </div>
+                <div className="hidden lg:block h-5 w-24 bg-slate-100 rounded-lg" />
+                <div className="hidden lg:block h-5 w-16 bg-slate-100 rounded-full" />
+                <div className="hidden lg:block h-3 w-10 bg-slate-100 rounded" />
+                <div className="hidden lg:block h-3 w-16 bg-slate-100 rounded" />
+                <div className="hidden lg:block h-3 w-16 bg-slate-100 rounded" />
+                <div className="hidden lg:block h-3 w-16 bg-slate-100 rounded" />
+                <div className="h-7 w-16 bg-slate-100 rounded-lg" />
+              </div>
+            ))}
           </div>
         )}
 
@@ -409,6 +464,7 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
                 <Link href={"/admin/affiliates/" + a.id} className="font-semibold text-slate-900 text-sm hover:text-purple-700 transition-colors truncate">
                   {a.email}
                 </Link>
+                <LevelBadge level={a.level} />
                 {a.hasComplianceFlag && (
                   <ShieldAlert size={11} className="text-orange-500 flex-shrink-0" />
                 )}
@@ -426,19 +482,21 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
               <StatusBadge status={a.status} />
             </div>
 
-            {/* Level */}
-            <div className="items-center hidden lg:flex">
-              <LevelBadge level={a.level} />
-            </div>
-
             {/* Referrals */}
             <div className="items-center hidden lg:flex">
               <span className="text-sm font-medium text-slate-700">{a.referralsCount}</span>
             </div>
 
-            {/* Commissions count */}
+            {/* Total Earned */}
             <div className="items-center hidden lg:flex">
-              <span className="text-sm font-medium text-slate-700">{a.commissionsCount}</span>
+              <span className="text-sm font-semibold text-slate-800">{fmtCents(a.totalEarnedCents)}</span>
+            </div>
+
+            {/* Pending Payout */}
+            <div className="items-center hidden lg:flex">
+              <span className={"text-sm font-medium " + (a.pendingPayoutCents > 0 ? "text-amber-600" : "text-slate-300")}>
+                {fmtCents(a.pendingPayoutCents)}
+              </span>
             </div>
 
             {/* Joined */}

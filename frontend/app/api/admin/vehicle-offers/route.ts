@@ -2,7 +2,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminError, adminSuccess, createAuditLog } from "@/lib/auth/admin-api";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -106,6 +106,17 @@ export async function POST(request: NextRequest) {
       referenceId:          data.referenceId ?? null,
       expiresAt,
       createdByAdminId:     admin.adminId,
+    },
+  });
+
+  await createAuditLog(admin, request, {
+    action: "VEHICLE_OFFER_CREATED",
+    entityType: "VehicleOffer",
+    entityId: offer.id,
+    metadata: {
+      vehicle: `${offer.vehicleYear} ${offer.vehicleMake} ${offer.vehicleModel}`,
+      askingPriceCents: offer.askingPriceCents,
+      buyerEmail: offer.buyerEmail ?? null,
     },
   });
 

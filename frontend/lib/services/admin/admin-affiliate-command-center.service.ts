@@ -15,8 +15,25 @@ export interface AffiliateListFilters {
   level?: number;
   conversionStatus?: string;
   commissionStatus?: string;
+  /** Earnings tier bucket by lifetime earned: "none" | "low" | "mid" | "high" */
+  earningsTier?: string;
+  /** ISO date — only affiliates registered on/after this date */
+  registeredAfter?: string;
+  /** ISO date — only affiliates registered on/before this date */
+  registeredBefore?: string;
   page?: number;
   perPage?: number;
+}
+
+// Earnings tier thresholds (lifetime earned, in cents).
+const EARNINGS_TIER_LOW_MAX = 10_000;    // < $100
+const EARNINGS_TIER_MID_MAX = 100_000;   // $100–$1,000; above = high
+
+function earningsTierOf(totalEarnedCents: number): "none" | "low" | "mid" | "high" {
+  if (totalEarnedCents <= 0) return "none";
+  if (totalEarnedCents < EARNINGS_TIER_LOW_MAX) return "low";
+  if (totalEarnedCents < EARNINGS_TIER_MID_MAX) return "mid";
+  return "high";
 }
 
 export interface AdminAffiliateKpis {
@@ -123,7 +140,7 @@ export async function getAdminAffiliateKpis(): Promise<AdminAffiliateKpis> {
 export async function getAdminAffiliateListData(
   filters: AffiliateListFilters = {}
 ) {
-  const { q, status, level, page = 1, perPage = 50 } = filters;
+  const { q, status, level, earningsTier, registeredAfter, registeredBefore, page = 1, perPage = 50 } = filters;
 
   const where: Record<string, unknown> = {};
 
@@ -137,7 +154,21 @@ export async function getAdminAffiliateListData(
   if (status) where.status = status;
   if (level !== undefined) where.level = level;
 
-  const [affiliates, total] = await Promise.all([
+  // Registration date range.
+  if (registeredAfter || registeredBefore) {
+    const createdAt: Record<string, Date> = {};
+    if (registeredAfter) {
+      const d = new Date(registeredAfter);
+      if (!isNaN(d.getTime())) createdAt.gte = d;
+    }
+    if (registeredBefore) {
+      const d = new Date(registeredBefore);
+      if (!isNaN(d.getTime())) createdAt.lte = new Date(d.getTime() + 24 * 60 * 60 * 1000 - 1);
+    }
+    if (Object.keys(createdAt).length > 0) where.createdAt = createdAt;
+  }
+
+  const [affiliates, rawTotal] = await Promise.all([
     prisma.affiliate.findMany({
       where,
       include: {
@@ -159,8 +190,8 @@ export async function getAdminAffiliateListData(
 
   const affiliateIds = affiliates.map((a) => a.id);
 
-  // Get compliance status
-  const [flaggedLogs, resolvedLogs, referralCounts] = await Promise.all([
+  // Get compliance status, referral counts, and commission earnings per affiliate
+  const [flaggedLogs, resolvedLogs, referralCounts, commissionSums] = await Promise.all([
     affiliateIds.length > 0
       ? prisma.adminAuditLog.findMany({
           where: {
@@ -190,6 +221,13 @@ export async function getAdminAffiliateListData(
           _count: { id: true },
         })
       : Promise.resolve([]),
+    affiliateIds.length > 0
+      ? prisma.commission.groupBy({
+          by: ["affiliateId", "status"],
+          where: { affiliateId: { in: affiliateIds } },
+          _sum: { amountCents: true },
+        })
+      : Promise.resolve([] as Array<{ affiliateId: string; status: string; _sum: { amountCents: number | null } }>),
   ]);
 
   const latestFlaggedMap = new Map<string, Date>();
@@ -211,11 +249,28 @@ export async function getAdminAffiliateListData(
     }
   }
 
-  const rows = affiliates.map((a) => {
+  // Earnings totals per affiliate.
+  //   totalEarned   = lifetime earned (PENDING + APPROVED + PAID; offsetting
+  //                   REVERSED rows carry negative amounts and net out)
+  //   pendingPayout = earned but not yet paid (PENDING + APPROVED)
+  const totalEarnedMap = new Map<string, number>();
+  const pendingPayoutMap = new Map<string, number>();
+  for (const row of commissionSums) {
+    const sum = row._sum.amountCents ?? 0;
+    if (row.status === "REJECTED") continue; // never earned
+    totalEarnedMap.set(row.affiliateId, (totalEarnedMap.get(row.affiliateId) ?? 0) + sum);
+    if (row.status === "PENDING" || row.status === "APPROVED") {
+      pendingPayoutMap.set(row.affiliateId, (pendingPayoutMap.get(row.affiliateId) ?? 0) + sum);
+    }
+  }
+
+  let rows = affiliates.map((a) => {
     const flaggedAt = latestFlaggedMap.get(a.id);
     const resolvedAt = latestResolvedMap.get(a.id);
     const hasComplianceFlag =
       !!flaggedAt && (!resolvedAt || flaggedAt > resolvedAt);
+    const totalEarnedCents = totalEarnedMap.get(a.id) ?? 0;
+    const pendingPayoutCents = pendingPayoutMap.get(a.id) ?? 0;
 
     return {
       id: a.id,
@@ -229,10 +284,21 @@ export async function getAdminAffiliateListData(
       payoutsCount: a._count.payouts,
       childrenCount: a._count.children,
       referralsCount: referralCountMap.get(a.id) ?? 0,
+      totalEarnedCents,
+      pendingPayoutCents,
+      earningsTier: earningsTierOf(totalEarnedCents),
       hasComplianceFlag,
       createdAt: a.createdAt.toISOString(),
     };
   });
+
+  // Earnings-tier filter is applied after enrichment (it derives from a
+  // commission aggregate, not a column). Total reflects the filtered set.
+  let total = rawTotal;
+  if (earningsTier) {
+    rows = rows.filter((r) => r.earningsTier === earningsTier);
+    total = rows.length;
+  }
 
   return { affiliates: rows, total, page, perPage };
 }
@@ -772,4 +838,77 @@ export async function resolveAffiliateComplianceIssue(
   });
 
   return { resolved: true };
+}
+
+// ─── Commission Clawback ──────────────────────────────────────────────────────
+
+// Claws back a commission by creating an OFFSETTING (negative) Commission row.
+// Platform invariant: the original commission record is NEVER modified — the
+// ledger stays append-only so the audit trail and financial history remain
+// intact. The offsetting row carries the negative amount and a deterministic
+// qualifyingEventId so a double-clawback is rejected by the unique constraint.
+export async function clawbackCommission(
+  commissionId: string,
+  adminId: string,
+  adminEmail: string,
+  reason: string
+) {
+  const original = await prisma.commission.findUnique({ where: { id: commissionId } });
+  if (!original) throw new Error("Commission not found");
+  if (original.amountCents < 0) throw new Error("Cannot claw back an offsetting (clawback) record");
+
+  const qualifyingEventId = `clawback-${commissionId}`;
+
+  // Idempotency / double-clawback guard.
+  const existingOffset = await prisma.commission.findUnique({ where: { qualifyingEventId } });
+  if (existingOffset) throw new Error("Commission has already been clawed back");
+
+  const offset = await prisma.commission.create({
+    data: {
+      affiliateId: original.affiliateId,
+      dealId: original.dealId,
+      level: original.level,
+      rate: original.rate,
+      amountCents: -original.amountCents,
+      status: "REVERSED",
+      qualifyingEventId,
+    },
+  });
+
+  await prisma.adminAuditLog.create({
+    data: {
+      adminId,
+      adminEmail,
+      action: "COMMISSION_CLAWED_BACK",
+      entityType: "Commission",
+      entityId: commissionId,
+      reason,
+      metadata: {
+        affiliateId: original.affiliateId,
+        dealId: original.dealId,
+        originalAmountCents: original.amountCents,
+        originalStatus: original.status,
+        offsetCommissionId: offset.id,
+        offsetAmountCents: offset.amountCents,
+      },
+    },
+  });
+
+  // Notify the affiliate — best-effort, must not roll back the clawback.
+  await prisma.notification.create({
+    data: {
+      affiliateId: original.affiliateId,
+      type: "SYSTEM_ALERT",
+      channel: "IN_APP",
+      title: "Commission adjustment",
+      body: `A commission of $${(original.amountCents / 100).toLocaleString()} has been clawed back. Reason: ${reason}`,
+    },
+  }).catch((err) => console.error("[clawbackCommission] affiliate notification failed:", err));
+
+  return {
+    clawedBack: true,
+    originalCommissionId: commissionId,
+    offsetCommissionId: offset.id,
+    offsetAmountCents: offset.amountCents,
+  };
 }

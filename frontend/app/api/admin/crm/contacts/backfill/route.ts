@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
 import { prisma } from '@/lib/prisma';
+import { getAdminActor } from '@/lib/auth/admin-actor';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +12,8 @@ export const dynamic = 'force-dynamic';
 // upsert dedups by email/phone and the identity unique constraint prevents
 // double-linking.
 export async function POST() {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
 
   let buyers_synced = 0;
@@ -144,6 +148,18 @@ export async function POST() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+
+  await writeCrmAuditLog(supabase, actor, {
+    action: 'CRM_CONTACTS_BACKFILL',
+    entity_type: 'contact',
+    entity_id: 'backfill',
+    metadata: {
+      buyers_synced,
+      dealers_synced,
+      affiliates_synced,
+      errors_count: errors.length,
+    },
+  });
 
   return NextResponse.json({
     buyers_synced,

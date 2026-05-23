@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 
 export const dynamic = 'force-dynamic';
 
+// Marks a conversation read. Read-state-only — no audit log entry.
 export async function POST(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
   const now = new Date().toISOString();
 

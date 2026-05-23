@@ -1,13 +1,18 @@
 // POST /api/admin/payments/concierge-fee/send-link
-// Admin creates a Stripe Checkout Session for the $400 concierge fee and emails the link to the buyer.
-// Amount is ALWAYS PREMIUM_FEE_REMAINING_CENTS (40000) from constants.ts — never from request body.
+// Admin creates a Stripe Checkout Session for the concierge fee balance and emails the link to the buyer.
+// Amount is ALWAYS PREMIUM_FEE_REMAINING_CENTS from constants.ts — never from request body.
 
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { getStripe } from "@/lib/stripe";
-import { PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
+import {
+  PREMIUM_FEE_REMAINING_CENTS,
+  PREMIUM_FEE_USD,
+  PREMIUM_FEE_REMAINING_USD,
+  DEPOSIT_AMOUNT_USD,
+} from "@/lib/constants";
 import { sendConciergeFeePaymentLinkEmail } from "@/lib/services/email/resend.service";
 
 const schema = z.object({
@@ -42,7 +47,7 @@ export async function POST(request: NextRequest) {
         price_data: {
           currency: "usd",
           unit_amount: PREMIUM_FEE_REMAINING_CENTS,
-          product_data: { name: "AutoLenis $499 Concierge Fee ($99 deposit credited — $400 due)" },
+          product_data: { name: `AutoLenis ${PREMIUM_FEE_USD} Concierge Fee (${DEPOSIT_AMOUNT_USD} deposit credited — ${PREMIUM_FEE_REMAINING_USD} due)` },
         },
         quantity: 1,
       },

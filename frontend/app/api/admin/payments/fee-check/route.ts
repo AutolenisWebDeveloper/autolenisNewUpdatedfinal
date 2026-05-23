@@ -1,12 +1,20 @@
 // GET /api/admin/payments/fee-check
 // Returns the fee structure for a buyer based on their plan.
-// Standard plan: $0 concierge fee. Premium plan: $499 total / $400 remaining after deposit credit.
+// Standard plan: $0 concierge fee. Premium plan: PREMIUM_FEE_CENTS total / PREMIUM_FEE_REMAINING_CENTS due after deposit credit.
 // Amount is ALWAYS from lib/constants.ts — NEVER from client input.
 
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS, PREMIUM_FEE_REMAINING_CENTS, STANDARD_FEE_CENTS } from "@/lib/constants";
+import {
+  DEPOSIT_AMOUNT_CENTS,
+  DEPOSIT_AMOUNT_USD,
+  PREMIUM_FEE_CENTS,
+  PREMIUM_FEE_USD,
+  PREMIUM_FEE_REMAINING_CENTS,
+  PREMIUM_FEE_REMAINING_USD,
+  STANDARD_FEE_CENTS,
+} from "@/lib/constants";
 
 export async function GET(request: NextRequest) {
   const admin = await getAdminFromRequest(request);
@@ -32,7 +40,7 @@ export async function GET(request: NextRequest) {
     depositCredit: isStandard ? 0 : DEPOSIT_AMOUNT_CENTS,
     displayMessage: isStandard
       ? "Standard plan: no concierge fee"
-      : `$${PREMIUM_FEE_CENTS / 100} total — $${DEPOSIT_AMOUNT_CENTS / 100} deposit credited = $${PREMIUM_FEE_REMAINING_CENTS / 100} due`,
+      : `${PREMIUM_FEE_USD} total — ${DEPOSIT_AMOUNT_USD} deposit credited = ${PREMIUM_FEE_REMAINING_USD} due`,
     requiresPayment: !isStandard,
   });
 }

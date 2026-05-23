@@ -54,6 +54,18 @@ export async function POST(request: NextRequest, { params }: Props) {
     console.error("[buyer/unsuspend] Supabase metadata update failed:", err);
   }
 
+  // Notify the buyer their access is restored — visible on next login.
+  await prisma.notification.create({
+    data: {
+      buyerId,
+      type: "ADMIN_MESSAGE",
+      channel: "IN_APP",
+      title: "Your account has been reinstated",
+      body: "Your AutoLenis account access has been restored. Welcome back — you can resume where you left off.",
+      actionUrl: "/buyer/dashboard",
+    },
+  }).catch((err) => console.error("[buyer/unsuspend] notification failed:", err));
+
   const ipAddress = request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip") ?? undefined;
 
   await prisma.adminAuditLog.create({

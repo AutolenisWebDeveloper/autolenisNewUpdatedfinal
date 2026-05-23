@@ -8,6 +8,21 @@ export const PREMIUM_FEE_CENTS = 49900;                // $499 — Premium conci
 export const PREMIUM_FEE_REMAINING_CENTS = 40000;      // $400 — Premium fee after $99 deposit credit
 export const STANDARD_FEE_CENTS = 0;                   // Standard buyers pay no concierge fee
 
+// USD formatters derived from the canonical *_CENTS constants above.
+// Use these in user-facing copy (emails, notifications, Stripe descriptions)
+// instead of hardcoding "$99" / "$499" / "$400" — that way if a constant
+// changes, the displayed amount changes with it. Cents → dollars is integer
+// math here because all platform amounts are whole-dollar.
+export function formatCentsAsUsd(cents: number): string {
+  const whole = Math.trunc(cents / 100);
+  const remainder = Math.abs(cents % 100);
+  return remainder === 0 ? `$${whole}` : `$${whole}.${String(remainder).padStart(2, "0")}`;
+}
+
+export const DEPOSIT_AMOUNT_USD          = formatCentsAsUsd(DEPOSIT_AMOUNT_CENTS);          // "$99"
+export const PREMIUM_FEE_USD             = formatCentsAsUsd(PREMIUM_FEE_CENTS);             // "$499"
+export const PREMIUM_FEE_REMAINING_USD   = formatCentsAsUsd(PREMIUM_FEE_REMAINING_CENTS);   // "$400"
+
 export type BuyerPlanKey = "STANDARD" | "PREMIUM";
 
 export const BUYER_PLANS = {

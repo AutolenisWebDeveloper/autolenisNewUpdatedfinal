@@ -1,7 +1,7 @@
 // POST /api/admin/requests/[requestId]/offer — admin creates and sends offer
 // Spec: System 4C step 7. All due-diligence checkpoints must be complete first.
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminFromRequest } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, createAuditLog } from "@/lib/auth/admin-api";
 import { createAndSendOffer } from "@/lib/services/vehicle-request/vehicle-request-offer.service";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +39,12 @@ export async function POST(request: NextRequest, { params }: Params) {
       body.priceCents,
       body.notes,
     );
+    await createAuditLog(admin, request, {
+      action: "VEHICLE_REQUEST_OFFER_SENT",
+      entityType: "VehicleRequest",
+      entityId: requestId,
+      metadata: { offerId: (offer as { id?: string })?.id ?? null, priceCents: body.priceCents },
+    });
     return NextResponse.json({ success: true, data: { offer } }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unable to create offer";

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { TemplateService } from '@/lib/services/template.service';
-import { getAdminActorId } from '@/lib/auth/admin-actor';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import type {
   EmailTemplateInput,
   EmailTemplateStatus,
@@ -44,11 +44,12 @@ export async function POST(req: Request) {
     );
   }
 
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
 
   try {
-    const created = await TemplateService.createTemplate(supabase, body, adminId);
+    const created = await TemplateService.createTemplate(supabase, body, actor);
     return NextResponse.json({ template: created }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'CREATE_FAILED';

@@ -25,6 +25,7 @@ import {
   sendPrequalApprovedEmail,
   sendAdverseActionEmail,
 } from "@/lib/services/email/resend.service";
+import { syncBuyerLifecycleToCrm } from "@/lib/services/admin/buyer-crm-sync";
 
 // Manual overrides are valid for 90 days (longer than iPredict's 30-day window).
 const MANUAL_OVERRIDE_EXPIRY_MS = 90 * 24 * 60 * 60 * 1000;
@@ -124,6 +125,17 @@ export async function POST(request: NextRequest, { params }: Props) {
       metadata: { decision, maxOtdAmountCents, tier: tier ?? null, buyerId },
     },
   });
+
+  // CRM lifecycle sync — an approved prequal advances the buyer's CRM stage.
+  // Other decisions (declined / pending / OFAC review) do not advance it.
+  if (decision === PreQualDecision.APPROVED) {
+    await syncBuyerLifecycleToCrm(
+      buyerId,
+      "prequal_completed",
+      { adminId: admin.adminId, adminEmail: admin.email },
+      buyer.user.email,
+    );
+  }
 
   if (decision === PreQualDecision.APPROVED) {
     const decisionDate = new Date();

@@ -15,11 +15,34 @@ export interface BuyerListFilters {
   dealStatus?: string;
   paymentStatus?: string;
   exceptionOnly?: boolean;
+  /** Filter to buyers with a deal in an active (in-progress) status */
+  hasActiveDeal?: boolean;
+  /** Filter to buyers with a PENDING or ACTIVE auction */
+  hasActiveAuction?: boolean;
+  /** ISO date — only buyers registered on/after this date */
+  registeredAfter?: string;
+  /** ISO date — only buyers registered on/before this date */
+  registeredBefore?: string;
   /** "active" | "archived" | "disabled" | "purged" | "all" — default "active" */
   lifecycleStatus?: string;
   page?: number;
   perPage?: number;
 }
+
+// Deal statuses considered "active" (in-progress) for buyer list filtering.
+const ACTIVE_DEAL_STATUSES_FILTER: DealStatus[] = [
+  DealStatus.ACTIVE,
+  DealStatus.FINANCING_PENDING,
+  DealStatus.FEE_PENDING,
+  DealStatus.FEE_PAID,
+  DealStatus.INSURANCE_PENDING,
+  DealStatus.CONTRACT_PENDING,
+  DealStatus.CONTRACT_REVIEW,
+  DealStatus.CONTRACT_APPROVED,
+  DealStatus.SIGNING_PENDING,
+  DealStatus.SIGNED,
+  DealStatus.PICKUP_SCHEDULED,
+];
 
 export interface AdminBuyerKpis {
   total: number;
@@ -129,7 +152,11 @@ export async function getAdminBuyerKpis(): Promise<AdminBuyerKpis> {
 // ─── Buyer List ───────────────────────────────────────────────────────────────
 
 export async function getAdminBuyerListData(filters: BuyerListFilters = {}) {
-  const { q, onboardingStatus, exceptionOnly, lifecycleStatus = "active", page = 1, perPage = 50 } = filters;
+  const {
+    q, onboardingStatus, exceptionOnly, prequalStatus,
+    hasActiveDeal, hasActiveAuction, registeredAfter, registeredBefore,
+    lifecycleStatus = "active", page = 1, perPage = 50,
+  } = filters;
 
   // Build where clause
   const where: Record<string, unknown> = {};
@@ -143,6 +170,38 @@ export async function getAdminBuyerListData(filters: BuyerListFilters = {}) {
   }
   if (onboardingStatus === "complete") where.onboardingComplete = true;
   if (onboardingStatus === "pending") where.onboardingComplete = false;
+
+  // Prequal decision filter — "none" matches buyers with no prequal record.
+  if (prequalStatus) {
+    if (prequalStatus === "none") {
+      where.preQualification = { is: null };
+    } else {
+      where.preQualification = { is: { decision: prequalStatus } };
+    }
+  }
+
+  // Relation existence filters
+  if (hasActiveDeal) {
+    where.deals = { some: { status: { in: ACTIVE_DEAL_STATUSES_FILTER } } };
+  }
+  if (hasActiveAuction) {
+    where.auctions = { some: { status: { in: ["PENDING", "ACTIVE"] } } };
+  }
+
+  // Registration date range
+  if (registeredAfter || registeredBefore) {
+    const createdAt: Record<string, Date> = {};
+    if (registeredAfter) {
+      const d = new Date(registeredAfter);
+      if (!isNaN(d.getTime())) createdAt.gte = d;
+    }
+    if (registeredBefore) {
+      const d = new Date(registeredBefore);
+      // Inclusive of the whole "before" day.
+      if (!isNaN(d.getTime())) createdAt.lte = new Date(d.getTime() + 24 * 60 * 60 * 1000 - 1);
+    }
+    if (Object.keys(createdAt).length > 0) where.createdAt = createdAt;
+  }
 
   // Lifecycle filter
   if (lifecycleStatus === "active") {
@@ -241,6 +300,7 @@ export async function getAdminBuyerListData(filters: BuyerListFilters = {}) {
     disabledAt: b.disabledAt?.toISOString() ?? null,
     purgedAt: b.purgedAt?.toISOString() ?? null,
     createdAt: b.createdAt.toISOString(),
+    lastActivityAt: b.updatedAt.toISOString(),
   }));
 
   // Apply exception filter after enrichment if needed

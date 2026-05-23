@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { z } from "zod";
 import { reactivateDealerByAdmin } from "@/lib/services/admin/admin-dealer-command-center.service";
+import { prisma } from "@/lib/prisma";
+import { sendDealerAccountReinstatedEmail } from "@/lib/services/email/resend.service";
 
 interface Props { params: Promise<{ dealerId: string }> }
 
@@ -23,6 +25,22 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   try {
     const result = await reactivateDealerByAdmin(dealerId, admin.adminId, admin.email, parsed.data.reason);
+
+    // Notify dealer their account is reinstated — non-blocking.
+    const dealer = await prisma.dealer.findUnique({
+      where: { id: dealerId },
+      include: { user: { select: { email: true } } },
+    });
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
+    if (dealer?.user?.email) {
+      await sendDealerAccountReinstatedEmail({
+        to: dealer.user.email,
+        contactName: dealer.dealershipName,
+        dealershipName: dealer.dealershipName,
+        dashboardUrl: `${appUrl}/dealer/dashboard`,
+      }).catch(err => console.error("[admin/dealers/reactivate] reinstatement email failed:", err));
+    }
+
     return adminSuccess(result);
   } catch (err) {
     return adminError("ACTION_FAILED", err instanceof Error ? err.message : "Reactivate failed", 400);

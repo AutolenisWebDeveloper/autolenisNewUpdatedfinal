@@ -6,6 +6,7 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { triggerBuyerReminder } from "@/lib/services/admin/admin-buyer-command-center.service";
+import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 import { z } from "zod";
 
 interface Props { params: Promise<{ buyerId: string }> }
@@ -15,7 +16,7 @@ const DEFAULT_MESSAGES: Record<string, string> = {
   prequal:       "Check your buying power — complete pre-qualification to see what you qualify for.",
   search:        "Browse our inventory and shortlist vehicles you're interested in.",
   shortlist:     "Shortlist vehicles you love so we can source competitive dealer offers.",
-  deposit:       "Activate your dealer auction with a $99 refundable deposit.",
+  deposit:       `Activate your dealer auction with a ${DEPOSIT_AMOUNT_USD} refundable deposit.`,
   auction:       "Your dealer auction is active — dealer offers are being collected.",
   "select-deal": "Your auction has closed — review dealer offers and select your best deal.",
   financing:     "Choose your financing path to continue with your selected deal.",

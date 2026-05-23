@@ -14,6 +14,9 @@ export async function GET(request: NextRequest) {
     q: searchParams.get("q") ?? undefined,
     status: searchParams.get("status") ?? undefined,
     level: searchParams.get("level") ? Number(searchParams.get("level")) : undefined,
+    earningsTier: searchParams.get("earningsTier") ?? undefined,
+    registeredAfter: searchParams.get("registeredAfter") ?? undefined,
+    registeredBefore: searchParams.get("registeredBefore") ?? undefined,
     page: searchParams.get("page") ? Number(searchParams.get("page")) : undefined,
     perPage: searchParams.get("perPage") ? Number(searchParams.get("perPage")) : undefined,
   };

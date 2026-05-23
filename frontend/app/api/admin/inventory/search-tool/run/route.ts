@@ -2,7 +2,7 @@
 // Queries MarketCheck (if key present) or internal DB. Logs to AdminInventorySearchRun.
 
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminFromRequest } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -154,6 +154,13 @@ export async function POST(request: NextRequest) {
     price: r.priceCents / 100,
     imageUrl: r.images[0] ?? null,
   }));
+
+  await createAuditLog(admin, request, {
+    action: "INVENTORY_SEARCH_TOOL_RUN",
+    entityType: "AdminInventorySearchRun",
+    entityId: admin.adminId,
+    metadata: { source, total: results.length, params },
+  });
 
   return NextResponse.json({ success: true, data: serialized, source, total: results.length });
 }

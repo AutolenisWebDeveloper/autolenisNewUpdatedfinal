@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
+import { getAdminActor } from '@/lib/auth/admin-actor';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,10 +10,19 @@ export const dynamic = 'force-dynamic';
 // scheduled run. Safe to invoke at any cadence: REFRESH CONCURRENTLY does
 // not block readers and is itself a no-op replay if no rows changed.
 export async function POST() {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
   const { error } = await supabase.rpc('refresh_analytics_views');
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, refreshed_at: new Date().toISOString() });
+  const refreshed_at = new Date().toISOString();
+  await writeCrmAuditLog(supabase, actor, {
+    action: 'OPERATIONS_ANALYTICS_REFRESH',
+    entity_type: 'operations',
+    entity_id: 'analytics_matviews',
+    metadata: { refreshed_at },
+  });
+  return NextResponse.json({ ok: true, refreshed_at });
 }

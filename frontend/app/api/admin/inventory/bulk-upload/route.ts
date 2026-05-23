@@ -3,7 +3,7 @@
 // Returns summary: succeeded, failed, errors per row.
 
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { InventoryLane } from "@prisma/client";
@@ -134,6 +134,13 @@ export async function POST(request: NextRequest) {
       status:       "COMPLETED",
       errors:       results.filter(r => r.status === "error"),
     },
+  });
+
+  await createAuditLog(admin, request, {
+    action: "INVENTORY_BULK_UPLOAD",
+    entityType: "InventoryUploadBatch",
+    entityId: batch.id,
+    metadata: { totalRows: rows.length, successCount, failureCount, filename: filename ?? null },
   });
 
   return adminSuccess({

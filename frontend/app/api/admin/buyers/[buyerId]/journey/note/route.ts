@@ -3,7 +3,7 @@
 // Notes are visible to admins only — never shown to the buyer.
 
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminError, adminSuccess, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -39,6 +39,13 @@ export async function POST(request: NextRequest, { params }: Props) {
       adminId: admin.adminId,
       adminEmail: admin.email,
     },
+  });
+
+  await createAuditLog(admin, request, {
+    action: "BUYER_JOURNEY_NOTE_ADDED",
+    entityType: "Buyer",
+    entityId: buyerId,
+    metadata: { stageId: parsed.data.stageId, noteId: note.id, contentLength: parsed.data.content.length },
   });
 
   return adminSuccess({ noteId: note.id, stageId: parsed.data.stageId }, 201);

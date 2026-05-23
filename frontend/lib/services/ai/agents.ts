@@ -4,6 +4,7 @@
 
 import { groqChat, groqChatStream, type ChatMessage } from "@/lib/ai/groq-client";
 import { buildSystemPromptFromContext, buildBuyerContext, buildDealerContext, buildAdminContext, type PlatformContext } from "@/lib/ai/context-builder";
+import { PREMIUM_FEE_USD } from "@/lib/constants";
 
 // ─── Agent 1: Buyer General Concierge ─────────────────────────────────────────
 export async function buyerConciergeAgent(buyerId: string, message: string, history: ChatMessage[] = []) {
@@ -37,7 +38,7 @@ export async function auctionAdvisorAgent(buyerId: string, message: string, hist
 // ─── Agent 5: Deal & Financing Advisor ───────────────────────────────────────
 export async function dealAdvisorAgent(buyerId: string, message: string, history: ChatMessage[] = []) {
   const ctx = await buildBuyerContext(buyerId);
-  const system = buildSystemPromptFromContext(ctx, "You are AutoLenis's deal completion specialist. Guide buyers through financing choice, the $499 concierge fee, insurance, Contract Shield review, DocuSign e-signing, and QR pickup. Be precise about what each stage means and what to do next.");
+  const system = buildSystemPromptFromContext(ctx, `You are AutoLenis's deal completion specialist. Guide buyers through financing choice, the ${PREMIUM_FEE_USD} concierge fee, insurance, Contract Shield review, DocuSign e-signing, and QR pickup. Be precise about what each stage means and what to do next.`);
   return groqChat([{ role: "system", content: system }, ...history, { role: "user", content: message }], { maxTokens: 512 });
 }
 

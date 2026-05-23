@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
+import { getAdminActor } from '@/lib/auth/admin-actor';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 import type { ContactSource } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
@@ -89,6 +91,8 @@ function toBool(v: string | undefined): boolean {
 }
 
 export async function POST(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const contentType = req.headers.get('content-type') ?? '';
 
   let csvText = '';
@@ -186,6 +190,13 @@ export async function POST(req: Request) {
       });
     }
   }
+
+  await writeCrmAuditLog(supabase, actor, {
+    action: 'CRM_CONTACTS_IMPORT',
+    entity_type: 'contact',
+    entity_id: 'csv_import',
+    metadata: { imported, duplicates_merged, errors_count: errors.length, total_rows: dataRows.length },
+  });
 
   return NextResponse.json({ imported, duplicates_merged, errors });
 }

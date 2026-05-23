@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
+import { getAdminActor } from '@/lib/auth/admin-actor';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 import type { Contact, ContactInput, ContactSource } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
@@ -62,6 +64,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   let body: Partial<ContactInput> & { notes?: string };
   try {
     body = await req.json();
@@ -101,6 +105,13 @@ export async function POST(req: Request) {
         .eq('id', contact.id);
       contact.notes = body.notes;
     }
+
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'CRM_CONTACT_CREATED',
+      entity_type: 'contact',
+      entity_id: contact.id,
+      new_state: contact,
+    });
 
     return NextResponse.json({ contact }, { status: 201 });
   } catch (err) {

@@ -3,6 +3,9 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 import { AUCTION_DURATION_HOURS } from "@/lib/constants";
+import { sendDealerAuctionInvitationEmail } from "@/lib/services/email/resend.service";
+
+const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 interface Props { params: Promise<{ auctionId: string }> }
 
 export async function POST(request: NextRequest, { params }: Props) {
@@ -69,6 +72,32 @@ export async function POST(request: NextRequest, { params }: Props) {
           body: `You've been invited to bid on auction ${auctionId.slice(0, 8)}. Review and submit your offer.`,
         },
       });
+
+      // Invitation email — populated with buyer location and the first
+      // attached auction vehicle (falls back to placeholders if none yet).
+      if (dealer.user?.email) {
+        const [buyer, vehicle] = await Promise.all([
+          prisma.buyer.findUnique({ where: { id: auction.buyerId }, select: { city: true, state: true } }),
+          prisma.auctionVehicle.findFirst({ where: { auctionId }, orderBy: { createdAt: "asc" } }),
+        ]);
+        const expiryHours = auction.endsAt
+          ? Math.max(1, Math.round((auction.endsAt.getTime() - Date.now()) / 3600000))
+          : AUCTION_DURATION_HOURS;
+        void sendDealerAuctionInvitationEmail({
+          to: dealer.user.email,
+          contactName: dealer.dealershipName ?? "Dealer",
+          vehicleMake: vehicle?.make ?? "Vehicle",
+          vehicleModel: vehicle?.model ?? "Requested",
+          vehicleYear: vehicle?.year ?? new Date().getFullYear(),
+          vehicleTrim: vehicle?.trim ?? null,
+          buyerCity: buyer?.city ?? "Location",
+          buyerState: buyer?.state ?? "TBD",
+          auctionUrl: `${APP_URL}/dealer/auctions/${auctionId}`,
+          expiryHours,
+          auctionId,
+        }).catch(err => console.error(`[auctions/action] dealer invite email failed (${dealerId}):`, err));
+      }
+
       result = { dealerInvited: dealerId, auctionId };
       break;
     }

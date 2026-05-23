@@ -3,7 +3,7 @@
 // Falls back to returning a data URL if storage is not configured.
 
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminFromRequest } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, createAuditLog } from "@/lib/auth/admin-api";
 import { createClient } from "@supabase/supabase-js";
 
 const BUCKET = "vehicle-images";
@@ -50,6 +50,12 @@ export async function POST(request: NextRequest) {
     if (error) throw error;
 
     const { data: publicData } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    await createAuditLog(admin, request, {
+      action: "INVENTORY_IMAGE_UPLOADED",
+      entityType: "InventoryItem",
+      entityId: vehicleId ?? "temp",
+      metadata: { path, contentType: file.type, sizeBytes: file.size },
+    });
     return NextResponse.json({ success: true, url: publicData.publicUrl, path });
   } catch (err: unknown) {
     // Fallback if storage fails

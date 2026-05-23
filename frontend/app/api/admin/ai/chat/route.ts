@@ -1,7 +1,7 @@
 // POST /api/admin/ai/chat — Admin concierge (Zura)
 // Groq ONLY | Kill switch | Admin auth required (MFA verified)
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { adminConciergeChat } from "@/lib/services/ai/admin-concierge.agent";
 import type { ChatMessage } from "@/lib/ai/groq-client";
 import { isAiEnabled } from "@/lib/ai/kill-switch";
@@ -28,6 +28,12 @@ export async function POST(request: NextRequest) {
       body.message,
       (body.history ?? []) as ChatMessage[]
     );
+    await createAuditLog(admin, request, {
+      action: "ADMIN_AI_CHAT",
+      entityType: "AdminConcierge",
+      entityId: admin.adminId,
+      metadata: { model: result.model, message_length: body.message.length, history_length: body.history?.length ?? 0 },
+    });
     return adminSuccess({ content: result.content, model: result.model });
   } catch (err) {
     const msg = String(err);
