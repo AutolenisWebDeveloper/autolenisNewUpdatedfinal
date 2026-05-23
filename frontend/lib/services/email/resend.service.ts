@@ -733,6 +733,55 @@ export async function sendAffiliateRejectionEmail(to: string, firstName: string,
   });
 }
 
+export async function sendAffiliateSuspendedEmail(to: string, firstName: string, reason: string) {
+  return sendIdempotent({
+    // Per-suspension idempotency key — an affiliate may be suspended more than once.
+    idempotencyKey: `affiliate-suspended-${to}-${Date.now()}`,
+    to,
+    templateId: "affiliate-suspended",
+    subject: "Your AutoLenis affiliate account has been suspended",
+    html: `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+        <div style="background:#FEF2F2;padding:32px;text-align:center;border-bottom:3px solid #DC2626">
+          <h1 style="color:#111827;margin:0;font-size:22px">Account suspended</h1>
+        </div>
+        <div style="padding:32px;color:#4B5563;line-height:1.7">
+          <p>Hi ${firstName},</p>
+          <p>Your AutoLenis affiliate account has been suspended. While suspended, your referral links remain active for attribution but you will not accrue new commissions and payouts are paused.</p>
+          <p style="background:#F8F9FB;border-left:3px solid #DC2626;padding:12px 16px;margin:16px 0;font-size:13px"><strong style="color:#111827">Reason:</strong> ${reason}</p>
+          <p>If you believe this is a mistake or would like to discuss reinstatement, please contact our team.</p>
+          <a href="mailto:support@autolenis.com" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin-top:8px">Contact Support</a>
+          <p style="margin-top:32px;color:#94A3B8;font-size:12px">— The AutoLenis Team</p>
+        </div>
+      </div>
+    `,
+  });
+}
+
+export async function sendAffiliateReinstatedEmail(to: string, firstName: string) {
+  const appUrl = APP_URL;
+  return sendIdempotent({
+    // Per-reinstatement idempotency key — repeat suspend→reinstate cycles each send.
+    idempotencyKey: `affiliate-reinstated-${to}-${Date.now()}`,
+    to,
+    templateId: "affiliate-reinstated",
+    subject: "Your AutoLenis affiliate account has been reinstated",
+    html: `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+        <div style="background:#F0FDF4;padding:32px;text-align:center;border-bottom:3px solid #16A34A">
+          <h1 style="color:#111827;margin:0;font-size:22px">Welcome back</h1>
+        </div>
+        <div style="padding:32px;color:#4B5563;line-height:1.7">
+          <p>Hi ${firstName},</p>
+          <p>Good news — your AutoLenis affiliate account has been reinstated and is active again. You can resume sharing your referral link and earning commissions right away.</p>
+          <a href="${appUrl}/affiliate/portal/dashboard" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin-top:8px">Go to my dashboard</a>
+          <p style="margin-top:32px;color:#94A3B8;font-size:12px">— The AutoLenis Team</p>
+        </div>
+      </div>
+    `,
+  });
+}
+
 export async function sendAffiliateWeeklyDigest(input: {
   to: string;
   firstName: string;

@@ -47,5 +47,16 @@ export async function POST(request: NextRequest, { params }: Props) {
     },
   }).catch(() => {});
 
+  // Notify the affiliate their payout was processed — best-effort.
+  await prisma.notification.create({
+    data: {
+      affiliateId: commission.affiliateId,
+      type: "PAYOUT_PAID",
+      channel: "IN_APP",
+      title: "Commission paid",
+      body: `Your commission of $${(commission.amountCents / 100).toLocaleString()} has been paid via ${parsed.data.paymentMethod} (ref: ${parsed.data.paymentReference}).`,
+    },
+  }).catch((err) => console.error("[commissions/mark-paid] affiliate notification failed:", err));
+
   return adminSuccess({ commissionId, status: "PAID" });
 }
