@@ -2,7 +2,7 @@
 // POST /api/admin/messages/[threadId]  — admin replies to thread
 
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -100,6 +100,13 @@ export async function POST(
       data: { lastMessageAt: new Date() },
     }),
   ]);
+
+  await createAuditLog(admin, request, {
+    action: "ADMIN_MESSAGE_REPLY_SENT",
+    entityType: "MessageThread",
+    entityId: threadId,
+    metadata: { messageId: message.id, contentLength: parsed.data.content.length },
+  });
 
   return adminSuccess({ message }, 201);
 }

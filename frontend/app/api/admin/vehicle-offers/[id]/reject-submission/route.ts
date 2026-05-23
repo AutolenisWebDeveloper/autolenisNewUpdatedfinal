@@ -3,7 +3,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminError, adminSuccess, createAuditLog } from "@/lib/auth/admin-api";
 import { sendDealerAcceptanceNotification } from "@/lib/services/email/vehicle-offers.email";
 
 const schema = z.object({
@@ -46,6 +46,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     buyerName: "AutoLenis",
     vehicleLabel: `${submission.vehicleOffer.vehicleYear} ${submission.vehicleOffer.vehicleMake} ${submission.vehicleOffer.vehicleModel} — Offer not selected`,
   }).catch((err) => console.error("[reject-submission] dealer email failed:", err));
+
+  await createAuditLog(admin, request, {
+    action: "VEHICLE_OFFER_SUBMISSION_REJECTED",
+    entityType: "DealerOfferSubmission",
+    entityId: submission.id,
+    metadata: { vehicleOfferId: id, contactEmail: submission.contactEmail },
+  });
 
   return adminSuccess({ id: submission.id, rejected: true });
 }

@@ -2,7 +2,7 @@
 // POST /api/admin/messages      — admin creates a new support thread for a buyer
 
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -124,6 +124,13 @@ export async function POST(request: NextRequest) {
       messages: true,
       participants: true,
     },
+  });
+
+  await createAuditLog(admin, request, {
+    action: "ADMIN_MESSAGE_THREAD_CREATED",
+    entityType: "MessageThread",
+    entityId: thread.id,
+    metadata: { buyerUserId, subject: parsed.data.subject ?? null },
   });
 
   return adminSuccess({ thread }, 201);

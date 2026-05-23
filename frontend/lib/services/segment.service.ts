@@ -6,6 +6,7 @@ import type {
   SegmentOperator,
   SegmentRule,
 } from '../types/crm';
+import { writeCrmAuditLog, type CrmAuditActor } from './admin/crm-audit';
 
 // Field whitelist + per-field operator and value type. Anything outside this
 // table is rejected at the service layer — the DB stores JSONB so it cannot
@@ -220,7 +221,7 @@ export class SegmentService {
   static async createSegment(
     supabase: SupabaseClient,
     input: { name: string; description?: string | null; conditions: unknown },
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<Segment> {
     if (!input.name?.trim()) throw new Error('NAME_REQUIRED');
     const conditions = normalizeConditions(input.conditions);
@@ -236,21 +237,18 @@ export class SegmentService {
         conditions,
         contact_count: count,
         last_counted_at: new Date().toISOString(),
-        created_by: adminId,
+        created_by: actor?.adminId ?? null,
       })
       .select('*')
       .single();
     if (error) throw error;
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'CREATE_SEGMENT',
-        entity_type: 'segment',
-        entity_id: data.id,
-        after_state: data,
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'CREATE_SEGMENT',
+      entity_type: 'segment',
+      entity_id: data.id,
+      new_state: data,
+    });
 
     return data as Segment;
   }
@@ -259,7 +257,7 @@ export class SegmentService {
     supabase: SupabaseClient,
     id: string,
     input: { name?: string; description?: string | null; conditions?: unknown },
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<Segment> {
     const before = await this.getSegment(supabase, id);
     if (!before) throw new Error('SEGMENT_NOT_FOUND');
@@ -282,16 +280,13 @@ export class SegmentService {
       .single();
     if (error) throw error;
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'UPDATE_SEGMENT',
-        entity_type: 'segment',
-        entity_id: id,
-        before_state: before,
-        after_state: data,
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'UPDATE_SEGMENT',
+      entity_type: 'segment',
+      entity_id: id,
+      previous_state: before,
+      new_state: data,
+    });
 
     return data as Segment;
   }

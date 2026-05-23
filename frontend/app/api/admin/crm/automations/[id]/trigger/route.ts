@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { WorkflowEngine } from '@/lib/services/workflow.engine';
+import { getAdminActor } from '@/lib/auth/admin-actor';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +15,8 @@ interface RouteContext {
 // pairing (used for back-filling, debugging, or one-off sends).
 export async function POST(req: Request, ctx: RouteContext) {
   const { id } = await ctx.params;
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   let body: { contact_id?: string; trigger_data?: Record<string, unknown> };
   try {
     body = await req.json();
@@ -34,6 +38,12 @@ export async function POST(req: Request, ctx: RouteContext) {
     if (!enrollment) {
       return NextResponse.json({ status: 'SKIPPED', reason: 'INACTIVE_OR_DUPLICATE' });
     }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'WORKFLOW_MANUAL_TRIGGER',
+      entity_type: 'workflow',
+      entity_id: id,
+      metadata: { contact_id: body.contact_id, enrollment_id: enrollment.id ?? null },
+    });
     return NextResponse.json({ status: 'ENROLLED', enrollment });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'TRIGGER_FAILED';

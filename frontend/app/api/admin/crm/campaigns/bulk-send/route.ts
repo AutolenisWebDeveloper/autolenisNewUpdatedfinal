@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { SuppressionService } from '@/lib/services/suppression.service';
 import { inngest } from '@/lib/inngest/client';
+import { getAdminActor } from '@/lib/auth/admin-actor';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 import type { Contact } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
@@ -22,6 +24,8 @@ type BulkSendBody = {
 // inngest events the single-contact send endpoints use — every gate (DNC,
 // consent, suppression) is enforced by the workers themselves.
 export async function POST(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   let body: BulkSendBody;
   try {
     body = (await req.json()) as BulkSendBody;
@@ -118,6 +122,21 @@ export async function POST(req: Request) {
       queued++;
     }
   }
+
+  await writeCrmAuditLog(supabase, actor, {
+    action: body.type === 'email' ? 'CRM_BULK_EMAIL_SEND' : 'CRM_BULK_SMS_SEND',
+    entity_type: 'campaign',
+    entity_id: 'ad_hoc',
+    metadata: {
+      queued,
+      skipped_dnc,
+      skipped_no_channel,
+      skipped_consent,
+      skipped_suppressed,
+      total: all.length,
+      template_id: body.template_id ?? null,
+    },
+  });
 
   return NextResponse.json({
     queued,

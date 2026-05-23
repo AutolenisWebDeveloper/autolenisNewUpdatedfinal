@@ -9,6 +9,7 @@ import type {
   WorkflowUpdate,
 } from '@/lib/types/crm';
 import { parseDurationToSeconds } from './workflow.engine';
+import { writeCrmAuditLog, type CrmAuditActor } from './admin/crm-audit';
 
 // Keep at most this many historical versions per workflow. Excess gets pruned
 // on each save so the table stays small and the UI's "Version history" panel
@@ -173,7 +174,7 @@ export class WorkflowService {
   static async createWorkflow(
     supabase: SupabaseClient,
     input: WorkflowInput,
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<Workflow> {
     if (!input.name?.trim()) throw new Error('NAME_REQUIRED');
     if (!input.trigger_type || !TRIGGER_TYPES.includes(input.trigger_type)) {
@@ -181,6 +182,7 @@ export class WorkflowService {
     }
 
     const nodes: WorkflowGraph = input.nodes ?? { nodes: [], edges: [] };
+    const adminId = actor?.adminId ?? null;
 
     const { data, error } = await supabase
       .from('workflows')
@@ -208,15 +210,12 @@ export class WorkflowService {
       created_by: adminId,
     });
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'CREATE_WORKFLOW',
-        entity_type: 'workflow',
-        entity_id: data.id,
-        after_state: data,
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'CREATE_WORKFLOW',
+      entity_type: 'workflow',
+      entity_id: data.id,
+      new_state: data,
+    });
 
     return data as Workflow;
   }
@@ -228,7 +227,7 @@ export class WorkflowService {
     supabase: SupabaseClient,
     id: string,
     update: WorkflowUpdate,
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<Workflow> {
     const before = await this.getWorkflow(supabase, id);
     if (!before) throw new Error('WORKFLOW_NOT_FOUND');
@@ -270,16 +269,13 @@ export class WorkflowService {
       .single();
     if (error) throw error;
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'UPDATE_WORKFLOW',
-        entity_type: 'workflow',
-        entity_id: id,
-        before_state: before,
-        after_state: data,
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'UPDATE_WORKFLOW',
+      entity_type: 'workflow',
+      entity_id: id,
+      previous_state: before,
+      new_state: data,
+    });
 
     return data as Workflow;
   }
@@ -290,7 +286,7 @@ export class WorkflowService {
   static async activateWorkflow(
     supabase: SupabaseClient,
     id: string,
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<Workflow> {
     const wf = await this.getWorkflow(supabase, id);
     if (!wf) throw new Error('WORKFLOW_NOT_FOUND');
@@ -308,16 +304,13 @@ export class WorkflowService {
       .single();
     if (error) throw error;
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'ACTIVATE_WORKFLOW',
-        entity_type: 'workflow',
-        entity_id: id,
-        before_state: { status: wf.status },
-        after_state: { status: 'active' },
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'ACTIVATE_WORKFLOW',
+      entity_type: 'workflow',
+      entity_id: id,
+      previous_state: { status: wf.status },
+      new_state: { status: 'active' },
+    });
 
     return data as Workflow;
   }
@@ -326,9 +319,9 @@ export class WorkflowService {
     supabase: SupabaseClient,
     id: string,
     status: WorkflowStatus,
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<Workflow> {
-    if (status === 'active') return this.activateWorkflow(supabase, id, adminId);
+    if (status === 'active') return this.activateWorkflow(supabase, id, actor);
 
     const { data, error } = await supabase
       .from('workflows')
@@ -338,15 +331,12 @@ export class WorkflowService {
       .single();
     if (error) throw error;
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'UPDATE_WORKFLOW_STATUS',
-        entity_type: 'workflow',
-        entity_id: id,
-        after_state: { status },
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'UPDATE_WORKFLOW_STATUS',
+      entity_type: 'workflow',
+      entity_id: id,
+      new_state: { status },
+    });
     return data as Workflow;
   }
 
@@ -365,7 +355,7 @@ export class WorkflowService {
     supabase: SupabaseClient,
     workflowId: string,
     versionId: string,
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<Workflow> {
     const { data: version } = await supabase
       .from('workflow_versions')
@@ -382,14 +372,14 @@ export class WorkflowService {
         nodes: version.nodes,
         trigger_config: version.trigger_config,
       },
-      adminId,
+      actor,
     );
   }
 
   static async duplicateWorkflow(
     supabase: SupabaseClient,
     id: string,
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<Workflow> {
     const src = await this.getWorkflow(supabase, id);
     if (!src) throw new Error('WORKFLOW_NOT_FOUND');
@@ -405,14 +395,14 @@ export class WorkflowService {
         is_prebuilt: false,
         prebuilt_key: null,
       },
-      adminId,
+      actor,
     );
   }
 
   static async deleteWorkflow(
     supabase: SupabaseClient,
     id: string,
-    adminId: string | null,
+    actor: CrmAuditActor | null,
   ): Promise<void> {
     const before = await this.getWorkflow(supabase, id);
     if (!before) return;
@@ -426,15 +416,12 @@ export class WorkflowService {
         .update({ status: 'archived', updated_at: new Date().toISOString() })
         .eq('id', id);
     }
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: before.status === 'draft' ? 'DELETE_WORKFLOW' : 'ARCHIVE_WORKFLOW',
-        entity_type: 'workflow',
-        entity_id: id,
-        before_state: before,
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: before.status === 'draft' ? 'DELETE_WORKFLOW' : 'ARCHIVE_WORKFLOW',
+      entity_type: 'workflow',
+      entity_id: id,
+      previous_state: before,
+    });
   }
 
   // Counts for the workflow list card — quick aggregate so the UI doesn't

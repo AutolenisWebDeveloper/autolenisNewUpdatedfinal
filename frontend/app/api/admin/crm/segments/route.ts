@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { SegmentService } from '@/lib/services/segment.service';
-import { getAdminActorId } from '@/lib/auth/admin-actor';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,11 +24,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'INVALID_JSON' }, { status: 400 });
   }
 
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
 
   try {
-    const segment = await SegmentService.createSegment(supabase, body, adminId);
+    const segment = await SegmentService.createSegment(supabase, body, actor);
     return NextResponse.json({ segment }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'CREATE_FAILED';

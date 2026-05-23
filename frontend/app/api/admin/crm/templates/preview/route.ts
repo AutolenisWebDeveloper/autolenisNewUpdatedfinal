@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { TemplateService } from '@/lib/services/template.service';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import type { TemplateVariable } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
@@ -31,7 +32,10 @@ const SAMPLE: Record<TemplateVariable, string> = {
   unsubscribeUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/unsubscribe?token=sample`,
 };
 
+// Read-only preview render — no audit log entry.
 export async function POST(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   let body: PreviewBody;
   try {
     body = (await req.json()) as PreviewBody;

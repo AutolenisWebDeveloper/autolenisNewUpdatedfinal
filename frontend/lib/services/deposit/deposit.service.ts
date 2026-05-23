@@ -3,7 +3,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
-import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { DEPOSIT_AMOUNT_CENTS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
 import { launchAuction } from "@/lib/services/auction/auction.service";
 
@@ -50,7 +50,7 @@ export async function handleDepositPaid(paymentIntentId: string): Promise<void> 
     data: {
       buyerId: deposit.buyerId,
       title: "Your auction is live!",
-      body: "Your $99 deposit was received. Your private auction is now active.",
+      body: `Your ${DEPOSIT_AMOUNT_USD} deposit was received. Your private auction is now active.`,
       type: "AUCTION_STARTED",
     },
   }).catch(() => {});

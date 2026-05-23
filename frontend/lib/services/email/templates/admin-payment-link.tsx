@@ -2,11 +2,17 @@
 // Payment link emails sent by admin to buyers.
 // Uses plain HTML string — no react-dom/server import (not compatible with Next.js App Router).
 
+import {
+  DEPOSIT_AMOUNT_USD,
+  PREMIUM_FEE_USD,
+  PREMIUM_FEE_REMAINING_USD,
+} from "@/lib/constants";
+
 export const DEPOSIT_PAYMENT_LINK_SUBJECT =
-  "Action Required — Complete Your $99 AutoLenis Deposit";
+  `Action Required — Complete Your ${DEPOSIT_AMOUNT_USD} AutoLenis Deposit`;
 
 export const CONCIERGE_FEE_PAYMENT_LINK_SUBJECT =
-  "Action Required — $400 Concierge Fee Due";
+  `Action Required — ${PREMIUM_FEE_REMAINING_USD} Concierge Fee Due`;
 
 export interface DepositPaymentLinkEmailProps {
   firstName: string;
@@ -49,7 +55,7 @@ export function renderDepositPaymentLinkEmail({
           <tr>
             <td style="padding:40px 40px 24px 40px;color:#333333;font-size:15px;line-height:1.6;">
               <p style="margin:0 0 16px 0;">Hi ${firstName},</p>
-              <p style="margin:0 0 16px 0;">Your AutoLenis specialist has sent you a secure payment link to complete your <strong>$99 Auction Access Deposit</strong>.</p>
+              <p style="margin:0 0 16px 0;">Your AutoLenis specialist has sent you a secure payment link to complete your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong>.</p>
               <p style="margin:0 0 16px 0;">Click the button below to pay securely through Stripe. This link expires in 24 hours.</p>
               <!-- CTA Button -->
               <table cellpadding="0" cellspacing="0" style="margin:24px 0;">
@@ -57,7 +63,7 @@ export function renderDepositPaymentLinkEmail({
                   <td>
                     <a href="${checkoutUrl}"
                        style="display:inline-block;background:#0B5FD1;color:#ffffff;text-decoration:none;font-weight:bold;padding:14px 28px;border-radius:6px;font-size:15px;">
-                      Pay $99 Deposit Now &#8594;
+                      Pay ${DEPOSIT_AMOUNT_USD} Deposit Now &#8594;
                     </a>
                   </td>
                 </tr>
@@ -109,15 +115,15 @@ export function renderConciergeFeePaymentLinkEmail({
           <tr>
             <td style="padding:40px 40px 24px 40px;color:#333333;font-size:15px;line-height:1.6;">
               <p style="margin:0 0 16px 0;">Hi ${firstName},</p>
-              <p style="margin:0 0 16px 0;">Your AutoLenis specialist has sent you a secure payment link to complete your <strong>$499 Premium Concierge Fee</strong>.</p>
-              <p style="margin:0 0 16px 0;">Your $99 deposit has been credited — <strong>$400 is due</strong>. Click the button below to pay securely.</p>
+              <p style="margin:0 0 16px 0;">Your AutoLenis specialist has sent you a secure payment link to complete your <strong>${PREMIUM_FEE_USD} Premium Concierge Fee</strong>.</p>
+              <p style="margin:0 0 16px 0;">Your ${DEPOSIT_AMOUNT_USD} deposit has been credited — <strong>${PREMIUM_FEE_REMAINING_USD} is due</strong>. Click the button below to pay securely.</p>
               <!-- CTA Button -->
               <table cellpadding="0" cellspacing="0" style="margin:24px 0;">
                 <tr>
                   <td>
                     <a href="${checkoutUrl}"
                        style="display:inline-block;background:#0B5FD1;color:#ffffff;text-decoration:none;font-weight:bold;padding:14px 28px;border-radius:6px;font-size:15px;">
-                      Pay $400 Now &#8594;
+                      Pay ${PREMIUM_FEE_REMAINING_USD} Now &#8594;
                     </a>
                   </td>
                 </tr>

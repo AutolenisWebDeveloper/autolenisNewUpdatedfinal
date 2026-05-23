@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { NotificationType } from "@prisma/client";
 import * as emailService from "@/lib/services/email/resend.service";
+import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 
 // 15 buyer notification trigger points
 export const BuyerTriggers = {
@@ -31,7 +32,7 @@ export const BuyerTriggers = {
     await prisma.notification.create({ data: { buyerId, type: NotificationType.PICKUP_SCHEDULED, title: "Pickup scheduled", body: `Your vehicle pickup is scheduled for ${date}. Your QR code is ready.`, actionUrl: `/buyer/pickup` } });
   },
   async depositConfirmed(buyerId: string) {
-    await prisma.notification.create({ data: { buyerId, type: NotificationType.DEPOSIT_CONFIRMED, title: "$99 deposit confirmed", body: "Your auction is being prepared. Dealers will be invited shortly.", actionUrl: `/buyer/auctions` } });
+    await prisma.notification.create({ data: { buyerId, type: NotificationType.DEPOSIT_CONFIRMED, title: `${DEPOSIT_AMOUNT_USD} deposit confirmed`, body: "Your auction is being prepared. Dealers will be invited shortly.", actionUrl: `/buyer/auctions` } });
   },
   async prequalApproved(buyerId: string, maxOtd: number) {
     await prisma.notification.create({ data: { buyerId, type: NotificationType.PREQUAL_APPROVED, title: "Pre-qualification approved", body: `Your approved budget is $${(maxOtd / 100).toLocaleString()}. Start browsing vehicles.`, actionUrl: `/buyer/prequal` } });

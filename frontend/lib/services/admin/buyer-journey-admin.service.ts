@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 
 export type StageStatus =
   | "COMPLETE"    // Organically complete in DB
@@ -61,7 +62,7 @@ const STAGE_META: Record<StageId, { label: string; description: string; route: s
   "prequal":     { label: "Pre-Qual",     route: "/buyer/prequal",         description: "Pre-qualification submitted. PreQualification record exists." },
   "search":      { label: "Search",       route: "/buyer/search",          description: "Buyer can browse inventory. Auto-unlocked after prequal." },
   "shortlist":   { label: "Shortlist",    route: "/buyer/shortlist",       description: "Buyer shortlisted at least one vehicle. Shortlist.items.length > 0." },
-  "deposit":     { label: "Deposit",      route: "/buyer/deposit",         description: "Buyer paid the $99 Auction Access Deposit. Deposit.status = PAID." },
+  "deposit":     { label: "Deposit",      route: "/buyer/deposit",         description: `Buyer paid the ${DEPOSIT_AMOUNT_USD} Auction Access Deposit. Deposit.status = PAID.` },
   "auction":     { label: "Auction",      route: "/buyer/auctions",        description: "Dealer auction concluded. Active deal exists." },
   "select-deal": { label: "Select Deal",  route: "/buyer/deal",            description: "Buyer selected a dealer offer. Deal record created." },
   "financing":   { label: "Financing",    route: "/buyer/deal/financing",  description: "Buyer chose financing path. deal.financingPath is set." },

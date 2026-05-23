@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizeEmail, normalizePhone } from '../utils/phone';
 import type { EmailSuppressionReason, SmsSuppressionReason } from '../types/crm';
+import { writeCrmAuditLog, type CrmAuditActor } from './admin/crm-audit';
 
 export class SuppressionService {
   static async isEmailSuppressed(supabase: SupabaseClient, email: string): Promise<boolean> {
@@ -68,7 +69,7 @@ export class SuppressionService {
   static async unsuppressEmail(
     supabase: SupabaseClient,
     email: string,
-    adminId: string
+    actor: CrmAuditActor
   ): Promise<void> {
     const clean = normalizeEmail(email);
     if (!clean) return;
@@ -81,12 +82,12 @@ export class SuppressionService {
 
     await supabase.from('email_suppression').delete().eq('email', clean);
 
-    await supabase.from('admin_audit_log').insert({
-      admin_id: adminId,
+    await writeCrmAuditLog(supabase, actor, {
       action: 'UNSUPPRESS_EMAIL',
       entity_type: 'email_suppression',
-      before_state: existing,
-      after_state: null,
+      entity_id: clean,
+      previous_state: existing,
+      new_state: null,
     });
   }
 

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { CampaignService, type CampaignInput } from '@/lib/services/campaign.service';
-import { getAdminActorId } from '@/lib/auth/admin-actor';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import { inngest } from '@/lib/inngest/client';
 import type { CampaignStatus } from '@/lib/types/crm';
 
@@ -29,11 +29,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'INVALID_JSON' }, { status: 400 });
   }
 
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
 
   try {
-    const campaign = await CampaignService.createCampaign(supabase, body, adminId);
+    const campaign = await CampaignService.createCampaign(supabase, body, actor);
 
     // Send-immediately path enqueues the fan-out worker. Scheduled campaigns
     // are picked up by the scheduledCampaignCronFn at run-time.

@@ -3,6 +3,7 @@
 // Returns structured rows for deposits and concierge fees.
 
 import { prisma } from "@/lib/prisma";
+import { PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 
 export interface DepositRow {
   depositId: string;
@@ -66,7 +67,7 @@ export async function getAdminConciergeFeeList(): Promise<ConciergeFeeRow[]> {
       buyerId: d.buyerId,
       buyerName: `${d.buyer.firstName} ${d.buyer.lastName}`,
       buyerEmail: d.buyer.user.email,
-      amountCents: d.feeAmountCents ?? 40000,
+      amountCents: d.feeAmountCents ?? PREMIUM_FEE_REMAINING_CENTS,
       feePaidAt: d.feePaidAt?.toISOString() ?? null,
       feeStatus,
       createdAt: d.createdAt.toISOString(),

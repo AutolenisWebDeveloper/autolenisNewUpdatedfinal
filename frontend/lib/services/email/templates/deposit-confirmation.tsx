@@ -2,7 +2,12 @@
 // Deposit Confirmation — sent when Stripe checkout.session.completed fires for a deposit.
 // Uses plain HTML string — no react-dom/server import (not compatible with Next.js App Router).
 
-export const DEPOSIT_CONFIRMATION_SUBJECT = "Your $99 AutoLenis deposit is confirmed";
+import { DEPOSIT_AMOUNT_CENTS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
+
+// Receipts show two-decimal currency to match Stripe receipt formatting.
+const DEPOSIT_USD_WITH_CENTS = `$${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(2)}`;
+
+export const DEPOSIT_CONFIRMATION_SUBJECT = `Your ${DEPOSIT_AMOUNT_USD} AutoLenis deposit is confirmed`;
 
 export interface DepositConfirmationEmailProps {
   firstName: string;
@@ -41,7 +46,7 @@ export function renderDepositConfirmationEmail({
           <tr>
             <td style="padding:40px 40px 24px 40px;color:#333333;font-size:15px;line-height:1.6;">
               <p style="margin:0 0 16px 0;">Hi ${firstName},</p>
-              <p style="margin:0 0 16px 0;">Your $99 activation deposit has been received. Your private auction is now active — dealers are being invited to compete for your business.</p>
+              <p style="margin:0 0 16px 0;">Your ${DEPOSIT_AMOUNT_USD} activation deposit has been received. Your private auction is now active — dealers are being invited to compete for your business.</p>
               <!-- Receipt box -->
               <table width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;">
                 <tr>
@@ -50,7 +55,7 @@ export function renderDepositConfirmationEmail({
                     <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#555555;">
                       <tr>
                         <td style="padding:4px 0;">Amount</td>
-                        <td style="padding:4px 0;text-align:right;font-weight:600;color:#333333;">$99.00</td>
+                        <td style="padding:4px 0;text-align:right;font-weight:600;color:#333333;">${DEPOSIT_USD_WITH_CENTS}</td>
                       </tr>
                       <tr>
                         <td style="padding:4px 0;">Status</td>
@@ -73,7 +78,7 @@ export function renderDepositConfirmationEmail({
                 <tr>
                   <td style="background:#F8F9FB;border-left:4px solid #0B5FD1;padding:14px 18px;border-radius:4px;">
                     <p style="margin:0;font-size:13px;color:#555555;line-height:1.6;">
-                      Your $99 deposit is <strong>fully refundable</strong> if no competitive offer is received. It will be credited toward your AutoLenis concierge fee when your deal closes.
+                      Your ${DEPOSIT_AMOUNT_USD} deposit is <strong>fully refundable</strong> if no competitive offer is received. It will be credited toward your AutoLenis concierge fee when your deal closes.
                     </p>
                   </td>
                 </tr>

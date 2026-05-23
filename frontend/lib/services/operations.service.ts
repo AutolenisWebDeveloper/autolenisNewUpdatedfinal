@@ -1,7 +1,6 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { inngest } from '@/lib/inngest/client';
-import { prisma } from '@/lib/prisma';
 
 // ----------------------------------------------------------------------------
 // AutoLenis Phase 5 — Operations dashboard data layer.
@@ -215,8 +214,8 @@ export class OperationsService {
   } = {}): Promise<AuditLogEntry[]> {
     const limit = Math.min(500, Math.max(10, options.limit ?? 200));
     let query = this.supabase
-      .from('admin_audit_log')
-      .select('id,admin_id,action,entity_type,entity_id,ip_address,created_at')
+      .from('admin_audit_logs')
+      .select('id,admin_id,admin_email,action,entity_type,entity_id,ip_address,created_at')
       .order('created_at', { ascending: false })
       .limit(limit);
 
@@ -229,6 +228,7 @@ export class OperationsService {
     const rows = (data ?? []) as Array<{
       id: string;
       admin_id: string;
+      admin_email: string | null;
       action: string;
       entity_type: string | null;
       entity_id: string | null;
@@ -236,25 +236,10 @@ export class OperationsService {
       created_at: string;
     }>;
 
-    // Resolve admin emails once for the page in a single Prisma query.
-    // Admins are owned by the legacy Prisma schema (Admin → User → email);
-    // there's no Supabase mirror, so a cross-db lookup is unavoidable here.
-    const adminIds = Array.from(new Set(rows.map((r) => r.admin_id)));
-    const emailMap = new Map<string, string>();
-    if (adminIds.length > 0) {
-      const adminRows = await prisma.admin.findMany({
-        where: { id: { in: adminIds } },
-        select: { id: true, user: { select: { email: true } } },
-      });
-      for (const a of adminRows) {
-        emailMap.set(a.id, a.user?.email ?? '');
-      }
-    }
-
     return rows.map((row) => ({
       id: row.id,
       admin_id: row.admin_id,
-      admin_email: emailMap.get(row.admin_id) ?? null,
+      admin_email: row.admin_email,
       action: row.action,
       entity_type: row.entity_type,
       entity_id: row.entity_id,

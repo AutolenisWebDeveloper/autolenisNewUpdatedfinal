@@ -1,7 +1,7 @@
 // lib/services/nudge/nudge.service.ts — Feature 6 Smart Buyer Nudge Engine
 
 import { prisma } from "@/lib/prisma";
-import { NUDGE_DEFAULTS } from "@/lib/constants";
+import { NUDGE_DEFAULTS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 import { NudgeChannel, NudgeStage } from "@prisma/client";
 
 export async function triggerNudge(buyerId: string, stage: NudgeStage): Promise<void> {
@@ -30,7 +30,7 @@ export async function triggerNudge(buyerId: string, stage: NudgeStage): Promise<
 
   const nudgeMessages: Record<NudgeStage, { title: string; body: string }> = {
     PREQUAL_IDLE: { title: "Your buying power awaits", body: "Complete your prequalification in 3 minutes — no credit score impact." },
-    DEPOSIT_IDLE: { title: "Dealers are waiting", body: "Activate your auction with a $99 refundable deposit and let dealers compete." },
+    DEPOSIT_IDLE: { title: "Dealers are waiting", body: `Activate your auction with a ${DEPOSIT_AMOUNT_USD} refundable deposit and let dealers compete.` },
     FINANCING_IDLE: { title: "Next step: financing", body: "Choose your financing path to move your deal forward." },
     INSURANCE_IDLE: { title: "Insurance needed", body: "Arrange coverage to continue with your deal." },
     EMAIL_IDLE: { title: "Your deal needs attention", body: "Log in to continue with your vehicle purchase." },

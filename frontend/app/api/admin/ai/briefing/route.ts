@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifyAdminJwt, ADMIN_TOKEN_COOKIE } from "@/lib/admin-auth";
+import { createAuditLog } from "@/lib/auth/admin-api";
 import { adminBriefingAgent } from "@/lib/services/ai/agents";
 import { prisma } from "@/lib/prisma";
 import { isAiEnabled } from "@/lib/ai/kill-switch";
@@ -32,6 +33,13 @@ export async function POST(request: NextRequest) {
     }).catch(() => {
       // briefing might already exist with different ID — just create
       return prisma.adminBriefing.create({ data: { content: briefingContent, period: today } });
+    });
+
+    await createAuditLog(admin, request, {
+      action: "ADMIN_AI_BRIEFING_GENERATED",
+      entityType: "AdminBriefing",
+      entityId: `briefing-${today}`,
+      metadata: { period: today },
     });
 
     return NextResponse.json({ success: true, data: { briefing: briefingContent, period: today } });

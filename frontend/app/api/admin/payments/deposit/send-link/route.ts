@@ -1,13 +1,13 @@
 // POST /api/admin/payments/deposit/send-link
-// Admin creates a Stripe Checkout Session for the $99 deposit and emails the link to the buyer.
-// Amount is ALWAYS DEPOSIT_AMOUNT_CENTS (9900) from constants.ts — never from request body.
+// Admin creates a Stripe Checkout Session for the Auction Access Deposit and emails the link to the buyer.
+// Amount is ALWAYS DEPOSIT_AMOUNT_CENTS from constants.ts — never from request body.
 
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { getStripe } from "@/lib/stripe";
-import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { DEPOSIT_AMOUNT_CENTS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 import { sendDepositPaymentLinkEmail } from "@/lib/services/email/resend.service";
 
 const schema = z.object({
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
         price_data: {
           currency: "usd",
           unit_amount: DEPOSIT_AMOUNT_CENTS,
-          product_data: { name: "AutoLenis $99 Auction Access Deposit" },
+          product_data: { name: `AutoLenis ${DEPOSIT_AMOUNT_USD} Auction Access Deposit` },
         },
         quantity: 1,
       },

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { WorkflowService } from '@/lib/services/workflow.service';
 import { getPrebuilt } from '@/lib/services/workflow.prebuilt';
-import { getAdminActorId } from '@/lib/auth/admin-actor';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import type { WorkflowStatus, WorkflowInput } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
@@ -38,8 +38,9 @@ export async function POST(req: Request) {
   }
   if (!body) return NextResponse.json({ error: 'BODY_REQUIRED' }, { status: 400 });
 
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
 
   // Cloning a prebuilt → seed the workflow with the template graph but mark
   // it as a normal draft so the admin can customize freely.
@@ -58,7 +59,7 @@ export async function POST(req: Request) {
           is_prebuilt: false,
           prebuilt_key: prebuilt.key,
         },
-        adminId,
+        actor,
       );
       return NextResponse.json({ workflow }, { status: 201 });
     } catch (err) {
@@ -68,7 +69,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const workflow = await WorkflowService.createWorkflow(supabase, body, adminId);
+    const workflow = await WorkflowService.createWorkflow(supabase, body, actor);
     return NextResponse.json({ workflow }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'CREATE_FAILED';

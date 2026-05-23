@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { TemplateService } from '@/lib/services/template.service';
-import { getAdminActorId } from '@/lib/auth/admin-actor';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import type { EmailTemplateUpdate } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
@@ -34,11 +34,12 @@ export async function PATCH(
     return NextResponse.json({ error: 'INVALID_JSON' }, { status: 400 });
   }
 
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
 
   try {
-    const updated = await TemplateService.updateTemplate(supabase, id, body, adminId);
+    const updated = await TemplateService.updateTemplate(supabase, id, body, actor);
     return NextResponse.json({ template: updated });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'UPDATE_FAILED';

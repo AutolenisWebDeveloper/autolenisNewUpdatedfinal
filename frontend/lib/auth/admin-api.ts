@@ -43,8 +43,11 @@ export async function createAuditLog(
     entityId: string;
     reason?: string;
     metadata?: Record<string, unknown>;
+    previousState?: Record<string, unknown> | null;
+    newState?: Record<string, unknown> | null;
   }
 ) {
+  type AuditLogJson = Parameters<typeof prisma.adminAuditLog.create>[0]["data"]["metadata"];
   return prisma.adminAuditLog.create({
     data: {
       adminId: admin.adminId,
@@ -54,7 +57,9 @@ export async function createAuditLog(
       entityId: params.entityId,
       ipAddress: getClientIp(request),
       reason: params.reason,
-      metadata: params.metadata ? (params.metadata as Parameters<typeof prisma.adminAuditLog.create>[0]["data"]["metadata"]) : undefined,
+      metadata: params.metadata ? (params.metadata as AuditLogJson) : undefined,
+      previousState: params.previousState ? (params.previousState as AuditLogJson) : undefined,
+      newState: params.newState ? (params.newState as AuditLogJson) : undefined,
     },
   });
 }

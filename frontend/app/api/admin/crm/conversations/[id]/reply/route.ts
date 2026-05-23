@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import twilio from 'twilio';
 import { getServiceSupabase } from '@/lib/supabase-service';
-import { getAdminActorId } from '@/lib/auth/admin-actor';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import { SuppressionService } from '@/lib/services/suppression.service';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,8 +20,10 @@ export async function POST(
   }
 
   const isInternalNote = !!body.is_internal_note;
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+  const adminId = actor.adminId;
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
 
   const { data: conversation, error: convErr } = await supabase
     .from('conversations')
@@ -115,6 +118,13 @@ export async function POST(
     event_type: 'sms_sent',
     event_data: { twilio_sid: twilioSid, source: 'admin_inbox_reply' },
     created_by: adminId,
+  });
+
+  await writeCrmAuditLog(supabase, actor, {
+    action: 'CONVERSATION_REPLY_SENT',
+    entity_type: 'conversation',
+    entity_id: id,
+    metadata: { twilio_sid: twilioSid, channel: conversation.channel },
   });
 
   return NextResponse.json({ message: inserted });

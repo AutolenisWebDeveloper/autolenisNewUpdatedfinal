@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { WorkflowService } from '@/lib/services/workflow.service';
-import { getAdminActorId } from '@/lib/auth/admin-actor';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,10 +11,11 @@ interface RouteContext {
 
 export async function POST(_req: Request, ctx: RouteContext) {
   const { id } = await ctx.params;
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
   try {
-    const workflow = await WorkflowService.activateWorkflow(supabase, id, adminId);
+    const workflow = await WorkflowService.activateWorkflow(supabase, id, actor);
     return NextResponse.json({ workflow });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'ACTIVATE_FAILED';

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { getHopeContent } from "@/lib/services/faith/faith.service";
 import { prisma } from "@/lib/prisma";
 
@@ -19,6 +19,12 @@ export async function PATCH(request: NextRequest) {
     where: { section },
     create: { section, body, title, isActive: true, order: 0 },
     update: { body, title },
+  });
+  await createAuditLog(admin, request, {
+    action: "FAITH_HOPE_CONTENT_UPDATED",
+    entityType: "HopePageContent",
+    entityId: section,
+    metadata: { section, hasTitle: !!title, bodyLength: body.length },
   });
   return adminSuccess({ updated });
 }

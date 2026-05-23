@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { WorkflowService } from '@/lib/services/workflow.service';
-import { getAdminActorId } from '@/lib/auth/admin-actor';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import type { WorkflowUpdate } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
@@ -33,10 +33,11 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     return NextResponse.json({ error: 'INVALID_JSON' }, { status: 400 });
   }
 
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
   try {
-    const workflow = await WorkflowService.updateWorkflow(supabase, id, body, adminId);
+    const workflow = await WorkflowService.updateWorkflow(supabase, id, body, actor);
     return NextResponse.json({ workflow });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'UPDATE_FAILED';
@@ -46,10 +47,11 @@ export async function PATCH(req: Request, ctx: RouteContext) {
 
 export async function DELETE(_req: Request, ctx: RouteContext) {
   const { id } = await ctx.params;
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
-  const adminId = await getAdminActorId();
   try {
-    await WorkflowService.deleteWorkflow(supabase, id, adminId);
+    await WorkflowService.deleteWorkflow(supabase, id, actor);
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'DELETE_FAILED';

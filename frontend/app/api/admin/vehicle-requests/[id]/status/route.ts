@@ -3,7 +3,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminError, adminSuccess, createAuditLog } from "@/lib/auth/admin-api";
 
 const schema = z.object({
   requestStatus: z.enum([
@@ -43,6 +43,16 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   await prisma.notification.update({
     where: { id },
     data: { metadata: updated as Parameters<typeof prisma.notification.update>[0]["data"]["metadata"] },
+  });
+
+  await createAuditLog(admin, request, {
+    action: "VEHICLE_REQUEST_STATUS_CHANGED",
+    entityType: "VehicleRequest",
+    entityId: id,
+    metadata: {
+      previousStatus: (meta as { requestStatus?: string }).requestStatus ?? null,
+      newStatus: parsed.data.requestStatus,
+    },
   });
 
   return adminSuccess({ id, requestStatus: parsed.data.requestStatus });

@@ -3,6 +3,8 @@ import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
 import { SuppressionService } from '@/lib/services/suppression.service';
 import { inngest } from '@/lib/inngest/client';
+import { getAdminActor } from '@/lib/auth/admin-actor';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,6 +17,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
 
   let payload: SendSmsBody;
   try {
@@ -57,6 +61,13 @@ export async function POST(
       phone: contact.phone,
       body: payload.body.trim(),
     },
+  });
+
+  await writeCrmAuditLog(supabase, actor, {
+    action: 'CRM_INDIVIDUAL_SMS_SEND',
+    entity_type: 'contact',
+    entity_id: contact.id,
+    metadata: { to_phone: contact.phone },
   });
 
   return NextResponse.json({ queued: true });

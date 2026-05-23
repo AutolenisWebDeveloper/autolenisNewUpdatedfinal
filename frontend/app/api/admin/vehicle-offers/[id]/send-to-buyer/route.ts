@@ -3,7 +3,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminError, adminSuccess, createAuditLog } from "@/lib/auth/admin-api";
 import { sendBuyerOfferReviewEmail } from "@/lib/services/email/vehicle-offers.email";
 import { sendVehicleOfferReady } from "@/lib/services/email/resend.service";
 
@@ -128,6 +128,17 @@ export async function POST(request: NextRequest, { params }: Params) {
     where: { id: offer.id },
     data: { requestStatus: "sent_to_buyer" },
   }).catch((err) => console.error("[send-to-buyer] requestStatus update failed:", err));
+
+  await createAuditLog(admin, request, {
+    action: "VEHICLE_OFFER_SENT_TO_BUYER",
+    entityType: "VehicleOffer",
+    entityId: offer.id,
+    metadata: {
+      buyerEmail: data.buyerEmail,
+      itemCount: data.items.length,
+      reviewId: review.id,
+    },
+  });
 
   return adminSuccess({ reviewToken: review.reviewToken, reviewUrl }, 201);
 }

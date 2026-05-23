@@ -1,6 +1,7 @@
 // lib/services/payment/refund.service.ts
 import { prisma } from "@/lib/prisma";
 import { refundPaymentIntent } from "./stripe.service";
+import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 
 export async function processRefund(depositId: string, reason: string): Promise<boolean> {
   const deposit = await prisma.deposit.findUnique({ where: { id: depositId } });
@@ -11,7 +12,7 @@ export async function processRefund(depositId: string, reason: string): Promise<
 
   await prisma.notification.create({ data: {
     buyerId: deposit.buyerId, type: "DEAL_STAGE_CHANGED",
-    title: "Refund processed", body: "Your $99 deposit refund has been processed. Allow 3-5 business days.",
+    title: "Refund processed", body: `Your ${DEPOSIT_AMOUNT_USD} deposit refund has been processed. Allow 3-5 business days.`,
   }}).catch(() => {});
 
   return true;

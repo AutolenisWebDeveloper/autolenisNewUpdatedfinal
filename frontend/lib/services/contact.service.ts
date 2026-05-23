@@ -7,6 +7,7 @@ import type {
   LifecycleStage,
   WorkflowTriggerType,
 } from '../types/crm';
+import { writeCrmAuditLog, type CrmAuditActor } from './admin/crm-audit';
 
 // Lifecycle stages that map 1:1 to a workflow trigger_type. Stages without a
 // corresponding trigger (e.g. 'inactive') do not enroll on stage change —
@@ -161,7 +162,7 @@ export class ContactService {
       .maybeSingle();
   }
 
-  // adminId is required for attribution. Pass null only when no authenticated
+  // actor is required for attribution. Pass null only when no authenticated
   // admin session is available — in that case the audit_log write is skipped
   // entirely rather than recorded against a placeholder UUID. An unlogged
   // mutation is preferable to a fraudulently attributed one.
@@ -169,7 +170,7 @@ export class ContactService {
     supabase: SupabaseClient,
     id: string,
     updates: ContactUpdate,
-    adminId: string | null
+    actor: CrmAuditActor | null
   ): Promise<Contact> {
     const { data: before } = await supabase
       .from('contacts')
@@ -190,16 +191,13 @@ export class ContactService {
 
     if (error) throw error;
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'UPDATE_CONTACT',
-        entity_type: 'contact',
-        entity_id: id,
-        before_state: before,
-        after_state: data,
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'UPDATE_CONTACT',
+      entity_type: 'contact',
+      entity_id: id,
+      previous_state: before,
+      new_state: data,
+    });
 
     return data as Contact;
   }
@@ -208,7 +206,7 @@ export class ContactService {
     supabase: SupabaseClient,
     id: string,
     newStage: LifecycleStage,
-    adminId: string | null
+    actor: CrmAuditActor | null
   ): Promise<Contact> {
     const { data: before } = await supabase
       .from('contacts')
@@ -229,19 +227,16 @@ export class ContactService {
       contact_id: id,
       event_type: 'stage_changed',
       event_data: { from: before?.lifecycle_stage, to: newStage },
-      created_by: adminId,
+      created_by: actor?.adminId ?? null,
     });
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'UPDATE_LIFECYCLE_STAGE',
-        entity_type: 'contact',
-        entity_id: id,
-        before_state: { lifecycle_stage: before?.lifecycle_stage },
-        after_state: { lifecycle_stage: newStage },
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'UPDATE_LIFECYCLE_STAGE',
+      entity_type: 'contact',
+      entity_id: id,
+      previous_state: { lifecycle_stage: before?.lifecycle_stage },
+      new_state: { lifecycle_stage: newStage },
+    });
 
     // Workflow trigger fan-out. Lazy import keeps the engine out of bundles
     // that only need contact CRUD, and isolates a workflow failure from
@@ -268,20 +263,17 @@ export class ContactService {
   static async softDeleteContact(
     supabase: SupabaseClient,
     id: string,
-    adminId: string | null
+    actor: CrmAuditActor | null
   ): Promise<void> {
     await supabase
       .from('contacts')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', id);
 
-    if (adminId) {
-      await supabase.from('admin_audit_log').insert({
-        admin_id: adminId,
-        action: 'SOFT_DELETE_CONTACT',
-        entity_type: 'contact',
-        entity_id: id,
-      });
-    }
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'SOFT_DELETE_CONTACT',
+      entity_type: 'contact',
+      entity_id: id,
+    });
   }
 }

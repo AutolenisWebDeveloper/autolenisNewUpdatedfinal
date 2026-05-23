@@ -7,6 +7,7 @@ import { getAdminWithRole, adminSuccess, adminError, getClientIp } from "@/lib/a
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { getStripe } from "@/lib/stripe";
+import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 
 interface Props { params: Promise<{ depositId: string }> }
 
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       type: "DEAL_STAGE_CHANGED",
       channel: "IN_APP",
       title: "Deposit refund processed",
-      body: "Your $99 deposit refund has been processed. Please allow 3–5 business days.",
+      body: `Your ${DEPOSIT_AMOUNT_USD} deposit refund has been processed. Please allow 3–5 business days.`,
     },
   });
 

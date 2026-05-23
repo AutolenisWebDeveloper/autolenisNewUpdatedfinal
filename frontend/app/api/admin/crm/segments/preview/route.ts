@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { SegmentService, normalizeConditions } from '@/lib/services/segment.service';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 
 export const dynamic = 'force-dynamic';
 
 // Live-count endpoint hit by the segment builder while the admin edits rules.
-// Validates the conditions and runs a HEAD-count against contacts. Returns 0
-// for an empty rule list (intentional — see SegmentService.countContacts).
+// Read-only — no audit log entry.
 export async function POST(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   let body: { conditions: unknown };
   try {
     body = await req.json();

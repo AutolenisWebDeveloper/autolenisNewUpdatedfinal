@@ -5,7 +5,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminError, adminSuccess, createAuditLog } from "@/lib/auth/admin-api";
 import { sendVehicleOfferInvitationEmail } from "@/lib/services/email/vehicle-offers.email";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -123,6 +123,17 @@ export async function POST(request: NextRequest, { params }: Params) {
   } catch (err) {
     console.error("[send-to-dealers] notification status update failed:", err);
   }
+
+  await createAuditLog(admin, request, {
+    action: "VEHICLE_OFFER_SENT_TO_DEALERS",
+    entityType: "VehicleOffer",
+    entityId: offer.id,
+    metadata: {
+      requestId,
+      dealerCount: created.length,
+      dealerEmails: created.map((c) => c.dealerEmail),
+    },
+  });
 
   return adminSuccess({
     invitations: created.map((inv) => ({

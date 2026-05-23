@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
+import { getAdminActor } from '@/lib/auth/admin-actor';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +38,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const body = (await req.json()) as {
     title?: string;
     description?: string;
@@ -89,6 +93,13 @@ export async function POST(req: Request) {
       event_data: { task_id: data.id, title: data.title },
     });
   }
+
+  await writeCrmAuditLog(supabase, actor, {
+    action: 'CRM_TASK_CREATED',
+    entity_type: 'crm_task',
+    entity_id: data.id,
+    new_state: data,
+  });
 
   return NextResponse.json({ task: data });
 }
