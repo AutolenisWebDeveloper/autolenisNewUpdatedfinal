@@ -3,11 +3,18 @@ import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dea
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { isValidVin, normalizeVin } from "@/lib/utils/vin";
 
 export async function GET(request: NextRequest) {
   const dealer = await getRequestDealer(request);
   if (!dealer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
-  const inventory = await prisma.inventoryItem.findMany({ where: { dealerId: dealer.id }, orderBy: { createdAt: "desc" } });
+  // Soft-deleted (archived) items remain queryable for audit. isActive=false
+  // is the archive flag — they are returned with status so the UI can show
+  // them in an archive section.
+  const inventory = await prisma.inventoryItem.findMany({
+    where: { dealerId: dealer.id },
+    orderBy: { createdAt: "desc" },
+  });
   return successResponse({ inventory });
 }
 
@@ -17,8 +24,11 @@ const createSchema = z.object({
   model: z.string().min(1).max(64),
   trim: z.string().max(64).optional(),
   priceCents: z.number().int().positive(),
-  vin: z.string().min(11).max(17),
+  vin: z.string().transform((s) => normalizeVin(s)).refine(isValidVin, {
+    message: "VIN must be exactly 17 alphanumeric characters (no I, O, or Q)",
+  }),
   mileage: z.number().int().nonnegative().optional(),
+  condition: z.enum(["NEW", "USED", "CPO"]).optional(),
   images: z.array(z.string().url()).max(20).optional(),
 }).strict();
 
@@ -30,6 +40,17 @@ export async function POST(request: NextRequest) {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
     return errorResponse("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 422);
+  }
+
+  // Dealer-scoped duplicate VIN guard. The InventoryItem.vin column is
+  // globally @unique, but check upfront so we can return a clean 409
+  // instead of waiting for a P2002.
+  const existing = await prisma.inventoryItem.findFirst({
+    where: { dealerId: dealer.id, vin: parsed.data.vin },
+    select: { id: true },
+  });
+  if (existing) {
+    return errorResponse("DUPLICATE_VIN", "You already have a vehicle with this VIN", 409);
   }
 
   try {
@@ -44,6 +65,7 @@ export async function POST(request: NextRequest) {
         priceCents: parsed.data.priceCents,
         vin: parsed.data.vin,
         mileage: parsed.data.mileage,
+        condition: parsed.data.condition?.toLowerCase(),
         images: parsed.data.images ?? [],
         isActive: true,
       },

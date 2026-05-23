@@ -12,17 +12,33 @@ CREATE TABLE IF NOT EXISTS "compliance_events" (
   CONSTRAINT "compliance_events_pkey" PRIMARY KEY ("id")
 );
 
-CREATE INDEX IF NOT EXISTS "compliance_events_buyer_id_created_at_idx"
-  ON "compliance_events"("buyer_id", "created_at");
-CREATE INDEX IF NOT EXISTS "compliance_events_event_type_idx"
-  ON "compliance_events"("event_type");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'compliance_events')) IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS "compliance_events_buyer_id_created_at_idx"
+      ON "compliance_events"("buyer_id", "created_at");
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'compliance_events')) IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS "compliance_events_event_type_idx"
+      ON "compliance_events"("event_type");
+  END IF;
+END $$;
 
-ALTER TABLE "compliance_events"
-  ADD CONSTRAINT "compliance_events_buyer_id_fkey"
-  FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id")
-  ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'compliance_events')) IS NOT NULL THEN
+    ALTER TABLE "compliance_events"
+      ADD CONSTRAINT "compliance_events_buyer_id_fkey"
+      FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id")
+      ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
-ALTER TABLE "compliance_events"
-  ADD CONSTRAINT "compliance_events_prequal_application_id_fkey"
-  FOREIGN KEY ("prequal_application_id") REFERENCES "pre_qualifications"("id")
-  ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'compliance_events')) IS NOT NULL THEN
+    ALTER TABLE "compliance_events"
+      ADD CONSTRAINT "compliance_events_prequal_application_id_fkey"
+      FOREIGN KEY ("prequal_application_id") REFERENCES "pre_qualifications"("id")
+      ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;

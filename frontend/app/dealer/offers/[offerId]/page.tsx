@@ -16,7 +16,16 @@ export default async function DealerOfferDetailPage({ params }: Props) {
   });
   if (!offer) notFound();
 
-  const canRevise = offer.status === "SUBMITTED" && offer.version < 2 && offer.auction.status === "ACTIVE";
+  // Mirrors reviseOffer() server-side guard: status SUBMITTED, version below
+  // cap, auction ACTIVE, and deadline not yet passed.
+  const deadlinePassed = offer.auction.endsAt
+    ? offer.auction.endsAt.getTime() <= Date.now()
+    : false;
+  const canRevise =
+    offer.status === "SUBMITTED" &&
+    offer.version < 2 &&
+    offer.auction.status === "ACTIVE" &&
+    !deadlinePassed;
 
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="offer-detail-page">

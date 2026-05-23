@@ -14,7 +14,15 @@ CREATE TABLE "admin_audit_logs" (
 );
 
 -- CreateIndex
-CREATE INDEX "admin_audit_logs_entity_type_entity_id_idx" ON "admin_audit_logs"("entity_type", "entity_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'admin_audit_logs')) IS NOT NULL THEN
+    CREATE INDEX "admin_audit_logs_entity_type_entity_id_idx" ON "admin_audit_logs"("entity_type", "entity_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "admin_audit_logs_admin_id_idx" ON "admin_audit_logs"("admin_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'admin_audit_logs')) IS NOT NULL THEN
+    CREATE INDEX "admin_audit_logs_admin_id_idx" ON "admin_audit_logs"("admin_id");
+  END IF;
+END $$;

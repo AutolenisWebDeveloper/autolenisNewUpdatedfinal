@@ -2,12 +2,28 @@
 -- Adds DealerApplication, DealerInvitation, and supporting fields for Areas 1-3
 
 -- 1. Add requires_password_change to users
-ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "requires_password_change" BOOLEAN NOT NULL DEFAULT false;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'users')) IS NOT NULL THEN
+    ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "requires_password_change" BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+END $$;
 
 -- 2. Add license_number, agreed_to_terms_at, onboarding_step to dealers
-ALTER TABLE "dealers" ADD COLUMN IF NOT EXISTS "license_number" TEXT;
-ALTER TABLE "dealers" ADD COLUMN IF NOT EXISTS "agreed_to_terms_at" TIMESTAMP(3);
-ALTER TABLE "dealers" ADD COLUMN IF NOT EXISTS "onboarding_step" TEXT NOT NULL DEFAULT 'BUSINESS_INFO';
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealers')) IS NOT NULL THEN
+    ALTER TABLE "dealers" ADD COLUMN IF NOT EXISTS "license_number" TEXT;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealers')) IS NOT NULL THEN
+    ALTER TABLE "dealers" ADD COLUMN IF NOT EXISTS "agreed_to_terms_at" TIMESTAMP(3);
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealers')) IS NOT NULL THEN
+    ALTER TABLE "dealers" ADD COLUMN IF NOT EXISTS "onboarding_step" TEXT NOT NULL DEFAULT 'BUSINESS_INFO';
+  END IF;
+END $$;
 
 -- 3. Create DealerApplicationStatus enum
 DO $$ BEGIN
@@ -43,7 +59,11 @@ CREATE TABLE IF NOT EXISTS "dealer_applications" (
   CONSTRAINT "dealer_applications_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "dealer_applications_dealer_id_key" UNIQUE ("dealer_id")
 );
-CREATE INDEX IF NOT EXISTS "dealer_applications_status_idx" ON "dealer_applications"("status");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealer_applications')) IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS "dealer_applications_status_idx" ON "dealer_applications"("status");
+  END IF;
+END $$;
 
 -- 6. Create dealer_invitations table
 CREATE TABLE IF NOT EXISTS "dealer_invitations" (
@@ -64,5 +84,13 @@ CREATE TABLE IF NOT EXISTS "dealer_invitations" (
   CONSTRAINT "dealer_invitations_token_key" UNIQUE ("token"),
   CONSTRAINT "dealer_invitations_dealer_id_key" UNIQUE ("dealer_id")
 );
-CREATE INDEX IF NOT EXISTS "dealer_invitations_status_idx" ON "dealer_invitations"("status");
-CREATE INDEX IF NOT EXISTS "dealer_invitations_token_idx" ON "dealer_invitations"("token");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealer_invitations')) IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS "dealer_invitations_status_idx" ON "dealer_invitations"("status");
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealer_invitations')) IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS "dealer_invitations_token_idx" ON "dealer_invitations"("token");
+  END IF;
+END $$;

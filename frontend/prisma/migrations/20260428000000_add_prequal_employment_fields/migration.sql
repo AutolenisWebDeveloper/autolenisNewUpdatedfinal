@@ -7,16 +7,24 @@
 ALTER TYPE "PreQualDecision" ADD VALUE IF NOT EXISTS 'OFAC_REVIEW';
 
 -- Optional employment columns on pre_qualifications
-ALTER TABLE "pre_qualifications"
-    ADD COLUMN IF NOT EXISTS "employment_status"     TEXT,
-    ADD COLUMN IF NOT EXISTS "employer_name"         TEXT,
-    ADD COLUMN IF NOT EXISTS "monthly_income_cents"  INTEGER,
-    ADD COLUMN IF NOT EXISTS "length_of_employment"  TEXT;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'pre_qualifications')) IS NOT NULL THEN
+    ALTER TABLE "pre_qualifications"
+        ADD COLUMN IF NOT EXISTS "employment_status"     TEXT,
+        ADD COLUMN IF NOT EXISTS "employer_name"         TEXT,
+        ADD COLUMN IF NOT EXISTS "monthly_income_cents"  INTEGER,
+        ADD COLUMN IF NOT EXISTS "length_of_employment"  TEXT;
+  END IF;
+END $$;
 
 -- Vehicle preference columns on buyer_preferences (collected during onboarding)
-ALTER TABLE "buyer_preferences"
-    ADD COLUMN IF NOT EXISTS "vehicle_type_preference" TEXT,
-    ADD COLUMN IF NOT EXISTS "new_or_used_preference"  TEXT;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'buyer_preferences')) IS NOT NULL THEN
+    ALTER TABLE "buyer_preferences"
+        ADD COLUMN IF NOT EXISTS "vehicle_type_preference" TEXT,
+        ADD COLUMN IF NOT EXISTS "new_or_used_preference"  TEXT;
+  END IF;
+END $$;
 
 -- prequal_consents — one row per FCRA acceptance, with the exact verbatim text
 CREATE TABLE IF NOT EXISTS "prequal_consents" (
@@ -31,8 +39,16 @@ CREATE TABLE IF NOT EXISTS "prequal_consents" (
     CONSTRAINT "prequal_consents_pkey" PRIMARY KEY ("id")
 );
 
-CREATE INDEX IF NOT EXISTS "prequal_consents_prequal_id_idx" ON "prequal_consents"("prequal_id");
-CREATE INDEX IF NOT EXISTS "prequal_consents_buyer_id_idx"   ON "prequal_consents"("buyer_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'prequal_consents')) IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS "prequal_consents_prequal_id_idx" ON "prequal_consents"("prequal_id");
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'prequal_consents')) IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS "prequal_consents_buyer_id_idx"   ON "prequal_consents"("buyer_id");
+  END IF;
+END $$;
 
 DO $$
 BEGIN

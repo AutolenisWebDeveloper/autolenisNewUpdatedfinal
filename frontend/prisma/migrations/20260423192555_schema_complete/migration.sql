@@ -780,97 +780,225 @@ CREATE TABLE "insurance_providers" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "admin_sessions_token_key" ON "admin_sessions"("token");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'admin_sessions')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "admin_sessions_token_key" ON "admin_sessions"("token");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "admin_sessions_admin_id_idx" ON "admin_sessions"("admin_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'admin_sessions')) IS NOT NULL THEN
+    CREATE INDEX "admin_sessions_admin_id_idx" ON "admin_sessions"("admin_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "rate_limit_events_identifier_endpoint_idx" ON "rate_limit_events"("identifier", "endpoint");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'rate_limit_events')) IS NOT NULL THEN
+    CREATE INDEX "rate_limit_events_identifier_endpoint_idx" ON "rate_limit_events"("identifier", "endpoint");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "csrf_tokens_token_key" ON "csrf_tokens"("token");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'csrf_tokens')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "csrf_tokens_token_key" ON "csrf_tokens"("token");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "deal_status_history_deal_id_idx" ON "deal_status_history"("deal_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'deal_status_history')) IS NOT NULL THEN
+    CREATE INDEX "deal_status_history_deal_id_idx" ON "deal_status_history"("deal_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "service_fee_payments_deal_id_key" ON "service_fee_payments"("deal_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'service_fee_payments')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "service_fee_payments_deal_id_key" ON "service_fee_payments"("deal_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "service_fee_payments_stripe_payment_intent_id_key" ON "service_fee_payments"("stripe_payment_intent_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'service_fee_payments')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "service_fee_payments_stripe_payment_intent_id_key" ON "service_fee_payments"("stripe_payment_intent_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "dealer_capacity_configs_dealer_id_key" ON "dealer_capacity_configs"("dealer_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealer_capacity_configs')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "dealer_capacity_configs_dealer_id_key" ON "dealer_capacity_configs"("dealer_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "revenue_snapshots_period_key" ON "revenue_snapshots"("period");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'revenue_snapshots')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "revenue_snapshots_period_key" ON "revenue_snapshots"("period");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "deal_timeline_deal_id_occurred_at_idx" ON "deal_timeline"("deal_id", "occurred_at");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'deal_timeline')) IS NOT NULL THEN
+    CREATE INDEX "deal_timeline_deal_id_occurred_at_idx" ON "deal_timeline"("deal_id", "occurred_at");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "buyer_inventory_preferences_buyer_id_key" ON "buyer_inventory_preferences"("buyer_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'buyer_inventory_preferences')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "buyer_inventory_preferences_buyer_id_key" ON "buyer_inventory_preferences"("buyer_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "vehicle_match_scores_buyer_id_inventory_item_id_key" ON "vehicle_match_scores"("buyer_id", "inventory_item_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'vehicle_match_scores')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "vehicle_match_scores_buyer_id_inventory_item_id_key" ON "vehicle_match_scores"("buyer_id", "inventory_item_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "notification_preferences_user_id_key" ON "notification_preferences"("user_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'notification_preferences')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "notification_preferences_user_id_key" ON "notification_preferences"("user_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "message_read_receipts_message_id_user_id_key" ON "message_read_receipts"("message_id", "user_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'message_read_receipts')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "message_read_receipts_message_id_user_id_key" ON "message_read_receipts"("message_id", "user_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "affiliate_referrals_affiliate_id_referred_user_id_key" ON "affiliate_referrals"("affiliate_id", "referred_user_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'affiliate_referrals')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "affiliate_referrals_affiliate_id_referred_user_id_key" ON "affiliate_referrals"("affiliate_id", "referred_user_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "affiliate_compliance_records_affiliate_id_key" ON "affiliate_compliance_records"("affiliate_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'affiliate_compliance_records')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "affiliate_compliance_records_affiliate_id_key" ON "affiliate_compliance_records"("affiliate_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "affiliate_payout_schedules_affiliate_id_key" ON "affiliate_payout_schedules"("affiliate_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'affiliate_payout_schedules')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "affiliate_payout_schedules_affiliate_id_key" ON "affiliate_payout_schedules"("affiliate_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "system_configurations_key_key" ON "system_configurations"("key");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'system_configurations')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "system_configurations_key_key" ON "system_configurations"("key");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "inventory_quality_scores_inventory_item_id_key" ON "inventory_quality_scores"("inventory_item_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'inventory_quality_scores')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "inventory_quality_scores_inventory_item_id_key" ON "inventory_quality_scores"("inventory_item_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "buyer_credit_history_buyer_id_idx" ON "buyer_credit_history"("buyer_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'buyer_credit_history')) IS NOT NULL THEN
+    CREATE INDEX "buyer_credit_history_buyer_id_idx" ON "buyer_credit_history"("buyer_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "trade_in_valuations_trade_in_id_key" ON "trade_in_valuations"("trade_in_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'trade_in_valuations')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "trade_in_valuations_trade_in_id_key" ON "trade_in_valuations"("trade_in_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "contract_scan_history_deal_id_idx" ON "contract_scan_history"("deal_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'contract_scan_history')) IS NOT NULL THEN
+    CREATE INDEX "contract_scan_history_deal_id_idx" ON "contract_scan_history"("deal_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "ai_context_cache_buyer_id_key" ON "ai_context_cache"("buyer_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'ai_context_cache')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "ai_context_cache_buyer_id_key" ON "ai_context_cache"("buyer_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "feature_flags_key_key" ON "feature_flags"("key");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'feature_flags')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "feature_flags_key_key" ON "feature_flags"("key");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "seo_redirects_from_path_key" ON "seo_redirects"("from_path");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'seo_redirects')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "seo_redirects_from_path_key" ON "seo_redirects"("from_path");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "seo_sitemap_entries_url_key" ON "seo_sitemap_entries"("url");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'seo_sitemap_entries')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "seo_sitemap_entries_url_key" ON "seo_sitemap_entries"("url");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "refinance_partner_analytics_partner_id_period_key" ON "refinance_partner_analytics"("partner_id", "period");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'refinance_partner_analytics')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "refinance_partner_analytics_partner_id_period_key" ON "refinance_partner_analytics"("partner_id", "period");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "user_preferences_user_id_key" ON "user_preferences"("user_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'user_preferences')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "user_preferences_user_id_key" ON "user_preferences"("user_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "dealer_verifications_dealer_id_key" ON "dealer_verifications"("dealer_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealer_verifications')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "dealer_verifications_dealer_id_key" ON "dealer_verifications"("dealer_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "buyer_nudge_preferences_buyer_id_key" ON "buyer_nudge_preferences"("buyer_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'buyer_nudge_preferences')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "buyer_nudge_preferences_buyer_id_key" ON "buyer_nudge_preferences"("buyer_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "insurance_providers_name_key" ON "insurance_providers"("name");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'insurance_providers')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "insurance_providers_name_key" ON "insurance_providers"("name");
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "ai_chat_messages" ADD CONSTRAINT "ai_chat_messages_session_id_fkey" FOREIGN KEY ("session_id") REFERENCES "ai_chat_sessions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'ai_chat_messages')) IS NOT NULL THEN
+    ALTER TABLE "ai_chat_messages" ADD CONSTRAINT "ai_chat_messages_session_id_fkey" FOREIGN KEY ("session_id") REFERENCES "ai_chat_sessions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;

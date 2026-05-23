@@ -15,7 +15,15 @@ CREATE TABLE "buyer_preferences" (
     CONSTRAINT "buyer_preferences_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX "buyer_preferences_buyer_id_key" ON "buyer_preferences"("buyer_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'buyer_preferences')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "buyer_preferences_buyer_id_key" ON "buyer_preferences"("buyer_id");
+  END IF;
+END $$;
 
-ALTER TABLE "buyer_preferences" ADD CONSTRAINT "buyer_preferences_buyer_id_fkey"
-    FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'buyer_preferences')) IS NOT NULL THEN
+    ALTER TABLE "buyer_preferences" ADD CONSTRAINT "buyer_preferences_buyer_id_fkey"
+        FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;

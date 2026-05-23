@@ -30,7 +30,15 @@ CREATE TABLE "vehicle_request_financing" (
     CONSTRAINT "vehicle_request_financing_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX "vehicle_request_financing_vehicle_request_id_key" ON "vehicle_request_financing"("vehicle_request_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'vehicle_request_financing')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "vehicle_request_financing_vehicle_request_id_key" ON "vehicle_request_financing"("vehicle_request_id");
+  END IF;
+END $$;
 
-ALTER TABLE "vehicle_request_financing" ADD CONSTRAINT "vehicle_request_financing_vehicle_request_id_fkey"
-    FOREIGN KEY ("vehicle_request_id") REFERENCES "vehicle_requests"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'vehicle_request_financing')) IS NOT NULL THEN
+    ALTER TABLE "vehicle_request_financing" ADD CONSTRAINT "vehicle_request_financing_vehicle_request_id_fkey"
+        FOREIGN KEY ("vehicle_request_id") REFERENCES "vehicle_requests"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;

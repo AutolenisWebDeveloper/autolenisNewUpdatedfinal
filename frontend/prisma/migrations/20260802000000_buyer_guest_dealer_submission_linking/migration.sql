@@ -1,10 +1,18 @@
 -- AlterTable
-ALTER TABLE "buyers"
-  ADD COLUMN IF NOT EXISTS "is_guest" BOOLEAN NOT NULL DEFAULT FALSE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'buyers')) IS NOT NULL THEN
+    ALTER TABLE "buyers"
+      ADD COLUMN IF NOT EXISTS "is_guest" BOOLEAN NOT NULL DEFAULT FALSE;
+  END IF;
+END $$;
 
 -- AlterTable
-ALTER TABLE "dealer_offer_submissions"
-  ADD COLUMN IF NOT EXISTS "dealer_id" TEXT;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealer_offer_submissions')) IS NOT NULL THEN
+    ALTER TABLE "dealer_offer_submissions"
+      ADD COLUMN IF NOT EXISTS "dealer_id" TEXT;
+  END IF;
+END $$;
 
 -- AddForeignKey
 DO $$
@@ -19,4 +27,8 @@ BEGIN
 END $$;
 
 -- CreateIndex
-CREATE INDEX IF NOT EXISTS "dealer_offer_submissions_dealer_id_idx" ON "dealer_offer_submissions"("dealer_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealer_offer_submissions')) IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS "dealer_offer_submissions_dealer_id_idx" ON "dealer_offer_submissions"("dealer_id");
+  END IF;
+END $$;

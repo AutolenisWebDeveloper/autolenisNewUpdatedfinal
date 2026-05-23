@@ -1,3 +1,12 @@
+# pnpm 10 reads workspace-wide settings (including onlyBuiltDependencies)
+# from this file. The `packages:` key is required for pnpm to treat this
+# directory as a workspace root and honor the other settings.
+packages:
+  - '.'
+
+# Build scripts are disabled by default in pnpm 10. Only the packages
+# listed below may execute install-time scripts (postinstall, build, etc).
+# Keep this list in sync with anything the lockfile flags as ignored.
 onlyBuiltDependencies:
   - '@prisma/client'
   - '@prisma/engines'
