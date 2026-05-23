@@ -11,4 +11,8 @@ CREATE TABLE IF NOT EXISTS "deal_notes" (
   CONSTRAINT "deal_notes_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS "deal_notes_deal_id_idx" ON "deal_notes"("deal_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'deal_notes')) IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS "deal_notes_deal_id_idx" ON "deal_notes"("deal_id");
+  END IF;
+END $$;

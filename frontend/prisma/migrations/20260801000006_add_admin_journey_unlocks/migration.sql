@@ -16,10 +16,22 @@ CREATE TABLE "admin_journey_unlocks" (
 );
 
 -- CreateIndex
-CREATE INDEX "idx_aju_buyer" ON "admin_journey_unlocks"("buyer_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'admin_journey_unlocks')) IS NOT NULL THEN
+    CREATE INDEX "idx_aju_buyer" ON "admin_journey_unlocks"("buyer_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "admin_journey_unlocks_buyer_id_stage_id_key" ON "admin_journey_unlocks"("buyer_id", "stage_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'admin_journey_unlocks')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "admin_journey_unlocks_buyer_id_stage_id_key" ON "admin_journey_unlocks"("buyer_id", "stage_id");
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "admin_journey_unlocks" ADD CONSTRAINT "admin_journey_unlocks_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'admin_journey_unlocks')) IS NOT NULL THEN
+    ALTER TABLE "admin_journey_unlocks" ADD CONSTRAINT "admin_journey_unlocks_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;

@@ -5,4 +5,8 @@
 
 CREATE TYPE "BuyerPlan" AS ENUM ('STANDARD', 'PREMIUM');
 
-ALTER TABLE "buyers" ADD COLUMN "plan" "BuyerPlan" NOT NULL DEFAULT 'STANDARD';
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'buyers')) IS NOT NULL THEN
+    ALTER TABLE "buyers" ADD COLUMN "plan" "BuyerPlan" NOT NULL DEFAULT 'STANDARD';
+  END IF;
+END $$;

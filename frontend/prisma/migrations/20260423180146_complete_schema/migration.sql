@@ -628,91 +628,211 @@ CREATE TABLE "audit_logs" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "sessions_token_key" ON "sessions"("token");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'sessions')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "sessions_token_key" ON "sessions"("token");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "sessions_user_id_idx" ON "sessions"("user_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'sessions')) IS NOT NULL THEN
+    CREATE INDEX "sessions_user_id_idx" ON "sessions"("user_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "accepted_terms_user_id_terms_version_key" ON "accepted_terms"("user_id", "terms_version");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'accepted_terms')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "accepted_terms_user_id_terms_version_key" ON "accepted_terms"("user_id", "terms_version");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "financing_deal_id_key" ON "financing"("deal_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'financing')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "financing_deal_id_key" ON "financing"("deal_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "message_thread_participants_thread_id_user_id_key" ON "message_thread_participants"("thread_id", "user_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'message_thread_participants')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "message_thread_participants_thread_id_user_id_key" ON "message_thread_participants"("thread_id", "user_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "messages_thread_id_idx" ON "messages"("thread_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'messages')) IS NOT NULL THEN
+    CREATE INDEX "messages_thread_id_idx" ON "messages"("thread_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "refinance_partners_partner_id_key" ON "refinance_partners"("partner_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'refinance_partners')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "refinance_partners_partner_id_key" ON "refinance_partners"("partner_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "seo_page_configs_page_slug_key" ON "seo_page_configs"("page_slug");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'seo_page_configs')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "seo_page_configs_page_slug_key" ON "seo_page_configs"("page_slug");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "seo_keywords_keyword_key" ON "seo_keywords"("keyword");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'seo_keywords')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "seo_keywords_keyword_key" ON "seo_keywords"("keyword");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "nudge_configurations_stage_key" ON "nudge_configurations"("stage");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'nudge_configurations')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "nudge_configurations_stage_key" ON "nudge_configurations"("stage");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "dealer_feed_configs_dealer_id_key" ON "dealer_feed_configs"("dealer_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealer_feed_configs')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "dealer_feed_configs_dealer_id_key" ON "dealer_feed_configs"("dealer_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE UNIQUE INDEX "market_coverage_city_state_key" ON "market_coverage"("city", "state");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'market_coverage')) IS NOT NULL THEN
+    CREATE UNIQUE INDEX "market_coverage_city_state_key" ON "market_coverage"("city", "state");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "audit_logs_entity_type_entity_id_idx" ON "audit_logs"("entity_type", "entity_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'audit_logs')) IS NOT NULL THEN
+    CREATE INDEX "audit_logs_entity_type_entity_id_idx" ON "audit_logs"("entity_type", "entity_id");
+  END IF;
+END $$;
 
 -- CreateIndex
-CREATE INDEX "audit_logs_admin_id_idx" ON "audit_logs"("admin_id");
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'audit_logs')) IS NOT NULL THEN
+    CREATE INDEX "audit_logs_admin_id_idx" ON "audit_logs"("admin_id");
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "sessions" ADD CONSTRAINT "sessions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'sessions')) IS NOT NULL THEN
+    ALTER TABLE "sessions" ADD CONSTRAINT "sessions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "accepted_terms" ADD CONSTRAINT "accepted_terms_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'accepted_terms')) IS NOT NULL THEN
+    ALTER TABLE "accepted_terms" ADD CONSTRAINT "accepted_terms_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "external_pre_approvals" ADD CONSTRAINT "external_pre_approvals_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'external_pre_approvals')) IS NOT NULL THEN
+    ALTER TABLE "external_pre_approvals" ADD CONSTRAINT "external_pre_approvals_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "trade_in_submissions" ADD CONSTRAINT "trade_in_submissions_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'trade_in_submissions')) IS NOT NULL THEN
+    ALTER TABLE "trade_in_submissions" ADD CONSTRAINT "trade_in_submissions_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "financing" ADD CONSTRAINT "financing_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'financing')) IS NOT NULL THEN
+    ALTER TABLE "financing" ADD CONSTRAINT "financing_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "financing_scenarios" ADD CONSTRAINT "financing_scenarios_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'financing_scenarios')) IS NOT NULL THEN
+    ALTER TABLE "financing_scenarios" ADD CONSTRAINT "financing_scenarios_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "insurance_quotes" ADD CONSTRAINT "insurance_quotes_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'insurance_quotes')) IS NOT NULL THEN
+    ALTER TABLE "insurance_quotes" ADD CONSTRAINT "insurance_quotes_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "insurance_policies" ADD CONSTRAINT "insurance_policies_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'insurance_policies')) IS NOT NULL THEN
+    ALTER TABLE "insurance_policies" ADD CONSTRAINT "insurance_policies_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "message_thread_participants" ADD CONSTRAINT "message_thread_participants_thread_id_fkey" FOREIGN KEY ("thread_id") REFERENCES "message_threads"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'message_thread_participants')) IS NOT NULL THEN
+    ALTER TABLE "message_thread_participants" ADD CONSTRAINT "message_thread_participants_thread_id_fkey" FOREIGN KEY ("thread_id") REFERENCES "message_threads"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "messages" ADD CONSTRAINT "messages_thread_id_fkey" FOREIGN KEY ("thread_id") REFERENCES "message_threads"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'messages')) IS NOT NULL THEN
+    ALTER TABLE "messages" ADD CONSTRAINT "messages_thread_id_fkey" FOREIGN KEY ("thread_id") REFERENCES "message_threads"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "refinance_applications" ADD CONSTRAINT "refinance_applications_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'refinance_applications')) IS NOT NULL THEN
+    ALTER TABLE "refinance_applications" ADD CONSTRAINT "refinance_applications_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "refinance_compliance_logs" ADD CONSTRAINT "refinance_compliance_logs_application_id_fkey" FOREIGN KEY ("application_id") REFERENCES "refinance_applications"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'refinance_compliance_logs')) IS NOT NULL THEN
+    ALTER TABLE "refinance_compliance_logs" ADD CONSTRAINT "refinance_compliance_logs_application_id_fkey" FOREIGN KEY ("application_id") REFERENCES "refinance_applications"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "dealer_feed_configs" ADD CONSTRAINT "dealer_feed_configs_dealer_id_fkey" FOREIGN KEY ("dealer_id") REFERENCES "dealers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'dealer_feed_configs')) IS NOT NULL THEN
+    ALTER TABLE "dealer_feed_configs" ADD CONSTRAINT "dealer_feed_configs_dealer_id_fkey" FOREIGN KEY ("dealer_id") REFERENCES "dealers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "inventory_sync_runs" ADD CONSTRAINT "inventory_sync_runs_source_id_fkey" FOREIGN KEY ("source_id") REFERENCES "inventory_sources"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'inventory_sync_runs')) IS NOT NULL THEN
+    ALTER TABLE "inventory_sync_runs" ADD CONSTRAINT "inventory_sync_runs_source_id_fkey" FOREIGN KEY ("source_id") REFERENCES "inventory_sources"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "affiliate_payouts" ADD CONSTRAINT "affiliate_payouts_affiliate_id_fkey" FOREIGN KEY ("affiliate_id") REFERENCES "affiliates"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'affiliate_payouts')) IS NOT NULL THEN
+    ALTER TABLE "affiliate_payouts" ADD CONSTRAINT "affiliate_payouts_affiliate_id_fkey" FOREIGN KEY ("affiliate_id") REFERENCES "affiliates"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "contract_versions" ADD CONSTRAINT "contract_versions_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF to_regclass(format('%I.%I', current_schema(), 'contract_versions')) IS NOT NULL THEN
+    ALTER TABLE "contract_versions" ADD CONSTRAINT "contract_versions_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
