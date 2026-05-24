@@ -18,8 +18,15 @@ export async function POST(
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
   const ops = new OperationsService(supabase);
-  const result = await ops.retryDeadLetterJob(id);
+
+  let result: { retried: boolean };
+  try {
+    result = await ops.retryDeadLetterJob(id);
+  } catch {
+    return NextResponse.json({ error: 'RETRY_FAILED' }, { status: 502 });
+  }
   if (!result.retried) {
+    // Already claimed by a prior retry, or never existed — safe no-op.
     return NextResponse.json({ error: 'NOT_FOUND' }, { status: 404 });
   }
   await writeCrmAuditLog(supabase, actor, {

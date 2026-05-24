@@ -8,9 +8,16 @@ import {
   Zap,
   Server,
   Users,
+  HelpCircle,
+  XCircle,
+  Clock,
 } from 'lucide-react';
 import { getServiceSupabase } from '@/lib/supabase-service';
-import { OperationsService } from '@/lib/services/operations.service';
+import {
+  OperationsService,
+  type DependencyStatus,
+  type CronJobRun,
+} from '@/lib/services/operations.service';
 import { DlqRetryButton } from '@/components/admin/crm/DlqRetryButton';
 import { RefreshAnalyticsButton } from '@/components/admin/crm/RefreshAnalyticsButton';
 import { formatNumber } from '@/lib/utils';
@@ -44,8 +51,10 @@ export default async function OperationsPage({
   const supabase = getServiceSupabase();
   const ops = new OperationsService(supabase);
 
-  const [health, dlq, failed, audit] = await Promise.all([
+  const [health, deps, crons, dlq, failed, audit] = await Promise.all([
     ops.getHealth(),
+    ops.getDependencyHealth(),
+    ops.listCronJobs(),
     ops.listDeadLetterJobs(50),
     ops.listFailedEnrollments(50),
     ops.listAuditLog({ limit: 200, query: q }),
@@ -76,7 +85,22 @@ export default async function OperationsPage({
         <div className="text-sm font-semibold">{healthBanner.text}</div>
       </div>
 
-      {/* ─── Panel 1: System Health ────────────────────────────────────── */}
+      {/* ─── System Health Overview: dependency statuses ───────────────── */}
+      <section className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <header className="px-5 py-4 border-b border-gray-800">
+          <h2 className="text-sm font-semibold text-white">System Health Overview</h2>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            Live status of every platform dependency.
+          </p>
+        </header>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-5">
+          {deps.map((dep) => (
+            <DependencyCard key={dep.key} dep={dep} />
+          ))}
+        </div>
+      </section>
+
+      {/* ─── Queue metrics ─────────────────────────────────────────────── */}
       <section className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <HealthCard
           icon={Server}
@@ -240,6 +264,46 @@ export default async function OperationsPage({
         )}
       </section>
 
+      {/* ─── Panel 3b: Cron Job Status ─────────────────────────────────── */}
+      <section className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <header className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-white">Cron Job Status</h2>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              Most recent run of each scheduled job.
+            </p>
+          </div>
+          <span className="text-[11px] text-gray-500">{crons.length} job{crons.length === 1 ? '' : 's'}</span>
+        </header>
+        {crons.length === 0 ? (
+          <div className="p-10 text-center">
+            <Clock className="w-10 h-10 text-gray-700 mx-auto mb-3" />
+            <p className="text-sm text-gray-500">No cron history yet</p>
+            <p className="text-[11px] text-gray-600 mt-1">
+              Scheduled jobs will appear here after their first recorded run.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider bg-gray-950/30">
+                  <th className="text-left px-4 py-2">Job</th>
+                  <th className="text-left px-4 py-2 w-28">Status</th>
+                  <th className="text-left px-4 py-2 w-24">Duration</th>
+                  <th className="text-left px-4 py-2 w-32">Last Run</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800/50">
+                {crons.map((job) => (
+                  <CronRow key={job.id} job={job} relativeTime={relativeTime} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       {/* ─── Panel 4: Admin Audit Log ──────────────────────────────────── */}
       <section className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
         <header className="px-5 py-4 border-b border-gray-800 flex items-center justify-between gap-4">
@@ -357,5 +421,64 @@ function HealthCard({
       <div className="mt-3 text-2xl font-bold text-white tabular-nums">{formatNumber(value)}</div>
       <div className="mt-0.5 text-[11px] text-gray-500">{label}</div>
     </div>
+  );
+}
+
+function DependencyCard({ dep }: { dep: DependencyStatus }) {
+  const map = {
+    healthy: { ring: 'border-emerald-500/30 bg-emerald-500/5', icon: CheckCircle2, color: 'text-emerald-400', label: 'Healthy' },
+    degraded: { ring: 'border-red-500/30 bg-red-500/5', icon: XCircle, color: 'text-red-400', label: 'Degraded' },
+    unknown: { ring: 'border-gray-800 bg-gray-900', icon: HelpCircle, color: 'text-gray-500', label: 'Unknown' },
+  } as const;
+  const cfg = map[dep.status];
+  const Icon = cfg.icon;
+  return (
+    <div className={`border rounded-xl p-4 ${cfg.ring}`}>
+      <div className="flex items-center gap-2">
+        <Icon className={`w-4 h-4 ${cfg.color}`} />
+        <span className={`text-[11px] font-bold uppercase tracking-wider ${cfg.color}`}>{cfg.label}</span>
+      </div>
+      <div className="mt-3 text-sm font-semibold text-white">{dep.label}</div>
+      <div className="mt-0.5 text-[11px] text-gray-500">{dep.detail}</div>
+      <div className="mt-1 text-[10px] text-gray-600">
+        Checked {new Date(dep.checked_at).toLocaleTimeString()}
+      </div>
+    </div>
+  );
+}
+
+function CronRow({
+  job,
+  relativeTime,
+}: {
+  job: CronJobRun;
+  relativeTime: (iso: string | null) => string;
+}) {
+  const badge =
+    job.status === 'COMPLETED'
+      ? 'bg-emerald-500/15 text-emerald-400'
+      : job.status === 'FAILED'
+        ? 'bg-red-500/15 text-red-400'
+        : 'bg-blue-500/15 text-blue-400';
+  return (
+    <tr className="hover:bg-gray-800/30 align-top">
+      <td className="px-4 py-2.5">
+        <code className="text-[11px] text-blue-300">{job.cron_name}</code>
+        {job.error && (
+          <div className="text-[10px] text-red-400/80 mt-0.5">{job.error.slice(0, 120)}</div>
+        )}
+      </td>
+      <td className="px-4 py-2.5">
+        <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded ${badge}`}>
+          {job.status}
+        </span>
+      </td>
+      <td className="px-4 py-2.5 text-[11px] text-gray-500 tabular-nums">
+        {job.duration != null ? `${job.duration}ms` : '—'}
+      </td>
+      <td className="px-4 py-2.5 text-[11px] text-gray-500 tabular-nums">
+        {relativeTime(job.started_at)}
+      </td>
+    </tr>
   );
 }

@@ -1,6 +1,8 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { inngest } from '@/lib/inngest/client';
+import { inngestFunctions } from '@/lib/inngest/functions';
+import { getStripe } from '@/lib/stripe';
 
 // ----------------------------------------------------------------------------
 // AutoLenis Phase 5 — Operations dashboard data layer.
@@ -23,6 +25,26 @@ export interface SystemHealth {
   pending_idempotency_count: number;
   last_analytics_refresh_at: string | null;
   status: 'ok' | 'degraded' | 'critical';
+}
+
+export type DependencyState = 'healthy' | 'degraded' | 'unknown';
+
+export interface DependencyStatus {
+  key: string;
+  label: string;
+  status: DependencyState;
+  detail: string;
+  checked_at: string;
+}
+
+export interface CronJobRun {
+  id: string;
+  cron_name: string;
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED' | string;
+  duration: number | null;
+  error: string | null;
+  started_at: string;
+  completed_at: string | null;
 }
 
 export interface DeadLetterJob {
@@ -112,6 +134,123 @@ export class OperationsService {
   }
 
   // ────────────────────────────────────────────────────────────────────────
+  // DEPENDENCY HEALTH — live status of every external platform dependency.
+  //
+  // Live-pingable services (Supabase, Stripe) are reached with a short timeout
+  // and report healthy/degraded. Credential-gated services with no cheap ping
+  // (Resend, Twilio, DocuSign) report healthy when configured and `unknown`
+  // when their credentials are absent — we cannot confirm reachability without
+  // a billable call. Inngest reports healthy when functions are registered with
+  // the serve handler.
+  // ────────────────────────────────────────────────────────────────────────
+  async getDependencyHealth(): Promise<DependencyStatus[]> {
+    const checked_at = new Date().toISOString();
+
+    const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> => {
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('timeout')), ms),
+      );
+      return Promise.race([p, timeout]);
+    };
+
+    const supabaseCheck = async (): Promise<DependencyStatus> => {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!url || !key) {
+        return { key: 'supabase', label: 'Supabase', status: 'unknown', detail: 'Not configured', checked_at };
+      }
+      try {
+        const res = await fetch(`${url}/rest/v1/`, {
+          headers: { apikey: key },
+          signal: AbortSignal.timeout(3000),
+        });
+        if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
+        return { key: 'supabase', label: 'Supabase', status: 'healthy', detail: 'REST API reachable', checked_at };
+      } catch {
+        return { key: 'supabase', label: 'Supabase', status: 'degraded', detail: 'Unreachable', checked_at };
+      }
+    };
+
+    const stripeCheck = async (): Promise<DependencyStatus> => {
+      if (!process.env.STRIPE_SECRET_KEY) {
+        return { key: 'stripe', label: 'Stripe', status: 'unknown', detail: 'Not configured', checked_at };
+      }
+      try {
+        await withTimeout(getStripe().balance.retrieve(), 3000);
+        return { key: 'stripe', label: 'Stripe', status: 'healthy', detail: 'API reachable', checked_at };
+      } catch {
+        return { key: 'stripe', label: 'Stripe', status: 'degraded', detail: 'API key invalid or unreachable', checked_at };
+      }
+    };
+
+    const credentialCheck = (
+      key: string,
+      label: string,
+      vars: string[],
+    ): DependencyStatus => {
+      const ok = vars.every((v) => !!process.env[v]);
+      return ok
+        ? { key, label, status: 'healthy', detail: 'Configured', checked_at }
+        : { key, label, status: 'unknown', detail: 'Credentials not set', checked_at };
+    };
+
+    const inngestCheck = (): DependencyStatus => {
+      const count = inngestFunctions.length;
+      return count > 0
+        ? { key: 'inngest', label: 'Inngest', status: 'healthy', detail: `${count} functions registered`, checked_at }
+        : { key: 'inngest', label: 'Inngest', status: 'degraded', detail: 'No functions registered', checked_at };
+    };
+
+    const [supabase, stripe] = await Promise.all([supabaseCheck(), stripeCheck()]);
+
+    return [
+      supabase,
+      stripe,
+      credentialCheck('resend', 'Resend', ['RESEND_API_KEY']),
+      credentialCheck('twilio', 'Twilio', ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN']),
+      credentialCheck('docusign', 'DocuSign', ['DOCUSIGN_INTEGRATION_KEY', 'DOCUSIGN_ACCOUNT_ID']),
+      inngestCheck(),
+    ];
+  }
+
+  // ────────────────────────────────────────────────────────────────────────
+  // CRON JOB STATUS — latest run per cron from cron_job_logs.
+  // ────────────────────────────────────────────────────────────────────────
+  async listCronJobs(limit = 200): Promise<CronJobRun[]> {
+    const { data } = await this.supabase
+      .from('cron_job_logs')
+      .select('id,cron_name,status,duration,error,started_at,completed_at')
+      .order('started_at', { ascending: false })
+      .limit(limit);
+
+    const rows = (data ?? []) as Array<{
+      id: string;
+      cron_name: string;
+      status: string;
+      duration: number | null;
+      error: string | null;
+      started_at: string;
+      completed_at: string | null;
+    }>;
+
+    // Collapse to the most recent run per cron name (rows already DESC by time).
+    const latest = new Map<string, CronJobRun>();
+    for (const row of rows) {
+      if (latest.has(row.cron_name)) continue;
+      latest.set(row.cron_name, {
+        id: row.id,
+        cron_name: row.cron_name,
+        status: row.status,
+        duration: row.duration,
+        error: row.error,
+        started_at: row.started_at,
+        completed_at: row.completed_at,
+      });
+    }
+    return [...latest.values()].sort((a, b) => a.cron_name.localeCompare(b.cron_name));
+  }
+
+  // ────────────────────────────────────────────────────────────────────────
   // DEAD LETTER QUEUE
   // ────────────────────────────────────────────────────────────────────────
   async listDeadLetterJobs(limit = 100): Promise<DeadLetterJob[]> {
@@ -131,25 +270,47 @@ export class OperationsService {
     }));
   }
 
-  // Re-emit a dead-letter job via Inngest and remove the DLQ row. The retry
-  // path goes back through the normal job's idempotency guard, so duplicate
-  // dispatch is naturally suppressed if the original message actually did
-  // succeed and was misfiled.
+  // Re-emit a dead-letter job via Inngest. Idempotency is enforced by claiming
+  // the row with a conditional delete BEFORE dispatching: only the caller whose
+  // delete actually removed the row proceeds to re-emit, so a double retry (two
+  // concurrent clicks, or a retried request) dispatches at most once. The
+  // underlying job's own idempotency guard is a second line of defence. If the
+  // re-emit fails after the claim, the row is restored so it can be retried.
   async retryDeadLetterJob(id: string): Promise<{ retried: boolean }> {
-    const { data: row, error: readErr } = await this.supabase
+    const { data: claimed, error: claimErr } = await this.supabase
       .from('jobs_dead_letter')
-      .select('event_name,payload')
+      .delete()
       .eq('id', id)
-      .maybeSingle();
+      .select('id,job_id,event_name,payload,error_message,failed_at');
 
-    if (readErr || !row) return { retried: false };
+    if (claimErr || !claimed || claimed.length === 0) return { retried: false };
+    const row = claimed[0] as {
+      id: string;
+      job_id: string;
+      event_name: string;
+      payload: Record<string, unknown> | null;
+      error_message: string;
+      failed_at: string;
+    };
 
-    await inngest.send({
-      name: row.event_name,
-      data: (row.payload ?? {}) as Record<string, unknown>,
-    });
+    try {
+      await inngest.send({
+        name: row.event_name,
+        data: (row.payload ?? {}) as Record<string, unknown>,
+      });
+    } catch (err) {
+      // Re-emit failed — put the row back so the job is not silently lost.
+      await this.supabase.from('jobs_dead_letter').insert({
+        id: row.id,
+        job_id: row.job_id,
+        event_name: row.event_name,
+        payload: row.payload ?? {},
+        error_message: row.error_message,
+        failed_at: row.failed_at,
+      });
+      throw err instanceof Error ? err : new Error('DLQ re-emit failed');
+    }
 
-    await this.supabase.from('jobs_dead_letter').delete().eq('id', id);
     return { retried: true };
   }
 
