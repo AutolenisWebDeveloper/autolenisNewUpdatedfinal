@@ -1,4 +1,5 @@
 import BuyerSidebar from "@/components/buyer/BuyerSidebar";
+import ExitPreviewButton from "@/components/buyer/ExitPreviewButton";
 import JourneyNavigator from "@/components/buyer/JourneyNavigator";
 import ChatWidget from "@/components/public/ChatWidget";
 import SessionExpiryWatcher from "@/components/buyer/SessionExpiryWatcher";
@@ -229,12 +230,15 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
     <div className="min-h-screen">
       {/* Admin preview banner — only shown in preview mode */}
       {isAdminPreview && (
-        <div className="sticky top-0 z-50 bg-amber-500 text-white text-xs font-bold px-4 py-2 flex items-center justify-between">
+        <div className="sticky top-0 z-50 bg-amber-500 text-white text-xs font-bold px-4 py-2 flex items-center justify-between gap-3">
           <span>
             👁 ADMIN PREVIEW MODE — Viewing as {previewBuyerName ?? "buyer"} ·
             This is what the buyer sees
           </span>
-          <span className="opacity-75">Previewed by {previewAdminEmail} · Token expires in 5 min</span>
+          <div className="flex items-center gap-3">
+            <span className="opacity-75 hidden sm:inline">Previewed by {previewAdminEmail} · Token expires in 5 min</span>
+            <ExitPreviewButton />
+          </div>
         </div>
       )}
       <div className="flex flex-col lg:flex-row h-screen bg-[#F8F9FA]" data-testid="buyer-portal">

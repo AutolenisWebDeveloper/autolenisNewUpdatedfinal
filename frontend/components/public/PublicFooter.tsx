@@ -1,6 +1,20 @@
 import Link from "next/link";
+import { Facebook, Instagram, Twitter, Linkedin } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { AutoLenisLogo } from "@/components/shared/AutoLenisLogo";
+
+const SOCIAL_LINKS = [
+  { label: "Facebook",  href: "https://www.facebook.com/autolenis",          icon: Facebook },
+  { label: "Instagram", href: "https://www.instagram.com/autolenis",         icon: Instagram },
+  { label: "X",         href: "https://twitter.com/autolenis",               icon: Twitter },
+  { label: "LinkedIn",  href: "https://www.linkedin.com/company/autolenis",  icon: Linkedin },
+];
+
+// CAN-SPAM requires a valid physical postal address in commercial footers.
+// Overridable per-environment; the default is AutoLenis's mailing address.
+const COMPANY_ADDRESS =
+  process.env.NEXT_PUBLIC_COMPANY_ADDRESS ??
+  "AutoLenis, Inc., 12800 Westridge Blvd, Suite 114, Frisco, TX 75035";
 
 const FOOTER_LINKS = {
   Buyers: [
@@ -67,12 +81,40 @@ export default function PublicFooter() {
           ))}
         </div>
 
+        {/* Social */}
+        <div className="flex items-center gap-3 mb-10">
+          {SOCIAL_LINKS.map((s) => (
+            <a
+              key={s.label}
+              href={s.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={s.label}
+              data-testid={`footer-social-${s.label.toLowerCase()}`}
+              className="w-9 h-9 flex items-center justify-center rounded-full border border-white/10 text-slate-400 hover:text-white hover:border-white/30 transition-colors"
+            >
+              <s.icon size={16} />
+            </a>
+          ))}
+        </div>
+
+        {/* Compliance disclosure */}
+        <p className="text-xs text-slate-500 leading-relaxed max-w-3xl mb-4" data-testid="footer-lender-disclosure">
+          AutoLenis is not a lender or dealer. AutoLenis is a car-buying concierge
+          and marketplace platform that connects buyers with independent, verified
+          dealers and third-party financing partners. AutoLenis does not originate
+          loans, extend credit, or sell vehicles.
+        </p>
+
         <Separator className="border-white/10 mb-8" />
 
         {/* Bottom */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <p className="text-xs text-slate-500">
             AutoLenis &copy; {new Date().getFullYear()}
+          </p>
+          <p className="text-xs text-slate-500" data-testid="footer-physical-address">
+            {COMPANY_ADDRESS}
           </p>
         </div>
       </div>

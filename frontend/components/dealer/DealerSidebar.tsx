@@ -70,11 +70,11 @@ function SignOutButton() {
   );
 }
 
-function Inner({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function Inner({ pathname, onNavigate, unreadCount }: { pathname: string; onNavigate?: () => void; unreadCount: number }) {
   return (
     <>
       <div className="px-5 py-5 border-b border-slate-100">
-        <AutoLenisLogo size="sm" variant="dark" href="/" testId="dealer-sidebar-logo" subtitle="Dealer Portal" />
+        <AutoLenisLogo size="sm" variant="dark" href="/dealer/dashboard" testId="dealer-sidebar-logo" subtitle="Dealer Portal" />
       </div>
       <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
         {NAV_GROUPS.map(group => (
@@ -83,6 +83,7 @@ function Inner({ pathname, onNavigate }: { pathname: string; onNavigate?: () => 
             <ul className="space-y-0.5">
               {group.items.map(item => {
                 const active = pathname === item.href || pathname.startsWith(item.href + "/");
+                const showBadge = item.href === "/dealer/notifications" && unreadCount > 0;
                 return (
                   <li key={item.href}>
                     <Link href={item.href} onClick={onNavigate}
@@ -90,7 +91,16 @@ function Inner({ pathname, onNavigate }: { pathname: string; onNavigate?: () => 
                       className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
                         active ? "bg-[#0B5FD1]/10 text-[#0B5FD1] font-semibold" : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
                       }`}>
-                      <item.icon size={15} className="shrink-0" />{item.label}
+                      <item.icon size={15} className="shrink-0" />
+                      <span className="flex-1">{item.label}</span>
+                      {showBadge && (
+                        <span
+                          data-testid="dealer-sidebar-notification-badge"
+                          className="min-w-[18px] h-[18px] rounded-full bg-[#0B5FD1] text-white text-[10px] font-bold flex items-center justify-center px-1"
+                        >
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </span>
+                      )}
                     </Link>
                   </li>
                 );
@@ -109,19 +119,42 @@ function Inner({ pathname, onNavigate }: { pathname: string; onNavigate?: () => 
 export default function DealerSidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/dealer/notifications/unread-count")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.data?.count) setUnreadCount(d.data.count); })
+      .catch(() => { /* badge stays at 0 on failure */ });
+  }, []);
+
+  useEffect(() => {
+    if (pathname === "/dealer/notifications") setUnreadCount(0);
+  }, [pathname]);
+
   useEffect(() => { setOpen(false); }, [pathname]);
   return (
     <>
       <aside className="hidden lg:flex w-60 shrink-0 bg-white border-r border-slate-200 flex-col h-screen sticky top-0" data-testid="dealer-sidebar">
-        <Inner pathname={pathname} />
+        <Inner pathname={pathname} unreadCount={unreadCount} />
       </aside>
       <div className="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between bg-white border-b border-slate-200 px-4 h-14" data-testid="dealer-mobile-topbar">
-        <AutoLenisLogo size="sm" variant="dark" href="/" testId="dealer-mobile-logo" />
-        <button type="button" onClick={() => setOpen(true)} aria-label="Open navigation"
-          data-testid="dealer-mobile-menu-toggle"
-          className="p-2 rounded-md text-slate-600 hover:bg-slate-100">
-          <Menu size={22} />
-        </button>
+        <AutoLenisLogo size="sm" variant="dark" href="/dealer/dashboard" testId="dealer-mobile-logo" />
+        <div className="flex items-center gap-2">
+          {unreadCount > 0 && (
+            <Link href="/dealer/notifications" className="relative p-2" data-testid="dealer-mobile-notification-bell">
+              <Bell size={20} className="text-slate-600" />
+              <span className="absolute top-1 right-1 min-w-[16px] h-[16px] rounded-full bg-[#0B5FD1] text-white text-[9px] font-bold flex items-center justify-center px-0.5">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            </Link>
+          )}
+          <button type="button" onClick={() => setOpen(true)} aria-label="Open navigation"
+            data-testid="dealer-mobile-menu-toggle"
+            className="p-2 rounded-md text-slate-600 hover:bg-slate-100">
+            <Menu size={22} />
+          </button>
+        </div>
       </div>
       {open && (
         <>
@@ -134,7 +167,7 @@ export default function DealerSidebar() {
               className="absolute top-3 right-3 p-2 rounded-md text-slate-600 hover:bg-slate-100">
               <X size={20} />
             </button>
-            <Inner pathname={pathname} onNavigate={() => setOpen(false)} />
+            <Inner pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} />
           </aside>
         </>
       )}
