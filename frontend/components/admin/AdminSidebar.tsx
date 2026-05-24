@@ -76,6 +76,10 @@ const NAV_GROUPS: NavGroup[] = [
   ]},
   { label: "Reports", items: [
     { label: "Reports", href: "/admin/reports", icon: BarChart2 },
+    { label: "Buyer Funnel", href: "/admin/reports/buyers", icon: Users },
+    { label: "Dealer Metrics", href: "/admin/reports/dealers", icon: Building2 },
+    { label: "Affiliate Report", href: "/admin/reports/affiliates", icon: Share2 },
+    { label: "Revenue", href: "/admin/reports/revenue", icon: DollarSign },
     { label: "Finance", href: "/admin/finance", icon: DollarSign, visibleTo: ["SUPER_ADMIN", "FINANCE_ADMIN"] },
     { label: "Activity Feed", href: "/admin/activity", icon: Activity },
     { label: "Audit Log", href: "/admin/audit-log", icon: ScrollText },
@@ -97,6 +101,7 @@ const NAV_GROUPS: NavGroup[] = [
   ]},
   { label: "System", items: [
     { label: "Settings", href: "/admin/settings", icon: Settings },
+    { label: "Admin Accounts", href: "/admin/settings/admins", icon: Users },
     { label: "Security", href: "/admin/security/mfa", icon: Shield },
     { label: "System Health", href: "/admin/system-health", icon: Activity },
     { label: "Platform Status", href: "/status", icon: CheckCircle2 },
