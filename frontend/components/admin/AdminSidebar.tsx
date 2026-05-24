@@ -11,7 +11,7 @@ import {
   CreditCard, FileCheck, Send,
   ClipboardCheck, ArrowDownCircle, RotateCcw, Bell,
   Trophy,
-  Map, TrendingDown, Globe, PlusCircle, Car, Inbox,
+  Map, TrendingDown, Globe, PlusCircle, Car, Inbox, ScrollText,
 } from "lucide-react";
 
 type NavItem = {
@@ -78,6 +78,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Reports", href: "/admin/reports", icon: BarChart2 },
     { label: "Finance", href: "/admin/finance", icon: DollarSign, visibleTo: ["SUPER_ADMIN", "FINANCE_ADMIN"] },
     { label: "Activity Feed", href: "/admin/activity", icon: Activity },
+    { label: "Audit Log", href: "/admin/audit-log", icon: ScrollText },
     { label: "Deal Risk", href: "/admin/reports/risk", icon: TrendingUp },
     { label: "Pipeline", href: "/admin/reports/pipeline", icon: BarChart2 },
     { label: "Funnel", href: "/admin/reports/funnel", icon: BarChart2 },
