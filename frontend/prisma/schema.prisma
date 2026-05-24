@@ -212,6 +212,8 @@ model Admin {
   failedMfaAttempts       Int       @default(0) @map("mfa_failed_attempts")
   mfaLockedUntil          DateTime? @map("mfa_locked_until")
   mfaResetAt              DateTime? @map("mfa_reset_at")
+  isActive                Boolean   @default(true)
+  deactivatedAt           DateTime? @map("deactivated_at")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
   user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)

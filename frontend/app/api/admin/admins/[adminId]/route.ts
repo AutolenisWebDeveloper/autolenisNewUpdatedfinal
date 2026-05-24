@@ -1,8 +1,7 @@
 // DELETE /api/admin/admins/[adminId] — deactivate an admin account (SUPER_ADMIN).
-// Removes the admin's access by deleting the User (which cascades to the Admin
-// record), freeing the email for re-invite. An admin cannot deactivate their
-// own account. The action is audit-logged; audit history is preserved because
-// AdminAuditLog stores the actor as denormalized strings, not a foreign key.
+// Soft-deactivates the admin (isActive = false) so audit history and the user
+// record are preserved. A deactivated admin is rejected at session resolution.
+// An admin cannot deactivate their own account. The action is audit-logged.
 import { NextRequest } from "next/server";
 import { getAdminWithRole, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -25,8 +24,13 @@ export async function DELETE(request: NextRequest, { params }: Props) {
   if (!target) return adminError("NOT_FOUND", "Admin not found", 404);
 
   await prisma.$transaction(async (tx) => {
-    // Deleting the user cascades to the Admin record (Admin.userId onDelete: Cascade).
-    await tx.user.delete({ where: { id: target.user.id } });
+    await tx.admin.update({
+      where: { id: adminId },
+      data: {
+        isActive: false,
+        deactivatedAt: new Date(),
+      },
+    });
     await tx.adminAuditLog.create({
       data: {
         adminId: admin.adminId,

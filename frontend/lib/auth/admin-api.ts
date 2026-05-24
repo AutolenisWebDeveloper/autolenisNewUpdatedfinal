@@ -18,6 +18,12 @@ export async function getAdminFromRequest(request: NextRequest): Promise<AdminJw
   if (!token) return null;
   const payload = await verifyAdminJwt(token);
   if (!payload?.mfaVerified) return null;
+  // Reject deactivated admins (soft-deleted via isActive = false).
+  const record = await prisma.admin.findUnique({
+    where: { id: payload.adminId },
+    select: { isActive: true },
+  });
+  if (!record?.isActive) return null;
   return payload;
 }
 
