@@ -11,7 +11,7 @@ import {
   CreditCard, FileCheck, Send,
   ClipboardCheck, ArrowDownCircle, RotateCcw, Bell,
   Trophy,
-  Map, TrendingDown, Globe, PlusCircle, Car, Inbox,
+  Map, TrendingDown, Globe, PlusCircle, Car, Inbox, ScrollText,
 } from "lucide-react";
 
 type NavItem = {
@@ -49,6 +49,8 @@ const NAV_GROUPS: NavGroup[] = [
   ]},
   { label: "Operations", items: [
     { label: "Queues", href: "/admin/queues", icon: AlertOctagon },
+    { label: "Compliance", href: "/admin/compliance", icon: Shield },
+    { label: "OFAC Review", href: "/admin/compliance/ofac", icon: AlertOctagon },
     { label: "Manual Reviews", href: "/admin/manual-reviews", icon: ClipboardCheck },
     { label: "Pickups", href: "/admin/pickups", icon: MapPin },
     { label: "E-Sign", href: "/admin/esign", icon: PenLine },
@@ -74,8 +76,13 @@ const NAV_GROUPS: NavGroup[] = [
   ]},
   { label: "Reports", items: [
     { label: "Reports", href: "/admin/reports", icon: BarChart2 },
+    { label: "Buyer Funnel", href: "/admin/reports/buyers", icon: Users },
+    { label: "Dealer Metrics", href: "/admin/reports/dealers", icon: Building2 },
+    { label: "Affiliate Report", href: "/admin/reports/affiliates", icon: Share2 },
+    { label: "Revenue", href: "/admin/reports/revenue", icon: DollarSign },
     { label: "Finance", href: "/admin/finance", icon: DollarSign, visibleTo: ["SUPER_ADMIN", "FINANCE_ADMIN"] },
     { label: "Activity Feed", href: "/admin/activity", icon: Activity },
+    { label: "Audit Log", href: "/admin/audit-log", icon: ScrollText },
     { label: "Deal Risk", href: "/admin/reports/risk", icon: TrendingUp },
     { label: "Pipeline", href: "/admin/reports/pipeline", icon: BarChart2 },
     { label: "Funnel", href: "/admin/reports/funnel", icon: BarChart2 },
@@ -94,6 +101,7 @@ const NAV_GROUPS: NavGroup[] = [
   ]},
   { label: "System", items: [
     { label: "Settings", href: "/admin/settings", icon: Settings },
+    { label: "Admin Accounts", href: "/admin/settings/admins", icon: Users },
     { label: "Security", href: "/admin/security/mfa", icon: Shield },
     { label: "System Health", href: "/admin/system-health", icon: Activity },
     { label: "Platform Status", href: "/status", icon: CheckCircle2 },

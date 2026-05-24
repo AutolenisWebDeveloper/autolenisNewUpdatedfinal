@@ -6,6 +6,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
+import { PREMIUM_FEE_CENTS } from "@/lib/constants";
 import AdminDealTabs from "@/components/admin/AdminDealTabs";
 
 export const dynamic = "force-dynamic";
@@ -97,7 +98,7 @@ function buildDealTimeline(deal: DealForTimeline) {
   const stages = [
     { stage: "DEAL CREATED", timestamp: deal.createdAt, description: "Buyer selected the winning offer" },
     deal.financingPath ? { stage: "FINANCING SELECTED", timestamp: deal.updatedAt, description: `Path: ${deal.financingPath}` } : null,
-    deal.feePaidAt ? { stage: "FEE PAID", timestamp: deal.feePaidAt, description: `$${(deal.feeAmountCents ?? 49900) / 100} concierge fee paid` } : null,
+    deal.feePaidAt ? { stage: "FEE PAID", timestamp: deal.feePaidAt, description: `$${(deal.feeAmountCents ?? PREMIUM_FEE_CENTS) / 100} concierge fee paid` } : null,
     deal.insuranceStatus !== "NOT_STARTED" ? { stage: "INSURANCE", timestamp: deal.updatedAt, description: `Status: ${deal.insuranceStatus.replace(/_/g, " ")}` } : null,
     deal.contractShieldStatus ? { stage: `CONTRACT SHIELD: ${deal.contractShieldStatus}`, timestamp: deal.updatedAt, description: `Score: ${deal.contractShieldScore}` } : null,
     deal.eSignEnvelope?.sentAt ? { stage: "SENT FOR SIGNING", timestamp: deal.eSignEnvelope.sentAt, description: "DocuSign envelope sent to buyer" } : null,

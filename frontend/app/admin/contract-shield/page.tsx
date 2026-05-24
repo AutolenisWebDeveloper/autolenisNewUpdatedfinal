@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Shield, AlertTriangle, Info } from "lucide-react";
+import ContractShieldReviewActions from "@/components/admin/ContractShieldReviewActions";
 
 export const dynamic = "force-dynamic";
 
@@ -189,6 +190,9 @@ export default async function AdminContractShieldPage() {
                     ))}
                   </div>
                 )}
+
+                {/* Admin review actions — approve / flag / request revision */}
+                <ContractShieldReviewActions reviewId={s.id} />
               </div>
             );
           })}

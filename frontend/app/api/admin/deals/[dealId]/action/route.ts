@@ -6,6 +6,7 @@ import { getStripe } from "@/lib/stripe";
 import {
   sendDealerContractPendingEmail,
   sendDealerContractIssuesEmail,
+  sendDealCompleteEmail,
 } from "@/lib/services/email/resend.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -19,6 +20,7 @@ async function getDealerEmailForDeal(dealId: string) {
   });
   return d?.offer?.dealer
     ? {
+        id: d.offer.dealer.id,
         email: d.offer.dealer.user?.email ?? null,
         dealershipName: d.offer.dealer.dealershipName,
       }
@@ -71,6 +73,38 @@ export async function POST(request: NextRequest, { params }: Props) {
         }
       }
 
+      // Notify both parties when the deal completes — buyer (in-app + email), dealer (in-app).
+      if (newStatus === "COMPLETED") {
+        const buyer = await prisma.buyer.findUnique({
+          where: { id: deal.buyerId },
+          select: { firstName: true, user: { select: { email: true } } },
+        });
+        await prisma.notification.create({
+          data: {
+            buyerId: deal.buyerId,
+            type: "DEAL_STAGE_CHANGED",
+            title: "Your deal is complete",
+            body: "Congratulations — your purchase is complete. Thank you for choosing AutoLenis.",
+          },
+        }).catch(err => console.error("[deals/action] complete buyer notify failed:", err));
+        if (buyer?.user?.email) {
+          await sendDealCompleteEmail(buyer.user.email, buyer.firstName ?? "there", dealId)
+            .catch(err => console.error("[deals/action] deal complete email failed:", err));
+        }
+        const dealerInfo = await getDealerEmailForDeal(dealId);
+        if (dealerInfo?.id) {
+          await prisma.notification.create({
+            data: {
+              dealerId: dealerInfo.id,
+              type: "DEAL_STAGE_CHANGED",
+              channel: "IN_APP",
+              title: "Deal completed",
+              body: `Deal ${dealId.slice(0, 8)} has been marked complete.`,
+            },
+          }).catch(err => console.error("[deals/action] complete dealer notify failed:", err));
+        }
+      }
+
       result = { newStatus };
       break;
     }
@@ -106,8 +140,58 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
 
     case "DEAL_CANCELLED": {
+      if (["CANCELLED", "REFUNDED", "COMPLETED"].includes(deal.status)) {
+        return adminError("INVALID_STATE", `Deal is already ${deal.status.toLowerCase()}`, 400);
+      }
+
+      // Refund the deposit if one is still held. The `status: "PAID"` guard
+      // makes this safe against double-refund — an already-refunded deposit
+      // is skipped, and the separate REFUND_TRIGGERED action will likewise
+      // find nothing to refund afterward.
+      let refunded = false;
+      const deposit = await prisma.deposit.findFirst({
+        where: { buyerId: deal.buyerId, status: "PAID" },
+        orderBy: { createdAt: "desc" },
+      });
+      if (deposit?.stripePaymentIntentId) {
+        try {
+          await getStripe().refunds.create({ payment_intent: deposit.stripePaymentIntentId });
+          await prisma.deposit.update({ where: { id: deposit.id }, data: { status: "REFUNDED", refundedAt: new Date() } });
+          refunded = true;
+        } catch (err) {
+          return adminError("STRIPE_ERROR", `Deal cancel refund failed: ${err}`, 500);
+        }
+      }
+
       await prisma.deal.update({ where: { id: dealId }, data: { status: "CANCELLED" } });
-      result = { cancelled: true };
+
+      // Notify buyer.
+      await prisma.notification.create({
+        data: {
+          buyerId: deal.buyerId,
+          type: "DEAL_STAGE_CHANGED",
+          title: "Deal cancelled",
+          body: refunded
+            ? "Your deal was cancelled and your deposit refunded. Please allow 3–5 business days for funds to appear."
+            : "Your deal was cancelled. If a refund is due, our team will follow up shortly.",
+        },
+      }).catch(err => console.error("[deals/action] cancel buyer notify failed:", err));
+
+      // Notify dealer (in-app).
+      const dealerInfo = await getDealerEmailForDeal(dealId);
+      if (dealerInfo?.id) {
+        await prisma.notification.create({
+          data: {
+            dealerId: dealerInfo.id,
+            type: "DEAL_STAGE_CHANGED",
+            channel: "IN_APP",
+            title: "Deal cancelled",
+            body: `Deal ${dealId.slice(0, 8)} was cancelled by the platform.`,
+          },
+        }).catch(err => console.error("[deals/action] cancel dealer notify failed:", err));
+      }
+
+      result = { cancelled: true, refunded };
       break;
     }
 
