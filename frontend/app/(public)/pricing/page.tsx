@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowRight, CheckCircle2, Sparkles, Shield } from "lucide-react";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
 import { MARKETING_IMAGES } from "@/lib/constants/marketing-images";
+import { DEPOSIT_AMOUNT_USD, PREMIUM_FEE_USD, PREMIUM_FEE_REMAINING_USD } from "@/lib/constants";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import { JsonLd, pricingSchema } from "@/lib/seo/jsonld";
 import CitationBlock from "@/components/seo/CitationBlock";
@@ -93,14 +94,14 @@ function PricingPageBody() {
           <CitationBlock
             id="autolenis-pricing"
             question="How much does AutoLenis cost?"
-            answer="AutoLenis charges two fees: a $99 Auction Access Deposit (100% refundable if you don't buy) and a $499 Service Fee only if you proceed with a purchase. The $99 deposit is credited toward the $499 fee, making your balance $400. There are no monthly charges, subscriptions, or hidden fees."
+            answer={`AutoLenis charges two fees: a ${DEPOSIT_AMOUNT_USD} Auction Access Deposit (100% refundable if you don't buy) and a ${PREMIUM_FEE_USD} Service Fee only if you proceed with a purchase. The ${DEPOSIT_AMOUNT_USD} deposit is credited toward the ${PREMIUM_FEE_USD} fee, making your balance ${PREMIUM_FEE_REMAINING_USD}. There are no monthly charges, subscriptions, or hidden fees.`}
             sourceLabel="AutoLenis Official Pricing"
             lastUpdated="2025-01-01"
           />
           <DefinitionBlock
             term="AutoLenis Auction Access Deposit"
             category="Fee"
-            definition="A $99 refundable deposit paid by the buyer to activate a private dealer auction. The deposit is 100% refundable if the buyer does not select any dealer offer. If a purchase is made, the $99 is credited toward the $499 AutoLenis Service Fee."
+            definition={`A ${DEPOSIT_AMOUNT_USD} refundable deposit paid by the buyer to activate a private dealer auction. The deposit is 100% refundable if the buyer does not select any dealer offer. If a purchase is made, the ${DEPOSIT_AMOUNT_USD} is credited toward the ${PREMIUM_FEE_USD} AutoLenis Service Fee.`}
             relatedTerms={["Refundable Deposit", "Auction Activation", "Service Fee"]}
           />
         </div>
@@ -125,7 +126,7 @@ function PricingPageBody() {
                   Free <span className="text-base font-normal text-[#94A3B8]">to start</span>
                 </p>
                 <div className="mt-4 bg-[#F8F9FB] border border-[#E5E7EB] rounded-lg px-4 py-3">
-                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">$99 Auction Access Deposit</p>
+                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">{DEPOSIT_AMOUNT_USD} Auction Access Deposit</p>
                   <p className="text-xs text-[#4B5563] leading-relaxed">
                     Required to activate your auction. <span className="font-semibold">Credited toward your vehicle purchase at closing.</span>
                   </p>
@@ -172,15 +173,15 @@ function PricingPageBody() {
 
               <div className="mb-8">
                 <p className="text-5xl font-bold text-[#111827] font-[family-name:var(--font-mono)] tracking-tight" data-testid="pricing-premium-price">
-                  $499 <span className="text-base font-normal text-[#94A3B8]">concierge fee</span>
+                  {PREMIUM_FEE_USD} <span className="text-base font-normal text-[#94A3B8]">concierge fee</span>
                 </p>
                 <p className="text-xs text-[#0B5FD1] font-semibold mt-2">
-                  $99 deposit credited → $400 net at closing
+                  {DEPOSIT_AMOUNT_USD} deposit credited → {PREMIUM_FEE_REMAINING_USD} net at closing
                 </p>
                 <div className="mt-4 bg-white border border-[#DBEAFE] rounded-lg px-4 py-3">
-                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">$99 Auction Access Deposit</p>
+                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">{DEPOSIT_AMOUNT_USD} Auction Access Deposit</p>
                   <p className="text-xs text-[#4B5563] leading-relaxed">
-                    Required to activate your auction. <span className="font-semibold">Credited toward your $499 concierge fee</span> — you pay $400 after selecting your deal.
+                    Required to activate your auction. <span className="font-semibold">Credited toward your {PREMIUM_FEE_USD} concierge fee</span> — you pay {PREMIUM_FEE_REMAINING_USD} after selecting your deal.
                   </p>
                 </div>
               </div>
@@ -219,12 +220,12 @@ function PricingPageBody() {
               </div>
               <div>
                 <h3 className="text-lg font-bold text-[#111827] mb-2 tracking-tight">
-                  Why the $99 Auction Access Deposit?
+                  Why the {DEPOSIT_AMOUNT_USD} Auction Access Deposit?
                 </h3>
                 <p className="text-sm text-[#4B5563] leading-relaxed">
-                  The $99 deposit is required before your auction begins. It unlocks live dealer bidding and competitive offer access — ensuring dealers invest real effort in competing for your business.{" "}
+                  The {DEPOSIT_AMOUNT_USD} deposit is required before your auction begins. It unlocks live dealer bidding and competitive offer access — ensuring dealers invest real effort in competing for your business.{" "}
                   <span className="font-semibold text-[#111827]">It is 100% refundable if you receive no offers or cancel before selecting a deal.</span>{" "}
-                  On Standard, it credits toward your vehicle purchase at closing. On Premium, it credits toward your $499 concierge fee.
+                  On Standard, it credits toward your vehicle purchase at closing. On Premium, it credits toward your {PREMIUM_FEE_USD} concierge fee.
                 </p>
               </div>
             </div>
@@ -270,8 +271,8 @@ function PricingPageBody() {
           <div className="space-y-4">
             {[
               {
-                q: "Is the $99 a plan or subscription?",
-                a: "No. The $99 is an Auction Access Deposit used to activate your private dealer auction. It is not a plan, not a subscription, and not a platform fee.",
+                q: `Is the ${DEPOSIT_AMOUNT_USD} a plan or subscription?`,
+                a: `No. The ${DEPOSIT_AMOUNT_USD} is an Auction Access Deposit used to activate your private dealer auction. It is not a plan, not a subscription, and not a platform fee.`,
               },
               {
                 q: "Is the deposit refundable?",

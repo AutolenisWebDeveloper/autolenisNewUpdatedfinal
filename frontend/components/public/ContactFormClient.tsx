@@ -20,24 +20,36 @@ const SUBJECT_OPTIONS = [
 export default function ContactFormClient() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", email: "", phone: "", subject: "", message: "" });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const res = await fetch("/api/public/contact", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: form.name,
-        email: form.email,
-        phone: form.phone,
-        subject: form.subject,
-        message: form.message,
-      }),
-    });
-    setLoading(false);
-    if (res.ok) setSubmitted(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/public/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          email: form.email,
+          phone: form.phone,
+          subject: form.subject,
+          message: form.message,
+        }),
+      });
+      if (res.ok) {
+        setSubmitted(true);
+        return;
+      }
+      const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+      setError(body.error?.message ?? "Something went wrong sending your message. Please try again.");
+    } catch {
+      setError("We couldn't reach the server. Check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (submitted) {
@@ -136,6 +148,16 @@ export default function ContactFormClient() {
           required
         />
       </div>
+
+      {error && (
+        <p
+          role="alert"
+          data-testid="contact-error"
+          className="text-sm text-[#DC2626] bg-[#FEF2F2] border border-[#FECACA] rounded-xl px-4 py-3"
+        >
+          {error}
+        </p>
+      )}
 
       <Button
         type="submit"
