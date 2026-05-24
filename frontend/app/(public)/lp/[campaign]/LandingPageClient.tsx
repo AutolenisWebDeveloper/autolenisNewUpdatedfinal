@@ -4,24 +4,43 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  Activity,
   ArrowRight,
   BarChart2,
-  Building2,
+  Brain,
   Car,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   Clock,
   CreditCard,
+  Crown,
   DollarSign,
   Eye,
+  Facebook,
   FileText,
   Gavel,
   Heart,
+  Instagram,
+  LayoutDashboard,
+  Linkedin,
   Lock,
+  Mail,
+  MessageCircle,
+  MessageSquare,
+  Phone,
+  Quote,
+  Scale,
   Shield,
+  ShieldCheck,
   Star,
+  Tag,
+  Target,
   UserCheck,
+  Users,
   X,
+  Youtube,
 } from "lucide-react";
 
 import { trackFunnelEvent } from "@/lib/analytics/funnel-events";
@@ -340,26 +359,40 @@ export default function LandingPageClient({
   return (
     <>
       {/* ── SECTION 1: NAVBAR ────────────────────────────────────────────── */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200/60">
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-5 h-16 flex items-center justify-between">
-          <span className="font-black text-slate-900 text-lg tracking-tight">AutoLenis</span>
-          <div className="hidden md:flex items-center gap-6">
-            {["How It Works", "Why AutoLenis", "Reviews", "FAQ"].map((l) => (
+          <div className="flex items-center gap-2">
+            <span className="text-[#0B5FD1] text-2xl font-black leading-none tracking-tighter">//</span>
+            <span className="font-black text-slate-900 text-lg tracking-tight">AutoLenis</span>
+          </div>
+          <div className="hidden md:flex items-center gap-7">
+            {["How It Works", "Why AutoLenis", "Reviews", "About Us", "FAQs"].map((l) => (
               <button
                 key={l}
                 onClick={scrollToForm}
-                className="text-sm text-slate-600 hover:text-slate-900 transition-colors"
+                className="relative text-sm text-slate-600 hover:text-slate-900 transition-colors"
               >
                 {l}
+                {l === "Reviews" && (
+                  <span className="absolute -bottom-[22px] left-0 right-0 h-0.5 bg-[#0B5FD1]" />
+                )}
               </button>
             ))}
           </div>
-          <button
-            onClick={scrollToForm}
-            className="bg-[#0B5FD1] hover:bg-[#0944a8] text-white text-sm font-bold px-4 py-2 rounded-xl transition-colors"
-          >
-            Start Your Vehicle Request
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={scrollToForm}
+              className="hidden sm:inline text-sm text-slate-600 hover:text-slate-900 transition-colors"
+            >
+              Log In
+            </button>
+            <button
+              onClick={scrollToForm}
+              className="bg-[#0B5FD1] hover:bg-[#0944a8] text-white text-sm font-semibold px-5 py-2 rounded-full transition-colors"
+            >
+              Start Your Request
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -383,22 +416,22 @@ export default function LandingPageClient({
                 <button
                   onClick={scrollToForm}
                   data-testid="lp-hero-cta"
-                  className="inline-flex items-center gap-2 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-black text-base px-7 py-4 rounded-2xl shadow-lg transition-colors"
+                  className="inline-flex items-center gap-2 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-semibold text-sm px-6 py-3 rounded-lg shadow-lg transition-colors"
                 >
-                  Start Your Vehicle Request <ArrowRight size={18} />
+                  Start Your Vehicle Request <ArrowRight size={16} />
                 </button>
                 <button
                   onClick={scrollToForm}
-                  className="inline-flex items-center gap-2 border border-slate-200 text-slate-700 font-medium px-6 py-4 rounded-2xl hover:bg-slate-50 transition-colors"
+                  className="inline-flex items-center gap-2 border border-slate-300 text-slate-700 font-medium text-sm px-6 py-3 rounded-lg hover:bg-slate-50 transition-colors"
                 >
                   See How AutoLenis Works
                 </button>
               </div>
-              <div className="flex flex-wrap gap-4">
+              <div className="flex flex-wrap gap-4 mt-4">
                 {[
                   "No dealership pressure",
                   "Compare offers privately",
-                  "Concierge-guided process",
+                  "Concierge-guided",
                   "Secure & transparent",
                 ].map((item) => (
                   <div key={item} className="flex items-center gap-1.5 text-xs text-slate-500">
@@ -409,70 +442,111 @@ export default function LandingPageClient({
               </div>
             </div>
 
-            {/* RIGHT COLUMN — live auction dashboard card */}
-            <div className="flex justify-center lg:justify-end relative">
-              <div className="absolute inset-0 bg-[#0B5FD1]/10 blur-3xl rounded-3xl pointer-events-none" />
-              <div className="relative bg-white rounded-3xl shadow-2xl border border-slate-200 p-6 max-w-md w-full">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <p className="text-xs text-slate-500">Your Request</p>
-                    <p className="font-bold text-slate-900 text-sm">2024 BMW X5 xDrive40i</p>
+            {/* RIGHT COLUMN — dark navy live-auction dashboard panel */}
+            <div className="relative">
+              <div className="absolute -inset-6 bg-[#0B5FD1]/20 blur-3xl rounded-[2.5rem] pointer-events-none" />
+              <div className="relative bg-[#0F172A] rounded-3xl shadow-2xl border border-white/10 p-3 flex gap-3">
+                {/* sidebar nav mockup */}
+                <div className="hidden sm:flex flex-col gap-1 w-32 py-2 shrink-0">
+                  {[
+                    { icon: <ClipboardList size={13} />,    label: "Your Request", active: false },
+                    { icon: <LayoutDashboard size={13} />,  label: "Overview",     active: false },
+                    { icon: <Gavel size={13} />,            label: "Offers",       active: true  },
+                    { icon: <MessageSquare size={13} />,    label: "Messages",     active: false },
+                    { icon: <FileText size={13} />,         label: "Documents",    active: false },
+                    { icon: <Activity size={13} />,         label: "Activity",     active: false },
+                  ].map((n) => (
+                    <div
+                      key={n.label}
+                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] ${
+                        n.active ? "bg-[#0B5FD1] text-white font-semibold" : "text-slate-400"
+                      }`}
+                    >
+                      {n.icon}
+                      {n.label}
+                    </div>
+                  ))}
+                </div>
+
+                {/* main content */}
+                <div className="flex-1 bg-white rounded-2xl p-4 min-w-0">
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="text-[10px] text-slate-500">Your Request</p>
+                      <p className="font-bold text-slate-900 text-sm">2024 BMW X5 xDrive40i</p>
+                      <button onClick={scrollToForm} className="text-[10px] text-[#0B5FD1] font-semibold">
+                        Edit Request
+                      </button>
+                    </div>
+                    <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap">
+                      Active Auction
+                    </span>
                   </div>
-                  <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">
-                    Active Auction
-                  </span>
-                </div>
-                <div className="bg-slate-50 rounded-xl p-3 mb-4 text-center">
-                  <p className="text-[10px] text-slate-400 mb-1">Auction ends in</p>
-                  <p className="text-2xl font-bold font-mono text-slate-900 tracking-tight">23:47:18</p>
-                </div>
-                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-                  Top Offers
-                </p>
-                {[
-                  { rank: 1, name: "Prestige Motors",   city: "Dallas, TX",  price: "$53,420", best: true  },
-                  { rank: 2, name: "Summit Auto Group", city: "Plano, TX",   price: "$52,380", best: false },
-                  { rank: 3, name: "DriveOne Autos",    city: "Frisco, TX",  price: "$49,950", best: false },
-                ].map((o) => (
-                  <div
-                    key={o.rank}
-                    className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-[#0B5FD1]/10 text-[#0B5FD1] text-[10px] font-bold flex items-center justify-center shrink-0">
-                        {o.rank}
-                      </span>
-                      <div>
-                        <p className="text-xs font-semibold text-slate-800">{o.name}</p>
-                        <p className="text-[10px] text-slate-400">{o.city}</p>
+                  <div className="bg-slate-50 rounded-xl p-2.5 mb-3 text-center">
+                    <p className="text-[9px] text-slate-400 mb-0.5">Auction ends in</p>
+                    <p className="text-xl font-bold font-mono text-slate-900 tracking-tight">23 : 47 : 18</p>
+                  </div>
+                  <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                    Top Offers
+                  </p>
+                  {[
+                    { rank: 1, name: "Prestige Motors",   city: "Dallas, TX",  price: "$53,420", best: true  },
+                    { rank: 2, name: "Summit Auto Group", city: "Plano, TX",   price: "$52,380", best: false },
+                    { rank: 3, name: "DriveOne Autos",    city: "Frisco, TX",  price: "$49,950", best: false },
+                  ].map((o) => (
+                    <div
+                      key={o.rank}
+                      className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-5 h-5 rounded-full bg-[#0B5FD1]/10 text-[#0B5FD1] text-[10px] font-bold flex items-center justify-center shrink-0">
+                          {o.rank}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold text-slate-800 truncate">{o.name}</p>
+                          <p className="text-[9px] text-slate-400">{o.city}</p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className={`text-xs font-bold ${o.best ? "text-green-600" : "text-slate-700"}`}>
+                          {o.price}
+                        </p>
+                        {o.best && (
+                          <span className="text-[8px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-semibold">
+                            Best Offer
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className={`text-sm font-bold ${o.best ? "text-green-600" : "text-slate-700"}`}>
-                        {o.price}
-                      </p>
-                      {o.best && (
-                        <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-semibold">
-                          Best Offer
-                        </span>
-                      )}
+                  ))}
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="bg-blue-50 rounded-xl p-2.5">
+                      <p className="text-[9px] text-slate-500">Estimated Savings</p>
+                      <p className="text-lg font-bold font-mono text-[#0B5FD1]">$2,341</p>
+                      <svg viewBox="0 0 100 24" className="w-full h-5 text-[#0B5FD1] mt-0.5" fill="none" preserveAspectRatio="none">
+                        <polyline
+                          points="0,20 20,16 35,18 55,9 72,11 100,2"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      <p className="text-[9px] text-slate-400">vs. market avg</p>
+                    </div>
+                    <div className="bg-green-50 border border-green-200 rounded-xl p-2.5">
+                      <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 text-[8px] font-bold px-1.5 py-0.5 rounded-full">
+                        <Shield size={8} /> PROTECTED
+                      </span>
+                      <p className="text-[10px] font-bold text-slate-800 mt-1.5">Contract Shield™</p>
+                      <p className="text-[9px] text-[#0B5FD1] font-medium">Review key highlights before you buy.</p>
                     </div>
                   </div>
-                ))}
-                <div className="mt-4 flex gap-3">
-                  <div className="flex-1 bg-blue-50 rounded-xl p-3">
-                    <p className="text-[10px] text-slate-500">Estimated Savings</p>
-                    <p className="text-2xl font-bold font-mono text-[#0B5FD1]">$2,341</p>
-                    <p className="text-[10px] text-slate-400">vs. market avg</p>
-                  </div>
-                  <div className="flex-1 bg-green-50 border border-green-200 rounded-xl p-3">
-                    <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                      <Shield size={9} /> PROTECTED
-                    </span>
-                    <p className="text-[10px] font-bold text-slate-800 mt-1.5">Contract Shield™</p>
-                    <p className="text-[9px] text-slate-500">Review highlights before you buy.</p>
-                  </div>
                 </div>
+              </div>
+              {/* SUV silhouette placeholder peeking below the panel */}
+              <div className="absolute -bottom-7 right-2 w-48 h-16 pointer-events-none">
+                <Car className="w-full h-full text-slate-900" strokeWidth={1} />
               </div>
             </div>
           </div>
@@ -481,7 +555,7 @@ export default function LandingPageClient({
         {/* ── SECTION 3: FORM (immediately below hero) ─────────────────────── */}
         <section
           ref={formRef}
-          className="py-20 bg-gradient-to-b from-slate-50 to-white"
+          className="py-16 bg-[#F8FAFC]"
           id="request"
         >
           <div className="max-w-lg mx-auto px-5">
@@ -504,7 +578,7 @@ export default function LandingPageClient({
 
             <form
               onSubmit={handleSubmit}
-              className="bg-white border border-slate-200 rounded-3xl p-8 shadow-2xl"
+              className="bg-white border border-slate-200 rounded-3xl p-8 shadow-xl"
               noValidate
             >
               {submitted ? (
@@ -685,26 +759,31 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 4: METRICS STRIP ─────────────────────────────────────── */}
-        <section className="bg-[#0F172A] py-14">
-          <div className="max-w-5xl mx-auto px-5 grid grid-cols-2 sm:grid-cols-4 gap-8 text-center">
+        <section className="bg-white border-y border-slate-200 py-6">
+          <div className="max-w-5xl mx-auto px-5 grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
-              { number: "Thousands", label: "In Reported Buyer Savings"   },
-              { number: "500+",      label: "Verified Dealer Partners"     },
-              { number: "10,000+",   label: "Vehicle Requests Processed"   },
-              { number: "4.9 / 5",   label: "Buyer Satisfaction Rating"    },
+              { icon: <DollarSign size={18} />, number: "Thousands", label: "In Reported Buyer Savings" },
+              { icon: <Users size={18} />,      number: "500+",      label: "Dealer Partners"           },
+              { icon: <Car size={18} />,        number: "10,000+",   label: "Vehicles Requested"        },
+              { icon: <Star size={18} />,       number: "4.9 / 5",   label: "Buyer Satisfaction"        },
             ].map((s) => (
-              <div key={s.label}>
-                <p className="text-3xl font-black text-white font-mono mb-1">{s.number}</p>
-                <p className="text-xs text-slate-400">{s.label}</p>
+              <div key={s.label} className="flex items-center justify-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center text-[#0B5FD1] shrink-0">
+                  {s.icon}
+                </div>
+                <div>
+                  <p className="text-xl sm:text-2xl font-black text-[#0F172A] leading-none">{s.number}</p>
+                  <p className="text-xs text-slate-500 mt-1">{s.label}</p>
+                </div>
               </div>
             ))}
           </div>
         </section>
 
         {/* ── SECTION 5: TRUST BAR ─────────────────────────────────────────── */}
-        <section className="py-12 bg-white border-y border-slate-100">
+        <section className="py-8 bg-white">
           <div className="max-w-5xl mx-auto px-5">
-            <p className="text-center text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 mb-5">
+            <p className="text-center text-sm font-semibold text-slate-600 mb-6">
               Trusted by Thousands of Smarter Car Buyers
             </p>
             <div className="flex flex-wrap justify-center gap-8">
@@ -757,63 +836,32 @@ export default function LandingPageClient({
                 ))}
               </div>
             </div>
-            <div className="relative rounded-2xl overflow-hidden bg-slate-800 p-6 h-72">
-              <div className="absolute inset-0 bg-gradient-to-br from-slate-900 to-slate-700" />
-              <div className="relative z-10 h-full flex flex-col justify-between">
-                <p className="text-white/40 text-xs font-bold uppercase tracking-wider">DEALERSHIP</p>
-                <div className="space-y-2">
-                  {[
-                    "Why is the price different online?",
-                    "Are there hidden fees?",
-                    "Am I getting a fair deal?",
-                    "This is taking all my time…",
-                  ].map((q) => (
-                    <div
-                      key={q}
-                      className="bg-white/10 backdrop-blur-sm border border-white/10 rounded-xl px-3 py-2 text-white text-xs"
-                    >
-                      {q}
-                    </div>
-                  ))}
-                </div>
+            <div className="relative rounded-2xl overflow-hidden bg-slate-800 h-80">
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700" />
+              <div className="absolute top-4 left-4 flex items-center gap-2 text-white/40 text-xs font-bold uppercase tracking-wider">
+                <Car size={14} /> DEALERSHIP
+              </div>
+              {/* floating buyer-doubt bubbles */}
+              <div className="absolute top-8 right-5 bg-white rounded-xl shadow-sm px-3 py-2 text-xs text-slate-700 max-w-[60%]">
+                Why is the price different online?
+              </div>
+              <div className="absolute top-28 left-5 bg-white rounded-xl shadow-sm px-3 py-2 text-xs text-slate-700 max-w-[55%]">
+                Are there hidden fees?
+              </div>
+              <div className="absolute bottom-24 right-6 bg-white rounded-xl shadow-sm px-3 py-2 text-xs text-slate-700 max-w-[55%]">
+                Am I getting a fair deal?
+              </div>
+              <div className="absolute bottom-6 left-6 bg-white rounded-xl shadow-sm px-3 py-2 text-xs text-slate-700 max-w-[60%]">
+                This is taking all my time…
               </div>
             </div>
           </div>
         </section>
 
         {/* ── SECTION 7: SOLUTION ──────────────────────────────────────────── */}
-        <section className="py-20 bg-slate-50">
+        <section className="py-20 bg-white">
           <div className="max-w-5xl mx-auto px-5 grid lg:grid-cols-2 gap-12 items-center">
-            {/* LEFT — condensed offer card */}
-            <div className="flex justify-center">
-              <div className="bg-white rounded-3xl shadow-xl border border-slate-200 p-5 max-w-xs w-full">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">
-                  Your Offers
-                </p>
-                {[
-                  { rank: 1, name: "Prestige Motors",   price: "$53,420", best: true  },
-                  { rank: 2, name: "Summit Auto Group",  price: "$52,380", best: false },
-                  { rank: 3, name: "DriveOne Autos",     price: "$49,950", best: false },
-                ].map((o) => (
-                  <div
-                    key={o.rank}
-                    className={`flex items-center justify-between py-2 border-b border-slate-100 last:border-0 ${o.best ? "bg-blue-50 -mx-2 px-2 rounded-lg" : ""}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-[#0B5FD1]/10 text-[#0B5FD1] text-[10px] font-bold flex items-center justify-center shrink-0">
-                        {o.rank}
-                      </span>
-                      <span className="text-xs font-semibold text-slate-800">{o.name}</span>
-                    </div>
-                    <span className={`text-sm font-bold ${o.best ? "text-[#0B5FD1]" : "text-slate-600"}`}>
-                      {o.price}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* RIGHT — copy */}
+            {/* LEFT — copy */}
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-3">
                 THE SOLUTION
@@ -822,38 +870,74 @@ export default function LandingPageClient({
                 AutoLenis Flips the Process{" "}
                 <span className="text-[#0B5FD1]">in Favor of the Buyer.</span>
               </h2>
-              <p className="text-slate-500 leading-relaxed mb-6 text-sm">
+              <p className="text-slate-500 leading-relaxed text-sm">
                 Instead of running between dealerships, buyers submit one request and let dealers
                 compete privately. You review offers calmly from home — with full transparency and
                 no pressure.
               </p>
-              <div className="space-y-4">
+            </div>
+
+            {/* RIGHT — phone mockup + benefit cards */}
+            <div className="flex items-center gap-5">
+              <div className="bg-slate-900 rounded-[2rem] p-2 shadow-2xl shrink-0 w-44">
+                <div className="bg-white rounded-[1.6rem] overflow-hidden">
+                  <div className="h-5 bg-white flex items-center justify-center">
+                    <div className="w-12 h-1.5 bg-slate-200 rounded-full" />
+                  </div>
+                  <div className="px-3 pb-4">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                      Your Offers
+                    </p>
+                    {[
+                      { rank: 1, name: "Prestige Motors",  price: "$53,420", best: true  },
+                      { rank: 2, name: "Summit Auto Group", price: "$52,380", best: false },
+                      { rank: 3, name: "DriveOne Autos",    price: "$49,950", best: false },
+                    ].map((o) => (
+                      <div
+                        key={o.rank}
+                        className={`flex items-center justify-between py-2 border-b border-slate-100 last:border-0 ${o.best ? "bg-blue-50 -mx-1 px-1 rounded-lg" : ""}`}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="w-4 h-4 rounded-full bg-[#0B5FD1]/10 text-[#0B5FD1] text-[9px] font-bold flex items-center justify-center shrink-0">
+                            {o.rank}
+                          </span>
+                          <span className="text-[10px] font-semibold text-slate-800 truncate">{o.name}</span>
+                        </div>
+                        <span className={`text-[11px] font-bold shrink-0 ${o.best ? "text-[#0B5FD1]" : "text-slate-600"}`}>
+                          {o.price}
+                        </span>
+                      </div>
+                    ))}
+                    <button onClick={scrollToForm} className="text-[10px] text-[#0B5FD1] font-semibold mt-2">
+                      View All Offers
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 flex-1">
                 {[
                   {
                     icon: <BarChart2 size={18} />,
-                    title: "Dealers Compete",
+                    title: "Dealers Compete, You Win",
                     body: "Compare offers side-by-side.",
                   },
                   {
                     icon: <CheckCircle2 size={18} />,
-                    title: "You&rsquo;re in Control",
+                    title: "You're in Control",
                     body: "Choose the best deal on your terms.",
                   },
-                  {
-                    icon: <Building2 size={18} />,
-                    title: "No Showrooms",
-                    body: "Complete everything from home.",
-                  },
                 ].map((item) => (
-                  <div key={item.title} className="flex items-start gap-3">
+                  <div
+                    key={item.title}
+                    className="bg-white border border-slate-200 rounded-xl shadow-sm p-4 flex items-start gap-3"
+                  >
                     <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center text-[#0B5FD1] shrink-0">
                       {item.icon}
                     </div>
                     <div>
-                      <p className="text-sm font-bold text-slate-900"
-                        dangerouslySetInnerHTML={{ __html: item.title }}
-                      />
-                      <p className="text-sm text-slate-500">{item.body}</p>
+                      <p className="text-sm font-bold text-slate-900">{item.title}</p>
+                      <p className="text-xs text-slate-500">{item.body}</p>
                     </div>
                   </div>
                 ))}
@@ -877,37 +961,42 @@ export default function LandingPageClient({
               {[
                 {
                   n: 1,
+                  icon: <Car size={22} />,
                   title: "Tell Us What You Want",
                   body: "Choose your preferred vehicle, budget, trade-in, and buying preferences.",
                 },
                 {
                   n: 2,
+                  icon: <Users size={22} />,
                   title: "Dealers Compete Privately",
                   body: "Verified dealers submit competing offers through the AutoLenis marketplace.",
                 },
                 {
                   n: 3,
+                  icon: <Tag size={22} />,
                   title: "Compare Real Offers",
                   body: "Review side-by-side pricing, financing, warranties, and dealer terms.",
                 },
                 {
                   n: 4,
+                  icon: <CheckCircle2 size={22} />,
                   title: "Select the Best Deal",
                   body: "Choose the offer you want and complete the process confidently.",
                 },
               ].map((s, i) => (
                 <div key={s.n} className="relative flex-1">
-                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-center h-full">
-                    <div className="w-9 h-9 rounded-full bg-[#0B5FD1] text-white text-sm font-black flex items-center justify-center mx-auto mb-3">
+                  <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-center h-full">
+                    <div className="w-8 h-8 rounded-full bg-[#0B5FD1] text-white text-sm font-black flex items-center justify-center mx-auto mb-3">
                       {s.n}
+                    </div>
+                    <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-[#0B5FD1] mx-auto mb-3">
+                      {s.icon}
                     </div>
                     <p className="font-bold text-slate-900 text-sm mb-2">{s.title}</p>
                     <p className="text-xs text-slate-500 leading-relaxed">{s.body}</p>
                   </div>
                   {i < 3 && (
-                    <div className="hidden lg:flex absolute top-1/2 -right-4 z-10 -translate-y-1/2 text-slate-300">
-                      <ArrowRight size={18} />
-                    </div>
+                    <div className="hidden lg:block absolute top-1/2 -right-3 z-10 -translate-y-1/2 w-6 border-t-2 border-dashed border-slate-300" />
                   )}
                 </div>
               ))}
@@ -916,60 +1005,89 @@ export default function LandingPageClient({
         </section>
 
         {/* ── SECTION 9: WHY BUYERS LOVE AUTOLENIS ─────────────────────────── */}
-        <section className="py-24 bg-slate-50">
-          <div className="max-w-5xl mx-auto px-5">
+        <section className="py-24 bg-white">
+          <div className="max-w-6xl mx-auto px-5">
             <div className="text-center mb-12">
-              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-3">
+              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1]">
                 WHY BUYERS LOVE AUTOLENIS
               </p>
-              <h2 className="text-4xl font-black text-slate-900 tracking-tight">
-                Everything Built Around the Buyer
-              </h2>
             </div>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[
-                {
-                  icon: <CheckCircle2 size={20} />,
-                  title: "Stay in Control",
-                  body: "No pressure. No dealership manipulation.",
-                },
-                {
-                  icon: <Clock size={20} />,
-                  title: "Save Time",
-                  body: "Avoid spending weekends dealership hopping.",
-                },
-                {
-                  icon: <BarChart2 size={20} />,
-                  title: "Compare Transparently",
-                  body: "Review multiple dealer offers side-by-side.",
-                },
-                {
-                  icon: <ClipboardList size={20} />,
-                  title: "Concierge Guidance",
-                  body: "We guide you from request to delivery.",
-                },
-                {
-                  icon: <Car size={20} />,
-                  title: "Smarter Buying",
-                  body: "Make informed decisions without rushed sales tactics.",
-                },
-                {
-                  icon: <Lock size={20} />,
-                  title: "Secure Transactions",
-                  body: "Protected workflows and transparent communication.",
-                },
-              ].map((item) => (
-                <div
-                  key={item.title}
-                  className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-[#0B5FD1] mb-3">
-                    {item.icon}
+            <div className="grid lg:grid-cols-12 gap-6 items-stretch">
+              <div className="lg:col-span-8 grid grid-cols-2 lg:grid-cols-3 gap-4">
+                {[
+                  {
+                    icon: <Crown size={20} />,
+                    title: "Stay in Control",
+                    body: "No pressure. No dealership manipulation.",
+                  },
+                  {
+                    icon: <Clock size={20} />,
+                    title: "Save Time",
+                    body: "Avoid spending weekends dealership hopping.",
+                  },
+                  {
+                    icon: <Scale size={20} />,
+                    title: "Compare Transparently",
+                    body: "Review multiple dealer offers side-by-side.",
+                  },
+                  {
+                    icon: <Target size={20} />,
+                    title: "Concierge Guidance",
+                    body: "We guide you from request to delivery.",
+                  },
+                  {
+                    icon: <Brain size={20} />,
+                    title: "Smarter Buying",
+                    body: "Make informed decisions without rushed sales tactics.",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.title}
+                    className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-[#0B5FD1] mb-3">
+                      {item.icon}
+                    </div>
+                    <p className="font-bold text-slate-900 text-sm mb-1">{item.title}</p>
+                    <p className="text-xs text-slate-500 leading-relaxed">{item.body}</p>
                   </div>
-                  <p className="font-bold text-slate-900 text-sm mb-1">{item.title}</p>
-                  <p className="text-xs text-slate-500 leading-relaxed">{item.body}</p>
+                ))}
+              </div>
+
+              {/* Contract Shield report preview */}
+              <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl shadow-lg p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <p className="text-[10px] text-slate-400">Contract Shield™ Report</p>
+                    <p className="text-sm font-bold text-slate-900">Dealer Offer Review</p>
+                  </div>
+                  <div className="w-9 h-9 rounded-full bg-green-100 border border-green-200 flex items-center justify-center text-green-600 text-sm font-black">
+                    A
+                  </div>
                 </div>
-              ))}
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                  Key Highlights
+                </p>
+                <div className="space-y-2 mb-4">
+                  {[
+                    "No hidden fees detected",
+                    "Financing terms look good",
+                    "Optionals are standard market rate",
+                  ].map((item) => (
+                    <div key={item} className="flex items-center gap-2">
+                      <CheckCircle2 size={13} className="text-green-500 shrink-0" />
+                      <span className="text-xs text-slate-600">{item}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <p className="text-[10px] text-slate-400 mb-0.5">Overall Assessment</p>
+                  <p className="text-green-600 font-bold text-sm">Low Risk</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    This offer is transparent and buyer-friendly.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -989,11 +1107,11 @@ export default function LandingPageClient({
                 AutoLenis Contract Shield helps buyers better understand paperwork, financing terms,
                 optional products, and common dealership contract risks before moving forward.
               </p>
-              <div className="space-y-3">
+              <div className="space-y-3 mb-7">
                 {[
-                  "Increased transparency on every term",
-                  "Better awareness of financing structures",
-                  "Reduced surprise costs at signing",
+                  "Increased transparency",
+                  "Better contract awareness",
+                  "Reduced surprise costs",
                   "More informed purchasing decisions",
                 ].map((item) => (
                   <div key={item} className="flex items-center gap-3">
@@ -1002,39 +1120,21 @@ export default function LandingPageClient({
                   </div>
                 ))}
               </div>
+              <button
+                onClick={scrollToForm}
+                className="inline-flex items-center gap-2 border border-blue-400/60 text-blue-300 hover:bg-blue-400/10 font-semibold text-sm px-5 py-2.5 rounded-lg transition-colors"
+              >
+                Learn More About Contract Shield™ <ArrowRight size={16} />
+              </button>
             </div>
 
-            <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <p className="text-[10px] text-white/50">Contract Shield™ Report</p>
-                  <p className="text-sm font-bold text-white">Dealer Offer Review</p>
+            {/* Large glowing shield */}
+            <div className="flex items-center justify-center">
+              <div className="relative">
+                <div className="absolute inset-0 bg-[#0B5FD1]/40 blur-3xl rounded-full pointer-events-none" />
+                <div className="relative w-44 h-44 rounded-3xl bg-gradient-to-br from-[#0B5FD1] to-[#0944a8] flex items-center justify-center shadow-2xl shadow-[#0B5FD1]/40 border border-blue-400/30">
+                  <ShieldCheck size={88} className="text-white" strokeWidth={1.5} />
                 </div>
-                <div className="w-8 h-8 rounded-full bg-green-400/20 border border-green-400/30 flex items-center justify-center text-green-400 text-xs font-black">
-                  A
-                </div>
-              </div>
-              <p className="text-[10px] font-bold uppercase tracking-wider text-white/40 mb-2">
-                Key Highlights
-              </p>
-              <div className="space-y-2 mb-4">
-                {[
-                  "No hidden fees detected",
-                  "Financing terms look good",
-                  "Optionals are standard market rate",
-                ].map((item) => (
-                  <div key={item} className="flex items-center gap-2">
-                    <CheckCircle2 size={12} className="text-green-400" />
-                    <span className="text-xs text-white/80">{item}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="bg-white/10 rounded-xl p-3">
-                <p className="text-[10px] text-white/40 mb-1">Overall Assessment</p>
-                <p className="text-green-400 font-bold text-sm">Low Risk</p>
-                <p className="text-[10px] text-white/60 mt-0.5">
-                  This offer is transparent and buyer-friendly.
-                </p>
               </div>
             </div>
           </div>
@@ -1042,7 +1142,7 @@ export default function LandingPageClient({
 
         {/* ── SECTION 11: COMPARISON TABLE ─────────────────────────────────── */}
         <section className="py-24 bg-white">
-          <div className="max-w-4xl mx-auto px-5">
+          <div className="max-w-6xl mx-auto px-5">
             <div className="text-center mb-10">
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-3">
                 THE DIFFERENCE
@@ -1051,42 +1151,53 @@ export default function LandingPageClient({
                 Two Different Experiences. One <span className="text-[#0B5FD1]">Smarter</span> Choice.
               </h2>
             </div>
-            <div className="overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
-              <div className="grid grid-cols-3">
-                <div className="p-4 bg-slate-50" />
-                <div className="p-4 bg-slate-100 border-l border-slate-200">
-                  <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">
-                    Traditional Dealership
-                  </p>
-                </div>
-                <div className="p-4 bg-[#0B5FD1] border-l border-blue-700">
-                  <p className="text-xs font-bold text-white uppercase tracking-wider">
-                    AutoLenis
-                  </p>
-                </div>
+            <div className="grid lg:grid-cols-[1fr_1.7fr_1fr] gap-6 items-center">
+              {/* silver sedan placeholder */}
+              <div className="hidden lg:flex h-44 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-300 items-center justify-center">
+                <Car size={72} className="text-slate-400" strokeWidth={1} />
               </div>
-              {[
-                ["Visit multiple dealerships",    "Request from home"              ],
-                ["Pressure negotiations",          "Dealers compete privately"      ],
-                ["Limited comparisons",            "Multiple side-by-side offers"   ],
-                ["Time-consuming process",         "Streamlined from home"          ],
-                ["Dealer-controlled experience",   "Buyer-controlled experience"    ],
-              ].map(([old, neu], i) => (
-                <div
-                  key={i}
-                  className={`grid grid-cols-3 ${i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}
-                >
-                  <div className="p-4" />
-                  <div className="p-4 border-l border-slate-200 flex items-center gap-2">
-                    <X size={13} className="text-red-400 shrink-0" />
-                    <span className="text-sm text-slate-600">{old}</span>
+
+              {/* comparison table */}
+              <div className="overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+                <div className="grid grid-cols-2">
+                  <div className="p-3 bg-slate-100 text-center">
+                    <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                      Traditional Dealership
+                    </p>
                   </div>
-                  <div className="p-4 border-l border-blue-100 bg-blue-50/40 flex items-center gap-2">
-                    <CheckCircle2 size={13} className="text-[#0B5FD1] shrink-0" />
-                    <span className="text-sm text-[#0B5FD1] font-medium">{neu}</span>
+                  <div className="p-3 bg-[#0B5FD1] text-center">
+                    <p className="text-xs font-bold text-white uppercase tracking-wider">
+                      AutoLenis
+                    </p>
                   </div>
                 </div>
-              ))}
+                {[
+                  ["Visit multiple dealerships",    "Request from home"              ],
+                  ["Pressure negotiations",          "Dealers compete privately"      ],
+                  ["Limited comparisons",            "Multiple side-by-side offers"   ],
+                  ["Time-consuming process",         "Streamlined process"            ],
+                  ["Dealer-controlled process",      "Buyer-controlled process"       ],
+                ].map(([old, neu], i) => (
+                  <div
+                    key={i}
+                    className={`grid grid-cols-2 ${i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}
+                  >
+                    <div className="p-3.5 flex items-center gap-2 border-r border-slate-100">
+                      <X size={13} className="text-red-400 shrink-0" />
+                      <span className="text-sm text-slate-600">{old}</span>
+                    </div>
+                    <div className="p-3.5 bg-blue-50/40 flex items-center gap-2">
+                      <CheckCircle2 size={13} className="text-[#0B5FD1] shrink-0" />
+                      <span className="text-sm text-[#0B5FD1] font-medium">{neu}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* dark SUV placeholder */}
+              <div className="hidden lg:flex h-44 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-950 items-center justify-center">
+                <Car size={72} className="text-slate-600" strokeWidth={1} />
+              </div>
             </div>
           </div>
         </section>
@@ -1095,37 +1206,54 @@ export default function LandingPageClient({
         <section className="py-24 bg-slate-50" id="proof">
           <div className="max-w-5xl mx-auto px-5">
             <div className="text-center mb-10">
-              <h2 className="text-4xl font-black text-slate-900 tracking-tight mb-2">
-                What Buyers Are Saying
-              </h2>
+              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1]">
+                WHAT BUYERS ARE SAYING
+              </p>
             </div>
-            <div className="grid sm:grid-cols-3 gap-4">
-              {TESTIMONIALS.map((t) => (
-                <div
-                  key={`${t.name}-${t.location}`}
-                  className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col"
-                >
-                  <div className="flex gap-1 mb-3">
-                    {Array.from({ length: t.stars }).map((_, i) => (
-                      <Star key={i} size={14} className="text-amber-400 fill-amber-400" />
-                    ))}
-                  </div>
-                  <p className="text-sm text-slate-700 leading-relaxed italic flex-1">
-                    &ldquo;{t.quote}&rdquo;
-                  </p>
-                  <div className="mt-4 pt-3 border-t border-slate-200 flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#0B5FD1] to-[#0944a8] flex items-center justify-center text-white text-sm font-black shrink-0">
-                      {t.name.charAt(0)}
+            <div className="flex items-center gap-3">
+              <div className="hidden lg:flex w-10 h-10 rounded-full bg-white border border-slate-200 shadow-sm items-center justify-center text-slate-400 shrink-0">
+                <ChevronLeft size={18} />
+              </div>
+              <div className="grid sm:grid-cols-3 gap-4 flex-1">
+                {TESTIMONIALS.map((t) => (
+                  <div
+                    key={`${t.name}-${t.location}`}
+                    className="relative bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col"
+                  >
+                    <Quote size={36} className="absolute top-4 right-4 text-[#0B5FD1]/15 fill-[#0B5FD1]/15" />
+                    <div className="flex gap-1 mb-3">
+                      {Array.from({ length: t.stars }).map((_, i) => (
+                        <Star key={i} size={14} className="text-amber-400 fill-amber-400" />
+                      ))}
                     </div>
-                    <div>
-                      <p className="text-sm font-bold text-slate-800">{t.name}</p>
-                      <p className="text-xs text-slate-500">{t.location} · {t.vehicle}</p>
-                      {t.saved && (
-                        <p className="text-xs font-bold text-green-600 mt-0.5">Saved {t.saved}</p>
-                      )}
+                    <p className="text-sm text-slate-700 leading-relaxed italic flex-1">
+                      &ldquo;{t.quote}&rdquo;
+                    </p>
+                    <div className="mt-4 pt-3 border-t border-slate-200 flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#0B5FD1] to-[#0944a8] flex items-center justify-center text-white text-sm font-black shrink-0">
+                        {t.name.charAt(0)}
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-slate-800">{t.name}</p>
+                        <p className="text-xs text-slate-500">{t.location} · {t.vehicle}</p>
+                        {t.saved && (
+                          <p className="text-xs font-bold text-green-600 mt-0.5">Saved {t.saved}</p>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
+                ))}
+              </div>
+              <div className="hidden lg:flex w-10 h-10 rounded-full bg-white border border-slate-200 shadow-sm items-center justify-center text-slate-400 shrink-0">
+                <ChevronRight size={18} />
+              </div>
+            </div>
+            <div className="flex items-center justify-center gap-2 mt-8">
+              {[0, 1, 2, 3].map((d) => (
+                <span
+                  key={d}
+                  className={`h-2 rounded-full ${d === 0 ? "w-6 bg-[#0B5FD1]" : "w-2 bg-slate-300"}`}
+                />
               ))}
             </div>
           </div>
@@ -1184,32 +1312,39 @@ export default function LandingPageClient({
         <section className="bg-[#0F172A] py-24 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-[#0B5FD1]/15 to-transparent pointer-events-none" />
           <div className="max-w-3xl mx-auto px-5 text-center relative z-10">
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-blue-400 mb-4">
-              START TODAY
-            </p>
             <h2 className="text-4xl sm:text-5xl font-black text-white mb-4 tracking-tight leading-[1.05]">
               Stop Chasing Deals.
               <br />
               Let Dealers{" "}
-              <span className="text-[#60A5FA]">Compete for You.</span>
+              <span className="text-[#3B82F6]">Compete</span> for You.
             </h2>
-            <p className="text-lg text-slate-400 mb-8 max-w-xl mx-auto leading-relaxed">
+            <p className="text-sm text-slate-400 mb-8 max-w-xl mx-auto leading-relaxed">
               AutoLenis gives modern buyers a smarter, more transparent way to purchase vehicles
               without dealership pressure.
             </p>
-            <button
-              onClick={scrollToForm}
-              className="inline-flex items-center gap-2 bg-white text-[#0B5FD1] font-black text-lg px-8 py-4 rounded-2xl shadow-xl hover:bg-blue-50 transition-all"
-            >
-              Start Your Vehicle Request <ArrowRight size={18} />
-            </button>
+            <div className="flex max-w-md mx-auto shadow-xl rounded-lg">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter your email..."
+                autoComplete="email"
+                className="flex-1 min-w-0 bg-white border-0 rounded-l-lg px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
+              />
+              <button
+                onClick={scrollToForm}
+                className="inline-flex items-center gap-2 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-semibold text-sm px-6 py-3 rounded-r-lg transition-colors whitespace-nowrap"
+              >
+                Start Your Vehicle Request <ArrowRight size={16} />
+              </button>
+            </div>
             <div className="flex items-center justify-center gap-6 mt-6 flex-wrap">
               {[
                 { icon: <CheckCircle2 size={14} />, label: "100% Free"        },
                 { icon: <CheckCircle2 size={14} />, label: "No Obligation"    },
                 { icon: <Lock size={14} />,         label: "Secure & Private" },
               ].map((item) => (
-                <div key={item.label} className="flex items-center gap-1.5 text-sm text-slate-400">
+                <div key={item.label} className="flex items-center gap-1.5 text-xs text-slate-400">
                   <span className="text-blue-400">{item.icon}</span>
                   {item.label}
                 </div>
@@ -1219,74 +1354,126 @@ export default function LandingPageClient({
         </section>
 
         {/* ── FOOTER ───────────────────────────────────────────────────────── */}
-        <footer className="bg-[#0F172A] border-t border-white/10 py-12">
+        <footer className="bg-[#111c33] border-t border-white/10 py-14">
           <div className="max-w-6xl mx-auto px-5">
-            <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-8 mb-10">
-              <div className="lg:col-span-2">
-                <p className="font-black text-white text-lg mb-2">AutoLenis</p>
-                <p className="text-xs text-slate-500 leading-relaxed max-w-xs">
-                  AutoLenis is a buyer-first automotive concierge platform where verified dealers
-                  compete for your business. Buy smarter, not harder.
+            <div className="grid lg:grid-cols-3 gap-10 mb-10">
+              {/* brand column */}
+              <div className="lg:col-span-1">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-[#3B82F6] text-2xl font-black leading-none tracking-tighter">//</span>
+                  <span className="font-black text-white text-lg tracking-tight">AutoLenis</span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed max-w-xs mb-5">
+                  AutoLenis is a buyer-first automotive concierge where verified dealers compete for
+                  your business so you can drive away with confidence.
                 </p>
+                <div className="flex gap-3 mb-5">
+                  {[Facebook, Instagram, Linkedin, Youtube].map((Icon, i) => (
+                    <div
+                      key={i}
+                      className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-slate-300 hover:bg-white/20 cursor-pointer transition-colors"
+                    >
+                      <Icon size={15} />
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-500 mb-3">
+                  © {new Date().getFullYear()} AutoLenis, Inc. All rights reserved.
+                </p>
+                <div className="flex gap-2">
+                  <span className="text-[10px] font-bold text-slate-300 bg-white/10 border border-white/10 rounded px-2 py-1">
+                    Norton Secured
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-300 bg-white/10 border border-white/10 rounded px-2 py-1">
+                    BBB A+ Rating
+                  </span>
+                </div>
               </div>
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
-                  Company
-                </p>
-                {["About Us", "How It Works", "Careers", "Press", "Contact Us"].map((l) => (
-                  <p
-                    key={l}
-                    className="text-sm text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
-                  >
-                    {l}
+
+              {/* link columns */}
+              <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-8">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
+                    Company
                   </p>
-                ))}
-              </div>
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
-                  Resources
-                </p>
-                {["FAQs", "Buying Guides", "Blog", "Contract Shield™", "Marketplace Rules"].map((l) => (
-                  <p
-                    key={l}
-                    className="text-sm text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
-                  >
-                    {l}
+                  {["About Us", "How It Works", "Careers", "Press", "Contact Us"].map((l) => (
+                    <p
+                      key={l}
+                      className="text-sm text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+                    >
+                      {l}
+                    </p>
+                  ))}
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
+                    Resources
                   </p>
-                ))}
-              </div>
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
-                  Legal
-                </p>
-                <Link
-                  href="/legal/terms"
-                  className="block text-sm text-slate-400 hover:text-white mb-2 transition-colors"
-                >
-                  Terms of Service
-                </Link>
-                <Link
-                  href="/legal/privacy"
-                  className="block text-sm text-slate-400 hover:text-white mb-2 transition-colors"
-                >
-                  Privacy Policy
-                </Link>
-                <Link
-                  href="/contact"
-                  className="block text-sm text-slate-400 hover:text-white mb-2 transition-colors"
-                >
-                  Contact Us
-                </Link>
-              </div>
-            </div>
-            <div className="border-t border-white/10 pt-6 flex flex-col sm:flex-row justify-between items-center gap-3">
-              <p className="text-xs text-slate-600">
-                © {new Date().getFullYear()} AutoLenis. All rights reserved.
-              </p>
-              <div className="flex gap-4">
-                <Link href="/legal/terms"   className="text-xs text-slate-600 hover:text-slate-400">Terms</Link>
-                <Link href="/legal/privacy" className="text-xs text-slate-600 hover:text-slate-400">Privacy</Link>
-                <Link href="/contact"       className="text-xs text-slate-600 hover:text-slate-400">Contact</Link>
+                  {["FAQs", "Buying Guides", "Blog", "Contract Shield™", "Marketplace Rules"].map((l) => (
+                    <p
+                      key={l}
+                      className="text-sm text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+                    >
+                      {l}
+                    </p>
+                  ))}
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
+                    Partners
+                  </p>
+                  {["Dealer Program", "Affiliate Program", "Financing Partners"].map((l) => (
+                    <p
+                      key={l}
+                      className="text-sm text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+                    >
+                      {l}
+                    </p>
+                  ))}
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
+                    Legal
+                  </p>
+                  <Link
+                    href="/legal/terms"
+                    className="block text-sm text-slate-400 hover:text-white mb-2 transition-colors"
+                  >
+                    Terms of Service
+                  </Link>
+                  <Link
+                    href="/legal/privacy"
+                    className="block text-sm text-slate-400 hover:text-white mb-2 transition-colors"
+                  >
+                    Privacy Policy
+                  </Link>
+                  <p className="text-sm text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors">
+                    DMCA
+                  </p>
+                  <p className="text-sm text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors">
+                    Sitemap
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
+                    Contact
+                  </p>
+                  <p className="flex items-center gap-2 text-sm text-slate-400 mb-2">
+                    <Phone size={13} className="shrink-0" /> (888) 987-0123
+                  </p>
+                  <p className="flex items-center gap-2 text-sm text-slate-400 mb-2">
+                    <Mail size={13} className="shrink-0" /> support@autolenis.com
+                  </p>
+                  <p className="flex items-center gap-2 text-sm text-slate-400 mb-2">
+                    <Clock size={13} className="shrink-0" /> Mon–Fri 9AM–6PM CT
+                  </p>
+                  <Link
+                    href="/contact"
+                    className="flex items-center gap-2 text-sm text-slate-400 hover:text-white mb-2 transition-colors"
+                  >
+                    <MessageCircle size={13} className="shrink-0" /> Chat With Us
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
