@@ -59,7 +59,7 @@ function SidebarContent({ pathname, onNavigate, unreadCount }: { pathname: strin
   return (
     <>
       <div className="px-5 py-4 border-b border-slate-100">
-        <AutoLenisLogo size="sm" variant="dark" href="/" testId="buyer-sidebar-logo" subtitle="Buyer Portal" />
+        <AutoLenisLogo size="sm" variant="dark" href="/buyer/dashboard" testId="buyer-sidebar-logo" subtitle="Buyer Portal" />
       </div>
       <nav className="flex-1 px-3 py-4 space-y-6 overflow-y-auto">
         {NAV_GROUPS.map((group) => (
@@ -152,7 +152,7 @@ export default function BuyerSidebar() {
 
       {/* Mobile top bar (< lg) */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between bg-white border-b border-slate-200 px-4 h-14" data-testid="buyer-mobile-topbar">
-        <AutoLenisLogo size="sm" variant="dark" href="/" testId="buyer-mobile-logo" />
+        <AutoLenisLogo size="sm" variant="dark" href="/buyer/dashboard" testId="buyer-mobile-logo" />
         <div className="flex items-center gap-2">
           {unreadCount > 0 && (
             <Link href="/buyer/notifications" className="relative p-2" data-testid="mobile-notification-bell">

@@ -132,6 +132,13 @@ export async function markLeadRedirected(leadId: string): Promise<RefinanceAppli
 }
 
 export function buildPartnerRedirectUrl(leadId: string): string {
+  // opt_1 is the per-lead subid OpenRoad uses to attribute the referral back to
+  // a real AutoLenis lead. It must never be empty or a placeholder — an unattributed
+  // handoff breaks reconciliation under the partner agreement — so we hard-fail
+  // rather than emit `opt_1=`.
+  if (!leadId || !leadId.trim()) {
+    throw new Error("buildPartnerRedirectUrl requires a non-empty leadId");
+  }
   // Only include parameters that have real values. OpenRoad's server parses
   // these as typed values, so passing the literal string "null" (or any other
   // empty placeholder) for missing optional fields causes a server-side
@@ -139,7 +146,7 @@ export function buildPartnerRedirectUrl(leadId: string): string {
   // added here with verified, non-empty values from the lead record.
   const params = new URLSearchParams();
   params.set("aid", PARTNER_AFFILIATE_ID);
-  params.set("opt_1", leadId);
+  params.set("opt_1", leadId.trim());
   return `${PARTNER_REDIRECT_BASE}?${params.toString()}`;
 }
 
