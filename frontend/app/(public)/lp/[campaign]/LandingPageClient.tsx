@@ -742,7 +742,7 @@ export default function LandingPageClient({
                       data-testid="lp-form-submit"
                       className="flex-1 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-black text-lg py-4 rounded-2xl shadow-lg shadow-[#0B5FD1]/20 flex items-center justify-center gap-2 transition-colors disabled:opacity-60"
                     >
-                      {submitting ? "Submitting…" : <>Activate Dealer Auction <ArrowRight size={18} /></>}
+                      {submitting ? "Submitting…" : <>Submit My Vehicle Request <ArrowRight size={18} /></>}
                     </button>
                   </div>
                   <p className="text-[11px] text-slate-400 text-center">
