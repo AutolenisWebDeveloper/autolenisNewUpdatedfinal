@@ -293,6 +293,33 @@ export async function POST(request: NextRequest) {
         consentText:  "AutoLenis Landing Page — vehicle request form",
       });
 
+      // GHL webhook sync — fire-and-forget, must never block the buyer.
+      if (process.env.GHL_WEBHOOK_URL) {
+        fetch(process.env.GHL_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            firstName: data.firstName,
+            lastName: data.lastName,
+            email: data.email,
+            phone: data.phone,
+            source: 'AutoLenis LP Form',
+            tags: [
+              'lp-form-submitted',
+              `campaign-${data.campaign ?? 'default'}`,
+            ],
+            customField: {
+              zip: data.zip,
+              utm_source: data.utm_source ?? null,
+              utm_campaign: data.utm_campaign ?? null,
+              vehicle_type: data.vehicleType ?? null,
+              budget: data.budget ?? null,
+              timeline: data.timeline ?? null,
+            },
+          }),
+        }).catch(() => {});
+      }
+
       // 2. Link contact ↔ buyer (polymorphic identity).
       if (buyerId) {
         await ContactService.linkContactIdentity(supabase, contact.id, "buyer", buyerId);
