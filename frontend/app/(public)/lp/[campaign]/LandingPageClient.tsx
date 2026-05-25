@@ -753,6 +753,12 @@ export default function LandingPageClient({
             </form>
 
             <p className="text-center text-[11px] text-slate-400 mt-5 max-w-md mx-auto leading-relaxed">
+              The $99 Auction Access Fee unlocks your private 48-hour dealer auction. Refundable if AutoLenis
+              is unable to secure a valuable or competitive offer for your requested vehicle. Limited-time
+              pricing — subject to change.
+            </p>
+
+            <p className="text-center text-[11px] text-slate-400 mt-5 max-w-md mx-auto leading-relaxed">
               Savings vary based on vehicle, market conditions, dealer participation, and buyer-selected offer.
               AutoLenis does not guarantee any specific savings outcome.
             </p>
@@ -1367,7 +1373,7 @@ export default function LandingPageClient({
                 },
                 {
                   q: "What does it cost?",
-                  a: "A $99 refundable Auction Access Deposit unlocks dealer competition. The deposit is fully refunded if you decline every offer, or credited toward your purchase if you choose one. Premium concierge is available for buyers who want full hands-off service.",
+                  a: "A $99 Limited-Time Auction Access Fee unlocks dealer competition. It is refundable if you decline every offer or if no valuable offer is received. Premium concierge is available for buyers who want full hands-off service.",
                 },
                 {
                   q: "Do I have to talk to dealers?",
@@ -1375,7 +1381,7 @@ export default function LandingPageClient({
                 },
                 {
                   q: "What if no offer works for me?",
-                  a: "Decline all offers. Your deposit is fully refunded — no questions asked.",
+                  a: "Decline all offers. Your Auction Access Fee is fully refunded — no questions asked.",
                 },
               ].map((item) => (
                 <details
@@ -1675,7 +1681,7 @@ export default function LandingPageClient({
             Compare Dealer Offers <ArrowRight size={16} />
           </button>
           <p className="text-[10px] text-slate-400 text-center mt-1.5">
-            $99 refundable deposit · No obligation · 48-hour auction
+            $99 Limited-Time Auction Access Fee · No obligation · 48-hour auction
           </p>
         </div>
       )}
