@@ -7,7 +7,7 @@ import { DEPOSIT_AMOUNT_CENTS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 // Receipts show two-decimal currency to match Stripe receipt formatting.
 const DEPOSIT_USD_WITH_CENTS = `$${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(2)}`;
 
-export const DEPOSIT_CONFIRMATION_SUBJECT = `Your ${DEPOSIT_AMOUNT_USD} AutoLenis deposit is confirmed`;
+export const DEPOSIT_CONFIRMATION_SUBJECT = `Your ${DEPOSIT_AMOUNT_USD} AutoLenis Auction Access Fee is confirmed`;
 
 export interface DepositConfirmationEmailProps {
   firstName: string;
@@ -28,7 +28,7 @@ export function renderDepositConfirmationEmail({
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Deposit Confirmed — AutoLenis</title>
+  <title>Auction Access Fee Confirmed — AutoLenis</title>
 </head>
 <body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:32px 0;">
@@ -39,14 +39,14 @@ export function renderDepositConfirmationEmail({
           <tr>
             <td style="background:#0B5FD1;padding:32px;text-align:center;">
               <p style="color:#ffffff;font-size:26px;font-weight:bold;margin:0;letter-spacing:-0.5px;">AutoLenis</p>
-              <p style="color:#DBEAFE;font-size:14px;margin:8px 0 0 0;">Deposit Confirmed ✓</p>
+              <p style="color:#DBEAFE;font-size:14px;margin:8px 0 0 0;">Auction Access Fee Confirmed ✓</p>
             </td>
           </tr>
           <!-- Body -->
           <tr>
             <td style="padding:40px 40px 24px 40px;color:#333333;font-size:15px;line-height:1.6;">
               <p style="margin:0 0 16px 0;">Hi ${firstName},</p>
-              <p style="margin:0 0 16px 0;">Your ${DEPOSIT_AMOUNT_USD} activation deposit has been received. Your private auction is now active — dealers are being invited to compete for your business.</p>
+              <p style="margin:0 0 16px 0;">Your ${DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee has been received. Your private auction is now active — dealers are being invited to compete for your business.</p>
               <!-- Receipt box -->
               <table width="100%" cellpadding="0" cellspacing="0" style="margin:20px 0;border:1px solid #e0e0e0;border-radius:6px;overflow:hidden;">
                 <tr>
@@ -78,7 +78,7 @@ export function renderDepositConfirmationEmail({
                 <tr>
                   <td style="background:#F8F9FB;border-left:4px solid #0B5FD1;padding:14px 18px;border-radius:4px;">
                     <p style="margin:0;font-size:13px;color:#555555;line-height:1.6;">
-                      Your ${DEPOSIT_AMOUNT_USD} deposit is <strong>fully refundable</strong> if no competitive offer is received. It will be credited toward your AutoLenis concierge fee when your deal closes.
+                      Your ${DEPOSIT_AMOUNT_USD} Auction Access Fee is <strong>refundable if no valuable offer is received</strong>. It will be credited toward your AutoLenis concierge fee when your deal closes.
                     </p>
                   </td>
                 </tr>

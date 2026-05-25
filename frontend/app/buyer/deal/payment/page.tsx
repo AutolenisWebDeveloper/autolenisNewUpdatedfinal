@@ -41,7 +41,7 @@ export default async function DealPaymentPage() {
             <div>
               <p className="text-sm font-bold text-[#111827] mb-1">You are on the Standard plan.</p>
               <p className="text-sm text-[#4B5563] leading-relaxed">
-                No service fee applies. Your $99 Auction Access Deposit will be credited toward your vehicle purchase at closing.
+                No service fee applies. Your $99 Limited-Time Auction Access Fee is refundable if no valuable offer is received.
               </p>
             </div>
           </div>
@@ -52,8 +52,8 @@ export default async function DealPaymentPage() {
               <span className="font-semibold text-[#111827]">$0</span>
             </div>
             <div className="flex justify-between text-[#1A6B18]">
-              <span>$99 deposit → credited to purchase</span>
-              <span>-$99.00</span>
+              <span>$99 Auction Access Fee → refundable if no valuable offer</span>
+              <span>Refundable</span>
             </div>
             <div className="flex justify-between font-bold text-base border-t border-[#EFF6FF] pt-2">
               <span>Due to AutoLenis today</span>
@@ -73,7 +73,7 @@ export default async function DealPaymentPage() {
     );
   }
 
-  // ─── PREMIUM plan: $499 less $99 deposit credit = $400 due ───────────────
+  // ─── PREMIUM plan: $499 less $99 Auction Access Fee credit = $400 due ───────────────
   const netFeeCents = PREMIUM_FEE_REMAINING_CENTS;
 
   return (
@@ -89,7 +89,7 @@ export default async function DealPaymentPage() {
             <span className="font-semibold text-[#111827]">${PREMIUM_FEE_CENTS / 100}</span>
           </div>
           <div className="flex justify-between text-[#1A6B18]">
-            <span>$99 deposit already credited</span>
+            <span>$99 Auction Access Fee already credited</span>
             <span>-${DEPOSIT_AMOUNT_CENTS / 100}</span>
           </div>
           <div className="flex justify-between font-bold text-base border-t border-[#EFF6FF] pt-3">
@@ -98,7 +98,7 @@ export default async function DealPaymentPage() {
           </div>
         </div>
         <p className="text-xs text-[#4B5563] mt-4 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md px-3 py-2 leading-relaxed">
-          AutoLenis Service Fee: <span className="font-semibold">$499 total</span> — $99 deposit already credited = <span className="font-semibold">$400 due today</span>.
+          AutoLenis Service Fee: <span className="font-semibold">$499 total</span> — $99 Auction Access Fee already credited = <span className="font-semibold">$400 due today</span>.
         </p>
       </div>
 

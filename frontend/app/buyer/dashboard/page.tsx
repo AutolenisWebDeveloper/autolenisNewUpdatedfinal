@@ -120,10 +120,10 @@ export default async function BuyerDashboard() {
   } else if (!activeDeal && !activeAuction && depositStatus === "NOT_PAID") {
     stepNum = 5;
     stepLabel = "Shortlist";
-    nextStepLabel = "Deposit";
+    nextStepLabel = "Access Fee";
   } else if (!activeDeal && !activeAuction) {
     stepNum = 6;
-    stepLabel = "Deposit";
+    stepLabel = "Access Fee";
     nextStepLabel = "Auction";
   } else if (activeAuction) {
     stepNum = 7;
@@ -209,7 +209,7 @@ export default async function BuyerDashboard() {
               <h3 className="font-semibold text-amber-900 mb-1">No dealers in your area yet</h3>
               <p className="text-sm text-amber-700 mb-3">
                 We&apos;re actively onboarding dealers in your area. In the meantime, you can submit a vehicle
-                request and our team will source options for you manually — no deposit required.
+                request and our team will source options for you manually — no Auction Access Fee required.
               </p>
               <a
                 href="/buyer/requests/new"
@@ -469,17 +469,17 @@ export default async function BuyerDashboard() {
             <div>
               <h2 className="text-lg font-bold text-[#111827] mb-2">Activate your auction</h2>
               <p className="text-sm text-[#4B5563] leading-relaxed mb-4">
-                You have {shortlistCount} vehicle{shortlistCount !== 1 ? "s" : ""} shortlisted. Pay the ${DEPOSIT_AMOUNT_CENTS / 100} Auction Access Deposit to launch your private 48-hour dealer competition.
+                You have {shortlistCount} vehicle{shortlistCount !== 1 ? "s" : ""} shortlisted. Pay the ${DEPOSIT_AMOUNT_CENTS / 100} Limited-Time Auction Access Fee to launch your private 48-hour dealer competition.
               </p>
               <div className="flex items-center gap-3 text-xs text-[#6B7280] mb-5">
-                <span>✓ 100% refundable</span>
+                <span>✓ Refundable if no valuable offer</span>
                 <span>✓ Up to 8 dealers compete</span>
                 <span>✓ 48-hour window</span>
               </div>
               <a href="/buyer/deposit"
                 className="inline-flex items-center gap-2 px-6 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
                 data-testid="next-step-deposit">
-                Pay ${DEPOSIT_AMOUNT_CENTS / 100} deposit →
+                Pay ${DEPOSIT_AMOUNT_CENTS / 100} Auction Access Fee →
               </a>
             </div>
           )}
