@@ -30,6 +30,7 @@ import {
   MessageCircle,
   MessageSquare,
   Phone,
+  Play,
   Quote,
   Scale,
   Shield,
@@ -780,7 +781,100 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 5: TRUST BAR ─────────────────────────────────────────── */}
+        {/* ── SECTION 5: VSL (video sales letter) ──────────────────────────── */}
+        <section className="py-20 bg-[#F8FAFC] border-y border-slate-200">
+          <div className="max-w-6xl mx-auto px-5 grid lg:grid-cols-2 gap-12 items-center">
+            {/* LEFT — copy */}
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-3">
+                WHY AUTOLENIS EXISTS
+              </p>
+              <h2 className="text-4xl sm:text-5xl font-black text-slate-900 tracking-tight leading-[1.05] mb-5">
+                Finally, a Smarter <br className="hidden sm:block" />
+                Way to Buy a Car
+              </h2>
+              <p className="text-slate-500 leading-relaxed text-sm mb-6 max-w-md">
+                Most buyers overpay because dealerships control the process. AutoLenis flips the
+                script — verified dealers compete for you, so you get the best offers, without the
+                pressure.
+              </p>
+              <div className="space-y-3 mb-7">
+                {[
+                  "See how our private auction works",
+                  "Why transparency saves you thousands",
+                  "How Contract Shield™ protects you",
+                  "Hear real results from real buyers",
+                ].map((item) => (
+                  <div key={item} className="flex items-center gap-3">
+                    <CheckCircle2 size={16} className="text-[#0B5FD1] shrink-0" />
+                    <span className="text-sm text-slate-600">{item}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex -space-x-2">
+                  {["A", "M", "J", "S"].map((c) => (
+                    <div
+                      key={c}
+                      className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0B5FD1] to-[#0944a8] border-2 border-white flex items-center justify-center text-white text-[11px] font-black"
+                    >
+                      {c}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Star key={i} size={13} className="text-amber-400 fill-amber-400" />
+                  ))}
+                  <span className="ml-1.5 text-xs font-semibold text-slate-600">
+                    4.9 / 5 from 1,200+ buyers
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT — video placeholder */}
+            <div className="relative">
+              <div className="absolute -inset-4 bg-[#0B5FD1]/10 blur-2xl rounded-[2rem] pointer-events-none" />
+              <button
+                type="button"
+                onClick={() => {
+                  trackFunnelEvent("lp_vsl_play", { campaign });
+                  scrollToForm();
+                }}
+                aria-label="Watch the 90-second overview"
+                className="group relative block w-full aspect-video rounded-2xl overflow-hidden shadow-2xl border border-white/10 text-left"
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-[#0F172A] to-slate-800" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                {/* play button */}
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-16 h-16 rounded-full bg-white/95 flex items-center justify-center shadow-xl group-hover:scale-105 transition-transform">
+                    <Play size={26} className="text-[#0B5FD1] fill-[#0B5FD1] ml-1" />
+                  </div>
+                </div>
+                {/* headline overlay */}
+                <div className="absolute top-6 left-6 right-6">
+                  <p className="text-2xl sm:text-3xl font-black text-white leading-tight">
+                    The Smarter <br /> Way to Buy
+                  </p>
+                  <p className="text-xs text-slate-300 mt-2">
+                    Better offers. Zero pressure. Total control.
+                  </p>
+                </div>
+                {/* footer overlay */}
+                <div className="absolute bottom-5 left-6 right-6 flex items-center gap-2">
+                  <span className="text-[11px] font-mono font-bold text-white bg-white/15 px-2 py-0.5 rounded">
+                    1:45
+                  </span>
+                  <span className="text-xs text-slate-200">Watch the 90-Second Overview</span>
+                </div>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* ── SECTION 6: TRUST BAR ─────────────────────────────────────────── */}
         <section className="py-8 bg-white">
           <div className="max-w-5xl mx-auto px-5">
             <p className="text-center text-sm font-semibold text-slate-600 mb-6">
@@ -809,7 +903,7 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 6: PROBLEM ───────────────────────────────────────────── */}
+        {/* ── SECTION 7: PROBLEM ───────────────────────────────────────────── */}
         <section className="py-20 bg-white">
           <div className="max-w-5xl mx-auto px-5 grid lg:grid-cols-2 gap-12 items-center">
             <div>
@@ -858,7 +952,7 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 7: SOLUTION ──────────────────────────────────────────── */}
+        {/* ── SECTION 8: SOLUTION ──────────────────────────────────────────── */}
         <section className="py-20 bg-white">
           <div className="max-w-5xl mx-auto px-5 grid lg:grid-cols-2 gap-12 items-center">
             {/* LEFT — copy */}
@@ -946,7 +1040,7 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 8: HOW IT WORKS ──────────────────────────────────────── */}
+        {/* ── SECTION 9: HOW IT WORKS ──────────────────────────────────────── */}
         <section className="py-24 bg-white">
           <div className="max-w-5xl mx-auto px-5">
             <div className="text-center mb-12">
@@ -1004,7 +1098,7 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 9: WHY BUYERS LOVE AUTOLENIS ─────────────────────────── */}
+        {/* ── SECTION 10: WHY BUYERS LOVE AUTOLENIS ────────────────────────── */}
         <section className="py-24 bg-white">
           <div className="max-w-6xl mx-auto px-5">
             <div className="text-center mb-12">
@@ -1092,7 +1186,7 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 10: CONTRACT SHIELD ──────────────────────────────────── */}
+        {/* ── SECTION 11: CONTRACT SHIELD ──────────────────────────────────── */}
         <section className="bg-[#0F172A] py-24 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-[#0B5FD1]/10 to-transparent pointer-events-none" />
           <div className="max-w-5xl mx-auto px-5 grid lg:grid-cols-2 gap-12 items-center relative z-10">
@@ -1140,7 +1234,7 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 11: COMPARISON TABLE ─────────────────────────────────── */}
+        {/* ── SECTION 12: COMPARISON TABLE ─────────────────────────────────── */}
         <section className="py-24 bg-white">
           <div className="max-w-6xl mx-auto px-5">
             <div className="text-center mb-10">
@@ -1202,7 +1296,7 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 12: SOCIAL PROOF ─────────────────────────────────────── */}
+        {/* ── SECTION 13: SOCIAL PROOF (testimonials) ──────────────────────── */}
         <section className="py-24 bg-slate-50" id="proof">
           <div className="max-w-5xl mx-auto px-5">
             <div className="text-center mb-10">
@@ -1259,7 +1353,7 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 13: FAQ ──────────────────────────────────────────────── */}
+        {/* ── SECTION 14: FAQ ──────────────────────────────────────────────── */}
         <section className="py-24 bg-white" id="faq">
           <div className="max-w-3xl mx-auto px-5">
             <h2 className="text-4xl font-black text-slate-900 text-center mb-10 tracking-tight">
@@ -1308,7 +1402,7 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 14: FINAL CTA ────────────────────────────────────────── */}
+        {/* ── SECTION 15: FINAL CTA ────────────────────────────────────────── */}
         <section className="bg-[#0F172A] py-24 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-[#0B5FD1]/15 to-transparent pointer-events-none" />
           <div className="max-w-3xl mx-auto px-5 text-center relative z-10">
