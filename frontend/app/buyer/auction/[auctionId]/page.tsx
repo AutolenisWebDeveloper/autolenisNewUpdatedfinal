@@ -61,7 +61,7 @@ export default async function AuctionDetailPage({ params }: Props) {
       {isClosed && offerCount === 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-8 text-center" data-testid="auction-no-offers">
           <h2 className="text-xl font-bold text-slate-900 mb-2">No offers received</h2>
-          <p className="text-slate-500 text-sm mb-4">Your $99 deposit will be refunded within 3 business days. You may re-run your auction or request a specific vehicle.</p>
+          <p className="text-slate-500 text-sm mb-4">Your $99 Auction Access Fee will be refunded within 3 business days. You may re-run your auction or request a specific vehicle.</p>
           <div className="flex gap-3 justify-center">
             <Button variant="secondary" href="/buyer/requests/new" data-testid="request-car-btn">Request a Car</Button>
           </div>

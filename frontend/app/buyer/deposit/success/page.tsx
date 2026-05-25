@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Deposit Confirmed", robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: "Auction Access Fee Confirmed", robots: { index: false, follow: false } };
 
 import Link from "next/link";
 import { CheckCircle2, XCircle, ArrowRight, Clock } from "lucide-react";
@@ -39,14 +39,14 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
       } else if (intent.status === "processing") {
         pending = true;
       } else {
-        errorMsg = `Payment status: ${intent.status}. Return to deposit and try again.`;
+        errorMsg = `Payment status: ${intent.status}. Return to payment and try again.`;
       }
     } catch (err) {
       console.error("[deposit-success] verify error:", err);
       errorMsg = "Could not verify payment status. Contact support if charged.";
     }
   } else {
-    errorMsg = "No payment reference found. Complete the deposit flow.";
+    errorMsg = "No payment reference found. Complete the payment flow.";
   }
 
   if (pending) {
@@ -78,7 +78,7 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
         <p className="text-[#4B5563] text-sm mb-8 leading-relaxed">{errorMsg}</p>
         <Link href="/buyer/deposit"
           className="inline-flex items-center gap-2 px-8 py-4 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors">
-          Return to Deposit <ArrowRight size={15} />
+          Return to Payment <ArrowRight size={15} />
         </Link>
       </div>
     );
@@ -91,7 +91,7 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
       </div>
       <h1 className="text-2xl font-bold text-[#111827] mb-2">Auction activated!</h1>
       <p className="text-[#4B5563] text-sm mb-8 leading-relaxed">
-        Your $99 Auction Access Deposit was received. Your private 48-hour dealer competition is being prepared.
+        Your $99 Limited-Time Auction Access Fee was received. Your private 48-hour dealer competition is being prepared.
       </p>
       <div className="bg-[#EFF6FF] border border-[#DBEAFE] rounded-xl p-5 mb-6 text-left text-sm text-[#374151] space-y-2">
         <p>• Dealers will receive invitations within the next few minutes</p>

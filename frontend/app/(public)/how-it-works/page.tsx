@@ -22,12 +22,12 @@ const FAQS = [
     a: "No. AutoLenis uses a soft credit pull only during prequalification — this never appears on your credit report and never impacts your score. A hard pull only happens much later, after you've selected your offer and are ready to finalize financing with a lender.",
   },
   {
-    q: "What is the Auction Access Deposit?",
-    a: "The Auction Access Deposit is a refundable payment that activates your private 48-hour dealer competition. It signals serious intent to participating dealers and ensures everyone in the auction is committed to submitting their best offer.",
+    q: "What is the Auction Access Fee?",
+    a: "The Auction Access Fee is a limited-time, refundable payment that activates your private 48-hour dealer competition. It signals serious intent to participating dealers and ensures everyone in the auction is committed to submitting their best offer.",
   },
   {
-    q: "Is the Auction Access Deposit refundable?",
-    a: "Yes — fully. If no competitive offer arrives within your 48-hour auction window, every cent of your Auction Access Deposit is returned automatically. No questions, no fees, no follow-up calls.",
+    q: "Is the Auction Access Fee refundable?",
+    a: "Yes. If no valuable offer is received within your 48-hour auction window, every cent of your Auction Access Fee is returned automatically. No questions, no fees, no follow-up calls.",
   },
   {
     q: "How many dealers compete for my business?",
@@ -35,7 +35,7 @@ const FAQS = [
   },
   {
     q: "Am I required to accept an offer?",
-    a: "Never. You are under no obligation to accept any offer that arrives. If none of the offers meet your expectations, you can decline them all and receive a full refund of your Auction Access Deposit.",
+    a: "Never. You are under no obligation to accept any offer that arrives. If none of the offers meet your expectations, you can decline them all and receive a full refund of your Auction Access Fee.",
   },
   {
     q: "Is AutoLenis a dealership?",
@@ -66,7 +66,7 @@ const STEPS = [
     n: "03",
     title: "Activate Dealer Competition",
     icon: Gavel,
-    body: "A refundable Auction Access Deposit opens your private 48-hour dealer competition. Up to 8 verified dealers submit their best offers — you stay anonymous throughout.",
+    body: "A refundable Auction Access Fee opens your private 48-hour dealer competition. Up to 8 verified dealers submit their best offers — you stay anonymous throughout.",
     tag: "48-hour window · Fully refundable",
   },
   {
@@ -120,7 +120,7 @@ const PREQUAL_CARDS = [
 ];
 
 const DEPOSIT_STATS = [
-  { label: "Refundable", desc: "Full refund if no competitive offer arrives" },
+  { label: "Refundable", desc: "Full refund if no valuable offer is received" },
   { label: "48 Hours", desc: "Dealers submit their best offers in 48 hours" },
   { label: "Private", desc: "You stay anonymous throughout the auction" },
   { label: "Up to 8", desc: "Verified dealers compete for your business" },
@@ -255,7 +255,7 @@ export default function HowItWorksPage() {
           <CitationBlock
             id="how-autolenis-works"
             question="How does AutoLenis work?"
-            answer="AutoLenis works in 6 steps: (1) Get pre-qualified online with a soft credit pull. (2) Browse and shortlist vehicles. (3) Pay a refundable $99 Auction Access Deposit. (4) AutoLenis launches a private 48-hour dealer auction. (5) Review competing dealer offers side-by-side. (6) Select the best offer and sign via DocuSign. Most buyers save $2,000–$4,000 compared to traditional dealership purchases."
+            answer="AutoLenis works in 6 steps: (1) Get pre-qualified online with a soft credit pull. (2) Browse and shortlist vehicles. (3) Pay a $99 Limited-Time Auction Access Fee (refundable if no valuable offer is received). (4) AutoLenis launches a private 48-hour dealer auction. (5) Review competing dealer offers side-by-side. (6) Select the best offer and sign via DocuSign. Most buyers save $2,000–$4,000 compared to traditional dealership purchases."
             sourceLabel="AutoLenis Official"
             lastUpdated="2025-01-01"
           />
@@ -412,15 +412,15 @@ export default function HowItWorksPage() {
         </div>
       </section>
 
-      {/* ── Section 5: Auction Access Deposit ── */}
+      {/* ── Section 5: Auction Access Fee ── */}
       <section className="py-20 md:py-24 bg-[#0A0F1A]" data-testid="hiw-deposit">
         <div className="mx-auto max-w-7xl px-6 md:px-12">
           <div className="text-center max-w-2xl mx-auto mb-12">
             <h2 className="text-3xl md:text-4xl font-bold text-white tracking-tight mb-3">
-              The Auction Access Deposit Keeps the Process Serious.
+              The Auction Access Fee Keeps the Process Serious.
             </h2>
             <p className="text-white/70">
-              A refundable deposit activates your private 48-hour dealer competition and ensures every participant is committed to winning your business.
+              A refundable Auction Access Fee activates your private 48-hour dealer competition and ensures every participant is committed to winning your business.
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

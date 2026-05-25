@@ -76,7 +76,7 @@ export default function DepositPage() {
         if (d.success && d.data) {
           setClientSecret(d.data.clientSecret);
         } else if (d.error?.code === "PREQUAL_REQUIRED") {
-          setError("You need to complete prequalification before paying the deposit.");
+          setError("You need to complete prequalification before paying the Auction Access Fee.");
           setTimeout(() => router.push("/buyer/prequal"), 2000);
         } else {
           setError("Unable to initialize payment. Please try again.");
@@ -106,7 +106,7 @@ export default function DepositPage() {
       <div className="mb-4">
         <h1 className="text-xl font-bold text-[#111827]">Activate Your Auction</h1>
         <p className="text-sm text-[#4B5563] mt-1">
-          Pay a <strong>$99 refundable Auction Access Deposit</strong> to launch your private 48-hour reverse auction.
+          Pay a <strong>$99 Limited-Time Auction Access Fee — refundable if no valuable offer is received</strong> to launch your private 48-hour reverse auction.
         </p>
       </div>
 
@@ -130,8 +130,8 @@ export default function DepositPage() {
           </p>
           <p data-testid="deposit-plan-credit-copy">
             {isPremium
-              ? `Your $99 deposit will be credited toward your $${PREMIUM_FEE_CENTS / 100} AutoLenis Service Fee ($${PREMIUM_FEE_REMAINING_CENTS / 100} remaining after this).`
-              : "Your $99 deposit will be credited toward your vehicle purchase at closing."}
+              ? `Your $99 Auction Access Fee will be credited toward your $${PREMIUM_FEE_CENTS / 100} AutoLenis Service Fee ($${PREMIUM_FEE_REMAINING_CENTS / 100} remaining after this).`
+              : "Your $99 Auction Access Fee is refundable if no valuable offer is received."}
           </p>
         </div>
       </div>
@@ -141,7 +141,7 @@ export default function DepositPage() {
 
       <div className="bg-[#F8F9FB] border border-[#E5E7EB] rounded-xl p-5 mb-6">
         <div className="flex items-center justify-between text-sm mb-3">
-          <span className="text-[#4B5563]">Auction Access Deposit</span>
+          <span className="text-[#4B5563]">Limited-Time Auction Access Fee</span>
           <span className="font-semibold text-[#111827]">$99.00</span>
         </div>
         <div className="flex items-center justify-between text-sm border-t border-[#E5E7EB] pt-3">
@@ -150,7 +150,7 @@ export default function DepositPage() {
         </div>
         <p className="text-xs text-[#1A6B18] mt-2 flex items-center gap-1">
           <Shield size={12} />
-          100% refundable if no deal is selected
+          Refundable if no valuable offer is received
         </p>
       </div>
 

@@ -62,7 +62,7 @@ export default async function BillingPage() {
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Billing</h1>
-        <p className="text-sm text-gray-500 mt-1">Your plan, deposit status, and payment history.</p>
+        <p className="text-sm text-gray-500 mt-1">Your plan, Auction Access Fee status, and payment history.</p>
       </div>
 
       {/* Plan */}
@@ -95,13 +95,13 @@ export default async function BillingPage() {
       <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
         <h2 className="font-semibold text-gray-900 flex items-center gap-2">
           <ShieldCheck className="h-5 w-5 text-[#0B5FD1]" />
-          Auction Deposit
+          Auction Access Fee
         </h2>
 
         {deposits.length === 0 ? (
           <div className="text-center py-6 space-y-3">
             <Clock className="h-10 w-10 text-gray-300 mx-auto" />
-            <p className="text-gray-500 text-sm">No deposit on file.</p>
+            <p className="text-gray-500 text-sm">No Auction Access Fee on file.</p>
             <Link
               href="/buyer/deposit"
               className="inline-block bg-[#0B5FD1] text-white text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-[#0A4DB8] transition"
@@ -115,7 +115,7 @@ export default async function BillingPage() {
               <div key={deposit.id} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
                 <div className="space-y-0.5">
                   <p className="text-sm font-medium text-gray-900">
-                    Refundable Deposit — {formatCurrency(deposit.amountCents)}
+                    Refundable Auction Access Fee — {formatCurrency(deposit.amountCents)}
                   </p>
                   <p className="text-xs text-gray-400">{formatDate(deposit.createdAt)}</p>
                 </div>
@@ -127,14 +127,14 @@ export default async function BillingPage() {
             {hasPaidDeposit && (
               <div className="flex items-start gap-2 pt-2 text-sm text-green-700">
                 <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>Your deposit is on file. It will be refunded if no deal is completed.</span>
+                <span>Your Auction Access Fee is on file. It is refundable if no valuable offer is received.</span>
               </div>
             )}
             {!hasPaidDeposit && deposits.some((d) => d.status === "REFUNDED") && (
               <div className="flex items-start gap-2 pt-2 text-sm text-gray-600">
                 <RefreshCw className="h-4 w-4 mt-0.5 flex-shrink-0" />
                 <span>
-                  Your previous deposit was refunded.{" "}
+                  Your previous Auction Access Fee was refunded.{" "}
                   <Link href="/buyer/deposit" className="text-[#0B5FD1] hover:underline">
                     Activate a new auction
                   </Link>
