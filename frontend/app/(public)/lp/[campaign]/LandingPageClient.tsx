@@ -741,7 +741,7 @@ export default function LandingPageClient({
                       data-testid="lp-form-submit"
                       className="flex-1 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-black text-lg py-4 rounded-2xl shadow-lg shadow-[#0B5FD1]/20 flex items-center justify-center gap-2 transition-colors disabled:opacity-60"
                     >
-                      {submitting ? "Submitting…" : <>Activate Dealer Auction <ArrowRight size={18} /></>}
+                      {submitting ? "Submitting…" : <>Submit My Vehicle Request <ArrowRight size={18} /></>}
                     </button>
                   </div>
                   <p className="text-[11px] text-slate-400 text-center">
@@ -780,7 +780,48 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 5: TRUST BAR ─────────────────────────────────────────── */}
+        {/* ── SECTION 5: VSL ───────────────────────────────────────────────── */}
+        <section className="py-16 bg-[#F8FAFC]">
+          <div className="max-w-6xl mx-auto px-5 grid lg:grid-cols-2 gap-8 items-center">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-3">WHY AUTOLENIS EXISTS</p>
+              <h2 className="text-4xl font-black text-slate-900 tracking-tight mb-4">Finally, a Smarter Way to Buy a Car</h2>
+              <p className="text-slate-600 text-sm leading-relaxed mb-5">
+                Most buyers overpay because dealerships control the process. AutoLenis flips the script — verified dealers compete for you, so you can compare real offers without pressure.
+              </p>
+              <div className="space-y-2 text-sm text-slate-600">
+                {[
+                  "See how our private auction works",
+                  "Why transparency saves buyers thousands",
+                  "How Contract Shield™ protects you",
+                  "Hear real results from real buyers",
+                ].map((item) => (
+                  <div key={item} className="flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-[#0B5FD1]" />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-3xl shadow-2xl overflow-hidden border border-slate-200 bg-slate-900 relative min-h-[300px]">
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700" />
+              <div className="absolute inset-0 p-8 flex flex-col justify-end">
+                <p className="text-4xl font-black text-white leading-tight">The Smarter Way to Buy</p>
+                <p className="text-slate-200">Better offers. Zero pressure. Total control.</p>
+              </div>
+              <button
+                aria-label="Play video"
+                className="absolute inset-0 m-auto w-16 h-16 rounded-full bg-[#0B5FD1] text-white flex items-center justify-center shadow-xl"
+                onClick={scrollToForm}
+                type="button"
+              >
+                <ChevronRight className="ml-1" />
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {/* ── SECTION 6: TRUST BAR ─────────────────────────────────────────── */}
         <section className="py-8 bg-white">
           <div className="max-w-5xl mx-auto px-5">
             <p className="text-center text-sm font-semibold text-slate-600 mb-6">
