@@ -49,6 +49,25 @@ export async function POST(req: Request) {
       consentText:  'AutoLenis Landing Page — partial form capture (Step 1)',
     });
 
+    // GHL webhook sync — fire-and-forget, must never block the buyer.
+    if (process.env.GHL_PARTIAL_LEAD_WEBHOOK_URL) {
+      fetch(process.env.GHL_PARTIAL_LEAD_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName: body.firstName ?? null,
+          lastName: body.lastName ?? null,
+          email: body.email,
+          phone: body.phone ?? null,
+          source: 'AutoLenis LP Partial Lead',
+          tags: [
+            'lp-partial-lead',
+            `campaign-${body.campaign ?? 'default'}`,
+          ],
+        }),
+      }).catch(() => {});
+    }
+
     // Only enroll the abandonment sequence for fresh leads. Contacts who
     // already advanced past 'lead' should not have their stage regressed or
     // be re-nurtured by an abandonment workflow they no longer match.

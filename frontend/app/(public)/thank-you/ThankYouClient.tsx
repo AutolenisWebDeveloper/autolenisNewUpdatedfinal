@@ -27,6 +27,22 @@ export default function ThankYouClient() {
         body: JSON.stringify({ email, campaign }),
       }).catch(() => {});
     }
+
+    // GHL webhook sync — fire-and-forget, must never block the page.
+    if (process.env.NEXT_PUBLIC_GHL_THANKYOU_WEBHOOK_URL) {
+      fetch(
+        process.env.NEXT_PUBLIC_GHL_THANKYOU_WEBHOOK_URL,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: params.get('email') ?? null,
+            campaign: params.get('campaign') ?? null,
+            tags: ['lp-form-completed', 'auction-access-pending'],
+          }),
+        }
+      ).catch(() => {});
+    }
   }, [email, campaign]);
 
   return (
