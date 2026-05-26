@@ -71,6 +71,9 @@ declare namespace NodeJS {
     // GoHighLevel CRM — inbound webhook for platform-event tag sync (optional;
     // tag sync no-ops when unset).
     GHL_WEBHOOK_URL?: string;
+    // Shared secret guarding the GHL AI-receptionist phone-request intake route
+    // (/api/public/phone-request). Sent by GHL in the X-GHL-Secret header.
+    GHL_PHONE_REQUEST_SECRET?: string;
 
     // Optional
     REDIS_URL?: string;
