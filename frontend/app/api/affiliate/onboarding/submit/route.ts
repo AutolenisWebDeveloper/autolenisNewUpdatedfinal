@@ -6,6 +6,7 @@ import {
   computeOnboardingCompletion,
   saveOnboardingStep,
 } from "@/lib/services/affiliate/onboarding.service";
+import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 
 export async function POST(request: NextRequest) {
   const affiliate = await getRequestAffiliate(request);
@@ -46,6 +47,8 @@ export async function POST(request: NextRequest) {
       metadata:   { affiliateEmail: affiliate.user.email },
     },
   }).catch(() => {});
+
+  syncGhlTag(affiliate.user.email, "affiliate-applied");
 
   return successResponse({ status: "SUBMITTED" });
 }

@@ -12,6 +12,7 @@ import {
 import { walkCommissionTree } from "@/lib/services/affiliate/commission.service";
 import { launchAuction } from "@/lib/services/auction/auction.service";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
+import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 
 export async function POST(request: NextRequest) {
   const stripe = getStripe();
@@ -140,6 +141,7 @@ export async function POST(request: NextRequest) {
               } catch (e) {
                 console.error("[stripe/webhook] auction activated email failed:", e);
               }
+              syncGhlTag(buyerEmail, "deposit-paid");
             }
           }
         }

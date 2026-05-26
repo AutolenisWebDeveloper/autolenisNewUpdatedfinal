@@ -68,6 +68,10 @@ declare namespace NodeJS {
     CURRENT_TERMS_VERSION: string;
     OPENROAD_PARTNER_ID: string;
 
+    // GoHighLevel CRM — inbound webhook for platform-event tag sync (optional;
+    // tag sync no-ops when unset).
+    GHL_WEBHOOK_URL?: string;
+
     // Optional
     REDIS_URL?: string;
     DEV_EMAIL_TO?: string; // Must NOT be set in production

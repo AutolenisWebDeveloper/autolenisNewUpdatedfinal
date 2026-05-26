@@ -6,6 +6,7 @@ import {
   sendDealerOfferWonEmail,
   sendDealerOfferLostEmail,
 } from "@/lib/services/email/resend.service";
+import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   } catch (e) {
     console.error("[select-offer] deal selected email failed:", e);
   }
+  syncGhlTag(buyerWithEmail?.user?.email, "offer-selected");
 
   // Notify every dealer that submitted an offer — winner vs lost — non-blocking.
   const allOffers = await prisma.offer.findMany({
@@ -81,6 +83,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         dealUrl: `${APP_URL}/dealer/deals/${deal.id}`,
         dealId: deal.id,
       }).catch(err => console.error("[select-offer] dealer won email failed:", err));
+      syncGhlTag(dealerEmail, "dealer-won");
     } else {
       await sendDealerOfferLostEmail({
         to: dealerEmail,

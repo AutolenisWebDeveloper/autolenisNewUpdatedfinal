@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { OfferStatus } from "@prisma/client";
 import { MAX_OFFER_REVISIONS } from "@/lib/constants";
 import { writeDealerAudit } from "@/lib/services/audit/dealer-audit.service";
+import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 
 const APR_SUSPICIOUS_THRESHOLD = 29.0;
 // Allow up to 1 cent rounding tolerance when summing OTD components
@@ -157,6 +158,16 @@ export async function submitOffer(input: OfferInput) {
       type: "OFFER_RECEIVED",
     },
   }).catch(() => {});
+
+  // Sync to GHL — fire-and-forget. Buyer email isn't loaded above, so resolve
+  // it with a lightweight lookup before tagging.
+  const buyerForGhl = await prisma.buyer
+    .findUnique({
+      where: { id: auction.buyerId },
+      include: { user: { select: { email: true } } },
+    })
+    .catch(() => null);
+  syncGhlTag(buyerForGhl?.user?.email, "offer-received");
 
   await writeDealerAudit({
     action: "DEALER_OFFER_SUBMITTED",

@@ -12,6 +12,7 @@ import {
   sendDealerPickupCompletedEmail,
   sendDealerPayoutInitiatedEmail,
 } from "@/lib/services/email/resend.service";
+import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -89,6 +90,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   } catch (e) {
     console.error("[pickup/complete] deal complete email failed:", e);
   }
+  syncGhlTag(deal.buyer?.user?.email, "purchase-complete");
 
   // Notify the dealer that pickup completed and payout is initiating — non-blocking.
   const dealerEmail = deal.offer?.dealer?.user?.email;
