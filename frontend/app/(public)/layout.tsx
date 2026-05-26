@@ -1,4 +1,3 @@
-import Script from "next/script";
 import PublicNav from "@/components/public/PublicNav";
 import PublicFooter from "@/components/public/PublicFooter";
 import AnnouncementBanner from "@/components/public/AnnouncementBanner";
@@ -25,17 +24,6 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
         chatEndpoint="/api/public/ai/chat"
         placeholder="Ask me anything about AutoLenis…"
         initialGreeting="Hi! I'm Zura, the AutoLenis concierge. Have questions about how our car-buying process works?"
-      />
-      <div
-        data-chat-widget
-        data-widget-id="6a13a127ee7b17216c5e0ed0"
-        data-location-id="xvcir6KTLAYlLKV12IdX"
-      />
-      <Script
-        src="https://beta.leadconnectorhq.com/loader.js"
-        data-resources-url="https://beta.leadconnectorhq.com/chat-widget/loader.js"
-        data-widget-id="6a13a127ee7b17216c5e0ed0"
-        strategy="afterInteractive"
       />
     </>
   );
