@@ -5,6 +5,7 @@ import { z } from "zod";
 import { approveDealerByAdmin } from "@/lib/services/admin/admin-dealer-command-center.service";
 import { prisma } from "@/lib/prisma";
 import { sendDealerAccountApprovedEmail } from "@/lib/services/email/resend.service";
+import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 
 interface Props { params: Promise<{ dealerId: string }> }
 
@@ -40,6 +41,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         dashboardUrl: `${appUrl}/dealer/dashboard`,
       }).catch(err => console.error("[admin/dealers/approve] account approved email failed:", err));
     }
+    syncGhlTag(dealer?.user?.email, "dealer-approved");
 
     return adminSuccess(result);
   } catch (err) {

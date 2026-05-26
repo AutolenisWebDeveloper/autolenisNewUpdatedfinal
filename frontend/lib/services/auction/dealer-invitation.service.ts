@@ -3,6 +3,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { sendDealerAuctionInvitationEmail } from "@/lib/services/email/resend.service";
+import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { AUCTION_DURATION_HOURS } from "@/lib/constants";
 import { ZIP_COORDS } from "@/lib/utils/zip-coords";
 
@@ -155,6 +156,8 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
         console.error(`[dealer-invitation] email failed for dealer ${dealerId}:`, err)
       );
     }
+
+    syncGhlTag(dealer?.user?.email, "dealer-invited");
   }
 
   return invitations.length;

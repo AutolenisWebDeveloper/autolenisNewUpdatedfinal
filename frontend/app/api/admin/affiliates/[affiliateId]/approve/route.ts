@@ -8,6 +8,7 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { approveAffiliateByAdmin } from "@/lib/services/admin/admin-affiliate-command-center.service";
 import { sendAffiliateActivationEmail } from "@/lib/services/email/resend.service";
+import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { z } from "zod";
 
 interface Props { params: Promise<{ affiliateId: string }> }
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         console.error("[affiliates/approve] activation email failed", err);
       }
     }
+    syncGhlTag(affiliate?.user?.email, "affiliate-approved");
 
     return adminSuccess(result);
   } catch (err) {

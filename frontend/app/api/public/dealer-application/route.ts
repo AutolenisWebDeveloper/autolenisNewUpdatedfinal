@@ -8,6 +8,7 @@ import {
   sendDealerApplicationReceivedEmail,
   sendDealerApplicationAdminNotification,
 } from "@/lib/services/email/resend.service";
+import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 
 const schema = z.object({
   dealershipName: z.string().min(1),
@@ -103,6 +104,8 @@ export async function POST(request: NextRequest) {
     dealershipName: data.dealershipName,
     contactName: data.contactName,
   }).catch(err => console.error("[dealer-application] templated received email failed:", err));
+
+  syncGhlTag(data.contactEmail, "dealer-applied");
 
   return NextResponse.json({
     success: true,
