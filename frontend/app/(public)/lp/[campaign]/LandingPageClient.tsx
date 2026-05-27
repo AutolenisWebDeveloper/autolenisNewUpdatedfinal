@@ -346,7 +346,7 @@ export default function LandingPageClient({
       setSubmitted(true);
       setTimeout(() => {
         router.push(
-          `/thank-you?email=${encodeURIComponent(email)}&campaign=${encodeURIComponent(campaign)}`,
+          `/thank-you?email=${encodeURIComponent(email)}&campaign=${encodeURIComponent(campaign)}&name=${encodeURIComponent(firstName)}`,
         );
       }, 1500);
     } catch (err) {

@@ -21,6 +21,8 @@ export type FunnelEvent =
   | "lp_faq_open"
   | "ty_view"
   | "ty_activate_cta_click"
+  | "ty_complete_submit"
+  | "ty_complete_skip"
   | "deposit_paid";
 
 interface FunnelEventPayload {

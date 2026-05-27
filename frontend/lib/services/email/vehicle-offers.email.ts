@@ -139,6 +139,60 @@ export async function sendVehicleRequestConfirmation(to: string, fullName: strin
   await sendRaw(to, "We received your vehicle request — AutoLenis", wrap(inner));
 }
 
+// ─── Vehicle request — step 2 completion (buyer-supplied detail) ──────────
+export async function sendVehicleRequestCompletedConfirmation(
+  to: string,
+  firstName: string,
+  summaryRows: [string, string][],
+) {
+  const rows = summaryRows.length
+    ? `<table style="width:100%;border-collapse:collapse;margin:8px 0 0">
+        ${summaryRows
+          .map(
+            ([k, v]) =>
+              `<tr><td style="padding:8px 0;color:#6B7280;font-size:13px;width:170px;vertical-align:top">${escape(k)}</td><td style="padding:8px 0;color:#111827;font-size:13px;font-weight:500">${escape(v)}</td></tr>`,
+          )
+          .join("")}
+       </table>`
+    : "";
+  const inner = `
+    <p style="color:#0B5FD1;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin:0 0 4px">Request Complete</p>
+    <h1 style="color:#111827;font-size:22px;font-weight:700;margin:0 0 8px">Your vehicle request is complete, ${escape(firstName)}</h1>
+    <p style="color:#4B5563;font-size:14px;line-height:1.6;margin:0 0 16px">Thanks for the detail — dealers will compete for you soon. Here's a summary of what you told us:</p>
+    ${rows}
+    <p style="color:#4B5563;font-size:14px;line-height:1.6;margin:16px 0 0">Activate your private dealer auction to put verified dealers to work competing for your exact vehicle.</p>
+    <div style="margin-top:24px">${button(`${APP_URL}/auth/signup?plan=standard&source=ty`, "Activate my auction →")}</div>`;
+  await sendRaw(
+    to,
+    "Your vehicle request is complete — dealers will compete for you soon",
+    wrap(inner),
+  );
+}
+
+export async function sendVehicleRequestCompletedAdminNotification(params: {
+  fullName: string;
+  email: string;
+  summaryLine: string;
+  summaryRows: [string, string][];
+  vehicleRequestId?: string;
+}) {
+  const detailUrl = `${APP_URL}/admin/vehicle-requests`;
+  const inner = `
+    <p style="color:#0B5FD1;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin:0 0 4px">Vehicle Request Completed</p>
+    <h1 style="color:#111827;font-size:20px;font-weight:700;margin:0 0 6px">${escape(params.summaryLine)}</h1>
+    <p style="color:#6B7280;font-size:13px;margin:0 0 16px">${escape(params.fullName)} &middot; ${escape(params.email)}</p>
+    <table style="width:100%;border-collapse:collapse">
+      ${params.summaryRows
+        .map(
+          ([k, v]) =>
+            `<tr><td style="padding:8px 0;color:#6B7280;font-size:13px;width:170px;vertical-align:top">${escape(k)}</td><td style="padding:8px 0;color:#111827;font-size:13px;font-weight:500">${escape(v)}</td></tr>`,
+        )
+        .join("")}
+    </table>
+    <div style="margin-top:24px">${button(detailUrl, "View Vehicle Requests →")}</div>`;
+  await sendRaw(ADMIN_EMAIL, `Vehicle Request Completed — ${params.fullName}`, wrap(inner));
+}
+
 // ─── Dealer offer submission ──────────────────────────────────────────────
 type VehicleSummary = {
   vehicleUrl: string;

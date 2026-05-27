@@ -21,18 +21,20 @@ export async function POST(request: NextRequest) {
   try {
     const { buyerId, firstName, email, phone } = (await request.json()) as Payload;
 
+    const completeUrl = `${NOTIFY_APP_URL}/thank-you?email=${encodeURIComponent(email)}&complete=true`;
+
     await notifyContact({
       entityType: "buyer",
       entityId: buyerId,
       phone,
       email,
-      sms: `Hey ${firstName}! Thanks for reaching out to AutoLenis. Your vehicle request was received. Complete your activation here: autolenis.com`,
+      sms: `Hey ${firstName}! Thanks for reaching out to AutoLenis. Your vehicle request was received. Complete your vehicle details so dealers can compete: ${completeUrl}`,
       emailSubject: "Welcome to AutoLenis — your request is in",
       emailHtml: renderEmail({
         heading: `Welcome to AutoLenis, ${firstName}`,
-        bodyHtml: `<p>Thanks for reaching out — your vehicle request is in.</p><p>The next step is to activate your private dealer auction so local dealers can start competing for your business.</p>`,
-        ctaText: "Complete your activation",
-        ctaUrl: `${NOTIFY_APP_URL}/buyer/dashboard`,
+        bodyHtml: `<p>Thanks for reaching out — your vehicle request is in.</p><p>Complete your vehicle details here to help dealers submit their best offers:</p><p><a href="${completeUrl}" style="color:#0B5FD1;font-weight:600">${completeUrl}</a></p><p>The next step after that is to activate your private dealer auction so local dealers can start competing for your business.</p>`,
+        ctaText: "Complete your vehicle details",
+        ctaUrl: completeUrl,
       }),
     });
 
