@@ -33,6 +33,16 @@ export async function parseTwilioRequest(
   const authToken = process.env.TWILIO_AUTH_TOKEN ?? "";
   const url = `${APP_URL}${pathPart}`;
   const verified = !!authToken && verifyTwilioRequest(authToken, signature, url, params);
+  if (!verified) {
+    // Surfaces the most common failure cause: the URL Twilio signed does not
+    // match `${NEXT_PUBLIC_APP_URL}${path}` (wrong host/scheme/trailing slash).
+    console.error("[twilio-verify] signature verification failed", {
+      path: pathPart,
+      expectedUrl: url,
+      hasAuthToken: !!authToken,
+      hasSignature: !!signature,
+    });
+  }
   return { params, verified };
 }
 
