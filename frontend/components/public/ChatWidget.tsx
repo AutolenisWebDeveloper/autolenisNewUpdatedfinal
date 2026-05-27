@@ -318,7 +318,7 @@ export default function ChatWidget({
   // ─── Chat screen ───────────────────────────────────────────────────────────
   const chatScreen = (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto bg-[#F8FAFC] px-4 py-4 min-h-[280px] max-h-[340px] space-y-3" data-testid="chat-messages">
+      <div className="flex-1 overflow-y-auto bg-[#F8FAFC] px-4 py-4 min-h-0 space-y-3" data-testid="chat-messages">
         {messages.map((msg, i) => (
           <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`} data-testid={`chat-msg-${i}`}>
             <div className={`px-4 py-2.5 text-sm leading-relaxed max-w-[80%] shadow-sm rounded-2xl ${
@@ -363,7 +363,7 @@ export default function ChatWidget({
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="bg-white border-t border-slate-100 px-4 py-3 flex items-center gap-3" data-testid="chat-input-area">
+      <div className="shrink-0 bg-white border-t border-slate-100 px-4 py-3 flex items-center gap-3" data-testid="chat-input-area">
         <input
           type="text"
           value={input}
@@ -393,7 +393,9 @@ export default function ChatWidget({
     >
       {/* Chat panel — always mounted so open/close can animate */}
       <div
-        className={`mb-4 bg-white rounded-3xl overflow-hidden flex flex-col w-[380px] max-sm:w-[calc(100vw-24px)] max-h-[600px] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+        className={`mb-4 bg-white rounded-3xl overflow-hidden flex flex-col w-[380px] max-sm:w-[calc(100vw-24px)] ${
+          isPublic && screen === "lead" ? "h-auto max-h-[600px]" : "h-[520px] max-sm:h-[480px]"
+        } transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
           open
             ? "translate-y-0 opacity-100 scale-100 pointer-events-auto"
             : "translate-y-4 opacity-0 scale-95 pointer-events-none"
