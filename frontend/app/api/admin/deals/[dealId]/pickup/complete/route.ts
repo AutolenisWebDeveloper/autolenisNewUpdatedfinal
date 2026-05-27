@@ -13,6 +13,7 @@ import {
   sendDealerPayoutInitiatedEmail,
 } from "@/lib/services/email/resend.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
+import { dispatch } from "@/lib/qstash/dispatch";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -91,6 +92,19 @@ export async function POST(request: NextRequest, { params }: Props) {
     console.error("[pickup/complete] deal complete email failed:", e);
   }
   syncGhlTag(deal.buyer?.user?.email, "purchase-complete");
+
+  // QStash — congratulations + review-request sequence.
+  if (deal.buyer?.user?.email) {
+    dispatch({
+      path: "/api/jobs/deal-complete",
+      body: {
+        buyerId: deal.buyerId,
+        firstName: deal.buyer.firstName,
+        email: deal.buyer.user.email,
+        dealId,
+      },
+    }).catch(() => {});
+  }
 
   // Notify the dealer that pickup completed and payout is initiating — non-blocking.
   const dealerEmail = deal.offer?.dealer?.user?.email;

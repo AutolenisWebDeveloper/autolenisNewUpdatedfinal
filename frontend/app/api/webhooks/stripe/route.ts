@@ -13,6 +13,7 @@ import { walkCommissionTree } from "@/lib/services/affiliate/commission.service"
 import { launchAuction } from "@/lib/services/auction/auction.service";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
+import { dispatch } from "@/lib/qstash/dispatch";
 
 export async function POST(request: NextRequest) {
   const stripe = getStripe();
@@ -142,6 +143,19 @@ export async function POST(request: NextRequest) {
                 console.error("[stripe/webhook] auction activated email failed:", e);
               }
               syncGhlTag(buyerEmail, "deposit-paid");
+
+              // QStash — auction-live sequence (immediate + midpoint/closing checks).
+              if (createdAuction) {
+                dispatch({
+                  path: "/api/jobs/auction-active",
+                  body: {
+                    buyerId: deposit.buyerId,
+                    firstName: deposit.buyer?.firstName ?? "there",
+                    email: buyerEmail,
+                    auctionId: createdAuction.id,
+                  },
+                }).catch(() => {});
+              }
             }
           }
         }

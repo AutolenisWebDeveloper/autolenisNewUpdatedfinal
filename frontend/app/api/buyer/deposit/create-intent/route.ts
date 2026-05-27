@@ -3,6 +3,7 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
+import { dispatch } from "@/lib/qstash/dispatch";
 
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
@@ -104,6 +105,25 @@ export async function POST(request: NextRequest) {
       },
       update: {},
     });
+
+    // QStash — start the deposit-activation reminder sequence. The job
+    // self-stops once the deposit is PAID, so re-creating an intent is safe.
+    const buyerContact = await prisma.buyer.findUnique({
+      where: { id: buyer.id },
+      select: { firstName: true, user: { select: { email: true } } },
+    });
+    if (buyerContact?.user?.email) {
+      dispatch({
+        path: "/api/jobs/deposit-reminder",
+        body: {
+          buyerId: buyer.id,
+          firstName: buyerContact.firstName,
+          email: buyerContact.user.email,
+          touchNumber: 1,
+        },
+        delaySeconds: 86400,
+      }).catch(() => {});
+    }
 
     return successResponse({ clientSecret: paymentIntent.client_secret });
   } catch (err) {

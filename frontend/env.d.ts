@@ -75,6 +75,16 @@ declare namespace NodeJS {
     // (/api/public/phone-request). Sent by GHL in the X-GHL-Secret header.
     GHL_PHONE_REQUEST_SECRET?: string;
 
+    // QStash (Upstash) — job queue + scheduled automation dispatch
+    QSTASH_TOKEN: string;
+    QSTASH_CURRENT_SIGNING_KEY: string;
+    QSTASH_NEXT_SIGNING_KEY: string;
+
+    // Twilio — transactional SMS (consent-gated)
+    TWILIO_ACCOUNT_SID?: string;
+    TWILIO_AUTH_TOKEN?: string;
+    TWILIO_FROM_NUMBER?: string;
+
     // Optional
     REDIS_URL?: string;
     DEV_EMAIL_TO?: string; // Must NOT be set in production

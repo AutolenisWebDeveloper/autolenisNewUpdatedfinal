@@ -179,6 +179,7 @@ model Affiliate {
   ftcAcknowledgedAt    DateTime?       @map("ftc_acknowledged_at")
   weeklyDigestEnabled  Boolean         @default(true) @map("weekly_digest_enabled")
   lastDigestSentAt     DateTime?       @map("last_digest_sent_at")
+  lastInactiveNudgeAt  DateTime?       @map("last_inactive_nudge_at")
   unsubscribeToken     String?         @unique @map("unsubscribe_token")
   createdAt            DateTime        @default(now()) @map("created_at")
   updatedAt            DateTime        @updatedAt @map("updated_at")
