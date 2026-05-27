@@ -4,6 +4,7 @@
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { dispatch } from "@/lib/qstash/dispatch";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,18 @@ export async function POST(request: NextRequest) {
     },
     select: { onboardingComplete: true, termsAcceptedAt: true, termsVersion: true },
   });
+
+  // QStash — start the deposit-activation reminder sequence 24h out.
+  dispatch({
+    path: "/api/jobs/deposit-reminder",
+    body: {
+      buyerId: buyer.id,
+      firstName: buyer.firstName,
+      email: buyer.user.email,
+      touchNumber: 1,
+    },
+    delaySeconds: 86400,
+  }).catch(() => {});
 
   return successResponse(updated);
 }
