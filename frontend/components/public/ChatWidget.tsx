@@ -37,9 +37,14 @@ export default function ChatWidget({
   agentType = "general",
   initialGreeting = "Hi! I'm Zura, your AutoLenis concierge. How can I help you today?",
   placeholder = "Ask me anything about buying your car…",
-  chatEndpoint = "/api/buyer/ai/chat",
+  chatEndpoint,
 }: ChatWidgetProps) {
   const isPublic = !buyerId;
+
+  // Authenticated buyers hit the buyer concierge; everyone else (no buyerId)
+  // hits the public concierge. An explicit chatEndpoint (admin/dealer/affiliate
+  // portals) always wins.
+  const endpoint = chatEndpoint ?? (buyerId ? "/api/buyer/ai/chat" : "/api/public/ai/chat");
 
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
@@ -99,7 +104,7 @@ export default function ChatWidget({
 
     try {
       const history = newMessages.slice(-8, -1).map(m => ({ role: m.role, content: m.content }));
-      const res = await fetch(chatEndpoint, {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
