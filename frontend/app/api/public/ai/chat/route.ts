@@ -2,11 +2,10 @@ import { NextRequest } from "next/server";
 import { successResponse, errorResponse } from "@/lib/auth/api";
 import { groqChat, type ChatMessage } from "@/lib/ai/groq-client";
 import { isAiEnabled } from "@/lib/ai/kill-switch";
+import { ZURA_SYSTEM_PROMPT } from "@/lib/ai/zura-knowledge";
 
 // Public Zura concierge endpoint — no authentication required.
 // Used by the public homepage ChatWidget for unauthenticated visitors.
-
-const PUBLIC_SYSTEM_PROMPT = `You are Zura, the AutoLenis concierge. AutoLenis is a reverse-auction car buying platform where buyers get prequalified, post their request, and up to 8 vetted dealers compete in a private 48-hour auction. Answer questions about how AutoLenis works, the buying process, pricing ($99 refundable deposit, $499 premium concierge), Contract Shield, and prequalification. Do not discuss specific user accounts. Never fabricate prices. Keep responses concise and helpful. Always encourage the user to sign up to get started.`;
 
 // Simple in-memory per-IP rate limit: 20 messages per hour.
 // Note: in-memory state is per server instance and resets on cold start —
@@ -81,13 +80,13 @@ export async function POST(request: NextRequest) {
     .map((m) => ({ role: m.role, content: m.content.slice(0, MAX_MESSAGE_LENGTH) }));
 
   const messages: ChatMessage[] = [
-    { role: "system", content: PUBLIC_SYSTEM_PROMPT },
+    { role: "system", content: ZURA_SYSTEM_PROMPT },
     ...history,
     { role: "user", content: message },
   ];
 
   try {
-    const result = await groqChat(messages, { maxTokens: 512, temperature: 0.7 });
+    const result = await groqChat(messages, { maxTokens: 300, temperature: 0.7 });
     return successResponse({ content: result.content, model: result.model });
   } catch (err) {
     const msg = String(err);

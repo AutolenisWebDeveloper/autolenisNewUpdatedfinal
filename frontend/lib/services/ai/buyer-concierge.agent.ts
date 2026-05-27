@@ -4,6 +4,7 @@
 
 import { groqChat, ChatMessage } from "@/lib/ai/groq-client";
 import { prisma } from "@/lib/prisma";
+import { ZURA_SYSTEM_PROMPT, ZURA_BUYER_CONTEXT_PREFIX } from "@/lib/ai/zura-knowledge";
 
 interface BuyerDealContext {
   buyerName: string;
@@ -65,31 +66,27 @@ function buildBuyerSystemPrompt(context: BuyerDealContext): string {
     ? `In progress — stage: ${context.activeDeal.status}`
     : "No active deal";
 
-  return `You are AutoLenis's AI car-buying concierge for ${context.buyerName}.
+  return `${ZURA_BUYER_CONTEXT_PREFIX}
 
-CURRENT BUYER CONTEXT (injected at session start):
+You are speaking with ${context.buyerName}.
+
+CURRENT BUYER CONTEXT (injected at session start — proactively reference this):
 - Stage: ${context.currentStage ?? "onboarding"}
 - Approved budget: ${budgetStr} (READ-ONLY — never suggest changing this)
 - Prequalification tier: ${context.prequal?.tier ?? "not completed"}
 - Auction: ${auctionStatus}
 - Deal: ${dealStatus}
 
-YOUR ROLE:
-You are a helpful, knowledgeable concierge who guides buyers through the AutoLenis car-buying process. You explain how the platform works, help buyers understand their options, and proactively address concerns.
-
-RULES:
+ACCOUNT-SPECIFIC RULES:
 - Always reference the buyer's actual deal state above
 - Never reveal dealer identities until after deal selection
 - Never suggest modifying the approved budget ceiling
+- Never reveal which dealers are in an active auction
+- Never access or share any other buyer's information
 - If asked about specific financial products (loans, APR), explain general concepts but recommend consulting a licensed professional
 - Proactively offer next steps based on the buyer's current stage
-- Keep responses concise and actionable
 
-WHAT YOU CANNOT DO:
-- Make guarantees about offer amounts or outcomes
-- Reveal which dealers are in an active auction
-- Give legal or financial advice
-- Access or share any other buyer's information`;
+${ZURA_SYSTEM_PROMPT}`;
 }
 
 // Main buyer concierge chat function
