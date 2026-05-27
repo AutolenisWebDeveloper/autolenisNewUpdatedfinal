@@ -227,10 +227,9 @@ function maybeCapturePartialLead(
 export async function POST(request: NextRequest) {
   try {
     const { params, verified } = await parseTwilioRequest(request, PATH);
-    // TODO: re-enable signature enforcement once the Twilio webhook URL is confirmed.
-    // Temporarily proceeding on unverified requests to debug the route itself.
     if (!verified) {
-      console.warn("[voice/process] Twilio signature not verified — proceeding (debug mode)");
+      console.error("[voice/process] Twilio signature invalid — rejecting request");
+      return new Response("Unauthorized", { status: 401 });
     }
 
     const speech = (params.SpeechResult ?? "").trim();
