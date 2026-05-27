@@ -80,10 +80,12 @@ declare namespace NodeJS {
     QSTASH_CURRENT_SIGNING_KEY: string;
     QSTASH_NEXT_SIGNING_KEY: string;
 
-    // Twilio — transactional SMS (consent-gated)
+    // Twilio — transactional SMS (consent-gated) + voice receptionist
     TWILIO_ACCOUNT_SID?: string;
     TWILIO_AUTH_TOKEN?: string;
     TWILIO_FROM_NUMBER?: string;
+    TWILIO_PHONE_NUMBER?: string;
+    TWILIO_TRANSFER_NUMBER?: string; // live-agent number for in-call transfers
 
     // Optional
     REDIS_URL?: string;

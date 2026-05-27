@@ -79,6 +79,13 @@ const PUBLIC_ROUTES = [
   "/buyer-offer-review",
   "/lp",
   "/thank-you",
+  // Twilio voice/SMS webhooks — cannot present a session/CSRF token; each
+  // handler validates the X-Twilio-Signature instead.
+  "/api/twilio/voice/incoming",
+  "/api/twilio/voice/process",
+  "/api/twilio/voice/fallback",
+  "/api/twilio/voice/status",
+  "/api/twilio/sms/incoming",
 ];
 
 const AUTH_ROUTES = [
@@ -177,6 +184,12 @@ function validateCsrfToken(request: NextRequest): boolean {
   // Skip CSRF for webhooks — they have their own signature validation
   const pathname = request.nextUrl.pathname;
   if (pathname.startsWith("/api/webhooks/") || isCronRoute(pathname)) {
+    return true;
+  }
+
+  // Skip CSRF for Twilio voice/SMS webhooks — Twilio cannot send a CSRF token;
+  // each handler validates the X-Twilio-Signature header instead.
+  if (pathname.startsWith("/api/twilio/")) {
     return true;
   }
 
