@@ -6,6 +6,7 @@ import { sendDealerAuctionInvitationEmail } from "@/lib/services/email/resend.se
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { AUCTION_DURATION_HOURS } from "@/lib/constants";
 import { ZIP_COORDS } from "@/lib/utils/zip-coords";
+import { dispatch } from "@/lib/qstash/dispatch";
 
 const MAX_INVITATIONS_PER_AUCTION = 8;
 const MAX_DISTANCE_MILES = 150;
@@ -64,6 +65,7 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
   const auctionForBuyer = await prisma.auction.findUnique({
     where: { id: auctionId },
     select: {
+      endsAt: true,
       buyer: { select: { zip: true, city: true, state: true } },
     },
   });
@@ -155,6 +157,20 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
       }).catch(err =>
         console.error(`[dealer-invitation] email failed for dealer ${dealerId}:`, err)
       );
+    }
+
+    // QStash — dealer invitation notification + bid-deadline reminders.
+    if (dealer?.user?.email) {
+      dispatch({
+        path: "/api/jobs/dealer-invited",
+        body: {
+          dealerId,
+          firstName: dealer.dealershipName ?? "Dealer",
+          email: dealer.user.email,
+          auctionId,
+          expiresAt: auctionForBuyer?.endsAt?.toISOString() ?? null,
+        },
+      }).catch(() => {});
     }
 
     syncGhlTag(dealer?.user?.email, "dealer-invited");

@@ -3,6 +3,7 @@ import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dea
 import { submitOffer } from "@/lib/services/offer/offer.service";
 import { z } from "zod";
 import { sendDealerOfferSubmittedEmail } from "@/lib/services/email/resend.service";
+import { dispatch } from "@/lib/qstash/dispatch";
 
 const schema = z.object({
   auctionId: z.string(), otdPriceCents: z.number().int().min(100),
@@ -63,6 +64,27 @@ export async function POST(request: NextRequest) {
         revisionWindowExpiry: revisionWindowExpiry.toISOString(),
         offerId: offer.id,
       }).catch(err => console.error("[dealer/offers] submission email failed:", err));
+    }
+
+    // QStash — notify the buyer that a dealer offer arrived (+ follow-up).
+    const auctionBuyer = await prisma.auction.findUnique({
+      where: { id: parsed.data.auctionId },
+      select: {
+        buyerId: true,
+        buyer: { select: { firstName: true, user: { select: { email: true } } } },
+      },
+    });
+    const buyerOfferEmail = auctionBuyer?.buyer?.user?.email;
+    if (auctionBuyer?.buyerId && buyerOfferEmail) {
+      dispatch({
+        path: "/api/jobs/offer-received",
+        body: {
+          buyerId: auctionBuyer.buyerId,
+          firstName: auctionBuyer.buyer?.firstName ?? "there",
+          email: buyerOfferEmail,
+          offerId: offer.id,
+        },
+      }).catch(() => {});
     }
 
     return successResponse({ offer }, 201);

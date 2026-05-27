@@ -25,6 +25,7 @@
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.104.0",
     "@types/qrcode": "^1.5.5",
+    "@upstash/qstash": "^2.11.0",
     "axios": "^1.8.4",
     "bcryptjs": "^2.4.3",
     "class-variance-authority": "^0.7.1",

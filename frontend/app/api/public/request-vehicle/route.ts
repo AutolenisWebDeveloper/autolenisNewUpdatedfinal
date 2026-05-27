@@ -20,6 +20,7 @@ import {
   sendVehicleRequestReceived,
   sendDealerNewBuyerOpportunityEmail,
 } from "@/lib/services/email/resend.service";
+import { dispatch } from "@/lib/qstash/dispatch";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -373,6 +374,20 @@ export async function POST(request: NextRequest) {
     } catch (crmErr) {
       console.error("[request-vehicle] CRM pipeline sync failed:", crmErr);
     }
+  }
+
+  // QStash — kick off the buyer welcome + activation-recovery sequence.
+  if (buyerId) {
+    dispatch({
+      path: "/api/jobs/form-submitted",
+      body: {
+        buyerId,
+        firstName: data.firstName,
+        email: data.email,
+        phone: data.phone,
+        campaign: data.campaign ?? "default",
+      },
+    }).catch(() => {});
   }
 
   // Persist as a SYSTEM_ALERT with the standardised "Vehicle Request:" title
