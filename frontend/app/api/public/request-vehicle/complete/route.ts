@@ -69,34 +69,6 @@ export async function POST(request: NextRequest) {
   const data: Parsed = parsed.data;
 
   try {
-    // ── Resolve the buyer + most recent VehicleRequest by email ──────────────
-    const user = await prisma.user.findUnique({
-      where:   { email: data.email.toLowerCase() },
-      include: { buyer: { select: { id: true, firstName: true, lastName: true } } },
-    });
-
-    if (!user?.buyer) {
-      return NextResponse.json(
-        { success: false, error: { code: "NOT_FOUND", message: "No request found for this email" } },
-        { status: 404 },
-      );
-    }
-
-    const vehicleRequest = await prisma.vehicleRequest.findFirst({
-      where:   { buyerId: user.buyer.id },
-      orderBy: { createdAt: "desc" },
-    });
-
-    if (!vehicleRequest) {
-      return NextResponse.json(
-        { success: false, error: { code: "NOT_FOUND", message: "No request found for this email" } },
-        { status: 404 },
-      );
-    }
-
-    const firstName = user.buyer.firstName || "there";
-    const fullName = `${user.buyer.firstName} ${user.buyer.lastName}`.trim();
-
     const make = meaningful(data.make);
     const model = meaningful(data.model);
     const color = meaningful(data.color);
@@ -138,72 +110,130 @@ export async function POST(request: NextRequest) {
       (summaryRows.length
         ? summaryRows.map(([k, v]) => `${k}: ${v}`).join("\n")
         : "No additional details provided.");
-    const mergedNotes = [vehicleRequest.notes?.trim(), detailBlock]
-      .filter(Boolean)
-      .join("\n\n");
 
-    // ── Update the canonical VehicleRequest with the supplied detail ─────────
-    await prisma.vehicleRequest.update({
-      where: { id: vehicleRequest.id },
-      data: {
-        ...(make ? { makePreference: make } : {}),
-        ...(model ? { modelPreference: model } : {}),
-        ...(data.yearFrom ? { yearMin: data.yearFrom } : {}),
-        ...(data.yearTo ? { yearMax: data.yearTo } : {}),
-        notes: mergedNotes,
-      },
+    const detailPayload = {
+      make: make ?? null,
+      model: model ?? null,
+      yearFrom: data.yearFrom ?? null,
+      yearTo: data.yearTo ?? null,
+      mileagePreference: mileagePreference ?? null,
+      color: color ?? null,
+      features: features ?? null,
+      financingPlan: financingPlan ?? null,
+      downPayment: downPayment ?? null,
+      hasTradeIn: data.hasTradeIn ?? null,
+      tradeInYear: data.tradeInYear ?? null,
+      tradeInMake: data.tradeInMake ?? null,
+      tradeInModel: data.tradeInModel ?? null,
+      tradeInMileage: data.tradeInMileage ?? null,
+      tradeInCondition: data.tradeInCondition ?? null,
+      additionalNotes: data.additionalNotes ?? null,
+    };
+
+    // ── Resolve the buyer + most recent VehicleRequest by email ──────────────
+    // A missing buyer/request must NOT fail the caller: they filled the form in
+    // good faith. We persist what we can (CRM contact timeline) and still 200.
+    const user = await prisma.user.findUnique({
+      where:   { email: data.email.toLowerCase() },
+      include: { buyer: { select: { id: true, firstName: true, lastName: true } } },
     });
+    const buyer = user?.buyer ?? null;
 
-    // ── Mark the request as detail-complete (event-sourced flag) ─────────────
-    await prisma.vehicleRequestEvent.create({
-      data: {
-        requestId: vehicleRequest.id,
-        eventType: "buyer_detail_completed",
-        actorRole: "buyer",
-        note: "Buyer completed the step 2 vehicle-detail form.",
-        payload: {
-          make: make ?? null,
-          model: model ?? null,
-          yearFrom: data.yearFrom ?? null,
-          yearTo: data.yearTo ?? null,
-          mileagePreference: mileagePreference ?? null,
-          color: color ?? null,
-          features: features ?? null,
-          financingPlan: financingPlan ?? null,
-          downPayment: downPayment ?? null,
-          hasTradeIn: data.hasTradeIn ?? null,
-          tradeInYear: data.tradeInYear ?? null,
-          tradeInMake: data.tradeInMake ?? null,
-          tradeInModel: data.tradeInModel ?? null,
-          tradeInMileage: data.tradeInMileage ?? null,
-          tradeInCondition: data.tradeInCondition ?? null,
-          additionalNotes: data.additionalNotes ?? null,
+    const vehicleRequest = buyer
+      ? await prisma.vehicleRequest.findFirst({
+          where:   { buyerId: buyer.id },
+          orderBy: { createdAt: "desc" },
+        })
+      : null;
+
+    const firstName = buyer?.firstName || "there";
+    const fullName = buyer ? `${buyer.firstName} ${buyer.lastName}`.trim() : "";
+
+    if (vehicleRequest) {
+      // ── Update the canonical VehicleRequest with the supplied detail ───────
+      const mergedNotes = [vehicleRequest.notes?.trim(), detailBlock]
+        .filter(Boolean)
+        .join("\n\n");
+
+      await prisma.vehicleRequest.update({
+        where: { id: vehicleRequest.id },
+        data: {
+          ...(make ? { makePreference: make } : {}),
+          ...(model ? { modelPreference: model } : {}),
+          ...(data.yearFrom ? { yearMin: data.yearFrom } : {}),
+          ...(data.yearTo ? { yearMax: data.yearTo } : {}),
+          notes: mergedNotes,
         },
-      },
-    }).catch((err) => console.error("[request-vehicle/complete] event create failed:", err));
+      });
+
+      // ── Mark the request as detail-complete (event-sourced flag) ───────────
+      await prisma.vehicleRequestEvent.create({
+        data: {
+          requestId: vehicleRequest.id,
+          eventType: "buyer_detail_completed",
+          actorRole: "buyer",
+          note: "Buyer completed the step 2 vehicle-detail form.",
+          payload: detailPayload,
+        },
+      }).catch((err) => console.error("[request-vehicle/complete] event create failed:", err));
+    } else {
+      // ── Fallback: no buyer account / no request on file ────────────────────
+      // Persist the completion detail to the CRM contact timeline if a contact
+      // exists, so the buyer's effort is never lost. Best-effort: a CRM failure
+      // must not turn a successful form submission into an error for the caller.
+      try {
+        const { getServiceSupabase } = await import("@/lib/supabase-service");
+        const { ContactService } = await import("@/lib/services/contact.service");
+        const supabase = getServiceSupabase();
+        const { data: contact } = await ContactService.findContactByEmail(supabase, data.email);
+        if (contact) {
+          await supabase.from("contact_timeline_events").insert({
+            contact_id: contact.id,
+            event_type: "note_added",
+            event_data: {
+              body: `Vehicle request step 2 completed (no buyer account on file).\n${detailBlock}`,
+              source: "ty_step2_complete",
+              detail: detailPayload,
+            },
+            created_by: null,
+          });
+        }
+      } catch (crmErr) {
+        console.error("[request-vehicle/complete] CRM fallback save failed:", crmErr);
+      }
+    }
 
     // ── Best-effort notifications ────────────────────────────────────────────
     const vehicleLine =
       [data.yearFrom ?? data.yearTo, make ?? "Any make", model ?? ""].filter(Boolean).join(" ").trim() ||
       "vehicle details";
     const budgetLine =
-      vehicleRequest.maxBudgetCents != null
+      vehicleRequest?.maxBudgetCents != null
         ? `$${(vehicleRequest.maxBudgetCents / 100).toLocaleString()}`
         : "not specified";
-    const summaryLine = `Vehicle request completed by ${fullName}: ${vehicleLine}, budget ${budgetLine}`;
+    const summaryLine = vehicleRequest
+      ? `Vehicle request completed by ${fullName}: ${vehicleLine}, budget ${budgetLine}`
+      : `Vehicle request completed by ${data.email} (no buyer account on file): ${vehicleLine}`;
 
     await Promise.allSettled([
       sendVehicleRequestCompletedConfirmation(data.email, firstName, summaryRows),
       sendVehicleRequestCompletedAdminNotification({
-        fullName,
+        fullName: fullName || data.email,
         email: data.email,
         summaryLine,
         summaryRows,
-        vehicleRequestId: vehicleRequest.id,
+        vehicleRequestId: vehicleRequest?.id,
       }),
     ]);
 
-    return NextResponse.json({ success: true });
+    if (!vehicleRequest) {
+      return NextResponse.json({
+        success: true,
+        accountFound: false,
+        note: "Account not found — your details were saved and our team will follow up.",
+      });
+    }
+    return NextResponse.json({ success: true, accountFound: true });
   } catch (err) {
     console.error("[request-vehicle/complete] failed:", err);
     return NextResponse.json(
