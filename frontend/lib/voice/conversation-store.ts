@@ -28,6 +28,9 @@ export interface VoiceConversation {
   callerPhone: string;
   vehicleRequest: VehicleRequestDraft | null;
   requestDispatched: boolean;
+  // True once a minimum-viable lead (a name + caller phone) has triggered the
+  // confirmation SMS + form-submitted job, so it can only fire once per call.
+  partialLeadDispatched: boolean;
   lastActivity: number;
 }
 
@@ -55,6 +58,7 @@ export function getConversation(callSid: string): VoiceConversation {
       callerPhone: "",
       vehicleRequest: null,
       requestDispatched: false,
+      partialLeadDispatched: false,
       lastActivity: now,
     };
     store.set(callSid, conv);

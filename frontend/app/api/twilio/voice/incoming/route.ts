@@ -22,9 +22,9 @@ export async function POST(request: NextRequest) {
 
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna" language="en-US">Thank you for calling AutoLenis, the buyer-first automotive concierge. This is Zura. How can I help you today?</Say>
-  <Gather input="speech" action="${PATH.replace("/incoming", "/process")}" method="POST" speechTimeout="auto" speechModel="phone_call" enhanced="true" timeout="5"></Gather>
-  <Say voice="Polly.Joanna">I did not catch that. Please try again or call back and we will be happy to help. Goodbye.</Say>
+  <Say voice="Polly.Joanna-Neural"><prosody rate="92%" pitch="+3%">Thank you for calling AutoLenis. This is Zura. How can I help you today?</prosody></Say>
+  <Gather input="speech" action="${PATH.replace("/incoming", "/process")}" method="POST" speechTimeout="auto" speechModel="experimental_conversations" enhanced="true" timeout="5"></Gather>
+  <Say voice="Polly.Joanna-Neural"><prosody rate="95%" pitch="+2%">I did not catch that. Please try again or call back and we will be happy to help. Goodbye.</prosody></Say>
 </Response>`;
 
   return twimlResponse(twiml);
