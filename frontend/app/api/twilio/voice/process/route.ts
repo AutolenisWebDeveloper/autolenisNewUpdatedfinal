@@ -1,9 +1,16 @@
 import { NextRequest } from "next/server";
 import { parseTwilioRequest, twimlResponse, escapeXml, sanitizeForSpeech } from "@/lib/voice/twilio-verify";
-import { getConversation, updateConversation, type VehicleRequestDraft } from "@/lib/voice/conversation-store";
+import {
+  getConversation,
+  updateConversation,
+  type VehicleRequestDraft,
+  type VoiceMessage,
+} from "@/lib/voice/conversation-store";
 import { dispatchVehicleRequest } from "@/lib/voice/dispatch-request";
 import { ZURA_VOICE_PROMPT } from "@/lib/ai/zura-voice";
 import { groqChat, type ChatMessage } from "@/lib/ai/groq-client";
+import { dispatch } from "@/lib/qstash/dispatch";
+import { sendSms, isValidUsPhone } from "@/lib/services/sms/twilio.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,11 +23,11 @@ const TRANSFER_KEYWORDS = ["human", "person", "agent", "someone", "transfer", "r
 // A spoken <Gather> block reused after every Zura reply so the conversation
 // continues until the caller hangs up or asks for a transfer.
 function gatherBlock(): string {
-  return `<Gather input="speech" action="${PATH}" method="POST" speechTimeout="auto" speechModel="phone_call" enhanced="true" timeout="5"></Gather>`;
+  return `<Gather input="speech" action="${PATH}" method="POST" speechTimeout="auto" speechModel="experimental_conversations" enhanced="true" timeout="5"></Gather>`;
 }
 
 function say(text: string): string {
-  return `<Say voice="Polly.Joanna">${escapeXml(text)}</Say>`;
+  return `<Say voice="Polly.Joanna-Neural"><prosody rate="95%" pitch="+2%">${escapeXml(text)}</prosody></Say>`;
 }
 
 function wantsTransfer(speech: string): boolean {
@@ -62,6 +69,148 @@ async function extractVehicleRequest(history: ChatMessage[]): Promise<VehicleReq
   }
 }
 
+const FIELD_KEYS = [
+  "firstName",
+  "lastName",
+  "email",
+  "make",
+  "model",
+  "budget",
+  "timeline",
+  "newOrUsed",
+] as const;
+
+const CAR_MAKES = [
+  "toyota", "honda", "ford", "chevrolet", "chevy", "nissan", "bmw",
+  "mercedes-benz", "mercedes", "audi", "tesla", "jeep", "hyundai", "kia",
+  "subaru", "lexus", "mazda", "volkswagen", "vw", "dodge", "ram", "gmc",
+  "acura", "infiniti", "volvo", "porsche", "cadillac", "buick", "chrysler",
+  "lincoln", "mitsubishi", "genesis", "range rover", "land rover", "jaguar",
+  "mini", "fiat",
+];
+
+const TIMELINE_PHRASES = [
+  "this week", "next week", "this weekend", "this month", "next month",
+  "this year", "next year", "as soon as possible", "asap", "immediately",
+  "right away", "within a month", "within 30 days", "within 60 days",
+  "within 90 days", "90 days", "60 days", "30 days", "a few weeks",
+  "a few months", "couple weeks", "couple months", "by the end of",
+];
+
+// Words that follow a self-introduction cue but are clearly not a name
+// ("I'm looking for…"), so the name extraction skips them.
+const NAME_STOPWORDS = new Set([
+  "looking", "interested", "calling", "trying", "here", "not", "just",
+  "hoping", "wondering", "ready", "good", "fine", "great", "okay", "ok",
+  "sorry", "gonna", "going", "thinking", "wanting", "needing", "in", "on",
+  "at", "a", "the", "from", "with", "about", "still", "really", "very", "so",
+]);
+
+function titleCase(s: string): string {
+  return s
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+// Lightweight, dependency-free extraction over the caller's own turns. Used to
+// backfill fields the model-based extractor missed. It never decides what to
+// keep — the call site applies it only to fields not already in the store.
+function extractFieldsFromHistory(history: VoiceMessage[]): VehicleRequestDraft {
+  const userText = history
+    .filter((m) => m.role === "user")
+    .map((m) => m.content)
+    .join(" ");
+  const lower = userText.toLowerCase();
+  const draft: VehicleRequestDraft = {};
+
+  const email = userText.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  if (email) draft.email = email[0].toLowerCase();
+
+  for (const cue of ["my name is", "this is", "i'm", "i am"]) {
+    const idx = lower.indexOf(cue);
+    if (idx === -1) continue;
+    const words = userText
+      .slice(idx + cue.length)
+      .trim()
+      .split(/[^A-Za-z'-]+/)
+      .filter(Boolean)
+      .slice(0, 2);
+    if (!words[0] || NAME_STOPWORDS.has(words[0].toLowerCase())) continue;
+    draft.firstName = titleCase(words[0]);
+    if (words[1]) draft.lastName = titleCase(words[1]);
+    break;
+  }
+
+  for (const make of CAR_MAKES) {
+    const idx = lower.indexOf(make);
+    if (idx === -1) continue;
+    draft.make = titleCase(make);
+    const rest = userText
+      .slice(idx + make.length)
+      .trim()
+      .split(/[^A-Za-z0-9-]+/)
+      .filter(Boolean);
+    if (rest[0]) draft.model = titleCase(rest[0]);
+    break;
+  }
+
+  const dollar = userText.match(/\$\s?[\d,]+(\.\d+)?/);
+  const kAmount = lower.match(/\b\d{1,3}\s?k\b/);
+  const thousand = lower.match(/\b[\d,]+\s?(thousand|grand)\b/);
+  if (dollar) draft.budget = dollar[0].trim();
+  else if (kAmount) draft.budget = kAmount[0].trim();
+  else if (thousand) draft.budget = thousand[0].trim();
+
+  for (const t of TIMELINE_PHRASES) {
+    if (lower.includes(t)) {
+      draft.timeline = t;
+      break;
+    }
+  }
+
+  if (/\bpre-?owned\b/.test(lower) || /\bused\b/.test(lower)) draft.newOrUsed = "used";
+  else if (/\bbrand new\b/.test(lower) || /\bnew\b/.test(lower)) draft.newOrUsed = "new";
+
+  return draft;
+}
+
+// Capture a minimum-viable lead — a name plus the caller's phone — and send an
+// immediate confirmation SMS, even before the full vehicle request is complete.
+// Fires at most once per call (guarded by partialLeadDispatched).
+function maybeCapturePartialLead(
+  callSid: string,
+  req: VehicleRequestDraft | null,
+  callerPhone: string,
+  alreadyDispatched: boolean,
+): void {
+  if (alreadyDispatched) return;
+  const hasName = !!(req?.firstName || req?.lastName);
+  if (!hasName || !callerPhone) return;
+
+  updateConversation(callSid, { partialLeadDispatched: true });
+
+  const firstName = req?.firstName?.trim() || "there";
+  if (isValidUsPhone(callerPhone)) {
+    sendSms(
+      callerPhone,
+      `Hi ${firstName}! Thanks for calling AutoLenis. We received your information and a team member will follow up shortly. Ready to start your dealer auction? Visit autolenis.com Reply STOP to opt out.`,
+    ).catch(() => {});
+  }
+
+  dispatch({
+    path: "/api/jobs/form-submitted",
+    body: {
+      firstName: req?.firstName ?? "",
+      lastName: req?.lastName ?? "",
+      email: req?.email ?? "",
+      phone: callerPhone,
+      campaign: "phone-voice-partial",
+    },
+  }).catch(() => {});
+}
+
 export async function POST(request: NextRequest) {
   const { params, verified } = await parseTwilioRequest(request, PATH);
   if (!verified) {
@@ -98,7 +247,7 @@ export async function POST(request: NextRequest) {
 
   let aiText: string;
   try {
-    const result = await groqChat(messages, { maxTokens: 150, temperature: 0.7 });
+    const result = await groqChat(messages, { maxTokens: 120, temperature: 0.85 });
     aiText = sanitizeForSpeech(result.content) ||
       "I am sorry, could you say that again?";
   } catch (err) {
@@ -138,18 +287,39 @@ export async function POST(request: NextRequest) {
     return twimlResponse(twiml);
   }
 
-  // Update the structured request draft and dispatch once it is complete.
+  // Update the structured request draft. The model-based extractor runs first;
+  // the lightweight string extractor then backfills any fields it missed
+  // without overwriting values already confirmed in the store.
   const extracted = await extractVehicleRequest([...history, { role: "user", content: speech }]);
-  const refreshed = extracted
-    ? updateConversation(callSid, { vehicleRequest: extracted })
-    : getConversation(callSid);
+  if (extracted) updateConversation(callSid, { vehicleRequest: extracted });
 
+  const afterModel = getConversation(callSid);
+  const stringDraft = extractFieldsFromHistory(afterModel.history);
+  const gapFill: VehicleRequestDraft = {};
+  for (const key of FIELD_KEYS) {
+    if (!afterModel.vehicleRequest?.[key] && stringDraft[key]) {
+      gapFill[key] = stringDraft[key];
+    }
+  }
+  const refreshed = Object.keys(gapFill).length
+    ? updateConversation(callSid, { vehicleRequest: gapFill })
+    : afterModel;
+
+  // Full request collected → run the complete intake exactly once.
   if (isComplete(refreshed.vehicleRequest) && !refreshed.requestDispatched) {
     updateConversation(callSid, { requestDispatched: true });
     dispatchVehicleRequest(refreshed.vehicleRequest, refreshed.callerPhone).catch((err) =>
       console.error("[voice/process] dispatch failed:", err),
     );
   }
+
+  // Partial lead — a name plus the caller's phone is enough to confirm receipt.
+  maybeCapturePartialLead(
+    callSid,
+    refreshed.vehicleRequest,
+    refreshed.callerPhone,
+    refreshed.partialLeadDispatched,
+  );
 
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
