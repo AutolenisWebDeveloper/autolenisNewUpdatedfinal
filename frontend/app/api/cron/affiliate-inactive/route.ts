@@ -1,0 +1,108 @@
+// /api/cron/affiliate-inactive — weekly (Mon 9AM) inactive-affiliate sweep.
+// Finds ACTIVE affiliates with no referral activity in the last 30 days that
+// haven't been nudged recently, and dispatches the affiliate-inactive job.
+// Cron schedule configured in vercel.json. Manually runnable via authenticated GET.
+
+import { NextRequest, NextResponse } from "next/server";
+import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
+import { prisma } from "@/lib/prisma";
+import { dispatch } from "@/lib/qstash/dispatch";
+
+// Up to 500 affiliates × a couple of activity lookups each.
+export const maxDuration = 180;
+
+const INACTIVITY_WINDOW_MS = 30 * 24 * 3600 * 1000;
+
+export async function GET(request: NextRequest) {
+  const auth = request.headers.get(CRON_AUTH_HEADER);
+  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
+  const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
+  if (!isVercelCron && !isValidSecret) {
+    return new NextResponse("Unauthorized", { status: 401 });
+  }
+
+  const cutoff = new Date(Date.now() - INACTIVITY_WINDOW_MS);
+
+  const affiliates = await prisma.affiliate.findMany({
+    where: { status: "ACTIVE" },
+    select: {
+      id: true,
+      lastInactiveNudgeAt: true,
+      user: { select: { email: true } },
+      profile: { select: { firstName: true } },
+    },
+    take: 500,
+  });
+
+  let dispatched = 0;
+  let skippedActive = 0;
+  let skippedAlreadyNudged = 0;
+  let skippedNoEmail = 0;
+
+  for (const aff of affiliates) {
+    // Already nudged within the inactivity window — don't re-dispatch weekly.
+    if (aff.lastInactiveNudgeAt && aff.lastInactiveNudgeAt >= cutoff) {
+      skippedAlreadyNudged += 1;
+      continue;
+    }
+
+    // Referral activity = a buyer they referred or a commission earned in the
+    // window. Either signal means the affiliate is active; skip them.
+    const [recentBuyer, recentCommission] = await Promise.all([
+      prisma.buyer.findFirst({
+        where: { affiliateId: aff.id, createdAt: { gte: cutoff } },
+        select: { id: true },
+      }),
+      prisma.commission.findFirst({
+        where: { affiliateId: aff.id, createdAt: { gte: cutoff } },
+        select: { id: true },
+      }),
+    ]);
+    if (recentBuyer || recentCommission) {
+      skippedActive += 1;
+      continue;
+    }
+
+    const email = aff.user?.email;
+    if (!email) {
+      skippedNoEmail += 1;
+      continue;
+    }
+
+    await dispatch({
+      path: "/api/jobs/affiliate-inactive",
+      body: {
+        affiliateId: aff.id,
+        firstName: aff.profile?.firstName ?? "there",
+        email,
+      },
+    });
+
+    // Stamp the dispatch so the next weekly run won't re-nudge this affiliate.
+    await prisma.affiliate.update({
+      where: { id: aff.id },
+      data: { lastInactiveNudgeAt: new Date() },
+    });
+    dispatched += 1;
+  }
+
+  console.log("[cron/affiliate-inactive]", {
+    scanned: affiliates.length,
+    dispatched,
+    skippedActive,
+    skippedAlreadyNudged,
+    skippedNoEmail,
+  });
+
+  return NextResponse.json({
+    success: true,
+    data: {
+      scanned: affiliates.length,
+      dispatched,
+      skippedActive,
+      skippedAlreadyNudged,
+      skippedNoEmail,
+      timestamp: new Date().toISOString(),
+    },
+  });
+}
