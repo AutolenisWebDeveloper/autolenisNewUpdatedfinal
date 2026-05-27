@@ -13,6 +13,7 @@ import { createClient } from "@supabase/supabase-js";
 import { prisma } from "@/lib/prisma";
 import { UserRole } from "@prisma/client";
 import { sendAdminCreatedBuyerEmail } from "@/lib/services/email/resend.service";
+import { dispatch } from "@/lib/qstash/dispatch";
 import crypto from "crypto";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -273,6 +274,19 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+
+  // QStash — enter the buyer welcome + activation-recovery sequence so phone
+  // receptionist leads get the same automation as web/landing-page buyers.
+  dispatch({
+    path: "/api/jobs/form-submitted",
+    body: {
+      buyerId,
+      firstName: data.firstName,
+      email: data.email,
+      phone: data.phone,
+      campaign: "phone-receptionist",
+    },
+  }).catch(() => {});
 
   // 6. Welcome email for newly provisioned accounts (non-fatal).
   if (createdNewAccount && tempPassword) {

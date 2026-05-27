@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { UserRole, BuyerPlan, AffiliateStatus } from "@prisma/client";
 import { sendWelcomeEmail } from "@/lib/services/email/resend.service";
+import { dispatch } from "@/lib/qstash/dispatch";
 import {
   getAppUrl,
   getSafeBuyerRedirect,
@@ -129,6 +130,19 @@ async function ensurePrismaUser(
   if (role === UserRole.BUYER) {
     const newBuyerId = (user as { buyer?: { id: string } | null }).buyer?.id;
     if (newBuyerId) {
+      // QStash — enter the buyer welcome + activation-recovery sequence so
+      // website signups get the same automation as landing-page submissions.
+      dispatch({
+        path: "/api/jobs/form-submitted",
+        body: {
+          buyerId: newBuyerId,
+          firstName: firstName ?? email.split("@")[0],
+          email: email.toLowerCase(),
+          phone: "",
+          campaign: "organic",
+        },
+      }).catch(() => {});
+
       prisma.buyer.findFirst({
         where:  { user: { email: email.toLowerCase() }, isGuest: true },
         select: { id: true },

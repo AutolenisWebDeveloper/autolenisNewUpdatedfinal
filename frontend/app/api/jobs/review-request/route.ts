@@ -33,6 +33,19 @@ export async function POST(request: NextRequest) {
       }),
     });
 
+    // Day 60 — refinance outreach via OpenRoad Lending (lead provider only).
+    // leadId falls back to buyerId; the Buyer model has no separate lead id.
+    dispatch({
+      path: "/api/jobs/refinance-outreach",
+      body: {
+        buyerId,
+        firstName,
+        email,
+        leadId: buyerId,
+      },
+      delaySeconds: 5184000,
+    }).catch(() => {});
+
     await dispatch({
       path: "/api/jobs/referral-nudge",
       body: { buyerId, firstName, email },
