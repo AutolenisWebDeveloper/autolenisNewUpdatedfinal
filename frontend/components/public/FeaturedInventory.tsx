@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Car } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { formatCents } from "@/lib/utils";
 import { VehicleRequestStatus } from "@prisma/client";
@@ -15,6 +15,52 @@ type FeaturedRequest = {
   createdAt: Date;
   _count: { offers: number };
 };
+
+type PlaceholderCard = {
+  id: string;
+  title: string;
+  budgetLabel: string;
+  subtitle: string;
+};
+
+const PLACEHOLDERS: PlaceholderCard[] = [
+  {
+    id: "sample-1",
+    title: "2024 BMW M5 Competition",
+    budgetLabel: "Budget: up to $120,000",
+    subtitle: "Performance Sedan",
+  },
+  {
+    id: "sample-2",
+    title: "2024 Mercedes-Benz GLE 63 AMG",
+    budgetLabel: "Budget: up to $140,000",
+    subtitle: "Luxury SUV",
+  },
+  {
+    id: "sample-3",
+    title: "2024 Porsche Cayenne Turbo GT",
+    budgetLabel: "Budget: up to $185,000",
+    subtitle: "Performance SUV",
+  },
+  {
+    id: "sample-4",
+    title: "2024 Range Rover Sport SVR",
+    budgetLabel: "Budget: up to $130,000",
+    subtitle: "Luxury SUV",
+  },
+  {
+    id: "sample-5",
+    title: "2023 Mercedes-Benz S 580",
+    budgetLabel: "Budget: up to $145,000",
+    subtitle: "Luxury Sedan",
+  },
+  {
+    id: "sample-6",
+    title: "2024 Audi RS e-tron GT",
+    budgetLabel: "Budget: up to $165,000",
+    subtitle: "Electric Performance",
+  },
+];
 
 async function getFeaturedVehicleRequests(): Promise<FeaturedRequest[]> {
   try {
@@ -49,22 +95,25 @@ const SOLD_STATUSES: VehicleRequestStatus[] = [
   "DEAL_CREATED",
 ];
 
+const BADGE_BASE =
+  "absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full";
+
 function badgeFor(status: VehicleRequestStatus): { label: string; classes: string } {
   if (ACTIVE_AUCTION_STATUSES.includes(status)) {
     return {
       label: "ACTIVE AUCTION",
-      classes: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      classes: "bg-green-500 text-white",
     };
   }
   if (SOLD_STATUSES.includes(status)) {
     return {
       label: "SOLD",
-      classes: "bg-blue-50 text-blue-700 border-blue-200",
+      classes: "bg-[#0B5FD1] text-white",
     };
   }
   return {
     label: "VERIFIED",
-    classes: "bg-slate-100 text-slate-600 border-slate-200",
+    classes: "bg-[#0B5FD1] text-white",
   };
 }
 
@@ -75,8 +124,24 @@ function formatYear(yearMin: number | null, yearMax: number | null): string {
   return "";
 }
 
+function CardImage({ badge }: { badge: { label: string; classes: string } }) {
+  return (
+    <div className="relative h-52 overflow-hidden bg-gradient-to-br from-[#0F172A] via-[#1E293B] to-[#0F172A] flex items-center justify-center">
+      <span
+        aria-hidden
+        className="text-white/10 font-black tracking-tighter text-5xl select-none"
+      >
+        //
+      </span>
+      <span className={`${BADGE_BASE} ${badge.classes}`}>{badge.label}</span>
+    </div>
+  );
+}
+
 export default async function FeaturedInventory() {
   const requests = await getFeaturedVehicleRequests();
+  const placeholderCount = Math.max(0, 6 - requests.length);
+  const placeholders = PLACEHOLDERS.slice(0, placeholderCount);
 
   return (
     <section className="py-24 bg-[#F8F9FB]" data-testid="featured-inventory-section">
@@ -102,7 +167,7 @@ export default async function FeaturedInventory() {
           </Link>
         </div>
 
-        {requests.length === 0 ? (
+        {requests.length === 0 && placeholders.length === 0 ? (
           <div className="text-center py-16" data-testid="featured-inventory-empty">
             <p className="text-slate-500 text-sm mb-4">
               Be the first to submit a vehicle request and let verified dealers
@@ -120,6 +185,9 @@ export default async function FeaturedInventory() {
             {requests.map((r) => (
               <RequestCard key={r.id} request={r} />
             ))}
+            {placeholders.map((p) => (
+              <PlaceholderRequestCard key={p.id} placeholder={p} />
+            ))}
           </div>
         )}
       </div>
@@ -133,45 +201,75 @@ function RequestCard({ request: r }: { request: FeaturedRequest }) {
   const make = r.makePreference?.trim() || "";
   const model = r.modelPreference?.trim() || "";
   const titleParts = [year, make, model].filter(Boolean);
-  const title = titleParts.length > 0 ? titleParts.join(" ") : "Buyer Request";
+  const title = titleParts.join(" ").trim() || "Vehicle Request";
+  const showAnyVehicleSubtitle = !make && !model;
 
   return (
     <div
       data-testid={`featured-request-${r.id}`}
-      className="bg-white border border-slate-200 rounded-2xl overflow-hidden hover:border-[#93C5FD] hover:shadow-md transition-all flex flex-col"
+      className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200 cursor-pointer flex flex-col"
     >
-      <div className="relative bg-slate-100 rounded-t-2xl flex items-center justify-center h-48 overflow-hidden">
-        <Car size={48} className="text-slate-300" aria-hidden />
-        <span
-          className={`absolute top-3 left-3 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${badge.classes}`}
-        >
-          {badge.label}
-        </span>
-      </div>
+      <CardImage badge={badge} />
 
-      <div className="p-5 flex flex-col flex-1">
-        <h3 className="font-semibold text-slate-900 text-base leading-tight">
+      <div className="px-5 py-4 flex flex-col flex-1">
+        <h3 className="text-base font-semibold text-slate-900 mb-0.5 leading-tight">
           {title}
         </h3>
 
+        {showAnyVehicleSubtitle && (
+          <p className="text-xs text-slate-500 mb-3">Any Vehicle</p>
+        )}
+
         {r.maxBudgetCents != null && r.maxBudgetCents > 0 && (
-          <p className="mt-3 text-[#0B5FD1] font-semibold text-sm">
+          <p className="text-[#0B5FD1] font-semibold text-sm mb-2">
             Budget: up to {formatCents(r.maxBudgetCents)}
           </p>
         )}
 
         {r._count.offers > 0 && (
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="text-xs text-slate-500 mb-3">
             {r._count.offers} dealer offer{r._count.offers === 1 ? "" : "s"}
           </p>
         )}
 
-        <div className="mt-auto pt-4">
+        <div className="mt-auto pt-2">
           <Link
             href="/auth/signup"
-            className="text-[#0B5FD1] text-sm font-medium hover:text-[#1A6FE0] transition-colors"
+            className="inline-flex items-center gap-1 text-[#0B5FD1] text-sm font-medium hover:gap-2 transition-all"
           >
-            View Opportunity →
+            View Opportunity <ArrowRight size={14} />
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlaceholderRequestCard({ placeholder: p }: { placeholder: PlaceholderCard }) {
+  const badge = { label: "SAMPLE REQUEST", classes: "bg-slate-500 text-white" };
+
+  return (
+    <div
+      data-testid={`featured-request-placeholder-${p.id}`}
+      className="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200 cursor-pointer flex flex-col"
+    >
+      <CardImage badge={badge} />
+
+      <div className="px-5 py-4 flex flex-col flex-1">
+        <h3 className="text-base font-semibold text-slate-900 mb-0.5 leading-tight">
+          {p.title}
+        </h3>
+
+        <p className="text-xs text-slate-500 mb-3">{p.subtitle}</p>
+
+        <p className="text-[#0B5FD1] font-semibold text-sm mb-2">{p.budgetLabel}</p>
+
+        <div className="mt-auto pt-2">
+          <Link
+            href="/lp/default"
+            className="inline-flex items-center gap-1 text-[#0B5FD1] text-sm font-medium hover:gap-2 transition-all"
+          >
+            Submit a Similar Request <ArrowRight size={14} />
           </Link>
         </div>
       </div>
