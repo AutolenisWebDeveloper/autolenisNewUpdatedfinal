@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { parseTwilioRequest, twimlResponse, escapeXml, sanitizeForSpeech } from "@/lib/voice/twilio-verify";
+import twilio from "twilio";
+import { parseTwilioRequest, twimlResponse, sanitizeForSpeech } from "@/lib/voice/twilio-verify";
 import {
   getConversation,
   updateConversation,
@@ -20,14 +21,26 @@ const HISTORY_LIMIT = 10;
 const MIN_CONFIDENCE = 0.3;
 const TRANSFER_KEYWORDS = ["human", "person", "agent", "someone", "transfer", "real person"];
 
+const VoiceResponse = twilio.twiml.VoiceResponse;
+type Twiml = InstanceType<typeof VoiceResponse>;
+const VOICE = "Polly.Joanna-Neural";
+
 // A spoken <Gather> block reused after every Zura reply so the conversation
 // continues until the caller hangs up or asks for a transfer.
-function gatherBlock(): string {
-  return `<Gather input="speech" action="${PATH}" method="POST" speechTimeout="auto" speechModel="experimental_conversations" enhanced="true" timeout="5"></Gather>`;
+function addGather(twiml: Twiml): void {
+  twiml.gather({
+    input: ["speech"],
+    action: PATH,
+    method: "POST",
+    speechTimeout: "auto",
+    speechModel: "experimental_conversations",
+    enhanced: true,
+    timeout: 5,
+  });
 }
 
-function say(text: string): string {
-  return `<Say voice="Polly.Joanna-Neural"><prosody rate="95%" pitch="+2%">${escapeXml(text)}</prosody></Say>`;
+function addSay(twiml: Twiml, text: string): void {
+  twiml.say({ voice: VOICE }, text);
 }
 
 function wantsTransfer(speech: string): boolean {
@@ -212,120 +225,124 @@ function maybeCapturePartialLead(
 }
 
 export async function POST(request: NextRequest) {
-  const { params, verified } = await parseTwilioRequest(request, PATH);
-  if (!verified) {
-    return new Response("Unauthorized", { status: 401 });
-  }
-
-  const speech = (params.SpeechResult ?? "").trim();
-  const callSid = params.CallSid ?? "";
-  const from = params.From ?? "";
-  const confidence = parseFloat(params.Confidence ?? "1");
-
-  // Couldn't make out the caller — ask them to repeat without losing the call.
-  if (!speech || (Number.isFinite(confidence) && confidence < MIN_CONFIDENCE)) {
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  ${say("Sorry, I did not catch that. Could you please repeat that?")}
-  ${gatherBlock()}
-</Response>`;
-    return twimlResponse(twiml);
-  }
-
-  const conv = getConversation(callSid);
-  if (from && !conv.callerPhone) conv.callerPhone = from;
-
-  const history: ChatMessage[] = conv.history
-    .slice(-HISTORY_LIMIT)
-    .map((m) => ({ role: m.role, content: m.content }));
-
-  const messages: ChatMessage[] = [
-    { role: "system", content: ZURA_VOICE_PROMPT },
-    ...history,
-    { role: "user", content: speech },
-  ];
-
-  let aiText: string;
   try {
-    const result = await groqChat(messages, { maxTokens: 120, temperature: 0.85 });
-    aiText = sanitizeForSpeech(result.content) ||
-      "I am sorry, could you say that again?";
-  } catch (err) {
-    console.error("[voice/process] Groq call failed:", err);
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  ${say("I am having trouble hearing you right now. Please call back shortly or email us at support at autolenis dot com.")}
-</Response>`;
-    return twimlResponse(twiml);
-  }
-
-  // Persist the turn.
-  const newHistory = [
-    ...conv.history,
-    { role: "user" as const, content: speech },
-    { role: "assistant" as const, content: aiText },
-  ].slice(-HISTORY_LIMIT * 2);
-  updateConversation(callSid, { history: newHistory, callerPhone: conv.callerPhone });
-
-  // Live-agent transfer.
-  if (wantsTransfer(speech)) {
-    const transferNumber = process.env.TWILIO_TRANSFER_NUMBER;
-    if (transferNumber) {
-      const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  ${say(aiText)}
-  <Dial>${escapeXml(transferNumber)}</Dial>
-</Response>`;
-      return twimlResponse(twiml);
+    const { params, verified } = await parseTwilioRequest(request, PATH);
+    if (!verified) {
+      console.error("[voice/process] Twilio signature invalid — rejecting request");
+      return new Response("Unauthorized", { status: 401 });
     }
-    // No transfer line configured — stay on the line gracefully.
-    const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  ${say("I am not able to connect a live agent right now, but I can help you here, or you can email support at autolenis dot com.")}
-  ${gatherBlock()}
-</Response>`;
-    return twimlResponse(twiml);
-  }
 
-  // Update the structured request draft. The model-based extractor runs first;
-  // the lightweight string extractor then backfills any fields it missed
-  // without overwriting values already confirmed in the store.
-  const extracted = await extractVehicleRequest([...history, { role: "user", content: speech }]);
-  if (extracted) updateConversation(callSid, { vehicleRequest: extracted });
+    const speech = (params.SpeechResult ?? "").trim();
+    const callSid = params.CallSid ?? "";
+    const from = params.From ?? "";
+    const confidence = parseFloat(params.Confidence ?? "1");
 
-  const afterModel = getConversation(callSid);
-  const stringDraft = extractFieldsFromHistory(afterModel.history);
-  const gapFill: VehicleRequestDraft = {};
-  for (const key of FIELD_KEYS) {
-    if (!afterModel.vehicleRequest?.[key] && stringDraft[key]) {
-      gapFill[key] = stringDraft[key];
+    // Couldn't make out the caller — ask them to repeat without losing the call.
+    if (!speech || (Number.isFinite(confidence) && confidence < MIN_CONFIDENCE)) {
+      const twiml = new VoiceResponse();
+      addSay(twiml, "Sorry, I did not catch that. Could you please repeat that?");
+      addGather(twiml);
+      return twimlResponse(twiml.toString());
     }
-  }
-  const refreshed = Object.keys(gapFill).length
-    ? updateConversation(callSid, { vehicleRequest: gapFill })
-    : afterModel;
 
-  // Full request collected → run the complete intake exactly once.
-  if (isComplete(refreshed.vehicleRequest) && !refreshed.requestDispatched) {
-    updateConversation(callSid, { requestDispatched: true });
-    dispatchVehicleRequest(refreshed.vehicleRequest, refreshed.callerPhone).catch((err) =>
-      console.error("[voice/process] dispatch failed:", err),
+    const conv = getConversation(callSid);
+    if (from && !conv.callerPhone) conv.callerPhone = from;
+
+    const history: ChatMessage[] = conv.history
+      .slice(-HISTORY_LIMIT)
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    const messages: ChatMessage[] = [
+      { role: "system", content: ZURA_VOICE_PROMPT },
+      ...history,
+      { role: "user", content: speech },
+    ];
+
+    let aiText: string;
+    try {
+      const result = await groqChat(messages, { maxTokens: 120, temperature: 0.85 });
+      aiText = sanitizeForSpeech(result.content) ||
+        "I am sorry, could you say that again?";
+    } catch (err) {
+      console.error("[voice/process] Groq call failed:", err);
+      const twiml = new VoiceResponse();
+      addSay(
+        twiml,
+        "I am having trouble hearing you right now. Please call back shortly or email us at support at autolenis dot com.",
+      );
+      return twimlResponse(twiml.toString());
+    }
+
+    // Persist the turn.
+    const newHistory = [
+      ...conv.history,
+      { role: "user" as const, content: speech },
+      { role: "assistant" as const, content: aiText },
+    ].slice(-HISTORY_LIMIT * 2);
+    updateConversation(callSid, { history: newHistory, callerPhone: conv.callerPhone });
+
+    // Live-agent transfer.
+    if (wantsTransfer(speech)) {
+      const transferNumber = process.env.TWILIO_TRANSFER_NUMBER;
+      if (transferNumber) {
+        const twiml = new VoiceResponse();
+        addSay(twiml, aiText);
+        twiml.dial(transferNumber);
+        return twimlResponse(twiml.toString());
+      }
+      // No transfer line configured — stay on the line gracefully.
+      const twiml = new VoiceResponse();
+      addSay(
+        twiml,
+        "I am not able to connect a live agent right now, but I can help you here, or you can email support at autolenis dot com.",
+      );
+      addGather(twiml);
+      return twimlResponse(twiml.toString());
+    }
+
+    // Update the structured request draft. The model-based extractor runs first;
+    // the lightweight string extractor then backfills any fields it missed
+    // without overwriting values already confirmed in the store.
+    const extracted = await extractVehicleRequest([...history, { role: "user", content: speech }]);
+    if (extracted) updateConversation(callSid, { vehicleRequest: extracted });
+
+    const afterModel = getConversation(callSid);
+    const stringDraft = extractFieldsFromHistory(afterModel.history);
+    const gapFill: VehicleRequestDraft = {};
+    for (const key of FIELD_KEYS) {
+      if (!afterModel.vehicleRequest?.[key] && stringDraft[key]) {
+        gapFill[key] = stringDraft[key];
+      }
+    }
+    const refreshed = Object.keys(gapFill).length
+      ? updateConversation(callSid, { vehicleRequest: gapFill })
+      : afterModel;
+
+    // Full request collected → run the complete intake exactly once.
+    if (isComplete(refreshed.vehicleRequest) && !refreshed.requestDispatched) {
+      updateConversation(callSid, { requestDispatched: true });
+      dispatchVehicleRequest(refreshed.vehicleRequest, refreshed.callerPhone).catch((err) =>
+        console.error("[voice/process] dispatch failed:", err),
+      );
+    }
+
+    // Partial lead — a name plus the caller's phone is enough to confirm receipt.
+    maybeCapturePartialLead(
+      callSid,
+      refreshed.vehicleRequest,
+      refreshed.callerPhone,
+      refreshed.partialLeadDispatched,
     );
+
+    const twiml = new VoiceResponse();
+    addSay(twiml, aiText);
+    addGather(twiml);
+    addSay(twiml, "Is there anything else I can help you with today?");
+    return twimlResponse(twiml.toString());
+  } catch (err) {
+    console.error("Voice process error:", err);
+    const twiml = new VoiceResponse();
+    addSay(twiml, "We are experiencing a technical issue. Please try again shortly.");
+    return twimlResponse(twiml.toString());
   }
-
-  // Partial lead — a name plus the caller's phone is enough to confirm receipt.
-  maybeCapturePartialLead(
-    callSid,
-    refreshed.vehicleRequest,
-    refreshed.callerPhone,
-    refreshed.partialLeadDispatched,
-  );
-
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  ${say(aiText)}
-  ${gatherBlock()}
-  ${say("Is there anything else I can help you with today?")}
-</Response>`;
-  return twimlResponse(twiml);
 }
