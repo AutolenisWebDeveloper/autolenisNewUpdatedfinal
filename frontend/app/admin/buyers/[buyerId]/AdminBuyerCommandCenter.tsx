@@ -41,6 +41,9 @@ type BuyerData = {
     id: string; decision: string; tier: string | null; maxOtdAmountCents: number;
     expiresAt: string; checkOfacAlert: boolean; isExternal: boolean;
     createdAt: string; updatedAt: string;
+    creditScore?: number | null; idvScore?: number | null; mlaCovered?: boolean;
+    fraudWarning?: string | null; adverseReasonCodes?: string[];
+    deceasedFlag?: boolean; bankruptcyFlag?: boolean;
   } | null;
   externalPreApprovals: Array<{
     id: string; status: string; lenderName: string | null;
@@ -1330,6 +1333,13 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
                           source: prequalPanelExtras.source ?? "",
                           createdAt: preQualification.createdAt,
                           updatedAt: preQualification.updatedAt,
+                          creditScore: preQualification.creditScore ?? null,
+                          idvScore: preQualification.idvScore ?? null,
+                          mlaCovered: preQualification.mlaCovered ?? false,
+                          fraudWarning: preQualification.fraudWarning ?? null,
+                          adverseReasonCodes: preQualification.adverseReasonCodes ?? [],
+                          deceasedFlag: preQualification.deceasedFlag ?? false,
+                          bankruptcyFlag: preQualification.bankruptcyFlag ?? false,
                         }
                       : null
                   }

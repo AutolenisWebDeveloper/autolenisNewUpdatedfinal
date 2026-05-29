@@ -8,6 +8,11 @@ import PrequalFormClient from "@/components/buyer/PrequalFormClient";
 import PrequalBudgetCalculator from "@/components/buyer/PrequalBudgetCalculator";
 import { formatCents } from "@/lib/utils";
 import {
+  getStabilityFactor,
+  FRONT_END_AUTO_DTI,
+  BACK_END_TOTAL_DTI,
+} from "@/lib/services/prequal/income-gate";
+import {
   CheckCircle2,
   Clock,
   ArrowRight,
@@ -25,6 +30,7 @@ import {
   ListChecks,
   BadgeCheck,
   Banknote,
+  Calculator,
   Car,
   FileText,
   Pen,
@@ -100,6 +106,51 @@ export default async function PrequalPage() {
 
     // Recommended search range: 90% of approved max
     const recommendedMaxCents = Math.floor(prequal.maxOtdAmountCents * 0.9);
+
+    // ── Budget math (FIX 8 transparency) ──────────────────────────────────────
+    // Only shown for income-based iPredict approvals (not external / manual).
+    const showBudgetMath =
+      prequal.monthlyIncomeCents != null &&
+      prequal.monthlyIncomeCents > 0 &&
+      prequal.benchmarkAprBps != null;
+
+    let budgetMath: {
+      effectiveIncomeCents: number;
+      housingCents: number;
+      otherDebtCents: number;
+      totalExistingCents: number;
+      totalCapacityCents: number;
+      availableAutoCents: number;
+      benchmarkAprLabel: string;
+    } | null = null;
+
+    if (showBudgetMath) {
+      // Prefer the persisted effective income; fall back to recomputing it from
+      // the stored income + stability haircut for older records.
+      const stabilityFactor = getStabilityFactor(
+        prequal.employmentStatus,
+        prequal.lengthOfEmployment,
+      );
+      const effectiveIncomeCents =
+        prequal.effectiveIncomeCents ??
+        Math.round(prequal.monthlyIncomeCents! * stabilityFactor);
+      const housingCents = prequal.monthlyHousingPaymentCents ?? 0;
+      const otherDebtCents = prequal.monthlyOtherDebtCents ?? 0;
+      const totalExistingCents = housingCents + otherDebtCents;
+      const totalCapacityCents = Math.round(effectiveIncomeCents * BACK_END_TOTAL_DTI);
+      const frontEndMaxCents = Math.round(effectiveIncomeCents * FRONT_END_AUTO_DTI);
+      const backEndMaxCents = totalCapacityCents - totalExistingCents;
+      const availableAutoCents = Math.max(0, Math.min(frontEndMaxCents, backEndMaxCents));
+      budgetMath = {
+        effectiveIncomeCents,
+        housingCents,
+        otherDebtCents,
+        totalExistingCents,
+        totalCapacityCents,
+        availableAutoCents,
+        benchmarkAprLabel: `${(prequal.benchmarkAprBps! / 100).toFixed(2)}%`,
+      };
+    }
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-[#F8F9FB] via-white to-[#EFF6FF]" data-testid="prequal-status-page">
@@ -246,6 +297,60 @@ export default async function PrequalPage() {
 
           {/* ── Expandable sections ──────────────────────────────────────── */}
           <div className="space-y-3">
+            {budgetMath && (
+              <ExpandableSection
+                title="How We Calculated Your Budget"
+                icon={<Calculator size={16} className="text-[#0B5FD1]" />}
+                testId="prequal-budget-calculation"
+              >
+                <div className="space-y-1 text-sm" data-testid="prequal-budget-calculation-rows">
+                  <CalcRow
+                    label="Monthly income (after stability adjustment)"
+                    value={formatCents(budgetMath.effectiveIncomeCents)}
+                  />
+                  <CalcRow
+                    label="Housing payment"
+                    value={`– ${formatCents(budgetMath.housingCents)}`}
+                  />
+                  <CalcRow
+                    label="Other debt payments"
+                    value={`– ${formatCents(budgetMath.otherDebtCents)}`}
+                  />
+                  <CalcRow
+                    label="Total existing obligations"
+                    value={formatCents(budgetMath.totalExistingCents)}
+                    muted
+                  />
+                  <div className="my-2 border-t border-slate-100" />
+                  <CalcRow
+                    label="Max total payment capacity (45% rule)"
+                    value={formatCents(budgetMath.totalCapacityCents)}
+                  />
+                  <CalcRow
+                    label="Available for auto payment / month"
+                    value={formatCents(budgetMath.availableAutoCents)}
+                    emphasize
+                  />
+                  <CalcRow
+                    label="Benchmark APR for your tier"
+                    value={budgetMath.benchmarkAprLabel}
+                  />
+                  <div className="my-2 border-t border-slate-100" />
+                  <CalcRow
+                    label="Approved max out-the-door budget"
+                    value={formatCents(prequal.maxOtdAmountCents)}
+                    emphasize
+                  />
+                </div>
+                <p className="mt-4 text-xs text-slate-500 leading-relaxed">
+                  We use the more conservative of two limits — your auto payment stays within 20% of
+                  income (front-end), and your total debt stays within 45% of income (back-end). Your
+                  final budget is the lower of what your income supports and what your credit profile
+                  qualifies for. This mirrors the underwriting used by major auto lenders and credit
+                  unions.
+                </p>
+              </ExpandableSection>
+            )}
             <ExpandableSection
               title="How Your Budget Works"
               icon={<Banknote size={16} className="text-[#0B5FD1]" />}
@@ -431,6 +536,31 @@ function DetailCard({
         <p className="text-sm font-semibold text-slate-900">{value}</p>
         <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{sub}</p>
       </div>
+    </div>
+  );
+}
+
+function CalcRow({
+  label,
+  value,
+  muted = false,
+  emphasize = false,
+}: {
+  label: string;
+  value: string;
+  muted?: boolean;
+  emphasize?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-1">
+      <span className={`${muted ? "text-slate-400" : "text-slate-600"} ${emphasize ? "font-semibold text-slate-900" : ""}`}>
+        {label}
+      </span>
+      <span
+        className={`tabular-nums shrink-0 ${emphasize ? "font-bold text-[#0B5FD1]" : muted ? "text-slate-400" : "text-slate-700"}`}
+      >
+        {value}
+      </span>
     </div>
   );
 }

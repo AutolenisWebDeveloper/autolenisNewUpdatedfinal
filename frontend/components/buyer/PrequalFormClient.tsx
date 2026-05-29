@@ -49,6 +49,17 @@ const LENGTH_OF_EMPLOYMENT = [
   "Not applicable",
 ] as const;
 
+// Housing status — value is the API enum code, label is buyer-facing.
+const HOUSING_STATUSES: ReadonlyArray<{ code: "RENT" | "MORTGAGE" | "OWN" | "FAMILY"; label: string }> = [
+  { code: "RENT", label: "Rent" },
+  { code: "MORTGAGE", label: "Mortgage" },
+  { code: "OWN", label: "Own outright (no mortgage)" },
+  { code: "FAMILY", label: "Live with family / no housing cost" },
+];
+
+// Housing payment is required unless the buyer owns outright or lives with family.
+const HOUSING_PAYMENT_REQUIRED: ReadonlySet<string> = new Set(["RENT", "MORTGAGE"]);
+
 // Section 1 fields are required to enable submit.
 interface PrequalForm {
   firstName: string;
@@ -63,6 +74,10 @@ interface PrequalForm {
   employerName: string;
   monthlyIncome: string; // raw input, parsed on submit
   lengthOfEmployment: string;
+  // Section 2.5 — housing + debt obligations (back-end DTI)
+  housingStatus: string; // "" | RENT | MORTGAGE | OWN | FAMILY
+  monthlyHousingPayment: string; // raw input, parsed on submit
+  monthlyOtherDebt: string; // raw input, parsed on submit (defaults to 0)
   // Section 3 — required
   fcraConsent: boolean;
 }
@@ -92,6 +107,9 @@ const INITIAL_FORM: PrequalForm = {
   employerName: "",
   monthlyIncome: "",
   lengthOfEmployment: "",
+  housingStatus: "",
+  monthlyHousingPayment: "",
+  monthlyOtherDebt: "",
   fcraConsent: false,
 };
 
@@ -150,7 +168,27 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
     return incomeValid && employmentValid && lengthValid;
   }, [form, lengthRequired]);
 
-  const canSubmit = section1Complete && section2Complete && form.fcraConsent && !loading;
+  const housingPaymentRequired = HOUSING_PAYMENT_REQUIRED.has(form.housingStatus);
+
+  const section2_5Complete = useMemo(() => {
+    if (form.housingStatus === "") return false;
+    // Housing payment required only for renters / mortgage holders.
+    if (housingPaymentRequired) {
+      const housingNum = form.monthlyHousingPayment
+        ? Number(form.monthlyHousingPayment.replace(/[^0-9.]/g, ""))
+        : NaN;
+      if (Number.isNaN(housingNum) || housingNum < 0 || housingNum > 20_000) return false;
+    }
+    // Other debt is optional and may be $0; validate range only when entered.
+    if (form.monthlyOtherDebt) {
+      const debtNum = Number(form.monthlyOtherDebt.replace(/[^0-9.]/g, ""));
+      if (Number.isNaN(debtNum) || debtNum < 0 || debtNum > 30_000) return false;
+    }
+    return true;
+  }, [form, housingPaymentRequired]);
+
+  const canSubmit =
+    section1Complete && section2Complete && section2_5Complete && form.fcraConsent && !loading;
 
   function update<K extends keyof PrequalForm>(key: K, value: PrequalForm[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -173,6 +211,12 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
     const monthlyIncomeNum = form.monthlyIncome
       ? Number(form.monthlyIncome.replace(/[^0-9.]/g, ""))
       : undefined;
+    const housingPaymentNum = form.monthlyHousingPayment
+      ? Number(form.monthlyHousingPayment.replace(/[^0-9.]/g, ""))
+      : undefined;
+    const otherDebtNum = form.monthlyOtherDebt
+      ? Number(form.monthlyOtherDebt.replace(/[^0-9.]/g, ""))
+      : 0;
 
     const payload = {
       firstName: form.firstName.trim(),
@@ -189,6 +233,11 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
         ? { monthlyIncome: monthlyIncomeNum }
         : {}),
       ...(form.lengthOfEmployment && { lengthOfEmployment: form.lengthOfEmployment }),
+      ...(form.housingStatus && { housingStatus: form.housingStatus }),
+      ...(typeof housingPaymentNum === "number" && !Number.isNaN(housingPaymentNum)
+        ? { monthlyHousingPayment: housingPaymentNum }
+        : {}),
+      monthlyOtherDebt: Number.isNaN(otherDebtNum) ? 0 : otherDebtNum,
     };
 
     try {
@@ -428,6 +477,91 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
                 </Field>
                 <p className="mt-1 text-xs text-slate-500">
                   Gross monthly income before taxes — not shared with credit bureaus
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* ─── Visual divider ──────────────────────────────────────────── */}
+          <div className="border-t border-slate-200" aria-hidden="true" />
+
+          {/* ─── Section 2.5: Housing & Debt (required) ─────────────────── */}
+          <section data-testid="prequal-section-housing">
+            <h2 className="text-base font-semibold text-slate-900 mb-1">Housing &amp; Monthly Debt</h2>
+            <p
+              className="text-xs text-slate-500 leading-relaxed mb-4"
+              data-testid="prequal-housing-disclaimer"
+            >
+              Required — used to calculate your total debt-to-income ratio. This information is used
+              by AutoLenis only and is never shared with credit bureaus or MicroBilt.
+            </p>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Housing status" required>
+                  <select
+                    data-testid="prequal-housing-status"
+                    value={form.housingStatus}
+                    onChange={(e) => update("housingStatus", e.target.value)}
+                    disabled={fieldDisabled}
+                    required
+                    className={inputCls}
+                  >
+                    <option value="">Select…</option>
+                    {HOUSING_STATUSES.map((s) => (
+                      <option key={s.code} value={s.code}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                {housingPaymentRequired && (
+                  <div>
+                    <Field label="Monthly housing payment" required>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">
+                          $
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          data-testid="prequal-housing-payment"
+                          value={form.monthlyHousingPayment}
+                          onChange={(e) =>
+                            update("monthlyHousingPayment", e.target.value.replace(/[^0-9.,]/g, ""))
+                          }
+                          disabled={fieldDisabled}
+                          required
+                          placeholder="e.g. 1,500"
+                          className={`${inputCls} pl-7`}
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                )}
+              </div>
+              <div>
+                <Field label="Total other monthly debt payments">
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">
+                      $
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      data-testid="prequal-other-debt"
+                      value={form.monthlyOtherDebt}
+                      onChange={(e) =>
+                        update("monthlyOtherDebt", e.target.value.replace(/[^0-9.,]/g, ""))
+                      }
+                      disabled={fieldDisabled}
+                      placeholder="e.g. 300 (enter 0 if none)"
+                      className={`${inputCls} pl-7`}
+                    />
+                  </div>
+                </Field>
+                <p className="mt-1 text-xs text-slate-500">
+                  Credit cards (minimums), student loans, other auto loans, personal loans, child
+                  support. Do NOT include utilities, groceries, or insurance.
                 </p>
               </div>
             </div>

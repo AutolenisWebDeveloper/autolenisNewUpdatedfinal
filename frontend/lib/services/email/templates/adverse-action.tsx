@@ -9,10 +9,31 @@ export const ADVERSE_ACTION_SUBJECT =
 export interface AdverseActionEmailProps {
   firstName: string;
   decisionDate: string;
+  /** Optional principal-reason codes from the consumer report (FCRA § 615(a)).
+   *  Supplemental detail — the required FCRA notice language is unchanged. */
+  reasonCodes?: string[];
 }
 
 export function renderAdverseActionEmail(props: AdverseActionEmailProps): string {
-  const { firstName, decisionDate } = props;
+  const { firstName, decisionDate, reasonCodes } = props;
+
+  // Supplemental principal-reasons block — rendered only when codes are present.
+  // Does NOT replace or alter any required FCRA § 615 language below.
+  const reasonsBlock =
+    reasonCodes && reasonCodes.length > 0
+      ? `              <table width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0;">
+                <tr>
+                  <td style="background:#f9f9f9;border:1px solid #e0e0e0;padding:16px 20px;border-radius:4px;">
+                    <p style="margin:0 0 8px 0;font-weight:bold;color:#333333;font-size:14px;">Principal reason(s) for this decision</p>
+                    <p style="margin:0;color:#555555;font-size:14px;">${reasonCodes
+                      .map((c) => String(c).replace(/[<>&]/g, ""))
+                      .join(", ")}</p>
+                  </td>
+                </tr>
+              </table>
+`
+      : "";
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -51,7 +72,7 @@ export function renderAdverseActionEmail(props: AdverseActionEmailProps): string
                 </tr>
               </table>
               <p>The consumer reporting agency listed above did not make this decision and is unable to provide you with the specific reasons why prequalification was not offered.</p>
-              <!-- Rights Section -->
+${reasonsBlock}              <!-- Rights Section -->
               <table width="100%" cellpadding="0" cellspacing="0" style="margin:24px 0;">
                 <tr>
                   <td style="background:#f9f9f9;border:1px solid #e0e0e0;padding:20px 24px;border-radius:4px;">

@@ -7,6 +7,7 @@
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { getStripe } from "@/lib/stripe";
+import { getMicroBiltConfigStatus } from "@/lib/services/prequal/microbilt.service";
 
 export const dynamic = "force-dynamic";
 
@@ -73,5 +74,9 @@ export async function GET(request: NextRequest) {
     r.status === "fulfilled" ? r.value : { name: "unknown", ok: false }
   );
 
-  return adminSuccess({ integrations });
+  // MicroBilt iPredict Advantage configuration snapshot (non-secret) — surfaces
+  // mode, active URLs, product, and CAID on the system-health page.
+  const microbilt = getMicroBiltConfigStatus();
+
+  return adminSuccess({ integrations, microbilt });
 }

@@ -255,6 +255,23 @@ model PreQualification {
   employerName        String?         @map("employer_name")
   monthlyIncomeCents  Int?            @map("monthly_income_cents")
   lengthOfEmployment  String?         @map("length_of_employment")
+  // Housing + debt obligations — AutoLenis-internal only (back-end DTI inputs).
+  housingStatus              String?  @map("housing_status")
+  monthlyHousingPaymentCents Int?     @map("monthly_housing_payment_cents")
+  monthlyOtherDebtCents      Int?     @map("monthly_other_debt_cents")
+  // Decision detail (basis points — 1850 = 18.50%) for transparency.
+  frontEndDtiBps             Int?     @map("front_end_dti_bps")
+  backEndDtiBps              Int?     @map("back_end_dti_bps")
+  benchmarkAprBps            Int?     @map("benchmark_apr_bps")
+  effectiveIncomeCents       Int?     @map("effective_income_cents")
+  // iPredict Advantage full response (iPredict_6.yaml): SCORES / REASONS / IDV / MLA.
+  creditScore        Int?       @map("credit_score")
+  idvScore           Int?       @map("idv_score")
+  mlaCovered         Boolean    @default(false) @map("mla_covered")
+  fraudWarning       String?    @map("fraud_warning")
+  adverseReasonCodes String[]   @default([]) @map("adverse_reason_codes")
+  deceasedFlag       Boolean    @default(false) @map("deceased_flag")
+  bankruptcyFlag     Boolean    @default(false) @map("bankruptcy_flag")
   createdAt           DateTime        @default(now()) @map("created_at")
   updatedAt           DateTime        @updatedAt @map("updated_at")
   buyer               Buyer           @relation(fields: [buyerId], references: [id], onDelete: Cascade)
