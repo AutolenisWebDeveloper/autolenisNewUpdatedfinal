@@ -74,6 +74,10 @@ export interface AdminIPredictInput {
   /** Monthly income in cents — derived from admin-entered income amount. */
   monthlyIncomeCents?: number;
   lengthOfEmployment?: string;
+  /** Housing + debt obligations (back-end DTI inputs) — internal only. */
+  housingStatus?: string;
+  monthlyHousingPaymentCents?: number;
+  monthlyOtherDebtCents?: number;
 }
 
 export interface AdminIPredictRunArgs {
@@ -386,6 +390,8 @@ export async function runAdminIPredictPrequalForBuyer(
     employmentStatus:    input.employmentStatus ?? null,
     lengthOfEmployment:  input.lengthOfEmployment ?? null,
     statedBudgetCents:   buyer.preQualification?.maxOtdAmountCents ?? null,
+    monthlyHousingPaymentCents: input.monthlyHousingPaymentCents ?? null,
+    monthlyOtherDebtCents:      input.monthlyOtherDebtCents ?? null,
     fallbackMaxOtdAmountCents: buyer.preQualification?.maxOtdAmountCents ?? 3_500_000,
   });
 
@@ -426,6 +432,13 @@ export async function runAdminIPredictPrequalForBuyer(
         employerName: input.employerName ?? null,
         monthlyIncomeCents: input.monthlyIncomeCents ?? null,
         lengthOfEmployment: input.lengthOfEmployment ?? null,
+        housingStatus: input.housingStatus ?? null,
+        monthlyHousingPaymentCents: input.monthlyHousingPaymentCents ?? null,
+        monthlyOtherDebtCents: input.monthlyOtherDebtCents ?? null,
+        creditScoreEstimate: result.creditScoreEstimate ?? null,
+        frontEndDtiBps: result.frontEndDtiBps ?? null,
+        backEndDtiBps: result.backEndDtiBps ?? null,
+        benchmarkAprBps: result.benchmarkAprBps ?? null,
       },
       update: {
         decision: finalDecision,
@@ -438,6 +451,13 @@ export async function runAdminIPredictPrequalForBuyer(
         employerName: input.employerName ?? null,
         monthlyIncomeCents: input.monthlyIncomeCents ?? null,
         lengthOfEmployment: input.lengthOfEmployment ?? null,
+        housingStatus: input.housingStatus ?? null,
+        monthlyHousingPaymentCents: input.monthlyHousingPaymentCents ?? null,
+        monthlyOtherDebtCents: input.monthlyOtherDebtCents ?? null,
+        creditScoreEstimate: result.creditScoreEstimate ?? null,
+        frontEndDtiBps: result.frontEndDtiBps ?? null,
+        backEndDtiBps: result.backEndDtiBps ?? null,
+        benchmarkAprBps: result.benchmarkAprBps ?? null,
       },
     });
 

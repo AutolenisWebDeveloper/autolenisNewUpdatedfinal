@@ -8,7 +8,12 @@
 
 import { createCipheriv, randomBytes } from "crypto";
 import { PreQualDecision, PreQualTier } from "@prisma/client";
-import { computeIncomeGate, type IncomeGateResult } from "./income-gate";
+import {
+  computeIncomeGate,
+  getBenchmarkApr,
+  type BenchmarkTier,
+  type IncomeGateResult,
+} from "./income-gate";
 
 const ENCRYPTION_KEY = Buffer.from(
   process.env.PREQUAL_ENCRYPTION_KEY ?? "0".repeat(64),
@@ -112,6 +117,16 @@ export interface IPredicResult {
   rawResponse: string; // AES-256-GCM encrypted
   mocked: boolean;
   reason?: string;
+  // ── Decision detail (institutional-grade transparency / storage) ──────────
+  // Estimated credit score parsed from iPredict (null when not present).
+  creditScoreEstimate?: number | null;
+  // Actual DTI ratios for this buyer, basis points (1850 = 18.50%).
+  frontEndDtiBps?: number | null;
+  backEndDtiBps?: number | null;
+  // Benchmark APR used in the FINAL (tier-aware) calculation, bps (1050 = 10.5%).
+  benchmarkAprBps?: number | null;
+  // Existing housing + other-debt obligations used in the back-end DTI (cents).
+  totalMonthlyObligationsCents?: number | null;
 }
 
 // Sandbox / dev mock — APPROVED / GOOD / $35,000
@@ -177,6 +192,9 @@ interface CallIPredictArgs {
   employmentStatus:   string | null | undefined;
   lengthOfEmployment: string | null | undefined;
   statedBudgetCents:  number | null | undefined;
+  // Back-end DTI inputs — AutoLenis-internal only, never sent to MicroBilt.
+  monthlyHousingPaymentCents?: number | null;
+  monthlyOtherDebtCents?:      number | null;
   // legacy — kept for backward compat but no longer used as final OTD amount
   fallbackMaxOtdAmountCents?: number;
 }
@@ -238,28 +256,40 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
     return errorResult("CONFIG_ERROR");
   }
 
-  // ── STEP 1: Compute income gate ────────────────────────────────────────────
+  // ── STEP 1: Compute income gate (PASS 1 — UNKNOWN tier, 10.5% APR) ─────────
+  // PASS 1 sizes the RequestedAmt sent to iPredict using a conservative middle-
+  // ground APR. After MicroBilt returns and a tier is derived, we RE-RUN the
+  // gate with the tier-specific APR for an accurate final estimate (PASS 2).
   const hasIncome = !!args.monthlyIncomeCents && args.monthlyIncomeCents > 0;
+
+  // Shared income-gate inputs (reused for PASS 2 with the derived tier).
+  const incomeGateBase = {
+    monthlyIncomeCents:         args.monthlyIncomeCents ?? 0,
+    employmentStatus:           args.employmentStatus ?? null,
+    lengthOfEmployment:         args.lengthOfEmployment ?? null,
+    statedBudgetCents:          args.statedBudgetCents ?? null,
+    monthlyHousingPaymentCents: args.monthlyHousingPaymentCents ?? null,
+    monthlyOtherDebtCents:      args.monthlyOtherDebtCents ?? null,
+  };
 
   let gate: IncomeGateResult;
   if (hasIncome) {
-    gate = computeIncomeGate({
-      monthlyIncomeCents:  args.monthlyIncomeCents!,
-      employmentStatus:    args.employmentStatus ?? null,
-      lengthOfEmployment:  args.lengthOfEmployment ?? null,
-      statedBudgetCents:   args.statedBudgetCents ?? null,
-    });
+    gate = computeIncomeGate({ ...incomeGateBase, benchmarkTier: "UNKNOWN" });
   } else {
     // No income data provided — use stated budget or conservative $35k default
     // Note: without income, we cannot validate the amount independently.
     // The result will carry reduced confidence; buyer may be asked for income.
     const fallback = args.statedBudgetCents ?? args.fallbackMaxOtdAmountCents ?? NO_INCOME_FALLBACK_CENTS;
     gate = {
-      requestedAmtCents:       Math.min(fallback, 8_500_000),
-      incomeBasedMaxCents:     Math.min(fallback, 8_500_000),
-      stabilityFactor:         1.0,
-      estimatedMonthlyPayment: 0,
-      belowMinimum:            false,
+      requestedAmtCents:            Math.min(fallback, 8_500_000),
+      incomeBasedMaxCents:          Math.min(fallback, 8_500_000),
+      stabilityFactor:              1.0,
+      estimatedMonthlyPayment:      0,
+      belowMinimum:                 false,
+      frontEndDtiBps:               0,
+      backEndDtiBps:                0,
+      totalMonthlyObligationsCents: 0,
+      benchmarkAprBps:              Math.round(getBenchmarkApr("UNKNOWN") * 10000),
     };
   }
 
@@ -278,6 +308,11 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
       ),
       mocked: false,
       reason: "INCOME_BELOW_MINIMUM",
+      creditScoreEstimate:          null,
+      frontEndDtiBps:               gate.frontEndDtiBps,
+      backEndDtiBps:                gate.backEndDtiBps,
+      benchmarkAprBps:              gate.benchmarkAprBps,
+      totalMonthlyObligationsCents: gate.totalMonthlyObligationsCents,
     };
   }
 
@@ -356,6 +391,9 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   const ofacFlagged = idv?.OFACAlert === "Y" || ofac?.ofacresult === "Y";
   const decision    = mapDecision(decisionCode, decisionValue);
 
+  // Estimated credit score parsed from iPredict (null when not present).
+  const creditScoreEstimate = parseScoreFromResponse(raw);
+
   // ── STEP 4: Two-gate minimum — income gate vs credit gate ─────────────────
   // Final OTD = min(income-computed max, MicroBilt-approved amount)
   // This is the same logic used by all major auto lenders.
@@ -363,15 +401,45 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
 
   let finalDecision     = decision;
   let maxOtdAmountCents = 0;
+  let tier: PreQualTier | null = null;
+  // PASS 2 income gate — defaults to the PASS 1 result until a tier is derived.
+  let finalGate = gate;
 
   if (decision === PreQualDecision.APPROVED) {
     if (creditGateAmount !== null && creditGateAmount > 0) {
+      // Preliminary OTD (PASS 1 income gate) — used only to derive the tier
+      // when no credit score is available.
+      const preliminaryMaxOtd = hasIncome
+        ? Math.min(gate.incomeBasedMaxCents, creditGateAmount)
+        : creditGateAmount;
+
+      // ── STEP 5: Derive tier (prefer credit score; fall back to ratio) ──────
+      tier = deriveTier(
+        creditScoreEstimate,
+        preliminaryMaxOtd,
+        gate.requestedAmtCents,
+        args.monthlyIncomeCents ?? null,
+      );
+
+      // PASS 2: re-run the income gate with the tier-specific benchmark APR for
+      // a more accurate monthly payment / buying-power estimate.
       if (hasIncome) {
+        finalGate = computeIncomeGate({
+          ...incomeGateBase,
+          benchmarkTier: tierToBenchmark(tier),
+        });
         // Both gates have data: take the conservative minimum
-        maxOtdAmountCents = Math.min(gate.incomeBasedMaxCents, creditGateAmount);
+        maxOtdAmountCents = Math.min(finalGate.incomeBasedMaxCents, creditGateAmount);
       } else {
         // No income validation: use credit gate only (less accurate)
         maxOtdAmountCents = creditGateAmount;
+      }
+
+      // A near/at-DTI-limit final amount that falls below the platform floor
+      // means there is no viable loan even though credit approved.
+      if (maxOtdAmountCents <= 0) {
+        finalDecision = PreQualDecision.MANUAL_REVIEW;
+        tier = null;
       }
     } else {
       // MicroBilt approved but returned no amount — cannot issue reliable budget
@@ -380,11 +448,6 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
       console.warn("[microbilt] APPROVED with no loan amount — routing to MANUAL_REVIEW");
     }
   }
-
-  // ── STEP 5: Derive tier ────────────────────────────────────────────────────
-  const tier = finalDecision === PreQualDecision.APPROVED && maxOtdAmountCents > 0
-    ? deriveTier(maxOtdAmountCents, gate.requestedAmtCents, args.monthlyIncomeCents ?? null)
-    : null;
 
   return {
     decision:                   finalDecision,
@@ -396,15 +459,62 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
     expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     rawResponse: encryptRawResponse(JSON.stringify(raw)),
     mocked: false,
+    creditScoreEstimate,
+    // Decision detail comes from the FINAL (tier-aware) income gate.
+    frontEndDtiBps:               hasIncome ? finalGate.frontEndDtiBps : null,
+    backEndDtiBps:                hasIncome ? finalGate.backEndDtiBps : null,
+    benchmarkAprBps:              hasIncome ? finalGate.benchmarkAprBps : null,
+    totalMonthlyObligationsCents: hasIncome ? finalGate.totalMonthlyObligationsCents : null,
   };
 }
 
-// Tier derivation — mirrors Capital One / Chase / credit union tier bands
+// Map a PreQualTier to the BenchmarkTier used for APR selection.
+function tierToBenchmark(tier: PreQualTier | null): BenchmarkTier {
+  switch (tier) {
+    case PreQualTier.STRONG: return "STRONG";
+    case PreQualTier.GOOD:   return "GOOD";
+    case PreQualTier.FAIR:   return "FAIR";
+    case PreQualTier.WEAK:   return "WEAK";
+    default:                 return "UNKNOWN";
+  }
+}
+
+// Extract the estimated credit score from an iPredict response. iPredict's
+// sandbox/production payloads vary, so we probe the most likely locations and
+// validate the value is a plausible FICO/VantageScore (300–850).
+function parseScoreFromResponse(raw: IPredictResponse): number | null {
+  const content = raw.RESPONSE?.CONTENT;
+  const candidates: Array<string | number | undefined> = [
+    content?.CREDITSCORE?.score,
+    content?.SERVICEDETAILS?.CREDITSCORE?.score,
+    content?.DECISION?.creditScore,
+    content?.DECISION?.score,
+  ];
+  for (const c of candidates) {
+    if (c === undefined || c === null) continue;
+    const n = typeof c === "number" ? c : parseInt(String(c).replace(/[^0-9]/g, ""), 10);
+    if (Number.isFinite(n) && n >= 300 && n <= 850) return n;
+  }
+  return null;
+}
+
+// Tier derivation — prefers the credit score when available, otherwise falls
+// back to the approval-ratio + payment-to-income logic.
+// Mirrors Capital One / Chase / credit union tier bands.
 function deriveTier(
+  creditScore:        number | null,
   approvedCents:      number,
   requestedCents:     number,
   monthlyIncomeCents: number | null,
 ): PreQualTier {
+  // PREFER credit score when present.
+  if (creditScore !== null && creditScore > 0) {
+    if (creditScore >= 720) return PreQualTier.STRONG;
+    if (creditScore >= 660) return PreQualTier.GOOD;
+    if (creditScore >= 600) return PreQualTier.FAIR;
+    return PreQualTier.WEAK;
+  }
+
   const approvalRatio = requestedCents > 0
     ? approvedCents / requestedCents
     : 0;
@@ -476,10 +586,25 @@ interface IPredictResponse {
         qualifiedAmount?:       string;   // alternative field name
         maxApprovedAmount?:     string;   // alternative field name
         reasonCodes?:           string[]; // adverse action codes
+        creditScore?:           string | number; // alternative score location
+        score?:                 string | number; // alternative score location
+      };
+      // Estimated credit score block. Exact placement varies between the
+      // iPredict sandbox and production payloads, so the parser probes several
+      // locations (see parseScoreFromResponse).
+      CREDITSCORE?: {
+        score?:  string | number;
+        bureau?: string;
+        model?:  string;
       };
       SERVICEDETAILS?: {
         IDV?:  { OFACAlert?: string };
         OFAC?: { ofacresult?: string };
+        CREDITSCORE?: {
+          score?:  string | number;
+          bureau?: string;
+          model?:  string;
+        };
       };
     };
   };

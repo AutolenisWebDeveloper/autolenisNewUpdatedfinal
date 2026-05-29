@@ -36,6 +36,23 @@ const submissionSchema = z.object({
     .max(1_000_000, "Please enter your monthly gross income (not annual)")
     .refine(v => v >= 500, "Monthly income must be at least $500"),
   lengthOfEmployment: z.string().trim().max(64).optional(),
+
+  // Housing + debt obligations (Section 2.5) — never sent to MicroBilt.
+  housingStatus: z.enum(["RENT", "MORTGAGE", "OWN", "FAMILY"]).optional(),
+  monthlyHousingPayment: z.number().min(0).max(20_000).optional(),
+  monthlyOtherDebt: z.number().min(0).max(30_000).default(0),
+}).superRefine((data, ctx) => {
+  // Housing payment is required when the buyer rents or has a mortgage.
+  if (
+    (data.housingStatus === "RENT" || data.housingStatus === "MORTGAGE") &&
+    (data.monthlyHousingPayment === undefined || data.monthlyHousingPayment === null)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["monthlyHousingPayment"],
+      message: "Monthly housing payment is required for renters and mortgage holders",
+    });
+  }
 });
 
 export async function POST(request: NextRequest) {
@@ -90,6 +107,15 @@ export async function POST(request: NextRequest) {
             ? Math.round(d.monthlyIncome * 100)
             : undefined,
         lengthOfEmployment: d.lengthOfEmployment,
+        housingStatus: d.housingStatus,
+        monthlyHousingPaymentCents:
+          typeof d.monthlyHousingPayment === "number"
+            ? Math.round(d.monthlyHousingPayment * 100)
+            : undefined,
+        monthlyOtherDebtCents:
+          typeof d.monthlyOtherDebt === "number"
+            ? Math.round(d.monthlyOtherDebt * 100)
+            : undefined,
         ipAddress,
         userAgent,
       },

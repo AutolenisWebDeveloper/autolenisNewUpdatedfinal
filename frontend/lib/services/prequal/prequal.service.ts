@@ -47,13 +47,23 @@ export function isPrequalValid(
 }
 
 // Buyer-safe summary — never expose raw iPredict scores or OFAC flag.
-export function toBuyerSafePrequal(prequal: {
-  decision: string;
-  tier: string | null;
-  maxOtdAmountCents: number;
-  expiresAt: Date;
-  checkOfacAlert: boolean;
-}) {
+//
+// Decision detail (back-end DTI + benchmark APR) is opt-in via
+// `includeDecisionDetail` so an admin surface can choose to surface the math
+// for transparency. It is NEVER exposed by default and never includes the raw
+// credit score or OFAC flag.
+export function toBuyerSafePrequal(
+  prequal: {
+    decision: string;
+    tier: string | null;
+    maxOtdAmountCents: number;
+    expiresAt: Date;
+    checkOfacAlert: boolean;
+    backEndDtiBps?: number | null;
+    benchmarkAprBps?: number | null;
+  },
+  options?: { includeDecisionDetail?: boolean },
+) {
   return {
     approved: prequal.decision === "APPROVED",
     // OFAC paths surface as "pending manual review" — buyer never learns the cause.
@@ -66,6 +76,12 @@ export function toBuyerSafePrequal(prequal: {
     // Immutable — no client component may modify or exceed this value.
     maxOtdAmountCents: prequal.maxOtdAmountCents,
     expiresAt: prequal.expiresAt,
+    ...(options?.includeDecisionDetail
+      ? {
+          backEndDtiBps: prequal.backEndDtiBps ?? null,
+          benchmarkAprBps: prequal.benchmarkAprBps ?? null,
+        }
+      : {}),
   };
 }
 
@@ -85,6 +101,11 @@ export interface PrequalSubmission {
   employerName?: string;
   monthlyIncomeCents?: number;
   lengthOfEmployment?: string;
+
+  // Optional (Section 2.5) housing + debt — AutoLenis-internal only.
+  housingStatus?: string;
+  monthlyHousingPaymentCents?: number;
+  monthlyOtherDebtCents?: number;
 
   // Audit
   ipAddress?: string;
@@ -128,6 +149,8 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     employmentStatus:    input.employmentStatus ?? null,
     lengthOfEmployment:  input.lengthOfEmployment ?? null,
     statedBudgetCents:   buyer.maxOtdAmountCents ?? null,
+    monthlyHousingPaymentCents: input.monthlyHousingPaymentCents ?? null,
+    monthlyOtherDebtCents:      input.monthlyOtherDebtCents ?? null,
   });
 
   // ── OFAC gate ──────────────────────────────────────────────────────────────
@@ -173,6 +196,13 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         employerName: input.employerName ?? null,
         monthlyIncomeCents: input.monthlyIncomeCents ?? null,
         lengthOfEmployment: input.lengthOfEmployment ?? null,
+        housingStatus: input.housingStatus ?? null,
+        monthlyHousingPaymentCents: input.monthlyHousingPaymentCents ?? null,
+        monthlyOtherDebtCents: input.monthlyOtherDebtCents ?? null,
+        creditScoreEstimate: result.creditScoreEstimate ?? null,
+        frontEndDtiBps: result.frontEndDtiBps ?? null,
+        backEndDtiBps: result.backEndDtiBps ?? null,
+        benchmarkAprBps: result.benchmarkAprBps ?? null,
       },
       update: {
         decision: finalDecision,
@@ -187,6 +217,13 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         employerName: input.employerName ?? null,
         monthlyIncomeCents: input.monthlyIncomeCents ?? null,
         lengthOfEmployment: input.lengthOfEmployment ?? null,
+        housingStatus: input.housingStatus ?? null,
+        monthlyHousingPaymentCents: input.monthlyHousingPaymentCents ?? null,
+        monthlyOtherDebtCents: input.monthlyOtherDebtCents ?? null,
+        creditScoreEstimate: result.creditScoreEstimate ?? null,
+        frontEndDtiBps: result.frontEndDtiBps ?? null,
+        backEndDtiBps: result.backEndDtiBps ?? null,
+        benchmarkAprBps: result.benchmarkAprBps ?? null,
       },
     });
 
