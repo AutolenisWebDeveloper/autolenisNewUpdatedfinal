@@ -995,62 +995,125 @@ export default function LandingPageClient({
         {/* ── SECTION 12: COMPARISON TABLE ─────────────────────────────────── */}
         <section className="py-24 bg-white">
           <div className="max-w-6xl mx-auto px-5">
-            <div className="text-center mb-10">
+
+            {/* Section header */}
+            <div className="text-center mb-12">
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-3">
                 THE DIFFERENCE
               </p>
-              <h2 className="text-4xl font-black text-slate-900 tracking-tight">
-                Two Different Experiences. One <span className="text-[#0B5FD1]">Smarter</span> Choice.
+              <h2 className="text-4xl sm:text-5xl font-black text-slate-900 tracking-tight">
+                Two Different Experiences.{" "}
+                One{" "}
+                <span className="text-[#0B5FD1]">
+                  Smarter
+                </span>{" "}
+                Choice.
               </h2>
             </div>
-            <div className="grid lg:grid-cols-[1fr_1.7fr_1fr] gap-6 items-center">
-              {/* silver sedan placeholder */}
-              <div className="hidden lg:flex h-44 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-300 items-center justify-center">
-                <Car size={72} className="text-slate-400" strokeWidth={1} />
+
+            {/* 3-column layout */}
+            <div className="grid lg:grid-cols-[280px_1fr_280px] gap-6 items-center">
+
+              {/* Left vehicle — silver SUV */}
+              <div className="hidden lg:flex bg-slate-50 rounded-2xl overflow-hidden h-72 items-center justify-center p-4">
+                <Image
+                  src="https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=500&q=85&fit=crop&auto=format"
+                  alt="Traditional dealership car buying"
+                  width={280}
+                  height={280}
+                  className="w-full h-full object-contain"
+                />
               </div>
 
-              {/* comparison table */}
-              <div className="overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+              {/* Center comparison table */}
+              <div className="rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+
+                {/* Table header */}
                 <div className="grid grid-cols-2">
-                  <div className="p-3 bg-slate-100 text-center">
-                    <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">
+                  <div className="p-4 bg-slate-50 text-center border-r border-slate-200">
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-500">
                       Traditional Dealership
                     </p>
                   </div>
-                  <div className="p-3 bg-[#0B5FD1] text-center">
-                    <p className="text-xs font-bold text-white uppercase tracking-wider">
+                  <div className="p-4 bg-[#0B5FD1] text-center">
+                    <p className="text-xs font-black uppercase tracking-widest text-white">
                       AutoLenis
                     </p>
                   </div>
                 </div>
+
+                {/* Comparison rows */}
                 {[
-                  ["Visit multiple dealerships",    "Request from home"              ],
-                  ["Pressure negotiations",          "Dealers compete privately"      ],
-                  ["Limited comparisons",            "Multiple side-by-side offers"   ],
-                  ["Time-consuming process",         "Streamlined process"            ],
-                  ["Dealer-controlled process",      "Buyer-controlled process"       ],
+                  [
+                    "Visit multiple dealerships",
+                    "Request from home",
+                  ],
+                  [
+                    "Pressure negotiations",
+                    "Dealers compete privately",
+                  ],
+                  [
+                    "Limited comparisons",
+                    "Multiple side-by-side offers",
+                  ],
+                  [
+                    "Time-consuming process",
+                    "Streamlined process",
+                  ],
+                  [
+                    "Dealer-controlled process",
+                    "Buyer-controlled process",
+                  ],
                 ].map(([old, neu], i) => (
                   <div
                     key={i}
-                    className={`grid grid-cols-2 ${i % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}
+                    className={`grid grid-cols-2 border-t border-slate-100 ${i % 2 === 0
+                      ? "bg-white"
+                      : "bg-slate-50/40"}`}
                   >
-                    <div className="p-3.5 flex items-center gap-2 border-r border-slate-100">
-                      <X size={13} className="text-red-400 shrink-0" />
+                    {/* Old way */}
+                    <div className="p-4 flex items-center gap-3 border-r border-slate-100">
+                      <span className="w-5 h-5 rounded-full bg-red-50 flex items-center justify-center shrink-0">
+                        <X size={11} className="text-red-500" />
+                      </span>
                       <span className="text-sm text-slate-600">{old}</span>
                     </div>
-                    <div className="p-3.5 bg-blue-50/40 flex items-center gap-2">
-                      <CheckCircle2 size={13} className="text-[#0B5FD1] shrink-0" />
-                      <span className="text-sm text-[#0B5FD1] font-medium">{neu}</span>
+
+                    {/* AutoLenis way */}
+                    <div className="p-4 bg-blue-50/30 flex items-center gap-3">
+                      <span className="w-5 h-5 rounded-full bg-[#0B5FD1]/10 flex items-center justify-center shrink-0">
+                        <CheckCircle2 size={11} className="text-[#0B5FD1]" />
+                      </span>
+                      <span className="text-sm font-medium text-[#0B5FD1]">{neu}</span>
                     </div>
                   </div>
                 ))}
               </div>
 
-              {/* dark SUV placeholder */}
-              <div className="hidden lg:flex h-44 rounded-2xl bg-gradient-to-br from-slate-800 to-slate-950 items-center justify-center">
-                <Car size={72} className="text-slate-600" strokeWidth={1} />
+              {/* Right vehicle — blue/dark SUV */}
+              <div className="hidden lg:flex bg-[#0F172A] rounded-2xl overflow-hidden h-72 items-center justify-center p-4">
+                <Image
+                  src="https://images.unsplash.com/photo-1617788138017-80ad40651399?w=500&q=85&fit=crop&auto=format"
+                  alt="AutoLenis smarter car buying experience"
+                  width={280}
+                  height={280}
+                  className="w-full h-full object-contain"
+                />
               </div>
+
             </div>
+
+            {/* CTA below table */}
+            <div className="text-center mt-12">
+              <button
+                onClick={scrollToForm}
+                className="inline-flex items-center gap-2 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-bold px-8 py-4 rounded-xl shadow-lg shadow-[#0B5FD1]/20 transition-colors text-sm"
+              >
+                Start the Smarter Way
+                <ArrowRight size={16} />
+              </button>
+            </div>
+
           </div>
         </section>
 
