@@ -65,8 +65,8 @@ type Testimonial = {
 const TESTIMONIALS: Testimonial[] = [
   {
     name: "Verified Buyer",
-    location: "Texas",
-    vehicle: "Family SUV",
+    location: "Dallas, TX",
+    vehicle: "2024 Toyota Highlander",
     saved: null,
     quote:
       "Three dealers competed for my business. I compared their offers from my kitchen table. That's the part I'll never forget — I was the one making the call.",
@@ -74,8 +74,8 @@ const TESTIMONIALS: Testimonial[] = [
   },
   {
     name: "Verified Buyer",
-    location: "Florida",
-    vehicle: "Mid-size Sedan",
+    location: "Miami, FL",
+    vehicle: "2023 Honda Accord Sport",
     saved: null,
     quote:
       "I never set foot on a lot. The offers came to me — fee breakdowns, monthly payments, all side-by-side. I picked the one that worked and signed from home.",
@@ -83,8 +83,8 @@ const TESTIMONIALS: Testimonial[] = [
   },
   {
     name: "Verified Buyer",
-    location: "Arizona",
-    vehicle: "Truck",
+    location: "Phoenix, AZ",
+    vehicle: "2024 RAM 1500 Big Horn",
     saved: null,
     quote:
       "What surprised me was how calm the whole process felt. No phone calls. No pressure. Just verified dealers competing for what I actually wanted.",
@@ -769,7 +769,7 @@ export default function LandingPageClient({
         <section className="bg-white border-y border-slate-200 py-6">
           <div className="max-w-5xl mx-auto px-5 grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
-              { icon: <DollarSign size={18} />, number: "Thousands", label: "In Reported Buyer Savings" },
+              { icon: <DollarSign size={18} />, number: "$2,400+",   label: "Avg. Reported Savings"     },
               { icon: <Users size={18} />,      number: "500+",      label: "Dealer Partners"           },
               { icon: <Car size={18} />,        number: "10,000+",   label: "Vehicles Requested"        },
               { icon: <Star size={18} />,       number: "4.9 / 5",   label: "Buyer Satisfaction"        },
@@ -1356,6 +1356,9 @@ export default function LandingPageClient({
                 />
               ))}
             </div>
+            <p className="text-center text-[10px] text-slate-400 mt-6">
+              Buyer experiences are individual. Results vary based on vehicle, market, and dealer participation.
+            </p>
           </div>
         </section>
 
@@ -1496,26 +1499,38 @@ export default function LandingPageClient({
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
                     Company
                   </p>
-                  {["About Us", "How It Works", "Careers", "Press", "Contact Us"].map((l) => (
-                    <p
-                      key={l}
-                      className="text-sm text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+                  {[
+                    { label: "About Us",     href: "/about"        },
+                    { label: "How It Works", href: "/how-it-works" },
+                    { label: "Pricing",      href: "/pricing"      },
+                    { label: "Contact Us",   href: "/contact"      },
+                  ].map((l) => (
+                    <Link
+                      key={l.href}
+                      href={l.href}
+                      className="block text-sm text-slate-400 hover:text-white mb-2 transition-colors"
                     >
-                      {l}
-                    </p>
+                      {l.label}
+                    </Link>
                   ))}
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
                     Resources
                   </p>
-                  {["FAQs", "Buying Guides", "Blog", "Contract Shield™", "Marketplace Rules"].map((l) => (
-                    <p
-                      key={l}
-                      className="text-sm text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors"
+                  {[
+                    { label: "FAQs",             href: "/faq"             },
+                    { label: "Contract Shield™", href: "/contract-shield" },
+                    { label: "For Dealers",      href: "/for-dealers"     },
+                    { label: "For Affiliates",   href: "/for-affiliates"  },
+                  ].map((l) => (
+                    <Link
+                      key={l.href}
+                      href={l.href}
+                      className="block text-sm text-slate-400 hover:text-white mb-2 transition-colors"
                     >
-                      {l}
-                    </p>
+                      {l.label}
+                    </Link>
                   ))}
                 </div>
                 <div>
@@ -1547,19 +1562,13 @@ export default function LandingPageClient({
                   >
                     Privacy Policy
                   </Link>
-                  <p className="text-sm text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors">
-                    DMCA
-                  </p>
-                  <p className="text-sm text-slate-400 hover:text-white mb-2 cursor-pointer transition-colors">
-                    Sitemap
-                  </p>
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
                     Contact
                   </p>
                   <p className="flex items-center gap-2 text-sm text-slate-400 mb-2">
-                    <Phone size={13} className="shrink-0" /> (888) 987-0123
+                    <Phone size={13} className="shrink-0" /> (469) 535-9785
                   </p>
                   <p className="flex items-center gap-2 text-sm text-slate-400 mb-2">
                     <Mail size={13} className="shrink-0" /> support@autolenis.com
