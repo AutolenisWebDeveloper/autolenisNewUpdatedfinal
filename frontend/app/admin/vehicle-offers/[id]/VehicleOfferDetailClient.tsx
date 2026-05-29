@@ -90,6 +90,233 @@ function parseVehicles(raw: unknown): DealerVehicle[] {
   return raw as DealerVehicle[];
 }
 
+type DealerSearchResult = { id: string; dealershipName: string; city: string | null; state: string | null; tier: string };
+
+function dollarsToCents(v: string): number {
+  const n = Number.parseFloat(v);
+  return Number.isFinite(n) ? Math.round(n * 100) : 0;
+}
+
+function ManualOfferSection({ offerId }: { offerId: string }) {
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"registered" | "outside">("registered");
+
+  // Registered dealer search
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<DealerSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [selectedDealer, setSelectedDealer] = useState<DealerSearchResult | null>(null);
+
+  // Outside dealer
+  const [outsideName, setOutsideName] = useState("");
+  const [outsideEmail, setOutsideEmail] = useState("");
+  const [outsidePhone, setOutsidePhone] = useState("");
+
+  // Common price fields (dollars)
+  const [vehiclePrice, setVehiclePrice] = useState("");
+  const [tax, setTax] = useState("");
+  const [fees, setFees] = useState("");
+  const [notes, setNotes] = useState("");
+  const [reason, setReason] = useState("");
+
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const otdCents = dollarsToCents(vehiclePrice) + dollarsToCents(tax) + dollarsToCents(fees);
+
+  async function runSearch(q: string) {
+    setSearch(q);
+    setSelectedDealer(null);
+    if (q.trim().length < 2) { setResults([]); return; }
+    setSearching(true);
+    try {
+      const res = await fetch(`/api/admin/dealers/active?q=${encodeURIComponent(q.trim())}`);
+      const data = (await res.json().catch(() => ({}))) as { success?: boolean; data?: { dealers: DealerSearchResult[] } };
+      setResults(data.success && data.data ? data.data.dealers.slice(0, 8) : []);
+    } catch {
+      setResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (otdCents <= 0) { setError("Enter a vehicle price (and any tax/fees)."); return; }
+    if (!reason.trim()) { setError("A reason for the manual entry is required."); return; }
+
+    const base = {
+      vehiclePriceCents: dollarsToCents(vehiclePrice),
+      taxCents: dollarsToCents(tax),
+      feesCents: dollarsToCents(fees),
+      otdPriceCents: otdCents,
+      notes: notes.trim() || undefined,
+      reason: reason.trim(),
+    };
+
+    let payload: Record<string, unknown>;
+    if (tab === "registered") {
+      if (!selectedDealer) { setError("Select a registered dealer first."); return; }
+      payload = { dealerId: selectedDealer.id, ...base };
+    } else {
+      if (!outsideName.trim() || !/\S+@\S+\.\S+/.test(outsideEmail.trim())) {
+        setError("Outside dealer name and a valid email are required."); return;
+      }
+      payload = {
+        outsideDealerName: outsideName.trim(),
+        outsideDealerEmail: outsideEmail.trim(),
+        outsideDealerPhone: outsidePhone.trim() || undefined,
+        ...base,
+      };
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/admin/vehicle-offers/${offerId}/submit-offer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: { message?: string } };
+      if (res.ok && data.success) {
+        setSuccess(true);
+        setTimeout(() => window.location.reload(), 900);
+      } else {
+        setError(data.error?.message ?? "Unable to submit offer.");
+      }
+    } catch {
+      setError("Network error.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-[#E5E7EB] p-5 mb-4" data-testid="manual-offer-section">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between text-left"
+        data-testid="manual-offer-toggle"
+      >
+        <div>
+          <p className="text-sm font-bold text-[#111827]">Submit Manual Offer</p>
+          <p className="text-xs text-slate-500">Enter an offer on behalf of a registered or unregistered dealer</p>
+        </div>
+        <span className="text-[#0B5FD1] text-sm font-semibold">{open ? "Hide" : "Add Offer"}</span>
+      </button>
+
+      {open && (
+        <form onSubmit={handleSubmit} className="mt-4 border-t border-slate-100 pt-4">
+          {/* Tabs */}
+          <div className="flex gap-2 mb-4">
+            {(["registered", "outside"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${tab === t ? "bg-[#0B5FD1] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                data-testid={`manual-offer-tab-${t}`}
+              >
+                {t === "registered" ? "Registered Dealer" : "Outside Dealer"}
+              </button>
+            ))}
+          </div>
+
+          {tab === "registered" ? (
+            <div className="mb-4">
+              <Label className="text-xs font-medium text-[#374151]">Search dealer (name, city, or state)</Label>
+              <Input
+                value={search}
+                onChange={(e) => runSearch(e.target.value)}
+                placeholder="Start typing a dealership name…"
+                className="mt-1"
+                data-testid="manual-offer-dealer-search"
+              />
+              {searching && <p className="text-xs text-slate-400 mt-1">Searching…</p>}
+              {selectedDealer ? (
+                <p className="text-xs text-green-700 mt-2" data-testid="manual-offer-dealer-selected">
+                  Selected: <strong>{selectedDealer.dealershipName}</strong>
+                  <button type="button" onClick={() => { setSelectedDealer(null); setSearch(""); }} className="ml-2 text-slate-400 hover:text-slate-600 underline">change</button>
+                </p>
+              ) : results.length > 0 ? (
+                <div className="mt-2 border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-48 overflow-auto">
+                  {results.map((d) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => { setSelectedDealer(d); setResults([]); }}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50"
+                      data-testid={`manual-offer-dealer-${d.id}`}
+                    >
+                      <span className="font-medium text-slate-900">{d.dealershipName}</span>
+                      <span className="text-xs text-slate-400 ml-2">{[d.city, d.state].filter(Boolean).join(", ")} · {d.tier}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+              <div>
+                <Label className="text-xs font-medium text-[#374151]">Dealership Name</Label>
+                <Input value={outsideName} onChange={(e) => setOutsideName(e.target.value)} className="mt-1" data-testid="manual-offer-outside-name" />
+              </div>
+              <div>
+                <Label className="text-xs font-medium text-[#374151]">Contact Email</Label>
+                <Input type="email" value={outsideEmail} onChange={(e) => setOutsideEmail(e.target.value)} className="mt-1" data-testid="manual-offer-outside-email" />
+              </div>
+              <div>
+                <Label className="text-xs font-medium text-[#374151]">Contact Phone</Label>
+                <Input value={outsidePhone} onChange={(e) => setOutsidePhone(e.target.value)} className="mt-1" data-testid="manual-offer-outside-phone" />
+              </div>
+            </div>
+          )}
+
+          {/* Common price fields */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <Label className="text-xs font-medium text-[#374151]">Vehicle Price ($)</Label>
+              <Input type="number" min="0" step="0.01" value={vehiclePrice} onChange={(e) => setVehiclePrice(e.target.value)} className="mt-1" data-testid="manual-offer-vehicle-price" />
+            </div>
+            <div>
+              <Label className="text-xs font-medium text-[#374151]">Tax ($)</Label>
+              <Input type="number" min="0" step="0.01" value={tax} onChange={(e) => setTax(e.target.value)} className="mt-1" data-testid="manual-offer-tax" />
+            </div>
+            <div>
+              <Label className="text-xs font-medium text-[#374151]">Fees ($)</Label>
+              <Input type="number" min="0" step="0.01" value={fees} onChange={(e) => setFees(e.target.value)} className="mt-1" data-testid="manual-offer-fees" />
+            </div>
+            <div>
+              <Label className="text-xs font-medium text-[#374151]">OTD Total</Label>
+              <Input value={`$${(otdCents / 100).toLocaleString()}`} readOnly className="mt-1 bg-slate-50 font-semibold" data-testid="manual-offer-otd" />
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <Label className="text-xs font-medium text-[#374151]">Notes (optional)</Label>
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value.slice(0, 2000))} className="mt-1 min-h-[60px]" data-testid="manual-offer-notes" />
+          </div>
+          <div className="mt-3">
+            <Label className="text-xs font-medium text-[#374151]">Reason for manual entry <span className="text-red-500">*</span></Label>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} className="mt-1" data-testid="manual-offer-reason" required />
+          </div>
+
+          {error && <p className="text-xs text-red-600 mt-2" data-testid="manual-offer-error">{error}</p>}
+          {success && <p className="text-xs text-green-600 mt-2" data-testid="manual-offer-success">Offer submitted — refreshing…</p>}
+
+          <Button type="submit" disabled={submitting || success} className="mt-3 bg-[#0B5FD1] text-white" data-testid="manual-offer-submit">
+            {submitting ? <><Loader2 size={14} className="animate-spin mr-1.5" />Submitting…</> : "Submit Offer"}
+          </Button>
+        </form>
+      )}
+    </div>
+  );
+}
+
 export default function VehicleOfferDetailClient({ offer: initialOffer, appUrl }: { offer: DetailOffer; appUrl: string }) {
   const [offer, setOffer] = useState(initialOffer);
   const [selected, setSelected] = useState<Set<SelectedKey>>(new Set());
@@ -247,6 +474,9 @@ export default function VehicleOfferDetailClient({ offer: initialOffer, appUrl }
           </div>
         </div>
       )}
+
+      {/* Manual offer entry (admin submits on behalf of a dealer) */}
+      <ManualOfferSection offerId={offer.id} />
 
       {/* Submissions */}
       {totalSubmissions === 0 ? (

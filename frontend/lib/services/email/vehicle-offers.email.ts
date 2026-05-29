@@ -279,6 +279,38 @@ export async function sendDealerOfferAdminNotification(params: {
   await sendRaw(ADMIN_EMAIL, `New Dealer Offer — ${params.dealershipName}`, wrap(inner));
 }
 
+// ─── Outside dealer auction offer (auction flow, not VehicleOffer flow) ───
+// Sent to admin when an outside/unregistered dealer submits an offer for a
+// buyer auction via their tokenized email link, or when an admin enters one
+// manually on their behalf.
+export async function sendOutsideDealerAuctionOfferAdminNotification(params: {
+  auctionId: string;
+  offerId: string;
+  dealershipName: string;
+  contactName?: string | null;
+  contactEmail: string;
+  contactPhone?: string | null;
+  otdPriceCents: number;
+  source: "email_link" | "admin_manual";
+}) {
+  const detailUrl = `${APP_URL}/admin/auctions/${params.auctionId}`;
+  const sourceLabel =
+    params.source === "admin_manual" ? "entered manually by admin" : "submitted via email link";
+  const inner = `
+    <p style="color:#0B5FD1;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin:0 0 4px">Outside Dealer Offer</p>
+    <h1 style="color:#111827;font-size:22px;font-weight:700;margin:0 0 4px">${escape(params.dealershipName)}</h1>
+    <p style="color:#6B7280;font-size:13px;margin:0 0 16px">${sourceLabel} for auction <strong>${escape(params.auctionId.slice(0, 8))}</strong></p>
+
+    <div style="background:#F8F9FB;border-radius:12px;padding:16px;margin-bottom:16px">
+      ${params.contactName ? `<p style="color:#374151;font-size:13px;margin:0 0 4px"><strong>Contact:</strong> ${escape(params.contactName)}</p>` : ""}
+      <p style="color:#374151;font-size:13px;margin:0 0 4px">${escape(params.contactEmail)}${params.contactPhone ? ` &middot; ${escape(params.contactPhone)}` : ""}</p>
+      <p style="color:#111827;font-size:14px;margin:8px 0 0"><strong>OTD Price:</strong> $${(params.otdPriceCents / 100).toLocaleString()}</p>
+    </div>
+
+    <div style="margin-top:24px">${button(detailUrl, "View Auction →")}</div>`;
+  await sendRaw(ADMIN_EMAIL, `Outside Dealer Offer — ${params.dealershipName}`, wrap(inner));
+}
+
 export async function sendDealerOfferConfirmation(params: {
   to: string;
   contactName: string;

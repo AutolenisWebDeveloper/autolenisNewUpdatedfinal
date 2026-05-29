@@ -70,9 +70,11 @@ export async function POST(request: NextRequest, { params }: Props) {
   const sortedByOtd = [...allOffers].sort((a, b) => a.otdPriceCents - b.otdPriceCents);
   for (let i = 0; i < sortedByOtd.length; i++) {
     const offerRow = sortedByOtd[i];
-    const dealerEmail = offerRow.dealer?.user?.email;
+    // Outside / unregistered dealer offers share the system placeholder Dealer,
+    // so prefer the real external contact captured on the offer itself.
+    const dealerEmail = offerRow.externalDealerEmail ?? offerRow.dealer?.user?.email;
     if (!dealerEmail) continue;
-    const dealershipName = offerRow.dealer.dealershipName;
+    const dealershipName = offerRow.externalDealerName ?? offerRow.dealer.dealershipName;
     if (offerRow.id === offer.id) {
       await sendDealerOfferWonEmail({
         to: dealerEmail,
