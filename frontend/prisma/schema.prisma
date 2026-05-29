@@ -142,6 +142,10 @@ model Dealer {
   zip                String?
   status             DealerStatus              @default(PENDING)
   tier               String                    @default("STANDARD")
+  // System placeholder used to satisfy Offer.dealerId for outside /
+  // unregistered dealers. Never a real, operating dealer — excluded from
+  // dealer-facing matching and public stats.
+  isSystemPlaceholder Boolean                  @default(false) @map("is_system_placeholder")
   currentAuctionLoad Int                       @default(0) @map("current_auction_load")
   scorecardTier      String?                   @map("scorecard_tier")
   createdAt          DateTime                  @default(now()) @map("created_at")
@@ -372,6 +376,9 @@ model OutsideAuctionInvite {
   offerTaxCents   Int?      @map("offer_tax_cents")
   offerFeesCents  Int?      @map("offer_fees_cents")
   offerNotes      String?   @map("offer_notes")
+  // Link to the real Offer record created when this outside dealer responds,
+  // so the offer flows through the best-price engine and buyer comparison.
+  offerId         String?   @unique @map("offer_id")
   auction         Auction   @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
   @@index([auctionId])
@@ -432,6 +439,15 @@ model Offer {
   version           Int         @default(1)
   originalOfferId   String?     @unique @map("original_offer_id")
   submittedAt       DateTime?   @map("submitted_at")
+  // Outside / unregistered dealer support. When an offer is submitted on behalf
+  // of a dealer that has no Dealer account, `dealerId` points to the system
+  // "Outside Dealer" placeholder and these fields carry the real identity.
+  externalDealerName  String?   @map("external_dealer_name")
+  externalDealerEmail String?   @map("external_dealer_email")
+  externalDealerPhone String?   @map("external_dealer_phone")
+  notes               String?
+  // Set when an admin entered this offer manually on behalf of a dealer.
+  submittedByAdminId  String?   @map("submitted_by_admin_id")
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @updatedAt @map("updated_at")
   deal              Deal?

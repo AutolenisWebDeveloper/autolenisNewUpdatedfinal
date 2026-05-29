@@ -13,7 +13,9 @@ export const dynamic = "force-dynamic";
 export default async function DealerOpportunitiesPage() {
   const dealer = await requireDealer();
 
-  // Active invitations where dealer hasn't submitted an offer yet — single query
+  // Active invitations where dealer hasn't submitted an offer yet — single query.
+  // Pull the auction's vehicle(s) and the buyer's latest request so the dealer
+  // can see exactly what they'd be bidding on (make/model/year + budget).
   const opportunities = await prisma.auctionInvitation.findMany({
     where: {
       dealerId: dealer.id,
@@ -25,11 +27,73 @@ export default async function DealerOpportunitiesPage() {
       },
     },
     include: {
-      auction: { include: { deposit: { select: { status: true } } } },
+      auction: {
+        include: {
+          deposit: { select: { status: true } },
+          vehicles: {
+            orderBy: { createdAt: "asc" },
+            take: 1,
+            select: { year: true, make: true, model: true, trim: true, mileage: true },
+          },
+          buyer: {
+            select: {
+              vehicleRequests: {
+                orderBy: { createdAt: "desc" },
+                take: 1,
+                select: {
+                  makePreference: true,
+                  modelPreference: true,
+                  yearMin: true,
+                  yearMax: true,
+                  maxBudgetCents: true,
+                },
+              },
+            },
+          },
+        },
+      },
     },
     orderBy: { sentAt: "desc" },
     take: 20,
   });
+
+  function vehicleTitle(inv: (typeof opportunities)[number]): string {
+    const v = inv.auction.vehicles[0];
+    if (v && (v.make || v.model)) {
+      return [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ");
+    }
+    const req = inv.auction.buyer.vehicleRequests[0];
+    if (req && (req.makePreference || req.modelPreference)) {
+      const yearLabel =
+        req.yearMin && req.yearMax
+          ? req.yearMin === req.yearMax
+            ? `${req.yearMin} `
+            : `${req.yearMin}–${req.yearMax} `
+          : "";
+      return `${yearLabel}${[req.makePreference, req.modelPreference].filter(Boolean).join(" ")}`.trim();
+    }
+    return "Vehicle Request";
+  }
+
+  function budgetLabel(inv: (typeof opportunities)[number]): string | null {
+    const req = inv.auction.buyer.vehicleRequests[0];
+    if (req?.maxBudgetCents) {
+      return `Budget: up to $${Math.round(req.maxBudgetCents / 100).toLocaleString()}`;
+    }
+    return null;
+  }
+
+  function yearRangeLabel(inv: (typeof opportunities)[number]): string {
+    const v = inv.auction.vehicles[0];
+    if (v?.year) return `Year: ${v.year}`;
+    const req = inv.auction.buyer.vehicleRequests[0];
+    if (req?.yearMin && req?.yearMax) {
+      return req.yearMin === req.yearMax ? `Year: ${req.yearMin}` : `Year: ${req.yearMin}–${req.yearMax}`;
+    }
+    if (req?.yearMin) return `Year: ${req.yearMin}+`;
+    if (req?.yearMax) return `Year: up to ${req.yearMax}`;
+    return "Year: Any";
+  }
 
   function timeRemainingLabel(endsAt: Date | null): string {
     if (!endsAt) return "Unknown";
@@ -85,9 +149,17 @@ export default async function DealerOpportunitiesPage() {
                   </div>
                   <div className="flex items-center gap-2 mb-1">
                     <Gavel size={14} className="text-slate-400 shrink-0" />
-                    <p className="text-sm font-medium text-slate-700 truncate">
-                      Auction #{inv.auctionId.slice(0, 8)}
+                    <p className="text-sm font-bold text-slate-900 truncate" data-testid={`opportunity-vehicle-${inv.id}`}>
+                      {vehicleTitle(inv)}
                     </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+                    {budgetLabel(inv) && (
+                      <span className="text-xs font-semibold text-[#0B5FD1]" data-testid={`opportunity-budget-${inv.id}`}>
+                        {budgetLabel(inv)}
+                      </span>
+                    )}
+                    <span className="text-xs text-slate-500">{yearRangeLabel(inv)}</span>
                   </div>
                   <div className={`flex items-center gap-1.5 text-sm font-medium mt-1 ${urgencyColor(inv.auction.endsAt)}`}
                     data-testid={`opportunity-time-${inv.id}`}>
@@ -95,7 +167,7 @@ export default async function DealerOpportunitiesPage() {
                     {timeRemainingLabel(inv.auction.endsAt)}
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
-                    Invitation received {inv.sentAt.toLocaleDateString()}
+                    Auction #{inv.auctionId.slice(0, 8)} &middot; Invitation received {inv.sentAt.toLocaleDateString()}
                   </p>
                 </div>
                 <Button

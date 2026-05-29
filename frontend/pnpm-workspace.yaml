@@ -1,12 +1,29 @@
-# pnpm 10 reads workspace-wide settings (including onlyBuiltDependencies)
+# pnpm reads workspace-wide settings (including the build-script allowlist)
 # from this file. The `packages:` key is required for pnpm to treat this
 # directory as a workspace root and honor the other settings.
+#
+# Build scripts (postinstall/install/preinstall) are DISABLED by default in
+# pnpm 10+ for supply-chain safety; un-approved scripts make the install exit 1
+# with ERR_PNPM_IGNORED_BUILDS. The packages below are explicitly approved.
+#
+# Two keys are kept in sync on purpose:
+#   * allowBuilds           - read by pnpm 11+ (map of package -> true)
+#   * onlyBuiltDependencies - read by pnpm 10  (array of package names)
+# pnpm 11 NO LONGER reads these settings from .npmrc or package.json#pnpm, so
+# this file is the source of truth. `pnpm approve-builds --all` regenerates the
+# allowBuilds map - values MUST be the boolean `true`, never placeholder text.
 packages:
   - '.'
 
-# Build scripts are disabled by default in pnpm 10. Only the packages
-# listed below may execute install-time scripts (postinstall, build, etc).
-# Keep this list in sync with anything the lockfile flags as ignored.
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true
+  protobufjs: true
+  sharp: true
+  unrs-resolver: true
+
 onlyBuiltDependencies:
   - '@prisma/client'
   - '@prisma/engines'
