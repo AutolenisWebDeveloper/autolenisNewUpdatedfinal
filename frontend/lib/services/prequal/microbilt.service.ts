@@ -20,6 +20,59 @@ const ENCRYPTION_KEY = Buffer.from(
   "hex"
 );
 
+// ─── iPredict Advantage URL resolvers (iPredict_6.yaml spec) ────────────────────
+// Production:  https://api.microbilt.com/iPredict  · POST /GetReport
+// Sandbox:     https://apitest.microbilt.com/iPredict
+// OAuth lives on a SEPARATE path (NOT under /iPredict): /OAuth/Token
+// New *_BASE_URL / *_SANDBOX_URL env vars must include the full /GetReport (or
+// /OAuth/Token) suffix. Legacy vars are kept as fallback for backward compat.
+
+function isSandboxMode(): boolean {
+  return process.env.MICROBILT_SANDBOX === "true";
+}
+
+function getReportUrl(): string | null {
+  // Spec endpoint: POST /GetReport — env vars must include the /GetReport suffix.
+  return (
+    (isSandboxMode()
+      ? process.env.MICROBILT_SANDBOX_URL
+      : process.env.MICROBILT_BASE_URL) ??
+    process.env.IPREDICT_GET_REPORT_URL ??
+    null
+  );
+}
+
+function getOAuthUrl(): string | null {
+  return (
+    (isSandboxMode()
+      ? process.env.MICROBILT_OAUTH_SANDBOX_URL
+      : process.env.MICROBILT_OAUTH_BASE_URL) ??
+    process.env.MICROBILT_OAUTH_TOKEN_URL ??
+    null
+  );
+}
+
+/**
+ * Non-secret MicroBilt configuration snapshot for the admin system-health page.
+ * Never returns client secret or token — only URLs, product, CAID, and a
+ * boolean indicating whether credentials are present.
+ */
+export function getMicroBiltConfigStatus() {
+  const clientId = process.env.MICROBILT_CLIENT_ID;
+  return {
+    mode: isSandboxMode() ? ("SANDBOX" as const) : ("PRODUCTION" as const),
+    reportUrl: getReportUrl(),
+    oauthUrl: getOAuthUrl(),
+    product: process.env.MICROBILT_PRODUCT ?? "IPredict Advantage",
+    caid: process.env.MICROBILT_CAID ?? null,
+    credentialsPresent: !!(
+      clientId &&
+      process.env.MICROBILT_CLIENT_SECRET &&
+      !clientId.includes("placeholder")
+    ),
+  };
+}
+
 // AES-256-GCM encryption for rawResponse
 function encryptRawResponse(text: string): string {
   const iv = randomBytes(12);
@@ -44,7 +97,7 @@ const NO_INCOME_FALLBACK_CENTS = 3_500_000;
 async function getMicroBiltToken(): Promise<string> {
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
 
-  const tokenUrl = process.env.MICROBILT_OAUTH_TOKEN_URL;
+  const tokenUrl = getOAuthUrl();
   const clientId = process.env.MICROBILT_CLIENT_ID;
   const clientSecret = process.env.MICROBILT_CLIENT_SECRET;
 
@@ -118,8 +171,6 @@ export interface IPredicResult {
   mocked: boolean;
   reason?: string;
   // ── Decision detail (institutional-grade transparency / storage) ──────────
-  // Estimated credit score parsed from iPredict (null when not present).
-  creditScoreEstimate?: number | null;
   // Actual DTI ratios for this buyer, basis points (1850 = 18.50%).
   frontEndDtiBps?: number | null;
   backEndDtiBps?: number | null;
@@ -127,7 +178,41 @@ export interface IPredicResult {
   benchmarkAprBps?: number | null;
   // Existing housing + other-debt obligations used in the back-end DTI (cents).
   totalMonthlyObligationsCents?: number | null;
+  // Monthly income after the employment stability haircut (cents).
+  effectiveIncomeCents?: number | null;
+  // ── iPredict_6.yaml spec fields (SCORES / REASONS / IDV / MLA) ─────────────
+  creditScore: number | null;          // DECISION.SCORES[0].Value (300–850)
+  idvScore: number | null;             // SERVICEDETAILS.IDV.score
+  mlaCovered: boolean | null;          // Military Lending Act covered borrower
+  fraudWarning: string | null;         // SERVICEDETAILS.IDV.fraudWarning
+  adverseReasonCodes: string[];        // DECISION.REASONS[].code (FCRA § 615)
+  deceasedFlag: boolean;               // SERVICEDETAILS.IDV.deceasedIndicator
+  bankruptcyFlag: boolean;             // SERVICEDETAILS.IDV.bankruptcyFlag
+  highRiskAddressFlag: boolean;        // IDV.highRiskAddress / suspiciousAddress
 }
+
+// Risk fields for paths where iPredict was never reached or returned no data.
+// mlaCovered/null is indeterminate (we cannot assert non-coverage).
+const INDETERMINATE_RISK = {
+  creditScore: null,
+  idvScore: null,
+  mlaCovered: null,
+  fraudWarning: null,
+  adverseReasonCodes: [] as string[],
+  deceasedFlag: false,
+  bankruptcyFlag: false,
+  highRiskAddressFlag: false,
+} satisfies Pick<
+  IPredicResult,
+  | "creditScore"
+  | "idvScore"
+  | "mlaCovered"
+  | "fraudWarning"
+  | "adverseReasonCodes"
+  | "deceasedFlag"
+  | "bankruptcyFlag"
+  | "highRiskAddressFlag"
+>;
 
 // Sandbox / dev mock — APPROVED / GOOD / $35,000
 function mockIPredict(): IPredicResult {
@@ -141,6 +226,7 @@ function mockIPredict(): IPredicResult {
     expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     rawResponse: encryptRawResponse(JSON.stringify({ mocked: true })),
     mocked: true,
+    ...INDETERMINATE_RISK,
   };
 }
 
@@ -160,6 +246,7 @@ function timeoutResult(): IPredicResult {
     rawResponse: encryptRawResponse(JSON.stringify({ referred: true, reason: "TIMEOUT" })),
     mocked: false,
     reason: "TIMEOUT",
+    ...INDETERMINATE_RISK,
   };
 }
 
@@ -175,6 +262,7 @@ function errorResult(reason: string): IPredicResult {
     rawResponse: encryptRawResponse(JSON.stringify({ referred: true, reason })),
     mocked: false,
     reason,
+    ...INDETERMINATE_RISK,
   };
 }
 
@@ -209,6 +297,12 @@ function buildPayload(buyer: MicroBiltBuyerPII, gate: IncomeGateResult) {
       RequestType: "N",
       ReasonCode:  "3",
       RefNum:      crypto.randomUUID(),
+      // CAID — MicroBilt account identifier (iPredict Advantage, CAID 29922).
+      // Spec default is payload-based; if iPredict rejects with "CAID required"
+      // or "MemberId invalid", switch to the X-CAID header in callIPredict().
+      MemberId:  process.env.MICROBILT_CAID ?? undefined,
+      // Product identifier
+      ProductID: process.env.MICROBILT_PRODUCT ?? "IPredict Advantage",
     },
     RequestedAmt: {
       // Income-derived: represents what the buyer can afford at 20% DTI/7%/72mo.
@@ -243,13 +337,48 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   // production env mistake into silent fake approvals. When credentials are
   // missing/placeholder outside sandbox mode we route to MANUAL_REVIEW
   // (CONFIG_ERROR) so a human can fix the deployment.
-  if (process.env.MICROBILT_SANDBOX === "true") return mockIPredict();
+  if (isSandboxMode()) return mockIPredict();
 
-  const reportUrl = process.env.IPREDICT_GET_REPORT_URL;
+  const reportUrl = getReportUrl();
+  const oauthUrl  = getOAuthUrl();
   const clientId  = process.env.MICROBILT_CLIENT_ID;
+
+  // ── Production URL safety guards (iPredict_6.yaml cutover) ──────────────────
+  // Sandbox mode already returned above, so we are in production here. Refuse to
+  // call apitest. with production credentials, and require both URLs.
+  if (!isSandboxMode()) {
+    if (reportUrl?.includes("apitest.")) {
+      console.error(
+        "[microbilt] CRITICAL: production mode but report URL points to " +
+        "apitest. Routing to MANUAL_REVIEW."
+      );
+      return errorResult("CONFIG_MISMATCH");
+    }
+    if (oauthUrl?.includes("apitest.")) {
+      console.error(
+        "[microbilt] CRITICAL: production mode but OAuth URL points to " +
+        "apitest. Routing to MANUAL_REVIEW."
+      );
+      return errorResult("CONFIG_MISMATCH");
+    }
+    if (!reportUrl?.endsWith("/GetReport")) {
+      console.warn(
+        "[microbilt] WARNING: report URL does not end with /GetReport — " +
+        "verify configuration against spec."
+      );
+    }
+    if (!reportUrl || !oauthUrl) {
+      console.error(
+        "[microbilt] CRITICAL: missing production URLs. reportUrl=" +
+        !!reportUrl + " oauthUrl=" + !!oauthUrl
+      );
+      return errorResult("URL_NOT_CONFIGURED");
+    }
+  }
+
   if (!reportUrl || !clientId || clientId.includes("placeholder")) {
     console.error(
-      "[microbilt] CONFIG_ERROR: MICROBILT_CLIENT_ID or IPREDICT_GET_REPORT_URL " +
+      "[microbilt] CONFIG_ERROR: MICROBILT_CLIENT_ID or the iPredict report URL " +
       "is missing or contains a placeholder, and MICROBILT_SANDBOX is not 'true'. " +
       "Routing prequalification to MANUAL_REVIEW until deployment env is fixed.",
     );
@@ -284,6 +413,7 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
       requestedAmtCents:            Math.min(fallback, 8_500_000),
       incomeBasedMaxCents:          Math.min(fallback, 8_500_000),
       stabilityFactor:              1.0,
+      effectiveIncomeCents:         0,
       estimatedMonthlyPayment:      0,
       belowMinimum:                 false,
       frontEndDtiBps:               0,
@@ -308,11 +438,12 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
       ),
       mocked: false,
       reason: "INCOME_BELOW_MINIMUM",
-      creditScoreEstimate:          null,
       frontEndDtiBps:               gate.frontEndDtiBps,
       backEndDtiBps:                gate.backEndDtiBps,
       benchmarkAprBps:              gate.benchmarkAprBps,
       totalMonthlyObligationsCents: gate.totalMonthlyObligationsCents,
+      effectiveIncomeCents:         gate.effectiveIncomeCents,
+      ...INDETERMINATE_RISK,
     };
   }
 
@@ -371,28 +502,51 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   const decisionCode  = decisionNode?.decision?.code;
   const decisionValue = decisionNode?.decision?.Value;
 
-  // Parse loan amounts — check all possible field names iPredict may return
-  const recommendedLoanAmountCents =
-    decisionNode?.recommendedLoanAmount
-      ? Math.round(parseFloat(decisionNode.recommendedLoanAmount) * 100)
-    : decisionNode?.approvedAmount
-      ? Math.round(parseFloat(decisionNode.approvedAmount) * 100)
-    : decisionNode?.qualifiedAmount
-      ? Math.round(parseFloat(decisionNode.qualifiedAmount) * 100)
+  // Loan amounts — spec fields: DECISION.recommendedLoanAmount / maxLoanAmount.
+  const recommendedLoanAmountCents = decisionNode?.recommendedLoanAmount
+    ? Math.round(parseFloat(decisionNode.recommendedLoanAmount) * 100)
     : null;
 
-  const maxLoanAmountCents =
-    decisionNode?.maxLoanAmount
-      ? Math.round(parseFloat(decisionNode.maxLoanAmount) * 100)
-    : decisionNode?.maxApprovedAmount
-      ? Math.round(parseFloat(decisionNode.maxApprovedAmount) * 100)
+  const maxLoanAmountCents = decisionNode?.maxLoanAmount
+    ? Math.round(parseFloat(decisionNode.maxLoanAmount) * 100)
     : null;
 
   const ofacFlagged = idv?.OFACAlert === "Y" || ofac?.ofacresult === "Y";
   const decision    = mapDecision(decisionCode, decisionValue);
 
-  // Estimated credit score parsed from iPredict (null when not present).
-  const creditScoreEstimate = parseScoreFromResponse(raw);
+  // ── Credit score from SCORES array — spec: DECISION.SCORES[].Value ─────────
+  const scoresArray = decisionNode?.SCORES ?? [];
+  const rawScore =
+    scoresArray.length > 0 && scoresArray[0]?.Value ? scoresArray[0].Value : null;
+  const parsedScore = rawScore !== null ? parseInt(String(rawScore), 10) : NaN;
+  const creditScore =
+    Number.isFinite(parsedScore) && parsedScore >= 300 && parsedScore <= 850
+      ? parsedScore
+      : null;
+
+  // FCRA adverse action reason codes — spec: DECISION.REASONS[].code
+  const adverseReasonCodes = (decisionNode?.REASONS ?? [])
+    .map((r) => r.code)
+    .filter((c): c is string => !!c);
+
+  // ID Verify fraud warning + IDV score
+  const fraudWarning = idv?.fraudWarning ?? null;
+  const idvScoreParsed = idv?.score ? parseInt(idv.score, 10) : NaN;
+  const idvScore = Number.isFinite(idvScoreParsed) ? idvScoreParsed : null;
+
+  // MLA Verify covered-borrower status — check both spec locations.
+  const mlaStatus =
+    content?.SERVICEDETAILS?.MLA?.STATUS?.Value ?? content?.MLA?.STATUS?.Value ?? null;
+  const mlaCovered =
+    mlaStatus === "Y" ||
+    (mlaStatus?.toUpperCase().includes("ACTIVE") ?? false) ||
+    mlaStatus?.toUpperCase() === "COVERED";
+
+  // Additional risk flags from IDV
+  const deceasedFlag = idv?.deceasedIndicator === "Y";
+  const bankruptcyFlag = idv?.bankruptcyFlag === "Y";
+  const highRiskAddressFlag =
+    idv?.highRiskAddress === "Y" || idv?.suspiciousAddress === "Y";
 
   // ── STEP 4: Two-gate minimum — income gate vs credit gate ─────────────────
   // Final OTD = min(income-computed max, MicroBilt-approved amount)
@@ -415,14 +569,15 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
 
       // ── STEP 5: Derive tier (prefer credit score; fall back to ratio) ──────
       tier = deriveTier(
-        creditScoreEstimate,
         preliminaryMaxOtd,
         gate.requestedAmtCents,
         args.monthlyIncomeCents ?? null,
+        creditScore,
       );
 
-      // PASS 2: re-run the income gate with the tier-specific benchmark APR for
-      // a more accurate monthly payment / buying-power estimate.
+      // PASS 2: re-run the income gate with the tier-specific benchmark APR
+      // (tier hint derived from the parsed creditScore) for a more accurate
+      // monthly payment / buying-power estimate.
       if (hasIncome) {
         finalGate = computeIncomeGate({
           ...incomeGateBase,
@@ -459,12 +614,21 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
     expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     rawResponse: encryptRawResponse(JSON.stringify(raw)),
     mocked: false,
-    creditScoreEstimate,
     // Decision detail comes from the FINAL (tier-aware) income gate.
     frontEndDtiBps:               hasIncome ? finalGate.frontEndDtiBps : null,
     backEndDtiBps:                hasIncome ? finalGate.backEndDtiBps : null,
     benchmarkAprBps:              hasIncome ? finalGate.benchmarkAprBps : null,
     totalMonthlyObligationsCents: hasIncome ? finalGate.totalMonthlyObligationsCents : null,
+    effectiveIncomeCents:         hasIncome ? finalGate.effectiveIncomeCents : null,
+    // ── iPredict_6.yaml spec fields ──────────────────────────────────────────
+    creditScore,
+    idvScore,
+    mlaCovered,
+    fraudWarning,
+    adverseReasonCodes,
+    deceasedFlag,
+    bankruptcyFlag,
+    highRiskAddressFlag,
   };
 }
 
@@ -479,33 +643,14 @@ function tierToBenchmark(tier: PreQualTier | null): BenchmarkTier {
   }
 }
 
-// Extract the estimated credit score from an iPredict response. iPredict's
-// sandbox/production payloads vary, so we probe the most likely locations and
-// validate the value is a plausible FICO/VantageScore (300–850).
-function parseScoreFromResponse(raw: IPredictResponse): number | null {
-  const content = raw.RESPONSE?.CONTENT;
-  const candidates: Array<string | number | undefined> = [
-    content?.CREDITSCORE?.score,
-    content?.SERVICEDETAILS?.CREDITSCORE?.score,
-    content?.DECISION?.creditScore,
-    content?.DECISION?.score,
-  ];
-  for (const c of candidates) {
-    if (c === undefined || c === null) continue;
-    const n = typeof c === "number" ? c : parseInt(String(c).replace(/[^0-9]/g, ""), 10);
-    if (Number.isFinite(n) && n >= 300 && n <= 850) return n;
-  }
-  return null;
-}
-
-// Tier derivation — prefers the credit score when available, otherwise falls
-// back to the approval-ratio + payment-to-income logic.
-// Mirrors Capital One / Chase / credit union tier bands.
+// Tier derivation — prefers the iPredict credit score (300–850 per spec) when
+// available, otherwise falls back to the approval-ratio + payment-to-income
+// logic. Mirrors Capital One / Chase / credit union tier bands.
 function deriveTier(
-  creditScore:        number | null,
   approvedCents:      number,
   requestedCents:     number,
   monthlyIncomeCents: number | null,
+  creditScore:        number | null,
 ): PreQualTier {
   // PREFER credit score when present.
   if (creditScore !== null && creditScore > 0) {
@@ -573,37 +718,99 @@ The agency did not make this decision and cannot explain the specific reasons fo
 export const FCRA_CONSENT_TEXT =
   'I understand that by clicking on the I AGREE button immediately following this notice, I am providing "written instructions" to AutoLenis under the Fair Credit Reporting Act authorizing AutoLenis to obtain information from my personal credit profile or other information from MicroBilt. I authorize AutoLenis to obtain such information solely to prequalify me for credit options. Credit Information accessed for my pre-qualification request may be different than the Credit Information accessed by a credit grantor on a date after the date of my original pre-qualification request to make the credit decision.';
 
-// ─── Response shape (subset we read) ────────────────────────────────────────
+// ─── Response shape — iPredict_6.yaml spec (subset we read) ──────────────────
 interface IPredictResponse {
+  MBCLVRq?: unknown; // echoed request
+  MsgRsHdr?: {
+    RqUID?: string;
+    Status?: {
+      StatusCode?: number;
+      Severity?: "Error" | "Warn" | "Info";
+      StatusDesc?: string;
+    };
+  };
   RESPONSE?: {
-    STATUS?:  { type?: string; message?: string };
+    REQUESTINGSYSTEM?: unknown;
+    HEADER?: unknown;
+    STATUS?: {
+      applicationNumber?: string;
+      type?: "SUCCESS" | "ERROR";
+      action?: "RESEND" | "DONE";
+      error?: {
+        message?: string;
+        code?: string;
+        type?: "APPLICATION" | "SYSTEM";
+      };
+    };
     CONTENT?: {
       DECISION?: {
-        decision?: { code?: string; Value?: string };
+        decision?: {
+          code?: string;
+          Value?: string;
+        };
+        decisionTimestamp?: string;
         recommendedLoanAmount?: string;
-        maxLoanAmount?:         string;
-        approvedAmount?:        string;   // alternative field name
-        qualifiedAmount?:       string;   // alternative field name
-        maxApprovedAmount?:     string;   // alternative field name
-        reasonCodes?:           string[]; // adverse action codes
-        creditScore?:           string | number; // alternative score location
-        score?:                 string | number; // alternative score location
-      };
-      // Estimated credit score block. Exact placement varies between the
-      // iPredict sandbox and production payloads, so the parser probes several
-      // locations (see parseScoreFromResponse).
-      CREDITSCORE?: {
-        score?:  string | number;
-        bureau?: string;
-        model?:  string;
+        maxLoanAmount?: string;
+        SCORES?: Array<{
+          type?: string;
+          model?: string;
+          performsLikeScore?: string;
+          profitabilityLift?: string;
+          Value?: string; // actual score
+        }>;
+        REASONS?: Array<{
+          code?: string;
+          Value?: string;
+        }>;
+        PROPERTIES?: Array<{
+          name?: string;
+          Value?: string;
+        }>;
       };
       SERVICEDETAILS?: {
-        IDV?:  { OFACAlert?: string };
-        OFAC?: { ofacresult?: string };
-        CREDITSCORE?: {
-          score?:  string | number;
-          bureau?: string;
-          model?:  string;
+        IDV?: {
+          score?: string;
+          OFACAlert?: string;
+          fraudWarning?: string;
+          deceasedIndicator?: string;
+          bankruptcyFlag?: string;
+          highRiskEmail?: string;
+          highRiskAddress?: string;
+          suspiciousSSN?: string;
+          suspiciousDOB?: string;
+          suspiciousAddress?: string;
+          suspiciousPhone?: string;
+          ssnNameMatch?: string;
+          ssnAddressMatch?: string;
+          ALERTS?: Array<{
+            code?: string;
+            description?: string;
+            Value?: string;
+          }>;
+        };
+        OFAC?: {
+          ofacresult?: string;
+          ofacname?: string;
+          ofaclist?: string;
+          ofacremarks?: string;
+        };
+        MLA?: {
+          STATUS?: {
+            code?: string;
+            Value?: string;
+          };
+        };
+        BAV?: {
+          SUMMARY?: {
+            highRiskIndicator?: string;
+            SCORE?: { value?: string };
+          };
+        };
+      };
+      MLA?: {
+        STATUS?: {
+          code?: string;
+          Value?: string;
         };
       };
     };

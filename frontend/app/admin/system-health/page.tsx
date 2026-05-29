@@ -30,6 +30,15 @@ interface LiveIntegration {
   ok: boolean;
 }
 
+interface MicroBiltConfig {
+  mode: "PRODUCTION" | "SANDBOX";
+  reportUrl: string | null;
+  oauthUrl: string | null;
+  product: string;
+  caid: string | null;
+  credentialsPresent: boolean;
+}
+
 function _StatusBadge({ ok, label }: { ok: boolean; label: string }) {
   return (
     <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium ${ok ? "bg-green-50 border-green-200 text-green-700" : "bg-red-50 border-red-200 text-red-700"}`}>
@@ -39,19 +48,43 @@ function _StatusBadge({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
+function ConfigRow({
+  label,
+  value,
+  mono = false,
+  full = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+  full?: boolean;
+}) {
+  return (
+    <div className={`flex items-start justify-between gap-3 py-1.5 border-b border-slate-100 last:border-0 ${full ? "sm:col-span-2" : ""}`}>
+      <span className="text-xs text-slate-500 shrink-0">{label}</span>
+      <span className={`text-sm text-slate-800 text-right break-all ${mono ? "font-mono text-xs" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
 export default function AdminSystemHealthPage() {
   const [report, setReport] = useState<HealthReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [liveIntegrations, setLiveIntegrations] = useState<LiveIntegration[] | null>(null);
   const [loadingIntegrations, setLoadingIntegrations] = useState(true);
+  const [microbiltConfig, setMicrobiltConfig] = useState<MicroBiltConfig | null>(null);
 
   const loadIntegrations = useCallback(async () => {
     setLoadingIntegrations(true);
     setLiveIntegrations(null);
     try {
       const res = await fetch("/api/admin/health/integrations");
-      const json = await res.json() as { success?: boolean; data?: { integrations: LiveIntegration[] } };
+      const json = await res.json() as {
+        success?: boolean;
+        data?: { integrations: LiveIntegration[]; microbilt?: MicroBiltConfig };
+      };
       if (json.success && json.data?.integrations) setLiveIntegrations(json.data.integrations);
+      if (json.success && json.data?.microbilt) setMicrobiltConfig(json.data.microbilt);
     } catch { /* ignore */ }
     setLoadingIntegrations(false);
   }, []);
@@ -163,6 +196,46 @@ export default function AdminSystemHealthPage() {
           );
         })}
       </div>
+
+      {/* MicroBilt iPredict Advantage configuration */}
+      {microbiltConfig && (
+        <div className="mb-8" data-testid="microbilt-config">
+          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">
+            MicroBilt iPredict™ Advantage
+          </h2>
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+              <ConfigRow
+                label="Mode"
+                value={
+                  <span
+                    className={`text-xs font-bold px-2 py-0.5 rounded ${
+                      microbiltConfig.mode === "PRODUCTION"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-amber-50 text-amber-700"
+                    }`}
+                    data-testid="microbilt-mode"
+                  >
+                    {microbiltConfig.mode}
+                  </span>
+                }
+              />
+              <ConfigRow label="Product" value={microbiltConfig.product} />
+              <ConfigRow label="CAID" value={microbiltConfig.caid ?? "— (not set)"} />
+              <ConfigRow
+                label="Credentials"
+                value={
+                  <span className={microbiltConfig.credentialsPresent ? "text-emerald-700" : "text-red-600"}>
+                    {microbiltConfig.credentialsPresent ? "Present" : "Missing"}
+                  </span>
+                }
+              />
+              <ConfigRow label="Report URL" value={microbiltConfig.reportUrl ?? "— (not configured)"} mono full />
+              <ConfigRow label="OAuth URL" value={microbiltConfig.oauthUrl ?? "— (not configured)"} mono full />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Metrics */}
       <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">Live Metrics</h2>

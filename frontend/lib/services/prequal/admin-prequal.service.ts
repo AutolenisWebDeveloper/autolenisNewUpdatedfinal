@@ -129,6 +129,14 @@ export interface AdminPrequalReadiness {
     source: string;
     createdAt: string;
     updatedAt: string;
+    // iPredict_6.yaml risk detail (admin-only — never exposed to buyer).
+    creditScore: number | null;
+    idvScore: number | null;
+    mlaCovered: boolean;
+    fraudWarning: string | null;
+    adverseReasonCodes: string[];
+    deceasedFlag: boolean;
+    bankruptcyFlag: boolean;
   } | null;
   buyer: {
     firstName: string;
@@ -202,6 +210,8 @@ const PROVIDER_ERROR_REASONS = new Set([
   "OAUTH_FAILED",
   "IPREDICT_ERROR",
   "CONFIG_ERROR",
+  "CONFIG_MISMATCH",
+  "URL_NOT_CONFIGURED",
 ]);
 
 function mapFinalDecisionToRunStatus(
@@ -277,6 +287,13 @@ export async function getAdminPrequalReadiness(
           source: inferPrequalSource(existing.rawResponse ?? null),
           createdAt: existing.createdAt.toISOString(),
           updatedAt: existing.updatedAt.toISOString(),
+          creditScore: existing.creditScore,
+          idvScore: existing.idvScore,
+          mlaCovered: existing.mlaCovered,
+          fraudWarning: existing.fraudWarning,
+          adverseReasonCodes: existing.adverseReasonCodes,
+          deceasedFlag: existing.deceasedFlag,
+          bankruptcyFlag: existing.bankruptcyFlag,
         }
       : null,
     buyer: {
@@ -395,9 +412,11 @@ export async function runAdminIPredictPrequalForBuyer(
     fallbackMaxOtdAmountCents: buyer.preQualification?.maxOtdAmountCents ?? 3_500_000,
   });
 
-  // ── OFAC hard gate — identical to buyer path ───────────────────────────────
+  // ── Decision gate pipeline — identical order to the buyer path ─────────────
+  // Gate 1: OFAC (hard gate). Gates 2–4: iPredict_6.yaml risk signals →
+  // MANUAL_REVIEW. Gate 5: existing income + credit decision (preserved).
   let finalDecision: PreQualDecision = result.decision;
-  if (result.ofacFlagged) {
+  if (result.ofacFlagged === true) {
     finalDecision = PreQualDecision.OFAC_REVIEW;
     await prisma.notification
       .create({
@@ -408,6 +427,29 @@ export async function runAdminIPredictPrequalForBuyer(
         },
       })
       .catch(() => {});
+  }
+  // Gate 2: Deceased indicator → manual review.
+  else if (result.deceasedFlag) {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    console.warn(`[admin-prequal] Deceased indicator for buyer ${buyerId} — manual review`);
+  }
+  // Gate 3: MLA covered borrower → manual review.
+  else if (result.mlaCovered === true) {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    await prisma.notification
+      .create({
+        data: {
+          title: "MLA Covered Borrower — Manual Review Required",
+          body: `Buyer ${buyerId} is covered under the Military Lending Act. Apply MLA-compliant disclosures.`,
+          type: "SYSTEM_ALERT",
+        },
+      })
+      .catch(() => {});
+  }
+  // Gate 4: Fraud warning → manual review.
+  else if (result.fraudWarning && result.fraudWarning !== "N" && result.fraudWarning !== "") {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    console.warn(`[admin-prequal] Fraud warning ${result.fraudWarning} for buyer ${buyerId}`);
   }
 
   // ── maxOtdAmountCents — two-gate minimum already applied by callIPredict ────
@@ -435,10 +477,18 @@ export async function runAdminIPredictPrequalForBuyer(
         housingStatus: input.housingStatus ?? null,
         monthlyHousingPaymentCents: input.monthlyHousingPaymentCents ?? null,
         monthlyOtherDebtCents: input.monthlyOtherDebtCents ?? null,
-        creditScoreEstimate: result.creditScoreEstimate ?? null,
         frontEndDtiBps: result.frontEndDtiBps ?? null,
         backEndDtiBps: result.backEndDtiBps ?? null,
         benchmarkAprBps: result.benchmarkAprBps ?? null,
+        effectiveIncomeCents: result.effectiveIncomeCents ?? null,
+        // iPredict_6.yaml spec fields
+        creditScore: result.creditScore ?? null,
+        idvScore: result.idvScore ?? null,
+        mlaCovered: result.mlaCovered ?? false,
+        fraudWarning: result.fraudWarning ?? null,
+        adverseReasonCodes: result.adverseReasonCodes ?? [],
+        deceasedFlag: result.deceasedFlag ?? false,
+        bankruptcyFlag: result.bankruptcyFlag ?? false,
       },
       update: {
         decision: finalDecision,
@@ -454,10 +504,18 @@ export async function runAdminIPredictPrequalForBuyer(
         housingStatus: input.housingStatus ?? null,
         monthlyHousingPaymentCents: input.monthlyHousingPaymentCents ?? null,
         monthlyOtherDebtCents: input.monthlyOtherDebtCents ?? null,
-        creditScoreEstimate: result.creditScoreEstimate ?? null,
         frontEndDtiBps: result.frontEndDtiBps ?? null,
         backEndDtiBps: result.backEndDtiBps ?? null,
         benchmarkAprBps: result.benchmarkAprBps ?? null,
+        effectiveIncomeCents: result.effectiveIncomeCents ?? null,
+        // iPredict_6.yaml spec fields
+        creditScore: result.creditScore ?? null,
+        idvScore: result.idvScore ?? null,
+        mlaCovered: result.mlaCovered ?? false,
+        fraudWarning: result.fraudWarning ?? null,
+        adverseReasonCodes: result.adverseReasonCodes ?? [],
+        deceasedFlag: result.deceasedFlag ?? false,
+        bankruptcyFlag: result.bankruptcyFlag ?? false,
       },
     });
 

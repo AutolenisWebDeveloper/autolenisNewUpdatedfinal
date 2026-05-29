@@ -125,11 +125,15 @@ export default async function PrequalPage() {
     } | null = null;
 
     if (showBudgetMath) {
+      // Prefer the persisted effective income; fall back to recomputing it from
+      // the stored income + stability haircut for older records.
       const stabilityFactor = getStabilityFactor(
         prequal.employmentStatus,
         prequal.lengthOfEmployment,
       );
-      const effectiveIncomeCents = Math.round(prequal.monthlyIncomeCents! * stabilityFactor);
+      const effectiveIncomeCents =
+        prequal.effectiveIncomeCents ??
+        Math.round(prequal.monthlyIncomeCents! * stabilityFactor);
       const housingCents = prequal.monthlyHousingPaymentCents ?? 0;
       const otherDebtCents = prequal.monthlyOtherDebtCents ?? 0;
       const totalExistingCents = housingCents + otherDebtCents;

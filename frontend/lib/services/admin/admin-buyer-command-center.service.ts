@@ -450,6 +450,14 @@ export async function getAdminBuyerDetailData(buyerId: string) {
           isExternal: buyer.preQualification.isExternal,
           createdAt: buyer.preQualification.createdAt.toISOString(),
           updatedAt: buyer.preQualification.updatedAt.toISOString(),
+          // iPredict_6.yaml risk detail (admin-only — never exposed to buyer).
+          creditScore: buyer.preQualification.creditScore,
+          idvScore: buyer.preQualification.idvScore,
+          mlaCovered: buyer.preQualification.mlaCovered,
+          fraudWarning: buyer.preQualification.fraudWarning,
+          adverseReasonCodes: buyer.preQualification.adverseReasonCodes,
+          deceasedFlag: buyer.preQualification.deceasedFlag,
+          bankruptcyFlag: buyer.preQualification.bankruptcyFlag,
         }
       : null,
     externalPreApprovals: buyer.externalPreApprovals.map((e) => ({

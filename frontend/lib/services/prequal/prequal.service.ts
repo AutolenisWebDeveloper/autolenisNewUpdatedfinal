@@ -27,6 +27,8 @@ const PROVIDER_ERROR_REASONS = new Set([
   "OAUTH_FAILED",
   "IPREDICT_ERROR",
   "CONFIG_ERROR",
+  "CONFIG_MISMATCH",
+  "URL_NOT_CONFIGURED",
 ]);
 
 function isProviderErrorReason(reason: string | undefined): boolean {
@@ -153,11 +155,15 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     monthlyOtherDebtCents:      input.monthlyOtherDebtCents ?? null,
   });
 
-  // ── OFAC gate ──────────────────────────────────────────────────────────────
-  // If ofacFlagged === true, NEVER approve, regardless of decision code.
-  // Internal status OFAC_REVIEW; admin queue item created; buyer sees pending.
+  // ── Decision gate pipeline (applied in this exact order) ───────────────────
+  // Gate 1: OFAC (hard gate — preserved). Gates 2–4 are iPredict_6.yaml risk
+  // signals that route to MANUAL_REVIEW. Gate 5 is the existing income +
+  // credit decision already baked into result.decision (preserved unchanged).
   let finalDecision: PreQualDecision = result.decision;
-  if (result.ofacFlagged) {
+
+  // Gate 1: OFAC — if ofacFlagged === true, NEVER approve, regardless of code.
+  // Internal status OFAC_REVIEW; admin queue item created; buyer sees pending.
+  if (result.ofacFlagged === true) {
     finalDecision = PreQualDecision.OFAC_REVIEW;
     await prisma.notification
       .create({
@@ -168,6 +174,29 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         },
       })
       .catch(() => {});
+  }
+  // Gate 2: Deceased indicator → manual review.
+  else if (result.deceasedFlag) {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    console.warn(`[prequal] Deceased indicator for buyer ${buyer.id} — manual review`);
+  }
+  // Gate 3: MLA covered borrower → manual review (apply MLA disclosures).
+  else if (result.mlaCovered === true) {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    await prisma.notification
+      .create({
+        data: {
+          title: "MLA Covered Borrower — Manual Review Required",
+          body: `Buyer ${buyer.id} is covered under the Military Lending Act. Apply MLA-compliant disclosures.`,
+          type: "SYSTEM_ALERT",
+        },
+      })
+      .catch(() => {});
+  }
+  // Gate 4: Fraud warning → manual review.
+  else if (result.fraudWarning && result.fraudWarning !== "N" && result.fraudWarning !== "") {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    console.warn(`[prequal] Fraud warning ${result.fraudWarning} for buyer ${buyer.id}`);
   }
 
   // ── maxOtdAmountCents assignment ───────────────────────────────────────────
@@ -199,10 +228,18 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         housingStatus: input.housingStatus ?? null,
         monthlyHousingPaymentCents: input.monthlyHousingPaymentCents ?? null,
         monthlyOtherDebtCents: input.monthlyOtherDebtCents ?? null,
-        creditScoreEstimate: result.creditScoreEstimate ?? null,
         frontEndDtiBps: result.frontEndDtiBps ?? null,
         backEndDtiBps: result.backEndDtiBps ?? null,
         benchmarkAprBps: result.benchmarkAprBps ?? null,
+        effectiveIncomeCents: result.effectiveIncomeCents ?? null,
+        // iPredict_6.yaml spec fields
+        creditScore: result.creditScore ?? null,
+        idvScore: result.idvScore ?? null,
+        mlaCovered: result.mlaCovered ?? false,
+        fraudWarning: result.fraudWarning ?? null,
+        adverseReasonCodes: result.adverseReasonCodes ?? [],
+        deceasedFlag: result.deceasedFlag ?? false,
+        bankruptcyFlag: result.bankruptcyFlag ?? false,
       },
       update: {
         decision: finalDecision,
@@ -220,10 +257,18 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         housingStatus: input.housingStatus ?? null,
         monthlyHousingPaymentCents: input.monthlyHousingPaymentCents ?? null,
         monthlyOtherDebtCents: input.monthlyOtherDebtCents ?? null,
-        creditScoreEstimate: result.creditScoreEstimate ?? null,
         frontEndDtiBps: result.frontEndDtiBps ?? null,
         backEndDtiBps: result.backEndDtiBps ?? null,
         benchmarkAprBps: result.benchmarkAprBps ?? null,
+        effectiveIncomeCents: result.effectiveIncomeCents ?? null,
+        // iPredict_6.yaml spec fields
+        creditScore: result.creditScore ?? null,
+        idvScore: result.idvScore ?? null,
+        mlaCovered: result.mlaCovered ?? false,
+        fraudWarning: result.fraudWarning ?? null,
+        adverseReasonCodes: result.adverseReasonCodes ?? [],
+        deceasedFlag: result.deceasedFlag ?? false,
+        bankruptcyFlag: result.bankruptcyFlag ?? false,
       },
     });
 

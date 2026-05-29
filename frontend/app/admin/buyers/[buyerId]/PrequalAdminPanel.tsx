@@ -45,6 +45,38 @@ interface ExistingPrequal {
   source: string;
   createdAt: string;
   updatedAt: string;
+  // iPredict_6.yaml risk detail (admin-only — never exposed to buyer).
+  creditScore?: number | null;
+  idvScore?: number | null;
+  mlaCovered?: boolean;
+  fraudWarning?: string | null;
+  adverseReasonCodes?: string[];
+  deceasedFlag?: boolean;
+  bankruptcyFlag?: boolean;
+}
+
+// Credit-score band label (iPredict scoring range 300–850 per spec).
+function creditScoreBand(score: number): string {
+  if (score >= 720) return "Strong";
+  if (score >= 660) return "Good";
+  if (score >= 600) return "Fair";
+  return "Weak";
+}
+
+// IDV score risk band (higher = lower risk per MicroBilt IDV scale).
+function idvScoreBand(score: number): string {
+  if (score >= 900) return "Low Risk";
+  if (score >= 700) return "Moderate Risk";
+  return "Elevated Risk";
+}
+
+function RiskRow({ label, value, alert = false }: { label: string; value: string; alert?: boolean }) {
+  return (
+    <div className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0">
+      <span className="text-xs text-slate-500">{label}</span>
+      <span className={`text-sm font-medium ${alert ? "text-red-700" : "text-slate-800"}`}>{value}</span>
+    </div>
+  );
 }
 
 interface BuyerProfile {
@@ -610,6 +642,73 @@ export function PrequalAdminPanel({
             </div>
           )}
         </div>
+
+        {/* Risk Detail (iPredict_6.yaml — admin-only, never shown to buyer) */}
+        {currentPrequal && (
+          currentPrequal.creditScore != null ||
+          currentPrequal.idvScore != null ||
+          currentPrequal.mlaCovered ||
+          currentPrequal.fraudWarning ||
+          currentPrequal.deceasedFlag ||
+          currentPrequal.bankruptcyFlag ||
+          (currentPrequal.adverseReasonCodes?.length ?? 0) > 0
+        ) && (
+          <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4" data-testid="prequal-risk-detail-card">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Risk Detail — iPredict™ (admin only)
+            </p>
+            <div className="space-y-0">
+              <RiskRow
+                label="Credit Score"
+                value={
+                  currentPrequal.creditScore != null
+                    ? `${currentPrequal.creditScore} (${creditScoreBand(currentPrequal.creditScore)})`
+                    : "—"
+                }
+              />
+              <RiskRow
+                label="IDV Score"
+                value={
+                  currentPrequal.idvScore != null
+                    ? `${currentPrequal.idvScore} (${idvScoreBand(currentPrequal.idvScore)})`
+                    : "—"
+                }
+              />
+              <RiskRow
+                label="MLA Status"
+                value={currentPrequal.mlaCovered ? "Covered Borrower" : "Not Covered"}
+                alert={!!currentPrequal.mlaCovered}
+              />
+              <RiskRow
+                label="Fraud Warning"
+                value={
+                  currentPrequal.fraudWarning && currentPrequal.fraudWarning !== "N"
+                    ? currentPrequal.fraudWarning
+                    : "None"
+                }
+                alert={!!currentPrequal.fraudWarning && currentPrequal.fraudWarning !== "N"}
+              />
+              <RiskRow
+                label="Deceased"
+                value={currentPrequal.deceasedFlag ? "Yes" : "No"}
+                alert={!!currentPrequal.deceasedFlag}
+              />
+              <RiskRow
+                label="Bankruptcy"
+                value={currentPrequal.bankruptcyFlag ? "Yes" : "No"}
+                alert={!!currentPrequal.bankruptcyFlag}
+              />
+              <RiskRow
+                label="Adverse Codes"
+                value={
+                  currentPrequal.adverseReasonCodes && currentPrequal.adverseReasonCodes.length > 0
+                    ? currentPrequal.adverseReasonCodes.join(", ")
+                    : "—"
+                }
+              />
+            </div>
+          </div>
+        )}
 
         {/* Consent Status */}
         <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4" data-testid="consent-status-card">

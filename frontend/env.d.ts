@@ -40,6 +40,14 @@ declare namespace NodeJS {
     IPREDICT_REPORT_PERFORMANCE_URL: string;
     IPREDICT_GET_ARCHIVE_REPORT_URL: string;
     MICROBILT_SANDBOX?: string; // "true" — bypass real MicroBilt and return mock APPROVED result
+    // iPredict Advantage production cutover (iPredict_6.yaml spec).
+    // *_BASE_URL must include the POST /GetReport suffix per spec.
+    MICROBILT_BASE_URL?: string;          // e.g. https://api.microbilt.com/iPredict/GetReport
+    MICROBILT_SANDBOX_URL?: string;       // e.g. https://apitest.microbilt.com/iPredict/GetReport
+    MICROBILT_OAUTH_BASE_URL?: string;    // e.g. https://api.microbilt.com/OAuth/Token
+    MICROBILT_OAUTH_SANDBOX_URL?: string; // e.g. https://apitest.microbilt.com/OAuth/Token
+    MICROBILT_PRODUCT?: string;           // "IPredict Advantage"
+    MICROBILT_CAID?: string;              // MicroBilt account identifier (e.g. 29922)
 
     // Communication (Resend ONLY)
     RESEND_API_KEY: string;

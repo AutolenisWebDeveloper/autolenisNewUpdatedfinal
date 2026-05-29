@@ -65,6 +65,7 @@ export interface IncomeGateResult {
   requestedAmtCents: number; // send to MicroBilt as RequestedAmt
   incomeBasedMaxCents: number; // income ceiling before credit check
   stabilityFactor: number; // employment stability multiplier (0–1.0)
+  effectiveIncomeCents: number; // monthly income after the stability haircut
   estimatedMonthlyPayment: number; // conservative max auto payment (cents)
   belowMinimum: boolean; // income too low / debt too high for any viable loan
   // Decision detail (basis points — 1850 = 18.50%) for storage + transparency.
@@ -217,6 +218,7 @@ export function computeIncomeGate(input: IncomeGateInput): IncomeGateResult {
     requestedAmtCents,
     incomeBasedMaxCents: cappedMaxCents,
     stabilityFactor,
+    effectiveIncomeCents,
     estimatedMonthlyPayment: autoPaymentForDti,
     belowMinimum,
     frontEndDtiBps,
