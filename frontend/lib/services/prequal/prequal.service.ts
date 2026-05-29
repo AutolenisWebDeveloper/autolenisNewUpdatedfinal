@@ -351,6 +351,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         decisionDate,
         prequalApplicationId: prequal.id,
         decisionTimestamp: prequal.updatedAt.toISOString(),
+        adverseReasonCodes: prequal.adverseReasonCodes,
       });
       outcome = result.outcome;
     } catch (emailErr) {

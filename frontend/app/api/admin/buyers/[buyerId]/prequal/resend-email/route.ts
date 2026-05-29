@@ -84,6 +84,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         decisionDate: stamp.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
         prequalApplicationId: prequal.id,
         idempotencyKey: resendIdempotencyKey,
+        adverseReasonCodes: prequal.adverseReasonCodes,
       });
     }
   } catch (err) {

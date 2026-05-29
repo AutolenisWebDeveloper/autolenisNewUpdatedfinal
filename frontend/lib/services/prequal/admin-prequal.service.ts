@@ -636,6 +636,7 @@ export async function runAdminIPredictPrequalForBuyer(
         decisionDate: decisionDateStr,
         prequalApplicationId: prequal.id,
         decisionTimestamp: prequal.updatedAt.toISOString(),
+        adverseReasonCodes: prequal.adverseReasonCodes,
       });
       outcome = sendResult.outcome;
       adverseActionSent = sendResult.sent;

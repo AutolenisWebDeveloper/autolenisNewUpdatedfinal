@@ -177,3 +177,50 @@ test("constants match the spec", () => {
   assert.equal(FRONT_END_AUTO_DTI, 0.2);
   assert.equal(BACK_END_TOTAL_DTI, 0.45);
 });
+
+// ─── Storage-field coverage — all persisted/transparency fields present ─────
+
+test("result exposes effectiveIncomeCents + DTI/APR storage fields with correct types/values", () => {
+  const r = computeIncomeGate({
+    monthlyIncomeCents: D(5000),
+    employmentStatus: "Full-time Employed",
+    lengthOfEmployment: "5+ years", // stability 1.0
+    statedBudgetCents: null,
+    monthlyHousingPaymentCents: D(1500),
+    monthlyOtherDebtCents: D(300),
+    benchmarkTier: "GOOD",
+  });
+
+  // All five storage/transparency fields must be present and numeric.
+  for (const field of [
+    "effectiveIncomeCents",
+    "frontEndDtiBps",
+    "backEndDtiBps",
+    "benchmarkAprBps",
+    "totalMonthlyObligationsCents",
+  ] as const) {
+    assert.ok(field in r, `${field} must be present on IncomeGateResult`);
+    assert.equal(typeof r[field], "number", `${field} must be a number`);
+  }
+
+  // Concrete values for this scenario.
+  assert.equal(r.effectiveIncomeCents, D(5000)); // $5000 × stability 1.0
+  assert.equal(r.totalMonthlyObligationsCents, D(1800)); // $1500 housing + $300 debt
+  assert.equal(r.frontEndDtiBps, 900); // $450 auto ÷ $5000
+  assert.equal(r.backEndDtiBps, 4500); // ($450 + $1800) ÷ $5000 → 45% cap
+  assert.equal(r.benchmarkAprBps, 850); // GOOD tier 8.5% (Pass 2 APR)
+});
+
+test("effectiveIncomeCents reflects the stability haircut (part-time = 60%)", () => {
+  const r = computeIncomeGate({
+    monthlyIncomeCents: D(5000),
+    employmentStatus: "Part-time Employed",
+    lengthOfEmployment: null,
+    statedBudgetCents: null,
+    monthlyHousingPaymentCents: 0,
+    monthlyOtherDebtCents: 0,
+    benchmarkTier: "UNKNOWN",
+  });
+  assert.equal(r.stabilityFactor, 0.6);
+  assert.equal(r.effectiveIncomeCents, D(3000)); // $5000 × 0.60
+});

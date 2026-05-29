@@ -350,6 +350,10 @@ export async function sendAdverseActionEmail(params: {
    *  decision-time callers leave this unset so the per-decision keying
    *  above governs de-duplication. */
   idempotencyKey?: string;
+  /** Optional FCRA § 615(a) principal-reason codes from the consumer report —
+   *  supplemental detail surfaced in the notice. Required FCRA language is
+   *  unchanged whether or not codes are present. */
+  adverseReasonCodes?: string[];
 }) {
   const defaultKey = params.prequalApplicationId
     ? `adverse-action-${params.prequalApplicationId}-${params.decisionTimestamp ?? params.decisionDate}`
@@ -363,6 +367,7 @@ export async function sendAdverseActionEmail(params: {
     html: renderAdverseActionEmail({
       firstName: params.firstName,
       decisionDate: params.decisionDate,
+      reasonCodes: params.adverseReasonCodes,
     }),
   });
 }
