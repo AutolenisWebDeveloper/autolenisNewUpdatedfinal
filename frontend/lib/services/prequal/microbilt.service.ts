@@ -297,12 +297,6 @@ function buildPayload(buyer: MicroBiltBuyerPII, gate: IncomeGateResult) {
       RequestType: "N",
       ReasonCode:  "3",
       RefNum:      crypto.randomUUID(),
-      // CAID — MicroBilt account identifier (iPredict Advantage, CAID 29922).
-      // Spec default is payload-based; if iPredict rejects with "CAID required"
-      // or "MemberId invalid", switch to the X-CAID header in callIPredict().
-      MemberId:  process.env.MICROBILT_CAID ?? undefined,
-      // Product identifier
-      ProductID: process.env.MICROBILT_PRODUCT ?? "IPredict Advantage",
     },
     RequestedAmt: {
       // Income-derived: represents what the buyer can afford at 20% DTI/7%/72mo.
@@ -467,7 +461,9 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        Accept:         "application/json",
+        "Accept":       "application/json",
+        "X-CAID":       process.env.MICROBILT_CAID ?? "",
+        "X-Product":    process.env.MICROBILT_PRODUCT ?? "IPredict Advantage",
       },
       body:   JSON.stringify(payload),
       signal: controller.signal,
