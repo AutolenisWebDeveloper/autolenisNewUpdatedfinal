@@ -153,7 +153,7 @@ export default async function AdminManualReviewsPage() {
                   {age}h
                 </span>
                 <Link
-                  href={`/admin/buyers/${r.buyerId}?tab=prequal`}
+                  href={`/admin/prequal/${r.id}`}
                   className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:underline justify-self-end"
                   data-testid={`review-open-${r.id}`}
                 >
@@ -190,7 +190,7 @@ export default async function AdminManualReviewsPage() {
                   </span>
                   <span className="text-xs text-slate-400">—</span>
                   <Link
-                    href={`/admin/buyers/${b.id}?tab=prequal`}
+                    href={b.preQualification ? `/admin/prequal/${b.preQualification.id}` : `/admin/buyers/${b.id}?tab=prequal`}
                     className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:underline justify-self-end"
                   >
                     Open

@@ -1272,7 +1272,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
                   <InfoRow label="OFAC Alert" value={preQualification.checkOfacAlert ? <Badge variant="destructive" className="text-[10px]">FLAGGED</Badge> : <Badge variant="green" className="text-[10px]">Clear</Badge>} />
                   <InfoRow label="Prequal ID" value={<span className="font-mono text-[10px]">{preQualification.id.slice(-8)}</span>} />
                   <div className="pt-3 flex gap-2">
-                    <Link href={"/admin/external-preapprovals?buyerId=" + buyer.id} className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />View Prequal</Link>
+                    <Link href={"/admin/prequal/" + preQualification.id} className="text-xs text-purple-600 hover:underline flex items-center gap-1" data-testid="buyer-view-prequal-link"><ExternalLink size={11} />View Prequal</Link>
                     <span className="text-slate-300">·</span>
                     <Link href="/admin/manual-reviews" className="text-xs text-purple-600 hover:underline flex items-center gap-1"><ExternalLink size={11} />Manual Reviews</Link>
                   </div>
