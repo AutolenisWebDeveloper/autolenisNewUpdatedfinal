@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  Activity,
   ArrowRight,
   BarChart2,
   Brain,
@@ -12,23 +11,18 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  ClipboardList,
   Clock,
   CreditCard,
   Crown,
   DollarSign,
   Eye,
   Facebook,
-  FileText,
-  Gavel,
   Heart,
   Instagram,
-  LayoutDashboard,
   Linkedin,
   Lock,
   Mail,
   MessageCircle,
-  MessageSquare,
   Phone,
   Play,
   Quote,
@@ -60,35 +54,43 @@ type Testimonial = {
   saved: string | null;
   quote: string;
   stars: number;
+  initial: string;
+  color: string;
 };
 
 const TESTIMONIALS: Testimonial[] = [
   {
-    name: "Verified Buyer",
-    location: "Dallas, TX",
+    name: "Sarah M.",
+    location: "Austin, TX",
     vehicle: "2024 Toyota Highlander",
     saved: null,
     quote:
-      "Three dealers competed for my business. I compared their offers from my kitchen table. That's the part I'll never forget — I was the one making the call.",
+      "AutoLenis saved me over $3,000. The process was so easy and there was zero pressure.",
     stars: 5,
+    initial: "S",
+    color: "from-pink-400 to-rose-500",
   },
   {
-    name: "Verified Buyer",
-    location: "Miami, FL",
+    name: "James T.",
+    location: "Plano, TX",
     vehicle: "2023 Honda Accord Sport",
     saved: null,
     quote:
-      "I never set foot on a lot. The offers came to me — fee breakdowns, monthly payments, all side-by-side. I picked the one that worked and signed from home.",
+      "The dealers actually competed for my business. I got the best offer without any hassle.",
     stars: 5,
+    initial: "J",
+    color: "from-blue-400 to-indigo-500",
   },
   {
-    name: "Verified Buyer",
-    location: "Phoenix, AZ",
+    name: "Amanda R.",
+    location: "El Paso, TX",
     vehicle: "2024 RAM 1500 Big Horn",
     saved: null,
     quote:
-      "What surprised me was how calm the whole process felt. No phone calls. No pressure. Just verified dealers competing for what I actually wanted.",
+      "Finally, a platform that puts buyers first. Highly recommend AutoLenis!",
     stars: 5,
+    initial: "A",
+    color: "from-emerald-400 to-teal-500",
   },
 ];
 
@@ -113,14 +115,15 @@ type UtmData = {
 
 interface LandingPageClientProps {
   campaign: string;
-  headline: string;
-  subheadline: string;
+  // Retained for the per-campaign metadata pipeline in page.tsx. The hero now
+  // renders a fixed brand headline per the final design, so these are not read
+  // here, but the props remain part of the contract.
+  headline?: string;
+  subheadline?: string;
 }
 
 export default function LandingPageClient({
   campaign,
-  headline,
-  subheadline,
 }: LandingPageClientProps) {
   const router = useRouter();
   const formRef = useRef<HTMLDivElement | null>(null);
@@ -367,7 +370,7 @@ export default function LandingPageClient({
             <span className="font-black text-slate-900 text-lg tracking-tight">AutoLenis</span>
           </div>
           <div className="hidden md:flex items-center gap-7">
-            {["How It Works", "Why AutoLenis", "Reviews", "About Us", "FAQs"].map((l) => (
+            {["How It Works", "Why AutoLenis", "Reviews", "Contract Shield™", "FAQs", "For Dealers"].map((l) => (
               <button
                 key={l}
                 onClick={scrollToForm}
@@ -383,117 +386,114 @@ export default function LandingPageClient({
           <div className="flex items-center gap-4">
             <button
               onClick={scrollToForm}
-              className="hidden sm:inline text-sm text-slate-600 hover:text-slate-900 transition-colors"
-            >
-              Log In
-            </button>
-            <button
-              onClick={scrollToForm}
               className="bg-[#0B5FD1] hover:bg-[#0944a8] text-white text-sm font-semibold px-5 py-2 rounded-full transition-colors"
             >
-              Start Your Request
+              Start Your Dealer Auction →
             </button>
           </div>
         </div>
       </nav>
 
       <main className="bg-white text-slate-900 pb-24 lg:pb-0">
-        {/* ── SECTION 2: HERO ──────────────────────────────────────────────── */}
-        <section className="min-h-screen flex items-center pt-20 pb-16 bg-white relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-bl from-blue-50/70 to-transparent pointer-events-none" />
-          <div className="max-w-6xl mx-auto px-5 grid lg:grid-cols-2 gap-12 items-center relative z-10 w-full">
-            {/* LEFT COLUMN */}
+        {/* ── SECTION 2: HERO (3-column with inline lead-capture form) ─────── */}
+        <section className="min-h-screen flex items-center pt-24 pb-16 bg-white relative overflow-hidden">
+          {/* light-blue gradient in the top-right corner */}
+          <div className="absolute top-0 right-0 w-1/3 h-full bg-gradient-to-bl from-blue-50 to-transparent pointer-events-none" />
+          <div className="max-w-6xl mx-auto px-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1fr_1fr_0.85fr] gap-8 items-start lg:items-center relative z-10 w-full">
+
+            {/* ── LEFT COLUMN — headline, copy, CTAs, social proof ─────────── */}
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-4">
                 BUYER-FIRST AUTOMOTIVE CONCIERGE
               </p>
-              <h1 className="text-5xl sm:text-6xl lg:text-7xl font-black tracking-tight text-slate-900 leading-[1.05] mb-5">
-                {headline}
+              <h1 className="font-black text-5xl lg:text-6xl tracking-tight text-slate-900 leading-[1.05] mb-5">
+                Buy Smarter.<br />
+                Dealers Compete.<br />
+                <span className="text-[#0B5FD1]">You Win.</span>
               </h1>
-              <p className="text-lg text-slate-500 leading-relaxed max-w-lg mb-8">
-                {subheadline}
+              <p className="text-slate-500 text-base leading-relaxed max-w-md mb-7">
+                Verified dealers compete for your business privately so you get real offers, stay in
+                control, and buy smarter from home.
               </p>
-              <div className="flex flex-wrap gap-3 mb-8">
-                <button
-                  onClick={scrollToForm}
-                  data-testid="lp-hero-cta"
-                  className="inline-flex items-center gap-2 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-semibold text-sm px-6 py-3 rounded-lg shadow-lg transition-colors"
-                >
-                  Start Your Vehicle Request <ArrowRight size={16} />
-                </button>
-                <button
-                  onClick={scrollToForm}
-                  className="inline-flex items-center gap-2 border border-slate-300 text-slate-700 font-medium text-sm px-6 py-3 rounded-lg hover:bg-slate-50 transition-colors"
-                >
-                  See How AutoLenis Works
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-4 mt-4">
+              <div className="space-y-2.5 mb-7">
                 {[
                   "No dealership pressure",
                   "Compare offers privately",
-                  "Concierge-guided",
-                  "Secure & transparent",
+                  "Concierge-guided experience",
                 ].map((item) => (
-                  <div key={item} className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <CheckCircle2 size={13} className="text-[#0B5FD1]" />
+                  <div key={item} className="flex items-center gap-2 text-sm text-slate-600">
+                    <CheckCircle2 size={16} className="text-[#0B5FD1] shrink-0" />
                     {item}
                   </div>
                 ))}
               </div>
-            </div>
-
-            {/* RIGHT COLUMN — dark navy live-auction dashboard panel */}
-            <div className="relative">
-              <div className="absolute -inset-6 bg-[#0B5FD1]/20 blur-3xl rounded-[2.5rem] pointer-events-none" />
-              <div className="relative bg-[#0F172A] rounded-3xl shadow-2xl border border-white/10 p-3 flex gap-3">
-                {/* sidebar nav mockup */}
-                <div className="hidden sm:flex flex-col gap-1 w-32 py-2 shrink-0">
-                  {[
-                    { icon: <ClipboardList size={13} />,    label: "Your Request", active: false },
-                    { icon: <LayoutDashboard size={13} />,  label: "Overview",     active: false },
-                    { icon: <Gavel size={13} />,            label: "Offers",       active: true  },
-                    { icon: <MessageSquare size={13} />,    label: "Messages",     active: false },
-                    { icon: <FileText size={13} />,         label: "Documents",    active: false },
-                    { icon: <Activity size={13} />,         label: "Activity",     active: false },
-                  ].map((n) => (
+              <div className="flex flex-wrap gap-3 mb-7">
+                <button
+                  onClick={scrollToForm}
+                  data-testid="lp-hero-cta"
+                  className="inline-flex items-center gap-2 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-bold px-6 py-3 rounded-lg shadow-lg transition-colors"
+                >
+                  Start Your Dealer Auction <ArrowRight size={16} />
+                </button>
+                <button
+                  onClick={scrollToForm}
+                  className="inline-flex items-center gap-2 border border-slate-300 text-slate-700 font-medium px-6 py-3 rounded-lg hover:bg-slate-50 transition-colors"
+                >
+                  <span className="w-5 h-5 rounded-full border border-slate-400 flex items-center justify-center shrink-0">
+                    <Play size={9} className="text-slate-600 fill-slate-600 ml-0.5" />
+                  </span>
+                  See How It Works
+                </button>
+              </div>
+              {/* social proof */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex -space-x-2">
+                  {["A", "M", "J"].map((c) => (
                     <div
-                      key={n.label}
-                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] ${
-                        n.active ? "bg-[#0B5FD1] text-white font-semibold" : "text-slate-400"
-                      }`}
+                      key={c}
+                      className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0B5FD1] to-[#0944a8] border-2 border-white flex items-center justify-center text-white text-[11px] font-black"
                     >
-                      {n.icon}
-                      {n.label}
+                      {c}
                     </div>
                   ))}
                 </div>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <Star key={i} size={14} className="text-amber-400 fill-amber-400" />
+                  ))}
+                </div>
+                <span className="text-xs text-slate-500">Trusted by thousands of smarter car buyers</span>
+              </div>
+            </div>
 
-                {/* main content */}
-                <div className="flex-1 bg-white rounded-2xl p-4 min-w-0">
+            {/* ── CENTER COLUMN — live auction dashboard (desktop only) ────── */}
+            <div className="hidden lg:block">
+              <div className="relative">
+                <div className="absolute -inset-5 bg-[#0B5FD1]/10 blur-3xl rounded-[2.5rem] pointer-events-none" />
+                <div className="relative bg-white rounded-2xl shadow-2xl border border-slate-200 p-5">
                   <div className="flex items-start justify-between mb-3">
                     <div>
-                      <p className="text-[10px] text-slate-500">Your Request</p>
+                      <p className="text-xs text-slate-500">Your Auction</p>
                       <p className="font-bold text-slate-900 text-sm">2024 BMW X5 xDrive40i</p>
-                      <button onClick={scrollToForm} className="text-[10px] text-[#0B5FD1] font-semibold">
-                        Edit Request
-                      </button>
                     </div>
                     <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap">
-                      Active Auction
+                      Active
                     </span>
                   </div>
-                  <div className="bg-slate-50 rounded-xl p-2.5 mb-3 text-center">
-                    <p className="text-[9px] text-slate-400 mb-0.5">Auction ends in</p>
-                    <p className="text-xl font-bold font-mono text-slate-900 tracking-tight">23 : 47 : 18</p>
+                  <div className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2 mb-4">
+                    <p className="text-[10px] text-slate-400">Auction ends in</p>
+                    <p className="text-sm font-bold font-mono text-slate-900 tracking-tight">23 : 47 : 18</p>
                   </div>
-                  <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                    Top Offers
-                  </p>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider">Top Offers</p>
+                    <button onClick={scrollToForm} className="text-[10px] text-[#0B5FD1] font-semibold">
+                      View all offers →
+                    </button>
+                  </div>
                   {[
-                    { rank: 1, name: "Prestige Motors",   city: "Dallas, TX",  price: "$53,420", best: true  },
-                    { rank: 2, name: "Summit Auto Group", city: "Plano, TX",   price: "$52,380", best: false },
-                    { rank: 3, name: "DriveOne Autos",    city: "Frisco, TX",  price: "$49,950", best: false },
+                    { rank: 1, name: "Prestige Motors",   city: "Plano, TX",  price: "$51,400", best: true  },
+                    { rank: 2, name: "Summit Auto Group", city: "Dallas, TX", price: "$52,380", best: false },
+                    { rank: 3, name: "DriveOne Autos",    city: "Frisco, TX", price: "$49,950", best: false },
                   ].map((o) => (
                     <div
                       key={o.rank}
@@ -520,66 +520,38 @@ export default function LandingPageClient({
                       </div>
                     </div>
                   ))}
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <div className="bg-blue-50 rounded-xl p-2.5">
-                      <p className="text-[9px] text-slate-500">Estimated Savings</p>
-                      <p className="text-lg font-bold font-mono text-[#0B5FD1]">$2,341</p>
-                      <svg viewBox="0 0 100 24" className="w-full h-5 text-[#0B5FD1] mt-0.5" fill="none" preserveAspectRatio="none">
-                        <polyline
-                          points="0,20 20,16 35,18 55,9 72,11 100,2"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                      <p className="text-[9px] text-slate-400">vs. market avg</p>
-                    </div>
-                    <div className="bg-green-50 border border-green-200 rounded-xl p-2.5">
-                      <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 text-[8px] font-bold px-1.5 py-0.5 rounded-full">
-                        <Shield size={8} /> PROTECTED
-                      </span>
-                      <p className="text-[10px] font-bold text-slate-800 mt-1.5">Contract Shield™</p>
-                      <p className="text-[9px] text-[#0B5FD1] font-medium">Review key highlights before you buy.</p>
-                    </div>
+                  <div className="mt-4 bg-blue-50 rounded-xl p-3">
+                    <p className="text-[10px] text-slate-500">Estimated Savings</p>
+                    <p className="text-2xl font-bold font-mono text-[#0B5FD1] leading-tight">$2,341</p>
+                    <svg viewBox="0 0 100 24" className="w-full h-6 text-[#0B5FD1] mt-1" fill="none" preserveAspectRatio="none">
+                      <polyline
+                        points="0,20 20,16 35,18 55,9 72,11 100,2"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    <p className="text-[10px] text-slate-400">vs. market average</p>
                   </div>
+                  <div
+                    className="mt-3 h-24 rounded-xl bg-cover bg-center"
+                    style={{ backgroundImage: "url(https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=400&q=80)" }}
+                  />
                 </div>
               </div>
-              {/* SUV silhouette placeholder peeking below the panel */}
-              <div className="absolute -bottom-7 right-2 w-48 h-16 pointer-events-none">
-                <Car className="w-full h-full text-slate-900" strokeWidth={1} />
-              </div>
             </div>
-          </div>
-        </section>
 
-        {/* ── SECTION 3: FORM (immediately below hero) ─────────────────────── */}
-        <section
-          ref={formRef}
-          className="py-16 bg-[#F8FAFC]"
-          id="request"
-        >
-          <div className="max-w-lg mx-auto px-5">
-            <div className="text-center mb-8">
-              <p className="text-[11px] font-bold text-[#0B5FD1] uppercase tracking-[0.2em] mb-2">
-                START YOUR DEALER AUCTION
+            {/* ── RIGHT COLUMN — lead-capture form (in hero) ───────────────── */}
+            <div ref={formRef} id="request" className="scroll-mt-24">
+              <p className="text-xs font-bold uppercase tracking-[0.15em] text-[#0B5FD1]">
+                START YOUR AUCTION
               </p>
-              <h2 className="text-3xl sm:text-4xl font-black text-slate-900 mb-2 tracking-tight">
-                Tell us what you&rsquo;re looking for.
-              </h2>
-              <p className="text-sm text-slate-500 mb-5">
-                Step {formStep + 1} of 2 · Takes about 60 seconds.
-              </p>
-              <div className="flex items-center justify-center gap-4 flex-wrap text-xs text-slate-500">
-                <span className="flex items-center gap-1.5"><Lock size={12} className="text-[#0B5FD1]" /> 100% Secure</span>
-                <span className="flex items-center gap-1.5"><CheckCircle2 size={12} className="text-[#0B5FD1]" /> No Credit Impact</span>
-                <span className="flex items-center gap-1.5"><CheckCircle2 size={12} className="text-[#0B5FD1]" /> No Obligation</span>
-              </div>
-            </div>
+              <p className="text-xs text-slate-500 mb-3">It&rsquo;s free and takes 60 seconds.</p>
 
             <form
               onSubmit={handleSubmit}
-              className="bg-white border border-slate-200 rounded-3xl p-8 shadow-xl"
+              className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xl"
               noValidate
             >
               {submitted ? (
@@ -679,9 +651,9 @@ export default function LandingPageClient({
                     type="button"
                     onClick={handleStep0Next}
                     data-testid="lp-form-step0-next"
-                    className="w-full bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-black text-lg py-4 rounded-2xl shadow-lg shadow-[#0B5FD1]/20 flex items-center justify-center gap-2 transition-colors"
+                    className="w-full bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-bold py-3 rounded-lg shadow-lg shadow-[#0B5FD1]/20 flex items-center justify-center gap-2 transition-colors"
                   >
-                    Continue <ArrowRight size={18} />
+                    Continue <ArrowRight size={16} />
                   </button>
                 </div>
               ) : (
@@ -732,7 +704,7 @@ export default function LandingPageClient({
                     <button
                       type="button"
                       onClick={() => setFormStep(0)}
-                      className="px-4 py-3 rounded-xl border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50"
+                      className="px-4 py-3 rounded-lg border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50"
                     >
                       Back
                     </button>
@@ -740,9 +712,9 @@ export default function LandingPageClient({
                       type="submit"
                       disabled={submitting}
                       data-testid="lp-form-submit"
-                      className="flex-1 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-black text-lg py-4 rounded-2xl shadow-lg shadow-[#0B5FD1]/20 flex items-center justify-center gap-2 transition-colors disabled:opacity-60"
+                      className="flex-1 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-bold py-3 rounded-lg shadow-lg shadow-[#0B5FD1]/20 flex items-center justify-center gap-2 transition-colors disabled:opacity-60"
                     >
-                      {submitting ? "Submitting…" : <>Submit My Vehicle Request <ArrowRight size={18} /></>}
+                      {submitting ? "Submitting…" : <>Submit Request <ArrowRight size={16} /></>}
                     </button>
                   </div>
                   <p className="text-[11px] text-slate-400 text-center">
@@ -752,16 +724,24 @@ export default function LandingPageClient({
               )}
             </form>
 
-            <p className="text-center text-[11px] text-slate-400 mt-5 max-w-md mx-auto leading-relaxed">
-              The $99 Auction Access Fee unlocks your private 48-hour dealer auction. Refundable if AutoLenis
-              is unable to secure a valuable or competitive offer for your requested vehicle. Limited-time
-              pricing — subject to change.
-            </p>
+              {/* trust row below button */}
+              <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 mt-3 text-[10px] text-slate-400">
+                <span className="flex items-center gap-1"><Lock size={11} /> Secure submission</span>
+                <span className="flex items-center gap-1"><CheckCircle2 size={11} /> No dealership pressure</span>
+                <span className="flex items-center gap-1"><UserCheck size={11} /> Buyer-first concierge</span>
+              </div>
 
-            <p className="text-center text-[11px] text-slate-400 mt-5 max-w-md mx-auto leading-relaxed">
-              Savings vary based on vehicle, market conditions, dealer participation, and buyer-selected offer.
-              AutoLenis does not guarantee any specific savings outcome.
-            </p>
+              {/* disclaimers below card */}
+              <p className="text-[10px] text-slate-400 text-center mt-3 leading-relaxed">
+                The $99 Auction Access Fee unlocks your private 48-hour dealer auction. Refundable if AutoLenis
+                is unable to secure a valuable or competitive offer for your requested vehicle.
+              </p>
+              <p className="text-[10px] text-slate-400 text-center mt-2 leading-relaxed">
+                Savings vary based on vehicle, market conditions, dealer participation, and buyer-selected offer.
+                AutoLenis does not guarantee any specific savings outcome.
+              </p>
+            </div>
+
           </div>
         </section>
 
@@ -769,8 +749,8 @@ export default function LandingPageClient({
         <section className="bg-white border-y border-slate-200 py-6">
           <div className="max-w-5xl mx-auto px-5 grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
-              { icon: <DollarSign size={18} />, number: "$2,400+",   label: "Avg. Reported Savings"     },
-              { icon: <Users size={18} />,      number: "500+",      label: "Dealer Partners"           },
+              { icon: <DollarSign size={18} />, number: "$2,300+",   label: "Average Buyer Savings"     },
+              { icon: <Users size={18} />,      number: "500+",      label: "Verified Dealer Partners"  },
               { icon: <Car size={18} />,        number: "10,000+",   label: "Vehicles Requested"        },
               { icon: <Star size={18} />,       number: "4.9 / 5",   label: "Buyer Satisfaction"        },
             ].map((s) => (
@@ -851,8 +831,16 @@ export default function LandingPageClient({
                 aria-label="Watch the 90-second overview"
                 className="group relative block w-full aspect-video rounded-2xl overflow-hidden shadow-2xl border border-white/10 text-left"
               >
-                <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-[#0F172A] to-slate-800" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    backgroundImage:
+                      "url(https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=800&q=80&fit=crop)",
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                  }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-black/20" />
                 {/* play button */}
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="w-16 h-16 rounded-full bg-white/95 flex items-center justify-center shadow-xl group-hover:scale-105 transition-transform">
@@ -1330,8 +1318,8 @@ export default function LandingPageClient({
                       &ldquo;{t.quote}&rdquo;
                     </p>
                     <div className="mt-4 pt-3 border-t border-slate-200 flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#0B5FD1] to-[#0944a8] flex items-center justify-center text-white text-sm font-black shrink-0">
-                        {t.name.charAt(0)}
+                      <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${t.color} flex items-center justify-center text-white font-black text-sm shrink-0`}>
+                        {t.initial}
                       </div>
                       <div>
                         <p className="text-sm font-bold text-slate-800">{t.name}</p>
