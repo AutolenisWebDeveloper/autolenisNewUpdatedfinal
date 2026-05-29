@@ -10,6 +10,10 @@ ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "external_dealer_phone" TEXT;
 ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "notes"                 TEXT;
 ALTER TABLE "offers" ADD COLUMN IF NOT EXISTS "submitted_by_admin_id" TEXT;
 
+-- Flag the system "Outside Dealer" placeholder so it can be excluded from
+-- dealer-facing matching and public-facing dealer stats.
+ALTER TABLE "dealers" ADD COLUMN IF NOT EXISTS "is_system_placeholder" BOOLEAN NOT NULL DEFAULT false;
+
 ALTER TABLE "outside_auction_invites" ADD COLUMN IF NOT EXISTS "offer_id" TEXT;
 
 DO $$ BEGIN

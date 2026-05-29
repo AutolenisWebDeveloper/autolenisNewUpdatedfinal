@@ -142,6 +142,10 @@ model Dealer {
   zip                String?
   status             DealerStatus              @default(PENDING)
   tier               String                    @default("STANDARD")
+  // System placeholder used to satisfy Offer.dealerId for outside /
+  // unregistered dealers. Never a real, operating dealer — excluded from
+  // dealer-facing matching and public stats.
+  isSystemPlaceholder Boolean                  @default(false) @map("is_system_placeholder")
   currentAuctionLoad Int                       @default(0) @map("current_auction_load")
   scorecardTier      String?                   @map("scorecard_tier")
   createdAt          DateTime                  @default(now()) @map("created_at")

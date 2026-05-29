@@ -100,6 +100,13 @@ export async function POST(request: NextRequest) {
 
   let body: unknown;
   try { body = await request.json(); } catch { return adminError("VALIDATION_ERROR", "Invalid JSON", 400); }
+
+  // Give a clear error when the caller picked neither path, rather than a
+  // cryptic zod union message.
+  if (body && typeof body === "object" && !("dealerId" in body) && !("outsideDealerName" in body)) {
+    return adminError("VALIDATION_ERROR", "Provide either dealerId (registered dealer) or outsideDealerName + outsideDealerEmail (outside dealer).", 400);
+  }
+
   const parsed = offerCreateSchema.safeParse(body);
   if (!parsed.success) return adminError("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
 

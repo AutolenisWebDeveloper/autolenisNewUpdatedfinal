@@ -72,9 +72,10 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
   const buyerZip = auctionForBuyer?.buyer?.zip ?? null;
   const buyerCoords = buyerZip ? ZIP_COORDS[buyerZip] ?? null : null;
 
-  // Get active dealers (with zip for geographic pre-filter)
+  // Get active dealers (with zip for geographic pre-filter).
+  // Exclude the system "Outside Dealer" placeholder — it is never invited.
   const dealers = await prisma.dealer.findMany({
-    where: { status: "ACTIVE" },
+    where: { status: "ACTIVE", isSystemPlaceholder: false },
     select: { id: true, zip: true },
   });
 

@@ -21,7 +21,7 @@ export async function getAuthPageStats(): Promise<AuthPageStats> {
   try {
     const [dealsCompleted, dealersActive, buyersTotal, snapshot] = await Promise.all([
       prisma.deal.count({ where: { status: "COMPLETED" } }),
-      prisma.dealer.count({ where: { status: "ACTIVE" } }),
+      prisma.dealer.count({ where: { status: "ACTIVE", isSystemPlaceholder: false } }),
       prisma.buyer.count(),
       prisma.platformStatSnapshot.findFirst({ orderBy: { snapshotDate: "desc" } }),
     ]);

@@ -12,9 +12,9 @@
 import { prisma } from "@/lib/prisma";
 import { UserRole, DealerStatus } from "@prisma/client";
 
-const OUTSIDE_DEALER_SUPABASE_ID = "system-outside-dealer-placeholder";
+export const OUTSIDE_DEALER_SUPABASE_ID = "system-outside-dealer-placeholder";
 const OUTSIDE_DEALER_EMAIL = "outside-dealers@system.autolenis.local";
-const OUTSIDE_DEALER_NAME = "Outside Dealer";
+const OUTSIDE_DEALER_NAME = "AutoLenis Outside Dealer System";
 
 /**
  * Returns the id of the system "Outside Dealer" placeholder, creating the
@@ -47,8 +47,13 @@ export async function getOrCreateOutsideDealerId(): Promise<string> {
         data: {
           userId: user.id,
           dealershipName: OUTSIDE_DEALER_NAME,
-          status: DealerStatus.ACTIVE,
+          // TERMINATED keeps the placeholder out of every `status: "ACTIVE"`
+          // query (auction invitation matching, public verified-dealer counts,
+          // the admin active-dealer search) with no per-call-site edits. The
+          // isSystemPlaceholder flag is the explicit, status-independent guard.
+          status: DealerStatus.TERMINATED,
           tier: "STANDARD",
+          isSystemPlaceholder: true,
         },
       });
     });

@@ -53,7 +53,20 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   // Create the real Offer record (so it flows through the best-price engine and
   // buyer comparison panel) and link the invite to it — atomically.
+  let alreadySubmitted = false;
   const offer = await prisma.$transaction(async (tx) => {
+    // Re-check inside the transaction so two concurrent submissions (e.g. a
+    // double-clicked link) cannot both pass the pre-transaction guard and
+    // create duplicate offers. The first commit wins; the second aborts.
+    const fresh = await tx.outsideAuctionInvite.findUnique({
+      where: { id: invite.id },
+      select: { respondedAt: true },
+    });
+    if (fresh?.respondedAt) {
+      alreadySubmitted = true;
+      return null;
+    }
+
     const created = await tx.offer.create({
       data: {
         auctionId:           invite.auction.id,
@@ -86,6 +99,10 @@ export async function POST(request: NextRequest, { params }: Props) {
 
     return created;
   });
+
+  if (alreadySubmitted || !offer) {
+    return err("ALREADY_SUBMITTED", "An offer has already been submitted for this invitation.", 400);
+  }
 
   // Notify the buyer (count only — no amount/identity), matching the
   // registered-dealer offer flow. Non-blocking.
