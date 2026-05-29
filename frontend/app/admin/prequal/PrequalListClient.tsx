@@ -129,14 +129,18 @@ export default function PrequalListClient({ initialRows }: { initialRows: Prequa
                 {fmtDate(r.expiresAt)}
               </span>
               <span className="text-[11px] text-slate-500">
-                {r.isExternal ? "External" : "iPredict / Admin"}
+                {r.isExternal ? (
+                  <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-amber-50 text-amber-700 border-amber-200">EXTERNAL</span>
+                ) : (
+                  <span className="inline-flex px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-blue-50 text-blue-700 border-blue-200">INTERNAL</span>
+                )}
               </span>
               <Link
-                href={`/admin/buyers/${r.buyerId}?tab=prequal`}
+                href={`/admin/prequal/${r.id}`}
                 className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:underline justify-self-end"
                 data-testid={`prequal-list-open-${r.id}`}
               >
-                Open
+                View
                 <ArrowRight size={11} />
               </Link>
             </div>
