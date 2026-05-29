@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Menu, X, ChevronDown, User, Car, DollarSign } from "lucide-react";
 import { AutoLenisLogo } from "@/components/shared/AutoLenisLogo";
 
@@ -19,12 +19,31 @@ export default function PublicNav() {
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [signInOpen, setSignInOpen] = useState(false);
+  const signInRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 10);
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  useEffect(() => {
+    if (!signInOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (signInRef.current && !signInRef.current.contains(event.target as Node)) {
+        setSignInOpen(false);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSignInOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [signInOpen]);
 
   return (
     <header
@@ -57,19 +76,27 @@ export default function PublicNav() {
           {/* Desktop CTAs */}
           <div className="hidden lg:flex items-center gap-3 shrink-0">
             {/* Sign In dropdown */}
-            <div className="relative" onMouseLeave={() => setSignInOpen(false)}>
+            <div className="relative" ref={signInRef}>
               <button
                 onClick={() => setSignInOpen(o => !o)}
                 data-testid="nav-signin-btn"
+                aria-expanded={signInOpen}
+                aria-haspopup="menu"
+                aria-controls="nav-signin-menu"
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-[#4B5563] hover:text-[#0B5FD1] transition-colors"
               >
                 Sign In
                 <ChevronDown size={14} className={`transition-transform ${signInOpen ? "rotate-180" : ""}`} />
               </button>
               {signInOpen && (
-                <div className="absolute right-0 top-full mt-2 w-52 bg-white border border-[#E5E7EB] rounded-xl shadow-lg overflow-hidden z-50">
+                <div
+                  id="nav-signin-menu"
+                  role="menu"
+                  className="absolute right-0 top-full mt-2 w-52 bg-white border border-[#E5E7EB] rounded-xl shadow-lg overflow-hidden z-50"
+                >
                   <Link
                     href="/auth/signin"
+                    role="menuitem"
                     onClick={() => setSignInOpen(false)}
                     className="flex items-center gap-2.5 px-4 py-3 text-sm text-[#374151] hover:bg-[#F8F9FB] hover:text-[#0B5FD1] transition-colors"
                     data-testid="nav-signin-buyer"
@@ -78,6 +105,7 @@ export default function PublicNav() {
                   </Link>
                   <Link
                     href="/dealer/sign-in"
+                    role="menuitem"
                     onClick={() => setSignInOpen(false)}
                     className="flex items-center gap-2.5 px-4 py-3 text-sm text-[#374151] hover:bg-[#F8F9FB] hover:text-[#0B5FD1] transition-colors border-t border-[#F3F4F6]"
                     data-testid="nav-signin-dealer"
@@ -86,6 +114,7 @@ export default function PublicNav() {
                   </Link>
                   <Link
                     href="/affiliate/signin"
+                    role="menuitem"
                     onClick={() => setSignInOpen(false)}
                     className="flex items-center gap-2.5 px-4 py-3 text-sm text-[#374151] hover:bg-[#F8F9FB] hover:text-[#0B5FD1] transition-colors border-t border-[#F3F4F6]"
                     data-testid="nav-signin-affiliate"
