@@ -35,6 +35,10 @@ import {
   sendBuyerOpportunityConfirmationEmail,
   sendFounderHotLeadAlertEmail,
 } from "@/lib/services/email/resend.service";
+import {
+  enrichMarketData,
+  discoverDealers,
+} from "@/lib/services/acquisition/compound-search.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -261,6 +265,91 @@ area who can compete for their business. Then end the turn.`;
           where: { id: opportunitySnapshot.id },
           data: { completed: true },
         });
+
+        // Fire market enrichment + dealer discovery in parallel
+        // Both are best-effort — never block or throw
+        console.log("[concierge] Completion detected — firing compound searches");
+
+        const enrichmentPromise = (async () => {
+          if (!updated.make || !updated.model || !updated.zip) {
+            console.log("[concierge] Skipping market enrichment — missing required fields");
+            return null;
+          }
+          try {
+            const enrichment = await enrichMarketData({
+              vehicleType: updated.vehicleType,
+              make: updated.make,
+              model: updated.model,
+              trim: updated.trim,
+              yearMin: updated.yearMin,
+              yearMax: updated.yearMax,
+              zip: updated.zip,
+            });
+
+            if (enrichment) {
+              await prisma.buyerOpportunity.update({
+                where: { id: opportunitySnapshot.id },
+                data: {
+                  marketMsrpEstimate: enrichment.msrpEstimate,
+                  marketAvgPaidPrice: enrichment.avgPaidPrice,
+                  marketTypicalMarkup: enrichment.typicalMarkup,
+                  marketGoodDealTarget: enrichment.goodDealTarget,
+                  marketNotes: enrichment.notes,
+                  marketEnrichedAt: new Date(),
+                },
+              });
+              console.log("[concierge] Market enrichment saved", {
+                msrp: enrichment.msrpEstimate,
+                avgPaid: enrichment.avgPaidPrice,
+                goodDeal: enrichment.goodDealTarget,
+              });
+            }
+          } catch (err) {
+            console.error("[concierge] Market enrichment failed:", err);
+          }
+        })();
+
+        const dealerPromise = (async () => {
+          if (!updated.make || !updated.zip) {
+            console.log("[concierge] Skipping dealer discovery — missing required fields");
+            return null;
+          }
+          try {
+            const dealers = await discoverDealers({
+              make: updated.make,
+              zip: updated.zip,
+              radiusMiles: 25,
+            });
+
+            if (dealers.length > 0) {
+              // Insert each dealer as a DealerProspect
+              await prisma.dealerProspect.createMany({
+                data: dealers.map((d) => ({
+                  buyerOppId: opportunitySnapshot.id,
+                  name: d.name,
+                  address: d.address,
+                  city: d.city,
+                  state: d.state,
+                  zip: d.zip,
+                  phone: d.phone,
+                  email: d.email,
+                  website: d.website,
+                  brand: d.brand,
+                  sourceUrl: d.sourceUrl,
+                  searchScore: d.searchScore,
+                  status: "DISCOVERED",
+                })),
+                skipDuplicates: true,
+              });
+              console.log("[concierge] Dealer discovery saved", { count: dealers.length });
+            }
+          } catch (err) {
+            console.error("[concierge] Dealer discovery failed:", err);
+          }
+        })();
+
+        // Fire both in parallel — do not await sequentially
+        await Promise.allSettled([enrichmentPromise, dealerPromise]);
       }
 
       const phoneJustCaptured = !opportunitySnapshot.phone && updated.phone;

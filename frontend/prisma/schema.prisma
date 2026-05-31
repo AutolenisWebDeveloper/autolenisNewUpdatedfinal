@@ -3222,6 +3222,17 @@ model BuyerOpportunity {
   // Financing
   financingNeeded Boolean? @map("financing_needed")
 
+  // Market enrichment (from groq/compound web search)
+  marketMsrpEstimate    Int?     @map("market_msrp_estimate")
+  marketAvgPaidPrice    Int?     @map("market_avg_paid_price")
+  marketTypicalMarkup   String?  @map("market_typical_markup")
+  marketGoodDealTarget  Int?     @map("market_good_deal_target")
+  marketNotes           String?  @db.Text @map("market_notes")
+  marketEnrichedAt      DateTime? @map("market_enriched_at")
+
+  // Dealer discovery (relation)
+  dealerProspects       DealerProspect[]
+
   // Conversation
   messages        Json     @default("[]")
   completed       Boolean  @default(false)
@@ -3244,6 +3255,78 @@ model BuyerOpportunity {
   @@index([leadTemperature])
   @@index([createdAt])
   @@map("buyer_opportunities")
+}
+
+model DealerProspect {
+  id              String   @id @default(cuid())
+
+  // Relation back to BuyerOpportunity
+  buyerOppId      String   @map("buyer_opp_id")
+  buyerOpp        BuyerOpportunity @relation(fields: [buyerOppId], references: [id], onDelete: Cascade)
+
+  // Dealer details (from web search)
+  name            String
+  address         String?
+  city            String?
+  state           String?
+  zip             String?
+  phone           String?
+  email           String?
+  website         String?
+
+  // What they sell
+  brand           String?  // Toyota, Honda, etc.
+
+  // Search metadata
+  sourceUrl       String?  @map("source_url")
+  searchScore     Float?   @map("search_score")
+  distanceMiles   Float?   @map("distance_miles")
+
+  // Recruitment workflow
+  status          DealerProspectStatus @default(DISCOVERED)
+  outreachDraft   String?  @db.Text @map("outreach_draft")
+  contactedAt     DateTime? @map("contacted_at")
+  repliedAt       DateTime? @map("replied_at")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([buyerOppId])
+  @@index([status])
+  @@index([zip])
+  @@map("dealer_prospects")
+}
+
+enum DealerProspectStatus {
+  DISCOVERED
+  DRAFTED
+  CONTACTED
+  REPLIED
+  ONBOARDED
+  DEAD
+}
+
+model SearchCache {
+  id          String   @id @default(cuid())
+
+  // Cache key components
+  cacheKey    String   @unique @map("cache_key")
+  searchType  String   @map("search_type")  // "market_enrichment" | "dealer_discovery"
+  zip         String?
+  make        String?
+  model       String?
+  radiusMiles Int?     @map("radius_miles")
+
+  // Cached result
+  result      Json
+
+  // TTL
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([cacheKey])
+  @@index([expiresAt])
+  @@map("search_cache")
 }
 
 model LeadScore {
