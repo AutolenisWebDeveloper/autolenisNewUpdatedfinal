@@ -4,6 +4,15 @@
 // gpt-oss-20b strict-JSON extraction call after the stream completes.
 // Phone capture triggers lead scoring + founder/buyer SMS in the same
 // post-stream block — never blocks the buyer-visible response.
+//
+// Required env vars:
+//   GROQ_API_KEY            - Groq API key
+//   ANTHROPIC_API_KEY       - Claude Haiku for buyer SMS
+//   TWILIO_*                - SMS provider config
+//   FOUNDER_PHONE_NUMBER    - SMS hot-lead recipient
+//   FOUNDER_EMAIL           - Email hot-lead recipient (NEW)
+//   RESEND_API_KEY          - Email provider
+//   NEXT_PUBLIC_APP_URL     - Used in email CTAs
 
 import type { NextRequest } from "next/server";
 import { after } from "next/server";
@@ -22,6 +31,10 @@ import {
   sendHotLeadBuyerSms,
   type HotLeadData,
 } from "@/lib/services/acquisition/twilio.service";
+import {
+  sendBuyerOpportunityConfirmationEmail,
+  sendFounderHotLeadAlertEmail,
+} from "@/lib/services/email/resend.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -252,7 +265,7 @@ area who can compete for their business. Then end the turn.`;
 
       const phoneJustCaptured = !opportunitySnapshot.phone && updated.phone;
       if (phoneJustCaptured) {
-        await scoreAndAlert(opportunitySnapshot.id, updated);
+        await scoreAndAlert(opportunitySnapshot.id, updated, opportunitySnapshot.email);
       }
     } catch (err) {
       console.error("[concierge after()] Background work error:", err);
@@ -271,6 +284,7 @@ area who can compete for their business. Then end the turn.`;
 async function scoreAndAlert(
   opportunityId: string,
   profile: BuyerProfile,
+  email: string | null,
 ): Promise<void> {
   try {
     const extractedData = {
@@ -329,32 +343,77 @@ async function scoreAndAlert(
         phone: profile.phone,
       };
 
-      console.log("[concierge] Hot lead detected — firing SMS notifications", {
+      console.log("[concierge] Hot lead detected — firing notifications", {
         opportunityId,
         phone: profile.phone,
+        email,
         vehicle,
         score: scoreResult.score,
       });
 
+      // Fire all four notification channels in parallel
+      const founderEmail = process.env.FOUNDER_EMAIL;
+
       const results = await Promise.allSettled([
+        // SMS channel
         notifyFounderHotLead(lead),
         sendHotLeadBuyerSms(lead),
+        // Email channel — buyer
+        email
+          ? sendBuyerOpportunityConfirmationEmail({
+              to: email,
+              firstName: profile.firstName ?? "there",
+              vehicle,
+              budget,
+              timeline: profile.timeline ?? "unknown",
+              zip: profile.zip ?? "unknown",
+              sessionId: opportunityId,
+            })
+          : Promise.resolve({ sent: false, skipped: "no email" }),
+        // Email channel — founder
+        founderEmail
+          ? sendFounderHotLeadAlertEmail({
+              to: founderEmail,
+              firstName: profile.firstName ?? "Anonymous",
+              email: email ?? "no email captured",
+              phone: profile.phone,
+              vehicle,
+              budget,
+              timeline: profile.timeline ?? "unknown",
+              zip: profile.zip ?? "unknown",
+              score: scoreResult.score,
+              scoringReason: scoreResult.reasoning,
+              sessionId: opportunityId,
+            })
+          : Promise.resolve({ sent: false, skipped: "no founder email" }),
       ]);
 
-      results.forEach((result, idx) => {
-        const fn = idx === 0 ? "notifyFounderHotLead" : "sendHotLeadBuyerSms";
+      const [founderSmsResult, buyerSmsResult, buyerEmailResult, founderEmailResult] = results;
+
+      // Log per-channel outcomes
+      const channels = [
+        { name: "notifyFounderHotLead (SMS)", result: founderSmsResult },
+        { name: "sendHotLeadBuyerSms (SMS)", result: buyerSmsResult },
+        { name: "sendBuyerOpportunityConfirmationEmail", result: buyerEmailResult },
+        { name: "sendFounderHotLeadAlertEmail", result: founderEmailResult },
+      ];
+
+      channels.forEach(({ name, result }) => {
         if (result.status === "rejected") {
-          console.error(`[concierge] ${fn} FAILED:`, result.reason);
+          console.error(`[concierge] ${name} FAILED:`, result.reason);
         } else {
-          console.log(`[concierge] ${fn} succeeded`);
+          console.log(`[concierge] ${name} succeeded`);
         }
       });
 
+      // Update flags — separate flag per channel for accurate tracking
       await prisma.buyerOpportunity.update({
         where: { id: opportunityId },
         data: {
-          founderNotified: true,
-          buyerSmsSent: true,
+          founderNotified: founderSmsResult.status === "fulfilled",
+          buyerSmsSent: buyerSmsResult.status === "fulfilled",
+          buyerEmailSent: buyerEmailResult.status === "fulfilled",
+          founderEmailSent: founderEmailResult.status === "fulfilled",
         },
       });
     }
