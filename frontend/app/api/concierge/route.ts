@@ -91,6 +91,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Load existing messages to include in prompt context
   const existingMessages = (opportunity.messages as unknown as ConciergeMessage[]) ?? [];
   const newMessages: ConciergeMessage[] = [
     ...existingMessages,
@@ -100,8 +101,7 @@ export async function POST(request: NextRequest) {
   // Snapshot the row so post-stream code can reference its current state.
   const opportunitySnapshot = opportunity;
 
-  // Build dynamic system prompt that includes current
-  // profile state so the AI knows what's already captured
+  // Build current profile state from BuyerOpportunity row
   const currentProfile = {
     vehicleType: opportunity.vehicleType,
     make: opportunity.make,
@@ -140,10 +140,13 @@ export async function POST(request: NextRequest) {
   if (!currentProfile.zip) missing.push("zip");
   if (!currentProfile.phone) missing.push("phone");
 
+  // Determine the turn number so the AI knows context
+  const turnNumber = Math.floor(existingMessages.length / 2) + 1;
+
   const dynamicSystemPrompt = `${CONCIERGE_SYSTEM_PROMPT}
 
 ==============================================
-CURRENT BUYER PROFILE — DATA ALREADY CAPTURED
+CURRENT BUYER PROFILE — STRUCTURED DATA CAPTURED
 ==============================================
 ${captured.length > 0 ? captured.join("\n") : "Nothing captured yet."}
 
@@ -152,16 +155,19 @@ STILL NEEDED
 ==============================================
 ${missing.length > 0 ? missing.join(", ") : "All required fields captured. Confirm next steps with the buyer."}
 
-CRITICAL: Do NOT re-ask the buyer for any field already
-listed above as captured. If you need to confirm or clarify
-something captured, reference what you already have (e.g.
-"I have your ZIP as 75024 — is that correct?"). Move the
-conversation forward by asking ONLY for fields in the
-STILL NEEDED list.
+==============================================
+CONVERSATION CONTEXT
+==============================================
+You have already had ${turnNumber - 1} previous exchange(s) with this buyer in this session.
+The full conversation history is in the messages array below — review it carefully before responding.
 
-If STILL NEEDED is empty, tell the buyer you have everything
-you need and that you're starting to find dealers in their
-area who can compete for their business. Then end the turn.`;
+CRITICAL RULES:
+1. NEVER re-ask the buyer for any field listed above as captured.
+2. NEVER re-ask the buyer for anything they have ALREADY TOLD YOU in the conversation history — even if it's not in the captured list yet (extraction may be delayed). Read the conversation transcript carefully.
+3. If you confirmed information in a previous turn (e.g. "I've got 2024 Toyota Highlander XLE"), TREAT IT AS LOCKED IN. Do not ask about it again.
+4. If STILL NEEDED is empty, tell the buyer you have everything you need and you're starting to find dealers in their area who can compete. Then end the turn.
+5. The buyer's most recent message often refers to topics from earlier in the conversation. Read the FULL history before interpreting it.
+6. If the buyer mentions financing, trade-in, or other details, store them mentally but only ask follow-up questions if those details are still genuinely needed.`;
 
   const encoder = new TextEncoder();
   let assistantReply = "";
