@@ -6,6 +6,7 @@
 // post-stream block — never blocks the buyer-visible response.
 
 import type { NextRequest } from "next/server";
+import { after } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
@@ -164,78 +165,6 @@ area who can compete for their business. Then end the turn.`;
         }
 
         controller.close();
-
-        // After stream completes: persist transcript, run extraction,
-        // and (if phone newly captured) score the lead and fire SMS.
-        const finalMessages: ConciergeMessage[] = [
-          ...newMessages,
-          { role: "assistant", content: assistantReply },
-        ];
-
-        const existingProfile: Partial<BuyerProfile> = {
-          vehicleType: opportunitySnapshot.vehicleType as BuyerProfile["vehicleType"],
-          make: opportunitySnapshot.make,
-          model: opportunitySnapshot.model,
-          bodyStyle: opportunitySnapshot.bodyStyle,
-          yearMin: opportunitySnapshot.yearMin,
-          yearMax: opportunitySnapshot.yearMax,
-          trim: opportunitySnapshot.trim,
-          budgetType: opportunitySnapshot.budgetType as BuyerProfile["budgetType"],
-          budgetAmount: opportunitySnapshot.budgetAmount,
-          monthlyPayment: opportunitySnapshot.monthlyPayment,
-          timeline: opportunitySnapshot.timeline as BuyerProfile["timeline"],
-          zip: opportunitySnapshot.zip,
-          phone: opportunitySnapshot.phone,
-          hasTradeIn: opportunitySnapshot.hasTradeIn,
-          financingNeeded: opportunitySnapshot.financingNeeded,
-          firstName: opportunitySnapshot.firstName,
-        };
-
-        const updated = await extractStructuredData(finalMessages, existingProfile);
-
-        await prisma.buyerOpportunity.update({
-          where: { id: opportunitySnapshot.id },
-          data: {
-            messages: finalMessages as unknown as Prisma.JsonArray,
-            vehicleType: updated.vehicleType,
-            make: updated.make,
-            model: updated.model,
-            bodyStyle: updated.bodyStyle,
-            yearMin: updated.yearMin,
-            yearMax: updated.yearMax,
-            trim: updated.trim,
-            budgetType: updated.budgetType,
-            budgetAmount: updated.budgetAmount,
-            monthlyPayment: updated.monthlyPayment,
-            timeline: updated.timeline,
-            zip: updated.zip,
-            phone: updated.phone,
-            hasTradeIn: updated.hasTradeIn,
-            financingNeeded: updated.financingNeeded,
-            firstName: updated.firstName,
-          },
-        });
-
-        // Check if all required fields are captured — mark complete
-        const allCaptured = !!(
-          (updated.make || updated.bodyStyle) &&
-          (updated.budgetAmount || updated.monthlyPayment) &&
-          updated.timeline &&
-          updated.zip &&
-          updated.phone
-        );
-
-        if (allCaptured && !opportunitySnapshot.completed) {
-          await prisma.buyerOpportunity.update({
-            where: { id: opportunity.id },
-            data: { completed: true },
-          });
-        }
-
-        const phoneJustCaptured = !opportunitySnapshot.phone && updated.phone;
-        if (phoneJustCaptured) {
-          await scoreAndAlert(opportunitySnapshot.id, updated);
-        }
       } catch (err) {
         console.error("[concierge] Stream error:", err);
         try {
@@ -248,6 +177,86 @@ area who can compete for their business. Then end the turn.`;
         }
       }
     },
+  });
+
+  // Register background work that must complete after the response is
+  // sent. Vercel keeps the function alive until this work finishes
+  // (up to the function timeout). Without after(), this work can be
+  // terminated mid-flight on serverless once the response closes.
+  after(async () => {
+    try {
+      const finalMessages: ConciergeMessage[] = [
+        ...newMessages,
+        { role: "assistant", content: assistantReply },
+      ];
+
+      const existingProfile: Partial<BuyerProfile> = {
+        vehicleType: opportunitySnapshot.vehicleType as BuyerProfile["vehicleType"],
+        make: opportunitySnapshot.make,
+        model: opportunitySnapshot.model,
+        bodyStyle: opportunitySnapshot.bodyStyle,
+        yearMin: opportunitySnapshot.yearMin,
+        yearMax: opportunitySnapshot.yearMax,
+        trim: opportunitySnapshot.trim,
+        budgetType: opportunitySnapshot.budgetType as BuyerProfile["budgetType"],
+        budgetAmount: opportunitySnapshot.budgetAmount,
+        monthlyPayment: opportunitySnapshot.monthlyPayment,
+        timeline: opportunitySnapshot.timeline as BuyerProfile["timeline"],
+        zip: opportunitySnapshot.zip,
+        phone: opportunitySnapshot.phone,
+        hasTradeIn: opportunitySnapshot.hasTradeIn,
+        financingNeeded: opportunitySnapshot.financingNeeded,
+        firstName: opportunitySnapshot.firstName,
+      };
+
+      const updated = await extractStructuredData(finalMessages, existingProfile);
+
+      await prisma.buyerOpportunity.update({
+        where: { id: opportunitySnapshot.id },
+        data: {
+          messages: finalMessages as unknown as Prisma.JsonArray,
+          vehicleType: updated.vehicleType,
+          make: updated.make,
+          model: updated.model,
+          bodyStyle: updated.bodyStyle,
+          yearMin: updated.yearMin,
+          yearMax: updated.yearMax,
+          trim: updated.trim,
+          budgetType: updated.budgetType,
+          budgetAmount: updated.budgetAmount,
+          monthlyPayment: updated.monthlyPayment,
+          timeline: updated.timeline,
+          zip: updated.zip,
+          phone: updated.phone,
+          hasTradeIn: updated.hasTradeIn,
+          financingNeeded: updated.financingNeeded,
+          firstName: updated.firstName,
+        },
+      });
+
+      // Check if all required fields are captured — mark complete
+      const allCaptured = !!(
+        (updated.make || updated.bodyStyle) &&
+        (updated.budgetAmount || updated.monthlyPayment) &&
+        updated.timeline &&
+        updated.zip &&
+        updated.phone
+      );
+
+      if (allCaptured && !opportunitySnapshot.completed) {
+        await prisma.buyerOpportunity.update({
+          where: { id: opportunitySnapshot.id },
+          data: { completed: true },
+        });
+      }
+
+      const phoneJustCaptured = !opportunitySnapshot.phone && updated.phone;
+      if (phoneJustCaptured) {
+        await scoreAndAlert(opportunitySnapshot.id, updated);
+      }
+    } catch (err) {
+      console.error("[concierge after()] Background work error:", err);
+    }
   });
 
   return new Response(stream, {
@@ -320,10 +329,26 @@ async function scoreAndAlert(
         phone: profile.phone,
       };
 
-      await Promise.allSettled([
+      console.log("[concierge] Hot lead detected — firing SMS notifications", {
+        opportunityId,
+        phone: profile.phone,
+        vehicle,
+        score: scoreResult.score,
+      });
+
+      const results = await Promise.allSettled([
         notifyFounderHotLead(lead),
         sendHotLeadBuyerSms(lead),
       ]);
+
+      results.forEach((result, idx) => {
+        const fn = idx === 0 ? "notifyFounderHotLead" : "sendHotLeadBuyerSms";
+        if (result.status === "rejected") {
+          console.error(`[concierge] ${fn} FAILED:`, result.reason);
+        } else {
+          console.log(`[concierge] ${fn} succeeded`);
+        }
+      });
 
       await prisma.buyerOpportunity.update({
         where: { id: opportunityId },
