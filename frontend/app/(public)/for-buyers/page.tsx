@@ -16,7 +16,6 @@ import {
   Smartphone,
 } from "lucide-react";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
-import ChatWidget from "@/components/public/ChatWidget";
 import VehicleFinder from "@/components/acquisition/VehicleFinder";
 import { MARKETING_IMAGES } from "@/lib/constants/marketing-images";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
@@ -629,13 +628,6 @@ export default function ForBuyersPage() {
           </p>
         </div>
       </section>
-
-      {/* ── AI Concierge ─────────────────────────────────────────────────────── */}
-      <ChatWidget
-        chatEndpoint="/api/public/ai/chat"
-        placeholder="Ask me anything about AutoLenis…"
-        initialGreeting="Hi! I'm Zura, the AutoLenis concierge. Have questions about how our car-buying process works?"
-      />
 
       {/* ── Scroll-depth sticky CTA — catches mid-scroll buyers ─────────── */}
       <ScrollCTA
