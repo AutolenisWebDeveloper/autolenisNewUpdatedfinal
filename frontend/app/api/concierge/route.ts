@@ -207,8 +207,12 @@ CRITICAL RULES:
   // (up to the function timeout). Without after(), this work can be
   // terminated mid-flight on serverless once the response closes.
   after(async () => {
+    // Stage 1: Build context and run extraction
+    let updated: BuyerProfile | null = null;
+    let finalMessages: ConciergeMessage[] = [];
+
     try {
-      const finalMessages: ConciergeMessage[] = [
+      finalMessages = [
         ...newMessages,
         { role: "assistant", content: assistantReply },
       ];
@@ -232,8 +236,29 @@ CRITICAL RULES:
         firstName: opportunitySnapshot.firstName,
       };
 
-      const updated = await extractStructuredData(finalMessages, existingProfile);
+      updated = await extractStructuredData(finalMessages, existingProfile);
+      console.log("[concierge] Extraction completed", {
+        opportunityId: opportunitySnapshot.id,
+        captured: {
+          make: updated.make,
+          model: updated.model,
+          zip: updated.zip,
+          phone: updated.phone,
+          timeline: updated.timeline,
+        },
+      });
+    } catch (err) {
+      console.error("[concierge] STAGE 1 (extraction) FAILED:", err);
+      return; // Cannot continue without extraction
+    }
 
+    if (!updated) {
+      console.error("[concierge] Extraction returned null — aborting after()");
+      return;
+    }
+
+    // Stage 2: Persist extracted data
+    try {
       await prisma.buyerOpportunity.update({
         where: { id: opportunitySnapshot.id },
         data: {
@@ -256,114 +281,125 @@ CRITICAL RULES:
           firstName: updated.firstName,
         },
       });
+      console.log("[concierge] STAGE 2 (persist) OK");
+    } catch (err) {
+      console.error("[concierge] STAGE 2 (persist) FAILED:", err);
+      // Continue to scoring even if persist failed — scoring uses
+      // the in-memory profile not the DB
+    }
 
-      // Check if all required fields are captured — mark complete
-      const allCaptured = !!(
-        (updated.make || updated.bodyStyle) &&
-        (updated.budgetAmount || updated.monthlyPayment) &&
-        updated.timeline &&
-        updated.zip &&
-        updated.phone
-      );
+    // Stage 3: Completion detection + compound searches
+    const allCaptured = !!(
+      (updated.make || updated.bodyStyle) &&
+      (updated.budgetAmount || updated.monthlyPayment) &&
+      updated.timeline &&
+      updated.zip &&
+      updated.phone
+    );
 
-      if (allCaptured && !opportunitySnapshot.completed) {
+    if (allCaptured && !opportunitySnapshot.completed) {
+      try {
         await prisma.buyerOpportunity.update({
           where: { id: opportunitySnapshot.id },
           data: { completed: true },
         });
-
-        // Fire market enrichment + dealer discovery in parallel
-        // Both are best-effort — never block or throw
-        console.log("[concierge] Completion detected — firing compound searches");
-
-        const enrichmentPromise = (async () => {
-          if (!updated.make || !updated.model || !updated.zip) {
-            console.log("[concierge] Skipping market enrichment — missing required fields");
-            return null;
-          }
-          try {
-            const enrichment = await enrichMarketData({
-              vehicleType: updated.vehicleType,
-              make: updated.make,
-              model: updated.model,
-              trim: updated.trim,
-              yearMin: updated.yearMin,
-              yearMax: updated.yearMax,
-              zip: updated.zip,
-            });
-
-            if (enrichment) {
-              await prisma.buyerOpportunity.update({
-                where: { id: opportunitySnapshot.id },
-                data: {
-                  marketMsrpEstimate: enrichment.msrpEstimate,
-                  marketAvgPaidPrice: enrichment.avgPaidPrice,
-                  marketTypicalMarkup: enrichment.typicalMarkup,
-                  marketGoodDealTarget: enrichment.goodDealTarget,
-                  marketNotes: enrichment.notes,
-                  marketEnrichedAt: new Date(),
-                },
-              });
-              console.log("[concierge] Market enrichment saved", {
-                msrp: enrichment.msrpEstimate,
-                avgPaid: enrichment.avgPaidPrice,
-                goodDeal: enrichment.goodDealTarget,
-              });
-            }
-          } catch (err) {
-            console.error("[concierge] Market enrichment failed:", err);
-          }
-        })();
-
-        const dealerPromise = (async () => {
-          if (!updated.make || !updated.zip) {
-            console.log("[concierge] Skipping dealer discovery — missing required fields");
-            return null;
-          }
-          try {
-            const dealers = await discoverDealers({
-              make: updated.make,
-              zip: updated.zip,
-              radiusMiles: 25,
-            });
-
-            if (dealers.length > 0) {
-              // Insert each dealer as a DealerProspect
-              await prisma.dealerProspect.createMany({
-                data: dealers.map((d) => ({
-                  buyerOppId: opportunitySnapshot.id,
-                  name: d.name,
-                  address: d.address,
-                  city: d.city,
-                  state: d.state,
-                  zip: d.zip,
-                  phone: d.phone,
-                  email: d.email,
-                  website: d.website,
-                  brand: d.brand,
-                  sourceUrl: d.sourceUrl,
-                  searchScore: d.searchScore,
-                  status: "DISCOVERED",
-                })),
-                skipDuplicates: true,
-              });
-              console.log("[concierge] Dealer discovery saved", { count: dealers.length });
-            }
-          } catch (err) {
-            console.error("[concierge] Dealer discovery failed:", err);
-          }
-        })();
-
-        // Fire both in parallel — do not await sequentially
-        await Promise.allSettled([enrichmentPromise, dealerPromise]);
+        console.log("[concierge] STAGE 3a (completion flag) OK");
+      } catch (err) {
+        console.error("[concierge] STAGE 3a (completion flag) FAILED:", err);
       }
 
-      const phoneJustCaptured = !opportunitySnapshot.phone && updated.phone;
-      if (phoneJustCaptured) {
-        await scoreAndAlert(opportunitySnapshot.id, updated, opportunitySnapshot.email);
+      // Compound searches in parallel — best effort
+      console.log("[concierge] STAGE 3b — firing compound searches");
+
+      const enrichmentPromise = (async () => {
+        if (!updated!.make || !updated!.model || !updated!.zip) {
+          console.log("[concierge] Skipping market enrichment — missing fields");
+          return null;
+        }
+        try {
+          const enrichment = await enrichMarketData({
+            vehicleType: updated!.vehicleType,
+            make: updated!.make,
+            model: updated!.model,
+            trim: updated!.trim,
+            yearMin: updated!.yearMin,
+            yearMax: updated!.yearMax,
+            zip: updated!.zip,
+          });
+
+          if (enrichment) {
+            await prisma.buyerOpportunity.update({
+              where: { id: opportunitySnapshot.id },
+              data: {
+                marketMsrpEstimate: enrichment.msrpEstimate,
+                marketAvgPaidPrice: enrichment.avgPaidPrice,
+                marketTypicalMarkup: enrichment.typicalMarkup,
+                marketGoodDealTarget: enrichment.goodDealTarget,
+                marketNotes: enrichment.notes,
+                marketEnrichedAt: new Date(),
+              },
+            });
+            console.log("[concierge] Market enrichment saved");
+          }
+        } catch (err) {
+          console.error("[concierge] Market enrichment FAILED:", err);
+        }
+      })();
+
+      const dealerPromise = (async () => {
+        if (!updated!.make || !updated!.zip) {
+          console.log("[concierge] Skipping dealer discovery — missing fields");
+          return null;
+        }
+        try {
+          const dealers = await discoverDealers({
+            make: updated!.make,
+            zip: updated!.zip,
+            radiusMiles: 25,
+          });
+
+          if (dealers.length > 0) {
+            await prisma.dealerProspect.createMany({
+              data: dealers.map((d) => ({
+                buyerOppId: opportunitySnapshot.id,
+                name: d.name,
+                address: d.address,
+                city: d.city,
+                state: d.state,
+                zip: d.zip,
+                phone: d.phone,
+                email: d.email,
+                website: d.website,
+                brand: d.brand,
+                sourceUrl: d.sourceUrl,
+                searchScore: d.searchScore,
+                status: "DISCOVERED",
+              })),
+              skipDuplicates: true,
+            });
+            console.log(`[concierge] Dealer discovery saved ${dealers.length} prospects`);
+          }
+        } catch (err) {
+          console.error("[concierge] Dealer discovery FAILED:", err);
+        }
+      })();
+
+      await Promise.allSettled([enrichmentPromise, dealerPromise]);
+    }
+
+    // Stage 4: Hot-lead notifications
+    const phoneJustCaptured = !opportunitySnapshot.phone && updated.phone;
+    if (phoneJustCaptured) {
+      try {
+        await scoreAndAlert(
+          opportunitySnapshot.id,
+          updated,
+          opportunitySnapshot.email,
+        );
+        console.log("[concierge] STAGE 4 (scoring + notifications) OK");
+      } catch (err) {
+        console.error("[concierge] STAGE 4 (scoring + notifications) FAILED:", err);
       }
-    } catch (err) {
-      console.error("[concierge after()] Background work error:", err);
     }
   });
 
