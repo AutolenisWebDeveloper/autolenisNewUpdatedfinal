@@ -305,3 +305,187 @@ Output ONLY valid JSON: { "isOptOut": boolean }`;
     return false;
   }
 }
+
+// ─── streamConcierge — GROQ_REASONING (gpt-oss-120b, medium effort) ──────────
+// Streams a conversation reply token-by-token via Server-Sent Events. The
+// streaming API and the response_format JSON schema feature cannot be combined
+// in a single Groq call, so structured extraction runs as a separate call.
+
+export interface ConciergeMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export async function* streamConcierge(
+  systemPrompt: string,
+  messages: ConciergeMessage[],
+): AsyncGenerator<string, void, unknown> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    yield "I am temporarily unavailable. Please try again in a moment.";
+    return;
+  }
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: GROQ_REASONING,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages,
+      ],
+      reasoning_effort: "medium",
+      stream: true,
+      max_tokens: 1024,
+      temperature: 0.7,
+    }),
+  });
+
+  if (!response.ok || !response.body) {
+    yield "I am having trouble responding right now. Please try again.";
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") return;
+
+        try {
+          const parsed = JSON.parse(data);
+          const content = parsed.choices?.[0]?.delta?.content;
+          if (content) yield content;
+        } catch {
+          // Skip malformed chunks
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+// ─── extractStructuredData — GROQ_MESSAGING (gpt-oss-20b, low effort) ────────
+// Non-streamed strict-JSON extraction call that runs in parallel with the
+// streaming reply. Never overwrites a non-null existing value with null.
+
+export interface BuyerProfile {
+  vehicleType: "new" | "used" | "open" | null;
+  make: string | null;
+  model: string | null;
+  bodyStyle: string | null;
+  yearMin: number | null;
+  yearMax: number | null;
+  trim: string | null;
+  budgetType: "cash" | "monthly" | null;
+  budgetAmount: number | null;
+  monthlyPayment: number | null;
+  timeline: "this_week" | "1_to_3_months" | "researching" | null;
+  zip: string | null;
+  phone: string | null;
+  hasTradeIn: boolean | null;
+  financingNeeded: boolean | null;
+  firstName: string | null;
+}
+
+function defaultProfile(): BuyerProfile {
+  return {
+    vehicleType: null,
+    make: null,
+    model: null,
+    bodyStyle: null,
+    yearMin: null,
+    yearMax: null,
+    trim: null,
+    budgetType: null,
+    budgetAmount: null,
+    monthlyPayment: null,
+    timeline: null,
+    zip: null,
+    phone: null,
+    hasTradeIn: null,
+    financingNeeded: null,
+    firstName: null,
+  };
+}
+
+export async function extractStructuredData(
+  messages: ConciergeMessage[],
+  existing: Partial<BuyerProfile>,
+): Promise<BuyerProfile> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) return { ...defaultProfile(), ...existing } as BuyerProfile;
+
+  const systemPrompt = `You are a data extraction system. Read the conversation between an AutoLenis car-buying concierge and a buyer. Extract ONLY explicitly stated facts about what the buyer wants. Return JSON only.
+
+Rules:
+- Return null for any field not mentioned
+- Never invent or assume data
+- Merge with existing values — never overwrite a non-null existing value with null
+- Phone numbers: extract digits only, format as E.164 (+1XXXXXXXXXX for US)
+- Budget: extract dollar amount as integer (no commas, no dollar sign)
+- Years: 4-digit integers
+- Timeline: "this_week" if buying immediately, "1_to_3_months" if soon, "researching" if just looking`;
+
+  const userPrompt = `Existing extracted data:\n${JSON.stringify(existing, null, 2)}\n\nConversation:\n${messages
+    .map((m) => `${m.role}: ${m.content}`)
+    .join("\n\n")}\n\nReturn updated JSON.`;
+
+  try {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: GROQ_MESSAGING,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        reasoning_effort: "low",
+        max_tokens: 512,
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (!response.ok) {
+      return { ...defaultProfile(), ...existing } as BuyerProfile;
+    }
+
+    const data = await response.json();
+    const text = data.choices?.[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(text);
+
+    const merged: BuyerProfile = { ...defaultProfile(), ...existing };
+    for (const key of Object.keys(parsed) as Array<keyof BuyerProfile>) {
+      const newVal = parsed[key];
+      if (newVal !== null && newVal !== undefined) {
+        (merged as unknown as Record<string, unknown>)[key] = newVal;
+      }
+    }
+    return merged;
+  } catch (err) {
+    console.error("[extractStructuredData] Failed:", err);
+    return { ...defaultProfile(), ...existing } as BuyerProfile;
+  }
+}
