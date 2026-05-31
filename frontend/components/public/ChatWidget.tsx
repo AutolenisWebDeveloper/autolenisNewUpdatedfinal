@@ -59,24 +59,42 @@ function formatTime(): string {
 export default function ChatWidget({
   buyerId,
   agentType = "general",
-  initialGreeting = "Hi! I'm Zura, your AutoLenis concierge. How can I help you today?",
-  placeholder = "Ask me anything about buying your car…",
+  initialGreeting,
+  placeholder,
   chatEndpoint,
 }: ChatWidgetProps) {
   const isPublic = !buyerId;
 
-  // Authenticated buyers hit the buyer concierge; everyone else (no buyerId)
-  // hits the public concierge. An explicit chatEndpoint (admin/dealer/affiliate
-  // portals) always wins.
-  const endpoint = chatEndpoint ?? (buyerId ? "/api/buyer/ai/chat" : "/api/public/ai/chat");
+  // Public visitors stream from the new concierge brain; authenticated buyers
+  // and explicit-endpoint portals (admin/dealer/affiliate) keep the existing
+  // JSON-response flow.
+  const effectiveGreeting =
+    initialGreeting ??
+    (isPublic
+      ? "Hey there. I'm AutoLenis — I help people get dealers to compete for their next car. What kind of vehicle are you looking for?"
+      : "Hi! I'm Zura, your AutoLenis concierge. How can I help you today?");
+  const effectivePlaceholder =
+    placeholder ?? (isPublic ? "Tell me what you're looking for..." : "Ask me anything about buying your car…");
+  const jsonEndpoint = chatEndpoint ?? "/api/buyer/ai/chat";
+  const useStreaming = isPublic && !chatEndpoint;
 
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", content: initialGreeting },
+    { role: "assistant", content: effectiveGreeting },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessionId, setSessionId] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (sessionId) return;
+    const next =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setSessionId(next);
+  }, [sessionId]);
 
   // Premium lead capture (public visitors only)
   const [screen, setScreen] = useState<"lead" | "chat">("lead");
@@ -125,32 +143,59 @@ export default function ChatWidget({
     setMessages(newMessages);
 
     try {
-      const history = newMessages.slice(-8, -1).map(m => ({ role: m.role, content: m.content }));
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMsg,
-          history,
-          agentType,
-          ...(buyerId && { buyerId }),
-        }),
-      });
+      if (useStreaming) {
+        const res = await fetch("/api/concierge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            userMessage: userMsg,
+          }),
+        });
 
-      if (res.status === 503) {
-        setMessages([...newMessages, { role: "assistant", content: "The concierge is temporarily unavailable. Please try again later." }]);
-        setLoading(false);
-        return;
-      }
+        if (!res.ok || !res.body) {
+          setMessages([...newMessages, { role: "assistant", content: "I'm having trouble right now. Please try again." }]);
+          return;
+        }
 
-      const data = await res.json() as { success?: boolean; data?: { content: string }; error?: { code: string } };
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let accumulated = "";
+        setMessages([...newMessages, { role: "assistant", content: "" }]);
 
-      if (res.ok && data.success && data.data) {
-        setMessages([...newMessages, { role: "assistant", content: data.data.content }]);
-      } else if (data.error?.code === "AI_DISABLED") {
-        setMessages([...newMessages, { role: "assistant", content: "The AI concierge is temporarily unavailable. Please contact support@autolenis.com for assistance." }]);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          accumulated += decoder.decode(value, { stream: true });
+          setMessages([...newMessages, { role: "assistant", content: accumulated }]);
+        }
       } else {
-        setMessages([...newMessages, { role: "assistant", content: "I'm having trouble right now. Please try again in a moment." }]);
+        const history = newMessages.slice(-8, -1).map(m => ({ role: m.role, content: m.content }));
+        const res = await fetch(jsonEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: userMsg,
+            history,
+            agentType,
+            ...(buyerId && { buyerId }),
+          }),
+        });
+
+        if (res.status === 503) {
+          setMessages([...newMessages, { role: "assistant", content: "The concierge is temporarily unavailable. Please try again later." }]);
+          return;
+        }
+
+        const data = await res.json() as { success?: boolean; data?: { content: string }; error?: { code: string } };
+
+        if (res.ok && data.success && data.data) {
+          setMessages([...newMessages, { role: "assistant", content: data.data.content }]);
+        } else if (data.error?.code === "AI_DISABLED") {
+          setMessages([...newMessages, { role: "assistant", content: "The AI concierge is temporarily unavailable. Please contact support@autolenis.com for assistance." }]);
+        } else {
+          setMessages([...newMessages, { role: "assistant", content: "I'm having trouble right now. Please try again in a moment." }]);
+        }
       }
     } catch {
       setMessages([...newMessages, { role: "assistant", content: "Connection error. Please check your connection and try again." }]);
@@ -369,7 +414,7 @@ export default function ChatWidget({
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={effectivePlaceholder}
           data-testid="chat-input"
           className="flex-1 text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 focus:border-[#0B5FD1] focus:bg-white placeholder:text-slate-400 transition-all duration-150"
           disabled={loading}
