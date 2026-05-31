@@ -208,6 +208,25 @@ function validateCsrfToken(request: NextRequest): boolean {
     return true;
   }
 
+  // Skip CSRF for public AI concierge — anonymous visitors
+  // have no authenticated session; session security is
+  // enforced via crypto.randomUUID() sessionId minted
+  // client-side
+  if (pathname.startsWith("/api/concierge")) {
+    return true;
+  }
+
+  // Skip CSRF for public finder fallback (same reason)
+  if (pathname.startsWith("/api/finder")) {
+    return true;
+  }
+
+  // Skip CSRF for Twilio inbound SMS webhook — validated
+  // by Twilio HMAC signature in the request body, not CSRF
+  if (pathname.startsWith("/api/twilio/sms/inbound")) {
+    return true;
+  }
+
   // Skip CSRF for role-specific API routes — protected by Supabase session auth
   // in each route handler via getRequestBuyer / getRequestDealer / getRequestAffiliate.
   // The Supabase session cookie is HttpOnly and SameSite=Lax, which already mitigates
