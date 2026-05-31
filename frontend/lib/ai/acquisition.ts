@@ -433,16 +433,69 @@ export async function extractStructuredData(
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return { ...defaultProfile(), ...existing } as BuyerProfile;
 
-  const systemPrompt = `You are a data extraction system. Read the conversation between an AutoLenis car-buying concierge and a buyer. Extract ONLY explicitly stated facts about what the buyer wants. Return JSON only.
+  const systemPrompt = `You are a precise data extraction
+system. Read the conversation between an AutoLenis
+car-buying concierge and a buyer. Extract ONLY explicitly
+stated facts about what the buyer wants. Return JSON only,
+matching the BuyerProfile schema.
 
-Rules:
-- Return null for any field not mentioned
+CRITICAL RULES:
+- Return null for any field NOT explicitly stated by the buyer
 - Never invent or assume data
-- Merge with existing values — never overwrite a non-null existing value with null
-- Phone numbers: extract digits only, format as E.164 (+1XXXXXXXXXX for US)
-- Budget: extract dollar amount as integer (no commas, no dollar sign)
-- Years: 4-digit integers
-- Timeline: "this_week" if buying immediately, "1_to_3_months" if soon, "researching" if just looking`;
+- Never overwrite an existing non-null value with null in the
+  output — copy the existing value forward
+- The "existing" object passed in IS the source of truth for
+  fields the buyer has not changed in the latest turn
+
+FIELD-SPECIFIC EXTRACTION:
+
+ZIP code:
+- A 5-digit number provided as a location
+- Examples: "75024", "my zip is 33101", "zip 90210"
+- If the buyer says a 5-digit number AFTER being asked for
+  ZIP/location, it IS the zip — NOT a budget
+
+Budget (budgetAmount):
+- A dollar amount the buyer states as their price ceiling
+- Must be EXPLICITLY about money: "$45,000", "45k", "45 thousand",
+  "budget of forty five thousand"
+- A bare 5-digit number is NEVER a budget unless preceded by $
+  or the words "budget", "price", "dollars", or "k"
+- Examples that ARE budgets: "$45,000", "around 45k", "budget 50000"
+- Examples that are NOT budgets: "75024" (this is ZIP)
+
+Monthly payment:
+- Only set if buyer explicitly says "per month", "/mo", "monthly"
+- Example: "$600/month", "500 a month"
+
+Phone:
+- Format as E.164: +1XXXXXXXXXX for US numbers
+- Strip all spaces, dashes, parentheses
+- Example: "954-756-2509" → "+19547562509"
+
+Timeline — NORMALIZE these natural phrases:
+- "this_week" matches: "this week", "asap", "right away",
+  "immediately", "today", "tomorrow", "in the next few days",
+  "ready now", "ready to buy", "now"
+- "1_to_3_months" matches: "next month", "in a few weeks",
+  "within 30 days", "next couple months", "1-3 months",
+  "soon", "in the next month or two"
+- "researching" matches: "just looking", "researching",
+  "browsing", "not sure yet", "gathering info", "no rush"
+
+VehicleType:
+- "new" if buyer says new, brand new, current year model
+- "used" if buyer says used, pre-owned, certified pre-owned
+- "open" if buyer says open to both or has no preference
+- null otherwise
+
+Make and model:
+- Extract proper noun vehicle makes (Toyota, Honda, Ford,
+  Chevrolet, BMW, etc.) and models (Highlander, Camry,
+  F-150, etc.) exactly as the buyer states them
+
+Output ONLY valid JSON matching the BuyerProfile interface.
+No commentary. No explanation.`;
 
   const userPrompt = `Existing extracted data:\n${JSON.stringify(existing, null, 2)}\n\nConversation:\n${messages
     .map((m) => `${m.role}: ${m.content}`)
