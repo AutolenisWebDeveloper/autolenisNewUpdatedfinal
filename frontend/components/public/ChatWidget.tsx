@@ -18,7 +18,7 @@ interface ChatWidgetProps {
 }
 
 const PUBLIC_GREETING =
-  "Hey there. I'm AutoLenis — I help people get dealers to compete for their next car. What kind of vehicle are you looking for?";
+  "Hey there. I'm Zura — I help people get dealers to compete for their next car. What kind of vehicle are you looking for?";
 
 const PUBLIC_PLACEHOLDER = "Tell me what you're looking for...";
 
@@ -56,6 +56,13 @@ export default function ChatWidget({
   const [aiAvailable, setAiAvailable] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Lead gate (public mode only)
+  const [leadGatePassed, setLeadGatePassed] = useState(false);
+  const [leadName, setLeadName] = useState("");
+  const [leadEmail, setLeadEmail] = useState("");
+  const [leadError, setLeadError] = useState("");
+  const isFirstMessageRef = useRef(true);
+
   // Initialize session ID for public mode
   useEffect(() => {
     if (isPublic) {
@@ -81,6 +88,9 @@ export default function ChatWidget({
 
     if (useStreaming) {
       // ─── PUBLIC CONCIERGE — STREAMING ───────────────────
+      const isFirstMessage = isFirstMessageRef.current;
+      isFirstMessageRef.current = false;
+
       try {
         const response = await fetch("/api/concierge", {
           method: "POST",
@@ -88,6 +98,10 @@ export default function ChatWidget({
           body: JSON.stringify({
             sessionId,
             userMessage: userMsg,
+            ...(isFirstMessage && {
+              firstName: leadName.trim(),
+              email: leadEmail.trim().toLowerCase(),
+            }),
           }),
         });
 
@@ -199,6 +213,31 @@ export default function ChatWidget({
     }
   }
 
+  function handleLeadSubmit() {
+    const name = leadName.trim();
+    const email = leadEmail.trim().toLowerCase();
+
+    if (!name) {
+      setLeadError("Please enter your name");
+      return;
+    }
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setLeadError("Please enter a valid email address");
+      return;
+    }
+
+    setLeadError("");
+    setLeadGatePassed(true);
+
+    setMessages([
+      {
+        role: "assistant",
+        content: `Hey ${name.split(" ")[0]}. I'm Zura — I help people get dealers to compete for their next car. What kind of vehicle are you looking for?`,
+      },
+    ]);
+  }
+
   if (!aiAvailable && !open) return null;
 
   const busy = loading || streaming;
@@ -219,9 +258,11 @@ export default function ChatWidget({
                 <Bot size={16} className="text-white" />
               </div>
               <div>
-                <p className="text-white text-sm font-semibold">AutoLenis</p>
+                <p className="text-white text-sm font-semibold">
+                  {isPublic ? "Zura" : "AutoLenis"}
+                </p>
                 <p className="text-white/60 text-xs">
-                  {isPublic ? "Concierge" : "Your Concierge"}
+                  {isPublic ? "AutoLenis Concierge" : "Your Concierge"}
                 </p>
               </div>
             </div>
@@ -235,6 +276,65 @@ export default function ChatWidget({
             </button>
           </div>
 
+          {/* Lead gate (public mode only, shown before first message) */}
+          {isPublic && !leadGatePassed ? (
+            <div
+              className="flex flex-col items-center justify-center flex-1 p-6 text-center space-y-4"
+              data-testid="lead-gate"
+            >
+              <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+                <Bot size={22} className="text-[#0B5FD1]" />
+              </div>
+
+              <div>
+                <p className="font-semibold text-slate-900 text-base mb-1">
+                  Let&apos;s get you the best deal
+                </p>
+                <p className="text-xs text-slate-500 max-w-xs">
+                  Tell me your name and email so I can send you dealer offers
+                  directly.
+                </p>
+              </div>
+
+              <div className="w-full max-w-xs space-y-2">
+                <input
+                  type="text"
+                  value={leadName}
+                  onChange={(e) => setLeadName(e.target.value)}
+                  placeholder="Your name"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+                  data-testid="lead-name-input"
+                />
+
+                <input
+                  type="email"
+                  value={leadEmail}
+                  onChange={(e) => setLeadEmail(e.target.value)}
+                  placeholder="Email address"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+                  data-testid="lead-email-input"
+                />
+
+                {leadError && (
+                  <p className="text-xs text-red-600 text-left">{leadError}</p>
+                )}
+
+                <button
+                  onClick={handleLeadSubmit}
+                  className="w-full bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                  data-testid="lead-submit-btn"
+                >
+                  Start the conversation
+                </button>
+              </div>
+
+              <p className="text-[10px] text-slate-400 max-w-xs">
+                By continuing you agree to receive messages from AutoLenis. We
+                never share your info.
+              </p>
+            </div>
+          ) : (
+          <>
           {/* Messages */}
           <div
             className="flex-1 overflow-y-auto px-4 py-3 space-y-3"
@@ -308,6 +408,8 @@ export default function ChatWidget({
               {busy ? <Loader2 size={16} className="animate-spin" /> : <Send size={15} />}
             </button>
           </div>
+          </>
+          )}
         </div>
       )}
 
