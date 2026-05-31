@@ -1,192 +1,196 @@
 "use client";
 
 // components/acquisition/VehicleFinder.tsx
-// Conversational vehicle finder — 7 scripted questions delivered as a chat
-// bubble UI. The backend at /api/finder owns the question script, the AI
-// extraction (llama-3.1-8b-instant), scoring (gpt-oss-120b), and the
-// outbound founder + Claude-Haiku-drafted buyer SMS. This component is
-// purely presentational state.
+// Streaming AI concierge chat. Posts each user turn to /api/concierge and
+// renders the response token-by-token as it streams in. Structured buyer
+// data extraction, lead scoring, and SMS dispatch all run server-side in
+// parallel with the stream — the UI is purely presentational.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { Send, CheckCircle2 } from "lucide-react";
 
-const FIRST_QUESTION =
-  "Are you looking to buy new, used, or are you open to both?";
-
-interface ChatBubble {
+interface Message {
   role: "ai" | "user";
-  text: string;
+  content: string;
 }
 
-interface ExtractedShape {
-  vehicleType?: string | null;
-  make?: string | null;
-  model?: string | null;
-  zip?: string | null;
-}
-
-interface FinderResponse {
-  nextQuestion: string;
-  extractedData: ExtractedShape;
-  complete: boolean;
-}
-
-function generateSessionId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `vf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function describeVehicle(d: ExtractedShape): string {
-  const v = [d.make, d.model].filter(Boolean).join(" ").trim();
-  return v || d.vehicleType || "your vehicle";
-}
+const INITIAL_MESSAGE =
+  "Hey there. I'm AutoLenis — I help people get dealers to compete for their next car. What kind of vehicle are you looking for?";
 
 export default function VehicleFinder() {
   const [sessionId, setSessionId] = useState<string>("");
-  const [messages, setMessages] = useState<ChatBubble[]>([
-    { role: "ai", text: FIRST_QUESTION },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
-  const [turnNumber, setTurnNumber] = useState(1);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
   const [isComplete, setIsComplete] = useState(false);
-  const [extractedData, setExtractedData] = useState<ExtractedShape>({});
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setSessionId(generateSessionId());
+    setSessionId(crypto.randomUUID());
+    setMessages([{ role: "ai", content: INITIAL_MESSAGE }]);
   }, []);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, isLoading]);
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, streamingText]);
 
-  const send = useCallback(async () => {
-    const text = inputValue.trim();
-    if (!text || isLoading || isComplete || !sessionId) return;
+  const handleSend = async () => {
+    const trimmed = inputValue.trim();
+    if (!trimmed || isStreaming || !sessionId) return;
 
-    setMessages((prev) => [...prev, { role: "user", text }]);
+    const userMsg: Message = { role: "user", content: trimmed };
+    setMessages((prev) => [...prev, userMsg]);
     setInputValue("");
-    setIsLoading(true);
+    setIsStreaming(true);
+    setStreamingText("");
 
     try {
-      const res = await fetch("/api/finder", {
+      const response = await fetch("/api/concierge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, userMessage: text, turnNumber }),
+        body: JSON.stringify({ sessionId, userMessage: trimmed }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as FinderResponse;
-      setMessages((prev) => [...prev, { role: "ai", text: data.nextQuestion }]);
-      setExtractedData(data.extractedData ?? {});
-      setTurnNumber((n) => n + 1);
-      if (data.complete) setIsComplete(true);
+
+      if (!response.ok || !response.body) {
+        throw new Error("Stream failed");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        accumulated += chunk;
+        setStreamingText(accumulated);
+      }
+
+      setMessages((prev) => [...prev, { role: "ai", content: accumulated }]);
+      setStreamingText("");
+
+      if (
+        accumulated.toLowerCase().includes("start finding dealers") ||
+        accumulated.toLowerCase().includes("competing offers")
+      ) {
+        setIsComplete(true);
+      }
     } catch (err) {
-      console.error("[VehicleFinder] request failed", err);
+      console.error("[VehicleFinder] Error:", err);
       setMessages((prev) => [
         ...prev,
-        { role: "ai", text: "Something went wrong. Please try again." },
+        { role: "ai", content: "Sorry, something went wrong. Please try again." },
       ]);
+      setStreamingText("");
     } finally {
-      setIsLoading(false);
+      setIsStreaming(false);
+      setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [inputValue, isLoading, isComplete, sessionId, turnNumber]);
+  };
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      void send();
+      void handleSend();
     }
-  }
+  };
 
   if (isComplete) {
-    const vehicle = describeVehicle(extractedData);
-    const zip = extractedData.zip ?? "your area";
     return (
       <div
-        className="flex flex-col w-full max-h-[520px] min-h-[320px] border border-gray-200 rounded-2xl bg-white overflow-hidden shadow-sm"
+        className="flex flex-col items-center justify-center p-8 text-center space-y-4 border border-gray-200 rounded-2xl bg-white shadow-sm min-h-[400px]"
         data-testid="vehicle-finder-complete"
       >
-        <div className="flex flex-col items-center justify-center p-8 text-center space-y-4 flex-1">
-          <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="w-6 h-6 text-green-600"
-              aria-hidden
-            >
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          </div>
-          <h3 className="font-semibold text-gray-900 text-lg">You are all set!</h3>
-          <p className="text-sm text-gray-500 max-w-md">
-            Dealers near {zip} will compete for your {vehicle} within 48
-            hours. Watch for a text from AutoLenis.
-          </p>
-        </div>
+        <CheckCircle2 className="w-16 h-16 text-green-600" strokeWidth={1.5} />
+        <h3 className="font-semibold text-gray-900 text-xl">You&apos;re all set</h3>
+        <p className="text-sm text-gray-500 max-w-md">
+          We&apos;re finding dealers near you and putting them in competition for
+          your business. Watch for a text from AutoLenis shortly.
+        </p>
       </div>
     );
   }
 
   return (
     <div
-      className="flex flex-col w-full max-h-[520px] min-h-[320px] border border-gray-200 rounded-2xl bg-white overflow-hidden shadow-sm"
+      className="flex flex-col w-full max-h-[600px] min-h-[400px] border border-gray-200 rounded-2xl bg-white overflow-hidden shadow-sm"
       data-testid="vehicle-finder"
     >
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.map((m, i) =>
-          m.role === "ai" ? (
-            <div key={i} className="flex justify-start">
-              <div className="max-w-[85%] bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-800">
-                {m.text}
-              </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {messages.map((msg, i) => (
+          <div
+            key={i}
+            className={msg.role === "user" ? "flex justify-end" : "flex justify-start"}
+          >
+            <div
+              className={
+                msg.role === "user"
+                  ? "max-w-[85%] bg-blue-600 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-white"
+                  : "max-w-[85%] bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-800 whitespace-pre-wrap"
+              }
+            >
+              {msg.content}
             </div>
-          ) : (
-            <div key={i} className="flex justify-end">
-              <div className="max-w-[85%] bg-blue-600 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-white">
-                {m.text}
-              </div>
-            </div>
-          ),
-        )}
-        {isLoading && (
-          <div className="flex justify-start" aria-label="AutoLenis is typing">
-            <div className="max-w-[85%] bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
-              <span className="inline-flex gap-1">
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:0ms]" />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:150ms]" />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:300ms]" />
-              </span>
+          </div>
+        ))}
+
+        {streamingText && (
+          <div className="flex justify-start">
+            <div className="max-w-[85%] bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-800 whitespace-pre-wrap">
+              {streamingText}
+              <span className="inline-block w-2 h-4 ml-1 bg-gray-400 animate-pulse" />
             </div>
           </div>
         )}
+
+        {isStreaming && !streamingText && (
+          <div className="flex justify-start" aria-label="AutoLenis is typing">
+            <div className="max-w-[85%] bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
+              <div className="flex gap-1">
+                <span
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "0ms" }}
+                />
+                <span
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "150ms" }}
+                />
+                <span
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "300ms" }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
       </div>
 
       <div className="border-t border-gray-100 p-3 flex gap-2 items-center bg-white">
         <input
+          ref={inputRef}
+          type="text"
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
+          disabled={isStreaming}
           placeholder="Type your answer..."
-          disabled={isLoading}
-          className="flex-1 border border-gray-200 rounded-full px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 border border-gray-200 rounded-full px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
           data-testid="vehicle-finder-input"
         />
         <button
-          onClick={() => void send()}
-          disabled={isLoading || !inputValue.trim()}
-          className="bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 py-2 text-sm font-medium disabled:opacity-40"
+          onClick={() => void handleSend()}
+          disabled={isStreaming || !inputValue.trim()}
+          className="bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 py-2 text-sm font-medium disabled:opacity-40 flex items-center gap-1"
           data-testid="vehicle-finder-send"
         >
-          Send
+          <Send className="w-4 h-4" />
         </button>
       </div>
     </div>

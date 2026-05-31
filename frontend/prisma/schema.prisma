@@ -85,6 +85,7 @@ model Buyer {
   adminJourneyUnlocks   AdminJourneyUnlock[]
   adminJourneyNotes     AdminJourneyNote[]
   conversations         Conversation[]
+  buyerOpportunities    BuyerOpportunity[]
 
   @@map("buyers")
 }
@@ -3182,6 +3183,64 @@ model Conversation {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@map("acquisition_conversations")
+}
+
+model BuyerOpportunity {
+  id              String   @id @default(cuid())
+  sessionId       String   @unique @map("session_id")
+  conversationId  String?  @map("conversation_id")
+
+  // Buyer identification
+  buyerId         String?  @map("buyer_id")
+  buyer           Buyer?   @relation(fields: [buyerId], references: [id])
+  phone           String?
+  firstName       String?  @map("first_name")
+
+  // Vehicle interest
+  vehicleType     String?  @map("vehicle_type")
+  make            String?
+  model           String?
+  bodyStyle       String?  @map("body_style")
+  yearMin         Int?     @map("year_min")
+  yearMax         Int?     @map("year_max")
+  trim            String?
+
+  // Financial
+  budgetType      String?  @map("budget_type")
+  budgetAmount    Int?     @map("budget_amount")
+  monthlyPayment  Int?     @map("monthly_payment")
+
+  // Timeline + location
+  timeline        String?
+  zip             String?
+
+  // Trade-in
+  hasTradeIn      Boolean? @map("has_trade_in")
+  tradeInDetails  Json?    @map("trade_in_details")
+
+  // Financing
+  financingNeeded Boolean? @map("financing_needed")
+
+  // Conversation
+  messages        Json     @default("[]")
+  completed       Boolean  @default(false)
+
+  // Lead scoring
+  leadScore       Int?     @map("lead_score")
+  leadTemperature String?  @map("lead_temperature")
+  scoringReason   String?  @map("scoring_reason") @db.Text
+
+  // Status
+  founderNotified Boolean  @default(false) @map("founder_notified")
+  buyerSmsSent    Boolean  @default(false) @map("buyer_sms_sent")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([buyerId])
+  @@index([leadTemperature])
+  @@index([createdAt])
+  @@map("buyer_opportunities")
 }
 
 model LeadScore {
