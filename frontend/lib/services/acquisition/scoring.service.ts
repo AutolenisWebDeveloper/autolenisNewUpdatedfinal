@@ -69,7 +69,7 @@ export async function scoreLeadFromConversation(data: ExtractedData): Promise<{
   const deterministic = computeDeterministicScore(data);
 
   let aiScore = 0;
-  let reasoning = "Deterministic score only — AI scoring unavailable";
+  let reasoning = "Deterministic scoring applied.";
   try {
     const ai = await scoreLeadWithGroq(data);
     aiScore = ai.score;

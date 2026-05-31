@@ -42,13 +42,25 @@ function LeadTemperatureBadge({ temperature }: { temperature: string | null }) {
   if (!temperature) return null;
   const t = temperature.toLowerCase();
   if (t === "hot") {
-    return <Badge variant="destructive" className="text-[9px] ml-1">Hot</Badge>;
+    return (
+      <span className="inline-flex items-center text-[9px] font-semibold ml-1 px-2 py-0.5 rounded-full bg-red-600 text-white">
+        Hot 🔥
+      </span>
+    );
   }
   if (t === "warm") {
-    return <Badge variant="amber" className="text-[9px] ml-1">Warm</Badge>;
+    return (
+      <span className="inline-flex items-center text-[9px] font-semibold ml-1 px-2 py-0.5 rounded-full bg-yellow-300 text-gray-800">
+        Warm
+      </span>
+    );
   }
   if (t === "cold") {
-    return <Badge variant="blue" className="text-[9px] ml-1">Cold</Badge>;
+    return (
+      <span className="inline-flex items-center text-[9px] font-semibold ml-1 px-2 py-0.5 rounded-full bg-blue-600 text-white">
+        Cold
+      </span>
+    );
   }
   return null;
 }

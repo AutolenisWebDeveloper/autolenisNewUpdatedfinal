@@ -12,7 +12,11 @@ import {
   type ExtractedData,
 } from "@/lib/ai/acquisition";
 import { scoreLeadFromConversation } from "@/lib/services/acquisition/scoring.service";
-import { notifyFounderHotLead } from "@/lib/services/acquisition/twilio.service";
+import {
+  notifyFounderHotLead,
+  sendHotLeadBuyerSms,
+  type HotLeadData,
+} from "@/lib/services/acquisition/twilio.service";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -204,7 +208,7 @@ export async function POST(req: Request) {
         }
 
         if (scoring.temperature === "hot") {
-          await notifyFounderHotLead({
+          const hotLead: HotLeadData = {
             firstName: undefined,
             vehicle: describeVehicle(extractedData),
             budget: describeBudget(extractedData),
@@ -212,7 +216,14 @@ export async function POST(req: Request) {
             zip: extractedData.zip ?? "Unknown",
             score: scoring.score,
             sessionId,
-          });
+            phone: extractedData.phone,
+          };
+          // Founder alert + buyer first-contact SMS run in parallel. Both
+          // are best-effort; neither throws out of this block.
+          await Promise.all([
+            notifyFounderHotLead(hotLead),
+            sendHotLeadBuyerSms(hotLead),
+          ]);
         }
       }
     } catch (err) {

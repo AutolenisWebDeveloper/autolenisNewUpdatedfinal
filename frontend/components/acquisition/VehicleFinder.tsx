@@ -2,8 +2,10 @@
 
 // components/acquisition/VehicleFinder.tsx
 // Conversational vehicle finder — 7 scripted questions delivered as a chat
-// bubble UI. The backend at /api/finder owns the question script and the
-// extraction/scoring logic; this component is purely presentational state.
+// bubble UI. The backend at /api/finder owns the question script, the AI
+// extraction (llama-3.1-8b-instant), scoring (gpt-oss-120b), and the
+// outbound founder + Claude-Haiku-drafted buyer SMS. This component is
+// purely presentational state.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -32,13 +34,12 @@ function generateSessionId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
-  // Fallback for environments where crypto.randomUUID is unavailable.
   return `vf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function describeVehicle(d: ExtractedShape): string {
   const v = [d.make, d.model].filter(Boolean).join(" ").trim();
-  return v || d.vehicleType || "vehicle";
+  return v || d.vehicleType || "your vehicle";
 }
 
 export default function VehicleFinder() {
@@ -106,83 +107,83 @@ export default function VehicleFinder() {
     const zip = extractedData.zip ?? "your area";
     return (
       <div
-        className="flex flex-col items-center justify-center text-center bg-white border border-gray-200 rounded-2xl shadow-sm p-8 min-h-[400px]"
+        className="flex flex-col w-full max-h-[520px] min-h-[320px] border border-gray-200 rounded-2xl bg-white overflow-hidden shadow-sm"
         data-testid="vehicle-finder-complete"
       >
-        <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mb-4">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="w-7 h-7 text-green-600"
-            aria-hidden
-          >
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
+        <div className="flex flex-col items-center justify-center p-8 text-center space-y-4 flex-1">
+          <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="w-6 h-6 text-green-600"
+              aria-hidden
+            >
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </div>
+          <h3 className="font-semibold text-gray-900 text-lg">You are all set!</h3>
+          <p className="text-sm text-gray-500 max-w-md">
+            Dealers near {zip} will compete for your {vehicle} within 48
+            hours. Watch for a text from AutoLenis.
+          </p>
         </div>
-        <h3 className="text-xl font-bold text-gray-900 mb-2">You are all set!</h3>
-        <p className="text-sm text-gray-600 max-w-md leading-relaxed">
-          Dealers near {zip} will compete for your {vehicle} within 48 hours.
-          Watch for a text from AutoLenis.
-        </p>
       </div>
     );
   }
 
   return (
     <div
-      className="flex flex-col h-full max-h-[500px] bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden"
+      className="flex flex-col w-full max-h-[520px] min-h-[320px] border border-gray-200 rounded-2xl bg-white overflow-hidden shadow-sm"
       data-testid="vehicle-finder"
     >
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto p-4 space-y-3 flex flex-col"
-      >
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={
-              m.role === "ai"
-                ? "self-start bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-2 max-w-[85%] text-sm text-gray-800"
-                : "self-end bg-blue-600 rounded-2xl rounded-tr-sm px-4 py-2 max-w-[85%] text-sm text-white"
-            }
-          >
-            {m.text}
-          </div>
-        ))}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+        {messages.map((m, i) =>
+          m.role === "ai" ? (
+            <div key={i} className="flex justify-start">
+              <div className="max-w-[85%] bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 text-sm text-gray-800">
+                {m.text}
+              </div>
+            </div>
+          ) : (
+            <div key={i} className="flex justify-end">
+              <div className="max-w-[85%] bg-blue-600 rounded-2xl rounded-tr-sm px-4 py-3 text-sm text-white">
+                {m.text}
+              </div>
+            </div>
+          ),
+        )}
         {isLoading && (
-          <div
-            className="self-start bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-2 max-w-[85%]"
-            aria-label="AutoLenis is typing"
-            data-testid="vehicle-finder-typing"
-          >
-            <span className="inline-flex gap-1">
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:120ms]" />
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:240ms]" />
-            </span>
+          <div className="flex justify-start" aria-label="AutoLenis is typing">
+            <div className="max-w-[85%] bg-gray-100 rounded-2xl rounded-tl-sm px-4 py-3">
+              <span className="inline-flex gap-1">
+                <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:0ms]" />
+                <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:150ms]" />
+                <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:300ms]" />
+              </span>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="sticky bottom-0 bg-white border-t p-3 flex gap-2 items-center">
+      <div className="border-t border-gray-100 p-3 flex gap-2 items-center bg-white">
         <input
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type your answer…"
+          placeholder="Type your answer..."
           disabled={isLoading}
-          className="flex-1 border rounded-full px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 border border-gray-200 rounded-full px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
           data-testid="vehicle-finder-input"
         />
         <button
           onClick={() => void send()}
           disabled={isLoading || !inputValue.trim()}
-          className="bg-blue-600 text-white rounded-full px-4 py-2 text-sm font-medium disabled:opacity-50"
+          className="bg-blue-600 hover:bg-blue-700 text-white rounded-full px-5 py-2 text-sm font-medium disabled:opacity-40"
           data-testid="vehicle-finder-send"
         >
           Send

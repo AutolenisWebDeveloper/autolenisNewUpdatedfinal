@@ -288,7 +288,7 @@ function HomePageBody() {
       <FeaturedInventory />
 
       {/* ── ACQUISITION: CONVERSATIONAL VEHICLE FINDER ──────────────────── */}
-      <section className="py-12 bg-white">
+      <section className="py-10 bg-white">
         <div className="max-w-2xl mx-auto px-4">
           <h2 className="text-2xl font-bold text-center text-gray-900 mb-2">
             What vehicle are you looking for?

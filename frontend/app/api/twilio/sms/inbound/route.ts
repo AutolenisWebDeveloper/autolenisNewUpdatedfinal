@@ -1,27 +1,23 @@
 // app/api/twilio/sms/inbound/route.ts
 // Twilio inbound SMS webhook. Handles opt-out (STOP/UNSUBSCRIBE/CANCEL/QUIT/END
-// plus AI-classified intent), opt-in (START), and generic acknowledgement
-// replies. Always returns TwiML 200 — Twilio will retry on non-200.
+// plus AI-classified intent via gpt-oss-safeguard-20b), opt-in (START), and
+// generic acknowledgement replies. Always returns TwiML 200 — Twilio will
+// retry on non-200.
 //
-// Body parsing note: parseTwilioRequest consumes the request body once
-// (urlencoded form, which is Twilio's webhook format) and validates the
-// x-twilio-signature header against the rebuilt public URL. We reuse it
-// rather than calling formData() separately because a Request body can
-// only be read once.
+// Body parsing + signature: Twilio sends application/x-www-form-urlencoded,
+// so we read req.formData() per spec. Because a Request body can only be
+// read once, we then validate the x-twilio-signature header manually using
+// verifyTwilioRequest against process.env.TWILIO_WEBHOOK_URL (the public
+// URL Twilio actually signed against).
 
 import { prisma } from "@/lib/prisma";
-import { parseTwilioRequest, twimlResponse } from "@/lib/voice/twilio-verify";
-import { groqChat } from "@/lib/ai/groq-client";
+import { twimlResponse, verifyTwilioRequest } from "@/lib/voice/twilio-verify";
+import { detectOptOutIntent } from "@/lib/ai/acquisition";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const OPT_OUT_KEYWORDS = ["STOP", "UNSUBSCRIBE", "CANCEL", "QUIT", "END"];
-
-function reply(message: string): Response {
-  const xml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(message)}</Message></Response>`;
-  return twimlResponse(xml);
-}
+const OPT_OUT_KEYWORDS = new Set(["STOP", "UNSUBSCRIBE", "CANCEL", "QUIT", "END"]);
 
 function escapeXml(s: string): string {
   return s
@@ -32,40 +28,42 @@ function escapeXml(s: string): string {
     .replace(/'/g, "&apos;");
 }
 
-async function classifyOptOutWithAi(message: string): Promise<boolean> {
-  try {
-    const result = await groqChat(
-      [
-        {
-          role: "system",
-          content:
-            'Reply with JSON only: { "isOptOut": boolean }. Is this message requesting to stop receiving texts?',
-        },
-        { role: "user", content: message },
-      ],
-      { maxTokens: 50, temperature: 0.0 },
-    );
-    const match = result.content.match(/\{[\s\S]*\}/);
-    if (!match) return false;
-    const parsed = JSON.parse(match[0]) as { isOptOut?: unknown };
-    return parsed.isOptOut === true;
-  } catch (err) {
-    console.error("[sms/inbound] opt-out classification failed", err);
-    return false;
-  }
+function reply(message: string): Response {
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(message)}</Message></Response>`;
+  return twimlResponse(xml);
 }
 
 export async function POST(req: Request) {
-  const { params, verified } = await parseTwilioRequest(
-    req,
-    "/api/twilio/sms/inbound",
-  );
+  // 1. Parse form body (per spec) — done first so we can hand the same
+  //    params to the signature validator below.
+  const form = await req.formData();
+  const params: Record<string, string> = {};
+  for (const [key, value] of form.entries()) {
+    params[key] = typeof value === "string" ? value : "";
+  }
+
+  // 2. Validate signature against TWILIO_WEBHOOK_URL.
+  const signature = req.headers.get("x-twilio-signature") ?? "";
+  const authToken = process.env.TWILIO_AUTH_TOKEN ?? "";
+  const webhookUrl = process.env.TWILIO_WEBHOOK_URL ?? "";
+  const verified =
+    !!authToken &&
+    !!webhookUrl &&
+    !!signature &&
+    verifyTwilioRequest(authToken, signature, webhookUrl, params);
+
   if (!verified) {
+    console.error("[sms/inbound] signature verification failed", {
+      hasAuthToken: !!authToken,
+      hasWebhookUrl: !!webhookUrl,
+      hasSignature: !!signature,
+    });
     return new Response("Forbidden", { status: 403 });
   }
 
   const body = (params.Body ?? "").trim();
   const from = params.From ?? "";
+
   if (!from) {
     return reply("Thanks for your message. An AutoLenis team member will follow up with you shortly.");
   }
@@ -82,23 +80,36 @@ export async function POST(req: Request) {
     return reply("You are re-subscribed to AutoLenis texts.");
   }
 
-  // ── STOP keyword or AI-classified opt-out ──────────────────────────────
-  const keywordOptOut = OPT_OUT_KEYWORDS.includes(upper);
-  const isOptOut =
-    keywordOptOut || (body.length > 0 && (await classifyOptOutWithAi(body)));
+  // ── Opt-out: keyword first, then safeguard model ───────────────────────
+  let isOptOut = OPT_OUT_KEYWORDS.has(upper);
+  let reason: string;
+  if (isOptOut) {
+    reason = `keyword:${upper}`;
+  } else if (body.length > 0) {
+    const aiSaidOptOut = await detectOptOutIntent(body);
+    if (aiSaidOptOut) {
+      isOptOut = true;
+      reason = "ai_classified";
+    } else {
+      reason = "";
+    }
+  } else {
+    reason = "";
+  }
+
   if (isOptOut) {
     await prisma.smsOptOut.upsert({
       where: { phone: from },
-      create: { phone: from, reason: keywordOptOut ? `keyword:${upper}` : "ai_classified" },
-      update: { reason: keywordOptOut ? `keyword:${upper}` : "ai_classified" },
+      create: { phone: from, reason },
+      update: { reason },
     });
     await prisma.buyer.updateMany({
       where: { phone: from },
       data: { optedOutSms: true },
     });
-    return reply("You have been unsubscribed from AutoLenis texts. Reply START to re-subscribe.");
+    return reply("You have been unsubscribed from AutoLenis texts. Reply START to re-subscribe at any time.");
   }
 
-  // ── Default acknowledgement ─────────────────────────────────────────────
+  // ── Default ────────────────────────────────────────────────────────────
   return reply("Thanks for your message. An AutoLenis team member will follow up with you shortly.");
 }
