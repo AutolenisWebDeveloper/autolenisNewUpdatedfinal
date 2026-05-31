@@ -279,26 +279,12 @@ export interface DiscoveredDealer {
   searchScore: number | null
 }
 
-const DEALER_DISCOVERY_SYSTEM_PROMPT = `You are a precise automotive dealership researcher. Your job is to find real, currently-operating dealerships near a specific ZIP code that sell a specific make of vehicle.
+const DEALER_DISCOVERY_SYSTEM_PROMPT = `You find real US car dealerships near a ZIP code.
 
-For each dealer you find, extract:
-  - name: official dealership name
-  - address: full street address
-  - city, state, zip: location components
-  - phone: main phone number with formatting
-  - website: official website URL
-  - brand: the make they primarily sell (Toyota, Honda, etc.)
-  - sourceUrl: the URL where you found this dealer
+For each dealer, return verified info only: name, address, city, state, zip, phone, website, brand, sourceUrl. Omit any field you cannot verify.
 
-Output a JSON array of dealers. Return 8-12 dealers if possible. Use only real, verified information. If you cannot verify a field, omit it from that dealer's object (do not invent data). Output JSON only — no commentary.
-
-Format:
-{
-  "dealers": [
-    { "name": "...", "address": "...", "city": "...", "state": "...", "zip": "...", "phone": "...", "website": "...", "brand": "...", "sourceUrl": "..." },
-    ...
-  ]
-}`
+Output JSON only:
+{"dealers": [{"name": "...", "address": "...", "city": "...", "state": "...", "zip": "...", "phone": "...", "website": "...", "brand": "...", "sourceUrl": "..."}]}`
 
 export async function discoverDealers(params: {
   make: string
@@ -322,17 +308,15 @@ export async function discoverDealers(params: {
 
   console.log("[compound-search] Dealer discovery cache MISS, calling compound:", cacheKey)
 
-  const userPrompt = `Find all ${params.make} dealerships within ${radiusMiles} miles of ZIP code ${params.zip} in the United States.
-
-Search the web to find their current contact info — name, full address, phone, website. Return as JSON.`
+  const userPrompt = `Find ${params.make} dealerships within ${radiusMiles} miles of US ZIP ${params.zip}. Return up to 12 dealers as JSON.`
 
   const result = await callCompound(
-    GROQ_COMPOUND_MODEL,
+    GROQ_COMPOUND_MINI_MODEL,
     DEALER_DISCOVERY_SYSTEM_PROMPT,
     userPrompt,
     {
       enabledTools: ["web_search"],
-      maxTokens: 4000,
+      maxTokens: 2500,
     }
   )
 
