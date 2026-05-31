@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, XCircle } from "lucide-react";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
+import VehicleFinder from "@/components/acquisition/VehicleFinder";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import {
   DEPOSIT_AMOUNT_CENTS,
@@ -124,6 +125,19 @@ export default function RequestACarPage() {
             Specific make &amp; model &nbsp;·&nbsp; Budget-matched &nbsp;·&nbsp; Dealer competition
             &nbsp;·&nbsp; No pressure
           </p>
+        </div>
+      </section>
+
+      {/* Vehicle Finder */}
+      <section className="py-10 bg-white">
+        <div className="max-w-2xl mx-auto px-4">
+          <h2 className="text-2xl font-bold text-center text-gray-900 mb-2">
+            Tell us what you are looking for
+          </h2>
+          <p className="text-center text-gray-500 text-sm mb-6">
+            Describe your ideal vehicle and verified dealers will compete to find it for you.
+          </p>
+          <VehicleFinder />
         </div>
       </section>
 

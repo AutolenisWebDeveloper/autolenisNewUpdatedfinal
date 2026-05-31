@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 
 import { trackFunnelEvent } from "@/lib/analytics/funnel-events";
+import VehicleFinder from "@/components/acquisition/VehicleFinder";
 
 // ──────────────────────────────────────────────────────────────────────────
 //  ⚠️ PRODUCTION GATE: testimonials substantiation
@@ -409,6 +410,15 @@ export default function LandingPageClient({
                 Verified dealers compete for your business privately so you get real offers, stay in
                 control, and buy smarter from home.
               </p>
+              <div className="max-w-2xl mx-auto px-4 py-8">
+                <h2 className="text-xl font-bold text-center text-gray-900 mb-2">
+                  What vehicle are you looking for?
+                </h2>
+                <p className="text-center text-gray-500 text-sm mb-6">
+                  Tell us what you want. Dealers compete in 48 hours.
+                </p>
+                <VehicleFinder />
+              </div>
               <div className="space-y-2.5 mb-7">
                 {[
                   "No dealership pressure",

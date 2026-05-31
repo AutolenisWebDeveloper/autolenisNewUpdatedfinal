@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
 import ChatWidget from "@/components/public/ChatWidget";
+import VehicleFinder from "@/components/acquisition/VehicleFinder";
 import { MARKETING_IMAGES } from "@/lib/constants/marketing-images";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import ScrollCTA from "@/components/seo/ScrollCTA";
@@ -307,6 +308,19 @@ export default function ForBuyersPage() {
               </ul>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ── Vehicle Finder ───────────────────────────────────────────────────── */}
+      <section className="py-10 bg-white">
+        <div className="max-w-2xl mx-auto px-4">
+          <h2 className="text-2xl font-bold text-center text-gray-900 mb-2">
+            What vehicle are you looking for?
+          </h2>
+          <p className="text-center text-gray-500 text-sm mb-6">
+            Tell us what you want. Verified dealers compete. You choose the best offer.
+          </p>
+          <VehicleFinder />
         </div>
       </section>
 
