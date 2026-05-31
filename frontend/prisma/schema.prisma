@@ -3234,6 +3234,8 @@ model BuyerOpportunity {
   // Status
   founderNotified Boolean  @default(false) @map("founder_notified")
   buyerSmsSent    Boolean  @default(false) @map("buyer_sms_sent")
+  buyerEmailSent      Boolean  @default(false) @map("buyer_email_sent")
+  founderEmailSent    Boolean  @default(false) @map("founder_email_sent")
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")

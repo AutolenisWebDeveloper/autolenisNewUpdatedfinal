@@ -81,6 +81,14 @@ import {
   renderDepositPaymentLinkEmail,
   renderConciergeFeePaymentLinkEmail,
 } from "./templates/admin-payment-link";
+import {
+  BUYER_OPPORTUNITY_CONFIRMATION_SUBJECT,
+  renderBuyerOpportunityConfirmationEmail,
+} from "./templates/buyer-opportunity-confirmation";
+import {
+  FOUNDER_HOT_LEAD_ALERT_SUBJECT,
+  renderFounderHotLeadAlertEmail,
+} from "./templates/founder-hot-lead-alert";
 
 // Lazy Resend client — constructed on first use. Keeping this lazy prevents
 // Next.js build-time page data collection from throwing when the API key
@@ -205,6 +213,63 @@ export async function sendWelcomeEmail(params: {
     templateId: "welcome",
     subject: WELCOME_EMAIL_SUBJECT(firstName),
     html: renderWelcomeEmail({ firstName, verificationUrl }),
+  });
+}
+
+export async function sendBuyerOpportunityConfirmationEmail(params: {
+  to: string;
+  firstName: string;
+  vehicle: string;
+  budget: string;
+  timeline: string;
+  zip: string;
+  sessionId: string;
+}) {
+  return sendIdempotent({
+    idempotencyKey: `buyer-opp-confirmation-${params.sessionId}`,
+    to: params.to,
+    templateId: "buyer-opportunity-confirmation",
+    subject: BUYER_OPPORTUNITY_CONFIRMATION_SUBJECT(params.vehicle),
+    html: renderBuyerOpportunityConfirmationEmail({
+      firstName: params.firstName,
+      vehicle: params.vehicle,
+      budget: params.budget,
+      timeline: params.timeline,
+      zip: params.zip,
+    }),
+  });
+}
+
+export async function sendFounderHotLeadAlertEmail(params: {
+  to: string;
+  firstName: string;
+  email: string;
+  phone: string;
+  vehicle: string;
+  budget: string;
+  timeline: string;
+  zip: string;
+  score: number;
+  scoringReason: string;
+  sessionId: string;
+}) {
+  return sendIdempotent({
+    idempotencyKey: `founder-hot-lead-${params.sessionId}`,
+    to: params.to,
+    templateId: "founder-hot-lead-alert",
+    subject: FOUNDER_HOT_LEAD_ALERT_SUBJECT(params.firstName, params.vehicle),
+    html: renderFounderHotLeadAlertEmail({
+      firstName: params.firstName,
+      email: params.email,
+      phone: params.phone,
+      vehicle: params.vehicle,
+      budget: params.budget,
+      timeline: params.timeline,
+      zip: params.zip,
+      score: params.score,
+      scoringReason: params.scoringReason,
+      sessionId: params.sessionId,
+    }),
   });
 }
 
