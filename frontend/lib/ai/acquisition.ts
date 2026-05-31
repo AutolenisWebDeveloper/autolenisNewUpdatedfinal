@@ -130,10 +130,10 @@ function coerceTimeline(v: unknown): ExtractedData["timeline"] {
   if (v === "this_week" || v === "1_to_3_months" || v === "researching") return v;
   return null;
 }
-function coerceString(v: unknown): string | null {
+function coerceTrimmedString(v: unknown): string | null {
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
 }
-function coerceNumber(v: unknown): number | null {
+function coerceNumeric(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string") {
     const n = Number(v.replace(/[$,\s]/g, ""));
@@ -141,7 +141,7 @@ function coerceNumber(v: unknown): number | null {
   }
   return null;
 }
-function coerceBool(v: unknown): boolean | null {
+function coerceBoolean(v: unknown): boolean | null {
   if (typeof v === "boolean") return v;
   if (typeof v === "string") {
     const s = v.toLowerCase();
@@ -208,14 +208,14 @@ Return the merged JSON.`;
     const obj = parsed as Record<string, unknown>;
     return {
       vehicleType: coerceVehicleType(obj.vehicleType) ?? merged.vehicleType,
-      make: coerceString(obj.make) ?? merged.make,
-      model: coerceString(obj.model) ?? merged.model,
-      budgetTotal: coerceNumber(obj.budgetTotal) ?? merged.budgetTotal,
-      monthlyPayment: coerceNumber(obj.monthlyPayment) ?? merged.monthlyPayment,
-      tradeIn: coerceBool(obj.tradeIn) ?? merged.tradeIn,
+      make: coerceTrimmedString(obj.make) ?? merged.make,
+      model: coerceTrimmedString(obj.model) ?? merged.model,
+      budgetTotal: coerceNumeric(obj.budgetTotal) ?? merged.budgetTotal,
+      monthlyPayment: coerceNumeric(obj.monthlyPayment) ?? merged.monthlyPayment,
+      tradeIn: coerceBoolean(obj.tradeIn) ?? merged.tradeIn,
       timeline: coerceTimeline(obj.timeline) ?? merged.timeline,
-      zip: coerceString(obj.zip) ?? merged.zip,
-      phone: coerceString(obj.phone) ?? merged.phone,
+      zip: coerceTrimmedString(obj.zip) ?? merged.zip,
+      phone: coerceTrimmedString(obj.phone) ?? merged.phone,
     };
   } catch (err) {
     console.error("[acquisition.extractVehicleData] failed", err);
@@ -260,10 +260,10 @@ Guidance:
     const parsed = safeParseJson(content);
     if (!parsed || typeof parsed !== "object") return fallback;
     const obj = parsed as Record<string, unknown>;
-    const scoreNum = coerceNumber(obj.score);
-    const tempRaw = coerceString(obj.temperature);
+    const scoreNum = coerceNumeric(obj.score);
+    const tempRaw = coerceTrimmedString(obj.temperature);
     const tempStr = tempRaw ? tempRaw.toLowerCase() : null;
-    const reasonStr = coerceString(obj.reasoning);
+    const reasonStr = coerceTrimmedString(obj.reasoning);
     if (scoreNum === null || tempStr === null || reasonStr === null) return fallback;
     const clamped = Math.max(0, Math.min(100, Math.round(scoreNum)));
     const temp = ["hot", "warm", "cold"].includes(tempStr) ? tempStr : "cold";
@@ -527,7 +527,11 @@ No commentary. No explanation.`;
 
     const data = await response.json();
     const text = data.choices?.[0]?.message?.content ?? "{}";
-    const parsed = JSON.parse(text);
+    const rawParsed = JSON.parse(text);
+
+    // Coerce LLM output to correct types before merging.
+    // LLMs sometimes return numbers as strings — never trust the JSON.
+    const parsed = coerceBuyerProfile(rawParsed);
 
     const merged: BuyerProfile = { ...defaultProfile(), ...existing };
     for (const key of Object.keys(parsed) as Array<keyof BuyerProfile>) {
@@ -541,4 +545,103 @@ No commentary. No explanation.`;
     console.error("[extractStructuredData] Failed:", err);
     return { ...defaultProfile(), ...existing } as BuyerProfile;
   }
+}
+
+// ───────────────────────────────────────────────────
+// TYPE COERCION
+// ───────────────────────────────────────────────────
+// LLMs do not reliably return correct JSON types.
+// Coerce every field at the boundary before trusting it.
+
+function coerceInt(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string") {
+    const cleaned = value.replace(/[^0-9.-]/g, "");
+    if (!cleaned) return null;
+    const parsed = parseInt(cleaned, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function coerceString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return null;
+}
+
+function coerceBool(value: unknown): boolean | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const lower = value.toLowerCase().trim();
+    if (["true", "yes", "y", "1"].includes(lower)) return true;
+    if (["false", "no", "n", "0"].includes(lower)) return false;
+  }
+  if (typeof value === "number") return value !== 0;
+  return null;
+}
+
+function coerceEnum<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): T | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
+  const match = allowed.find((a) => a.toLowerCase() === trimmed);
+  return match ?? null;
+}
+
+function coercePhone(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return null;
+  const digits = value.replace(/[^0-9]/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  if (digits.length >= 11 && value.startsWith("+")) return `+${digits}`;
+  return null;
+}
+
+function coerceZip(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const str = typeof value === "number" ? String(value) : value;
+  if (typeof str !== "string") return null;
+  const digits = str.replace(/[^0-9]/g, "");
+  if (digits.length === 5) return digits;
+  if (digits.length === 9) return digits.substring(0, 5);
+  return null;
+}
+
+function coerceBuyerProfile(raw: unknown): Partial<BuyerProfile> {
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as Record<string, unknown>;
+
+  return {
+    vehicleType: coerceEnum(r.vehicleType, ["new", "used", "open"] as const),
+    make: coerceString(r.make),
+    model: coerceString(r.model),
+    bodyStyle: coerceString(r.bodyStyle),
+    yearMin: coerceInt(r.yearMin),
+    yearMax: coerceInt(r.yearMax),
+    trim: coerceString(r.trim),
+    budgetType: coerceEnum(r.budgetType, ["cash", "monthly"] as const),
+    budgetAmount: coerceInt(r.budgetAmount),
+    monthlyPayment: coerceInt(r.monthlyPayment),
+    timeline: coerceEnum(r.timeline, ["this_week", "1_to_3_months", "researching"] as const),
+    zip: coerceZip(r.zip),
+    phone: coercePhone(r.phone),
+    hasTradeIn: coerceBool(r.hasTradeIn),
+    financingNeeded: coerceBool(r.financingNeeded),
+    firstName: coerceString(r.firstName),
+  };
 }
