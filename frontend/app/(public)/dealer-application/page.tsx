@@ -261,8 +261,14 @@ export default function DealerApplicationPage() {
                 className="h-4 w-4 mt-0.5 rounded border-slate-300 text-[#0B5FD1] focus:ring-[#0B5FD1]/30"
               />
               <span className="text-xs text-slate-600 leading-relaxed">
-                I consent to AutoLenis contacting me by phone, email, or text at the contact details provided regarding my application
-                and dealer onboarding (TCPA consent — required).
+                I agree to receive SMS messages from AutoLenis regarding my dealer
+                application, onboarding, auction activity, buyer requests, and
+                service-related communications. Message frequency varies. Message and data
+                rates may apply. Reply STOP to opt out, HELP for assistance. Consent is not
+                a condition of purchase. View our{" "}
+                <a href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Privacy Policy</a>
+                {" "}and{" "}
+                <a href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Terms of Service</a>.
               </span>
             </label>
             <label className="flex items-start gap-2 cursor-pointer select-none" data-testid="da-tos-label">

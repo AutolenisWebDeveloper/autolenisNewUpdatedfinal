@@ -129,7 +129,42 @@ export default function TermsPage() {
         </div>
 
         <div className="bg-white border border-[#E5E7EB] rounded-2xl p-7 shadow-sm">
-          <h2 className="text-base font-bold text-[#111827] mb-3">9. Contact</h2>
+          <h2 className="text-base font-bold text-[#111827] mb-3">
+            9. SMS Terms and Conditions
+          </h2>
+          <p className="text-sm text-[#4B5563] leading-relaxed mb-3">
+            By providing your mobile phone number and opting in to receive text
+            messages from AutoLenis, you consent to receive conversational,
+            transactional, and informational SMS communications related to your use
+            of AutoLenis services.
+          </p>
+          <p className="text-sm text-[#4B5563] leading-relaxed mb-3">
+            Message types may include vehicle request updates, dealer offer
+            notifications, financing updates, appointment reminders, customer support
+            communications, account notifications, and verification messages.
+          </p>
+          <p className="text-sm text-[#4B5563] leading-relaxed mb-3">
+            Message frequency varies. Message and data rates may apply.
+          </p>
+          <p className="text-sm text-[#4B5563] leading-relaxed mb-3">
+            You may opt out at any time by replying <strong>STOP</strong> to any
+            message. For assistance, reply <strong>HELP</strong> or contact support
+            at{" "}
+            <a
+              href="mailto:support@autolenis.com"
+              className="text-[#0B5FD1] hover:underline"
+            >
+              support@autolenis.com
+            </a>.
+          </p>
+          <p className="text-sm text-[#4B5563] leading-relaxed">
+            Consent to receive SMS messages is not a condition of purchasing any
+            product or service.
+          </p>
+        </div>
+
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl p-7 shadow-sm">
+          <h2 className="text-base font-bold text-[#111827] mb-3">10. Contact</h2>
           <p className="text-sm text-[#4B5563] leading-relaxed">
             Questions about these Terms should be directed to
             legal@autolenis.com.

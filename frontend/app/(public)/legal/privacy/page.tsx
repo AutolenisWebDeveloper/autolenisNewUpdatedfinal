@@ -118,7 +118,38 @@ export default function PrivacyPage() {
         </div>
 
         <div className="bg-white border border-[#E5E7EB] rounded-2xl p-7 shadow-sm">
-          <h2 className="text-base font-bold text-[#111827] mb-3">8. Contact</h2>
+          <h2 className="text-base font-bold text-[#111827] mb-3">
+            8. SMS Communications
+          </h2>
+          <p className="text-sm text-[#4B5563] leading-relaxed mb-3">
+            AutoLenis may send SMS text messages to customers who provide express
+            written consent through our website forms, including account registration,
+            vehicle requests, contact inquiries, appointment scheduling, financing
+            inquiries, and dealer applications.
+          </p>
+          <p className="text-sm text-[#4B5563] leading-relaxed mb-3">
+            SMS messages may include vehicle request updates, dealer offer
+            notifications, financing and prequalification updates, appointment
+            reminders, account notifications, customer support communications,
+            verification messages, and other service-related communications.
+          </p>
+          <p className="text-sm text-[#4B5563] leading-relaxed mb-3">
+            Message frequency varies based on customer activity and service usage.
+            Message and data rates may apply.
+          </p>
+          <p className="text-sm text-[#4B5563] leading-relaxed mb-3">
+            You may opt out at any time by replying <strong>STOP</strong> to any
+            message. For assistance, reply <strong>HELP</strong>.
+          </p>
+          <p className="text-sm text-[#4B5563] leading-relaxed">
+            Mobile information will not be shared with third parties or affiliates
+            for marketing or promotional purposes. Information sharing is limited to
+            service providers necessary to deliver messaging services.
+          </p>
+        </div>
+
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl p-7 shadow-sm">
+          <h2 className="text-base font-bold text-[#111827] mb-3">9. Contact</h2>
           <p className="text-sm text-[#4B5563] leading-relaxed">
             Privacy inquiries: privacy@autolenis.com
           </p>
