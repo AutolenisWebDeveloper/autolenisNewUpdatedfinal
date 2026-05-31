@@ -3195,6 +3195,7 @@ model BuyerOpportunity {
   buyer           Buyer?   @relation(fields: [buyerId], references: [id])
   phone           String?
   firstName       String?  @map("first_name")
+  email           String?  @map("email")
 
   // Vehicle interest
   vehicleType     String?  @map("vehicle_type")

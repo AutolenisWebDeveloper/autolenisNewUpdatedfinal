@@ -28,6 +28,8 @@ export const dynamic = "force-dynamic";
 interface ConciergeRequest {
   sessionId: string;
   userMessage: string;
+  firstName?: string; // Sent only on first turn after lead gate
+  email?: string; // Sent only on first turn after lead gate
 }
 
 export async function POST(request: NextRequest) {
@@ -58,8 +60,21 @@ export async function POST(request: NextRequest) {
       data: {
         sessionId,
         messages: [],
+        firstName: body.firstName ?? null,
+        email: body.email ?? null,
       },
     });
+  } else if (body.firstName || body.email) {
+    // Backfill name/email on an existing row only when they're currently null.
+    const patch: { firstName?: string; email?: string } = {};
+    if (body.firstName && !opportunity.firstName) patch.firstName = body.firstName;
+    if (body.email && !opportunity.email) patch.email = body.email;
+    if (Object.keys(patch).length > 0) {
+      opportunity = await prisma.buyerOpportunity.update({
+        where: { id: opportunity.id },
+        data: patch,
+      });
+    }
   }
 
   const existingMessages = (opportunity.messages as unknown as ConciergeMessage[]) ?? [];
