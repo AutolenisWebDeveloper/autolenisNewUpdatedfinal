@@ -86,6 +86,69 @@ export async function POST(request: NextRequest) {
   // Snapshot the row so post-stream code can reference its current state.
   const opportunitySnapshot = opportunity;
 
+  // Build dynamic system prompt that includes current
+  // profile state so the AI knows what's already captured
+  const currentProfile = {
+    vehicleType: opportunity.vehicleType,
+    make: opportunity.make,
+    model: opportunity.model,
+    bodyStyle: opportunity.bodyStyle,
+    budgetAmount: opportunity.budgetAmount,
+    monthlyPayment: opportunity.monthlyPayment,
+    timeline: opportunity.timeline,
+    zip: opportunity.zip,
+    phone: opportunity.phone,
+    hasTradeIn: opportunity.hasTradeIn,
+    firstName: opportunity.firstName,
+  };
+
+  // Format already-captured fields for AI awareness
+  const captured: string[] = [];
+  if (currentProfile.firstName) captured.push(`Name: ${currentProfile.firstName}`);
+  if (currentProfile.vehicleType) captured.push(`Condition: ${currentProfile.vehicleType}`);
+  if (currentProfile.make && currentProfile.model) captured.push(`Vehicle: ${currentProfile.make} ${currentProfile.model}`);
+  else if (currentProfile.make) captured.push(`Make: ${currentProfile.make}`);
+  else if (currentProfile.bodyStyle) captured.push(`Body style: ${currentProfile.bodyStyle}`);
+  if (currentProfile.budgetAmount) captured.push(`Budget: $${currentProfile.budgetAmount.toLocaleString()}`);
+  if (currentProfile.monthlyPayment) captured.push(`Monthly payment: $${currentProfile.monthlyPayment}/mo`);
+  if (currentProfile.timeline) captured.push(`Timeline: ${currentProfile.timeline}`);
+  if (currentProfile.zip) captured.push(`ZIP: ${currentProfile.zip}`);
+  if (currentProfile.phone) captured.push(`Phone: ${currentProfile.phone}`);
+  if (currentProfile.hasTradeIn !== null && currentProfile.hasTradeIn !== undefined) {
+    captured.push(`Trade-in: ${currentProfile.hasTradeIn ? "yes" : "no"}`);
+  }
+
+  // Determine what's still missing
+  const missing: string[] = [];
+  if (!currentProfile.make && !currentProfile.bodyStyle) missing.push("vehicle");
+  if (!currentProfile.budgetAmount && !currentProfile.monthlyPayment) missing.push("budget");
+  if (!currentProfile.timeline) missing.push("timeline");
+  if (!currentProfile.zip) missing.push("zip");
+  if (!currentProfile.phone) missing.push("phone");
+
+  const dynamicSystemPrompt = `${CONCIERGE_SYSTEM_PROMPT}
+
+==============================================
+CURRENT BUYER PROFILE — DATA ALREADY CAPTURED
+==============================================
+${captured.length > 0 ? captured.join("\n") : "Nothing captured yet."}
+
+==============================================
+STILL NEEDED
+==============================================
+${missing.length > 0 ? missing.join(", ") : "All required fields captured. Confirm next steps with the buyer."}
+
+CRITICAL: Do NOT re-ask the buyer for any field already
+listed above as captured. If you need to confirm or clarify
+something captured, reference what you already have (e.g.
+"I have your ZIP as 75024 — is that correct?"). Move the
+conversation forward by asking ONLY for fields in the
+STILL NEEDED list.
+
+If STILL NEEDED is empty, tell the buyer you have everything
+you need and that you're starting to find dealers in their
+area who can compete for their business. Then end the turn.`;
+
   const encoder = new TextEncoder();
   let assistantReply = "";
 
@@ -93,7 +156,7 @@ export async function POST(request: NextRequest) {
     async start(controller) {
       try {
         for await (const chunk of streamConcierge(
-          CONCIERGE_SYSTEM_PROMPT,
+          dynamicSystemPrompt,
           newMessages,
         )) {
           assistantReply += chunk;
@@ -152,6 +215,22 @@ export async function POST(request: NextRequest) {
             firstName: updated.firstName,
           },
         });
+
+        // Check if all required fields are captured — mark complete
+        const allCaptured = !!(
+          (updated.make || updated.bodyStyle) &&
+          (updated.budgetAmount || updated.monthlyPayment) &&
+          updated.timeline &&
+          updated.zip &&
+          updated.phone
+        );
+
+        if (allCaptured && !opportunitySnapshot.completed) {
+          await prisma.buyerOpportunity.update({
+            where: { id: opportunity.id },
+            data: { completed: true },
+          });
+        }
 
         const phoneJustCaptured = !opportunitySnapshot.phone && updated.phone;
         if (phoneJustCaptured) {
