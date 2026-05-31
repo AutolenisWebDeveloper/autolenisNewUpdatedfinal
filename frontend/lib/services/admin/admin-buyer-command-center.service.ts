@@ -299,6 +299,8 @@ export async function getAdminBuyerListData(filters: BuyerListFilters = {}) {
     archivedAt: b.archivedAt?.toISOString() ?? null,
     disabledAt: b.disabledAt?.toISOString() ?? null,
     purgedAt: b.purgedAt?.toISOString() ?? null,
+    leadScore: b.leadScore ?? null,
+    leadTemperature: b.leadTemperature ?? null,
     createdAt: b.createdAt.toISOString(),
     lastActivityAt: b.updatedAt.toISOString(),
   }));

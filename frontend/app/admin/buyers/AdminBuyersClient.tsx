@@ -32,8 +32,25 @@ interface BuyerRow {
   archivedAt: string | null;
   disabledAt: string | null;
   purgedAt: string | null;
+  leadScore: number | null;
+  leadTemperature: string | null;
   createdAt: string;
   lastActivityAt?: string | null;
+}
+
+function LeadTemperatureBadge({ temperature }: { temperature: string | null }) {
+  if (!temperature) return null;
+  const t = temperature.toLowerCase();
+  if (t === "hot") {
+    return <Badge variant="destructive" className="text-[9px] ml-1">Hot</Badge>;
+  }
+  if (t === "warm") {
+    return <Badge variant="amber" className="text-[9px] ml-1">Warm</Badge>;
+  }
+  if (t === "cold") {
+    return <Badge variant="blue" className="text-[9px] ml-1">Cold</Badge>;
+  }
+  return null;
 }
 
 interface Props {
@@ -667,6 +684,7 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
                   <Link href={"/admin/buyers/" + b.id} className="font-semibold text-slate-900 text-sm hover:text-purple-700 transition-colors truncate">
                     {b.firstName} {b.lastName}
                   </Link>
+                  <LeadTemperatureBadge temperature={b.leadTemperature} />
                   {lifecycleBadge}
                   {b.isException && (
                     <span className="text-red-500" title="Exception"><Flag size={10} /></span>
