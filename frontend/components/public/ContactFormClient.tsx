@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,11 +22,24 @@ export default function ContactFormClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", email: "", phone: "", subject: "", message: "" });
+  const [smsConsent, setSmsConsent] = useState(false);
+
+  useEffect(() => {
+    if (form.phone.trim().length === 0) setSmsConsent(false);
+  }, [form.phone]);
+
+  const phoneProvided = form.phone.trim().length > 0;
+  const canSubmit = !loading && (!phoneProvided || smsConsent);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    if (form.phone.trim().length > 0 && !smsConsent) {
+      setError("Please agree to receive SMS communications or remove your phone number to continue.");
+      setLoading(false);
+      return;
+    }
     try {
       const res = await fetch("/api/public/contact", {
         method: "POST",
@@ -149,6 +162,31 @@ export default function ContactFormClient() {
         />
       </div>
 
+      {form.phone.trim().length > 0 && (
+        <label
+          className="flex items-start gap-2 cursor-pointer select-none"
+          data-testid="contact-sms-consent-label"
+        >
+          <input
+            type="checkbox"
+            checked={smsConsent}
+            onChange={(e) => setSmsConsent(e.target.checked)}
+            data-testid="contact-sms-consent-checkbox"
+            className="h-4 w-4 mt-0.5 rounded border-[#CBD5E1] text-[#0B5FD1] focus:ring-[#0B5FD1]/30"
+          />
+          <span className="text-xs text-[#64748B] leading-relaxed">
+            I agree to receive SMS messages from AutoLenis regarding my inquiry,
+            account notifications, and service-related communications. Message
+            frequency varies. Message and data rates may apply. Reply STOP to opt
+            out, HELP for assistance. Consent is not a condition of purchase.
+            View our{" "}
+            <a href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Privacy Policy</a>
+            {" "}and{" "}
+            <a href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Terms of Service</a>.
+          </span>
+        </label>
+      )}
+
       {error && (
         <p
           role="alert"
@@ -163,7 +201,7 @@ export default function ContactFormClient() {
         type="submit"
         className="w-full"
         data-testid="contact-submit-btn"
-        disabled={loading}
+        disabled={!canSubmit}
       >
         {loading ? "Sending…" : "Send Message"}
       </Button>

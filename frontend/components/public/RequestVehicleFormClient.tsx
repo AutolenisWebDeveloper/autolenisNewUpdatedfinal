@@ -1559,7 +1559,14 @@ export default function RequestVehicleFormClient() {
                           className="h-4 w-4 mt-0.5 rounded border-[#CBD5E1] text-[#0B5FD1] focus:ring-[#0B5FD1]/30"
                         />
                         <span className="text-xs text-[#64748B] leading-relaxed">
-                          I agree to be contacted by AutoLenis about my vehicle request. My information will not be shared without my consent.
+                          I agree to receive SMS messages from AutoLenis regarding my vehicle request,
+                          dealer offers, financing updates, appointment reminders, and service-related
+                          communications. Message frequency varies. Message and data rates may apply.
+                          Reply STOP to opt out, HELP for assistance. Consent is not a condition of
+                          purchase. View our{" "}
+                          <a href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Privacy Policy</a>
+                          {" "}and{" "}
+                          <a href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Terms of Service</a>.
                         </span>
                       </label>
 

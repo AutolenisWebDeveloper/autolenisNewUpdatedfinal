@@ -119,10 +119,18 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
   const [phone, setPhone] = useState(initial.phone ?? "");
   const [firstName, setFirstName] = useState(initial.firstName ?? "");
   const [lastName, setLastName] = useState(initial.lastName ?? "");
+  const [smsConsent, setSmsConsent] = useState(false);
 
   const phoneValid = !phoneAlreadySet ? phone.replace(/\D/g, "").length >= 10 : true;
   const nameValid = nameAlreadySet || (firstName.trim().length > 0 && lastName.trim().length > 0);
-  const canSubmit = vehicleType !== "" && newOrUsed !== "" && phoneValid && nameValid && !submitting;
+  const phoneIsBeingCollected = !phoneAlreadySet && phone.trim().length > 0;
+  const canSubmit =
+    vehicleType !== "" &&
+    newOrUsed !== "" &&
+    phoneValid &&
+    nameValid &&
+    !submitting &&
+    (!phoneIsBeingCollected || smsConsent);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -331,9 +339,30 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/20"
                 required
               />
-              <p className="mt-1 text-xs text-slate-500">
-                We&apos;ll use this only for time-sensitive auction notifications.
-              </p>
+              {phone.trim().length > 0 && (
+                <label
+                  className="flex items-start gap-2 cursor-pointer select-none mt-3"
+                  data-testid="onboarding-sms-consent-label"
+                >
+                  <input
+                    type="checkbox"
+                    checked={smsConsent}
+                    onChange={(e) => setSmsConsent(e.target.checked)}
+                    data-testid="onboarding-sms-consent-checkbox"
+                    className="h-4 w-4 mt-0.5 rounded border-slate-300 text-[#0B5FD1] focus:ring-[#0B5FD1]/30"
+                  />
+                  <span className="text-xs text-slate-500 leading-relaxed">
+                    I agree to receive SMS messages from AutoLenis regarding auction
+                    alerts, dealer offers, appointment reminders, and service-related
+                    communications. Message frequency varies. Message and data rates
+                    may apply. Reply STOP to opt out, HELP for assistance. Consent is
+                    not a condition of purchase. View our{" "}
+                    <a href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Privacy Policy</a>
+                    {" "}and{" "}
+                    <a href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Terms of Service</a>.
+                  </span>
+                </label>
+              )}
             </section>
           )}
 
