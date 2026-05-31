@@ -32,8 +32,37 @@ interface BuyerRow {
   archivedAt: string | null;
   disabledAt: string | null;
   purgedAt: string | null;
+  leadScore: number | null;
+  leadTemperature: string | null;
   createdAt: string;
   lastActivityAt?: string | null;
+}
+
+function LeadTemperatureBadge({ temperature }: { temperature: string | null }) {
+  if (!temperature) return null;
+  const t = temperature.toLowerCase();
+  if (t === "hot") {
+    return (
+      <span className="inline-flex items-center text-[9px] font-semibold ml-1 px-2 py-0.5 rounded-full bg-red-600 text-white">
+        Hot 🔥
+      </span>
+    );
+  }
+  if (t === "warm") {
+    return (
+      <span className="inline-flex items-center text-[9px] font-semibold ml-1 px-2 py-0.5 rounded-full bg-yellow-300 text-gray-800">
+        Warm
+      </span>
+    );
+  }
+  if (t === "cold") {
+    return (
+      <span className="inline-flex items-center text-[9px] font-semibold ml-1 px-2 py-0.5 rounded-full bg-blue-600 text-white">
+        Cold
+      </span>
+    );
+  }
+  return null;
 }
 
 interface Props {
@@ -667,6 +696,7 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
                   <Link href={"/admin/buyers/" + b.id} className="font-semibold text-slate-900 text-sm hover:text-purple-700 transition-colors truncate">
                     {b.firstName} {b.lastName}
                   </Link>
+                  <LeadTemperatureBadge temperature={b.leadTemperature} />
                   {lifecycleBadge}
                   {b.isException && (
                     <span className="text-red-500" title="Exception"><Flag size={10} /></span>

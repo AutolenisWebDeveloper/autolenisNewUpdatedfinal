@@ -16,6 +16,7 @@ import FeaturedInventory from "@/components/public/FeaturedInventory";
 import ComparisonTable from "@/components/public/ComparisonTable";
 import SavingsCalculator from "@/components/public/SavingsCalculator";
 import HeroLiveSignal from "@/components/public/HeroLiveSignal";
+import VehicleFinder from "@/components/acquisition/VehicleFinder";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 import { JsonLd, localBusinessSchema } from "@/lib/seo/jsonld";
 
@@ -285,6 +286,19 @@ function HomePageBody() {
 
       {/* ── SECTION 5: FEATURED INVENTORY ───────────────────────────────── */}
       <FeaturedInventory />
+
+      {/* ── ACQUISITION: CONVERSATIONAL VEHICLE FINDER ──────────────────── */}
+      <section className="py-10 bg-white">
+        <div className="max-w-2xl mx-auto px-4">
+          <h2 className="text-2xl font-bold text-center text-gray-900 mb-2">
+            What vehicle are you looking for?
+          </h2>
+          <p className="text-center text-gray-500 text-sm mb-6">
+            Tell us what you want. Dealers compete. You choose.
+          </p>
+          <VehicleFinder />
+        </div>
+      </section>
 
       {/* ── SECTION 6: HOW IT WORKS ──────────────────────────────────────── */}
       <section className="py-24 md:py-32 bg-white" data-testid="how-it-works-section">

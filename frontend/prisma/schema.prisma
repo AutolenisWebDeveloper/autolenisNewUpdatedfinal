@@ -55,6 +55,12 @@ model Buyer {
   suspendedAt        DateTime?            @map("suspended_at")
   suspendedReason    String?              @map("suspended_reason")
   isGuest            Boolean              @default(false) @map("is_guest")
+  // AI acquisition fields — populated by the conversational finder + lead scorer
+  leadScore          Int?                 @map("lead_score")
+  leadTemperature    String?              @map("lead_temperature")
+  sequencePaused     Boolean              @default(false) @map("sequence_paused")
+  optedOutSms        Boolean              @default(false) @map("opted_out_sms")
+  timezone           String?
   createdAt          DateTime             @default(now()) @map("created_at")
   updatedAt          DateTime             @updatedAt @map("updated_at")
   auctions           Auction[]
@@ -78,6 +84,7 @@ model Buyer {
   complianceEvents      ComplianceEvent[]
   adminJourneyUnlocks   AdminJourneyUnlock[]
   adminJourneyNotes     AdminJourneyNote[]
+  conversations         Conversation[]
 
   @@map("buyers")
 }
@@ -3156,4 +3163,45 @@ model BuyerOfferReviewItem {
   submission DealerOfferSubmission @relation(fields: [dealerSubmissionId], references: [id], onDelete: Cascade)
 
   @@map("buyer_offer_review_items")
+}
+
+// ─── AI Buyer Acquisition ────────────────────────────────────────────────────
+// Persists conversational finder sessions, scoring snapshots, and SMS
+// opt-out preferences. Conversations may belong to an authenticated Buyer
+// or remain anonymous (buyerId null) until phone match resolves identity.
+
+model Conversation {
+  id            String   @id @default(cuid())
+  sessionId     String   @unique @map("session_id")
+  buyerId       String?  @map("buyer_id")
+  buyer         Buyer?   @relation(fields: [buyerId], references: [id])
+  transcript    Json     @default("[]")
+  completed     Boolean  @default(false)
+  extractedData Json?    @map("extracted_data")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("conversations")
+}
+
+model LeadScore {
+  id          String   @id @default(cuid())
+  buyerId     String?  @map("buyer_id")
+  sessionId   String?  @map("session_id")
+  score       Int
+  temperature String
+  signals     Json
+  reasoning   String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("lead_scores")
+}
+
+model SmsOptOut {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("sms_opt_outs")
 }
