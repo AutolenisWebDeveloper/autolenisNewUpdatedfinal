@@ -84,7 +84,7 @@ export async function discoverDealersViaGeminiMaps(params: {
         ],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 3000,
+          maxOutputTokens: 5000,
         },
       }),
     })
@@ -115,16 +115,63 @@ export async function discoverDealersViaGeminiMaps(params: {
       placeId?: string
     }> = []
 
+    // Strategy 1: Try standard JSON parse on the largest brace block
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/)
-      if (!jsonMatch) {
-        console.error("[gemini-maps] No JSON found in response:", content.substring(0, 200))
-        return []
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0])
+        if (Array.isArray(parsed.dealers)) {
+          dealers = parsed.dealers
+        }
       }
-      const parsed = JSON.parse(jsonMatch[0])
-      dealers = Array.isArray(parsed.dealers) ? parsed.dealers : []
     } catch (err) {
-      console.error("[gemini-maps] JSON parse failed:", err)
+      console.warn(
+        "[gemini-maps] Standard JSON parse failed, attempting salvage:",
+        err instanceof Error ? err.message : String(err)
+      )
+    }
+
+    // Strategy 2: If standard parse failed or returned no dealers,
+    // salvage complete dealer objects from the (possibly truncated) text.
+    if (dealers.length === 0) {
+      try {
+        // Match every {...} object that looks like a dealer record.
+        // A complete dealer object has at least name and placeId.
+        const dealerObjectRegex = /\{(?:[^{}]|"(?:[^"\\]|\\.)*")*\}/g
+        const matches = content.match(dealerObjectRegex) ?? []
+
+        const salvaged: typeof dealers = []
+        for (const m of matches) {
+          try {
+            const obj = JSON.parse(m)
+            // Only accept objects that look like dealer records
+            if (obj && typeof obj === "object" && obj.name && obj.placeId) {
+              salvaged.push(obj)
+            }
+          } catch {
+            // Skip malformed individual objects
+          }
+        }
+
+        if (salvaged.length > 0) {
+          console.log(
+            `[gemini-maps] Salvaged ${salvaged.length} complete dealer objects from truncated response`
+          )
+          dealers = salvaged
+        }
+      } catch (err) {
+        console.error(
+          "[gemini-maps] Salvage parse failed:",
+          err instanceof Error ? err.message : String(err)
+        )
+      }
+    }
+
+    if (dealers.length === 0) {
+      console.error(
+        "[gemini-maps] No dealers parsed from response. First 300 chars:",
+        content.substring(0, 300)
+      )
       return []
     }
 
