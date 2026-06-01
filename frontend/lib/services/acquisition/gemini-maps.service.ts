@@ -39,7 +39,7 @@ For each dealer you find, return a JSON object with:
 Output ONLY a JSON object in this exact format:
 {"dealers": [{"name": "...", "address": "...", "city": "...", "state": "...", "zip": "...", "phone": "...", "website": "...", "brand": "...", "placeId": "..."}]}
 
-CRITICAL: Every dealer MUST include a placeId from Google Maps. Do not invent dealers. Do not include results without a verified Place ID. Return up to 12 dealers. No markdown, no commentary, JSON only.`
+CRITICAL: Every dealer MUST include a placeId from Google Maps. Do not invent dealers. Do not include results without a verified Place ID. Return up to 12 dealers. IMPORTANT: Return ONLY the JSON object. No markdown code fences, no commentary, no explanation. Begin your response with { and end with }.`
 
 export async function discoverDealersViaGeminiMaps(params: {
   make: string
@@ -85,7 +85,6 @@ export async function discoverDealersViaGeminiMaps(params: {
         generationConfig: {
           temperature: 0.1,
           maxOutputTokens: 3000,
-          responseMimeType: "application/json",
         },
       }),
     })
