@@ -226,39 +226,48 @@ export async function discoverDealersViaGeminiMaps(params: {
     console.log("[gemini-maps] First dealer placeId:", dealers[0]?.placeId)
 
     const validatedDealers: DiscoveredDealer[] = []
+
     for (const d of dealers) {
-      if (!d.placeId || typeof d.placeId !== "string" || d.placeId.length < 10) {
-        console.warn(`[gemini-maps] Dropped dealer without valid placeId: ${d.name ?? "unknown"}`)
-        continue
-      }
       if (!d.name || d.name.length < 3) {
-        console.warn(`[gemini-maps] Dropped dealer with invalid name: ${d.placeId}`)
+        console.warn(`[gemini-maps] Dropped dealer with invalid name`)
         continue
       }
 
-      // Extract CID from dealer placeId (may be a pure number)
-      // or from the maps URI directly
-      const dealerCid = String(d.placeId).replace(/[^0-9]/g, "")
+      const hasPlaceId = !!(d.placeId && String(d.placeId).trim().length >= 5)
+      const hasPhone = !!(d.phone && typeof d.phone === "string" && d.phone.length >= 7)
+      const hasAddress = !!(d.address && typeof d.address === "string" && d.address.length >= 5)
 
-      // Build source URL from CID — Google Maps canonical format
-      const sourceUrl = dealerCid
-        ? `https://maps.google.com/?cid=${dealerCid}`
-        : placeIdToUrl.get(d.placeId) ?? null
+      // Drop dealers with no verifiable data at all
+      if (!hasPlaceId && !hasPhone && !hasAddress) {
+        console.warn(`[gemini-maps] Dropped dealer with no verifiable fields: ${d.name}`)
+        continue
+      }
 
-      // For search score: try matching groundingChunks by CID
-      // found in the URI, since placeId formats don't match
+      let sourceUrl: string | null = null
       let searchScore: number | null = null
-      for (const [chunkPlaceId, score] of placeIdToScore) {
-        const chunkCid = String(chunkPlaceId).replace(/[^0-9]/g, "")
-        if (chunkCid && chunkCid === dealerCid) {
-          searchScore = score
-          break
+
+      if (hasPlaceId) {
+        // Tier 1 — Maps-verified: derive CID-based URL
+        const dealerCid = String(d.placeId).replace(/[^0-9]/g, "")
+        sourceUrl = dealerCid
+          ? `https://maps.google.com/?cid=${dealerCid}`
+          : null
+
+        // Match searchScore by CID comparison
+        for (const [chunkPlaceId, score] of placeIdToScore) {
+          const chunkCid = String(chunkPlaceId).replace(/[^0-9]/g, "")
+          if (chunkCid && chunkCid === dealerCid) {
+            searchScore = score
+            break
+          }
+        }
+        if (searchScore === null) {
+          searchScore = placeIdToScore.get(String(d.placeId).trim()) ?? null
         }
       }
-      // Fallback: direct placeId lookup
-      if (searchScore === null) {
-        searchScore = placeIdToScore.get(d.placeId) ?? null
-      }
+      // Tier 2 — no placeId: sourceUrl and searchScore stay null
+      // The dealer has name + phone or address — acceptable for
+      // founder-driven phone outreach
 
       validatedDealers.push({
         name: d.name,
@@ -275,7 +284,13 @@ export async function discoverDealersViaGeminiMaps(params: {
       })
     }
 
-    console.log(`[gemini-maps] Returned ${validatedDealers.length} validated dealers (${dealers.length - validatedDealers.length} dropped for missing placeId)`)
+    // Update the log to show tier breakdown
+    const tier1Count = validatedDealers.filter(d => d.sourceUrl !== null).length
+    const tier2Count = validatedDealers.filter(d => d.sourceUrl === null).length
+    console.log(
+      `[gemini-maps] Returned ${validatedDealers.length} dealers: ` +
+      `${tier1Count} Maps-verified, ${tier2Count} structurally valid`
+    )
     return validatedDealers
 
   } catch (err) {
