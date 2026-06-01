@@ -3288,6 +3288,19 @@ model DealerProspect {
   contactedAt     DateTime? @map("contacted_at")
   repliedAt       DateTime? @map("replied_at")
 
+  // Phase 4A — Founder-driven phone outreach
+  outreachScript        String?   @db.Text @map("outreach_script")
+  scriptDraftedAt       DateTime? @map("script_drafted_at")
+  scriptAttempts        Int       @default(0) @map("script_attempts")
+  founderNotes          String?   @db.Text @map("founder_notes")
+
+  // Status timestamps
+  scriptedAt            DateTime? @map("scripted_at")
+  // (contactedAt and repliedAt already exist above)
+  onboardedAt           DateTime? @map("onboarded_at")
+  deadAt                DateTime? @map("dead_at")
+  deadReason            String?   @map("dead_reason")
+
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -3299,11 +3312,12 @@ model DealerProspect {
 
 enum DealerProspectStatus {
   DISCOVERED
-  DRAFTED
-  CONTACTED
-  REPLIED
-  ONBOARDED
-  DEAD
+  SCRIPTED      // AI script drafted, ready for founder to call
+  DRAFTED       // KEEP for forward compatibility (email phase)
+  CONTACTED     // Founder called the dealer
+  REPLIED       // Dealer responded
+  ONBOARDED     // Dealer signed up
+  DEAD          // No interest or unreachable
 }
 
 model SearchCache {

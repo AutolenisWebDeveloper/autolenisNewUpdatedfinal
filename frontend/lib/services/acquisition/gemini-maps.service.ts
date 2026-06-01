@@ -6,6 +6,8 @@ interface GeminiGroundingChunk {
   maps?: {
     placeId?: string
     uri?: string
+    googleMapsUri?: string
+    url?: string
     title?: string
   }
 }
@@ -188,15 +190,40 @@ export async function discoverDealersViaGeminiMaps(params: {
           if (score > maxScore) maxScore = score
         }
       }
-      placeIdToScore.set(placeId, maxScore)
+      // Normalize placeId so map lookups against dealer placeIds always match.
+      placeIdToScore.set(String(placeId).trim(), maxScore)
     }
 
     const placeIdToUrl = new Map<string, string>()
     for (const chunk of groundingChunks) {
-      if (chunk.maps?.placeId && chunk.maps?.uri) {
-        placeIdToUrl.set(chunk.maps.placeId, chunk.maps.uri)
+      const placeId = chunk.maps?.placeId
+      if (!placeId) continue
+
+      // Try multiple field names for the URL across Gemini API versions.
+      const uri =
+        chunk.maps?.uri ??
+        chunk.maps?.googleMapsUri ??
+        (chunk as { maps?: { url?: string } }).maps?.url ??
+        null
+
+      if (uri) {
+        placeIdToUrl.set(String(placeId).trim(), uri)
       }
     }
+
+    // Diagnostic logging — keep in production for now so we can observe the
+    // actual shape of Gemini's grounding metadata in real traffic.
+    console.log(
+      "[gemini-maps] groundingChunks sample:",
+      JSON.stringify(groundingChunks.slice(0, 2), null, 2)
+    )
+    console.log(
+      "[gemini-maps] groundingSupports sample:",
+      JSON.stringify(groundingSupports.slice(0, 2), null, 2)
+    )
+    console.log("[gemini-maps] placeIdToUrl size:", placeIdToUrl.size)
+    console.log("[gemini-maps] placeIdToScore size:", placeIdToScore.size)
+    console.log("[gemini-maps] First dealer placeId:", dealers[0]?.placeId)
 
     const validatedDealers: DiscoveredDealer[] = []
     for (const d of dealers) {
@@ -209,6 +236,14 @@ export async function discoverDealersViaGeminiMaps(params: {
         continue
       }
 
+      const normalizedPlaceId = String(d.placeId).trim()
+
+      // Fallback: synthesize a Google Maps URL from the placeId so we always
+      // have a valid clickable link, even if Gemini's grounding shape changes.
+      const sourceUrl =
+        placeIdToUrl.get(normalizedPlaceId) ??
+        `https://www.google.com/maps/place/?q=place_id:${normalizedPlaceId}`
+
       validatedDealers.push({
         name: d.name,
         address: d.address ?? null,
@@ -219,8 +254,8 @@ export async function discoverDealersViaGeminiMaps(params: {
         email: null,
         website: d.website ?? null,
         brand: d.brand ?? null,
-        sourceUrl: placeIdToUrl.get(d.placeId) ?? null,
-        searchScore: placeIdToScore.get(d.placeId) ?? null,
+        sourceUrl,
+        searchScore: placeIdToScore.get(normalizedPlaceId) ?? null,
       })
     }
 

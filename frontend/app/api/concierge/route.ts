@@ -39,6 +39,7 @@ import {
   enrichMarketData,
   discoverDealers,
 } from "@/lib/services/acquisition/compound-search.service";
+import { draftAndSaveScript } from "@/lib/services/dealer-recruitment/phone-script-drafter.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -378,6 +379,31 @@ CRITICAL RULES:
               skipDuplicates: true,
             });
             console.log(`[concierge] Dealer discovery saved ${dealers.length} prospects`);
+
+            // Background script drafting for each newly-discovered prospect
+            const insertedProspects = await prisma.dealerProspect.findMany({
+              where: {
+                buyerOppId: opportunitySnapshot.id,
+                status: "DISCOVERED",
+                scriptDraftedAt: null,
+              },
+              select: { id: true },
+            });
+
+            console.log(
+              `[concierge] Drafting phone scripts for ${insertedProspects.length} prospects`,
+            );
+
+            for (const p of insertedProspects) {
+              try {
+                const ok = await draftAndSaveScript(p.id);
+                console.log(`[concierge] Phone script for ${p.id}: ${ok ? "OK" : "FAILED"}`);
+                // 500ms gap between gpt-oss-120b calls to respect TPM
+                await new Promise((resolve) => setTimeout(resolve, 500));
+              } catch (err) {
+                console.error(`[concierge] Script drafting threw for ${p.id}:`, err);
+              }
+            }
           }
         } catch (err) {
           console.error("[concierge] Dealer discovery FAILED:", err);

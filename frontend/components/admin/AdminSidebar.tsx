@@ -12,6 +12,7 @@ import {
   ClipboardCheck, ArrowDownCircle, RotateCcw, Bell,
   Trophy,
   Map, TrendingDown, Globe, PlusCircle, Car, Inbox, ScrollText,
+  Phone,
 } from "lucide-react";
 
 type NavItem = {
@@ -36,6 +37,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Prequalifications", href: "/admin/prequal",     icon: FileCheck },
     { label: "Journey Map",       href: "/admin/journey",     icon: ClipboardList },
     { label: "Dealers",           href: "/admin/dealers",     icon: Building2 },
+    { label: "Dealer Recruitment", href: "/admin/dealer-outreach", icon: Phone },
     { label: "Affiliates",        href: "/admin/affiliates",  icon: Share2 },
   ]},
   { label: "CRM & Communications", items: [
