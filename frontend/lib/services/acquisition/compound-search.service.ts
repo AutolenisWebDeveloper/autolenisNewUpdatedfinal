@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma"
+import { discoverDealersViaGeminiMaps } from "./gemini-maps.service"
 
 // Cache TTLs
 const MARKET_ENRICHMENT_TTL_HOURS = 24
@@ -279,25 +280,6 @@ export interface DiscoveredDealer {
   searchScore: number | null
 }
 
-const DEALER_DISCOVERY_SYSTEM_PROMPT = `You are a verified-source automotive dealership researcher. Find REAL operating car dealerships near a US ZIP code using web search.
-
-CRITICAL VERIFICATION RULES — your output is used to contact real businesses:
-
-1. Each dealer MUST come from a real web search result. Use the search tools to find dealer listings, Google Maps results, manufacturer dealer locators (toyota.com/dealers, honda.com/find-a-dealer, etc.), or industry directories.
-
-2. Set sourceUrl to the SPECIFIC web page where you confirmed each dealer (e.g., "https://www.toyota.com/dealers/dealer.07064.html"). NEVER use the dealer's own website as the sourceUrl — sourceUrl is where you VERIFIED the dealer exists.
-
-3. NEVER invent any field. If you cannot confirm a phone, address, or website from a real search result, OMIT that field. An incomplete record is acceptable; a fabricated record is not.
-
-4. If your search returns fewer than 5 dealers, return what you found. Quality over quantity. Do not pad with guesses.
-
-5. For each dealer extract: name (exact name from search), full street address, city, state, ZIP, phone, the dealer's own website, brand, and your sourceUrl.
-
-6. Phone numbers must look like real numbers — not patterns like (XXX) XXX-5000 repeated. If unsure, omit.
-
-Output JSON only (no markdown, no commentary):
-{"dealers": [{"name": "...", "address": "...", "city": "...", "state": "...", "zip": "...", "phone": "...", "website": "...", "brand": "...", "sourceUrl": "..."}]}`
-
 export async function discoverDealers(params: {
   make: string
   zip: string
@@ -311,94 +293,29 @@ export async function discoverDealers(params: {
     radiusMiles,
   })
 
-  // Check cache
   const cached = await getCached(cacheKey)
   if (cached) {
     console.log("[compound-search] Dealer discovery cache hit:", cacheKey)
     return cached as DiscoveredDealer[]
   }
 
-  console.log("[compound-search] Dealer discovery cache MISS, calling compound:", cacheKey)
+  console.log("[compound-search] Dealer discovery cache MISS, delegating to Gemini Maps:", cacheKey)
 
-  const userPrompt = `Use web_search to find ${params.make} dealerships within ${radiusMiles} miles of US ZIP code ${params.zip}.
-
-Search queries to consider:
-- "${params.make} dealers near ${params.zip}"
-- "${params.make} dealership ${params.zip} site:${params.make.toLowerCase()}.com"
-
-Return up to 12 verified dealers as JSON. Each dealer must have a real sourceUrl from your search results — not the dealer's own website. If you cannot verify a dealer, do not include it.`
-
-  const result = await callCompound(
-    GROQ_COMPOUND_MINI_MODEL,
-    DEALER_DISCOVERY_SYSTEM_PROMPT,
-    userPrompt,
-    {
-      enabledTools: ["web_search"],
-      maxTokens: 3000,
-    }
-  )
-
-  if (!result) return []
-
-  // Parse JSON from content
-  let dealers: DiscoveredDealer[] = []
-  try {
-    const jsonMatch = result.content.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      console.error("[compound-search] No JSON in dealer discovery response:", result.content.substring(0, 200))
-      return []
-    }
-    const parsed = JSON.parse(jsonMatch[0])
-    dealers = Array.isArray(parsed.dealers) ? parsed.dealers : []
-  } catch (err) {
-    console.error("[compound-search] Dealer discovery JSON parse failed:", err)
-    return []
-  }
-
-  // Validation filter — drop entries that look hallucinated
-  const validatedDealers = dealers.filter((d) => {
-    // Must have name and at least one of (sourceUrl, website, phone)
-    if (!d.name || typeof d.name !== "string" || d.name.length < 3) return false
-    if (!d.sourceUrl && !d.website && !d.phone) return false
-
-    // Reject suspiciously patterned phone numbers
-    if (d.phone && typeof d.phone === "string") {
-      const digits = d.phone.replace(/[^0-9]/g, "")
-      // Phones ending in -X000 or -X5000 four times in a row are pattern fakes
-      if (/(0000|5000|3000)$/.test(digits) && digits.length >= 10) {
-        // Suspicious — log and drop
-        console.warn(`[compound-search] Dropped suspected hallucinated dealer: ${d.name} phone=${d.phone}`)
-        return false
-      }
-    }
-
-    return true
+  const dealers = await discoverDealersViaGeminiMaps({
+    make: params.make,
+    zip: params.zip,
+    radiusMiles,
   })
 
-  dealers = validatedDealers
-
-  // Attach search scores from executed_tools
-  const scoreMap = new Map<string, number>()
-  for (const sr of result.searchResults) {
-    if (sr.url && sr.score !== undefined) {
-      scoreMap.set(sr.url, sr.score)
-    }
-  }
-
-  const enrichedDealers = dealers.map((d) => ({
-    ...d,
-    searchScore: d.sourceUrl ? scoreMap.get(d.sourceUrl) ?? null : null,
-  }))
-
-  if (enrichedDealers.length > 0) {
+  if (dealers.length > 0) {
     await setCached(
       cacheKey,
       "dealer_discovery",
       { zip: params.zip, make: params.make, radiusMiles },
-      enrichedDealers,
+      dealers,
       DEALER_DISCOVERY_TTL_HOURS
     )
   }
 
-  return enrichedDealers
+  return dealers
 }
