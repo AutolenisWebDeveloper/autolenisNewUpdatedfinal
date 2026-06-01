@@ -57,6 +57,40 @@ async function callGroq(options: {
   return data.choices?.[0]?.message?.content ?? ""
 }
 
+// ─── Retry wrapper with exponential backoff ──────────────────────────────────
+// Groq free tier rate-limits aggressively (429) and occasionally returns 503
+// when capacity is exhausted. Retry only those transient errors; surface
+// everything else immediately so genuine failures aren't masked.
+async function callGroqWithRetry(params: Parameters<typeof callGroq>[0]): Promise<string> {
+  const maxAttempts = 3
+  let lastError: unknown
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await callGroq(params)
+    } catch (err) {
+      lastError = err
+      const message = err instanceof Error ? err.message : String(err)
+
+      // Only retry on 429 (rate limit) or 503 (capacity)
+      if (!message.includes("429") && !message.includes("503")) {
+        throw err
+      }
+
+      if (attempt === maxAttempts - 1) {
+        throw err
+      }
+
+      // Exponential backoff: 8s, 16s, 32s
+      const backoffMs = Math.min(8000 * Math.pow(2, attempt), 32000)
+      console.warn(`[phone-script-drafter] Retry ${attempt + 1}/${maxAttempts} after ${backoffMs}ms due to: ${message.substring(0, 100)}`)
+      await new Promise((resolve) => setTimeout(resolve, backoffMs))
+    }
+  }
+
+  throw lastError
+}
+
 const SCRIPT_SYSTEM_PROMPT = `You are an outbound dealer recruitment coach for AutoLenis. The founder is personally calling dealerships to recruit them onto the platform. Your job is to draft a confident, conversational phone-call script.
 
 About AutoLenis:
@@ -154,7 +188,7 @@ Output the JSON script structure.`
 
   let response: string
   try {
-    response = await callGroq({
+    response = await callGroqWithRetry({
       model: GROQ_REASONING, // openai/gpt-oss-120b
       systemPrompt: SCRIPT_SYSTEM_PROMPT,
       userPrompt,

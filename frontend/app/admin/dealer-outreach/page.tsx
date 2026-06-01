@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { Phone, Users } from "lucide-react";
 import { DealerProspectStatus, type Prisma } from "@prisma/client";
+import BackfillButton from "./BackfillButton";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +79,12 @@ export default async function DealerOutreachPage({
   const counts: Record<string, number> = {};
   for (const g of grouped) counts[g.status] = g._count._all;
 
+  // Count of DISCOVERED prospects still missing a drafted script — these are
+  // the ones the backfill button can fill in.
+  const missingScriptCount = await prisma.dealerProspect
+    .count({ where: { status: "DISCOVERED", outreachScript: null } })
+    .catch(() => 0);
+
   const statusOrder: DealerProspectStatus[] = [
     "DISCOVERED",
     "SCRIPTED",
@@ -89,9 +96,12 @@ export default async function DealerOutreachPage({
 
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-dealer-outreach-page">
-      <div className="flex items-center gap-3 mb-6">
-        <Phone size={22} className="text-[#0B5FD1]" />
-        <h1 className="text-xl font-bold text-slate-900">Dealer Recruitment Pipeline</h1>
+      <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+        <div className="flex items-center gap-3">
+          <Phone size={22} className="text-[#0B5FD1]" />
+          <h1 className="text-xl font-bold text-slate-900">Dealer Recruitment Pipeline</h1>
+        </div>
+        <BackfillButton missingCount={missingScriptCount} />
       </div>
 
       {/* Stats row */}

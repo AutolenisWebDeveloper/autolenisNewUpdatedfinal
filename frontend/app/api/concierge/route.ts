@@ -398,8 +398,11 @@ CRITICAL RULES:
               try {
                 const ok = await draftAndSaveScript(p.id);
                 console.log(`[concierge] Phone script for ${p.id}: ${ok ? "OK" : "FAILED"}`);
-                // 500ms gap between gpt-oss-120b calls to respect TPM
-                await new Promise((resolve) => setTimeout(resolve, 500));
+                // 12s between gpt-oss-120b calls — respects 8K TPM on free
+                // tier (1500-2000 tokens per call, need most of the minute
+                // budget to recover). Once Groq Developer tier is enabled
+                // this can be reduced to 500ms.
+                await new Promise((resolve) => setTimeout(resolve, 12000));
               } catch (err) {
                 console.error(`[concierge] Script drafting threw for ${p.id}:`, err);
               }
