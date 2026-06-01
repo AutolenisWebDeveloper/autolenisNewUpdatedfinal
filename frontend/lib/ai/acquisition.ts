@@ -223,7 +223,7 @@ Return the merged JSON.`;
   }
 }
 
-// ─── scoreLeadWithGroq — GROQ_REASONING (gpt-oss-120b, medium effort) ────────
+// ─── scoreLeadWithGroq — GROQ_MESSAGING (gpt-oss-20b, medium effort) ─────────
 export async function scoreLeadWithGroq(
   data: ExtractedData,
 ): Promise<{ score: number; temperature: string; reasoning: string }> {
@@ -247,7 +247,7 @@ Guidance:
 
   try {
     const content = await callGroq({
-      model: GROQ_REASONING,
+      model: GROQ_MESSAGING,
       messages: [
         { role: "system", content: system },
         { role: "user", content: `Score this lead:\n${JSON.stringify(data)}` },

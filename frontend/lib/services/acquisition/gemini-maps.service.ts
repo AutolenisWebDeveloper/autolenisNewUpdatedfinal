@@ -236,13 +236,29 @@ export async function discoverDealersViaGeminiMaps(params: {
         continue
       }
 
-      const normalizedPlaceId = String(d.placeId).trim()
+      // Extract CID from dealer placeId (may be a pure number)
+      // or from the maps URI directly
+      const dealerCid = String(d.placeId).replace(/[^0-9]/g, "")
 
-      // Fallback: synthesize a Google Maps URL from the placeId so we always
-      // have a valid clickable link, even if Gemini's grounding shape changes.
-      const sourceUrl =
-        placeIdToUrl.get(normalizedPlaceId) ??
-        `https://www.google.com/maps/place/?q=place_id:${normalizedPlaceId}`
+      // Build source URL from CID — Google Maps canonical format
+      const sourceUrl = dealerCid
+        ? `https://maps.google.com/?cid=${dealerCid}`
+        : placeIdToUrl.get(d.placeId) ?? null
+
+      // For search score: try matching groundingChunks by CID
+      // found in the URI, since placeId formats don't match
+      let searchScore: number | null = null
+      for (const [chunkPlaceId, score] of placeIdToScore) {
+        const chunkCid = String(chunkPlaceId).replace(/[^0-9]/g, "")
+        if (chunkCid && chunkCid === dealerCid) {
+          searchScore = score
+          break
+        }
+      }
+      // Fallback: direct placeId lookup
+      if (searchScore === null) {
+        searchScore = placeIdToScore.get(d.placeId) ?? null
+      }
 
       validatedDealers.push({
         name: d.name,
@@ -255,7 +271,7 @@ export async function discoverDealersViaGeminiMaps(params: {
         website: d.website ?? null,
         brand: d.brand ?? null,
         sourceUrl,
-        searchScore: placeIdToScore.get(normalizedPlaceId) ?? null,
+        searchScore,
       })
     }
 
