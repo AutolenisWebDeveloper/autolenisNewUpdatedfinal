@@ -82,6 +82,11 @@ export interface UnifiedIntakeInput {
   utmMedium?: string | null;
   utmCampaign?: string | null;
   sourceUrl?: string | null;
+  // Organic SEO attribution. `landingSource` is the semantic FormSource
+  // ("seo_city_frisco", "seo_texas_hub", …) used to segment paid vs organic
+  // conversions; `referrer` is document.referrer captured at form mount.
+  landingSource?: string | null;
+  referrer?: string | null;
 }
 
 export interface UnifiedIntakeResult {
@@ -188,6 +193,19 @@ async function resolveBuyerId(
   }
 }
 
+// Prisma raises P2022 ("column does not exist") when code references a column
+// the database has not migrated yet. The add_landing_source_referrer migration
+// may be unapplied in some environments, so we detect this case to retry the
+// VehicleRequest create without the new columns rather than lose the lead.
+function isMissingColumnError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "P2022"
+  );
+}
+
 export async function intakeBuyerRequest(
   input: UnifiedIntakeInput,
 ): Promise<UnifiedIntakeResult> {
@@ -214,7 +232,12 @@ export async function intakeBuyerRequest(
       yearMin: input.yearMin ?? null,
       yearMax: input.yearMax ?? null,
       trim: input.trim ?? null,
-      budgetAmount: input.budgetAmount ?? null,
+      // BuyerOpportunity.budgetAmount stored as dollars
+      // (legacy concierge convention); VehicleRequest stores
+      // cents. Input contract = cents, convert here.
+      budgetAmount: input.budgetAmount != null
+        ? Math.round(input.budgetAmount / 100)
+        : null,
       monthlyPayment: input.monthlyPayment ?? null,
       timeline: input.timeline ?? null,
       zip: input.zip ?? null,
@@ -240,24 +263,48 @@ export async function intakeBuyerRequest(
 
   if (buyerId) {
     try {
-      const vehicleRequest = await prisma.vehicleRequest.create({
-        data: {
-          buyerId,
-          status: "SUBMITTED",
-          makePreference: input.make ?? null,
-          modelPreference: input.model ?? null,
-          yearMin: input.yearMin ?? null,
-          yearMax: input.yearMax ?? null,
-          maxBudgetCents: input.budgetAmount ?? null,
-          notes: input.notes ?? null,
-          utmSource: input.utmSource ?? null,
-          utmMedium: input.utmMedium ?? null,
-          utmCampaign: input.utmCampaign ?? null,
-          sourceUrl: input.sourceUrl ?? null,
-          buyerOpportunityId: opportunityId,
-        },
-      });
-      vehicleRequestId = vehicleRequest.id;
+      const baseData = {
+        buyerId,
+        status: "SUBMITTED" as const,
+        makePreference: input.make ?? null,
+        modelPreference: input.model ?? null,
+        yearMin: input.yearMin ?? null,
+        yearMax: input.yearMax ?? null,
+        maxBudgetCents: input.budgetAmount ?? null,
+        notes: input.notes ?? null,
+        utmSource: input.utmSource ?? null,
+        utmMedium: input.utmMedium ?? null,
+        utmCampaign: input.utmCampaign ?? null,
+        sourceUrl: input.sourceUrl ?? null,
+        buyerOpportunityId: opportunityId,
+      };
+
+      // landingSource/referrer require the add_landing_source_referrer
+      // migration. Until it is applied, the create throws P2022; we retry
+      // WITHOUT those columns so a lead is never lost. Once applied, the first
+      // attempt succeeds and the SEO attribution persists.
+      try {
+        const vehicleRequest = await prisma.vehicleRequest.create({
+          data: {
+            ...baseData,
+            landingSource: input.landingSource ?? null,
+            referrer: input.referrer ?? null,
+          },
+        });
+        vehicleRequestId = vehicleRequest.id;
+      } catch (err) {
+        if (isMissingColumnError(err)) {
+          console.warn(
+            "[unified-intake] landingSource/referrer migration pending — retrying without",
+          );
+          const vehicleRequest = await prisma.vehicleRequest.create({
+            data: baseData,
+          });
+          vehicleRequestId = vehicleRequest.id;
+        } else {
+          throw err;
+        }
+      }
 
       // Backfill the opportunity's buyerId now that it is resolved, so the
       // two records stay consistent (the input may not have supplied one).
@@ -467,16 +514,19 @@ async function scoreAndAlert(
       const vehicle =
         [input.make, input.model].filter(Boolean).join(" ") || "vehicle";
 
-      const budget = input.budgetAmount
-        ? `$${input.budgetAmount.toLocaleString()}`
-        : input.monthlyPayment
-          ? `$${input.monthlyPayment}/mo`
+      // budgetAmount and monthlyPayment are in CENTS per the
+      // unified intake contract; convert to dollars for the
+      // user-facing hot-lead notifications.
+      const budgetDisplay = input.budgetAmount != null
+        ? `$${Math.round(input.budgetAmount / 100).toLocaleString()}`
+        : input.monthlyPayment != null
+          ? `$${Math.round(input.monthlyPayment / 100).toLocaleString()}/mo`
           : "not specified";
 
       const lead: HotLeadData = {
         firstName: input.firstName ?? undefined,
         vehicle,
-        budget,
+        budget: budgetDisplay,
         timeline: input.timeline ?? "unknown",
         zip: input.zip ?? "unknown",
         score: scoreResult.score,
@@ -505,7 +555,7 @@ async function scoreAndAlert(
               to: email,
               firstName: input.firstName ?? "there",
               vehicle,
-              budget,
+              budget: budgetDisplay,
               timeline: input.timeline ?? "unknown",
               zip: input.zip ?? "unknown",
               sessionId: opportunityId,
@@ -519,7 +569,7 @@ async function scoreAndAlert(
               email: email ?? "no email captured",
               phone: input.phone,
               vehicle,
-              budget,
+              budget: budgetDisplay,
               timeline: input.timeline ?? "unknown",
               zip: input.zip ?? "unknown",
               score: scoreResult.score,
