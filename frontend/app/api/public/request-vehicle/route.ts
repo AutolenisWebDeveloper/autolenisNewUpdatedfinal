@@ -129,6 +129,11 @@ const schema = z.object({
   campaign:     z.string().max(60).optional().nullable(),
   consent_email: z.boolean().optional(),
   consent_sms:   z.boolean().optional(),
+  // ── Organic SEO attribution (populated by the shared SEO-page form) ────────
+  // `source` is a semantic FormSource ("seo_city_frisco", "seo_texas_hub", …)
+  // that segments paid vs organic conversions; `referrer` is document.referrer.
+  source:   z.string().max(60).optional().nullable(),
+  referrer: z.string().max(500).optional().nullable(),
 });
 
 type Parsed = z.infer<typeof schema>;
@@ -261,6 +266,12 @@ export async function POST(request: NextRequest) {
     utmMedium:   data.utm_medium   ?? null,
     utmCampaign: data.utm_campaign ?? null,
     sourceUrl:   data.source_url   ?? null,
+    // Organic SEO attribution. `data.source` is the semantic FormSource
+    // ("seo_city_frisco", "seo_texas_hub", …) — distinct from UnifiedIntakeInput
+    // `source` (the IntakeSource channel). The unified service threads these
+    // through to VehicleRequest.landingSource / referrer.
+    landingSource: data.source   ?? null,
+    referrer:      data.referrer ?? null,
   };
 
   const { buyerOpportunityId, vehicleRequestId } =

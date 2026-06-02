@@ -75,8 +75,8 @@ const LP_FAQS = [
     a: "No. Submitting a vehicle request through AutoLenis does not affect your credit score. AutoLenis performs a soft prequalification only. Any hard credit pull would only occur if you choose to proceed with financing through a dealer.",
   },
   {
-    q: "What is the Auction Access Deposit?",
-    a: "The $99 Auction Access Deposit activates your private 48-hour dealer auction. It signals seriousness to verified dealers and is 100% refundable if you do not select any offer. On the Standard plan, it is credited toward your vehicle purchase at closing.",
+    q: "What is the Auction Access Fee?",
+    a: "The $99 Auction Access Fee is a one-time, non-refundable fee that activates your private 48-hour dealer auction. It signals seriousness to verified dealers. It is not a deposit and is not credited toward your vehicle purchase.",
   },
   {
     q: "How is AutoLenis different from other car buying services?",
@@ -100,9 +100,11 @@ export async function generateMetadata(
   return {
     title: meta.title,
     description: meta.description,
+    // noindex (paid funnel — never compete with the organic hub), but follow so
+    // link equity flows through to /car-buying-service/* via the footer bridge.
     robots: {
       index: false,
-      follow: false,
+      follow: true,
       noarchive: true,
       nosnippet: false,
     },
@@ -214,13 +216,13 @@ export default async function LandingPage({
             price: "0",
             priceCurrency: "USD",
             description:
-              "Free to submit a vehicle request. Optional $99 refundable Auction Access Deposit to activate dealer competition.",
+              "Free to submit a vehicle request. A one-time $99 non-refundable Auction Access Fee activates dealer competition.",
             priceSpecification: {
               "@type": "PriceSpecification",
               price: "99",
               priceCurrency: "USD",
               description:
-                "Refundable Auction Access Deposit — credited toward purchase",
+                "One-time, non-refundable Auction Access Fee — not a deposit, not credited toward purchase",
             },
           },
           hasOfferCatalog: {
@@ -233,7 +235,7 @@ export default async function LandingPage({
                   "@type": "Service",
                   name: "Standard Plan",
                   description:
-                    "Free to start. $99 refundable deposit activates your 48-hour dealer auction. Deposit credited to purchase at closing.",
+                    "Free to start. A one-time $99 non-refundable Auction Access Fee activates your 48-hour dealer auction. Not a deposit; not credited toward purchase.",
                 },
               },
               {
