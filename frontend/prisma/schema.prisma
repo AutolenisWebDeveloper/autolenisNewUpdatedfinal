@@ -751,6 +751,10 @@ model VehicleRequest {
   utmCampaign     String?                                @map("utm_campaign")
   sourceUrl       String?                                @map("source_url")
   ipAddress       String?                                @map("ip_address")
+  // Group 5 — link to the AI-enrichment BuyerOpportunity created alongside
+  // this canonical request. Soft link: no cascade, application-enforced.
+  buyerOpportunityId String?                             @map("buyer_opportunity_id")
+  buyerOpportunity   BuyerOpportunity?                   @relation(fields: [buyerOpportunityId], references: [id])
   createdAt       DateTime                               @default(now()) @map("created_at")
   updatedAt       DateTime                               @updatedAt @map("updated_at")
   buyerUpdates    VehicleRequestBuyerUpdate[]
@@ -762,6 +766,7 @@ model VehicleRequest {
   buyer           Buyer                                  @relation(fields: [buyerId], references: [id])
 
   @@index([buyerId, status])
+  @@index([buyerOpportunityId])
   @@map("vehicle_requests")
 }
 
@@ -3197,6 +3202,11 @@ model BuyerOpportunity {
   firstName       String?  @map("first_name")
   email           String?  @map("email")
 
+  // Group 5 — entry-point provenance for this opportunity.
+  source          String?  @map("source")
+  // Inverse relation — canonical VehicleRequest(s) linked to this opportunity.
+  vehicleRequests VehicleRequest[]
+
   // Vehicle interest
   vehicleType     String?  @map("vehicle_type")
   make            String?
@@ -3254,6 +3264,7 @@ model BuyerOpportunity {
   @@index([buyerId])
   @@index([leadTemperature])
   @@index([createdAt])
+  @@index([source])
   @@map("buyer_opportunities")
 }
 
