@@ -214,7 +214,12 @@ export async function intakeBuyerRequest(
       yearMin: input.yearMin ?? null,
       yearMax: input.yearMax ?? null,
       trim: input.trim ?? null,
-      budgetAmount: input.budgetAmount ?? null,
+      // BuyerOpportunity.budgetAmount stored as dollars
+      // (legacy concierge convention); VehicleRequest stores
+      // cents. Input contract = cents, convert here.
+      budgetAmount: input.budgetAmount != null
+        ? Math.round(input.budgetAmount / 100)
+        : null,
       monthlyPayment: input.monthlyPayment ?? null,
       timeline: input.timeline ?? null,
       zip: input.zip ?? null,
@@ -467,16 +472,19 @@ async function scoreAndAlert(
       const vehicle =
         [input.make, input.model].filter(Boolean).join(" ") || "vehicle";
 
-      const budget = input.budgetAmount
-        ? `$${input.budgetAmount.toLocaleString()}`
-        : input.monthlyPayment
-          ? `$${input.monthlyPayment}/mo`
+      // budgetAmount and monthlyPayment are in CENTS per the
+      // unified intake contract; convert to dollars for the
+      // user-facing hot-lead notifications.
+      const budgetDisplay = input.budgetAmount != null
+        ? `$${Math.round(input.budgetAmount / 100).toLocaleString()}`
+        : input.monthlyPayment != null
+          ? `$${Math.round(input.monthlyPayment / 100).toLocaleString()}/mo`
           : "not specified";
 
       const lead: HotLeadData = {
         firstName: input.firstName ?? undefined,
         vehicle,
-        budget,
+        budget: budgetDisplay,
         timeline: input.timeline ?? "unknown",
         zip: input.zip ?? "unknown",
         score: scoreResult.score,
@@ -505,7 +513,7 @@ async function scoreAndAlert(
               to: email,
               firstName: input.firstName ?? "there",
               vehicle,
-              budget,
+              budget: budgetDisplay,
               timeline: input.timeline ?? "unknown",
               zip: input.zip ?? "unknown",
               sessionId: opportunityId,
@@ -519,7 +527,7 @@ async function scoreAndAlert(
               email: email ?? "no email captured",
               phone: input.phone,
               vehicle,
-              budget,
+              budget: budgetDisplay,
               timeline: input.timeline ?? "unknown",
               zip: input.zip ?? "unknown",
               score: scoreResult.score,
