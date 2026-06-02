@@ -765,66 +765,34 @@ export default function LandingPageClient({
           </div>
         </section>
 
-        {/* ── SECTION 5: VSL (video sales letter) ──────────────────────────── */}
-        <section className="py-20 bg-[#F8FAFC] border-y border-slate-200">
-          <div className="max-w-6xl mx-auto px-5 grid lg:grid-cols-2 gap-12 items-center">
-            {/* LEFT — copy */}
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-3">
-                WHY AUTOLENIS EXISTS
-              </p>
-              <h2 className="text-4xl sm:text-5xl font-black text-slate-900 tracking-tight leading-[1.05] mb-5">
-                Finally, a Smarter <br className="hidden sm:block" />
-                Way to Buy a Car
+        {/* ── SECTION 5: VSL (video sales letter — Vimeo embed) ─────────────── */}
+        <section
+          className="py-12 sm:py-16 px-4 bg-white border-y border-slate-200"
+          data-testid="lp-vsl-section"
+        >
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center mb-8">
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-3">
+                See How AutoLenis Saves You Thousands
               </h2>
-              <p className="text-slate-500 leading-relaxed text-sm mb-6 max-w-md">
-                Most buyers overpay because dealerships control the process. AutoLenis flips the
-                script — verified dealers compete for you, so you get the best offers, without the
-                pressure.
+              <p className="text-slate-600 text-base sm:text-lg">
+                Watch this 2-minute video to learn how our reverse auction works
               </p>
-              <div className="space-y-3 mb-7">
-                {[
-                  "See how our private auction works",
-                  "Why transparency saves you thousands",
-                  "How Contract Shield™ protects you",
-                  "Hear real results from real buyers",
-                ].map((item) => (
-                  <div key={item} className="flex items-center gap-3">
-                    <CheckCircle2 size={16} className="text-[#0B5FD1] shrink-0" />
-                    <span className="text-sm text-slate-600">{item}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex -space-x-2">
-                  {["A", "M", "J", "S"].map((c) => (
-                    <div
-                      key={c}
-                      className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0B5FD1] to-[#0944a8] border-2 border-white flex items-center justify-center text-white text-[11px] font-black"
-                    >
-                      {c}
-                    </div>
-                  ))}
-                </div>
-                <div className="flex items-center gap-1">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Star key={i} size={13} className="text-amber-400 fill-amber-400" />
-                  ))}
-                  <span className="ml-1.5 text-xs font-semibold text-slate-600">
-                    4.9 / 5 from 1,200+ buyers
-                  </span>
-                </div>
-              </div>
             </div>
 
-            {/* RIGHT — VSL thumbnail image */}
-            <div className="relative rounded-2xl overflow-hidden shadow-2xl">
-              <Image
-                src="/images/vsl-thumbnail.png"
-                alt="AutoLenis — Finally a smarter way to buy a car"
-                width={640}
-                height={400}
-                className="w-full h-auto"
+            {/* Responsive 16:9 Vimeo embed */}
+            <div
+              className="relative w-full rounded-2xl overflow-hidden shadow-2xl shadow-slate-900/20 bg-slate-900"
+              style={{ paddingBottom: "56.25%" }}
+            >
+              <iframe
+                src="https://player.vimeo.com/video/1196569482?title=0&byline=0&portrait=0&dnt=1"
+                className="absolute top-0 left-0 w-full h-full"
+                frameBorder="0"
+                allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
+                allowFullScreen
+                title="AutoLenis — How It Works"
+                loading="lazy"
               />
             </div>
           </div>
