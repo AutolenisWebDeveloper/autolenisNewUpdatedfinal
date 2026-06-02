@@ -472,12 +472,13 @@ async function scoreAndAlert(
       const vehicle =
         [input.make, input.model].filter(Boolean).join(" ") || "vehicle";
 
-      // budgetAmount is in CENTS per the unified intake contract; convert to
-      // dollars for the user-facing hot-lead notifications.
+      // budgetAmount and monthlyPayment are in CENTS per the
+      // unified intake contract; convert to dollars for the
+      // user-facing hot-lead notifications.
       const budgetDisplay = input.budgetAmount != null
         ? `$${Math.round(input.budgetAmount / 100).toLocaleString()}`
-        : input.monthlyPayment
-          ? `$${input.monthlyPayment}/mo`
+        : input.monthlyPayment != null
+          ? `$${Math.round(input.monthlyPayment / 100).toLocaleString()}/mo`
           : "not specified";
 
       const lead: HotLeadData = {
