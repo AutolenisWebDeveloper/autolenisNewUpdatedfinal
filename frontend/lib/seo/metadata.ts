@@ -67,7 +67,7 @@ export const PAGE_METADATA = {
   pricing: {
     title: "Pricing — Free to Start, $499 Premium Concierge",
     description:
-      "Start free with a $99 refundable deposit, or go Premium for the full white-glove experience. No hidden fees.",
+      "Start free with a one-time $99 non-refundable Auction Access Fee, or go Premium for the full white-glove experience. No hidden fees.",
     path: "/pricing",
     keywords: ["car concierge price", "AutoLenis pricing", "premium car buying"],
   },

@@ -16,6 +16,11 @@ const COMPANY_ADDRESS =
   process.env.NEXT_PUBLIC_COMPANY_ADDRESS ??
   "AutoLenis, Inc., 12800 Westridge Blvd, Suite 114, Frisco, TX 75035";
 
+// NAP phone. Display format here; the +1-469-535-9785 schema form lives in
+// lib/seo/jsonld.tsx. Local Frisco number for local-SEO citation consistency.
+const COMPANY_PHONE_DISPLAY = "(469) 535-9785";
+const COMPANY_PHONE_TEL = "+14695359785";
+
 const FOOTER_LINKS = {
   Buyers: [
     { label: "How It Works",     href: "/how-it-works" },
@@ -45,6 +50,16 @@ const FOOTER_LINKS = {
     { label: "Security",         href: "/trust" },
     { label: "Cookie Policy",    href: "/legal/cookie-policy" },
   ],
+  // Service Areas — organic internal-linking column. State hub + 5 representative
+  // cities. Site-wide (appears on every public page that renders this footer).
+  "Service Areas": [
+    { label: "Texas (statewide)", href: "/car-buying-service/texas" },
+    { label: "Dallas",            href: "/car-buying-service/dallas" },
+    { label: "Fort Worth",        href: "/car-buying-service/fort-worth" },
+    { label: "Frisco",            href: "/car-buying-service/frisco" },
+    { label: "Plano",             href: "/car-buying-service/plano" },
+    { label: "McKinney",          href: "/car-buying-service/mckinney" },
+  ],
 };
 
 export default function PublicFooter() {
@@ -60,7 +75,7 @@ export default function PublicFooter() {
         </div>
 
         {/* Links grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-10 mb-16">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-10 mb-16">
           {Object.entries(FOOTER_LINKS).map(([category, links]) => (
             <div key={category}>
               <h3 className="text-xs tracking-widest uppercase font-semibold text-slate-500 mb-4">{category}</h3>
@@ -112,6 +127,10 @@ export default function PublicFooter() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <p className="text-xs text-slate-500">
             AutoLenis &copy; {new Date().getFullYear()}
+            {" · "}
+            <a href={`tel:${COMPANY_PHONE_TEL}`} className="hover:text-white transition-colors" data-testid="footer-phone">
+              {COMPANY_PHONE_DISPLAY}
+            </a>
           </p>
           <p className="text-xs text-slate-500" data-testid="footer-physical-address">
             {COMPANY_ADDRESS}

@@ -79,6 +79,8 @@ const PUBLIC_ROUTES = [
   "/buyer-offer-review",
   "/lp",
   "/thank-you",
+  // Hybrid SEO landing system — organic state hub + programmatic city pages.
+  "/car-buying-service",
   // Twilio voice/SMS webhooks — cannot present a session/CSRF token; each
   // handler validates the X-Twilio-Signature instead.
   "/api/twilio/voice/incoming",

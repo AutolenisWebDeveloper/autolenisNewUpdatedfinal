@@ -104,6 +104,11 @@ const schema = z.object({
   campaign:     z.string().max(60).optional().nullable(),
   consent_email: z.boolean().optional(),
   consent_sms:   z.boolean().optional(),
+  // ── Organic SEO attribution (populated by the shared SEO-page form) ────────
+  // `source` is a semantic FormSource ("seo_city_frisco", "seo_texas_hub", …)
+  // that segments paid vs organic conversions; `referrer` is document.referrer.
+  source:   z.string().max(60).optional().nullable(),
+  referrer: z.string().max(500).optional().nullable(),
 });
 
 type Parsed = z.infer<typeof schema>;
@@ -242,28 +247,39 @@ export async function POST(request: NextRequest) {
   let vehicleRequestId: string | undefined;
 
   if (buyerId) {
+    const baseData = {
+      buyerId,
+      status:          "SUBMITTED" as const,
+      makePreference:  data.preferredMake  || null,
+      modelPreference: data.preferredModel || null,
+      yearMin:         data.minYear ? Number(data.minYear) : null,
+      yearMax:         data.maxYear ? Number(data.maxYear) : null,
+      maxBudgetCents:  parseBudgetToCents(data.budget),
+      notes:           data.notes || null,
+      // LP + organic attribution
+      utmSource:   data.utm_source   ?? null,
+      utmMedium:   data.utm_medium   ?? null,
+      utmCampaign: data.utm_campaign ?? null,
+      sourceUrl:   data.source_url   ?? null,
+      ipAddress:   request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+    };
+    // `landingSource` (semantic FormSource) + `referrer` require the pending
+    // migration (add_landing_source_referrer). Until it is applied, writing
+    // those columns throws P2022; we catch and retry WITHOUT them so an organic
+    // lead is never lost. Once the migration runs, the first attempt succeeds.
     try {
       const vehicleRequest = await prisma.vehicleRequest.create({
-        data: {
-          buyerId,
-          status:          "SUBMITTED",
-          makePreference:  data.preferredMake  || null,
-          modelPreference: data.preferredModel || null,
-          yearMin:         data.minYear ? Number(data.minYear) : null,
-          yearMax:         data.maxYear ? Number(data.maxYear) : null,
-          maxBudgetCents:  parseBudgetToCents(data.budget),
-          notes:           data.notes || null,
-          // LP attribution
-          utmSource:   data.utm_source   ?? null,
-          utmMedium:   data.utm_medium   ?? null,
-          utmCampaign: data.utm_campaign ?? null,
-          sourceUrl:   data.source_url   ?? null,
-          ipAddress:   request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
-        },
+        data: { ...baseData, landingSource: data.source ?? null, referrer: data.referrer ?? null },
       });
       vehicleRequestId = vehicleRequest.id;
     } catch (err) {
-      console.error("[request-vehicle] VehicleRequest create failed:", err);
+      console.warn("[request-vehicle] create with landingSource/referrer failed (migration pending?); retrying without:", err);
+      try {
+        const vehicleRequest = await prisma.vehicleRequest.create({ data: baseData });
+        vehicleRequestId = vehicleRequest.id;
+      } catch (err2) {
+        console.error("[request-vehicle] VehicleRequest create failed:", err2);
+      }
     }
   }
 

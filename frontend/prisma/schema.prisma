@@ -751,6 +751,10 @@ model VehicleRequest {
   utmCampaign     String?                                @map("utm_campaign")
   sourceUrl       String?                                @map("source_url")
   ipAddress       String?                                @map("ip_address")
+  // Hybrid SEO attribution — semantic FormSource (paid vs organic segmentation)
+  // and document.referrer. Added by migration add_landing_source_referrer.
+  landingSource   String?                                @map("landing_source")
+  referrer        String?                                @map("referrer")
   // Group 5 — link to the AI-enrichment BuyerOpportunity created alongside
   // this canonical request. Soft link: no cascade, application-enforced.
   buyerOpportunityId String?                             @map("buyer_opportunity_id")

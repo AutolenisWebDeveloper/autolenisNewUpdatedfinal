@@ -498,7 +498,7 @@ export default function LandingPageClient({
                   {[
                     "Takes about 60 seconds",
                     "No credit impact",
-                    "$99 Auction Access Fee — refundable if no valuable offer is received",
+                    "$99 one-time Auction Access Fee activates your private auction",
                     "No obligation to accept",
                   ].map((item) => (
                     <div key={item} className="flex items-center gap-3">
@@ -731,12 +731,24 @@ export default function LandingPageClient({
 
                 {/* disclaimers */}
                 <p className="text-[10px] text-slate-400 text-center mt-3 leading-relaxed">
-                  The $99 Auction Access Fee unlocks your private 48-hour dealer auction. Refundable if AutoLenis
-                  is unable to secure a valuable or competitive offer for your requested vehicle.
+                  The $99 Auction Access Fee is a one-time, non-refundable fee that activates your
+                  private 48-hour dealer auction. It is not a deposit and is not credited toward a purchase.
                 </p>
                 <p className="text-[10px] text-slate-400 text-center mt-2 leading-relaxed">
                   Savings vary based on vehicle, market conditions, dealer participation, and buyer-selected offer.
                   AutoLenis does not guarantee any specific savings outcome.
+                </p>
+                {/* A7 — secondary organic bridge. Subtle, below the form, does not
+                    compete with the primary CTA. Links paid visitors who want more
+                    depth to the indexable state hub. Only added LP element. */}
+                <p className="text-[11px] text-center mt-4">
+                  <Link
+                    href="/car-buying-service/texas"
+                    data-testid="lp-service-guide-link"
+                    className="text-slate-400 hover:text-[#0B5FD1] transition-colors underline underline-offset-2"
+                  >
+                    Want to learn more about how AutoLenis works? See our full service guide →
+                  </Link>
                 </p>
               </div>
             </div>
@@ -1160,7 +1172,7 @@ export default function LandingPageClient({
                 },
                 {
                   q: "What does it cost?",
-                  a: "A $99 Limited-Time Auction Access Fee unlocks dealer competition. It is refundable if you decline every offer or if no valuable offer is received. Premium concierge is available for buyers who want full hands-off service.",
+                  a: "A one-time $99 Auction Access Fee unlocks dealer competition. It is a non-refundable access fee — not a deposit, and not credited toward your purchase. Premium concierge is available for buyers who want full hands-off service.",
                 },
                 {
                   q: "Do I have to talk to dealers?",
