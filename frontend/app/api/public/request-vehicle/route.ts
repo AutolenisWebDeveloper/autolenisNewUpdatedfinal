@@ -21,6 +21,10 @@ import {
   sendDealerNewBuyerOpportunityEmail,
 } from "@/lib/services/email/resend.service";
 import { dispatch } from "@/lib/qstash/dispatch";
+import {
+  intakeBuyerRequest,
+  type UnifiedIntakeInput,
+} from "@/lib/services/acquisition/unified-buyer-intake.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -38,6 +42,27 @@ function parseBudgetToCents(budget: string): number | null {
   };
   return map[budget] ?? null;
 }
+
+// The wizard collects make/model either as discrete fields or, on the "other"
+// path, as a single free-text "customMakeModel" string (e.g. "Toyota
+// Highlander"). Split it so the unified service receives structured make/model.
+function splitMakeModel(s?: string): { make?: string; model?: string } {
+  const trimmed = (s ?? "").trim();
+  if (!trimmed) return {};
+  const [make, ...rest] = trimmed.split(/\s+/);
+  return { make, model: rest.join(" ") || undefined };
+}
+
+// Map the wizard's free-form timeline labels onto the unified intake contract.
+const TIMELINE_MAP: Record<
+  "ASAP" | "Within 30 Days" | "Within 60 Days" | "Just Researching",
+  string
+> = {
+  "ASAP": "asap",
+  "Within 30 Days": "1_month",
+  "Within 60 Days": "1_to_3_months",
+  "Just Researching": "researching",
+};
 
 const schema = z.object({
   firstName:           z.string().min(1).max(50),
@@ -180,91 +205,83 @@ export async function POST(request: NextRequest) {
 
   const fullName = `${data.firstName} ${data.lastName}`.trim();
 
-  // ── Find or create buyer account ────────────────────────────────────────
-  // VehicleRequest.buyerId is NOT NULL.
-  // Resolve the buyer from the submitted email — three cases.
+  // ── Unified buyer intake ─────────────────────────────────────────────────
+  // The unified service owns buyer find/create (Case 1/2/3), BuyerOpportunity +
+  // VehicleRequest creation, and the Group 3+4A AI pipeline (market enrichment,
+  // dealer discovery, phone scripts, lead scoring, 4-channel hot-lead alerts).
+  // We no longer touch prisma.vehicleRequest.create directly here.
+  const custom = splitMakeModel(data.customMakeModel);
+
+  const input: UnifiedIntakeInput = {
+    // /lp/[campaign] submissions carry `campaign`; the plain wizard does not.
+    source: data.campaign ? "lp_campaign" : "request_vehicle_wizard",
+    campaign: data.campaign ?? undefined,
+
+    firstName: data.firstName,
+    lastName:  data.lastName,
+    email:     data.email,
+    phone:     data.phone,
+    zip:       data.zip,
+
+    make:        data.preferredMake  || custom.make,
+    model:       data.preferredModel || custom.model,
+    vehicleType: data.vehicleType,
+    yearMin:     data.minYear,
+    yearMax:     data.maxYear,
+
+    // Contract: budgetAmount is in CENTS (the service converts to dollars for
+    // BuyerOpportunity and stores cents on VehicleRequest.maxBudgetCents).
+    budgetAmount: parseBudgetToCents(data.budget) ?? undefined,
+    timeline:     TIMELINE_MAP[data.timeline],
+
+    hasTradeIn: data.hasTradeIn ?? false,
+    tradeInDetails: data.hasTradeIn
+      ? {
+          year:            data.tradeYear,
+          make:            data.tradeMake,
+          model:           data.tradeModel,
+          trim:            data.tradeTrim,
+          mileage:         data.tradeMileage,
+          color:           data.tradeColor,
+          condition:       data.tradeCondition,
+          vin:             data.tradeVin,
+          paidOff:         data.tradePaidOff,
+          loanBalance:     data.tradeLoanBalance,
+          payoffAmount:    data.tradePayoffAmount,
+          issues:          data.tradeIssues,
+          titleStatus:     data.tradeTitleStatus,
+          accidentHistory: data.tradeAccidentHistory,
+        }
+      : undefined,
+
+    financingNeeded: data.financingOption === "need_financing",
+    notes:           data.notes,
+
+    utmSource:   data.utm_source   ?? null,
+    utmMedium:   data.utm_medium   ?? null,
+    utmCampaign: data.utm_campaign ?? null,
+    sourceUrl:   data.source_url   ?? null,
+  };
+
+  const { buyerOpportunityId, vehicleRequestId } =
+    await intakeBuyerRequest(input);
+
+  // Resolve the buyerId the unified service stood up, for CRM identity linking
+  // and the QStash welcome sequence. When no VehicleRequest was created the
+  // buyer could not be resolved (Case C) — degrade gracefully.
   let buyerId = "";
-
-  try {
-    const existingUser = await prisma.user.findUnique({
-      where:   { email: data.email.toLowerCase() },
-      include: { buyer: { select: { id: true } } },
+  if (vehicleRequestId) {
+    const vr = await prisma.vehicleRequest.findUnique({
+      where:  { id: vehicleRequestId },
+      select: { buyerId: true },
     });
-
-    if (existingUser?.buyer) {
-      // Case 1: Registered buyer — link directly
-      buyerId = existingUser.buyer.id;
-    } else if (existingUser && !existingUser.buyer) {
-      // Case 2: User exists but no buyer profile — create it
-      const newBuyer = await prisma.buyer.create({
-        data: {
-          userId:    existingUser.id,
-          firstName: data.firstName,
-          lastName:  data.lastName,
-          phone:     data.phone  ?? null,
-          city:      data.city   ?? null,
-          state:     data.state  ?? null,
-          zip:       data.zip    ?? null,
-        },
-      });
-      buyerId = newBuyer.id;
-    } else {
-      // Case 3: No user at all — create guest User + Buyer.
-      // User.supabaseId is NOT NULL — use a placeholder replaced at signup.
-      const guestUser = await prisma.user.create({
-        data: {
-          supabaseId: `guest_${crypto.randomUUID()}`,
-          email:      data.email.toLowerCase(),
-          role:       "BUYER",
-        },
-      });
-      const guestBuyer = await prisma.buyer.create({
-        data: {
-          userId:    guestUser.id,
-          firstName: data.firstName,
-          lastName:  data.lastName,
-          phone:     data.phone  ?? null,
-          city:      data.city   ?? null,
-          state:     data.state  ?? null,
-          zip:       data.zip    ?? null,
-          isGuest:   true,
-        },
-      });
-      buyerId = guestBuyer.id;
-    }
-  } catch (err) {
-    console.error("[request-vehicle] buyer find/create failed:", err);
-  }
-
-  // ── Create VehicleRequest record ────────────────────────────────────────
-  // This is the canonical record the buyer offer page queries.
-  // The Notification below is for the admin queue only.
-  let vehicleRequestId: string | undefined;
-
-  if (buyerId) {
-    try {
-      const vehicleRequest = await prisma.vehicleRequest.create({
-        data: {
-          buyerId,
-          status:          "SUBMITTED",
-          makePreference:  data.preferredMake  || null,
-          modelPreference: data.preferredModel || null,
-          yearMin:         data.minYear ? Number(data.minYear) : null,
-          yearMax:         data.maxYear ? Number(data.maxYear) : null,
-          maxBudgetCents:  parseBudgetToCents(data.budget),
-          notes:           data.notes || null,
-          // LP attribution
-          utmSource:   data.utm_source   ?? null,
-          utmMedium:   data.utm_medium   ?? null,
-          utmCampaign: data.utm_campaign ?? null,
-          sourceUrl:   data.source_url   ?? null,
-          ipAddress:   request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
-        },
-      });
-      vehicleRequestId = vehicleRequest.id;
-    } catch (err) {
-      console.error("[request-vehicle] VehicleRequest create failed:", err);
-    }
+    buyerId = vr?.buyerId ?? "";
+  } else {
+    console.warn(
+      "[request-vehicle] unified intake returned no vehicleRequestId — " +
+        "skipping CRM linking and VehicleRequest emails",
+      { buyerOpportunityId },
+    );
   }
 
   // ─── CRM PIPELINE — runs after VehicleRequest write ──────────────────────
@@ -415,48 +432,54 @@ export async function POST(request: NextRequest) {
     console.error("[request-vehicle] notification persist failed:", err);
   }
 
-  await Promise.allSettled([
-    sendVehicleRequestAdminNotification({
-      fullName,
-      email: data.email,
-      phone: data.phone,
-      zip: data.zip,
-      city: data.city,
-      state: data.state,
-      vehicleType: data.vehicleType,
-      preferredMake: data.preferredMake,
-      preferredModel: data.preferredModel,
-      minYear: data.minYear,
-      maxYear: data.maxYear,
-      budget: data.budget,
-      newOrUsed: data.newOrUsed,
-      financingNeeded:
-        data.financingOption === "need_financing" ? "Yes" :
-        data.financingOption === "have_financing" ? "No" :
-        "Not Sure",
-      contactMethod: data.contactMethod,
-      timeline: data.timeline,
-      interiorColor: data.interiorColor,
-      mustHaveFeatures: data.mustHaveFeatures,
-      openToAlternatives: data.openToAlternatives,
-      desiredMonthly: data.desiredMonthly,
-      downPaymentAvail: data.downPaymentAvail,
-      hasTradeIn: data.hasTradeIn,
-      tradeYear: data.tradeYear,
-      tradeMake: data.tradeMake,
-      tradeModel: data.tradeModel,
-      notes: data.notes,
-      notificationId,
-    }),
-    sendVehicleRequestConfirmation(data.email, data.firstName),
-  ]);
+  // VehicleRequest-specific emails (admin queue notification + buyer
+  // confirmation). These are DISTINCT from the BuyerOpportunity hot-lead
+  // notifications fired inside the unified service. Skipped when no
+  // VehicleRequest was created (Case C — insufficient buyer info).
+  if (vehicleRequestId) {
+    await Promise.allSettled([
+      sendVehicleRequestAdminNotification({
+        fullName,
+        email: data.email,
+        phone: data.phone,
+        zip: data.zip,
+        city: data.city,
+        state: data.state,
+        vehicleType: data.vehicleType,
+        preferredMake: data.preferredMake,
+        preferredModel: data.preferredModel,
+        minYear: data.minYear,
+        maxYear: data.maxYear,
+        budget: data.budget,
+        newOrUsed: data.newOrUsed,
+        financingNeeded:
+          data.financingOption === "need_financing" ? "Yes" :
+          data.financingOption === "have_financing" ? "No" :
+          "Not Sure",
+        contactMethod: data.contactMethod,
+        timeline: data.timeline,
+        interiorColor: data.interiorColor,
+        mustHaveFeatures: data.mustHaveFeatures,
+        openToAlternatives: data.openToAlternatives,
+        desiredMonthly: data.desiredMonthly,
+        downPaymentAvail: data.downPaymentAvail,
+        hasTradeIn: data.hasTradeIn,
+        tradeYear: data.tradeYear,
+        tradeMake: data.tradeMake,
+        tradeModel: data.tradeModel,
+        notes: data.notes,
+        notificationId,
+      }),
+      sendVehicleRequestConfirmation(data.email, data.firstName),
+    ]);
 
-  // Buyer-side dedicated confirmation (uses unified resend template).
-  // Prefer vehicleRequestId so the link resolves to the canonical record.
-  const buyerEmailRequestId = vehicleRequestId ?? notificationId ?? "";
-  if (buyerEmailRequestId) {
-    await sendVehicleRequestReceived(data.email, fullName, buyerEmailRequestId)
-      .catch(err => console.error("[request-vehicle] buyer confirmation email failed:", err));
+    // Buyer-side dedicated confirmation (uses unified resend template).
+    // Prefer vehicleRequestId so the link resolves to the canonical record.
+    const buyerEmailRequestId = vehicleRequestId ?? notificationId ?? "";
+    if (buyerEmailRequestId) {
+      await sendVehicleRequestReceived(data.email, fullName, buyerEmailRequestId)
+        .catch(err => console.error("[request-vehicle] buyer confirmation email failed:", err));
+    }
   }
 
   // Notify active dealers of the new buyer opportunity — non-blocking per dealer.
@@ -485,5 +508,5 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, buyerOpportunityId, vehicleRequestId });
 }

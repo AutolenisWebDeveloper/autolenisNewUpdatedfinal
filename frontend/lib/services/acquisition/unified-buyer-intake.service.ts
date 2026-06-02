@@ -214,7 +214,12 @@ export async function intakeBuyerRequest(
       yearMin: input.yearMin ?? null,
       yearMax: input.yearMax ?? null,
       trim: input.trim ?? null,
-      budgetAmount: input.budgetAmount ?? null,
+      // BuyerOpportunity.budgetAmount stored as dollars
+      // (legacy concierge convention); VehicleRequest stores
+      // cents. Input contract = cents, convert here.
+      budgetAmount: input.budgetAmount != null
+        ? Math.round(input.budgetAmount / 100)
+        : null,
       monthlyPayment: input.monthlyPayment ?? null,
       timeline: input.timeline ?? null,
       zip: input.zip ?? null,
