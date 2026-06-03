@@ -11,7 +11,7 @@ import {
 // ─── Types & Constants ──────────────────────────────────────────────────────────
 
 type VehicleType = "SUV" | "Sedan" | "Truck" | "Van" | "Coupe" | "Other";
-type Condition = "New" | "Used";
+type Condition = "New" | "Used" | "Either";
 type Timeline = "ASAP" | "1-2 Weeks" | "1 Month" | "Flexible";
 type MileageOption = "25k" | "50k" | "75k" | "100k" | "Any";
 
@@ -52,6 +52,9 @@ interface FormState {
   condition: Condition | "";
   makeModel: string;
   timeline: Timeline | "";
+  yearMin: number | null;
+  yearMax: number | null;
+  purchaseTimeframe: PurchaseTimeframe | "";
   // Step 2
   zip: string;
   budget: string;          // formatted with commas
@@ -88,6 +91,7 @@ const INITIAL_FINANCING: FinancingState = {
 
 const INITIAL: FormState = {
   vehicleType: "", condition: "", makeModel: "", timeline: "",
+  yearMin: null, yearMax: null, purchaseTimeframe: "",
   zip: "", budget: "", downPayment: "", monthlyTarget: "",
   trim: "", maxMileage: "Any", features: [],
   financing: null,
@@ -105,6 +109,14 @@ const VEHICLE_TYPES: { id: VehicleType; label: string; icon: string }[] = [
 ];
 
 const TIMELINES: Timeline[] = ["ASAP", "1-2 Weeks", "1 Month", "Flexible"];
+const CONDITIONS: Condition[] = ["New", "Used", "Either"];
+const REQUEST_YEARS = Array.from({ length: 17 }, (_, i) => 2026 - i);
+const TIMEFRAMES: { val: PurchaseTimeframe; label: string }[] = [
+  { val: "ASAP", label: "ASAP" },
+  { val: "WITHIN_7_DAYS", label: "Within 7 days" },
+  { val: "WITHIN_30_DAYS", label: "Within 30 days" },
+  { val: "WITHIN_60_DAYS_PLUS", label: "60+ days / flexible" },
+];
 const MILEAGE_STOPS: MileageOption[] = ["25k", "50k", "75k", "100k", "Any"];
 const MILEAGE_VALUE: Record<MileageOption, number | undefined> = {
   "25k": 25000, "50k": 50000, "75k": 75000, "100k": 100000, "Any": undefined,
@@ -164,9 +176,15 @@ export default function NewRequestPage() {
     const vt = sp.get("vehicleType");
     if (vt && ["SUV","Sedan","Truck","Van","Coupe","Other"].includes(vt)) fromUrl.vehicleType = vt as VehicleType;
     const cond = sp.get("condition");
-    if (cond === "New" || cond === "Used") fromUrl.condition = cond;
+    if (cond === "New" || cond === "Used" || cond === "Either") fromUrl.condition = cond;
     const tl = sp.get("timeline");
     if (tl && (TIMELINES as readonly string[]).includes(tl)) fromUrl.timeline = tl as Timeline;
+    const ptf = sp.get("purchaseTimeframe");
+    if (ptf && TIMEFRAMES.some(t => t.val === ptf)) fromUrl.purchaseTimeframe = ptf as PurchaseTimeframe;
+    const yMin = sp.get("yearMin");
+    if (yMin && /^\d{4}$/.test(yMin)) fromUrl.yearMin = Number(yMin);
+    const yMax = sp.get("yearMax");
+    if (yMax && /^\d{4}$/.test(yMax)) fromUrl.yearMax = Number(yMax);
     const make = sp.get("makePreference");
     const model = sp.get("modelPreference");
     if (make || model) fromUrl.makeModel = [make, model].filter(Boolean).join(" ").trim();
@@ -204,6 +222,25 @@ export default function NewRequestPage() {
     } catch { /* ignore */ }
   }, [form, step]);
 
+  // ── Pre-fill ZIP from the buyer profile (editable; only fills when empty) ──
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/buyer/profile");
+        if (!res.ok) return;
+        const data = await res.json() as { data?: { zip?: string } };
+        const z = data?.data?.zip;
+        if (!cancelled && z && /^\d{5}$/.test(z)) {
+          // Functional update so we never clobber a ZIP already hydrated from
+          // the URL (Adjust-Request flow) or restored from sessionStorage.
+          setForm(prev => (prev.zip ? prev : { ...prev, zip: z }));
+        }
+      } catch { /* ignore — ZIP stays editable/empty */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // ── Rate limit countdown ──────────────────────────────────────────────────
   useEffect(() => {
     if (rateLimitSeconds <= 0) return;
@@ -226,15 +263,20 @@ export default function NewRequestPage() {
   // ── Validators ────────────────────────────────────────────────────────────
   function validateStep1(): boolean {
     const e: typeof errors = {};
-    if (!form.vehicleType) e.vehicleType = "Please select a vehicle type";
-    if (!form.condition)   e.condition   = "Select new or used";
-    if (!form.timeline)    e.timeline    = "Select your timeline";
+    if (!form.vehicleType)      e.vehicleType      = "Please select a vehicle type";
+    if (!form.condition)        e.condition        = "Select new, used, or either";
+    if (!form.timeline)         e.timeline         = "Select your timeline";
+    if (!form.purchaseTimeframe) e.purchaseTimeframe = "Select how soon you're buying";
+    if (form.yearMin != null && form.yearMax != null && form.yearMin > form.yearMax) {
+      e.yearMax = "Max year must be greater than or equal to min year";
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   }
   function validateStep2(): boolean {
     const e: typeof errors = {};
-    if (form.zip && !/^\d{5}$/.test(form.zip)) e.zip = "Enter a valid 5-digit ZIP";
+    if (!form.zip) e.zip = "ZIP code is required";
+    else if (!/^\d{5}$/.test(form.zip)) e.zip = "Enter a valid 5-digit ZIP";
     const budget = parseCurrency(form.budget);
     if (!budget) e.budget = "Budget is required";
     else if (budget < 5000) e.budget = "Budget must be greater than $5,000";
@@ -328,6 +370,15 @@ export default function NewRequestPage() {
       makePreference,
       modelPreference,
       maxBudgetCents: parseCurrency(form.budget) * 100,
+      // Structured intake fields (Phase 5.3-B) — sent first-class so the
+      // unified intake service / lead scoring sees complete data instead of
+      // having to parse them back out of the notes blob.
+      yearMin: form.yearMin,
+      yearMax: form.yearMax,
+      vehicleType: form.vehicleType || undefined,
+      condition: form.condition || undefined,
+      zip: form.zip || undefined,
+      purchaseTimeframe: form.purchaseTimeframe || undefined,
       notes,
     };
     if (financingPayload) payload.financing = financingPayload;
@@ -530,10 +581,10 @@ function Step1({
         </div>
       </FieldGroup>
 
-      {/* New / Used */}
+      {/* New / Used / Either */}
       <FieldGroup label="New or Used" testId="field-condition" error={errors.condition}>
-        <div className="grid grid-cols-2 gap-3">
-          {(["New", "Used"] as Condition[]).map(opt => {
+        <div className="grid grid-cols-3 gap-3">
+          {CONDITIONS.map(opt => {
             const selected = form.condition === opt;
             return (
               <button
@@ -589,6 +640,36 @@ function Step1({
         </div>
       </FieldGroup>
 
+      {/* Year range */}
+      <FieldGroup label="Year Range" testId="field-year-range" optional error={errors.yearMax}>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <span className="block text-xs text-slate-500 mb-1.5">Min year</span>
+            <select
+              value={form.yearMin ?? ""}
+              onChange={(e) => update("yearMin", e.target.value ? Number(e.target.value) : null)}
+              data-testid="year-min-select"
+              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+            >
+              <option value="">No minimum</option>
+              {REQUEST_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div>
+            <span className="block text-xs text-slate-500 mb-1.5">Max year</span>
+            <select
+              value={form.yearMax ?? ""}
+              onChange={(e) => update("yearMax", e.target.value ? Number(e.target.value) : null)}
+              data-testid="year-max-select"
+              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+            >
+              <option value="">No maximum</option>
+              {REQUEST_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+        </div>
+      </FieldGroup>
+
       {/* Timeline */}
       <FieldGroup label="Timeline" testId="field-timeline" error={errors.timeline}>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -607,6 +688,30 @@ function Step1({
                 }`}
               >
                 {t}
+              </button>
+            );
+          })}
+        </div>
+      </FieldGroup>
+
+      {/* Purchase timeframe — how soon are you buying? (drives lead scoring) */}
+      <FieldGroup label="How soon are you looking to buy?" testId="field-purchase-timeframe" error={errors.purchaseTimeframe}>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          {TIMEFRAMES.map(tf => {
+            const selected = form.purchaseTimeframe === tf.val;
+            return (
+              <button
+                key={tf.val}
+                type="button"
+                onClick={() => update("purchaseTimeframe", tf.val)}
+                data-testid={`purchase-timeframe-${tf.val.toLowerCase()}`}
+                className={`rounded-full border px-4 py-2.5 text-xs font-medium transition-all ${
+                  selected
+                    ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                    : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                {tf.label}
               </button>
             );
           })}
@@ -644,7 +749,7 @@ function Step2({
         We use this to match you with options that fit your financial goals.
       </p>
 
-      <FieldGroup label="ZIP Code" testId="field-zip" optional error={errors.zip}>
+      <FieldGroup label="ZIP Code" testId="field-zip" error={errors.zip}>
         <input
           ref={zipRef}
           type="text"
