@@ -162,9 +162,11 @@ export async function POST(request: NextRequest) {
     // Capture a *complete* vehicle request that was collected but never dispatched
     // mid-call (e.g. the caller hung up right after the last detail).
     if (conv?.vehicleRequest && !conv.requestDispatched) {
-      await dispatchVehicleRequest(conv.vehicleRequest, conv.callerPhone || from).catch((err) =>
-        console.error("[voice/status] late dispatch failed:", err),
-      );
+      await dispatchVehicleRequest(
+        conv.vehicleRequest,
+        conv.callerPhone || from,
+        conv.inboundNumber,
+      ).catch((err) => console.error("[voice/status] late dispatch failed:", err));
     }
 
     // FIX 4 — internal alert to admin with the full set of collected data.

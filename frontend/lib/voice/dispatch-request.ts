@@ -1,10 +1,9 @@
 // Persist a vehicle request collected by Zura over the phone, then kick off the
 // same post-intake flow the web form uses.
 //
-// Mirrors the GHL intake at /api/public/phone-request: resolve or provision a
-// buyer (VehicleRequest.buyerId is NOT NULL), create the VehicleRequest, sync
-// the lead into the CRM, and dispatch the form-submitted job. Voice collects
-// fewer fields than the web form, so everything beyond name/email is optional.
+// Voice dispatch intake: resolve or provision a buyer, then route through the
+// unified intake service. Voice collects fewer fields than the web form, so
+// everything beyond name/email is optional.
 
 import { prisma } from "@/lib/prisma";
 import { UserRole } from "@prisma/client";
@@ -18,6 +17,38 @@ import {
 import type { VehicleRequestDraft } from "@/lib/voice/conversation-store";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
+
+// Dual-number tracking. Both Twilio numbers route to the same webhook; the
+// number the caller dialed lets us tag the lead's source as toll-free vs local.
+const TWILIO_TOLLFREE = "+18662803328";
+const TWILIO_LOCAL = "+14695359785";
+
+// Pull a four-digit model year out of a free-form string, or null.
+function parseYear(year: string | undefined): number | undefined {
+  if (!year) return undefined;
+  const match = year.match(/\b(19|20)\d{2}\b/);
+  if (!match) return undefined;
+  const n = parseInt(match[0], 10);
+  return n >= 1980 && n <= 2030 ? n : undefined;
+}
+
+// "yes"/"no" → boolean, anything else → undefined.
+function parseYesNo(value: string | undefined): boolean | undefined {
+  if (!value) return undefined;
+  const v = value.toLowerCase().trim();
+  if (/^(yes|y|yeah|yep|true)\b/.test(v)) return true;
+  if (/^(no|n|nope|false)\b/.test(v)) return false;
+  return undefined;
+}
+
+// "cash" → false, "financing"/"finance"/"need" → true, else undefined.
+function parseFinancing(value: string | undefined): boolean | undefined {
+  if (!value) return undefined;
+  const v = value.toLowerCase();
+  if (v.includes("cash")) return false;
+  if (/financ|loan|need/.test(v)) return true;
+  return undefined;
+}
 
 function adminSupabase() {
   return createClient(
@@ -45,14 +76,22 @@ function parseBudgetToCents(budget: string | undefined): number | null {
 }
 
 function buildNotes(req: VehicleRequestDraft, callerPhone: string): string {
+  const yearRange =
+    req.yearMin || req.yearMax
+      ? [req.yearMin, req.yearMax].filter(Boolean).join("–")
+      : "";
   const lines = [
     "Inbound phone request via Zura voice receptionist.",
     req.newOrUsed ? `Condition: ${req.newOrUsed}.` : "",
+    req.vehicleType ? `Vehicle type: ${req.vehicleType}.` : "",
     req.make || req.model
-      ? `Vehicle: ${[req.make, req.model].filter(Boolean).join(" ")}.`
+      ? `Vehicle: ${[yearRange, req.make, req.model].filter(Boolean).join(" ")}.`
       : "",
     req.budget ? `Budget: ${req.budget}.` : "",
     req.timeline ? `Timeline: ${req.timeline}.` : "",
+    req.zip ? `ZIP: ${req.zip}.` : "",
+    req.hasTradeIn ? `Trade-in: ${req.hasTradeIn}.` : "",
+    req.financing ? `Financing: ${req.financing}.` : "",
     callerPhone ? `Caller: ${callerPhone}.` : "",
   ].filter(Boolean);
   return lines.join(" ");
@@ -68,6 +107,7 @@ export interface DispatchResult {
 export async function dispatchVehicleRequest(
   req: VehicleRequestDraft,
   callerPhone: string,
+  inboundNumber?: string,
 ): Promise<DispatchResult> {
   const firstName = req.firstName?.trim();
   const lastName = req.lastName?.trim();
@@ -135,21 +175,39 @@ export async function dispatchVehicleRequest(
   //    BuyerOpportunity + VehicleRequest (linked) and fires the Group 3+4A AI
   //    pipeline (market enrichment, dealer discovery, phone scripts, lead
   //    scoring, 4-channel hot-lead notifications) in the background.
+  // Dual-number tracking: tag the lead source by the number the caller dialed.
+  // The unified intake service appends ":campaign" to the source, producing
+  // "voice_dispatch:tollfree" or "voice_dispatch:local".
+  const numberType =
+    inboundNumber === TWILIO_TOLLFREE
+      ? "tollfree"
+      : inboundNumber === TWILIO_LOCAL
+        ? "local"
+        : "unknown";
+
   let vehicleRequestId: string;
   try {
     const input: UnifiedIntakeInput = {
       source: "voice_dispatch",
+      campaign: numberType,
       buyerId,
       firstName,
       lastName,
       email,
       phone: callerPhone || undefined,
+      zip: req.zip ?? undefined,
       make: req.make ?? undefined,
       model: req.model ?? undefined,
+      // Unified intake's vehicleType carries the condition (new/used/either);
+      // the spoken body style (SUV/Sedan/…) is captured in the notes instead.
       vehicleType: req.newOrUsed ?? undefined,
+      yearMin: parseYear(req.yearMin),
+      yearMax: parseYear(req.yearMax),
       // Contract: budgetAmount is in CENTS (parseBudgetToCents returns cents).
       budgetAmount: parseBudgetToCents(req.budget) ?? undefined,
       timeline: req.timeline ?? undefined,
+      hasTradeIn: parseYesNo(req.hasTradeIn),
+      financingNeeded: parseFinancing(req.financing),
       notes: buildNotes(req, callerPhone),
       utmSource: "voice-receptionist",
     };

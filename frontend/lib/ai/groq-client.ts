@@ -1,12 +1,12 @@
 // lib/ai/groq-client.ts
 // Groq API client singleton — ONLY approved AI provider
-// Primary: llama-3.3-70b-versatile | Fallback: mixtral-8x7b-32768
+// Primary: openai/gpt-oss-120b | Fallback: openai/gpt-oss-20b
 
 import Groq from "groq-sdk";
 import { assertAiEnabled } from "@/lib/ai/kill-switch";
 
-const PRIMARY_MODEL = "llama-3.3-70b-versatile";
-const FALLBACK_MODEL = "mixtral-8x7b-32768";
+const PRIMARY_MODEL = "openai/gpt-oss-120b";
+const FALLBACK_MODEL = "openai/gpt-oss-20b";
 
 // Singleton Groq client
 let _client: Groq | null = null;
@@ -33,7 +33,7 @@ export interface CompletionResult {
   tokensUsed: number;
 }
 
-// Chat completion with automatic fallback to mixtral on rate limit
+// Chat completion with automatic fallback to the secondary model on rate limit
 export async function groqChat(
   messages: ChatMessage[],
   options: { maxTokens?: number; temperature?: number } = {}
@@ -61,7 +61,7 @@ export async function groqChat(
     };
   } catch (err) {
     const errMsg = String(err);
-    // Fallback to mixtral on rate limit or primary unavailable
+    // Fallback to the secondary model on rate limit or primary unavailable
     if (errMsg.includes("429") || errMsg.includes("rate_limit") || errMsg.includes("overloaded")) {
       const fallback = await client.chat.completions.create({
         ...params,

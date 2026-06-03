@@ -1,5 +1,5 @@
 // lib/services/ai/agents.ts — System 16 ENH: All 7 role-aware agents
-// Groq API ONLY — llama-3.3-70b-versatile primary, mixtral-8x7b-32768 fallback
+// Groq API ONLY — openai/gpt-oss-120b primary, openai/gpt-oss-20b fallback
 // Kill switch checked before every agent call
 
 import { groqChat, groqChatStream, type ChatMessage } from "@/lib/ai/groq-client";
