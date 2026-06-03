@@ -11,6 +11,10 @@ import { UserRole } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import { dispatch } from "@/lib/qstash/dispatch";
+import {
+  intakeBuyerRequest,
+  type UnifiedIntakeInput,
+} from "@/lib/services/acquisition/unified-buyer-intake.service";
 import type { VehicleRequestDraft } from "@/lib/voice/conversation-store";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -126,23 +130,37 @@ export async function dispatchVehicleRequest(
     return { success: false, error: "could not resolve buyer" };
   }
 
-  // 2. Create the VehicleRequest.
+  // 2. Hand off to the unified buyer-intake service. The buyer is already
+  //    resolved above, so we pass buyerId through; the service creates the
+  //    BuyerOpportunity + VehicleRequest (linked) and fires the Group 3+4A AI
+  //    pipeline (market enrichment, dealer discovery, phone scripts, lead
+  //    scoring, 4-channel hot-lead notifications) in the background.
   let vehicleRequestId: string;
   try {
-    const vehicleRequest = await prisma.vehicleRequest.create({
-      data: {
-        buyerId,
-        status: "SUBMITTED",
-        makePreference: req.make ?? null,
-        modelPreference: req.model ?? null,
-        maxBudgetCents: parseBudgetToCents(req.budget),
-        notes: buildNotes(req, callerPhone),
-        utmSource: "voice-receptionist",
-      },
-    });
-    vehicleRequestId = vehicleRequest.id;
+    const input: UnifiedIntakeInput = {
+      source: "voice_dispatch",
+      buyerId,
+      firstName,
+      lastName,
+      email,
+      phone: callerPhone || undefined,
+      make: req.make ?? undefined,
+      model: req.model ?? undefined,
+      vehicleType: req.newOrUsed ?? undefined,
+      // Contract: budgetAmount is in CENTS (parseBudgetToCents returns cents).
+      budgetAmount: parseBudgetToCents(req.budget) ?? undefined,
+      timeline: req.timeline ?? undefined,
+      notes: buildNotes(req, callerPhone),
+      utmSource: "voice-receptionist",
+    };
+    const result = await intakeBuyerRequest(input);
+    if (!result.vehicleRequestId) {
+      console.error("[voice/dispatch] unified intake returned no vehicleRequestId");
+      return { success: false, buyerId, error: "could not save vehicle request" };
+    }
+    vehicleRequestId = result.vehicleRequestId;
   } catch (err) {
-    console.error("[voice/dispatch] VehicleRequest create failed:", err);
+    console.error("[voice/dispatch] unified intake failed:", err);
     return { success: false, buyerId, error: "could not save vehicle request" };
   }
 

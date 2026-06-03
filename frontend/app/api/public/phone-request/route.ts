@@ -2,8 +2,12 @@
 //
 // Server-to-server intake for vehicle requests collected by the GoHighLevel
 // AI phone receptionist. GHL POSTs the structured call result here; the route
-// resolves (or provisions) a buyer account, persists a VehicleRequest, and
-// syncs the lead into the CRM.
+// hands the submission to the unified buyer-intake service, which resolves (or
+// provisions a guest) buyer, persists a BuyerOpportunity + VehicleRequest, and
+// fires the Group 3+4A AI pipeline (market enrichment, dealer discovery, phone
+// scripts, lead scoring, 4-channel hot-lead notifications). This route then
+// layers the CRM sync + welcome-sequence dispatch on top, and upgrades net-new
+// guest buyers into full Supabase login accounts (the credential email).
 //
 // Auth is a shared secret in the `X-GHL-Secret` header — this endpoint is not
 // browser-facing, so there is no cookie/session involved.
@@ -11,9 +15,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { prisma } from "@/lib/prisma";
-import { UserRole } from "@prisma/client";
 import { sendAdminCreatedBuyerEmail } from "@/lib/services/email/resend.service";
 import { dispatch } from "@/lib/qstash/dispatch";
+import {
+  intakeBuyerRequest,
+  type UnifiedIntakeInput,
+} from "@/lib/services/acquisition/unified-buyer-intake.service";
 import crypto from "crypto";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -69,21 +76,38 @@ function generateTempPassword(): string {
   return "Buyer@" + crypto.randomBytes(9).toString("hex");
 }
 
-// Pull the largest dollar figure out of a free-form budget string
-// ("$30,000", "$25,000–$35,000", "30000") and convert to integer cents.
-function parseBudgetToCents(budget: string): number | null {
-  const matches = budget.match(/\d[\d,]*/g);
-  if (!matches) return null;
-  const values = matches
-    .map((m) => parseInt(m.replace(/,/g, ""), 10))
-    .filter((n) => Number.isFinite(n) && n > 0);
-  if (values.length === 0) return null;
-  return Math.max(...values) * 100;
+// GHL may send budget as a free-form string ("$35,000", "$25k–$35k") or as a
+// numeric value. Strings are dollars → convert to integer cents; numbers are
+// assumed to already be cents (matching the unified intake contract).
+function parseGhlBudgetToCents(
+  budget: string | number | undefined,
+): number | undefined {
+  if (budget == null) return undefined;
+  if (typeof budget === "number") {
+    return Number.isFinite(budget) && budget > 0 ? budget : undefined;
+  }
+  const digits = budget.replace(/[^0-9]/g, "");
+  if (!digits) return undefined;
+  return Math.round(Number(digits) * 100); // dollars → cents
 }
 
-function parseYear(year: string): number | null {
+// GHL sends timeline as free-form text ("ASAP", "this week", "1 month",
+// "just looking"). Normalize to the labels the unified intake contract uses.
+function normalizePhoneTimeline(t: string | undefined): string | undefined {
+  if (!t) return undefined;
+  const lower = t.toLowerCase().trim();
+  if (lower.includes("asap") || lower.includes("immediate")) return "asap";
+  if (lower.includes("week")) return "this_week";
+  if (lower.includes("month")) return "1_month";
+  if (lower.includes("research") || lower.includes("just looking")) {
+    return "researching";
+  }
+  return lower; // pass through
+}
+
+function parseYear(year: string): number | undefined {
   const n = parseInt(year, 10);
-  return Number.isFinite(n) && n >= 1980 && n <= 2030 ? n : null;
+  return Number.isFinite(n) && n >= 1980 && n <= 2030 ? n : undefined;
 }
 
 const schema = z.object({
@@ -120,8 +144,22 @@ function buildNotes(data: Parsed): string {
   return lines.join(" ");
 }
 
+// Map GHL's vehicle condition phrasing onto the unified intake vehicleType
+// contract ("new" | "used" | "open"). Unknown values pass through lowercased.
+function mapVehicleType(newOrUsed: string): string {
+  const v = newOrUsed.toLowerCase().trim();
+  if (v.includes("new")) return "new";
+  if (v.includes("used") || v.includes("pre-owned") || v.includes("preowned")) {
+    return "used";
+  }
+  if (v.includes("either") || v.includes("open") || v.includes("any")) {
+    return "open";
+  }
+  return v;
+}
+
 export async function POST(request: NextRequest) {
-  // 1. Shared-secret auth.
+  // 1. Shared-secret auth. SECURITY GATE — must run before any business logic.
   const expected = process.env.GHL_PHONE_REQUEST_SECRET;
   if (!expected) {
     console.error("[phone-request] GHL_PHONE_REQUEST_SECRET is not configured");
@@ -137,7 +175,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 2. Rate limit.
+  // 2. Rate limit. SECURITY GATE — runs before any business logic.
   const ip = getClientIp(request);
   if (!checkRateLimit(ip)) {
     return NextResponse.json(
@@ -166,36 +204,112 @@ export async function POST(request: NextRequest) {
   const data = parsed.data;
   const normalizedEmail = data.email.toLowerCase().trim();
 
-  // 4. Resolve or provision the buyer. VehicleRequest.buyerId is NOT NULL.
-  let buyerId = "";
-  let createdNewAccount = false;
-  let tempPassword = "";
-  let provisionedSupabaseId: string | null = null;
+  // 4. Unified buyer intake. The service owns buyer find/create (Case 1/2/3),
+  //    BuyerOpportunity + VehicleRequest creation, and the Group 3+4A pipeline
+  //    (market enrichment, dealer discovery, phone scripts, lead scoring, and
+  //    the 4-channel hot-lead notifications). We do NOT duplicate any of those.
+  const year = parseYear(data.year);
 
+  const input: UnifiedIntakeInput = {
+    source: "phone_intake",
+
+    firstName: data.firstName,
+    lastName: data.lastName,
+    email: normalizedEmail,
+    phone: data.phone,
+    zip: data.zip,
+
+    make: data.make,
+    model: data.model,
+    trim: data.trim || undefined,
+    vehicleType: mapVehicleType(data.newOrUsed),
+    yearMin: year,
+    yearMax: year,
+
+    // Contract: budgetAmount is in CENTS.
+    budgetAmount: parseGhlBudgetToCents(data.budget),
+    timeline: normalizePhoneTimeline(data.timeline),
+
+    hasTradeIn: data.hasTradeIn,
+    financingNeeded: /yes|need|finance/i.test(data.financing),
+
+    notes: buildNotes(data),
+    utmSource: "ghl_phone_receptionist",
+  };
+
+  let vehicleRequestId: string | null = null;
+  let buyerOpportunityId = "";
   try {
-    const existingUser = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-      include: { buyer: { select: { id: true } } },
-    });
+    const result = await intakeBuyerRequest(input);
+    vehicleRequestId = result.vehicleRequestId;
+    buyerOpportunityId = result.buyerOpportunityId;
+  } catch (err) {
+    // GHL retries on 5xx — but a thrown intake means the BuyerOpportunity may
+    // not exist, so surface the failure so GHL retries the whole call.
+    console.error("[phone-request] unified intake failed:", err);
+    return NextResponse.json(
+      { success: false, error: { code: "REQUEST_ERROR", message: "Could not save vehicle request" } },
+      { status: 500 },
+    );
+  }
 
-    if (existingUser?.buyer) {
-      // Existing buyer — reuse.
-      buyerId = existingUser.buyer.id;
-    } else if (existingUser && !existingUser.buyer) {
-      // User exists without a buyer profile — attach one.
-      const buyer = await prisma.buyer.create({
-        data: {
-          userId: existingUser.id,
-          firstName: data.firstName,
-          lastName: data.lastName,
-          phone: data.phone,
-          zip: data.zip,
+  // 5. Resolve the buyer the unified service stood up, for CRM identity
+  //    linking and the QStash welcome sequence. When no VehicleRequest was
+  //    created the buyer could not be resolved (Case A — partial payload);
+  //    the BuyerOpportunity still persisted, so we return success to GHL but
+  //    skip the buyer-scoped downstream steps.
+  let buyerId = "";
+  let buyerIsGuest = false;
+  let buyerUserId = "";
+  let buyerSupabaseId = "";
+  if (vehicleRequestId) {
+    const vr = await prisma.vehicleRequest.findUnique({
+      where: { id: vehicleRequestId },
+      select: {
+        buyer: {
+          select: {
+            id: true,
+            isGuest: true,
+            user: { select: { id: true, supabaseId: true } },
+          },
         },
-      });
-      buyerId = buyer.id;
-    } else {
-      // No account — provision a full buyer account with a temp password.
-      tempPassword = generateTempPassword();
+      },
+    });
+    if (vr?.buyer) {
+      buyerId = vr.buyer.id;
+      buyerIsGuest = vr.buyer.isGuest ?? false;
+      buyerUserId = vr.buyer.user?.id ?? "";
+      buyerSupabaseId = vr.buyer.user?.supabaseId ?? "";
+    }
+  }
+
+  if (!buyerId) {
+    console.warn(
+      "[phone-request] unified intake resolved no buyer — BuyerOpportunity " +
+        "captured, skipping account upgrade, CRM sync and QStash dispatch",
+      { buyerOpportunityId, email: normalizedEmail },
+    );
+    return NextResponse.json(
+      {
+        success: true,
+        data: { vehicleRequestId, buyerOpportunityId, buyerId: null, accountCreated: false },
+      },
+      { status: 201 },
+    );
+  }
+
+  // 6. Account upgrade — for net-new buyers only. The unified service creates a
+  //    guest buyer (isGuest:true) whose User carries a `guest_` placeholder
+  //    supabaseId (no real auth account yet). Provision a Supabase login,
+  //    flip the buyer off guest, swap in the real supabaseId, and email the
+  //    caller their temporary password. Returning buyers (real supabaseId, or
+  //    already non-guest) are left untouched. Non-fatal: a provisioning failure
+  //    must never lose the lead we already captured.
+  let createdNewAccount = false;
+  const needsProvisioning = buyerIsGuest && buyerSupabaseId.startsWith("guest_");
+  if (needsProvisioning && buyerUserId) {
+    const tempPassword = generateTempPassword();
+    try {
       const supabase = adminSupabase();
       const { data: created, error: authErr } = await supabase.auth.admin.createUser({
         email: normalizedEmail,
@@ -205,74 +319,30 @@ export async function POST(request: NextRequest) {
       });
       if (authErr || !created?.user) {
         console.error("[phone-request] Supabase createUser failed:", authErr?.message);
-        return NextResponse.json(
-          { success: false, error: { code: "SIGNUP_FAILED", message: "Could not create buyer account" } },
-          { status: 500 },
-        );
-      }
-      provisionedSupabaseId = created.user.id;
-
-      try {
-        const buyer = await prisma.$transaction(async (tx) => {
-          const user = await tx.user.create({
-            data: {
-              supabaseId: provisionedSupabaseId!,
-              email: normalizedEmail,
-              role: UserRole.BUYER,
-              requiresPasswordChange: true,
-            },
-          });
-          return tx.buyer.create({
-            data: {
-              userId: user.id,
-              firstName: data.firstName,
-              lastName: data.lastName,
-              phone: data.phone,
-              zip: data.zip,
-            },
-          });
-        });
-        buyerId = buyer.id;
+      } else {
+        await prisma.$transaction([
+          prisma.user.update({
+            where: { id: buyerUserId },
+            data: { supabaseId: created.user.id, requiresPasswordChange: true },
+          }),
+          prisma.buyer.update({
+            where: { id: buyerId },
+            data: { isGuest: false },
+          }),
+        ]);
         createdNewAccount = true;
-      } catch (dbErr) {
-        // Roll back the orphaned Supabase user.
-        await supabase.auth.admin.deleteUser(provisionedSupabaseId).catch(() => {});
-        throw dbErr;
-      }
-    }
-  } catch (err) {
-    console.error("[phone-request] buyer resolve/create failed:", err);
-    return NextResponse.json(
-      { success: false, error: { code: "BUYER_ERROR", message: "Could not resolve buyer" } },
-      { status: 500 },
-    );
-  }
 
-  // 5. Create the VehicleRequest.
-  const year = parseYear(data.year);
-  let vehicleRequestId: string;
-  try {
-    const vehicleRequest = await prisma.vehicleRequest.create({
-      data: {
-        buyerId,
-        status: "SUBMITTED",
-        makePreference: data.make,
-        modelPreference: data.model,
-        yearMin: year,
-        yearMax: year,
-        maxBudgetCents: parseBudgetToCents(data.budget),
-        notes: buildNotes(data),
-        utmSource: data.source,
-        ipAddress: ip === "unknown" ? null : ip,
-      },
-    });
-    vehicleRequestId = vehicleRequest.id;
-  } catch (err) {
-    console.error("[phone-request] VehicleRequest create failed:", err);
-    return NextResponse.json(
-      { success: false, error: { code: "REQUEST_ERROR", message: "Could not save vehicle request" } },
-      { status: 500 },
-    );
+        // Welcome email with the temp password (idempotent on email).
+        await sendAdminCreatedBuyerEmail(
+          normalizedEmail,
+          data.firstName,
+          tempPassword,
+          `${APP_URL}/auth/signin`,
+        ).catch((err) => console.error("[phone-request] welcome email failed:", err));
+      }
+    } catch (provErr) {
+      console.error("[phone-request] account provisioning failed:", provErr);
+    }
   }
 
   // QStash — enter the buyer welcome + activation-recovery sequence so phone
@@ -282,21 +352,11 @@ export async function POST(request: NextRequest) {
     body: {
       buyerId,
       firstName: data.firstName,
-      email: data.email,
+      email: normalizedEmail,
       phone: data.phone,
       campaign: "phone-receptionist",
     },
   }).catch(() => {});
-
-  // 6. Welcome email for newly provisioned accounts (non-fatal).
-  if (createdNewAccount && tempPassword) {
-    await sendAdminCreatedBuyerEmail(
-      normalizedEmail,
-      data.firstName,
-      tempPassword,
-      `${APP_URL}/auth/signin`,
-    ).catch((err) => console.error("[phone-request] welcome email failed:", err));
-  }
 
   // 7. CRM sync — must never block the intake response.
   try {
@@ -341,6 +401,7 @@ export async function POST(request: NextRequest) {
       success: true,
       data: {
         vehicleRequestId,
+        buyerOpportunityId,
         buyerId,
         accountCreated: createdNewAccount,
       },
