@@ -6,8 +6,13 @@ import {
   updateConversation,
   type VehicleRequestDraft,
   type VoiceMessage,
+  type CallReason,
+  type MessageDetails,
 } from "@/lib/voice/conversation-store";
-import { dispatchVehicleRequest } from "@/lib/voice/dispatch-request";
+import {
+  dispatchVehicleRequest,
+  sendFounderMessageAlert,
+} from "@/lib/voice/dispatch-request";
 import { generateZuraSpeech } from "@/lib/voice/elevenlabs-tts.service";
 import { ZURA_VOICE_PROMPT } from "@/lib/ai/zura-voice";
 import { groqChat, type ChatMessage } from "@/lib/ai/groq-client";
@@ -65,50 +70,144 @@ function isComplete(req: VehicleRequestDraft | null): req is VehicleRequestDraft
   return !!(req && req.firstName && req.lastName && req.email && req.make && req.model);
 }
 
-// Best-effort structured extraction. Runs a second, cheap Groq call that returns
-// only the vehicle-request fields mentioned so far as JSON. Failures are
-// swallowed — extraction never blocks the spoken reply.
-async function extractVehicleRequest(history: ChatMessage[]): Promise<VehicleRequestDraft | null> {
-  const system =
-    "Extract vehicle-request details from this phone conversation. " +
-    "Return ONLY a JSON object with these keys: firstName, lastName, email, zip, make, model, " +
-    "vehicleType, yearMin, yearMax, budget, timeline, newOrUsed, hasTradeIn, financing. " +
-    "Field meanings: vehicleType is the body style (SUV, Sedan, Truck, Van, or Coupe); " +
-    "newOrUsed is the condition (new, used, or either); timeline is the purchase timeframe " +
-    "(ASAP, Within 7 days, Within 30 days, or Flexible); yearMin and yearMax are four-digit years; " +
-    'hasTradeIn is "yes" or "no"; financing is "cash" or "financing". ' +
-    "Use null for anything the caller has not clearly provided. No prose, no markdown, JSON only.";
+// Multi-intent extractor. Runs a second, cheap Groq call that first classifies
+// WHY the caller phoned in, then returns either vehicle-request fields or a
+// short structured message, as JSON. Failures are swallowed — extraction never
+// blocks the spoken reply.
+const EXTRACTOR_PROMPT = `
+You extract structured data from voice receptionist conversations.
+
+Return ONLY a JSON object with these keys:
+
+{
+  "callReason": "vehicle_request" | "question" | "status_check"
+                | "message" | "dealer_inquiry" | "transfer_request"
+                | "other",
+
+  "vehicleRequest": {
+    "firstName": string | null,
+    "lastName": string | null,
+    "email": string | null,
+    "zip": string | null,
+    "make": string | null,
+    "model": string | null,
+    "vehicleType": "SUV" | "Sedan" | "Truck" | "Van" | "Coupe" | null,
+    "yearMin": number | null,
+    "yearMax": number | null,
+    "condition": "New" | "Used" | "Either" | null,
+    "budget": number | null,
+    "purchaseTimeframe": "ASAP" | "WITHIN_7_DAYS" | "WITHIN_30_DAYS" | "WITHIN_60_DAYS_PLUS" | null,
+    "hasTradeIn": boolean | null,
+    "financing": "Cash" | "Need financing" | null
+  },
+
+  "messageDetails": {
+    "callerName": string | null,
+    "callerEmail": string | null,
+    "reason": string | null,
+    "bestCallbackTime": string | null
+  },
+
+  "complete": boolean
+}
+
+Rules:
+- callReason is REQUIRED — always classify
+- If callReason = "vehicle_request", populate vehicleRequest fields
+- If callReason is anything else, populate messageDetails
+- complete = true if you have enough to fulfill the request
+- For vehicle_request: complete requires firstName, email, make, model, zip, budget at minimum
+- For others: complete requires callerName, callerEmail, reason
+- Return ONLY valid JSON, no markdown, no commentary
+`;
+
+const CALL_REASONS = new Set<CallReason>([
+  "vehicle_request",
+  "question",
+  "status_check",
+  "message",
+  "dealer_inquiry",
+  "transfer_request",
+  "other",
+]);
+
+interface ExtractedCall {
+  callReason?: CallReason;
+  vehicleRequest: VehicleRequestDraft;
+  messageDetails: MessageDetails;
+  complete: boolean;
+}
+
+function str(v: unknown): string | undefined {
+  if (typeof v === "string") {
+    const t = v.trim();
+    if (t && t.toLowerCase() !== "null") return t;
+  }
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return undefined;
+}
+
+// Convert the extractor's richly-typed vehicleRequest object into the
+// string-based VehicleRequestDraft the dispatch pipeline expects.
+function toVehicleDraft(raw: Record<string, unknown> | undefined): VehicleRequestDraft {
+  const draft: VehicleRequestDraft = {};
+  if (!raw) return draft;
+  const assign = (key: keyof VehicleRequestDraft, v: unknown) => {
+    const s = str(v);
+    if (s) draft[key] = s;
+  };
+  assign("firstName", raw.firstName);
+  assign("lastName", raw.lastName);
+  assign("email", raw.email);
+  assign("zip", raw.zip);
+  assign("make", raw.make);
+  assign("model", raw.model);
+  assign("vehicleType", raw.vehicleType);
+  assign("yearMin", raw.yearMin);
+  assign("yearMax", raw.yearMax);
+  assign("budget", raw.budget);
+  // Map the extractor's enum field names onto the draft's legacy field names.
+  assign("newOrUsed", raw.condition);
+  assign("timeline", raw.purchaseTimeframe);
+  assign("financing", raw.financing);
+  if (typeof raw.hasTradeIn === "boolean") draft.hasTradeIn = raw.hasTradeIn ? "yes" : "no";
+  return draft;
+}
+
+function toMessageDetails(raw: Record<string, unknown> | undefined): MessageDetails {
+  const details: MessageDetails = {};
+  if (!raw) return details;
+  const name = str(raw.callerName);
+  const email = str(raw.callerEmail);
+  const reason = str(raw.reason);
+  const time = str(raw.bestCallbackTime);
+  if (name) details.callerName = name;
+  if (email) details.callerEmail = email;
+  if (reason) details.reason = reason;
+  if (time) details.bestCallbackTime = time;
+  return details;
+}
+
+async function extractCallData(history: ChatMessage[]): Promise<ExtractedCall | null> {
   try {
     const result = await groqChat(
-      [{ role: "system", content: system }, ...history],
-      { maxTokens: 250, temperature: 0 },
+      [{ role: "system", content: EXTRACTOR_PROMPT }, ...history],
+      { maxTokens: 400, temperature: 0 },
     );
     const match = result.content.match(/\{[\s\S]*\}/);
     if (!match) return null;
     const parsed = JSON.parse(match[0]) as Record<string, unknown>;
-    const draft: VehicleRequestDraft = {};
-    for (const key of [
-      "firstName",
-      "lastName",
-      "email",
-      "zip",
-      "make",
-      "model",
-      "vehicleType",
-      "yearMin",
-      "yearMax",
-      "budget",
-      "timeline",
-      "newOrUsed",
-      "hasTradeIn",
-      "financing",
-    ] as const) {
-      const v = parsed[key];
-      if (typeof v === "string" && v.trim() && v.trim().toLowerCase() !== "null") {
-        draft[key] = v.trim();
-      }
-    }
-    return Object.keys(draft).length ? draft : null;
+    const reason = typeof parsed.callReason === "string" ? parsed.callReason : undefined;
+    return {
+      callReason: reason && CALL_REASONS.has(reason as CallReason)
+        ? (reason as CallReason)
+        : undefined,
+      vehicleRequest: toVehicleDraft(parsed.vehicleRequest as Record<string, unknown> | undefined),
+      messageDetails: toMessageDetails(
+        parsed.messageDetails as Record<string, unknown> | undefined,
+      ),
+      complete: parsed.complete === true,
+    };
   } catch (err) {
     console.error("[voice/process] extraction failed:", err);
     return null;
@@ -333,11 +432,19 @@ export async function POST(request: NextRequest) {
       return twimlResponse(twiml.toString());
     }
 
-    // Update the structured request draft. The model-based extractor runs first;
-    // the lightweight string extractor then backfills any fields it missed
-    // without overwriting values already confirmed in the store.
-    const extracted = await extractVehicleRequest([...history, { role: "user", content: speech }]);
-    if (extracted) updateConversation(callSid, { vehicleRequest: extracted });
+    // Classify intent and update the structured draft. The model-based extractor
+    // runs first; for vehicle requests the lightweight string extractor then
+    // backfills any fields it missed without overwriting confirmed values.
+    const extracted = await extractCallData([...history, { role: "user", content: speech }]);
+    if (extracted) {
+      updateConversation(callSid, {
+        callReason: extracted.callReason,
+        messageDetails: extracted.messageDetails,
+        vehicleRequest: Object.keys(extracted.vehicleRequest).length
+          ? extracted.vehicleRequest
+          : undefined,
+      });
+    }
 
     const afterModel = getConversation(callSid);
     const stringDraft = extractFieldsFromHistory(afterModel.history);
@@ -351,23 +458,38 @@ export async function POST(request: NextRequest) {
       ? updateConversation(callSid, { vehicleRequest: gapFill })
       : afterModel;
 
-    // Full request collected → run the complete intake exactly once.
-    if (isComplete(refreshed.vehicleRequest) && !refreshed.requestDispatched) {
-      updateConversation(callSid, { requestDispatched: true });
-      dispatchVehicleRequest(
+    const callReason = refreshed.callReason;
+    const isVehicleIntent = !callReason || callReason === "vehicle_request";
+
+    if (isVehicleIntent) {
+      // Vehicle path — full request collected → run the complete intake once.
+      if (isComplete(refreshed.vehicleRequest) && !refreshed.requestDispatched) {
+        updateConversation(callSid, { requestDispatched: true });
+        dispatchVehicleRequest(
+          refreshed.vehicleRequest,
+          refreshed.callerPhone,
+          refreshed.inboundNumber,
+        ).catch((err) => console.error("[voice/process] dispatch failed:", err));
+      }
+
+      // Partial lead — a name plus the caller's phone confirms receipt.
+      maybeCapturePartialLead(
+        callSid,
         refreshed.vehicleRequest,
         refreshed.callerPhone,
-        refreshed.inboundNumber,
-      ).catch((err) => console.error("[voice/process] dispatch failed:", err));
+        refreshed.partialLeadDispatched,
+      );
+    } else if (extracted?.complete && !refreshed.founderAlertSent) {
+      // Non-vehicle path — once we have a complete message, SMS-alert the founder
+      // exactly once. End-of-call dispatch in voice/status covers early hang-ups.
+      updateConversation(callSid, { founderAlertSent: true });
+      sendFounderMessageAlert({
+        callReason,
+        callerPhone: refreshed.callerPhone,
+        inboundNumber: refreshed.inboundNumber,
+        messageDetails: refreshed.messageDetails ?? {},
+      }).catch((err) => console.error("[voice/process] founder alert failed:", err));
     }
-
-    // Partial lead — a name plus the caller's phone is enough to confirm receipt.
-    maybeCapturePartialLead(
-      callSid,
-      refreshed.vehicleRequest,
-      refreshed.callerPhone,
-      refreshed.partialLeadDispatched,
-    );
 
     const twiml = new VoiceResponse();
     await speakWithFallback(twiml, aiText);

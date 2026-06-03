@@ -3208,6 +3208,10 @@ model BuyerOpportunity {
 
   // Group 5 — entry-point provenance for this opportunity.
   source          String?  @map("source")
+  // Zura intelligence — classified intent for the inbound call. One of
+  // vehicle_request / question / status_check / message / dealer_inquiry /
+  // transfer_request / other. Null for non-voice opportunities.
+  callReason      String?  @map("call_reason")
   // Inverse relation — canonical VehicleRequest(s) linked to this opportunity.
   vehicleRequests VehicleRequest[]
 
@@ -3269,6 +3273,7 @@ model BuyerOpportunity {
   @@index([leadTemperature])
   @@index([createdAt])
   @@index([source])
+  @@index([callReason])
   @@map("buyer_opportunities")
 }
 
