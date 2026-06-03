@@ -30,7 +30,7 @@ export default function AdminAiPage() {
       <div className="flex items-center gap-3 mb-6">
         <Brain size={22} className="text-[#0B5FD1]" />
         <h1 className="text-xl font-bold text-slate-900">Zura — AI Concierge</h1>
-        <p className="text-sm text-[#6B7280]">Groq-powered · llama-3.3-70b-versatile</p>
+        <p className="text-sm text-[#6B7280]">Groq-powered · openai/gpt-oss-120b</p>
         <Badge variant={aiOn ? "green" : "destructive"}>{aiOn ? "Active" : "Kill Switch ON"}</Badge>
       </div>
       {aiOn && (
@@ -48,8 +48,8 @@ export default function AdminAiPage() {
       {/* AI Configuration */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 text-sm mb-6" data-testid="ai-config">
         {[
-          { label: "Primary model", value: "llama-3.3-70b-versatile" },
-          { label: "Fallback model", value: "mixtral-8x7b-32768" },
+          { label: "Primary model", value: "openai/gpt-oss-120b" },
+          { label: "Fallback model", value: "openai/gpt-oss-20b" },
           { label: "Provider", value: "Groq API (only approved provider)" },
           { label: "Kill switch", value: aiOn ? "OFF (AI enabled)" : "ON (AI disabled)" },
           { label: "Available agents", value: "7 (General, PreQual, Search, Auction, Deal, Dealer, Admin Briefing)" },
