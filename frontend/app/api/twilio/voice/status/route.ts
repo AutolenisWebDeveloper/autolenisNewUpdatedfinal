@@ -6,7 +6,10 @@ import {
   clearConversation,
   type VehicleRequestDraft,
 } from "@/lib/voice/conversation-store";
-import { dispatchVehicleRequest } from "@/lib/voice/dispatch-request";
+import {
+  dispatchVehicleRequest,
+  sendFounderMessageAlert,
+} from "@/lib/voice/dispatch-request";
 import { dispatch } from "@/lib/qstash/dispatch";
 import { sendSms, isValidUsPhone } from "@/lib/services/sms/twilio.service";
 import { normalizePhone } from "@/lib/utils/phone";
@@ -73,6 +76,13 @@ async function sendCallerThankYouEmail(email: string, firstName: string): Promis
 
 function fieldOrDash(value: string | undefined): string {
   return value && value.trim() ? value.trim() : "—";
+}
+
+// Minimum fields needed to fire the vehicle-intake pipeline. dispatch itself
+// re-validates required identity fields before persisting.
+function isVehicleRequestComplete(draft: VehicleRequestDraft | undefined | null): boolean {
+  if (!draft) return false;
+  return !!(draft.firstName && draft.email && draft.make && draft.model);
 }
 
 export async function POST(request: NextRequest) {
@@ -159,14 +169,33 @@ export async function POST(request: NextRequest) {
       await sendCallerThankYouEmail(vr.email, vr.firstName ?? "");
     }
 
-    // Capture a *complete* vehicle request that was collected but never dispatched
-    // mid-call (e.g. the caller hung up right after the last detail).
-    if (conv?.vehicleRequest && !conv.requestDispatched) {
-      await dispatchVehicleRequest(
-        conv.vehicleRequest,
-        conv.callerPhone || from,
-        conv.inboundNumber,
-      ).catch((err) => console.error("[voice/status] late dispatch failed:", err));
+    // End-of-call dispatch routing. Vehicle requests run the dealer-auction
+    // pipeline; every other classified intent SMS-alerts the founder. Both are
+    // guarded so a duplicate status callback can't double-fire. An unclassified
+    // call (callReason undefined) is treated as a vehicle request to preserve
+    // legacy capture behavior.
+    if (callSid && conv) {
+      const callReason = conv.callReason;
+      const isVehicleIntent = !callReason || callReason === "vehicle_request";
+
+      if (isVehicleIntent) {
+        if (!conv.requestDispatched && isVehicleRequestComplete(conv.vehicleRequest)) {
+          updateConversation(callSid, { requestDispatched: true });
+          await dispatchVehicleRequest(
+            conv.vehicleRequest!,
+            conv.callerPhone || from,
+            conv.inboundNumber,
+          ).catch((err) => console.error("[voice/status] late dispatch failed:", err));
+        }
+      } else if (!conv.founderAlertSent) {
+        updateConversation(callSid, { founderAlertSent: true });
+        await sendFounderMessageAlert({
+          callReason,
+          callerPhone: conv.callerPhone || from,
+          inboundNumber: conv.inboundNumber,
+          messageDetails: conv.messageDetails ?? {},
+        }).catch((err) => console.error("[voice/status] founder alert failed:", err));
+      }
     }
 
     // FIX 4 — internal alert to admin with the full set of collected data.

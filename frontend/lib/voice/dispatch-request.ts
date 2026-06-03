@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { UserRole } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+import twilio from "twilio";
 import { dispatch } from "@/lib/qstash/dispatch";
 import {
   intakeBuyerRequest,
@@ -276,4 +277,120 @@ export async function dispatchVehicleRequest(
   });
 
   return { success: true, buyerId, vehicleRequestId };
+}
+
+// Non-vehicle calls (questions, callbacks, dealer inquiries, transfer requests,
+// status checks) don't run the dealer-auction pipeline. Instead Zura captures a
+// short structured message and we SMS-alert the founder so a human can follow
+// up, plus drop a lightweight BuyerOpportunity row for tracking/reporting.
+export interface FounderMessageAlertInput {
+  callReason: string;
+  callerPhone: string;
+  inboundNumber?: string;
+  messageDetails: {
+    callerName?: string | null;
+    callerEmail?: string | null;
+    reason?: string | null;
+    bestCallbackTime?: string | null;
+  };
+}
+
+export async function sendFounderMessageAlert(
+  input: FounderMessageAlertInput,
+): Promise<void> {
+  const numberType =
+    input.inboundNumber === TWILIO_TOLLFREE
+      ? "toll-free"
+      : input.inboundNumber === TWILIO_LOCAL
+        ? "local"
+        : "unknown";
+
+  // Format SMS message
+  const reasonLabels: Record<string, string> = {
+    question: "Question",
+    status_check: "Status Check",
+    message: "Callback Request",
+    dealer_inquiry: "DEALER INQUIRY",
+    transfer_request: "Wants to Talk to Marc",
+    other: "Other",
+  };
+
+  const label = reasonLabels[input.callReason] ?? "Call";
+
+  const smsBody = [
+    `🔔 ${label} (${numberType})`,
+    `From: ${input.messageDetails.callerName ?? "Unknown"}`,
+    `Phone: ${input.callerPhone}`,
+    input.messageDetails.callerEmail && `Email: ${input.messageDetails.callerEmail}`,
+    input.messageDetails.reason && `Reason: ${input.messageDetails.reason}`,
+    input.messageDetails.bestCallbackTime &&
+      `Best time: ${input.messageDetails.bestCallbackTime}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  // Send SMS to founder using the existing Twilio client pattern.
+  try {
+    const founderPhone = process.env.FOUNDER_PHONE_NUMBER;
+    // Prefer the dedicated TWILIO_PHONE_NUMBER, but fall back to the
+    // TWILIO_FROM_NUMBER the rest of the app already sends from.
+    const fromPhone = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_FROM_NUMBER;
+
+    if (!founderPhone || !fromPhone) {
+      console.error(
+        "[founder-alert] Missing FOUNDER_PHONE_NUMBER or TWILIO_PHONE_NUMBER/TWILIO_FROM_NUMBER",
+      );
+      return;
+    }
+
+    if (founderPhone === fromPhone) {
+      console.error("[founder-alert] FOUNDER_PHONE_NUMBER cannot equal the Twilio from number");
+      return;
+    }
+
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+    if (!accountSid || !authToken) {
+      console.error("[founder-alert] Missing Twilio credentials");
+      return;
+    }
+
+    const twilioClient = twilio(accountSid, authToken);
+    await twilioClient.messages.create({
+      from: fromPhone,
+      to: founderPhone,
+      body: smsBody,
+    });
+
+    console.log(`[founder-alert] SMS sent for ${input.callReason}`);
+  } catch (err) {
+    console.error(`[founder-alert] Failed: ${err instanceof Error ? err.message : err}`);
+  }
+
+  // Also create a BuyerOpportunity record (lightweight) for tracking. The
+  // caller's stated reason is kept in the messages JSON (BuyerOpportunity has
+  // no dedicated notes column — that lives on VehicleRequest).
+  try {
+    const sourceSuffix =
+      numberType === "toll-free" ? "tollfree" : numberType === "local" ? "local" : "unknown";
+    await prisma.buyerOpportunity.create({
+      data: {
+        sessionId: crypto.randomUUID(),
+        source: `voice_dispatch:${sourceSuffix}`,
+        callReason: input.callReason,
+        phone: input.callerPhone,
+        firstName: input.messageDetails.callerName ?? null,
+        email: input.messageDetails.callerEmail ?? null,
+        completed: true,
+        messages: input.messageDetails.reason
+          ? [{ role: "caller", content: input.messageDetails.reason }]
+          : [],
+      },
+    });
+  } catch (err) {
+    console.error(
+      `[founder-alert] BuyerOpportunity create failed: ${err instanceof Error ? err.message : err}`,
+    );
+  }
 }

@@ -34,14 +34,43 @@ export interface VehicleRequestDraft {
   financing?: string;
 }
 
+// Classified reason the caller phoned in. Drives how Zura responds and how the
+// call is dispatched when it ends (vehicle pipeline vs. founder SMS alert).
+export type CallReason =
+  | "vehicle_request"
+  | "question"
+  | "status_check"
+  | "message"
+  | "dealer_inquiry"
+  | "transfer_request"
+  | "other";
+
+// Structured details captured for non-vehicle calls (message, status check,
+// dealer inquiry, transfer request, etc.). Surfaced to the founder via SMS.
+export interface MessageDetails {
+  callerName?: string;
+  callerEmail?: string;
+  // What the caller wants help with.
+  reason?: string;
+  bestCallbackTime?: string;
+}
+
 export interface VoiceConversation {
   history: VoiceMessage[];
   callerPhone: string;
   // The Twilio number the caller dialed (the "To" param). Used to tag the
   // BuyerOpportunity source as toll-free vs local for dual-number tracking.
   inboundNumber?: string;
+  // Classified intent for this call. Undefined until the extractor runs.
+  callReason?: CallReason;
+  // Populated for non-vehicle call reasons (message / status_check / dealer /
+  // transfer / question / other).
+  messageDetails?: MessageDetails;
   vehicleRequest: VehicleRequestDraft | null;
   requestDispatched: boolean;
+  // True once a non-vehicle call has fired the founder SMS alert, so it can
+  // only fire once per call (mirrors requestDispatched for the vehicle path).
+  founderAlertSent: boolean;
   // True once a minimum-viable lead (a name + caller phone) has triggered the
   // confirmation SMS + form-submitted job, so it can only fire once per call.
   partialLeadDispatched: boolean;
@@ -72,6 +101,7 @@ export function getConversation(callSid: string): VoiceConversation {
       callerPhone: "",
       vehicleRequest: null,
       requestDispatched: false,
+      founderAlertSent: false,
       partialLeadDispatched: false,
       lastActivity: now,
     };
@@ -99,6 +129,12 @@ export function updateConversation(
         : updates.vehicleRequest === null
           ? null
           : { ...(conv.vehicleRequest ?? {}), ...updates.vehicleRequest },
+    // Merge messageDetails field-by-field so a partial update never wipes
+    // details captured on an earlier turn.
+    messageDetails:
+      updates.messageDetails === undefined
+        ? conv.messageDetails
+        : { ...(conv.messageDetails ?? {}), ...updates.messageDetails },
     lastActivity: now,
   };
   store.set(callSid, next);
