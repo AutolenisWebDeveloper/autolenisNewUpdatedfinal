@@ -31,6 +31,43 @@ function deriveTimeline(
   }
 }
 
+// BuyerOpportunity.vehicleType is stored lowercase ("sedan", "suv", …) to match
+// the public wizard / concierge convention, so normalize the dashboard's
+// title-case body-type value before handing it to the intake service.
+function mapVehicleType(t: string | undefined): string | undefined {
+  if (!t) return undefined;
+  return t.toLowerCase();
+}
+
+// BuyerOpportunity has no structured condition (new/used/either) column, so
+// fold the buyer's choice into the free-form notes the team reads.
+function combineNotes(
+  notes: string | undefined,
+  condition: string | undefined,
+): string | undefined {
+  if (!notes && !condition) return undefined;
+  const parts: string[] = [];
+  if (condition) parts.push(`Condition: ${condition}`);
+  if (notes) parts.push(notes);
+  return parts.join("\n");
+}
+
+// Top-level purchaseTimeframe (now a first-class dashboard field) maps onto the
+// scoring timeline strings. Returns undefined when not supplied so the caller
+// can fall back to the financing object's purchaseTimeframe.
+function deriveTimelineFromPurchaseTimeframe(
+  t: string | undefined,
+): UnifiedIntakeInput["timeline"] | undefined {
+  if (!t) return undefined;
+  const map: Record<string, UnifiedIntakeInput["timeline"]> = {
+    ASAP: "asap",
+    WITHIN_7_DAYS: "this_week",
+    WITHIN_30_DAYS: "1_month",
+    WITHIN_60_DAYS_PLUS: "1_to_3_months",
+  };
+  return map[t];
+}
+
 // ─── Zod schema for optional financing object ─────────────────────────────────
 
 const financingSchema = z.object({
@@ -98,6 +135,10 @@ export async function POST(request: NextRequest) {
     modelPreference?: string;
     yearMin?: number;
     yearMax?: number;
+    vehicleType?: "SUV" | "Sedan" | "Truck" | "Van" | "Coupe" | "Other";
+    condition?: "New" | "Used" | "Either";
+    zip?: string;
+    purchaseTimeframe?: "ASAP" | "WITHIN_7_DAYS" | "WITHIN_30_DAYS" | "WITHIN_60_DAYS_PLUS";
     maxBudgetCents?: number;
     notes?: string;
     financing?: unknown;
@@ -134,14 +175,21 @@ export async function POST(request: NextRequest) {
     lastName: buyer.lastName ?? undefined,
     email: buyerEmail,
     phone: buyer.phone ?? undefined,
-    zip: buyer.zip ?? undefined,
+    // Editable ZIP from the form takes precedence over the buyer profile.
+    zip: body.zip ?? buyer.zip ?? undefined,
     make: body.makePreference,
     model: body.modelPreference,
     yearMin: body.yearMin,
     yearMax: body.yearMax,
+    vehicleType: mapVehicleType(body.vehicleType),
     budgetAmount: body.maxBudgetCents, // already in cents
-    notes: body.notes,
-    timeline: deriveTimeline(validatedFinancing?.purchaseTimeframe),
+    // Condition has no structured column on BuyerOpportunity, so fold it into notes.
+    notes: combineNotes(body.notes, body.condition),
+    // Prefer the new top-level purchaseTimeframe; fall back to the financing
+    // object's purchaseTimeframe only when the form didn't supply one.
+    timeline:
+      deriveTimelineFromPurchaseTimeframe(body.purchaseTimeframe) ??
+      deriveTimeline(validatedFinancing?.purchaseTimeframe),
     financingNeeded:
       validatedFinancing?.paymentMethod === "FINANCE_AUTOLENIS" ||
       validatedFinancing?.paymentMethod === "FINANCE_OUTSIDE",
