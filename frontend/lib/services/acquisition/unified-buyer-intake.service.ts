@@ -481,8 +481,15 @@ async function scoreAndAlert(
       vehicleType: coerceVehicleType(input.vehicleType),
       make: input.make ?? null,
       model: input.model ?? null,
-      budgetTotal: input.budgetAmount ?? null,
-      monthlyPayment: input.monthlyPayment ?? null,
+      // Convert cents → dollars for the scoring AI. Input
+      // contract is cents; ExtractedData uses dollars per
+      // legacy concierge convention.
+      budgetTotal: input.budgetAmount != null
+        ? Math.round(input.budgetAmount / 100)
+        : null,
+      monthlyPayment: input.monthlyPayment != null
+        ? Math.round(input.monthlyPayment / 100)
+        : null,
       tradeIn: input.hasTradeIn ?? null,
       timeline: coerceTimeline(input.timeline),
       zip: input.zip ?? null,
