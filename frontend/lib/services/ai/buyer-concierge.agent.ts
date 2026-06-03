@@ -1,5 +1,5 @@
 // Buyer concierge AI agent — System 16
-// Groq API ONLY (llama-3.3-70b-versatile primary, mixtral-8x7b-32768 fallback)
+// Groq API ONLY (openai/gpt-oss-120b primary, openai/gpt-oss-20b fallback)
 // Proactive context injection from buyer's current deal state
 
 import { groqChat, ChatMessage } from "@/lib/ai/groq-client";

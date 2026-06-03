@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import twilio from "twilio";
 import { parseTwilioRequest, twimlResponse } from "@/lib/voice/twilio-verify";
 import { updateConversation } from "@/lib/voice/conversation-store";
+import { generateZuraSpeech } from "@/lib/voice/elevenlabs-tts.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,8 +36,11 @@ export async function POST(request: NextRequest) {
 
     const callSid = params.CallSid ?? "";
     const from = params.From ?? "";
+    // The Twilio number the caller dialed — used downstream to tag the lead
+    // source as toll-free vs local (dual-number tracking).
+    const calledNumber = params.To ?? "";
     if (callSid) {
-      updateConversation(callSid, { callerPhone: from });
+      updateConversation(callSid, { callerPhone: from, inboundNumber: calledNumber });
     }
 
     const twiml = new VoiceResponse();
@@ -49,14 +53,24 @@ export async function POST(request: NextRequest) {
       enhanced: true,
       timeout: 5,
     });
-    gather.say(
-      { voice: VOICE },
-      "Thank you for calling AutoLenis. This is Zura. How can I help you today?",
-    );
-    twiml.say(
-      { voice: VOICE },
-      "I did not catch that. Please try again or call back and we will be happy to help. Goodbye.",
-    );
+
+    const greeting =
+      "Thank you for calling AutoLenis. This is Zura. How can I help you find your next vehicle today?";
+    const greetingSpeech = await generateZuraSpeech(greeting);
+    if (greetingSpeech) {
+      gather.play(greetingSpeech.audioUrl);
+    } else {
+      gather.say({ voice: VOICE }, greeting);
+    }
+
+    const noInput =
+      "I did not catch that. Please try again or call back and we will be happy to help. Goodbye.";
+    const noInputSpeech = await generateZuraSpeech(noInput);
+    if (noInputSpeech) {
+      twiml.play(noInputSpeech.audioUrl);
+    } else {
+      twiml.say({ voice: VOICE }, noInput);
+    }
 
     return twimlResponse(twiml.toString());
   } catch (err) {

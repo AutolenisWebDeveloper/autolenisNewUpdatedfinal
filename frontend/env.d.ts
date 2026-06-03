@@ -79,9 +79,6 @@ declare namespace NodeJS {
     // GoHighLevel CRM — inbound webhook for platform-event tag sync (optional;
     // tag sync no-ops when unset).
     GHL_WEBHOOK_URL?: string;
-    // Shared secret guarding the GHL AI-receptionist phone-request intake route
-    // (/api/public/phone-request). Sent by GHL in the X-GHL-Secret header.
-    GHL_PHONE_REQUEST_SECRET?: string;
 
     // QStash (Upstash) — job queue + scheduled automation dispatch
     QSTASH_TOKEN: string;
@@ -94,6 +91,13 @@ declare namespace NodeJS {
     TWILIO_FROM_NUMBER?: string;
     TWILIO_PHONE_NUMBER?: string;
     TWILIO_TRANSFER_NUMBER?: string; // live-agent number for in-call transfers
+
+    // ElevenLabs — Turbo v2.5 TTS for the Zura voice receptionist. Audio is
+    // synthesized with the cloned professional voice and served from the
+    // public `zura-audio` Supabase storage bucket. Falls back to Polly <Say>
+    // when unset.
+    ELEVENLABS_API_KEY?: string;
+    ELEVENLABS_VOICE_ID?: string;
 
     // Optional
     REDIS_URL?: string;

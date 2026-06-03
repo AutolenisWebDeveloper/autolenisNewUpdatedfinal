@@ -16,16 +16,30 @@ export interface VehicleRequestDraft {
   firstName?: string;
   lastName?: string;
   email?: string;
+  zip?: string;
   make?: string;
   model?: string;
+  // Body style: SUV / Sedan / Truck / Van / Coupe.
+  vehicleType?: string;
+  yearMin?: string;
+  yearMax?: string;
   budget?: string;
+  // Purchase timeframe: ASAP / Within 7 days / Within 30 days / Flexible.
   timeline?: string;
+  // Condition: new / used / either.
   newOrUsed?: string;
+  // "yes" / "no".
+  hasTradeIn?: string;
+  // "cash" / "financing".
+  financing?: string;
 }
 
 export interface VoiceConversation {
   history: VoiceMessage[];
   callerPhone: string;
+  // The Twilio number the caller dialed (the "To" param). Used to tag the
+  // BuyerOpportunity source as toll-free vs local for dual-number tracking.
+  inboundNumber?: string;
   vehicleRequest: VehicleRequestDraft | null;
   requestDispatched: boolean;
   // True once a minimum-viable lead (a name + caller phone) has triggered the

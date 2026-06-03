@@ -8,6 +8,7 @@ import {
   type VoiceMessage,
 } from "@/lib/voice/conversation-store";
 import { dispatchVehicleRequest } from "@/lib/voice/dispatch-request";
+import { generateZuraSpeech } from "@/lib/voice/elevenlabs-tts.service";
 import { ZURA_VOICE_PROMPT } from "@/lib/ai/zura-voice";
 import { groqChat, type ChatMessage } from "@/lib/ai/groq-client";
 import { dispatch } from "@/lib/qstash/dispatch";
@@ -23,7 +24,23 @@ const TRANSFER_KEYWORDS = ["human", "person", "agent", "someone", "transfer", "r
 
 const VoiceResponse = twilio.twiml.VoiceResponse;
 type Twiml = InstanceType<typeof VoiceResponse>;
+type Gather = ReturnType<Twiml["gather"]>;
 const VOICE = "Polly.Joanna-Neural";
+
+// Speak with ElevenLabs (cloned Zura voice) when synthesis succeeds, otherwise
+// fall back to Polly <Say> so the call never breaks. Works on either a
+// <Response> or a <Gather> target.
+async function speakWithFallback(
+  target: Twiml | Gather,
+  text: string,
+): Promise<void> {
+  const speech = await generateZuraSpeech(text);
+  if (speech) {
+    target.play(speech.audioUrl);
+  } else {
+    target.say({ voice: VOICE }, text);
+  }
+}
 
 // A spoken <Gather> block reused after every Zura reply so the conversation
 // continues until the caller hangs up or asks for a transfer.
@@ -37,10 +54,6 @@ function addGather(twiml: Twiml): void {
     enhanced: true,
     timeout: 5,
   });
-}
-
-function addSay(twiml: Twiml, text: string): void {
-  twiml.say({ voice: VOICE }, text);
 }
 
 function wantsTransfer(speech: string): boolean {
@@ -58,18 +71,38 @@ function isComplete(req: VehicleRequestDraft | null): req is VehicleRequestDraft
 async function extractVehicleRequest(history: ChatMessage[]): Promise<VehicleRequestDraft | null> {
   const system =
     "Extract vehicle-request details from this phone conversation. " +
-    "Return ONLY a JSON object with these keys: firstName, lastName, email, make, model, budget, timeline, newOrUsed. " +
+    "Return ONLY a JSON object with these keys: firstName, lastName, email, zip, make, model, " +
+    "vehicleType, yearMin, yearMax, budget, timeline, newOrUsed, hasTradeIn, financing. " +
+    "Field meanings: vehicleType is the body style (SUV, Sedan, Truck, Van, or Coupe); " +
+    "newOrUsed is the condition (new, used, or either); timeline is the purchase timeframe " +
+    "(ASAP, Within 7 days, Within 30 days, or Flexible); yearMin and yearMax are four-digit years; " +
+    'hasTradeIn is "yes" or "no"; financing is "cash" or "financing". ' +
     "Use null for anything the caller has not clearly provided. No prose, no markdown, JSON only.";
   try {
     const result = await groqChat(
       [{ role: "system", content: system }, ...history],
-      { maxTokens: 200, temperature: 0 },
+      { maxTokens: 250, temperature: 0 },
     );
     const match = result.content.match(/\{[\s\S]*\}/);
     if (!match) return null;
     const parsed = JSON.parse(match[0]) as Record<string, unknown>;
     const draft: VehicleRequestDraft = {};
-    for (const key of ["firstName", "lastName", "email", "make", "model", "budget", "timeline", "newOrUsed"] as const) {
+    for (const key of [
+      "firstName",
+      "lastName",
+      "email",
+      "zip",
+      "make",
+      "model",
+      "vehicleType",
+      "yearMin",
+      "yearMax",
+      "budget",
+      "timeline",
+      "newOrUsed",
+      "hasTradeIn",
+      "financing",
+    ] as const) {
       const v = parsed[key];
       if (typeof v === "string" && v.trim() && v.trim().toLowerCase() !== "null") {
         draft[key] = v.trim();
@@ -240,7 +273,7 @@ export async function POST(request: NextRequest) {
     // Couldn't make out the caller — ask them to repeat without losing the call.
     if (!speech || (Number.isFinite(confidence) && confidence < MIN_CONFIDENCE)) {
       const twiml = new VoiceResponse();
-      addSay(twiml, "Sorry, I did not catch that. Could you please repeat that?");
+      await speakWithFallback(twiml, "Sorry, I did not catch that. Could you please repeat that?");
       addGather(twiml);
       return twimlResponse(twiml.toString());
     }
@@ -266,7 +299,7 @@ export async function POST(request: NextRequest) {
     } catch (err) {
       console.error("[voice/process] Groq call failed:", err);
       const twiml = new VoiceResponse();
-      addSay(
+      await speakWithFallback(
         twiml,
         "I am having trouble hearing you right now. Please call back shortly or email us at support at autolenis dot com.",
       );
@@ -286,13 +319,13 @@ export async function POST(request: NextRequest) {
       const transferNumber = process.env.TWILIO_TRANSFER_NUMBER;
       if (transferNumber) {
         const twiml = new VoiceResponse();
-        addSay(twiml, aiText);
+        await speakWithFallback(twiml, aiText);
         twiml.dial(transferNumber);
         return twimlResponse(twiml.toString());
       }
       // No transfer line configured — stay on the line gracefully.
       const twiml = new VoiceResponse();
-      addSay(
+      await speakWithFallback(
         twiml,
         "I am not able to connect a live agent right now, but I can help you here, or you can email support at autolenis dot com.",
       );
@@ -321,9 +354,11 @@ export async function POST(request: NextRequest) {
     // Full request collected → run the complete intake exactly once.
     if (isComplete(refreshed.vehicleRequest) && !refreshed.requestDispatched) {
       updateConversation(callSid, { requestDispatched: true });
-      dispatchVehicleRequest(refreshed.vehicleRequest, refreshed.callerPhone).catch((err) =>
-        console.error("[voice/process] dispatch failed:", err),
-      );
+      dispatchVehicleRequest(
+        refreshed.vehicleRequest,
+        refreshed.callerPhone,
+        refreshed.inboundNumber,
+      ).catch((err) => console.error("[voice/process] dispatch failed:", err));
     }
 
     // Partial lead — a name plus the caller's phone is enough to confirm receipt.
@@ -335,14 +370,14 @@ export async function POST(request: NextRequest) {
     );
 
     const twiml = new VoiceResponse();
-    addSay(twiml, aiText);
+    await speakWithFallback(twiml, aiText);
     addGather(twiml);
-    addSay(twiml, "Is there anything else I can help you with today?");
+    await speakWithFallback(twiml, "Is there anything else I can help you with today?");
     return twimlResponse(twiml.toString());
   } catch (err) {
     console.error("Voice process error:", err);
     const twiml = new VoiceResponse();
-    addSay(twiml, "We are experiencing a technical issue. Please try again shortly.");
+    await speakWithFallback(twiml, "We are experiencing a technical issue. Please try again shortly.");
     return twimlResponse(twiml.toString());
   }
 }
