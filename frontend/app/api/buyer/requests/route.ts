@@ -4,11 +4,32 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import {
   checkRateLimit,
-  hasActiveRequest,
-  createVehicleRequest,
   toBuyerLabel,
 } from "@/lib/services/vehicle-request/vehicle-request.service";
 import { createVehicleRequestFinancing } from "@/lib/services/vehicle-request/car-request-financing.service";
+import {
+  intakeBuyerRequest,
+  type UnifiedIntakeInput,
+} from "@/lib/services/acquisition/unified-buyer-intake.service";
+
+// Map the financing wizard's purchaseTimeframe enum onto the unified intake
+// service's free-form timeline strings (used for lead scoring).
+function deriveTimeline(
+  purchaseTimeframe: string | undefined,
+): UnifiedIntakeInput["timeline"] {
+  switch (purchaseTimeframe) {
+    case "ASAP":
+      return "asap";
+    case "WITHIN_7_DAYS":
+      return "this_week";
+    case "WITHIN_30_DAYS":
+      return "1_month";
+    case "WITHIN_60_DAYS_PLUS":
+      return "1_to_3_months";
+    default:
+      return "researching";
+  }
+}
 
 // ─── Zod schema for optional financing object ─────────────────────────────────
 
@@ -92,23 +113,84 @@ export async function POST(request: NextRequest) {
     validatedFinancing = result.data;
   }
 
-  const vehicleRequest = await createVehicleRequest(buyer.id, {
-    makePreference: body.makePreference,
-    modelPreference: body.modelPreference,
+  // Email lives on the related User, not the Buyer. The buyer is already
+  // included with its user via getRequestBuyer, but query defensively so a
+  // missing relation never throws here.
+  const buyerWithUser = await prisma.buyer.findUnique({
+    where: { id: buyer.id },
+    include: { user: { select: { email: true } } },
+  });
+  const buyerEmail = buyerWithUser?.user?.email ?? undefined;
+
+  // Route the submission through the unified intake service. Because the buyer
+  // is already resolved by auth, the service skips all find/create logic and
+  // creates the BuyerOpportunity + linked VehicleRequest, then fires the
+  // Group 3 + 4A enrichment / dealer-discovery / scoring pipeline in the
+  // background.
+  const intakeInput: UnifiedIntakeInput = {
+    source: "buyer_dashboard",
+    buyerId: buyer.id,
+    firstName: buyer.firstName ?? undefined,
+    lastName: buyer.lastName ?? undefined,
+    email: buyerEmail,
+    phone: buyer.phone ?? undefined,
+    zip: buyer.zip ?? undefined,
+    make: body.makePreference,
+    model: body.modelPreference,
     yearMin: body.yearMin,
     yearMax: body.yearMax,
-    maxBudgetCents: body.maxBudgetCents,
+    budgetAmount: body.maxBudgetCents, // already in cents
     notes: body.notes,
+    timeline: deriveTimeline(validatedFinancing?.purchaseTimeframe),
+    financingNeeded:
+      validatedFinancing?.paymentMethod === "FINANCE_AUTOLENIS" ||
+      validatedFinancing?.paymentMethod === "FINANCE_OUTSIDE",
+    hasTradeIn: validatedFinancing?.tradeIn ?? false,
+  };
+
+  const { vehicleRequestId } = await intakeBuyerRequest(intakeInput);
+
+  // buyerId is always supplied here, so the service must have created a
+  // VehicleRequest. If it didn't, surface a clear server error rather than
+  // returning a malformed response.
+  if (!vehicleRequestId) {
+    return errorResponse(
+      "INTAKE_FAILED",
+      "We couldn't create your request. Please try again.",
+      500,
+    );
+  }
+
+  // Create financing record if provided (optional). The unified service does
+  // not handle financing — preserve the dashboard's dedicated financing flow.
+  if (validatedFinancing) {
+    await createVehicleRequestFinancing(vehicleRequestId, validatedFinancing);
+  }
+
+  // The unified service creates the VehicleRequest but NOT the dashboard's
+  // audit event / buyer-facing update (those were side effects of the old
+  // createVehicleRequest helper). Recreate them here to preserve behavior.
+  await prisma.vehicleRequestEvent.create({
+    data: {
+      requestId: vehicleRequestId,
+      eventType: "SUBMITTED",
+      actorId: buyer.id,
+      actorRole: "BUYER",
+      payload: JSON.parse(JSON.stringify(body)),
+    },
   });
 
-  // Create financing record if provided (optional)
-  if (validatedFinancing) {
-    await createVehicleRequestFinancing(vehicleRequest.id, validatedFinancing);
-  }
+  await prisma.vehicleRequestBuyerUpdate.create({
+    data: {
+      requestId: vehicleRequestId,
+      title: "Request received",
+      body: "Our team has received your vehicle request and will begin researching options.",
+    },
+  });
 
   // Return request (financing is fetched separately to keep response shape consistent)
   const withFinancing = await prisma.vehicleRequest.findUnique({
-    where: { id: vehicleRequest.id },
+    where: { id: vehicleRequestId },
     include: { financing: true },
   });
 
