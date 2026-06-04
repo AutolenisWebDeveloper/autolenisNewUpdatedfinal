@@ -48,16 +48,21 @@ async function speakWithFallback(
 }
 
 // A spoken <Gather> block reused after every Zura reply so the conversation
-// continues until the caller hangs up or asks for a transfer.
+// continues until the caller hangs up or asks for a transfer. Zura's reply is
+// always played on the <Response> BEFORE this gather (see call sites), never
+// inside it, so barge-in can't cut the reply off. Timeouts are tuned for
+// natural speech: wait 3s of silence before ending, and up to 10s for the
+// caller to start; actionOnEmptyResult keeps the call alive on empty STT.
 function addGather(twiml: Twiml): void {
   twiml.gather({
     input: ["speech"],
     action: PATH,
     method: "POST",
-    speechTimeout: "auto",
+    speechTimeout: "3", // was "auto" (≈0.5s — cut callers off mid-sentence)
     speechModel: "experimental_conversations",
     enhanced: true,
-    timeout: 5,
+    timeout: 10, // was 5
+    actionOnEmptyResult: true,
   });
 }
 

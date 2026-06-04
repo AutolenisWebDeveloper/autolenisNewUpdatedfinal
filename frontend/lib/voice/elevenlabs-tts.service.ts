@@ -11,6 +11,11 @@ import { randomUUID } from "crypto";
 
 const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 
+// ELEVENLABS_VOICE_ID is read from the env var on each call to
+// generateZuraSpeech (see below). Production should log:
+//   "[elevenlabs] Using voice ID: ShVXgfhb..."
+// If logs show a different prefix, the env var needs updating in Vercel.
+
 // Eleven V3 model — highest quality, ~600-800ms latency.
 // Falls back to Turbo v2.5 if V3 is unavailable on this
 // ElevenLabs tier.
@@ -88,6 +93,11 @@ export async function generateZuraSpeech(
 ): Promise<GenerateSpeechResult | null> {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   const voiceId = process.env.ELEVENLABS_VOICE_ID;
+
+  // Log which voice is loaded so production logs can confirm the correct
+  // ELEVENLABS_VOICE_ID is in use. Only the first 8 chars are logged so the
+  // full ID is never exposed. Expected prefix: "ShVXgfhb...".
+  console.log(`[elevenlabs] Using voice ID: ${voiceId?.substring(0, 8)}...`);
 
   if (!apiKey || !voiceId) {
     console.error("[elevenlabs] Missing API key or voice ID");
