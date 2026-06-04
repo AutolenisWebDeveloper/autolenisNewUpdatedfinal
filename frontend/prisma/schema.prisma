@@ -3314,6 +3314,19 @@ model DealerProspect {
   scriptAttempts        Int       @default(0) @map("script_attempts")
   founderNotes          String?   @db.Text @map("founder_notes")
 
+  // Phase 4B-1 — Dealer email enrichment via Gemini Search grounding.
+  // `email` already exists above (Dealer details block). These track where the
+  // address came from and when enrichment last ran.
+  // emailSource values: "gemini_search_high_confidence" |
+  // "gemini_search_medium_confidence" | "gemini_search_inferred" |
+  // "fallback_info_email" | "manual"
+  emailSource           String?   @map("email_source")
+  emailEnrichedAt       DateTime? @map("email_enriched_at")
+  // Contact person behind the email (Internet Sales Manager, etc.) — captured
+  // by the Phase 4B-1 enrichment and used to personalize outreach greetings.
+  contactName           String?   @map("contact_name")
+  contactTitle          String?   @map("contact_title")
+
   // Status timestamps
   scriptedAt            DateTime? @map("scripted_at")
   // (contactedAt and repliedAt already exist above)
@@ -3330,6 +3343,7 @@ model DealerProspect {
   @@index([buyerOppId])
   @@index([status])
   @@index([zip])
+  @@index([email])
   @@map("dealer_prospects")
 }
 

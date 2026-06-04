@@ -67,8 +67,10 @@ declare namespace NodeJS {
     // Senders fail safe and skip if unset.
     ADMIN_NOTIFICATION_EMAIL?: string;
 
-    // AI — Groq API ONLY (no OpenAI/Anthropic/Gemini/Cohere)
+    // AI — Groq is the primary LLM provider. Gemini 2.5 Flash is used only for
+    // grounded search (Maps dealer discovery + Phase 4B-1 email enrichment).
     GROQ_API_KEY: string;
+    GEMINI_API_KEY?: string; // Gemini 2.5 Flash — Google Search / Maps grounding
     AI_KILL_SWITCH?: string; // "true" | "false" — disable all AI
 
     // Security secrets
