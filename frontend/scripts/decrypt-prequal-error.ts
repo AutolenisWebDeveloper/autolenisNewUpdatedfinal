@@ -1,8 +1,25 @@
-import * as dotenv from "dotenv";
+import { readFileSync, existsSync } from "fs";
 import * as path from "path";
 import { createDecipheriv } from "crypto";
 
-dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
+// Load ../.env.local if present. Uses a minimal inline parser rather than the
+// `dotenv` package so this standalone diagnostic script has no dependency
+// outside the project's installed packages and type-checks cleanly in the build.
+const envPath = path.resolve(__dirname, "../.env.local");
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, "utf8").split("\n")) {
+    const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*?)\s*$/);
+    if (!m) continue;
+    let val = m[2];
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (!(m[1] in process.env)) process.env[m[1]] = val;
+  }
+}
 
 const blob = process.argv[2];
 if (!blob) {
