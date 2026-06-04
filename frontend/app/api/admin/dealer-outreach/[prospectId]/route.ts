@@ -40,7 +40,12 @@ interface PatchBody {
   founderNotes?: string;
   status?: string;
   deadReason?: string;
+  // Phase 4B-1 — manual email override. Pass empty string to clear.
+  email?: string;
 }
+
+// Same permissive check the enrichment service uses before persisting.
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function PATCH(request: NextRequest, { params }: Params) {
   const admin = await getAdminFromRequest(request);
@@ -71,6 +76,24 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
   if (typeof body.deadReason === "string") {
     data.deadReason = body.deadReason;
+  }
+
+  // Manual email override — founder-entered address takes precedence over any
+  // Gemini-sourced value and is tagged emailSource="manual".
+  if (typeof body.email === "string") {
+    const trimmed = body.email.trim();
+    if (trimmed === "") {
+      // Explicit clear.
+      data.email = null;
+      data.emailSource = null;
+      data.emailEnrichedAt = new Date();
+    } else if (EMAIL_REGEX.test(trimmed)) {
+      data.email = trimmed.toLowerCase();
+      data.emailSource = "manual";
+      data.emailEnrichedAt = new Date();
+    } else {
+      return adminError("INVALID_EMAIL", `Invalid email: ${trimmed}`, 422);
+    }
   }
 
   if (body.status) {
