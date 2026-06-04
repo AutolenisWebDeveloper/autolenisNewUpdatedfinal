@@ -44,25 +44,31 @@ export async function POST(request: NextRequest) {
     }
 
     const twiml = new VoiceResponse();
-    const gather = twiml.gather({
-      input: ["speech"],
-      action: PROCESS_PATH,
-      method: "POST",
-      speechTimeout: "auto",
-      speechModel: "experimental_conversations",
-      enhanced: true,
-      timeout: 5,
-    });
 
+    // STEP 1: Play the greeting OUTSIDE the gather so barge-in (caller
+    // speech or background noise) cannot interrupt it before it finishes.
     const greeting =
       "Thank you for calling AutoLenis. This is Zura. How can I help you find your next vehicle today?";
     const greetingSpeech = await generateZuraSpeech(greeting);
     if (greetingSpeech) {
-      gather.play(greetingSpeech.audioUrl);
+      twiml.play(greetingSpeech.audioUrl);
     } else {
-      gather.say({ voice: VOICE }, greeting);
+      twiml.say({ voice: VOICE }, greeting);
     }
 
+    // STEP 2: Now start listening, with timeouts tuned for natural speech.
+    twiml.gather({
+      input: ["speech"],
+      action: PROCESS_PATH,
+      method: "POST",
+      speechTimeout: "3", // wait 3s of silence (was "auto" ≈ 0.5s — too aggressive)
+      speechModel: "experimental_conversations",
+      enhanced: true,
+      timeout: 10, // total wait for the caller to start speaking (was 5)
+      actionOnEmptyResult: true, // continue even when STT returns empty
+    });
+
+    // STEP 3: Fallback if no input was captured.
     const noInput =
       "I did not catch that. Please try again or call back and we will be happy to help. Goodbye.";
     const noInputSpeech = await generateZuraSpeech(noInput);
