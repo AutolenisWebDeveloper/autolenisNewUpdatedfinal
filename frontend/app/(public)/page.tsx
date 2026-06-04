@@ -58,10 +58,12 @@ const WHY_ITEMS = [
   { icon: Clock, title: "Smarter Financing", body: "Understand total cost of ownership — not just the monthly payment. We help you see the full financial picture." },
 ];
 
+// Representative buyer scenarios. Quantified savings/APR figures intentionally
+// omitted until backed by documented, substantiable auction data (FTC §255).
 const TESTIMONIALS = [
-  { name: "Marcus T.", location: "Atlanta, GA", tag: "Saved $2,100", text: "I had 5 offers in my inbox by 6am. Never set foot in a dealership. AutoLenis paid for itself before I even picked up the car.", rating: 5 },
-  { name: "Priya S.", location: "Dallas, TX", tag: "Saved 8 Hours", text: "The Contract Shield caught a $400 documentation fee buried in the paperwork. I saved 8+ hours of back-and-forth and got a better deal.", rating: 5 },
-  { name: "David R.", location: "Chicago, IL", tag: "Better APR Found", text: "I was skeptical this could really work. My dealer financing was 7.9%. AutoLenis found me 5.4%. This is how buying a car should work.", rating: 5 },
+  { name: "Marcus T.", location: "Atlanta, GA", tag: "No Dealership Visit", text: "I had multiple offers in my inbox by the next morning. I never set foot in a dealership — the dealers came to me.", rating: 5 },
+  { name: "Priya S.", location: "Dallas, TX", tag: "Caught a Junk Fee", text: "The Contract Shield flagged a documentation fee buried in the paperwork before I signed. The whole process was transparent.", rating: 5 },
+  { name: "David R.", location: "Chicago, IL", tag: "Real Competition", text: "I was skeptical this could really work, but watching dealers actually compete for my business changed my mind. This is how buying a car should work.", rating: 5 },
 ];
 
 const FAQ_ITEMS = [
@@ -175,6 +177,10 @@ function HomePageBody() {
             <div className="relative hidden lg:flex items-center justify-center">
               <div className="relative w-full max-w-lg">
 
+                <p className="text-[11px] font-medium uppercase tracking-wider text-[#9CA3AF] text-center mb-3">
+                  Illustrative product preview
+                </p>
+
                 {/* Main card */}
                 <div className="bg-white rounded-2xl shadow-2xl shadow-[#0B5FD1]/10 border border-[#E5E7EB] overflow-hidden">
                   {/* Card header */}
@@ -192,9 +198,9 @@ function HomePageBody() {
                   {/* Offer rows */}
                   <div className="divide-y divide-[#F3F4F6]">
                     {[
-                      { dealer: "Premier Toyota — Dallas", payment: "$521/mo", savings: "$2,800 below market", rank: 1, highlight: true },
-                      { dealer: "AutoNation Ford — Plano", payment: "$538/mo", savings: "$2,100 below market", rank: 2, highlight: false },
-                      { dealer: "Hendrick Chevrolet — Frisco", payment: "$547/mo", savings: "$1,650 below market", rank: 3, highlight: false },
+                      { dealer: "Premier Toyota — Dallas", payment: "$521/mo", savings: "Ranked #1 by total value", rank: 1, highlight: true },
+                      { dealer: "AutoNation Ford — Plano", payment: "$538/mo", savings: "Strong total-cost offer", rank: 2, highlight: false },
+                      { dealer: "Hendrick Chevrolet — Frisco", payment: "$547/mo", savings: "Competitive offer", rank: 3, highlight: false },
                     ].map((offer) => (
                       <div key={offer.rank}
                         className={`flex items-center gap-4 px-5 py-4 ${offer.highlight ? "bg-[#EFF6FF]" : ""}`}>
@@ -225,11 +231,11 @@ function HomePageBody() {
                   <p className="text-lg font-bold">8 bids</p>
                 </div>
 
-                {/* Floating savings card bottom-left */}
+                {/* Floating top-offer card bottom-left */}
                 <div className="absolute -bottom-8 -left-4 bg-white rounded-xl shadow-lg shadow-[#0B5FD1]/10 px-5 py-4 border border-[#E5E7EB]">
-                  <p className="text-xs text-[#6B7280] mb-1">Best offer received</p>
-                  <p className="text-2xl font-bold text-[#0B5FD1]">$2,800 <span className="text-sm font-medium text-[#10B981]">saved</span></p>
-                  <p className="text-xs text-[#9CA3AF]">vs. market price</p>
+                  <p className="text-xs text-[#6B7280] mb-1">Top-ranked offer</p>
+                  <p className="text-2xl font-bold text-[#0B5FD1]">Best <span className="text-sm font-medium text-[#10B981]">overall value</span></p>
+                  <p className="text-xs text-[#9CA3AF]">by total deal quality</p>
                 </div>
 
               </div>
@@ -335,7 +341,7 @@ function HomePageBody() {
           <div className="mb-14 text-center">
             <span className="text-xs font-bold uppercase tracking-[0.15em] text-[#0B5FD1]">Buyer Stories</span>
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#111827] mt-3">
-              Real Buyers. Real Savings.
+              A Smarter Way to Buy
             </h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -363,6 +369,11 @@ function HomePageBody() {
               </article>
             ))}
           </div>
+          <p className="mt-8 text-center text-xs text-[#94A3B8] max-w-2xl mx-auto leading-relaxed">
+            Representative examples. Individual experiences vary. AutoLenis improves
+            competition and transparency but does not guarantee any specific savings,
+            financing terms, or outcome.
+          </p>
         </div>
       </section>
 
@@ -393,7 +404,7 @@ function HomePageBody() {
             Your Next Car Should Be a Smart Decision
           </h2>
           <p className="text-white/70 mb-10 max-w-lg mx-auto leading-relaxed">
-            Join 3,200+ buyers choosing a more intelligent way to purchase vehicles.
+            Choose a more intelligent way to purchase your next vehicle.
           </p>
           <div className="flex flex-wrap gap-4 justify-center">
             <Link

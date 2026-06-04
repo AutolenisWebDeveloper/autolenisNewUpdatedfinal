@@ -60,7 +60,7 @@ const TESTIMONIALS: Testimonial[] = [
     vehicle: "2024 Toyota Highlander",
     saved: null,
     quote:
-      "AutoLenis saved me over $3,000. The process was so easy and there was zero pressure.",
+      "The dealers actually competed for my business. The process was so easy and there was zero pressure.",
     stars: 5,
     initial: "S",
     color: "from-pink-400 to-rose-500",
@@ -518,14 +518,9 @@ export default function LandingPageClient({
                       </div>
                     ))}
                   </div>
-                  <div className="flex items-center gap-1">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Star key={i} size={13} className="text-amber-400 fill-amber-400" />
-                    ))}
-                    <span className="ml-1.5 text-xs font-semibold text-slate-600">
-                      4.9 / 5 from 1,200+ buyers
-                    </span>
-                  </div>
+                  <span className="text-xs font-semibold text-slate-600">
+                    Buyer-first — no dealer commissions, no pressure
+                  </span>
                 </div>
               </div>
 
@@ -759,10 +754,10 @@ export default function LandingPageClient({
         <section className="bg-white border-y border-slate-200 py-6">
           <div className="max-w-5xl mx-auto px-5 grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
-              { icon: <DollarSign size={18} />, number: "$2,300+",   label: "Average Buyer Savings"     },
-              { icon: <Users size={18} />,      number: "500+",      label: "Verified Dealer Partners"  },
-              { icon: <Car size={18} />,        number: "10,000+",   label: "Vehicles Requested"        },
-              { icon: <Star size={18} />,       number: "4.9 / 5",   label: "Buyer Satisfaction"        },
+              { icon: <Users size={18} />,      number: "Up to 8",   label: "Dealers Per Auction"       },
+              { icon: <Clock size={18} />,      number: "48 hrs",    label: "Private Auction Window"    },
+              { icon: <Car size={18} />,        number: "100%",      label: "Online — No Dealership"    },
+              { icon: <DollarSign size={18} />, number: "$99",       label: "One-Time Access Fee"       },
             ].map((s) => (
               <div key={s.label} className="flex items-center justify-center gap-3">
                 <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center text-[#0B5FD1] shrink-0">
@@ -785,7 +780,7 @@ export default function LandingPageClient({
           <div className="max-w-4xl mx-auto">
             <div className="text-center mb-8">
               <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-3">
-                See How AutoLenis Saves You Thousands
+                See How Dealer Competition Works for You
               </h2>
               <p className="text-slate-600 text-base sm:text-lg">
                 Watch this 2-minute video to learn how our reverse auction works

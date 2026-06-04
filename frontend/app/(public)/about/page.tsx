@@ -71,9 +71,9 @@ export default function AboutPage() {
                   </div>
                   <div className="grid grid-cols-3 w-full gap-4 pt-4 border-t border-[#F3F4F6]">
                     {[
-                      { v: "312+", l: "Verified Dealers" },
-                      { v: "$2,300", l: "Avg Savings" },
-                      { v: "1,847", l: "Deals Done" },
+                      { v: "Up to 8", l: "Dealers Compete" },
+                      { v: "48 hrs", l: "Auction Window" },
+                      { v: "100%", l: "Online & Remote" },
                     ].map((s) => (
                       <div key={s.l} className="flex flex-col items-center">
                         <p className="text-xl font-bold text-[#0B5FD1]">{s.v}</p>
@@ -167,32 +167,19 @@ export default function AboutPage() {
               <p className="text-xs tracking-widest uppercase font-semibold text-[#9CA3AF] mb-6">
                 Buyer Advantage
               </p>
-              <div className="space-y-4">
+              <ul className="space-y-4">
                 {[
-                  { label: "Dealer competition", pct: 92 },
-                  { label: "Pricing transparency", pct: 96 },
-                  { label: "Buyer satisfaction", pct: 94 },
-                  { label: "Stress reduction", pct: 89 },
-                ].map((bar) => (
-                  <div key={bar.label}>
-                    <div className="flex justify-between mb-1.5">
-                      <span className="text-xs font-medium text-[#374151]">{bar.label}</span>
-                      <span className="text-xs font-semibold text-[#0B5FD1]">{bar.pct}%</span>
-                    </div>
-                    <div className="h-1.5 bg-[#E5E7EB] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#0B5FD1] rounded-full"
-                        style={{ width: `${bar.pct}%` }}
-                        role="progressbar"
-                        aria-valuenow={bar.pct}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-label={bar.label}
-                      />
-                    </div>
-                  </div>
+                  "Dealers compete for your business",
+                  "Every offer shown transparently, side by side",
+                  "No dealership pressure or back-and-forth",
+                  "You choose the best deal — or walk away",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-3">
+                    <CheckCircle2 size={18} className="text-[#0B5FD1] mt-0.5 shrink-0" />
+                    <span className="text-sm text-[#4B5563] leading-relaxed">{item}</span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           </div>
         </div>

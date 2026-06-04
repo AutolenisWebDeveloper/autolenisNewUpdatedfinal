@@ -100,7 +100,7 @@ export const entityGraphSchema: Record<string, unknown> = {
       areaServed: { "@type": "Country", name: "United States" },
       url: `${BASE}/how-it-works`,
       description:
-        "AutoLenis connects pre-qualified buyers with verified dealers who compete in a private 48-hour auction. Buyers save an average of $2,300.",
+        "AutoLenis connects pre-qualified buyers with verified dealers who compete in a private 48-hour auction. Buyers compare every offer side by side and choose the best deal.",
       mainEntityOfPage: { "@id": ENTITY_IDS.howItWorks },
     },
 

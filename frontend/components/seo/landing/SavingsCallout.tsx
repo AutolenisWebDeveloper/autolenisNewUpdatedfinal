@@ -17,13 +17,16 @@ export default function SavingsCallout({ city = null }: SavingsCalloutProps) {
           fall versus negotiating alone. {where} keep their time and their leverage.
         </p>
 
+        {/* No fabricated average-savings figure is shown. A specific dollar amount
+            can be reintroduced here only once it is backed by documented, verifiable
+            auction data (FTC substantiation). Until then we describe the mechanism,
+            not an unverified number. */}
         <div className="mx-auto mt-8 max-w-md rounded-2xl bg-white/10 p-8">
-          <div className="text-4xl font-extrabold sm:text-5xl">
-            {/* {{CONFIRM_WITH_OWNER}} — verifiable average savings figure, or remove this block */}
-            $&#123;&#123;CONFIRM_WITH_OWNER&#125;&#125;
+          <div className="text-2xl font-extrabold sm:text-3xl">
+            Up to 8 dealers compete for your business
           </div>
           <p className="mt-2 text-sm text-blue-100">
-            Average reported savings ({"{{CONFIRM_WITH_OWNER}}"} — substantiate before publishing)
+            Compare every offer side by side and choose the best deal — or walk away.
           </p>
         </div>
 

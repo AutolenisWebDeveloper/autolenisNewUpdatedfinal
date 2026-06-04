@@ -255,7 +255,7 @@ export default function HowItWorksPage() {
           <CitationBlock
             id="how-autolenis-works"
             question="How does AutoLenis work?"
-            answer="AutoLenis works in 6 steps: (1) Get pre-qualified online with a soft credit pull. (2) Browse and shortlist vehicles. (3) Pay a $99 Limited-Time Auction Access Fee (refundable if no valuable offer is received). (4) AutoLenis launches a private 48-hour dealer auction. (5) Review competing dealer offers side-by-side. (6) Select the best offer and sign via DocuSign. Most buyers save $2,000–$4,000 compared to traditional dealership purchases."
+            answer="AutoLenis works in 6 steps: (1) Get pre-qualified online with a soft credit pull. (2) Browse and shortlist vehicles. (3) Pay a $99 Limited-Time Auction Access Fee (refundable if no valuable offer is received). (4) AutoLenis launches a private 48-hour dealer auction. (5) Review competing dealer offers side-by-side. (6) Select the best offer and sign via DocuSign. Verified dealers compete for your business so you can compare every offer and choose the best deal — without negotiating at the dealership."
             sourceLabel="AutoLenis Official"
             lastUpdated="2025-01-01"
           />
@@ -525,6 +525,9 @@ export default function HowItWorksPage() {
             </h2>
             <p className="text-[#4B5563]">
               The monthly payment is the least important number. Total cost of ownership is what actually matters.
+            </p>
+            <p className="mt-3 text-xs text-[#94A3B8]">
+              Illustrative example comparing two financing structures. Figures are hypothetical and not a quote or a savings guarantee.
             </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto mb-10">

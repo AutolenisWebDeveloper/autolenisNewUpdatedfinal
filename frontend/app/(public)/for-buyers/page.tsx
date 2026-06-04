@@ -29,7 +29,7 @@ export const revalidate = 86400;
 // ── Data ─────────────────────────────────────────────────────────────────────
 
 const OLD_WAY = [
-  "Hours wasted at the dealership — average 4+ hrs per visit",
+  "Hours wasted at the dealership — back-and-forth that drags on",
   "High-pressure sales tactics and manager games",
   "Hidden fees buried deep in the contract",
   "No way to compare competing offers side by side",
@@ -150,7 +150,7 @@ const TRUST_PILLARS = [
 ];
 
 const STATS = [
-  { value: "3,200+", label: "Families served" },
+  { value: "100%", label: "Online & remote" },
   { value: "48 hrs", label: "Auction duration" },
   { value: "Up to 8", label: "Competing dealers" },
   { value: "$99", label: "Fully refundable deposit" },
@@ -237,8 +237,8 @@ export default function ForBuyersPage() {
             </div>
             {/* Floating badge */}
             <div className="absolute -bottom-5 -left-6 bg-white rounded-xl shadow-xl shadow-[#0B5FD1]/10 px-5 py-4 border border-[#E5E7EB]">
-              <p className="text-xs text-[#94A3B8] mb-0.5">Families served</p>
-              <p className="text-2xl font-bold text-[#0B5FD1]">3,200+</p>
+              <p className="text-xs text-[#94A3B8] mb-0.5">Buy from home</p>
+              <p className="text-2xl font-bold text-[#0B5FD1]">100% online</p>
             </div>
             <div className="absolute -top-4 -right-4 bg-[#0B5FD1] rounded-xl shadow-lg px-4 py-3 text-white">
               <p className="text-xs font-medium text-white/70 mb-0.5">Average auction</p>
@@ -506,9 +506,9 @@ export default function ForBuyersPage() {
               </summary>
               <p className="px-6 pb-5 text-sm text-[#4B5563] leading-relaxed">
                 The $99 deposit is refundable if you don&apos;t select any offer. If you do
-                buy, the $99 is credited toward the $499 Service Fee. Buyers who use
-                AutoLenis save an average of $2,300 — meaning the service typically
-                pays for itself many times over.
+                buy, the $99 is credited toward the $499 Service Fee. Instead of
+                negotiating alone, you have verified dealers competing for your business
+                and full visibility into every offer before you decide.
               </p>
             </details>
 

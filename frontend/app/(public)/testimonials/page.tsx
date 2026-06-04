@@ -16,14 +16,14 @@ export const revalidate = 86400;
 const BUYER_TESTIMONIALS = [
   {
     quote:
-      "I got 6 dealer offers in 48 hours. One came in $2,800 below the price I was quoted at the lot the week before. The whole process took less time than one dealership visit.",
+      "I got 6 dealer offers in 48 hours. One came in well below the price I was quoted at the lot the week before. The whole process took less time than one dealership visit.",
     name: "Marcus T.",
     location: "Dallas TX",
     plan: "Standard Plan",
   },
   {
     quote:
-      "Contract Shield flagged a $1,200 dealer add-on I never would have caught. I had the dealer remove it before I signed. That alone was worth the entire process.",
+      "Contract Shield flagged a dealer add-on I never would have caught. I had the dealer remove it before I signed. That alone was worth the entire process.",
     name: "Priya S.",
     location: "Houston TX",
     plan: "Premium Concierge",
@@ -129,6 +129,11 @@ export default function TestimonialsPage() {
           <p className="text-[#4B5563] text-lg max-w-2xl mx-auto leading-relaxed">
             AutoLenis is built on a simple premise: buyers deserve a better process. Here's what
             people say when that process works.
+          </p>
+          <p className="text-[#94A3B8] text-xs max-w-2xl mx-auto leading-relaxed mt-5">
+            Representative examples of AutoLenis experiences. Individual results vary.
+            AutoLenis improves competition and transparency but does not guarantee any
+            specific savings, pricing, financing terms, or outcome.
           </p>
         </div>
       </section>
