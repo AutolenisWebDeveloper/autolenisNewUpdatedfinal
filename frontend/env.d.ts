@@ -52,6 +52,16 @@ declare namespace NodeJS {
     // Communication (Resend ONLY)
     RESEND_API_KEY: string;
     FROM_NAME: string;
+    // Resend webhook (Svix) signing secret — verifies delivery/bounce events.
+    RESEND_WEBHOOK_SECRET?: string;
+
+    // Phase 4B-3 — Dealer outreach email send infrastructure.
+    // From/Reply-To addresses and the CAN-SPAM physical address. Senders fall
+    // back to safe defaults when unset, but AUTOLENIS_PHYSICAL_ADDRESS must be a
+    // real business address before live dealer sends (required by CAN-SPAM).
+    DEALER_OUTREACH_FROM_EMAIL?: string;  // e.g. "dealers@autolenis.com"
+    DEALER_OUTREACH_REPLY_TO?: string;    // e.g. "markist@skaipay.com"
+    AUTOLENIS_PHYSICAL_ADDRESS?: string;  // required by CAN-SPAM
     // Ops inbox for AutoLenis admin alerts (new MANUAL_REVIEW / OFAC prequals,
     // provider errors, dealer-application notifications, morning briefings).
     // Senders fail safe and skip if unset.

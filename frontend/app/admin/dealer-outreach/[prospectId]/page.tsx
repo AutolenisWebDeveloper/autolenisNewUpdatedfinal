@@ -18,12 +18,20 @@ export default async function DealerProspectDetailPage({
 
   const prospect = await prisma.dealerProspect.findUnique({
     where: { id: prospectId },
-    include: { buyerOpp: true },
+    include: {
+      buyerOpp: true,
+      outreachLog: {
+        where: { channel: "email" },
+        orderBy: { sentAt: "desc" },
+        take: 1,
+      },
+    },
   });
 
   if (!prospect) notFound();
 
   const opp = prospect.buyerOpp;
+  const lastEmail = prospect.outreachLog[0] ?? null;
 
   const detail: ProspectDetail = {
     id: prospect.id,
@@ -33,7 +41,16 @@ export default async function DealerProspectDetailPage({
     state: prospect.state,
     zip: prospect.zip,
     phone: prospect.phone,
+    email: prospect.email,
     website: prospect.website,
+    lastOutreach: lastEmail
+      ? {
+          status: lastEmail.status,
+          subject: lastEmail.subject,
+          outreachType: lastEmail.outreachType,
+          sentAt: lastEmail.sentAt.toISOString(),
+        }
+      : null,
     brand: prospect.brand,
     sourceUrl: prospect.sourceUrl,
     searchScore: prospect.searchScore,

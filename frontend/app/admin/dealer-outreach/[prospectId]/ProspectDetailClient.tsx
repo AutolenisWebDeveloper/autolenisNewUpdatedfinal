@@ -11,6 +11,7 @@ export interface ProspectDetail {
   state: string | null;
   zip: string | null;
   phone: string | null;
+  email: string | null;
   website: string | null;
   brand: string | null;
   sourceUrl: string | null;
@@ -26,6 +27,12 @@ export interface ProspectDetail {
   onboardedAt: string | null;
   deadAt: string | null;
   deadReason: string | null;
+  lastOutreach: {
+    status: string;
+    subject: string | null;
+    outreachType: string;
+    sentAt: string;
+  } | null;
   buyerOpp: {
     id: string;
     firstName: string | null;
@@ -52,6 +59,16 @@ const STATUS_BADGE: Record<string, string> = {
   REPLIED: "bg-purple-100 text-purple-700",
   ONBOARDED: "bg-green-100 text-green-700",
   DEAD: "bg-red-100 text-red-700",
+};
+
+const OUTREACH_BADGE: Record<string, string> = {
+  queued: "bg-slate-100 text-slate-600",
+  sent: "bg-blue-100 text-blue-700",
+  delivered: "bg-green-100 text-green-700",
+  bounced: "bg-red-100 text-red-700",
+  complained: "bg-red-100 text-red-700",
+  replied: "bg-purple-100 text-purple-700",
+  failed: "bg-red-100 text-red-700",
 };
 
 function humanizeTimeline(t: string | null): string {
@@ -83,6 +100,74 @@ export default function ProspectDetailClient({
   const [notes, setNotes] = useState(prospect.founderNotes ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  // Outreach email state.
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [previewLoaded, setPreviewLoaded] = useState(false);
+
+  async function previewEmail() {
+    setBusy("preview");
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/dealer-outreach/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dealerProspectId: prospect.id }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
+      }
+      setEmailSubject(body?.data?.subject ?? "");
+      setEmailBody(body?.data?.body ?? "");
+      setPreviewLoaded(true);
+      setMessage("Preview generated. Edit if needed, then Send.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Preview failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sendEmail(outreachType: "initial" | "followup_1" | "followup_2") {
+    if (!prospect.email) {
+      setMessage("This dealer has no email on file.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Send ${outreachType.replace("_", " ")} outreach email to ${prospect.email}?`,
+      )
+    ) {
+      return;
+    }
+    setBusy("send");
+    setMessage(null);
+    try {
+      // If the founder edited a generated preview, send those overrides.
+      const useOverride = previewLoaded && emailSubject.trim() && emailBody.trim();
+      const res = await fetch("/api/admin/dealer-outreach/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dealerProspectId: prospect.id,
+          outreachType,
+          ...(useOverride ? { customSubject: emailSubject, customBody: emailBody } : {}),
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
+      }
+      setMessage(`Email sent${body?.data?.resendId ? ` (${body.data.resendId})` : ""}.`);
+      router.refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Send failed");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function patch(payload: Record<string, unknown>, action: string) {
     setBusy(action);
@@ -297,6 +382,83 @@ export default function ProspectDetailClient({
           >
             {busy === "regenerate" ? "Regenerating…" : "Regenerate Script"}
           </button>
+        </div>
+      </div>
+
+      {/* Outreach email */}
+      <div className="rounded-lg border border-slate-200 bg-white p-5">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 className="text-sm font-semibold uppercase text-slate-500">Outreach Email</h2>
+          {prospect.lastOutreach ? (
+            <span
+              className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                OUTREACH_BADGE[prospect.lastOutreach.status] ?? "bg-slate-100 text-slate-600"
+              }`}
+            >
+              Last: {prospect.lastOutreach.status} · {fmt(prospect.lastOutreach.sentAt)}
+            </span>
+          ) : (
+            <span className="text-xs text-slate-400">No email sent yet</span>
+          )}
+        </div>
+
+        <div className="text-sm text-slate-600 mb-3">
+          To:{" "}
+          {prospect.email ? (
+            <span className="font-medium text-slate-800">{prospect.email}</span>
+          ) : (
+            <span className="text-red-600">No email on file — enrich or add one first.</span>
+          )}
+        </div>
+
+        {previewLoaded && (
+          <div className="space-y-3 mb-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Subject</label>
+              <input
+                value={emailSubject}
+                onChange={(e) => setEmailSubject(e.target.value)}
+                className="w-full rounded-md border border-slate-300 p-2 text-sm focus:border-[#0B5FD1] focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">
+                Body (edit before sending — signature &amp; CAN-SPAM footer are added automatically)
+              </label>
+              <textarea
+                value={emailBody}
+                onChange={(e) => setEmailBody(e.target.value)}
+                rows={14}
+                className="w-full rounded-md border border-slate-300 p-3 text-sm font-mono focus:border-[#0B5FD1] focus:outline-none"
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={previewEmail}
+            disabled={busy !== null || !prospect.email}
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {busy === "preview" ? "Generating…" : "Preview Email"}
+          </button>
+          <button
+            onClick={() => sendEmail("initial")}
+            disabled={busy !== null || !prospect.email}
+            className="rounded-md bg-[#0B5FD1] px-4 py-2 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
+          >
+            {busy === "send" ? "Sending…" : "Send Email"}
+          </button>
+          {prospect.lastOutreach && prospect.lastOutreach.status !== "replied" && (
+            <button
+              onClick={() => sendEmail("followup_1")}
+              disabled={busy !== null || !prospect.email}
+              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Send Follow-up
+            </button>
+          )}
         </div>
       </div>
 

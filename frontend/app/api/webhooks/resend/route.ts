@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { SuppressionService } from '@/lib/services/suppression.service';
+import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,6 +46,67 @@ function verifySvixSignature(
   return false;
 }
 
+// Phase 4B-3 — apply a Resend delivery event to the matching dealer outreach
+// log row (matched by Resend message id). Best-effort: never throws into the
+// webhook handler, since a missing row simply means the event wasn't ours.
+async function updateDealerOutreachLog(
+  type: string,
+  resendId: string | undefined
+): Promise<void> {
+  if (!resendId) return;
+
+  try {
+    const log = await prisma.dealerOutreachLog.findFirst({
+      where: { resendId },
+      select: { id: true, status: true, metadata: true },
+    });
+    if (!log) return;
+
+    switch (type) {
+      case 'email.delivered':
+        await prisma.dealerOutreachLog.update({
+          where: { id: log.id },
+          data: { status: 'delivered', deliveredAt: new Date() },
+        });
+        break;
+      case 'email.bounced':
+        await prisma.dealerOutreachLog.update({
+          where: { id: log.id },
+          data: { status: 'bounced' },
+        });
+        break;
+      case 'email.complained':
+        await prisma.dealerOutreachLog.update({
+          where: { id: log.id },
+          data: { status: 'complained' },
+        });
+        break;
+      case 'email.opened': {
+        const meta = (log.metadata && typeof log.metadata === 'object' ? log.metadata : {}) as Record<string, unknown>;
+        const opens = typeof meta.opens === 'number' ? meta.opens : 0;
+        await prisma.dealerOutreachLog.update({
+          where: { id: log.id },
+          data: { metadata: { ...meta, opens: opens + 1 } },
+        });
+        break;
+      }
+      case 'email.clicked': {
+        const meta = (log.metadata && typeof log.metadata === 'object' ? log.metadata : {}) as Record<string, unknown>;
+        const clicks = typeof meta.clicks === 'number' ? meta.clicks : 0;
+        await prisma.dealerOutreachLog.update({
+          where: { id: log.id },
+          data: { metadata: { ...meta, clicks: clicks + 1 } },
+        });
+        break;
+      }
+      default:
+        break;
+    }
+  } catch (err) {
+    console.error('[resend.webhook] dealer outreach log update failed', err);
+  }
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const rawBody = await req.text();
@@ -64,7 +126,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const payload = JSON.parse(rawBody) as {
       type: string;
-      data: { to?: string[]; email?: string } & Record<string, unknown>;
+      data: { to?: string[]; email?: string; email_id?: string } & Record<string, unknown>;
     };
 
     const supabase = createClient(
@@ -74,24 +136,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const recipient =
       (Array.isArray(payload.data.to) ? payload.data.to[0] : undefined) ?? payload.data.email;
-    if (!recipient) {
-      return NextResponse.json({ ok: true, skipped: 'no_recipient' });
-    }
 
     switch (payload.type) {
       case 'email.bounced':
-        await SuppressionService.suppressEmail(supabase, recipient, 'bounced', payload.data);
+        if (recipient) await SuppressionService.suppressEmail(supabase, recipient, 'bounced', payload.data);
         break;
       case 'email.complained':
-        await SuppressionService.suppressEmail(supabase, recipient, 'complained', payload.data);
+        if (recipient) await SuppressionService.suppressEmail(supabase, recipient, 'complained', payload.data);
         break;
       case 'email.unsubscribed':
-        await SuppressionService.suppressEmail(supabase, recipient, 'unsubscribed', payload.data);
+        if (recipient) await SuppressionService.suppressEmail(supabase, recipient, 'unsubscribed', payload.data);
         break;
       default:
-        // Other event types (delivered, opened, clicked) are not handled in Phase 1.
+        // Other event types (delivered, opened, clicked) are reconciled against
+        // the dealer outreach log below.
         break;
     }
+
+    // Phase 4B-3 — reconcile Resend delivery events against dealer_outreach_log.
+    // Keyed on the Resend message id (data.email_id). No-ops when the event is
+    // unrelated to a dealer outreach send.
+    await updateDealerOutreachLog(payload.type, payload.data.email_id);
 
     return NextResponse.json({ verified: true });
   } catch (err) {

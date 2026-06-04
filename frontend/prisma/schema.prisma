@@ -3321,6 +3321,9 @@ model DealerProspect {
   deadAt                DateTime? @map("dead_at")
   deadReason            String?   @map("dead_reason")
 
+  // Phase 4B-3 — Email outreach send log (relation)
+  outreachLog     DealerOutreachLog[]
+
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -3328,6 +3331,35 @@ model DealerProspect {
   @@index([status])
   @@index([zip])
   @@map("dealer_prospects")
+}
+
+// Phase 4B-3 — Dealer Outreach Log.
+// Records every outreach attempt (initial + followups) so sends are auditable,
+// rate-limited, and reconcilable against Resend delivery webhooks.
+model DealerOutreachLog {
+  id                 String   @id @default(uuid())
+  dealerProspectId   String   @map("dealer_prospect_id")
+  outreachType       String   @map("outreach_type")  // 'initial' | 'followup_1' | 'followup_2'
+  channel            String                           // 'email' | 'sms' | 'phone'
+  subject            String?
+  body               String?  @db.Text
+  toEmail            String?  @map("to_email")
+  fromEmail          String?  @map("from_email")
+  resendId           String?  @map("resend_id")
+  status             String                           // 'queued' | 'sent' | 'delivered' | 'bounced' | 'replied' | 'complained' | 'failed'
+  errorMessage       String?  @db.Text @map("error_message")
+  sentAt             DateTime  @default(now()) @map("sent_at")
+  deliveredAt        DateTime? @map("delivered_at")
+  repliedAt          DateTime? @map("replied_at")
+  metadata           Json      @default("{}")
+
+  dealerProspect     DealerProspect @relation(fields: [dealerProspectId], references: [id], onDelete: Cascade)
+
+  @@index([dealerProspectId])
+  @@index([status])
+  @@index([sentAt])
+  @@index([resendId])
+  @@map("dealer_outreach_log")
 }
 
 enum DealerProspectStatus {

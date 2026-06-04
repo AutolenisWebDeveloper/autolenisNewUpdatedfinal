@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Phone, Users } from "lucide-react";
 import { DealerProspectStatus, type Prisma } from "@prisma/client";
 import BackfillButton from "./BackfillButton";
+import BatchSendPanel from "./BatchSendPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,16 @@ const STATUS_BADGE: Record<string, string> = {
   REPLIED: "bg-purple-100 text-purple-700",
   ONBOARDED: "bg-green-100 text-green-700",
   DEAD: "bg-red-100 text-red-700",
+};
+
+const OUTREACH_BADGE: Record<string, string> = {
+  queued: "bg-slate-100 text-slate-600",
+  sent: "bg-blue-100 text-blue-700",
+  delivered: "bg-green-100 text-green-700",
+  bounced: "bg-red-100 text-red-700",
+  complained: "bg-red-100 text-red-700",
+  replied: "bg-purple-100 text-purple-700",
+  failed: "bg-red-100 text-red-700",
 };
 
 function humanizeTimeline(t: string | null): string {
@@ -55,7 +66,10 @@ export default async function DealerOutreachPage({
   let prospects: Awaited<
     ReturnType<
       typeof prisma.dealerProspect.findMany<{
-        include: { buyerOpp: true };
+        include: {
+          buyerOpp: true;
+          outreachLog: true;
+        };
       }>
     >
   > = [];
@@ -64,13 +78,31 @@ export default async function DealerOutreachPage({
   try {
     prospects = await prisma.dealerProspect.findMany({
       where,
-      include: { buyerOpp: true },
+      include: {
+        buyerOpp: true,
+        outreachLog: {
+          where: { channel: "email" },
+          orderBy: { sentAt: "desc" },
+          take: 1,
+        },
+      },
       orderBy: { createdAt: "desc" },
       take: 100,
     });
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Failed to load prospects";
   }
+
+  // Dealers with an email but no email outreach yet — eligible for batch send.
+  const batchEligible = prospects
+    .filter((p) => p.email && p.outreachLog.length === 0)
+    .map((p) => ({
+      id: p.id,
+      name: p.name,
+      email: p.email as string,
+      city: p.city,
+      state: p.state,
+    }));
 
   // Stats row — counts per status across all prospects.
   const grouped = await prisma.dealerProspect
@@ -137,6 +169,9 @@ export default async function DealerOutreachPage({
         </div>
       )}
 
+      {/* Phase 4B-3 — batch outreach to dealers with an email and no send yet */}
+      <BatchSendPanel eligible={batchEligible} />
+
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -145,8 +180,10 @@ export default async function DealerOutreachPage({
               <th className="px-4 py-3 font-medium">Location</th>
               <th className="px-4 py-3 font-medium">Brand</th>
               <th className="px-4 py-3 font-medium">Phone</th>
+              <th className="px-4 py-3 font-medium">Email</th>
               <th className="px-4 py-3 font-medium">Linked Buyer</th>
               <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Outreach</th>
               <th className="px-4 py-3 font-medium">Drafted</th>
               <th className="px-4 py-3 font-medium"></th>
             </tr>
@@ -154,13 +191,14 @@ export default async function DealerOutreachPage({
           <tbody className="divide-y divide-slate-100">
             {prospects.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={10} className="px-4 py-8 text-center text-slate-400">
                   No prospects in this view yet.
                 </td>
               </tr>
             )}
             {prospects.map((p) => {
               const opp = p.buyerOpp;
+              const lastOutreach = p.outreachLog[0] ?? null;
               const vehicle =
                 [opp?.make, opp?.model].filter(Boolean).join(" ") ||
                 opp?.bodyStyle ||
@@ -181,6 +219,18 @@ export default async function DealerOutreachPage({
                       "—"
                     )}
                   </td>
+                  <td className="px-4 py-3">
+                    {p.email ? (
+                      <a
+                        href={`mailto:${p.email}`}
+                        className="text-[#0B5FD1] hover:underline break-all"
+                      >
+                        {p.email}
+                      </a>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-slate-600">
                     {opp ? (
                       <span>
@@ -199,6 +249,19 @@ export default async function DealerOutreachPage({
                     >
                       {p.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {lastOutreach ? (
+                      <span
+                        className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                          OUTREACH_BADGE[lastOutreach.status] ?? "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {lastOutreach.status}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 text-xs">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-slate-500 text-xs">
                     {p.scriptDraftedAt
