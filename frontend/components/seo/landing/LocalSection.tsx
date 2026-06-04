@@ -9,7 +9,19 @@ interface LocalSectionProps {
   location: SeoLocation;
 }
 
+// A real, documented city testimonial. Forward-looking: the `testimonials` field is
+// not yet on SeoLocation, so until real quotes are added to the location dataset this
+// list is empty and the testimonial sub-section stays hidden. We never render
+// placeholder/{{CONFIRM_WITH_OWNER}} slots.
+interface LocalTestimonial {
+  quote: string;
+  attribution: string; // e.g. "Jane D., Frisco TX"
+}
+
 export default function LocalSection({ location }: LocalSectionProps) {
+  const realTestimonials: LocalTestimonial[] =
+    (location as SeoLocation & { testimonials?: LocalTestimonial[] }).testimonials ?? [];
+
   return (
     <section id="local" className="scroll-mt-20 bg-white py-16 md:py-20">
       <div className="mx-auto max-w-4xl px-6 md:px-12">
@@ -39,20 +51,21 @@ export default function LocalSection({ location }: LocalSectionProps) {
           </p>
         </div>
 
-        {/* City testimonial slots — owner-confirm only, never fabricated. */}
-        {location.testimonialSlots > 0 && (
+        {/* City testimonials render ONLY when real, documented, substantiated quotes
+            exist for this location. Placeholder/{{CONFIRM_WITH_OWNER}} slots are never
+            rendered; until real testimonials are wired in, this section is hidden. */}
+        {realTestimonials.length > 0 && (
           <div className="mt-8">
             <h3 className="text-lg font-semibold text-slate-900">
               What {location.city} buyers say
             </h3>
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {Array.from({ length: location.testimonialSlots }).map((_, i) => (
-                <figure key={i} className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-5">
-                  <blockquote className="text-sm italic text-slate-400">
-                    {"{{CONFIRM_WITH_OWNER}}"} — verified {location.city} customer testimonial
-                    (first name + last initial + city), with documented, substantiated claims only.
+              {realTestimonials.map((t, i) => (
+                <figure key={i} className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+                  <blockquote className="text-sm italic text-slate-700">
+                    &ldquo;{t.quote}&rdquo;
                   </blockquote>
-                  <figcaption className="mt-3 text-xs text-slate-400">— Pending owner confirmation</figcaption>
+                  <figcaption className="mt-3 text-xs text-slate-500">— {t.attribution}</figcaption>
                 </figure>
               ))}
             </div>
