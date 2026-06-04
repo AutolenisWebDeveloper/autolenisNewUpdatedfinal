@@ -8,6 +8,7 @@ import { DealerProspectStatus, type Prisma } from "@prisma/client";
 import BackfillButton from "./BackfillButton";
 import BackfillEmailsButton from "./BackfillEmailsButton";
 import EmailCell from "./EmailCell";
+import OutreachActions from "./OutreachActions";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +93,27 @@ export default async function DealerOutreachPage({
     .count({ where: { email: null } })
     .catch(() => 0);
 
+  // Latest email outreach status per displayed prospect (for the Outreach
+  // column). Guarded so the page still renders before the 4B-3 migration runs.
+  const latestOutreach = new Map<string, string>();
+  if (prospects.length > 0) {
+    const logs = await prisma.dealerOutreachLog
+      .findMany({
+        where: {
+          dealerProspectId: { in: prospects.map((p) => p.id) },
+          channel: "email",
+        },
+        orderBy: { sentAt: "desc" },
+        select: { dealerProspectId: true, status: true },
+      })
+      .catch(() => [] as { dealerProspectId: string; status: string }[]);
+    for (const l of logs) {
+      if (!latestOutreach.has(l.dealerProspectId)) {
+        latestOutreach.set(l.dealerProspectId, l.status);
+      }
+    }
+  }
+
   const statusOrder: DealerProspectStatus[] = [
     "DISCOVERED",
     "SCRIPTED",
@@ -158,6 +180,7 @@ export default async function DealerOutreachPage({
               <th className="px-4 py-3 font-medium">Email</th>
               <th className="px-4 py-3 font-medium">Linked Buyer</th>
               <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Outreach</th>
               <th className="px-4 py-3 font-medium">Drafted</th>
               <th className="px-4 py-3 font-medium"></th>
             </tr>
@@ -165,7 +188,7 @@ export default async function DealerOutreachPage({
           <tbody className="divide-y divide-slate-100">
             {prospects.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={10} className="px-4 py-8 text-center text-slate-400">
                   No prospects in this view yet.
                 </td>
               </tr>
@@ -222,6 +245,13 @@ export default async function DealerOutreachPage({
                     >
                       {p.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <OutreachActions
+                      prospectId={p.id}
+                      hasEmail={!!p.email}
+                      lastStatus={latestOutreach.get(p.id) ?? null}
+                    />
                   </td>
                   <td className="px-4 py-3 text-slate-500 text-xs">
                     {p.scriptDraftedAt

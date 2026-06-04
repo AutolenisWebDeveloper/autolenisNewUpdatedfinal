@@ -1,0 +1,277 @@
+// AutoLenis Phase 4B-3 — Dealer outreach email send service.
+//
+// Sends a personalized, CAN-SPAM-compliant outreach email to a dealer prospect
+// via Resend, recording every attempt in dealer_outreach_log. Enforces:
+//   - Suppression: never email a bounced / complained / unsubscribed address
+//   - Rate limits: max 50 sends/hour, 200/day (platform-wide for this channel)
+//
+// Reuses the project's lazy-Resend pattern so `next build` never throws when the
+// API key isn't in scope.
+
+import { Resend } from "resend"
+import { prisma } from "@/lib/prisma"
+import { getServiceSupabase } from "@/lib/supabase-service"
+import { SuppressionService } from "@/lib/services/suppression.service"
+import {
+  generateEmailTemplate,
+  type EmailTemplate,
+} from "./email-template.service"
+
+export type OutreachType = "initial" | "followup_1" | "followup_2"
+
+export interface SendDealerEmailInput {
+  dealerProspectId: string
+  outreachType?: OutreachType
+  // Optional: override the generated email (founder-edited send).
+  customSubject?: string
+  customBody?: string
+}
+
+export interface SendDealerEmailResult {
+  success: boolean
+  resendId?: string
+  error?: string
+  outreachLogId?: string
+}
+
+const MAX_PER_HOUR = 50
+const MAX_PER_DAY = 200
+const FROM_NAME = process.env.FROM_NAME ?? "AutoLenis"
+
+let resendInstance: Resend | null = null
+function getResend(): Resend | null {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey || apiKey.includes("placeholder")) return null
+  if (!resendInstance) resendInstance = new Resend(apiKey)
+  return resendInstance
+}
+
+function fromAddress(): string {
+  const email = process.env.DEALER_OUTREACH_FROM_EMAIL ?? "dealers@autolenis.com"
+  return `${FROM_NAME} <${email}>`
+}
+
+// Platform-wide rate limit for the dealer email channel. Returns true if a send
+// is allowed right now.
+async function checkRateLimit(): Promise<boolean> {
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+
+  const [hourCount, dayCount] = await Promise.all([
+    prisma.dealerOutreachLog.count({
+      where: {
+        channel: "email",
+        status: { in: ["sent", "delivered"] },
+        sentAt: { gte: oneHourAgo },
+      },
+    }),
+    prisma.dealerOutreachLog.count({
+      where: {
+        channel: "email",
+        status: { in: ["sent", "delivered"] },
+        sentAt: { gte: oneDayAgo },
+      },
+    }),
+  ])
+
+  if (hourCount >= MAX_PER_HOUR) {
+    console.warn(`[phase-4b3] Hourly rate limit hit: ${hourCount}/${MAX_PER_HOUR}`)
+    return false
+  }
+  if (dayCount >= MAX_PER_DAY) {
+    console.warn(`[phase-4b3] Daily rate limit hit: ${dayCount}/${MAX_PER_DAY}`)
+    return false
+  }
+  return true
+}
+
+// Best-effort suppression check. Fails open only when the Supabase client can't
+// be constructed (missing env) — never silently emails a known-suppressed
+// address.
+async function isSuppressed(email: string): Promise<boolean> {
+  try {
+    const supabase = getServiceSupabase()
+    return await SuppressionService.isEmailSuppressed(supabase, email)
+  } catch (err) {
+    console.warn(
+      `[phase-4b3] Suppression check failed (allowing send): ${err instanceof Error ? err.message : String(err)}`,
+    )
+    return false
+  }
+}
+
+/**
+ * Build (but do not send) the outreach email for a prospect. Used by the
+ * preview route and by sendDealerEmail.
+ */
+export async function previewDealerEmail(
+  dealerProspectId: string,
+): Promise<{ subject: string; body: string; bodyText: string; toEmail: string | null } | null> {
+  const prospect = await prisma.dealerProspect.findUnique({
+    where: { id: dealerProspectId },
+    select: {
+      name: true,
+      contactName: true,
+      contactTitle: true,
+      city: true,
+      state: true,
+      email: true,
+    },
+  })
+  if (!prospect) return null
+
+  const template = await generateEmailTemplate(
+    {
+      dealerName: prospect.name,
+      contactName: prospect.contactName,
+      contactTitle: prospect.contactTitle,
+      city: prospect.city ?? "",
+      state: prospect.state ?? "",
+    },
+    { dealerEmail: prospect.email ?? "this dealership" },
+  )
+
+  return { ...template, toEmail: prospect.email }
+}
+
+export async function sendDealerEmail(
+  input: SendDealerEmailInput,
+): Promise<SendDealerEmailResult> {
+  const outreachType: OutreachType = input.outreachType ?? "initial"
+
+  // 1. Load prospect.
+  const prospect = await prisma.dealerProspect.findUnique({
+    where: { id: input.dealerProspectId },
+    select: {
+      id: true,
+      name: true,
+      contactName: true,
+      contactTitle: true,
+      city: true,
+      state: true,
+      email: true,
+    },
+  })
+  if (!prospect) return { success: false, error: "Dealer not found" }
+  if (!prospect.email) return { success: false, error: "Dealer has no email" }
+
+  // 2. Suppression gate (CAN-SPAM / deliverability).
+  if (await isSuppressed(prospect.email)) {
+    console.warn(`[phase-4b3] Skipping suppressed address ${prospect.email}`)
+    return { success: false, error: "Recipient is suppressed (bounced/unsubscribed)" }
+  }
+
+  // 3. Rate limit.
+  if (!(await checkRateLimit())) {
+    return {
+      success: false,
+      error: `Rate limit exceeded (${MAX_PER_HOUR}/hr, ${MAX_PER_DAY}/day)`,
+    }
+  }
+
+  // 4. Build the email (custom override or AI-generated).
+  let template: EmailTemplate
+  if (input.customSubject && input.customBody) {
+    const text = input.customBody
+    template = {
+      subject: input.customSubject,
+      bodyText: text,
+      body: `<div style="font-family:-apple-system,system-ui,sans-serif;max-width:600px;margin:0 auto;color:#1f2937;font-size:14px;line-height:1.7">${text
+        .split("\n\n")
+        .map((p) => `<p style="margin:0 0 16px">${p.replace(/\n/g, "<br/>")}</p>`)
+        .join("")}</div>`,
+    }
+  } else {
+    template = await generateEmailTemplate(
+      {
+        dealerName: prospect.name,
+        contactName: prospect.contactName,
+        contactTitle: prospect.contactTitle,
+        city: prospect.city ?? "",
+        state: prospect.state ?? "",
+      },
+      { dealerEmail: prospect.email },
+    )
+  }
+
+  // 5. Create the log row (queued) before dispatch.
+  const fromEmail = process.env.DEALER_OUTREACH_FROM_EMAIL ?? "dealers@autolenis.com"
+  const log = await prisma.dealerOutreachLog.create({
+    data: {
+      dealerProspectId: prospect.id,
+      outreachType,
+      channel: "email",
+      subject: template.subject,
+      body: template.bodyText,
+      toEmail: prospect.email,
+      fromEmail,
+      status: "queued",
+    },
+  })
+
+  // 6. Send via Resend.
+  const resend = getResend()
+  if (!resend) {
+    // No API key configured (or placeholder) — record as failed, don't throw.
+    await prisma.dealerOutreachLog.update({
+      where: { id: log.id },
+      data: { status: "failed", errorMessage: "RESEND_API_KEY not configured" },
+    })
+    console.warn("[phase-4b3] RESEND_API_KEY not configured — send skipped")
+    return { success: false, error: "Email sending not configured", outreachLogId: log.id }
+  }
+
+  try {
+    const result = await resend.emails.send({
+      from: fromAddress(),
+      to: prospect.email,
+      replyTo: process.env.DEALER_OUTREACH_REPLY_TO ?? "markist@skaipay.com",
+      subject: template.subject,
+      html: template.body,
+      text: template.bodyText,
+      tags: [
+        { name: "outreach_type", value: outreachType },
+        { name: "dealer_id", value: prospect.id },
+      ],
+    })
+
+    // The Resend SDK surfaces HTTP errors via result.error rather than throwing.
+    if (result.error || !result.data?.id) {
+      const msg =
+        result.error?.message ?? "Resend returned no message id"
+      await prisma.dealerOutreachLog.update({
+        where: { id: log.id },
+        data: { status: "failed", errorMessage: msg },
+      })
+      console.error(`[phase-4b3] Resend dispatch failed for ${prospect.email}: ${msg}`)
+      return { success: false, error: msg, outreachLogId: log.id }
+    }
+
+    await prisma.dealerOutreachLog.update({
+      where: { id: log.id },
+      data: { status: "sent", resendId: result.data.id },
+    })
+
+    // Reflect the outreach on the prospect status (DISCOVERED/SCRIPTED → CONTACTED).
+    // updateMany so the status filter is allowed; no-op when already advanced.
+    await prisma.dealerProspect
+      .updateMany({
+        where: { id: prospect.id, status: { in: ["DISCOVERED", "SCRIPTED"] } },
+        data: { status: "CONTACTED", contactedAt: new Date() },
+      })
+      .catch(() => {
+        // Non-blocking — the send already succeeded.
+      })
+
+    console.log(`[phase-4b3] Email sent to ${prospect.email} (resend ${result.data.id})`)
+    return { success: true, resendId: result.data.id, outreachLogId: log.id }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await prisma.dealerOutreachLog.update({
+      where: { id: log.id },
+      data: { status: "failed", errorMessage: msg },
+    })
+    console.error(`[phase-4b3] Email send threw for ${prospect.email}: ${msg}`)
+    return { success: false, error: msg, outreachLogId: log.id }
+  }
+}

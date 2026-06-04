@@ -341,10 +341,15 @@ export async function enrichDealerEmail(
     emailEnrichedAt: Date
     email?: string
     emailSource?: string
+    contactName?: string | null
+    contactTitle?: string | null
   } = { emailEnrichedAt: now }
   if (parsed.email && source) {
     data.email = parsed.email
     data.emailSource = source
+    // Persist the contact person too — used to personalize outreach greetings.
+    data.contactName = parsed.contactName
+    data.contactTitle = parsed.contactTitle
   }
 
   try {
