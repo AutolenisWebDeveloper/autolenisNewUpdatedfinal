@@ -6,6 +6,9 @@ import Link from "next/link";
 import { Phone, Users } from "lucide-react";
 import { DealerProspectStatus, type Prisma } from "@prisma/client";
 import BackfillButton from "./BackfillButton";
+import BackfillEmailsButton from "./BackfillEmailsButton";
+import EmailCell from "./EmailCell";
+import OutreachActions from "./OutreachActions";
 
 export const dynamic = "force-dynamic";
 
@@ -85,6 +88,32 @@ export default async function DealerOutreachPage({
     .count({ where: { status: "DISCOVERED", outreachScript: null } })
     .catch(() => 0);
 
+  // Count of prospects with no email captured yet — the email backfill target.
+  const missingEmailCount = await prisma.dealerProspect
+    .count({ where: { email: null } })
+    .catch(() => 0);
+
+  // Latest email outreach status per displayed prospect (for the Outreach
+  // column). Guarded so the page still renders before the 4B-3 migration runs.
+  const latestOutreach = new Map<string, string>();
+  if (prospects.length > 0) {
+    const logs = await prisma.dealerOutreachLog
+      .findMany({
+        where: {
+          dealerProspectId: { in: prospects.map((p) => p.id) },
+          channel: "email",
+        },
+        orderBy: { sentAt: "desc" },
+        select: { dealerProspectId: true, status: true },
+      })
+      .catch(() => [] as { dealerProspectId: string; status: string }[]);
+    for (const l of logs) {
+      if (!latestOutreach.has(l.dealerProspectId)) {
+        latestOutreach.set(l.dealerProspectId, l.status);
+      }
+    }
+  }
+
   const statusOrder: DealerProspectStatus[] = [
     "DISCOVERED",
     "SCRIPTED",
@@ -101,7 +130,10 @@ export default async function DealerOutreachPage({
           <Phone size={22} className="text-[#0B5FD1]" />
           <h1 className="text-xl font-bold text-slate-900">Dealer Recruitment Pipeline</h1>
         </div>
-        <BackfillButton missingCount={missingScriptCount} />
+        <div className="flex items-center gap-2 flex-wrap">
+          <BackfillEmailsButton missingCount={missingEmailCount} />
+          <BackfillButton missingCount={missingScriptCount} />
+        </div>
       </div>
 
       {/* Stats row */}
@@ -145,8 +177,10 @@ export default async function DealerOutreachPage({
               <th className="px-4 py-3 font-medium">Location</th>
               <th className="px-4 py-3 font-medium">Brand</th>
               <th className="px-4 py-3 font-medium">Phone</th>
+              <th className="px-4 py-3 font-medium">Email</th>
               <th className="px-4 py-3 font-medium">Linked Buyer</th>
               <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Outreach</th>
               <th className="px-4 py-3 font-medium">Drafted</th>
               <th className="px-4 py-3 font-medium"></th>
             </tr>
@@ -154,7 +188,7 @@ export default async function DealerOutreachPage({
           <tbody className="divide-y divide-slate-100">
             {prospects.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={10} className="px-4 py-8 text-center text-slate-400">
                   No prospects in this view yet.
                 </td>
               </tr>
@@ -181,6 +215,18 @@ export default async function DealerOutreachPage({
                       "—"
                     )}
                   </td>
+                  <td className="px-4 py-3">
+                    <EmailCell
+                      prospectId={p.id}
+                      email={p.email}
+                      emailSource={p.emailSource}
+                      emailEnrichedAt={
+                        p.emailEnrichedAt
+                          ? p.emailEnrichedAt.toISOString()
+                          : null
+                      }
+                    />
+                  </td>
                   <td className="px-4 py-3 text-slate-600">
                     {opp ? (
                       <span>
@@ -199,6 +245,13 @@ export default async function DealerOutreachPage({
                     >
                       {p.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <OutreachActions
+                      prospectId={p.id}
+                      hasEmail={!!p.email}
+                      lastStatus={latestOutreach.get(p.id) ?? null}
+                    />
                   </td>
                   <td className="px-4 py-3 text-slate-500 text-xs">
                     {p.scriptDraftedAt

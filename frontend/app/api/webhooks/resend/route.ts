@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { SuppressionService } from '@/lib/services/suppression.service';
 
 export const runtime = 'nodejs';
@@ -45,6 +45,60 @@ function verifySvixSignature(
   return false;
 }
 
+// Phase 4B-3 — map a Resend event onto the dealer_outreach_log row identified by
+// Resend's message id (data.email_id). Status-changing events update `status`
+// (and the matching timestamp); open/click events stamp metadata only.
+async function updateDealerOutreachLog(
+  supabase: SupabaseClient,
+  eventType: string,
+  emailId: string | undefined
+): Promise<void> {
+  if (!emailId) return;
+
+  const nowIso = new Date().toISOString();
+
+  switch (eventType) {
+    case 'email.delivered':
+      await supabase
+        .from('dealer_outreach_log')
+        .update({ status: 'delivered', delivered_at: nowIso })
+        .eq('resend_id', emailId);
+      return;
+    case 'email.bounced':
+      await supabase
+        .from('dealer_outreach_log')
+        .update({ status: 'bounced' })
+        .eq('resend_id', emailId);
+      return;
+    case 'email.complained':
+      await supabase
+        .from('dealer_outreach_log')
+        .update({ status: 'complained' })
+        .eq('resend_id', emailId);
+      return;
+    case 'email.opened':
+    case 'email.clicked': {
+      // Stamp the first open/click timestamp in metadata without clobbering
+      // existing keys (read-modify-write on the single matched row).
+      const { data: row } = await supabase
+        .from('dealer_outreach_log')
+        .select('id, metadata')
+        .eq('resend_id', emailId)
+        .maybeSingle();
+      if (!row) return;
+      const key = eventType === 'email.opened' ? 'opened_at' : 'clicked_at';
+      const metadata = {
+        ...(row.metadata as Record<string, unknown> | null ?? {}),
+        [key]: nowIso,
+      };
+      await supabase.from('dealer_outreach_log').update({ metadata }).eq('id', row.id);
+      return;
+    }
+    default:
+      return;
+  }
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const rawBody = await req.text();
@@ -64,12 +118,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const payload = JSON.parse(rawBody) as {
       type: string;
-      data: { to?: string[]; email?: string } & Record<string, unknown>;
+      data: { to?: string[]; email?: string; email_id?: string } & Record<string, unknown>;
     };
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // Phase 4B-3 — reflect delivery lifecycle on dealer_outreach_log rows.
+    // Best-effort and isolated: never let a logging failure break suppression.
+    await updateDealerOutreachLog(supabase, payload.type, payload.data.email_id).catch(
+      (err) => console.error('[resend.webhook] dealer-outreach-log update failed', err)
     );
 
     const recipient =
