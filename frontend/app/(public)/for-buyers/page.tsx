@@ -115,10 +115,10 @@ const FEATURES = [
   },
   {
     Icon: Lock,
-    title: "$99 Fully Refundable Deposit",
+    title: "$99 Service Fee",
     description:
-      "Your auction access deposit is returned in full if no deal is reached. Zero financial risk to try.",
-    tag: "Zero-risk commitment",
+      "Your $99 service fee is refundable if no dealer offers are received within 72 hours. Limited-time launch pricing.",
+    tag: "Limited-time launch pricing",
   },
 ];
 
@@ -137,9 +137,9 @@ const TRUST_PILLARS = [
   },
   {
     Icon: Lock,
-    title: "100% Refundable Deposit",
+    title: "$99 Service Fee",
     description:
-      "If no deal is reached that you're happy with, your $99 auction deposit comes back. No questions, no hoops.",
+      "If no dealer offers are received within 72 hours, your $99 service fee comes back in full. No hoops.",
   },
   {
     Icon: Eye,
@@ -153,7 +153,7 @@ const STATS = [
   { value: "3,200+", label: "Families served" },
   { value: "48 hrs", label: "Auction duration" },
   { value: "Up to 8", label: "Competing dealers" },
-  { value: "$99", label: "Fully refundable deposit" },
+  { value: "$99", label: "Service fee · launch pricing" },
 ];
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -185,7 +185,7 @@ export default function ForBuyersPage() {
               {[
                 "48-hr private auction",
                 "Up to 8 dealers compete",
-                "$99 fully refundable",
+                "$99 service fee · launch pricing",
               ].map((pill) => (
                 <span
                   key={pill}
@@ -505,8 +505,10 @@ export default function ForBuyersPage() {
                 </span>
               </summary>
               <p className="px-6 pb-5 text-sm text-[#4B5563] leading-relaxed">
-                The $99 deposit is refundable if you don&apos;t select any offer. If you do
-                buy, the $99 is credited toward the $499 Service Fee. Buyers who use
+                The $99 service fee (limited-time launch pricing) is refundable only if no
+                dealer offers are received within 72 hours. If you choose the Premium
+                Concierge Package, the $99 starts your auction and the remaining $400 of the
+                $499 total is due at closing. Buyers who use
                 AutoLenis save an average of $2,300 — meaning the service typically
                 pays for itself many times over.
               </p>
@@ -566,9 +568,9 @@ export default function ForBuyersPage() {
               </summary>
               <p className="px-6 pb-5 text-sm text-[#4B5563] leading-relaxed">
                 No. Creating an account and getting pre-qualified is completely free.
-                Even after paying the $99 deposit, you can decline all offers and
-                receive a full refund. You only pay the Service Fee if you select an
-                offer and proceed with a purchase.
+                The $99 service fee activates your auction and is refundable only if no
+                dealer offers are received within 72 hours. If you choose the Premium
+                Concierge Package, the remaining $400 of the $499 total is due at closing.
               </p>
             </details>
           </div>
@@ -593,7 +595,7 @@ export default function ForBuyersPage() {
             <span className="text-[#0B5FD1]">actually offer you?</span>
           </h2>
           <p className="text-[#6B7280] text-lg mb-10 max-w-xl mx-auto leading-relaxed">
-            Check your buying power in 3 minutes. No credit impact. No commitment. Your $99 auction deposit is fully refundable if no deal works for you.
+            Check your buying power in 3 minutes. No credit impact. No commitment. Your $99 service fee is refundable if no dealer offers are received within 72 hours.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
@@ -611,7 +613,7 @@ export default function ForBuyersPage() {
             </Link>
           </div>
           <p className="text-xs text-[#94A3B8] mt-6">
-            No credit score impact &bull; 3 minutes to start &bull; $99 deposit refunded if no deal
+            No credit score impact &bull; 3 minutes to start &bull; $99 service fee refundable if no offers in 72h
           </p>
         </div>
       </section>

@@ -39,37 +39,37 @@ interface CategoryDefinition {
 const CATEGORIES: Record<string, CategoryDefinition> = {
   "suv": {
     title: "Used SUVs for Sale",
-    description: "Browse SUV inventory and let dealers compete for your business. Soft-pull prequalification. Your $99 deposit is fully refundable if no competitive offer is received.",
+    description: "Browse SUV inventory and let dealers compete for your business. Soft-pull prequalification. Your $99 service fee is refundable if no dealer offers are received within 72 hours.",
     filter: { bodyType: "SUV" },
     keywords: ["used SUVs", "SUVs for sale", "SUV best price", "buy SUV online"],
   },
   "trucks": {
     title: "Used Trucks for Sale",
-    description: "Browse truck inventory and let dealers compete for your business. Soft-pull prequalification. Your $99 deposit is fully refundable if no competitive offer is received.",
+    description: "Browse truck inventory and let dealers compete for your business. Soft-pull prequalification. Your $99 service fee is refundable if no dealer offers are received within 72 hours.",
     filter: { bodyType: "Truck" },
     keywords: ["used trucks", "trucks for sale", "truck best price", "buy truck online"],
   },
   "sedans": {
     title: "Used Sedans for Sale",
-    description: "Browse sedan inventory and let dealers compete for your business. Soft-pull prequalification. Your $99 deposit is fully refundable if no competitive offer is received.",
+    description: "Browse sedan inventory and let dealers compete for your business. Soft-pull prequalification. Your $99 service fee is refundable if no dealer offers are received within 72 hours.",
     filter: { bodyType: "Sedan" },
     keywords: ["used sedans", "sedans for sale", "sedan best price", "buy sedan online"],
   },
   "under-25000": {
     title: "Used Cars Under $25,000",
-    description: "Browse vehicles under $25,000 and let dealers compete for your business. No haggle. Soft-pull prequalification. Your $99 deposit is fully refundable if no competitive offer is received.",
+    description: "Browse vehicles under $25,000 and let dealers compete for your business. No haggle. Soft-pull prequalification. Your $99 service fee is refundable if no dealer offers are received within 72 hours.",
     filter: { maxPriceCents: 2500000 },
     keywords: ["used cars under 25000", "cars under $25k", "affordable used cars"],
   },
   "under-30000": {
     title: "Used Cars Under $30,000",
-    description: "Browse vehicles under $30,000 and let dealers compete for your business. No haggle. Soft-pull prequalification. Your $99 deposit is fully refundable if no competitive offer is received.",
+    description: "Browse vehicles under $30,000 and let dealers compete for your business. No haggle. Soft-pull prequalification. Your $99 service fee is refundable if no dealer offers are received within 72 hours.",
     filter: { maxPriceCents: 3000000 },
     keywords: ["used cars under 30000", "cars under $30k"],
   },
   "under-40000": {
     title: "Used Cars Under $40,000",
-    description: "Browse vehicles under $40,000 and let dealers compete for your business. No haggle. Soft-pull prequalification. Your $99 deposit is fully refundable if no competitive offer is received.",
+    description: "Browse vehicles under $40,000 and let dealers compete for your business. No haggle. Soft-pull prequalification. Your $99 service fee is refundable if no dealer offers are received within 72 hours.",
     filter: { maxPriceCents: 4000000 },
     keywords: ["used cars under 40000", "cars under $40k"],
   },
@@ -226,7 +226,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (resolved.kind === "city") {
     return buildPageMetadata({
       title: `Used Cars in ${resolved.city}, ${resolved.stateAbbr} — Let Dealers Compete`,
-      description: `Browse used vehicles in ${resolved.city}, ${resolved.stateAbbr}. Let dealers compete for your business. Soft-pull prequalification. Your $99 deposit is fully refundable if no competitive offer is received.`,
+      description: `Browse used vehicles in ${resolved.city}, ${resolved.stateAbbr}. Let dealers compete for your business. Soft-pull prequalification. Your $99 service fee is refundable if no dealer offers are received within 72 hours.`,
       path: `/cars/${slug}`,
       keywords: [
         `used cars ${resolved.city} ${resolved.stateAbbr}`,
@@ -238,7 +238,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // make
   return buildPageMetadata({
     title: `Used ${resolved.name} for Sale — All Models`,
-    description: `Browse all ${resolved.name} models on AutoLenis. Let dealers compete for your business. Soft-pull prequalification. Your $99 deposit is fully refundable if no competitive offer is received.`,
+    description: `Browse all ${resolved.name} models on AutoLenis. Let dealers compete for your business. Soft-pull prequalification. Your $99 service fee is refundable if no dealer offers are received within 72 hours.`,
     path: `/cars/${slug}`,
     keywords: [`used ${resolved.name}`, `${resolved.name} for sale`, `buy ${resolved.name} online`],
   });

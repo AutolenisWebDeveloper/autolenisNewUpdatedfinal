@@ -20,7 +20,7 @@ const FAQ_CATEGORIES = [
       },
       {
         q: "How do I get started?",
-        a: "Create a free account, complete your soft-pull prequalification in about 3 minutes, and browse inventory matched to your budget. When you're ready, activate dealer competition with the Auction Access Deposit.",
+        a: "Create a free account, complete your soft-pull prequalification in about 3 minutes, and browse inventory matched to your budget. When you're ready, activate dealer competition with the $99 Auction Access Fee.",
       },
       {
         q: "Does the prequalification affect my credit score?",
@@ -33,19 +33,19 @@ const FAQ_CATEGORIES = [
     ],
   },
   {
-    title: "Pricing & Deposit",
+    title: "Pricing",
     faqs: [
       {
         q: "What are the AutoLenis plans?",
-        a: "AutoLenis offers two plans: Standard (free to start) and Premium Concierge ($499 total). Both require the $99 Auction Access Deposit to activate your auction, which is credited toward your vehicle purchase (Standard) or concierge fee (Premium).",
+        a: "AutoLenis offers two separate options: Standard — a one-time $99 service fee (limited-time launch pricing) — and Premium Concierge at $499 total ($99 to start + $400 at closing). Standard's $99 is a flat service fee; on Premium the $99 starts your auction and the remaining $400 is due at closing.",
       },
       {
         q: "Is the $99 a plan?",
-        a: "No. The $99 is an Auction Access Deposit — not a plan, subscription, or platform fee. It activates your private dealer auction and is refundable if no competitive offer is received.",
+        a: "No. The $99 is a one-time service fee — not a plan, subscription, or platform fee. It activates your private dealer auction and is refundable only if no dealer offers are received within 72 hours.",
       },
       {
-        q: "How does the Auction Access Deposit work?",
-        a: "The deposit activates your private 48-hour reverse auction. It unlocks live dealer bidding and competitive offer access — keeping auction quality high. The deposit is fully refundable if no dealers submit offers that meet your expectations, or if you choose not to proceed. On the Standard plan, it is credited toward your vehicle purchase at closing. On Premium, it is credited toward your concierge fee.",
+        q: "How does the $99 service fee work?",
+        a: "The $99 service fee activates your private 48-hour reverse auction and unlocks live dealer bidding and competitive offer access. It is refundable only if no dealer offers are received within 72 hours; otherwise it is non-refundable. On Premium Concierge ($499 total), the $99 starts your auction and the remaining $400 is due at closing.",
       },
     ],
   },
@@ -66,7 +66,7 @@ const FAQ_CATEGORIES = [
       },
       {
         q: "What if no dealer submits an offer?",
-        a: "If the auction closes with zero offers — which is rare — your $99 deposit is refunded in full within 3 business days. AutoLenis may also offer to re-run the auction at no additional cost, or route you through our Request a Car program if the vehicle is not commonly available.",
+        a: "If the auction closes with zero offers within 72 hours — which is rare — your $99 service fee is refunded in full within 3 business days. AutoLenis may also offer to re-run the auction at no additional cost, or route you through our Request a Car program if the vehicle is not commonly available.",
       },
     ],
   },

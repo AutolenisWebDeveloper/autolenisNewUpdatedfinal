@@ -93,6 +93,6 @@ export const CORE_FAQS: SeoFaqItem[] = [
   },
   {
     q: "How much does AutoLenis cost?",
-    a: "Submitting a vehicle request is free. A one-time, non-refundable $99 Auction Access Fee activates your private dealer auction — it is not a deposit and is not credited toward a purchase. A premium concierge package is available for fully hands-off service.",
+    a: "Submitting a vehicle request is free. AutoLenis Standard is a one-time $99 service fee (limited-time launch pricing) that activates your private dealer auction — refundable only if no dealer offers are received within 72 hours. Premium Concierge is $499 total ($99 to start + $400 at closing) for fully hands-off service.",
   },
 ];

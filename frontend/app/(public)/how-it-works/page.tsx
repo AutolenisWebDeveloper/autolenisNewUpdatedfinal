@@ -23,11 +23,11 @@ const FAQS = [
   },
   {
     q: "What is the Auction Access Fee?",
-    a: "The Auction Access Fee is a limited-time, refundable payment that activates your private 48-hour dealer competition. It signals serious intent to participating dealers and ensures everyone in the auction is committed to submitting their best offer.",
+    a: "The Auction Access Fee is a one-time $99 service fee (limited-time launch pricing) that activates your private 48-hour dealer competition. It signals serious intent to participating dealers and ensures everyone in the auction is committed to submitting their best offer.",
   },
   {
     q: "Is the Auction Access Fee refundable?",
-    a: "Yes. If no valuable offer is received within your 48-hour auction window, every cent of your Auction Access Fee is returned automatically. No questions, no fees, no follow-up calls.",
+    a: "It is refundable only if no dealer offers are received within 72 hours of activation — in that case every cent is returned automatically. Otherwise the $99 service fee is non-refundable.",
   },
   {
     q: "How many dealers compete for my business?",
@@ -35,7 +35,7 @@ const FAQS = [
   },
   {
     q: "Am I required to accept an offer?",
-    a: "Never. You are under no obligation to accept any offer that arrives. If none of the offers meet your expectations, you can decline them all and receive a full refund of your Auction Access Fee.",
+    a: "Never. You are under no obligation to accept any offer that arrives — you can decline them all and walk away. Note the $99 service fee is refundable only if no dealer offers are received within 72 hours; if offers arrive and you decline, the fee is non-refundable.",
   },
   {
     q: "Is AutoLenis a dealership?",
@@ -66,8 +66,8 @@ const STEPS = [
     n: "03",
     title: "Activate Dealer Competition",
     icon: Gavel,
-    body: "A refundable Auction Access Fee opens your private 48-hour dealer competition. Up to 8 verified dealers submit their best offers — you stay anonymous throughout.",
-    tag: "48-hour window · Fully refundable",
+    body: "A $99 service fee (refundable if no dealer offers within 72 hours) opens your private 48-hour dealer competition. Up to 8 verified dealers submit their best offers — you stay anonymous throughout.",
+    tag: "48-hour window · refundable if no offers in 72h",
   },
   {
     n: "04",
@@ -120,7 +120,7 @@ const PREQUAL_CARDS = [
 ];
 
 const DEPOSIT_STATS = [
-  { label: "Refundable", desc: "Full refund if no valuable offer is received" },
+  { label: "Refundable", desc: "Full refund if no dealer offers are received within 72 hours" },
   { label: "48 Hours", desc: "Dealers submit their best offers in 48 hours" },
   { label: "Private", desc: "You stay anonymous throughout the auction" },
   { label: "Up to 8", desc: "Verified dealers compete for your business" },
@@ -187,7 +187,7 @@ export default function HowItWorksPage() {
               </div>
               {/* Trust strip */}
               <div className="flex flex-wrap gap-2">
-                {["Soft-pull only", "48-hour auction", "Fully refundable", "Buyer-first"].map((badge) => (
+                {["Soft-pull only", "48-hour auction", "72h refund window", "Buyer-first"].map((badge) => (
                   <span
                     key={badge}
                     className="text-xs font-medium text-[#4B5563] bg-[#F8F9FB] border border-[#E5E7EB] rounded-full px-3 py-1"
@@ -255,7 +255,7 @@ export default function HowItWorksPage() {
           <CitationBlock
             id="how-autolenis-works"
             question="How does AutoLenis work?"
-            answer="AutoLenis works in 6 steps: (1) Get pre-qualified online with a soft credit pull. (2) Browse and shortlist vehicles. (3) Pay a $99 Limited-Time Auction Access Fee (refundable if no valuable offer is received). (4) AutoLenis launches a private 48-hour dealer auction. (5) Review competing dealer offers side-by-side. (6) Select the best offer and sign via DocuSign. Most buyers save $2,000–$4,000 compared to traditional dealership purchases."
+            answer="AutoLenis works in 6 steps: (1) Get pre-qualified online with a soft credit pull. (2) Browse and shortlist vehicles. (3) Pay a $99 service fee, limited-time launch pricing (refundable only if no dealer offers within 72 hours). (4) AutoLenis launches a private 48-hour dealer auction. (5) Review competing dealer offers side-by-side. (6) Select the best offer and sign via DocuSign. Most buyers save $2,000–$4,000 compared to traditional dealership purchases."
             sourceLabel="AutoLenis Official"
             lastUpdated="2025-01-01"
           />
@@ -420,7 +420,7 @@ export default function HowItWorksPage() {
               The Auction Access Fee Keeps the Process Serious.
             </h2>
             <p className="text-white/70">
-              A refundable Auction Access Fee activates your private 48-hour dealer competition and ensures every participant is committed to winning your business.
+              A $99 service fee (refundable if no dealer offers within 72 hours) activates your private 48-hour dealer competition and ensures every participant is committed to winning your business.
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -644,7 +644,7 @@ export default function HowItWorksPage() {
             </Link>
           </div>
           <p className="text-xs text-white/50">
-            Soft-pull only · Fully refundable · 48-hour auction · No obligation
+            Soft-pull only · 72h refund window · 48-hour auction · No obligation
           </p>
         </div>
       </section>

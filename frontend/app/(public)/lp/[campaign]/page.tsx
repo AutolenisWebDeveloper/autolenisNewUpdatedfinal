@@ -76,7 +76,7 @@ const LP_FAQS = [
   },
   {
     q: "What is the Auction Access Fee?",
-    a: "The $99 Auction Access Fee is a one-time, non-refundable fee that activates your private 48-hour dealer auction. It signals seriousness to verified dealers. It is not a deposit and is not credited toward your vehicle purchase.",
+    a: "The $99 Auction Access Fee is a one-time service fee (limited-time launch pricing) that activates your private 48-hour dealer auction. It is refundable only if no dealer offers are received within 72 hours; otherwise non-refundable. On the Premium Concierge Package ($499 total), the $99 starts your auction and the remaining $400 is due at closing.",
   },
   {
     q: "How is AutoLenis different from other car buying services?",
@@ -216,13 +216,13 @@ export default async function LandingPage({
             price: "0",
             priceCurrency: "USD",
             description:
-              "Free to submit a vehicle request. A one-time $99 non-refundable Auction Access Fee activates dealer competition.",
+              "Free to submit a vehicle request. A one-time $99 service fee (limited-time launch pricing) activates dealer competition — refundable if no dealer offers within 72 hours.",
             priceSpecification: {
               "@type": "PriceSpecification",
               price: "99",
               priceCurrency: "USD",
               description:
-                "One-time, non-refundable Auction Access Fee — not a deposit, not credited toward purchase",
+                "One-time $99 service fee — refundable only if no dealer offers within 72 hours; applied toward the $499 Premium Concierge Package if chosen",
             },
           },
           hasOfferCatalog: {
@@ -235,7 +235,7 @@ export default async function LandingPage({
                   "@type": "Service",
                   name: "Standard Plan",
                   description:
-                    "Free to start. A one-time $99 non-refundable Auction Access Fee activates your 48-hour dealer auction. Not a deposit; not credited toward purchase.",
+                    "Free to submit a request. A one-time $99 service fee (limited-time launch pricing) activates your 48-hour dealer auction. Refundable only if no dealer offers within 72 hours.",
                 },
               },
               {

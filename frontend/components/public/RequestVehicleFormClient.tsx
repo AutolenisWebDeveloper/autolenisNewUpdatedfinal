@@ -1624,7 +1624,7 @@ export default function RequestVehicleFormClient() {
             <div className="flex items-center justify-center gap-6 mt-6 text-xs text-[#94A3B8] flex-wrap">
               <span className="flex items-center gap-1.5"><ShieldCheck size={12} /> SSL encrypted</span>
               <span className="flex items-center gap-1.5"><Lock size={12} /> Never sold to dealers</span>
-              <span className="flex items-center gap-1.5"><RefreshCw size={12} /> $99 deposit refundable</span>
+              <span className="flex items-center gap-1.5"><RefreshCw size={12} /> $99 service fee · refundable if no offers in 72h</span>
             </div>
           </>
         )}

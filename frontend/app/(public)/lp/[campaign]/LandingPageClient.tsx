@@ -731,8 +731,9 @@ export default function LandingPageClient({
 
                 {/* disclaimers */}
                 <p className="text-[10px] text-slate-400 text-center mt-3 leading-relaxed">
-                  The $99 Auction Access Fee is a one-time, non-refundable fee that activates your
-                  private 48-hour dealer auction. It is not a deposit and is not credited toward a purchase.
+                  The $99 Auction Access Fee is a one-time service fee (limited-time launch pricing) that
+                  activates your private 48-hour dealer auction. It is refundable only if no dealer offers
+                  are received within 72 hours; otherwise non-refundable.
                 </p>
                 <p className="text-[10px] text-slate-400 text-center mt-2 leading-relaxed">
                   Savings vary based on vehicle, market conditions, dealer participation, and buyer-selected offer.
@@ -1172,7 +1173,7 @@ export default function LandingPageClient({
                 },
                 {
                   q: "What does it cost?",
-                  a: "A one-time $99 Auction Access Fee unlocks dealer competition. It is a non-refundable access fee — not a deposit, and not credited toward your purchase. Premium concierge is available for buyers who want full hands-off service.",
+                  a: "A one-time $99 service fee (limited-time launch pricing) unlocks dealer competition. It is refundable only if no dealer offers are received within 72 hours; otherwise non-refundable. Premium Concierge ($499 total — $99 to start + $400 at closing) is available for buyers who want full hands-off service.",
                 },
                 {
                   q: "Do I have to talk to dealers?",
@@ -1180,7 +1181,7 @@ export default function LandingPageClient({
                 },
                 {
                   q: "What if no offer works for me?",
-                  a: "Decline all offers. Your Auction Access Fee is fully refunded — no questions asked.",
+                  a: "You can decline every offer and walk away. Your $99 service fee is refundable only if no dealer offers are received within 72 hours; if offers arrive and you decline, the fee is non-refundable.",
                 },
               ].map((item) => (
                 <details

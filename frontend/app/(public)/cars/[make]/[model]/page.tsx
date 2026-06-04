@@ -43,7 +43,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   return buildPageMetadata({
     title: `Used ${makeName} ${modelName} for Sale | No-Haggle`,
-    description: `Browse ${makeName} ${modelName} listings on AutoLenis. Let dealers compete for your business in a private 48-hour auction. Soft-pull prequalification. Your $99 deposit is fully refundable if no competitive offer is received.`,
+    description: `Browse ${makeName} ${modelName} listings on AutoLenis. Let dealers compete for your business in a private 48-hour auction. Soft-pull prequalification. Your $99 service fee is refundable if no dealer offers are received within 72 hours.`,
     path: `/cars/${make}/${model}`,
     keywords: [
       `used ${makeName} ${modelName}`,

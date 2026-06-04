@@ -64,13 +64,15 @@ export default function TermsPage() {
 
         <div className="bg-white border border-[#E5E7EB] rounded-2xl p-7 shadow-sm">
           <h2 className="text-base font-bold text-[#111827] mb-3">
-            3. Deposit and Fee Policy
+            3. Service Fee Policy
           </h2>
           <p className="text-sm text-[#4B5563] leading-relaxed">
-            The $99 auction activation deposit is fully refundable if no deal is
-            selected. The $499 concierge fee is charged only upon selection of a
-            deal. The $99 deposit is credited toward the $499 fee, resulting in a
-            net charge of $400. All payments are processed via Stripe.
+            AutoLenis Standard is a one-time $99 service fee (limited-time launch
+            pricing) that activates your private dealer auction. The $99 is refundable
+            only if no dealer offers are received within 72 hours of activation;
+            otherwise it is non-refundable. AutoLenis Premium Concierge is $499 total:
+            the $99 service fee starts your auction and the remaining $400 is due at
+            closing once a purchase is completed. All payments are processed via Stripe.
           </p>
         </div>
 

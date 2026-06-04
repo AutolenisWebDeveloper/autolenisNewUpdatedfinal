@@ -65,9 +65,9 @@ export const PAGE_METADATA = {
     keywords: ["used cars", "verified dealers", "car inventory search", "buy car online"],
   },
   pricing: {
-    title: "Pricing — Free to Start, $499 Premium Concierge",
+    title: "Pricing — $99 Standard & $499 Premium Concierge",
     description:
-      "Start free with a one-time $99 non-refundable Auction Access Fee, or go Premium for the full white-glove experience. No hidden fees.",
+      "Standard is a one-time $99 service fee (limited-time launch pricing), refundable if no dealer offers within 72 hours. Premium Concierge is $499 total ($99 to start + $400 at closing). No hidden fees.",
     path: "/pricing",
     keywords: ["car concierge price", "AutoLenis pricing", "premium car buying"],
   },
@@ -115,7 +115,7 @@ export const PAGE_METADATA = {
   trust: {
     title: "Trust & Security — How We Protect You",
     description:
-      "Contract Shield catches junk fees and unfair terms. Verified dealers only. $99 refund guarantee. See how AutoLenis protects every buyer.",
+      "Contract Shield catches junk fees and unfair terms. Verified dealers only. $99 service fee refundable if no dealer offers within 72 hours. See how AutoLenis protects every buyer.",
     path: "/trust",
     keywords: ["car buying protection", "Contract Shield", "verified car dealers"],
   },

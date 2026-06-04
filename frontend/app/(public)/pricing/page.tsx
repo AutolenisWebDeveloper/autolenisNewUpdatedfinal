@@ -94,14 +94,14 @@ function PricingPageBody() {
           <CitationBlock
             id="autolenis-pricing"
             question="How much does AutoLenis cost?"
-            answer={`AutoLenis charges two fees: a ${DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee (refundable if no valuable offer is received) and a ${PREMIUM_FEE_USD} Service Fee only if you proceed with a purchase. The ${DEPOSIT_AMOUNT_USD} Auction Access Fee is credited toward the ${PREMIUM_FEE_USD} fee, making your balance ${PREMIUM_FEE_REMAINING_USD}. There are no monthly charges, subscriptions, or hidden fees.`}
+            answer={`AutoLenis has two options. Standard is a one-time ${DEPOSIT_AMOUNT_USD} service fee (limited-time launch pricing) that activates your private dealer auction — refundable only if no dealer offers are received within 72 hours. Premium Concierge is ${PREMIUM_FEE_USD} total (${DEPOSIT_AMOUNT_USD} to start your auction plus ${PREMIUM_FEE_REMAINING_USD} at closing) and adds a dedicated specialist, financing guidance, closing coordination, free home delivery, and extended Contract Shield. There are no monthly charges, subscriptions, or hidden fees.`}
             sourceLabel="AutoLenis Official Pricing"
             lastUpdated="2025-01-01"
           />
           <DefinitionBlock
             term="AutoLenis Auction Access Fee"
             category="Fee"
-            definition={`A ${DEPOSIT_AMOUNT_USD} limited-time Auction Access Fee paid by the buyer to activate a private dealer auction. The fee is refundable if no valuable offer is received. If a purchase is made, the ${DEPOSIT_AMOUNT_USD} is credited toward the ${PREMIUM_FEE_USD} AutoLenis Service Fee.`}
+            definition={`A ${DEPOSIT_AMOUNT_USD} service fee (limited-time launch pricing) paid by the buyer to activate a private dealer auction under the Standard tier. It is refundable only if no dealer offers are received within 72 hours; otherwise it is non-refundable. On the Premium Concierge Package (${PREMIUM_FEE_USD} total), the ${DEPOSIT_AMOUNT_USD} starts the auction and the remaining ${PREMIUM_FEE_REMAINING_USD} is due at closing.`}
             relatedTerms={["Refundable Fee", "Auction Activation", "Service Fee"]}
           />
         </div>
@@ -126,9 +126,9 @@ function PricingPageBody() {
                   Free <span className="text-base font-normal text-[#94A3B8]">to start</span>
                 </p>
                 <div className="mt-4 bg-[#F8F9FB] border border-[#E5E7EB] rounded-lg px-4 py-3">
-                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">{DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee</p>
+                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">{DEPOSIT_AMOUNT_USD} service fee · limited-time launch pricing</p>
                   <p className="text-xs text-[#4B5563] leading-relaxed">
-                    Required to activate your auction. <span className="font-semibold">Refundable if no valuable offer is received.</span>
+                    Required to activate your auction. <span className="font-semibold">Refundable only if no dealer offers are received within 72 hours.</span>
                   </p>
                 </div>
               </div>
@@ -176,12 +176,12 @@ function PricingPageBody() {
                   {PREMIUM_FEE_USD} <span className="text-base font-normal text-[#94A3B8]">concierge fee</span>
                 </p>
                 <p className="text-xs text-[#0B5FD1] font-semibold mt-2">
-                  {DEPOSIT_AMOUNT_USD} Auction Access Fee credited → {PREMIUM_FEE_REMAINING_USD} net at closing
+                  {DEPOSIT_AMOUNT_USD} to start + {PREMIUM_FEE_REMAINING_USD} at closing
                 </p>
                 <div className="mt-4 bg-white border border-[#DBEAFE] rounded-lg px-4 py-3">
-                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">{DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee</p>
+                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">{PREMIUM_FEE_USD} Premium Concierge total</p>
                   <p className="text-xs text-[#4B5563] leading-relaxed">
-                    Required to activate your auction. <span className="font-semibold">Credited toward your {PREMIUM_FEE_USD} concierge fee</span> — you pay {PREMIUM_FEE_REMAINING_USD} after selecting your deal.
+                    Pay the {DEPOSIT_AMOUNT_USD} service fee to start your auction. <span className="font-semibold">The remaining {PREMIUM_FEE_REMAINING_USD} is due at closing</span> once your purchase is complete.
                   </p>
                 </div>
               </div>
@@ -207,7 +207,46 @@ function PricingPageBody() {
         </div>
       </section>
 
-      {/* $99 Auction Access Fee Callout — Fix 1: replace non-brand green icon wrapper */}
+      {/* Standard vs Premium side-by-side comparison */}
+      <section className="pb-16" data-testid="pricing-tier-comparison-section">
+        <div className="mx-auto max-w-4xl px-6">
+          <h2 className="text-2xl md:text-3xl font-bold text-[#111827] tracking-tight text-center mb-3">
+            Standard vs. Premium
+          </h2>
+          <p className="text-sm text-[#4B5563] text-center mb-8 max-w-xl mx-auto">
+            Two separate offerings. Both run the same private dealer auction — Premium adds full
+            white-glove concierge support.
+          </p>
+          <div className="bg-white border border-[#E5E7EB] rounded-2xl overflow-hidden shadow-sm">
+            <div className="grid grid-cols-3 text-xs font-bold uppercase tracking-wider">
+              <div className="px-5 py-4 text-[#94A3B8] bg-[#F8F9FB]">Feature</div>
+              <div className="px-5 py-4 text-[#0B5FD1] bg-[#EFF6FF] text-center">Standard · {DEPOSIT_AMOUNT_USD}</div>
+              <div className="px-5 py-4 text-[#4B5563] bg-[#F8F9FB] text-center">Premium · {PREMIUM_FEE_USD}</div>
+            </div>
+            {[
+              ["Pricing status", "Limited-time launch", "Regular pricing"],
+              ["Dealer competition", "Up to 8 dealers", "Up to 8 dealers"],
+              ["Private auction", "48-hour window", "48-hour window"],
+              ["Ranked offers", "Cash · Monthly · Overall", "Cash · Monthly · Overall"],
+              ["Contract Shield", "Basic protection", "Extended protection"],
+              ["Buying specialist", "—", "Dedicated specialist"],
+              ["Financing help", "—", "Guidance & best-rate sourcing"],
+              ["Closing & delivery", "—", "Coordination + free home delivery"],
+              ["Support", "Standard", "Priority concierge"],
+              ["What you pay", `${DEPOSIT_AMOUNT_USD} service fee`, `${PREMIUM_FEE_USD} total — ${DEPOSIT_AMOUNT_USD} to start + ${PREMIUM_FEE_REMAINING_USD} at closing`],
+              ["Refundability", "Refundable if no dealer offers within 72h", `${DEPOSIT_AMOUNT_USD} starter: same 72h window`],
+            ].map(([label, standard, premium]) => (
+              <div key={label} className="grid grid-cols-3 border-t border-[#F1F5F9]">
+                <div className="px-5 py-4 text-sm font-medium text-[#374151]">{label}</div>
+                <div className="px-5 py-4 text-sm text-[#0B5FD1] font-semibold text-center bg-[#EFF6FF]/40">{standard}</div>
+                <div className="px-5 py-4 text-sm text-[#4B5563] text-center">{premium}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* $99 service fee Callout */}
       <section className="pb-24" data-testid="pricing-deposit-callout-section">
         <div className="mx-auto max-w-4xl px-6">
           <div
@@ -220,12 +259,12 @@ function PricingPageBody() {
               </div>
               <div>
                 <h3 className="text-lg font-bold text-[#111827] mb-2 tracking-tight">
-                  Why the {DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee?
+                  Why the {DEPOSIT_AMOUNT_USD} service fee?
                 </h3>
                 <p className="text-sm text-[#4B5563] leading-relaxed">
-                  The {DEPOSIT_AMOUNT_USD} Auction Access Fee is required before your auction begins. It unlocks live dealer bidding and competitive offer access — ensuring dealers invest real effort in competing for your business.{" "}
-                  <span className="font-semibold text-[#111827]">It is refundable if no valuable offer is received.</span>{" "}
-                  On Premium, it is credited toward your {PREMIUM_FEE_USD} concierge fee.
+                  The {DEPOSIT_AMOUNT_USD} service fee (limited-time launch pricing) is required before your auction begins. It unlocks live dealer bidding and competitive offer access — ensuring dealers invest real effort in competing for your business.{" "}
+                  <span className="font-semibold text-[#111827]">It is refundable only if no dealer offers are received within 72 hours.</span>{" "}
+                  On the Premium Concierge Package, it starts your auction and the remaining {PREMIUM_FEE_REMAINING_USD} of the {PREMIUM_FEE_USD} total is due at closing.
                 </p>
               </div>
             </div>
@@ -272,11 +311,11 @@ function PricingPageBody() {
             {[
               {
                 q: `Is the ${DEPOSIT_AMOUNT_USD} a plan or subscription?`,
-                a: `No. The ${DEPOSIT_AMOUNT_USD} is a Limited-Time Auction Access Fee used to activate your private dealer auction. It is not a plan, not a subscription, and not a recurring charge.`,
+                a: `No. The ${DEPOSIT_AMOUNT_USD} is a one-time service fee (limited-time launch pricing) used to activate your private dealer auction. It is not a plan, not a subscription, and not a recurring charge.`,
               },
               {
-                q: "Is the Auction Access Fee refundable?",
-                a: "Yes. The Auction Access Fee is refundable if no valuable offer is received within your auction window.",
+                q: `Is the ${DEPOSIT_AMOUNT_USD} service fee refundable?`,
+                a: "It is refundable only if no dealer offers are received within 72 hours of activation. Otherwise it is non-refundable.",
               },
               {
                 q: "Are there any subscriptions?",

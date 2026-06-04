@@ -139,8 +139,8 @@ export function pricingSchema() {
     {
       "@context": "https://schema.org",
       "@type": "Product",
-      name: "AutoLenis Free Tier",
-      description: "Reverse auction with a one-time $99 non-refundable Auction Access Fee and full Contract Shield protection.",
+      name: "AutoLenis Standard",
+      description: "Reverse auction with a one-time $99 service fee (limited-time launch pricing) and Contract Shield protection. Refundable only if no dealer offers are received within 72 hours.",
       offers: {
         "@type": "Offer",
         price: "99.00",
@@ -150,7 +150,7 @@ export function pricingSchema() {
           price: "99.00",
           priceCurrency: "USD",
           valueAddedTaxIncluded: false,
-          description: "One-time, non-refundable Auction Access Fee — not a deposit and not credited toward purchase.",
+          description: "One-time $99 service fee (limited-time launch pricing). Refundable only if no dealer offers are received within 72 hours; otherwise non-refundable.",
         },
         availability: "https://schema.org/InStock",
       },
@@ -159,7 +159,7 @@ export function pricingSchema() {
       "@context": "https://schema.org",
       "@type": "Product",
       name: "AutoLenis Premium Concierge",
-      description: "White-glove car-buying concierge with dedicated specialist, full negotiation, paperwork handling, and delivery.",
+      description: "White-glove car-buying concierge — $499 total ($99 to start plus $400 at closing) — with dedicated specialist, financing guidance, full negotiation, paperwork handling, free delivery, and extended Contract Shield.",
       offers: {
         "@type": "Offer",
         price: "499.00",

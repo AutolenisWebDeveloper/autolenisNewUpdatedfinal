@@ -311,12 +311,12 @@ export default function ComparePage() {
               </ul>
             </div>
             <div className="bg-[#FFFBEB] border border-[#FDE68A] rounded-2xl shadow-sm p-8">
-              <h3 className="font-bold text-[#92400E] mb-5 text-sm">AutoLenis deposit note:</h3>
+              <h3 className="font-bold text-[#92400E] mb-5 text-sm">AutoLenis service fee note:</h3>
               <p className="text-sm text-[#78350F] leading-relaxed">
-                The ${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(0)} Auction Access Deposit is required
-                to activate dealer competition. It's fully refundable if no competitive offer is
-                received. This is not a hidden fee — it's how serious dealer engagement is
-                guaranteed.
+                The ${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(0)} Auction Access Fee (limited-time
+                launch pricing) is required to activate dealer competition. It's refundable only
+                if no dealer offers are received within 72 hours. This is not a hidden fee — it's
+                how serious dealer engagement is ensured.
               </p>
             </div>
           </div>

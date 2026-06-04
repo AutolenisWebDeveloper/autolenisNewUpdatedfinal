@@ -104,29 +104,29 @@ export const entityGraphSchema: Record<string, unknown> = {
       mainEntityOfPage: { "@id": ENTITY_IDS.howItWorks },
     },
 
-    // $99 Auction Access Fee — connected to service
+    // $99 Standard service fee — connected to service
     {
       "@type": "Offer",
       "@id": ENTITY_IDS.depositService,
-      name: "Auction Access Fee",
+      name: "AutoLenis Standard — Auction Access Fee",
       price: "99.00",
       priceCurrency: "USD",
       description:
-        "One-time, non-refundable $99 Auction Access Fee that activates a private 48-hour dealer auction for the buyer. It is not a deposit and is not credited toward a purchase.",
+        "A one-time $99 service fee — a limited-time launch price — that activates a private 48-hour dealer auction for the buyer. It is refundable only if no dealer offers are received within 72 hours of activation; otherwise it is non-refundable.",
       offeredBy: { "@id": ENTITY_IDS.organization },
       priceValidUntil: "2027-12-31",
       availability: "https://schema.org/InStock",
     },
 
-    // $499 Service Fee — connected to service
+    // $499 Premium Concierge Package — connected to service
     {
       "@type": "Offer",
       "@id": ENTITY_IDS.serviceFeeOffer,
-      name: "AutoLenis Service Fee",
+      name: "AutoLenis Premium Concierge Package",
       price: "499.00",
       priceCurrency: "USD",
       description:
-        "Full AutoLenis concierge fee covering dealer auction management, offer review, contract coordination, and purchase facilitation.",
+        "Premium Concierge Package — $499 total ($99 to start the auction plus $400 due at closing). Adds a dedicated buying specialist, financing guidance, closing coordination, free home delivery, and extended Contract Shield to everything in Standard.",
       offeredBy: { "@id": ENTITY_IDS.organization },
       priceValidUntil: "2027-12-31",
       availability: "https://schema.org/InStock",

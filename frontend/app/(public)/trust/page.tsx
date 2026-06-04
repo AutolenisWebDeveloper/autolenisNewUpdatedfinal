@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 const TRUST_PILLARS = [
-  { icon: CreditCard, title: "$99 Refund Guarantee", body: "Your deposit is fully refundable if no dealer submits a competitive offer, or if you choose not to proceed before selecting a deal. No fine print.", accent: "text-[#059669]", bg: "bg-[#ECFDF5]", border: "border-[#A7F3D0]" },
+  { icon: CreditCard, title: "$99 Service Fee", body: "Your $99 service fee (limited-time launch pricing) is refundable only if no dealer offers are received within 72 hours of activation. No fine print.", accent: "text-[#059669]", bg: "bg-[#ECFDF5]", border: "border-[#A7F3D0]" },
   { icon: Shield, title: "Dealer Vetting & Scoring", body: "Every dealer is licensed, insured, and scored by deal history. Dealers with high junk-fee ratios or low completion rates are removed automatically.", accent: "text-[#0B5FD1]", bg: "bg-[#0B5FD1]/10", border: "border-[#DBEAFE]" },
   { icon: FileText, title: "Contract Shield", body: "Before you sign anything, AutoLenis runs every contract through our Contract Shield engine — scanning for junk fees, unusual add-ons, and compliance issues.", accent: "text-[#0B5FD1]", bg: "bg-[#EFF6FF]", border: "border-[#BFDBFE]" },
   { icon: Lock, title: "Bank-Grade Data Security", body: "Your prequalification data is encrypted with AES-256-GCM at rest. We never share your identity with dealers until you select a deal. FCRA-compliant.", accent: "text-[#0B5FD1]", bg: "bg-[#0B5FD1]/10", border: "border-[#DBEAFE]" },
@@ -51,7 +51,7 @@ export default function TrustPage() {
               <Shield size={26} className="text-[#0B5FD1]" />
             </div>
             <h2 className="text-2xl font-bold text-[#111827] mb-4 tracking-tight">The AutoLenis Guarantee</h2>
-            <p className="text-[#4B5563] leading-relaxed mb-8 text-sm max-w-xl mx-auto">If AutoLenis does not surface at least one offer that is at or below fair market value for your vehicle, your $99 deposit is returned in full within 3 business days. No disputes. No conditions.</p>
+            <p className="text-[#4B5563] leading-relaxed mb-8 text-sm max-w-xl mx-auto">If no dealer offers are received within 72 hours of activating your auction, your $99 service fee is returned in full within 3 business days. No disputes.</p>
             <Link href="/auth/signup" data-testid="trust-get-started-cta" className="inline-flex items-center gap-2 px-8 py-4 bg-[#0B5FD1] text-white font-semibold text-sm rounded-md hover:bg-[#0A4DB8] transition-colors shadow-md shadow-[#0B5FD1]/20">
               Get Started Risk-Free <ArrowRight size={16} />
             </Link>
