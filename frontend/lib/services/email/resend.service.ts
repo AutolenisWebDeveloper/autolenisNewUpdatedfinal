@@ -31,6 +31,10 @@ import {
   type AdminPrequalAlertKind,
 } from "./templates/admin-prequal-alert";
 import { WELCOME_EMAIL_SUBJECT, renderWelcomeEmail } from "./templates/welcome";
+import {
+  LEAD_MAGNET_DELIVERY_SUBJECT,
+  renderLeadMagnetDeliveryEmail,
+} from "./templates/lead-magnet-delivery";
 import { EMAIL_VERIFIED_SUBJECT, renderEmailVerifiedEmail } from "./templates/email-verified";
 import {
   DEPOSIT_CONFIRMATION_SUBJECT,
@@ -258,6 +262,50 @@ export async function sendDealerFeeCalculatorWelcomeEmail(params: {
         </div>
       </div>
     `,
+  });
+}
+
+// Phase C-Leads — delivers a free lead-magnet guide to a buyer. Idempotency is
+// keyed on the lead's opportunity session id so a double form submit never
+// double-sends the guide. The segment intro tailors the opener by timeline.
+export async function sendLeadMagnetDeliveryEmail(params: {
+  to: string;
+  firstName: string;
+  magnetTitle: string;
+  magnetDescription: string;
+  bullets: string[];
+  accessPath: string; // e.g. /guide/thank-you?m=honest-guide
+  segmentIntro: string;
+  sessionId: string;
+}) {
+  const {
+    to,
+    firstName,
+    magnetTitle,
+    magnetDescription,
+    bullets,
+    accessPath,
+    segmentIntro,
+    sessionId,
+  } = params;
+  const accessUrl = `${APP_URL}${accessPath}`;
+  const auctionUrl = `${APP_URL}/request-a-car`;
+  const unsubscribeUrl = `${APP_URL}/unsubscribe?email=${encodeURIComponent(to)}`;
+  return sendIdempotent({
+    idempotencyKey: `lead-magnet-delivery-${sessionId}`,
+    to,
+    templateId: "lead-magnet-delivery",
+    subject: LEAD_MAGNET_DELIVERY_SUBJECT(magnetTitle),
+    html: renderLeadMagnetDeliveryEmail({
+      firstName,
+      magnetTitle,
+      magnetDescription,
+      bullets,
+      accessUrl,
+      auctionUrl,
+      unsubscribeUrl,
+      segmentIntro,
+    }),
   });
 }
 
