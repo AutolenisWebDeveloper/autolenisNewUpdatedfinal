@@ -90,6 +90,25 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // DB unavailable at build — return static only
   }
 
+  // Phase C1 — published programmatic buying-guide articles from DB.
+  let contentArticleEntries: MetadataRoute.Sitemap = [];
+  try {
+    const articles = await prisma.contentArticle.findMany({
+      where: { status: "PUBLISHED" },
+      select: { slug: true, updatedAt: true },
+      orderBy: { updatedAt: "desc" },
+      take: 50000,
+    });
+    contentArticleEntries = articles.map((a) => ({
+      url: `${BASE}/buying-guide/${a.slug}`,
+      priority: 0.7,
+      changeFrequency: "monthly" as const,
+      lastModified: a.updatedAt,
+    }));
+  } catch {
+    // DB unavailable at build — skip programmatic content entries.
+  }
+
   // Programmatic make/model pages from DB
   let makeModelEntries: MetadataRoute.Sitemap = [];
   let makeEntries: MetadataRoute.Sitemap = [];
@@ -118,5 +137,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // DB unavailable — skip programmatic entries
   }
 
-  return [...staticEntries, ...pillarEntries, ...carBuyingServiceEntries, ...makeEntries, ...makeModelEntries, ...vehicleEntries];
+  return [...staticEntries, ...pillarEntries, ...carBuyingServiceEntries, ...contentArticleEntries, ...makeEntries, ...makeModelEntries, ...vehicleEntries];
 }
