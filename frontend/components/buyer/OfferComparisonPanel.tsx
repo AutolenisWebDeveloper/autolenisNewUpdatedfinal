@@ -7,8 +7,14 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, ArrowRight, Star, AlertTriangle } from "lucide-react";
+import { CheckCircle2, ArrowRight, Star, AlertTriangle, Clock, HelpCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
+
+interface OtdBreakdown {
+  vehiclePriceCents: number;
+  taxCents: number;
+  feesCents: number;
+}
 
 interface RankedOffer {
   offerId: string;
@@ -23,7 +29,12 @@ interface RankedOffer {
   savingsVsRetailCents?: number;
   aprFlag?: string | null;   // System 4 ENH — buyer-facing APR validation flag
   aprRate?: number | null;
+  rank?: number;                       // Group 7 (7C) — numeric rank (#1/#2/#3) by OTD
+  otdBreakdown?: OtdBreakdown;          // Group 7 (7C) — vehicle + tax + fees
+  responseTimeHours?: number | null;   // Group 7 (7C) — dealer response speed
 }
+
+const money = (cents: number) => `$${(cents / 100).toLocaleString()}`;
 
 interface OfferComparisonPanelProps {
   auctionId: string;
@@ -94,12 +105,12 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
         </div>
       )}
       {/* Loan term toggle */}
-      <div className="flex items-center gap-2 mb-6" data-testid="term-toggle">
-        <span className="text-sm text-slate-500 mr-2">Loan term:</span>
+      <div className="flex flex-wrap items-center gap-2 mb-6" data-testid="term-toggle">
+        <span className="text-sm text-slate-500 mr-2 w-full sm:w-auto">Loan term:</span>
         {[36, 48, 60, 72].map(months => (
           <button key={months} onClick={() => setTermMonths(months)}
             data-testid={`term-${months}`}
-            className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${termMonths === months ? "bg-[#0B5FD1] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+            className={`min-h-[44px] px-4 py-2 rounded-full text-xs font-semibold transition-colors ${termMonths === months ? "bg-[#0B5FD1] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
             {months}mo
           </button>
         ))}
@@ -107,22 +118,61 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
 
       {/* Offer cards — dealer identity NEVER revealed here */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {offers.map((offer) => (
-          <div key={offer.offerId} data-testid={`offer-card-${offer.rankType}`}
-            className={`border-2 rounded-2xl p-6 ${RANK_COLORS[offer.rankType]} relative`}>
+        {offers.map((offer) => {
+          const isBest = offer.rank === 1;
+          return (
+          <div
+            key={offer.offerId}
+            data-testid={offer.rank ? `offer-card-${offer.rank}` : `offer-card-${offer.rankType}`}
+            data-rank-type={offer.rankType}
+            className={`border-2 rounded-2xl p-6 ${RANK_COLORS[offer.rankType]} relative ${
+              isBest ? "ring-2 ring-[#0B5FD1] ring-offset-2 shadow-md" : ""
+            }`}>
+            {/* Group 7 (7C) — numeric rank badge; #1 is visually dominant */}
+            {offer.rank && (
+              <div className="absolute -top-3 left-5">
+                <Badge
+                  data-testid={`offer-rank-badge-${offer.rank}`}
+                  className={`border-0 px-3 ${isBest ? "bg-[#0B5FD1] text-white" : "bg-slate-700 text-white"}`}
+                >
+                  {isBest ? <Star size={11} className="mr-1" /> : null}
+                  #{offer.rank}{isBest ? " Best Offer" : ""}
+                </Badge>
+              </div>
+            )}
             {offer.rankType === "BEST_OVERALL" && (
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                <Badge className="bg-[#0B5FD1] text-white border-0 px-3">
-                  <Star size={11} className="mr-1" />Recommended
+              <div className="absolute -top-3 right-5">
+                <Badge className="bg-[#643293] text-white border-0 px-3">
+                  Recommended
                 </Badge>
               </div>
             )}
 
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">{offer.rankLabel}</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 mt-2">{offer.rankLabel}</p>
             <p className="text-3xl font-bold text-slate-900 mb-1">
-              ${(offer.otdPriceCents / 100).toLocaleString()}
+              {money(offer.otdPriceCents)}
             </p>
-            <p className="text-xs text-slate-400 mb-4">Out-the-door price</p>
+            <p className="text-xs text-slate-400 mb-3">Out-the-door price</p>
+
+            {/* Group 7 (7C) — OTD breakdown: vehicle + fees + taxes */}
+            {offer.otdBreakdown && (
+              <div className="text-xs text-slate-500 space-y-1 mb-3 border-t border-slate-200/70 pt-3" data-testid={`otd-breakdown-${offer.rankType}`}>
+                <div className="flex justify-between"><span>Vehicle</span><span className="font-medium text-slate-700">{money(offer.otdBreakdown.vehiclePriceCents)}</span></div>
+                <div className="flex justify-between"><span>Taxes</span><span className="font-medium text-slate-700">{money(offer.otdBreakdown.taxCents)}</span></div>
+                <div className="flex justify-between"><span>Fees</span><span className="font-medium text-slate-700">{money(offer.otdBreakdown.feesCents)}</span></div>
+              </div>
+            )}
+
+            {/* Group 7 (7C) — dealer response-time badge */}
+            {typeof offer.responseTimeHours === "number" && (
+              <span
+                className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 bg-slate-100 rounded-full px-2.5 py-1 mb-3"
+                data-testid={`offer-response-time-${offer.rankType}`}
+              >
+                <Clock size={11} />
+                Responded in {offer.responseTimeHours} hr{offer.responseTimeHours !== 1 ? "s" : ""}
+              </span>
+            )}
 
             {offer.monthlyPayment && (
               <p className="text-sm text-slate-600 mb-2">~${offer.monthlyPayment}/mo for {termMonths} months</p>
@@ -154,7 +204,21 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
             )}
 
             <Badge variant="secondary" className="text-xs mb-3">{offer.dealerTier} Dealer</Badge>
-            <p className="text-xs text-slate-500 italic mb-4">{offer.rankingExplanation}</p>
+            <p className="text-xs text-slate-500 italic mb-2">{offer.rankingExplanation}</p>
+
+            {/* Group 7 (7C) — "Why this rank?" explainer (hover/focus tooltip) */}
+            <div className="relative group inline-block mb-4" data-testid={`offer-rank-tooltip-${offer.rankType}`}>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-xs font-medium text-[#0B5FD1] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B5FD1] rounded"
+                aria-label="Why this rank?"
+              >
+                <HelpCircle size={12} /> Why this rank?
+              </button>
+              <span className="absolute left-0 top-full mt-1 w-56 bg-slate-800 text-white text-xs leading-snug rounded-lg px-3 py-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none z-10 shadow-lg">
+                Offers are ranked by total out-the-door price first, then by dealer tier and reliability. The lowest all-in price you&apos;ll pay earns the #1 spot.
+              </span>
+            </div>
 
             {confirming === offer.offerId ? (
               <div className="space-y-2">
@@ -171,7 +235,8 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
               </Button>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

@@ -13,13 +13,24 @@ export async function GET(request: NextRequest, { params }: Props) {
 
   const auction = await prisma.auction.findFirst({
     where: { id: auctionId, buyerId: buyer.id },
-    include: { _count: { select: { offers: { where: { status: "SUBMITTED" } } } } },
+    include: {
+      _count: {
+        select: {
+          offers: { where: { status: "SUBMITTED" } },
+          // Group 7 (7B) — surface how many dealers were invited to compete.
+          invitations: true,
+          outsideInvites: true,
+        },
+      },
+    },
   });
   if (!auction) return errorResponse("NOT_FOUND", "Auction not found", 404);
 
   const now = new Date();
   const timeRemaining = auction.endsAt ? auction.endsAt.getTime() - now.getTime() : 0;
   const offerCount = auction._count.offers;
+  // Total dealers invited = registered invitations + outside (unregistered) invites.
+  const dealersInvited = auction._count.invitations + auction._count.outsideInvites;
 
   // Anonymous engagement signal (no amounts, no dealer names)
   const engagementLevel = offerCount >= 5 ? "Very High" : offerCount >= 3 ? "High" : offerCount >= 1 ? "Active" : "Building";
@@ -30,6 +41,7 @@ export async function GET(request: NextRequest, { params }: Props) {
     timeRemaining: Math.max(0, timeRemaining),
     endsAt: auction.endsAt,
     offerCount, // Count only — no amounts
+    dealersInvited, // Group 7 (7B) — count only, no dealer identities
     engagementLevel,
     socialProof: aboveAverage ? "Your auction is performing above average" : "Dealers are reviewing your request",
   });
