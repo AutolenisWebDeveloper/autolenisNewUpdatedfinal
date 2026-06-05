@@ -9,9 +9,11 @@
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test lib/services/prequal/__tests__/*.test.ts",
+    "test:content": "tsx --test lib/content/__tests__/*.test.ts",
     "postinstall": "prisma generate",
     "seed": "tsx prisma/seed.ts",
-    "sandbox:seed-deal": "tsx scripts/seed-sandbox-deal.ts"
+    "sandbox:seed-deal": "tsx scripts/seed-sandbox-deal.ts",
+    "content:generate": "tsx scripts/generate-articles.ts"
   },
   "engines": {
     "node": ">=18.18"
