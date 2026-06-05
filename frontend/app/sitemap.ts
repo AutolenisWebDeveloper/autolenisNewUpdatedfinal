@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { prisma } from "@/lib/prisma";
 import { SEO_LOCATIONS } from "@/lib/seo/locations";
+import { PILLAR_PAGES } from "@/lib/seo/pillar-links";
 
 const BASE = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -49,7 +50,18 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // Hybrid SEO landing system — organic state hub (/lp/* is intentionally
     // excluded: paid funnel, noindex).
     { url: `${BASE}/car-buying-service/texas`, priority: 0.9, changeFrequency: "weekly", lastModified: now },
+    // Phase C0 — content engine foundation: buying-guide hub + author bio.
+    { url: `${BASE}/buying-guide`,     priority: 0.7, changeFrequency: "monthly", lastModified: now },
+    { url: `${BASE}/author/markist`,   priority: 0.6, changeFrequency: "monthly", lastModified: now },
   ];
+
+  // Phase C0 — cornerstone pillar pages.
+  const pillarEntries: MetadataRoute.Sitemap = PILLAR_PAGES.map((p) => ({
+    url: `${BASE}${p.url}`,
+    priority: 0.9,
+    changeFrequency: "monthly" as const,
+    lastModified: now,
+  }));
 
   // Programmatic car-buying-service city pages — driven by SEO_LOCATIONS.
   const carBuyingServiceEntries: MetadataRoute.Sitemap = SEO_LOCATIONS.map((loc) => ({
@@ -106,5 +118,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // DB unavailable — skip programmatic entries
   }
 
-  return [...staticEntries, ...carBuyingServiceEntries, ...makeEntries, ...makeModelEntries, ...vehicleEntries];
+  return [...staticEntries, ...pillarEntries, ...carBuyingServiceEntries, ...makeEntries, ...makeModelEntries, ...vehicleEntries];
 }
