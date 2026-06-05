@@ -14,6 +14,11 @@ import {
   sendFounderMessageAlert,
 } from "@/lib/voice/dispatch-request";
 import { generateZuraSpeech } from "@/lib/voice/elevenlabs-tts.service";
+import {
+  isTransferEnabled,
+  getTransferConfig,
+  buildTransferTwiML,
+} from "@/lib/voice/call-transfer.service";
 import { ZURA_VOICE_PROMPT } from "@/lib/ai/zura-voice";
 import type { BuyerLookupResult } from "@/lib/services/voice/buyer-lookup.service";
 import { groqChat, type ChatMessage } from "@/lib/ai/groq-client";
@@ -122,6 +127,8 @@ Return ONLY a JSON object with these keys:
                 | "message" | "dealer_inquiry" | "transfer_request"
                 | "other",
 
+  "transferUrgency": "high" | "normal" | null,
+
   "vehicleRequest": {
     "firstName": string | null,
     "lastName": string | null,
@@ -156,6 +163,14 @@ Rules:
 - complete = true if you have enough to fulfill the request
 - For vehicle_request: complete requires firstName, email, make, model, zip, budget at minimum
 - For others: complete requires callerName, callerEmail, reason
+- Set callReason = "transfer_request" when the caller wants a live human NOW:
+  "speak to a person", "talk to someone", "connect me", "transfer me",
+  "real person", "human"; OR is a dealer who wants to discuss a partnership
+  immediately; OR expresses same-day buying urgency ("I want to buy today",
+  "I need this ASAP"); OR has a complaint that needs human resolution.
+- transferUrgency: "high" when the caller is urgent, frustrated, or explicitly
+  wants someone right now (e.g. a dealer ready to partner today, a same-day
+  buyer, an upset caller); "normal" for a routine request; null if not applicable.
 - Return ONLY valid JSON, no markdown, no commentary
 `;
 
@@ -169,8 +184,13 @@ const CALL_REASONS = new Set<CallReason>([
   "other",
 ]);
 
+// Zura Phase 3 — how urgently the caller wants a live human. Drives whether a
+// dealer_inquiry escalates to a live founder transfer vs. a message.
+type TransferUrgency = "high" | "normal";
+
 interface ExtractedCall {
   callReason?: CallReason;
+  transferUrgency?: TransferUrgency;
   vehicleRequest: VehicleRequestDraft;
   messageDetails: MessageDetails;
   complete: boolean;
@@ -236,10 +256,12 @@ async function extractCallData(history: ChatMessage[]): Promise<ExtractedCall | 
     if (!match) return null;
     const parsed = JSON.parse(match[0]) as Record<string, unknown>;
     const reason = typeof parsed.callReason === "string" ? parsed.callReason : undefined;
+    const urgency = parsed.transferUrgency === "high" ? "high" : undefined;
     return {
       callReason: reason && CALL_REASONS.has(reason as CallReason)
         ? (reason as CallReason)
         : undefined,
+      transferUrgency: urgency,
       vehicleRequest: toVehicleDraft(parsed.vehicleRequest as Record<string, unknown> | undefined),
       messageDetails: toMessageDetails(
         parsed.messageDetails as Record<string, unknown> | undefined,
@@ -394,6 +416,36 @@ function maybeCapturePartialLead(
   }).catch(() => {});
 }
 
+// Zura Phase 3 — attempt a live transfer to the founder. Returns a TwiML
+// Response that bridges the caller via <Dial>, or null when the transfer can't
+// proceed (disabled by feature flag, or no founder number configured) so the
+// caller falls through to the existing message-taking flow. The conversation's
+// callReason is set to transfer_request so the end-of-call status handler logs
+// the attempt and SMS-alerts the founder if the dial never connects.
+async function attemptTransfer(
+  callSid: string,
+  triggerReason: string,
+): Promise<Response | null> {
+  if (!isTransferEnabled()) {
+    console.warn(
+      "[zura-p3] Live transfer disabled (ENABLE_LIVE_CALL_TRANSFER != 'true') — falling back to message-taking",
+    );
+    return null;
+  }
+
+  const config = getTransferConfig();
+  if (!config) {
+    // getTransferConfig already logged the missing FOUNDER_PHONE_NUMBER.
+    return null;
+  }
+
+  if (callSid) updateConversation(callSid, { callReason: "transfer_request" });
+  console.log(`[zura-p3] Transfer triggered. ${triggerReason}`);
+
+  const xml = await buildTransferTwiML(config);
+  return twimlResponse(xml);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { params, verified } = await parseTwilioRequest(request, PATH);
@@ -452,20 +504,18 @@ export async function POST(request: NextRequest) {
     ].slice(-HISTORY_LIMIT * 2);
     updateConversation(callSid, { history: newHistory, callerPhone: conv.callerPhone });
 
-    // Live-agent transfer.
+    // Zura Phase 3 — live transfer to the founder. Fast path: the caller
+    // explicitly asked for a human. Try a live <Dial> to FOUNDER_PHONE_NUMBER;
+    // if transfers are disabled or no number is configured, fall through to a
+    // graceful message-taking offer rather than dropping the hot lead.
     if (wantsTransfer(speech)) {
-      const transferNumber = process.env.TWILIO_TRANSFER_NUMBER;
-      if (transferNumber) {
-        const twiml = new VoiceResponse();
-        await speakWithFallback(twiml, aiText);
-        twiml.dial(transferNumber);
-        return twimlResponse(twiml.toString());
-      }
-      // No transfer line configured — stay on the line gracefully.
+      const transfer = await attemptTransfer(callSid, "Trigger: explicit human request (keyword)");
+      if (transfer) return transfer;
+
       const twiml = new VoiceResponse();
       await speakWithFallback(
         twiml,
-        "I am not able to connect a live agent right now, but I can help you here, or you can email support at autolenis dot com.",
+        "Marc isn't available to connect live right now, but I'd be glad to take a message and have him call you back. What would you like me to pass along?",
       );
       addGather(twiml);
       return twimlResponse(twiml.toString());
@@ -483,6 +533,22 @@ export async function POST(request: NextRequest) {
           ? extracted.vehicleRequest
           : undefined,
       });
+
+      // Zura Phase 3 — escalate to a live transfer when the extractor classifies
+      // the call as a human-now request, or a dealer with high urgency wanting
+      // to partner immediately. The keyword fast-path above covers most explicit
+      // "talk to a person" cases; this covers urgent intent phrased without the
+      // trigger words. Falls through to message-taking when transfer can't run.
+      const wantsLiveTransfer =
+        extracted.callReason === "transfer_request" ||
+        (extracted.callReason === "dealer_inquiry" && extracted.transferUrgency === "high");
+      if (wantsLiveTransfer) {
+        const transfer = await attemptTransfer(
+          callSid,
+          `Intent: ${extracted.callReason}, urgency: ${extracted.transferUrgency ?? "normal"}`,
+        );
+        if (transfer) return transfer;
+      }
     }
 
     const afterModel = getConversation(callSid);
