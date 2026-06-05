@@ -38,6 +38,39 @@ const MAX_PER_HOUR = 50
 const MAX_PER_DAY = 200
 const FROM_NAME = process.env.FROM_NAME ?? "AutoLenis"
 
+// Phase 4B-2 — env vars that MUST be present before any dealer outreach send.
+// A cold/misconfigured sending domain torches deliverability, so we refuse to
+// dispatch until the founder has wired these up in Vercel (and verified the
+// domain in Resend). AUTOLENIS_PHYSICAL_ADDRESS is a CAN-SPAM requirement.
+export const REQUIRED_EMAIL_ENV_VARS = [
+  "DEALER_OUTREACH_FROM_EMAIL",
+  "DEALER_OUTREACH_REPLY_TO",
+  "AUTOLENIS_PHYSICAL_ADDRESS",
+  "RESEND_API_KEY",
+] as const
+
+// Returns the subset of required email env vars that are unset/empty. Empty
+// array means the channel is configured.
+export function missingEmailEnvVars(): string[] {
+  return REQUIRED_EMAIL_ENV_VARS.filter((k) => {
+    const v = process.env[k]
+    return !v || v.trim().length === 0
+  })
+}
+
+// Throws when the sending domain isn't fully configured. Exported for callers
+// that prefer fail-fast semantics (e.g. scripts / tests); the send path below
+// uses missingEmailEnvVars() directly to return a structured result instead.
+export function assertEmailEnvVars(): void {
+  const missing = missingEmailEnvVars()
+  if (missing.length > 0) {
+    throw new Error(
+      `[phase-4b2] Missing required email env vars: ${missing.join(", ")}. ` +
+        "Domain warming not configured. Set in Vercel before sending.",
+    )
+  }
+}
+
 let resendInstance: Resend | null = null
 function getResend(): Resend | null {
   const apiKey = process.env.RESEND_API_KEY
@@ -138,6 +171,21 @@ export async function sendDealerEmail(
   input: SendDealerEmailInput,
 ): Promise<SendDealerEmailResult> {
   const outreachType: OutreachType = input.outreachType ?? "initial"
+
+  // 0. Deliverability guard (Phase 4B-2). Refuse to send from an unconfigured
+  // sending domain — protects the domain reputation during DNS warming and
+  // keeps every outbound email CAN-SPAM compliant. Returned as a structured
+  // result (not thrown) so one misconfig never cascades through callers.
+  const missingEnv = missingEmailEnvVars()
+  if (missingEnv.length > 0) {
+    console.warn(
+      `[phase-4b2] Send blocked — missing required email env vars: ${missingEnv.join(", ")}`,
+    )
+    return {
+      success: false,
+      error: `Email domain not configured — set in Vercel before sending: ${missingEnv.join(", ")}`,
+    }
+  }
 
   // 1. Load prospect.
   const prospect = await prisma.dealerProspect.findUnique({
