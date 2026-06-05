@@ -7,6 +7,8 @@
 // this Map is per server instance, so a call that lands on a different lambda
 // between webhooks would start with empty history.
 
+import type { BuyerLookupResult } from "@/lib/services/voice/buyer-lookup.service";
+
 export interface VoiceMessage {
   role: "user" | "assistant";
   content: string;
@@ -66,6 +68,10 @@ export interface VoiceConversation {
   // Populated for non-vehicle call reasons (message / status_check / dealer /
   // transfer / question / other).
   messageDetails?: MessageDetails;
+  // Zura Intelligence Phase 2 — returning-caller lookup result, resolved once
+  // at call start (in /voice/incoming) and reused across turns so the Groq
+  // prompt can reference the caller's existing request without re-querying.
+  buyerContext?: BuyerLookupResult;
   vehicleRequest: VehicleRequestDraft | null;
   requestDispatched: boolean;
   // True once a non-vehicle call has fired the founder SMS alert, so it can

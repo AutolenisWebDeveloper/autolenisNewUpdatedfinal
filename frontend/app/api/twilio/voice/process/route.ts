@@ -15,6 +15,7 @@ import {
 } from "@/lib/voice/dispatch-request";
 import { generateZuraSpeech } from "@/lib/voice/elevenlabs-tts.service";
 import { ZURA_VOICE_PROMPT } from "@/lib/ai/zura-voice";
+import type { BuyerLookupResult } from "@/lib/services/voice/buyer-lookup.service";
 import { groqChat, type ChatMessage } from "@/lib/ai/groq-client";
 import { dispatch } from "@/lib/qstash/dispatch";
 import { sendSms, isValidUsPhone } from "@/lib/services/sms/twilio.service";
@@ -64,6 +65,38 @@ function addGather(twiml: Twiml): void {
     timeout: 10, // was 5
     actionOnEmptyResult: true,
   });
+}
+
+// Phase 2: when the caller is a recognized returning buyer, prepend a context
+// block to Zura's system prompt so she addresses them by name and references
+// their existing request instead of re-collecting vehicle details.
+function buyerContextBlock(ctx: BuyerLookupResult | undefined): string {
+  if (!ctx || !ctx.found) return "[NEW CALLER — no prior record found]";
+
+  const vehicle = [ctx.yearMin, ctx.make, ctx.model].filter(Boolean).join(" ").trim();
+  const budget =
+    typeof ctx.budgetCents === "number"
+      ? `$${Math.round(ctx.budgetCents / 100).toLocaleString("en-US")}`
+      : "not specified";
+  const submitted = ctx.createdAt
+    ? new Date(ctx.createdAt).toLocaleDateString("en-US")
+    : "unknown";
+  const requestState = ctx.completed ? "completed" : "in progress";
+
+  return [
+    "[BUYER CONTEXT]",
+    "This is a RETURNING CALLER. Their existing AutoLenis record:",
+    `- Name: ${ctx.firstName ?? "unknown"}`,
+    `- Looking for: ${vehicle || "no vehicle on file"}${ctx.trim ? ` (${ctx.trim})` : ""}`,
+    `- Budget: ${budget}`,
+    `- Timeline: ${ctx.timeline ?? "not specified"}`,
+    `- Request status: ${requestState}`,
+    `- Submitted: ${submitted}`,
+    "",
+    "DO address them by first name.",
+    "DO reference their existing request naturally.",
+    "DO NOT re-extract vehicle info they have already provided unless they want to change it.",
+  ].join("\n");
 }
 
 function wantsTransfer(speech: string): boolean {
@@ -389,8 +422,9 @@ export async function POST(request: NextRequest) {
       .slice(-HISTORY_LIMIT)
       .map((m) => ({ role: m.role, content: m.content }));
 
+    const systemPrompt = `${ZURA_VOICE_PROMPT}\n\n${buyerContextBlock(conv.buyerContext)}`;
     const messages: ChatMessage[] = [
-      { role: "system", content: ZURA_VOICE_PROMPT },
+      { role: "system", content: systemPrompt },
       ...history,
       { role: "user", content: speech },
     ];
