@@ -77,6 +77,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Contributions",    href: "/admin/inventory/contributions",    icon: PlusCircle },
   ]},
   { label: "Reports", items: [
+    { label: "Analytics", href: "/admin/analytics", icon: TrendingUp },
     { label: "Reports", href: "/admin/reports", icon: BarChart2 },
     { label: "Buyer Funnel", href: "/admin/reports/buyers", icon: Users },
     { label: "Buyer Sources", href: "/admin/buyer-sources", icon: TrendingUp },
