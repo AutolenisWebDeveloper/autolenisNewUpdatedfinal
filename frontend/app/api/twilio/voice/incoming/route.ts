@@ -3,6 +3,7 @@ import twilio from "twilio";
 import { parseTwilioRequest, twimlResponse } from "@/lib/voice/twilio-verify";
 import { updateConversation } from "@/lib/voice/conversation-store";
 import { generateZuraSpeech } from "@/lib/voice/elevenlabs-tts.service";
+import { lookupBuyerByPhone, buildGreeting } from "@/lib/services/voice/buyer-lookup.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,16 +40,33 @@ export async function POST(request: NextRequest) {
     // The Twilio number the caller dialed — used downstream to tag the lead
     // source as toll-free vs local (dual-number tracking).
     const calledNumber = params.To ?? "";
+
+    // Phase 2: recognize returning buyers by phone before greeting. The lookup
+    // is read-only and never throws — a miss or error yields the default
+    // new-caller greeting. The result is cached on the conversation so the
+    // /voice/process turns can reference it without re-querying.
+    const buyerContext = await lookupBuyerByPhone(from);
+    if (buyerContext.found) {
+      console.log(
+        `[zura-phase2] Returning caller: ${buyerContext.firstName ?? "unknown"}, ` +
+          `${buyerContext.make ?? "—"} ${buyerContext.model ?? ""}`.trim(),
+      );
+    }
+
     if (callSid) {
-      updateConversation(callSid, { callerPhone: from, inboundNumber: calledNumber });
+      updateConversation(callSid, {
+        callerPhone: from,
+        inboundNumber: calledNumber,
+        buyerContext,
+      });
     }
 
     const twiml = new VoiceResponse();
 
     // STEP 1: Play the greeting OUTSIDE the gather so barge-in (caller
     // speech or background noise) cannot interrupt it before it finishes.
-    const greeting =
-      "Thank you for calling AutoLenis. This is Zura. How can I help you find your next vehicle today?";
+    // Personalized for recognized callers, standard new-caller line otherwise.
+    const greeting = buildGreeting(buyerContext);
     const greetingSpeech = await generateZuraSpeech(greeting);
     if (greetingSpeech) {
       twiml.play(greetingSpeech.audioUrl);
