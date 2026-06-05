@@ -45,9 +45,43 @@ function verifySvixSignature(
   return false;
 }
 
+// Phase 4B-4 — pause the dealer's follow-up sequence by resolving the
+// dealer_prospect_id from the matched outreach-log row. A bounce/complaint means
+// we must stop nudging this address (and a complaint also marks the dealer DEAD).
+// Best-effort and isolated — never let this break suppression handling.
+async function pauseDealerSequenceFromLog(
+  supabase: SupabaseClient,
+  emailId: string,
+  reason: 'bounced' | 'opted_out',
+  markDead: boolean
+): Promise<void> {
+  const { data: log } = await supabase
+    .from('dealer_outreach_log')
+    .select('dealer_prospect_id')
+    .eq('resend_id', emailId)
+    .maybeSingle();
+  const prospectId = log?.dealer_prospect_id as string | undefined;
+  if (!prospectId) return;
+
+  const nowIso = new Date().toISOString();
+  const update: Record<string, unknown> = {
+    sequence_paused_at: nowIso,
+    sequence_pause_reason: reason,
+  };
+  if (markDead) {
+    update.status = 'DEAD';
+    update.dead_at = nowIso;
+    update.dead_reason = 'complaint';
+  }
+  await supabase.from('dealer_prospects').update(update).eq('id', prospectId);
+}
+
 // Phase 4B-3 — map a Resend event onto the dealer_outreach_log row identified by
 // Resend's message id (data.email_id). Status-changing events update `status`
 // (and the matching timestamp); open/click events stamp metadata only.
+//
+// Phase 4B-4 — bounce/complaint additionally pause the follow-up sequence; a
+// 3rd+ open is recorded as a high-engagement signal for admin visibility.
 async function updateDealerOutreachLog(
   supabase: SupabaseClient,
   eventType: string,
@@ -69,32 +103,43 @@ async function updateDealerOutreachLog(
         .from('dealer_outreach_log')
         .update({ status: 'bounced' })
         .eq('resend_id', emailId);
+      await pauseDealerSequenceFromLog(supabase, emailId, 'bounced', false);
       return;
     case 'email.complained':
       await supabase
         .from('dealer_outreach_log')
         .update({ status: 'complained' })
         .eq('resend_id', emailId);
+      await pauseDealerSequenceFromLog(supabase, emailId, 'opted_out', true);
       return;
     case 'email.opened':
     case 'email.clicked': {
       // Stamp the first open/click timestamp in metadata without clobbering
-      // existing keys (read-modify-write on the single matched row).
+      // existing keys (read-modify-write on the single matched row). Opens also
+      // bump a counter so repeated opens (3+) surface as high engagement —
+      // a strong (non-reply) interest signal for the admin.
       const { data: row } = await supabase
         .from('dealer_outreach_log')
         .select('id, metadata')
         .eq('resend_id', emailId)
         .maybeSingle();
       if (!row) return;
+      const existing = (row.metadata as Record<string, unknown> | null) ?? {};
       const key = eventType === 'email.opened' ? 'opened_at' : 'clicked_at';
-      const metadata = {
-        ...(row.metadata as Record<string, unknown> | null ?? {}),
-        [key]: nowIso,
-      };
+      const metadata: Record<string, unknown> = { ...existing, [key]: nowIso };
+      if (eventType === 'email.opened') {
+        const openCount =
+          (typeof existing.open_count === 'number' ? existing.open_count : 0) + 1;
+        metadata.open_count = openCount;
+        if (openCount >= 3) metadata.high_engagement = true;
+      }
       await supabase.from('dealer_outreach_log').update({ metadata }).eq('id', row.id);
       return;
     }
     default:
+      // NOTE: true inbound-reply detection (Resend Inbound or a catch-all
+      // inbox) would mark prospects REPLIED here. That is a future phase; for
+      // now replies are recorded via the admin "mark replied"/pause action.
       return;
   }
 }
