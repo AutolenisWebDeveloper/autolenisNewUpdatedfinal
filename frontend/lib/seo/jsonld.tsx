@@ -336,10 +336,22 @@ const ORG_ID = `${APP_URL}/#organization`;
 
 interface AreaServedCity { city: string; state?: string }
 
-/** Build an `areaServed` array: the Texas State plus any specific cities. */
+/**
+ * Build an `areaServed` array: a State node for each distinct state represented
+ * by the cities (defaulting to Texas for the legacy state hub when no city
+ * carries a state), plus a City node per city. National-expansion safe — a
+ * Los Angeles page no longer falsely claims Texas as its service area.
+ */
 function buildAreaServed(cities: AreaServedCity[]) {
+  const states = Array.from(
+    new Set(cities.map(c => c.state).filter((s): s is string => Boolean(s))),
+  );
+  const stateNodes = (states.length ? states : ["Texas"]).map(name => ({
+    "@type": "State",
+    name,
+  }));
   return [
-    { "@type": "State", name: "Texas" },
+    ...stateNodes,
     ...cities.map(c => ({
       "@type": "City",
       name: c.city,

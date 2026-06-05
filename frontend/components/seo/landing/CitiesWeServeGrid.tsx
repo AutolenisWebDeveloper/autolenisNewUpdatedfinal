@@ -6,6 +6,11 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { SEO_LOCATIONS } from "@/lib/seo/locations";
 
+// This grid lives on the Texas/Dallas-Fort Worth state hub, so it shows only
+// the DFW markets. Other national metros have their own city pages (reachable
+// via search, the sitemap, and nearby-city links) but are not listed here.
+const HUB_METRO = "Dallas-Fort Worth";
+
 // One-line USP per city (kept short; the full unique copy lives on each page).
 const CITY_USP: Record<string, string> = {
   allen: "Dealers across DFW compete — skip the US-75 lot crawl.",
@@ -31,7 +36,7 @@ export default function CitiesWeServeGrid() {
         </p>
 
         <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {SEO_LOCATIONS.map((loc) => (
+          {SEO_LOCATIONS.filter((loc) => loc.metro === HUB_METRO).map((loc) => (
             <Link
               key={loc.slug}
               href={`/car-buying-service/${loc.slug}`}
