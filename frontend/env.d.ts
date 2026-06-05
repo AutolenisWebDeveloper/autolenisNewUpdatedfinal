@@ -101,7 +101,16 @@ declare namespace NodeJS {
     TWILIO_AUTH_TOKEN?: string;
     TWILIO_FROM_NUMBER?: string;
     TWILIO_PHONE_NUMBER?: string;
-    TWILIO_TRANSFER_NUMBER?: string; // live-agent number for in-call transfers
+    TWILIO_TRANSFER_NUMBER?: string; // legacy live-agent transfer number (Phase 3 fallback)
+
+    // Zura Phase 3 — live call transfer to the founder. FOUNDER_PHONE_NUMBER is
+    // the founder's cell that hot leads are bridged to via Twilio <Dial>; it is
+    // also reused for founder SMS alerts. ENABLE_LIVE_CALL_TRANSFER is the
+    // runtime kill-switch — transfers run only when it is exactly "true", so the
+    // founder can pause them (meetings, travel) without a code deploy. When
+    // either is unset, callers fall through to the message-taking flow.
+    FOUNDER_PHONE_NUMBER?: string;
+    ENABLE_LIVE_CALL_TRANSFER?: string; // "true" enables live transfers; default off
 
     // ElevenLabs — Turbo v2.5 TTS for the Zura voice receptionist. Audio is
     // synthesized with the cloned professional voice and served from the
