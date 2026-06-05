@@ -25,6 +25,20 @@ export interface SendDealerEmailInput {
   // Optional: override the generated email (founder-edited send).
   customSubject?: string
   customBody?: string
+  // Phase 4B-4: a fully-built template (subject + HTML + text, including footer).
+  // Takes precedence over customSubject/customBody and the generator. Used by the
+  // follow-up service so the CAN-SPAM footer is preserved on every touch.
+  prebuiltTemplate?: EmailTemplate
+  // Phase 4B-4: which step of the sequence this send represents (1/2/3). When
+  // omitted it is inferred from outreachType.
+  sequenceStep?: number
+}
+
+// Map an outreach type onto its sequence step (initial = 1, followups = 2/3).
+function stepForOutreachType(type: OutreachType): number {
+  if (type === "followup_1") return 2
+  if (type === "followup_2") return 3
+  return 1
 }
 
 export interface SendDealerEmailResult {
@@ -217,9 +231,11 @@ export async function sendDealerEmail(
     }
   }
 
-  // 4. Build the email (custom override or AI-generated).
+  // 4. Build the email (prebuilt > custom override > AI-generated).
   let template: EmailTemplate
-  if (input.customSubject && input.customBody) {
+  if (input.prebuiltTemplate) {
+    template = input.prebuiltTemplate
+  } else if (input.customSubject && input.customBody) {
     const text = input.customBody
     template = {
       subject: input.customSubject,
@@ -254,6 +270,7 @@ export async function sendDealerEmail(
       toEmail: prospect.email,
       fromEmail,
       status: "queued",
+      outreachSequenceStep: input.sequenceStep ?? stepForOutreachType(outreachType),
     },
   })
 

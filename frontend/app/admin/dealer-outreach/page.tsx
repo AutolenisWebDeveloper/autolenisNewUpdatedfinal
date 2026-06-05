@@ -10,6 +10,8 @@ import BackfillEmailsButton from "./BackfillEmailsButton";
 import EmailCell from "./EmailCell";
 import EmailHealthBanner from "./EmailHealthBanner";
 import OutreachActions from "./OutreachActions";
+import RunFollowupsButton from "./RunFollowupsButton";
+import SequenceCell, { type SequenceStep } from "./SequenceCell";
 
 export const dynamic = "force-dynamic";
 
@@ -95,23 +97,45 @@ export default async function DealerOutreachPage({
     .catch(() => 0);
 
   // Latest email outreach status per displayed prospect (for the Outreach
-  // column). Guarded so the page still renders before the 4B-3 migration runs.
+  // column) plus the per-step send history (Phase 4B-4 Sequence column).
+  // Guarded so the page still renders before the 4B-3/4B-4 migrations run.
   const latestOutreach = new Map<string, string>();
+  const sequenceSteps = new Map<string, SequenceStep[]>();
   if (prospects.length > 0) {
     const logs = await prisma.dealerOutreachLog
       .findMany({
         where: {
           dealerProspectId: { in: prospects.map((p) => p.id) },
           channel: "email",
+          status: { in: ["sent", "delivered", "replied"] },
         },
         orderBy: { sentAt: "desc" },
-        select: { dealerProspectId: true, status: true },
+        select: {
+          dealerProspectId: true,
+          status: true,
+          outreachSequenceStep: true,
+          sentAt: true,
+        },
       })
-      .catch(() => [] as { dealerProspectId: string; status: string }[]);
+      .catch(
+        () =>
+          [] as {
+            dealerProspectId: string;
+            status: string;
+            outreachSequenceStep: number | null;
+            sentAt: Date;
+          }[],
+      );
     for (const l of logs) {
       if (!latestOutreach.has(l.dealerProspectId)) {
         latestOutreach.set(l.dealerProspectId, l.status);
       }
+      const arr = sequenceSteps.get(l.dealerProspectId) ?? [];
+      arr.push({
+        step: l.outreachSequenceStep ?? 1,
+        sentAt: l.sentAt.toISOString(),
+      });
+      sequenceSteps.set(l.dealerProspectId, arr);
     }
   }
 
@@ -132,6 +156,7 @@ export default async function DealerOutreachPage({
           <h1 className="text-xl font-bold text-slate-900">Dealer Recruitment Pipeline</h1>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <RunFollowupsButton />
           <BackfillEmailsButton missingCount={missingEmailCount} />
           <BackfillButton missingCount={missingScriptCount} />
         </div>
@@ -185,6 +210,7 @@ export default async function DealerOutreachPage({
               <th className="px-4 py-3 font-medium">Linked Buyer</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Outreach</th>
+              <th className="px-4 py-3 font-medium">Sequence</th>
               <th className="px-4 py-3 font-medium">Drafted</th>
               <th className="px-4 py-3 font-medium"></th>
             </tr>
@@ -192,7 +218,7 @@ export default async function DealerOutreachPage({
           <tbody className="divide-y divide-slate-100">
             {prospects.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-slate-400">
+                <td colSpan={11} className="px-4 py-8 text-center text-slate-400">
                   No prospects in this view yet.
                 </td>
               </tr>
@@ -255,6 +281,19 @@ export default async function DealerOutreachPage({
                       prospectId={p.id}
                       hasEmail={!!p.email}
                       lastStatus={latestOutreach.get(p.id) ?? null}
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <SequenceCell
+                      prospectId={p.id}
+                      steps={sequenceSteps.get(p.id) ?? []}
+                      replyDetectedAt={
+                        p.replyDetectedAt ? p.replyDetectedAt.toISOString() : null
+                      }
+                      sequencePausedAt={
+                        p.sequencePausedAt ? p.sequencePausedAt.toISOString() : null
+                      }
+                      sequencePauseReason={p.sequencePauseReason ?? null}
                     />
                   </td>
                   <td className="px-4 py-3 text-slate-500 text-xs">

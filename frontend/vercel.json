@@ -103,6 +103,10 @@
     {
       "path": "/api/cron/vehicle-offer-expire",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/dealer-followup",
+      "schedule": "0 14 * * 1-5"
     }
   ]
 }

@@ -249,6 +249,93 @@ ${physicalAddress}`
   }
 }
 
+// ─── Phase 4B-4 — follow-up templates ────────────────────────────────────────
+//
+// Deterministic (non-LLM) follow-up bodies. We keep these copy-controlled and
+// reliable rather than re-prompting Groq for every nudge — the cadence is about
+// gentle persistence, not novelty. Both reuse buildFullEmail so the signature
+// and CAN-SPAM footer stay identical to the initial outreach.
+
+export interface FollowUpTemplateInput {
+  dealerName: string
+  contactName: string | null
+  city: string
+  state: string
+  // Number of verified buyers we can reference in the dealer's area (0 = unknown).
+  buyerCount?: number
+  // Days since the initial outreach email was sent.
+  daysAgo?: number
+}
+
+function followUpGreeting(contactName: string | null): string {
+  return contactName
+    ? `Hi ${contactName.split(" ")[0]},`
+    : "Hi Internet Sales Team,"
+}
+
+/**
+ * Follow-up 1 (Day 3) — value-add angle. Leads with buyer demand, references the
+ * prior note, and invites a short call without a hard pitch.
+ */
+export function generateFollowUp1Template(
+  input: FollowUpTemplateInput,
+  opts: { dealerEmail: string; unsubscribeUrl?: string | null },
+): EmailTemplate {
+  const greeting = followUpGreeting(input.contactName)
+  const daysAgo = input.daysAgo && input.daysAgo > 0 ? input.daysAgo : "a few"
+  const area = [input.city, input.state].filter(Boolean).join(", ") || "your area"
+  const buyerPhrase =
+    input.buyerCount && input.buyerCount > 0
+      ? `we currently have ${input.buyerCount} verified buyer${input.buyerCount === 1 ? "" : "s"} in the ${area} area with approved budgets`
+      : `we have verified buyers in the ${area} area with approved budgets`
+
+  const body = `${greeting}
+
+Just following up on my note from ${daysAgo} days ago about AutoLenis and qualified buyers in your market.
+
+A quick update: ${buyerPhrase} looking for vehicles your dealership stocks. There's no cost to join — we only earn on a closed deal.
+
+Would a 15-minute call this week work to walk through how it fits ${input.dealerName}?`
+
+  return buildFullEmail(
+    {
+      subject: `Re: ${input.dealerName} + AutoLenis — buyer update`.slice(0, 120),
+      body,
+    },
+    opts.dealerEmail,
+    opts.unsubscribeUrl ?? null,
+  )
+}
+
+/**
+ * Follow-up 2 (Day 8) — low-pressure final check-in. Easy to say yes or no.
+ */
+export function generateFollowUp2Template(
+  input: FollowUpTemplateInput,
+  opts: { dealerEmail: string; unsubscribeUrl?: string | null },
+): EmailTemplate {
+  const greeting = followUpGreeting(input.contactName)
+
+  const body = `${greeting}
+
+I'll keep this brief — didn't want to leave things hanging.
+
+AutoLenis is building a network of dealerships who want first access to verified buyer auctions in their area. No commitment, no upfront cost.
+
+If timing isn't right, totally understand. If you'd like to learn more, I'm happy to send a one-page overview.
+
+Either way — no pressure.`
+
+  return buildFullEmail(
+    {
+      subject: "Last note — AutoLenis dealer network",
+      body,
+    },
+    opts.dealerEmail,
+    opts.unsubscribeUrl ?? null,
+  )
+}
+
 /**
  * Generate the full personalized outreach email (subject + HTML + plain text)
  * for a dealer prospect, including signature and CAN-SPAM footer.
