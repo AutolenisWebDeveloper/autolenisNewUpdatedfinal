@@ -216,6 +216,51 @@ export async function sendWelcomeEmail(params: {
   });
 }
 
+// Phase C-Tools — welcome email for buyers who request a negotiation strategy
+// from the public Dealer Fee Calculator. Idempotency-keyed on the lead's
+// opportunity session id so a double form submit never double-sends.
+export async function sendDealerFeeCalculatorWelcomeEmail(params: {
+  to: string;
+  firstName: string;
+  state: string;
+  segmentLabel: string;
+  sessionId: string;
+}) {
+  const { to, firstName, state, segmentLabel, sessionId } = params;
+  const calculatorUrl = `${APP_URL}/tools/dealer-fee-calculator`;
+  const buyersUrl = `${APP_URL}/request-a-car`;
+  return sendIdempotent({
+    idempotencyKey: `dealer-fee-lead-${sessionId}`,
+    to,
+    templateId: "dealer-fee-calculator-welcome",
+    subject: "Your car dealer fee negotiation strategy — AutoLenis",
+    html: `
+      <div style="font-family:-apple-system,system-ui,sans-serif;max-width:600px;margin:0 auto;background:#fff">
+        <div style="background:#0B5FD1;padding:32px;text-align:center">
+          <h1 style="color:#fff;margin:0;font-size:22px">Don't Overpay on Dealer Fees</h1>
+        </div>
+        <div style="padding:32px;color:#1f2937;line-height:1.7;font-size:14px">
+          <p>Hi ${firstName},</p>
+          <p>Thanks for using the AutoLenis Dealer Fee Calculator. Here's the single most important thing to remember when you sit down at the dealership in ${state}:</p>
+          <p style="background:#F8F9FB;border-left:3px solid #0B5FD1;padding:12px 16px;margin:16px 0"><strong>Make them itemize every fee in writing before you agree to anything.</strong> Required state fees (title, registration) are fixed. Everything else — doc fees, add-ons, "market adjustments" — is negotiable or pure markup.</p>
+          <p>Three lines that work:</p>
+          <ul style="padding-left:20px;color:#4B5563">
+            <li>"Please remove the add-ons — I only want the vehicle."</li>
+            <li>"What's your out-the-door price, all fees included?"</li>
+            <li>"I'm comparing this against other dealers' total price."</li>
+          </ul>
+          <p>The fastest way to skip the fee games entirely: let dealers compete for your business privately. With AutoLenis, up to 8 local dealers submit their best out-the-door price in a 48-hour auction — you pick the winner.</p>
+          <div style="text-align:center;margin:28px 0">
+            <a href="${buyersUrl}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">Get Dealers to Compete →</a>
+          </div>
+          <p style="color:#4B5563;font-size:13px">Want to re-check a fee? <a href="${calculatorUrl}" style="color:#0B5FD1">Open the calculator again</a>.</p>
+          <p style="margin-top:24px;color:#94A3B8;font-size:12px">You're receiving this because you requested a negotiation strategy from the AutoLenis Dealer Fee Calculator (${segmentLabel}).</p>
+        </div>
+      </div>
+    `,
+  });
+}
+
 export async function sendBuyerOpportunityConfirmationEmail(params: {
   to: string;
   firstName: string;
