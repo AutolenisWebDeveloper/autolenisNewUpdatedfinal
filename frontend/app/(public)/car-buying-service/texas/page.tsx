@@ -37,7 +37,11 @@ const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").tri
 const PATH = "/car-buying-service/texas";
 const PAGE_URL = `${APP_URL}${PATH}`;
 
-const ALL_CITIES = SEO_LOCATIONS.map((l) => ({ city: l.city, state: "Texas" }));
+// This hub covers the Texas / Dallas-Fort Worth market, so its structured data
+// lists only the DFW markets. Other national metros have their own city pages.
+const ALL_CITIES = SEO_LOCATIONS
+  .filter((l) => l.metro === "Dallas-Fort Worth")
+  .map((l) => ({ city: l.city, state: l.state }));
 
 export function generateMetadata(): Metadata {
   return buildPageMetadata({

@@ -84,8 +84,14 @@ export default async function CityPage({ params }: { params: Promise<{ city: str
   }
 
   const pageUrl = `${APP_URL}/car-buying-service/${loc.slug}`;
-  const cityArea = [{ city: loc.city, state: "Texas" }];
+  const cityArea = [{ city: loc.city, state: loc.state }];
   const visibleFaqs = [...loc.localFaqs, ...CORE_FAQS.slice(0, 3)];
+
+  // The Texas state hub is the only organic state hub today, so only Texas
+  // markets link their "Car Buying Service" / state breadcrumb to it. Other
+  // states render the state name as a non-linked crumb until a hub exists.
+  const isTx = loc.stateAbbr === "TX";
+  const serviceCrumbPath = isTx ? HUB_PATH : undefined;
 
   return (
     <>
@@ -93,8 +99,8 @@ export default async function CityPage({ params }: { params: Promise<{ city: str
         id="city-breadcrumb"
         data={breadcrumbSchema([
           { name: "Home", path: "/" },
-          { name: "Car Buying Service", path: HUB_PATH },
-          { name: "Texas", path: HUB_PATH },
+          { name: "Car Buying Service", ...(serviceCrumbPath ? { path: serviceCrumbPath } : {}) },
+          { name: loc.state, ...(serviceCrumbPath ? { path: serviceCrumbPath } : {}) },
           { name: loc.city, path: `/car-buying-service/${loc.slug}` },
         ])}
       />
@@ -127,8 +133,8 @@ export default async function CityPage({ params }: { params: Promise<{ city: str
       <Breadcrumbs
         items={[
           { name: "Home", href: "/" },
-          { name: "Car Buying Service", href: HUB_PATH },
-          { name: "Texas", href: HUB_PATH },
+          { name: "Car Buying Service", href: serviceCrumbPath },
+          { name: loc.state, href: serviceCrumbPath },
           { name: loc.city },
         ]}
       />

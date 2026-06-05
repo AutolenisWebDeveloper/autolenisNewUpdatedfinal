@@ -35,7 +35,7 @@ export default function LocalSection({ location }: LocalSectionProps) {
             ))}
           </div>
           <p className="mt-4 text-sm text-slate-500">
-            Part of our Texas service area in the {location.metro} metro.
+            Part of our {location.state} service area in the {location.metro} metro.
           </p>
         </div>
 
