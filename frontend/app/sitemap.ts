@@ -29,6 +29,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE}/insurance`,         priority: 0.7, changeFrequency: "monthly", lastModified: now },
     { url: `${BASE}/request-vehicle`,    priority: 0.7, changeFrequency: "monthly", lastModified: now },
     { url: `${BASE}/dealer-application`, priority: 0.6, changeFrequency: "monthly", lastModified: now },
+    // Free buyer tools (Phase C-Tools)
+    { url: `${BASE}/tools`,                       priority: 0.7, changeFrequency: "monthly", lastModified: now },
+    { url: `${BASE}/tools/dealer-fee-calculator`, priority: 0.8, changeFrequency: "monthly", lastModified: now },
     // Hope — System 25 brand differentiation page (intentionally indexed)
     { url: `${BASE}/hope`,              priority: 0.3, changeFrequency: "monthly", lastModified: now },
     // Legal pages (low priority but indexable)
