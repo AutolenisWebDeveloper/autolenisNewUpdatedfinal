@@ -3470,3 +3470,51 @@ model SmsOptOut {
 
   @@map("sms_opt_outs")
 }
+
+// Phase C1 — programmatic SEO content engine. One row per buying-guide article
+// (dealer quotes, OTD price, dealer fees, trade-in, leasing) generated for a
+// city/state in a national wave. Generation happens in Phase C2; this model is
+// the storage + lifecycle layer that the /buying-guide/[slug] route reads from.
+model ContentArticle {
+  id              String        @id @default(cuid())
+  slug            String        @unique
+  cluster         String        // dealer_quotes|otd_price|dealer_fees|trade_in|leasing
+  make            String?       // "Toyota"
+  model           String?       // "Camry"
+  city            String        // "Dallas"
+  state           String        // "TX"
+  metro           String?       // "Dallas-Fort Worth" — for grouping
+  wave            Int           @default(1) // 1, 2, or 3
+  targetKeyword   String        @map("target_keyword")
+  title           String
+  metaDescription String        @map("meta_description")
+  h1              String
+  body            String        @db.Text
+  faqJson         String?       @map("faq_json") @db.Text
+  wordCount       Int?          @map("word_count")
+  authorSlug      String        @default("markist") @map("author_slug")
+  status          ArticleStatus @default(DRAFT)
+  qualityScore    Int?          @map("quality_score")
+  qualityFlags    String?       @map("quality_flags") @db.Text
+  publishedAt     DateTime?     @map("published_at")
+  generatedAt     DateTime?     @map("generated_at")
+  groqModel       String?       @map("groq_model")
+  searchGrounded  Boolean?      @map("search_grounded")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  @@index([cluster])
+  @@index([status])
+  @@index([city, state])
+  @@index([metro])
+  @@index([wave])
+  @@index([publishedAt])
+  @@map("content_articles")
+}
+
+enum ArticleStatus {
+  DRAFT
+  REVIEW_NEEDED
+  PUBLISHED
+  ARCHIVED
+}
