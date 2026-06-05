@@ -8,6 +8,7 @@ import { DealerProspectStatus, type Prisma } from "@prisma/client";
 import BackfillButton from "./BackfillButton";
 import BackfillEmailsButton from "./BackfillEmailsButton";
 import EmailCell from "./EmailCell";
+import EmailHealthBanner from "./EmailHealthBanner";
 import OutreachActions from "./OutreachActions";
 
 export const dynamic = "force-dynamic";
@@ -135,6 +136,9 @@ export default async function DealerOutreachPage({
           <BackfillButton missingCount={missingScriptCount} />
         </div>
       </div>
+
+      {/* Phase 4B-2 — sending-domain readiness indicator */}
+      <EmailHealthBanner />
 
       {/* Stats row */}
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6">
