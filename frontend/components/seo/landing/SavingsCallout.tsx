@@ -17,15 +17,8 @@ export default function SavingsCallout({ city = null }: SavingsCalloutProps) {
           fall versus negotiating alone. {where} keep their time and their leverage.
         </p>
 
-        <div className="mx-auto mt-8 max-w-md rounded-2xl bg-white/10 p-8">
-          <div className="text-4xl font-extrabold sm:text-5xl">
-            {/* {{CONFIRM_WITH_OWNER}} — verifiable average savings figure, or remove this block */}
-            $&#123;&#123;CONFIRM_WITH_OWNER&#125;&#125;
-          </div>
-          <p className="mt-2 text-sm text-blue-100">
-            Average reported savings ({"{{CONFIRM_WITH_OWNER}}"} — substantiate before publishing)
-          </p>
-        </div>
+        {/* Average-savings figure block hidden until an owner-confirmed,
+            substantiated number exists — never render a placeholder. */}
 
         <p className="mx-auto mt-6 max-w-2xl text-xs text-blue-100">
           Savings vary based on vehicle, market conditions, dealer participation, and the offer
