@@ -6,6 +6,7 @@ import Clarity from "@/components/seo/Clarity";
 import ReferralCapture from "@/components/referral/ReferralCapture";
 import { JsonLd } from "@/lib/seo/jsonld";
 import { entityGraphSchema } from "@/lib/seo/entity-graph";
+import OrganizationSchema from "@/components/seo/OrganizationSchema";
 import "./globals.css";
 
 // Self-hosted Google fonts via @fontsource — bundled at build time, no
@@ -63,6 +64,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} font-[family-name:var(--font-heading)] antialiased`}>
         {/* Connected entity graph — sitewide knowledge-graph backbone */}
         <JsonLd id="ld-entity-graph" data={entityGraphSchema} />
+        {/* Phase C0 — sitewide Organization schema (national content engine) */}
+        <OrganizationSchema />
         {children}
         {/* Group 8 (8A) — records affiliate referral clicks sitewide */}
         <ReferralCapture />

@@ -176,6 +176,63 @@ export function pricingSchema() {
   ];
 }
 
+// ── Phase C0 — content engine builders (Person + Article) ─────────────────────
+
+interface PersonSchemaInput {
+  name: string;
+  jobTitle: string;
+  url: string;
+  worksFor?: string;
+}
+
+/** Person schema for the named author (E-E-A-T signal). */
+export function personSchema(input: PersonSchemaInput) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "Person",
+    name: input.name,
+    jobTitle: input.jobTitle,
+    worksFor: { "@type": "Organization", name: input.worksFor ?? "AutoLenis" },
+    url: input.url,
+    sameAs: [APP_URL],
+  };
+}
+
+interface ArticleSchemaInput {
+  headline: string;
+  description: string;
+  slug: string;
+  authorName?: string;
+  authorUrl?: string;
+  datePublished?: string;
+  dateModified?: string;
+}
+
+/** Article schema with author reference for buying-guide content. */
+export function articleSchema(input: ArticleSchemaInput) {
+  const url = `${APP_URL}/buying-guide/${input.slug}`;
+  return {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: input.headline,
+    description: input.description,
+    mainEntityOfPage: { "@type": "WebPage", "@id": url },
+    url,
+    author: {
+      "@type": "Person",
+      name: input.authorName ?? "Markist",
+      url: input.authorUrl ?? `${APP_URL}/author/markist`,
+    },
+    publisher: {
+      "@type": "Organization",
+      name: AUTOLENIS_NAP.name,
+      logo: { "@type": "ImageObject", url: `${APP_URL}/logo.png` },
+    },
+    ...(input.datePublished ? { datePublished: input.datePublished } : {}),
+    dateModified: input.dateModified ?? input.datePublished ?? undefined,
+  };
+}
+
 interface FaqItem { question: string; answer: string }
 export function faqSchema(items: FaqItem[]) {
   return {
