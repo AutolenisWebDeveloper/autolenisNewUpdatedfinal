@@ -4,13 +4,13 @@ import { parseTwilioRequest, twimlResponse } from "@/lib/voice/twilio-verify";
 import { updateConversation } from "@/lib/voice/conversation-store";
 import { generateZuraSpeech } from "@/lib/voice/elevenlabs-tts.service";
 import { lookupBuyerByPhone, buildGreeting } from "@/lib/services/voice/buyer-lookup.service";
+import { addCallerInput } from "@/lib/voice/voice-input";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const VoiceResponse = twilio.twiml.VoiceResponse;
 const PATH = "/api/twilio/voice/incoming";
-const PROCESS_PATH = "/api/twilio/voice/process";
 const VOICE = "Polly.Joanna-Neural";
 
 const REQUIRED_ENV_VARS = ["TWILIO_AUTH_TOKEN", "TWILIO_ACCOUNT_SID", "GROQ_API_KEY"] as const;
@@ -74,17 +74,11 @@ export async function POST(request: NextRequest) {
       twiml.say({ voice: VOICE }, greeting);
     }
 
-    // STEP 2: Now start listening, with timeouts tuned for natural speech.
-    twiml.gather({
-      input: ["speech"],
-      action: PROCESS_PATH,
-      method: "POST",
-      speechTimeout: "3", // wait 3s of silence (was "auto" ≈ 0.5s — too aggressive)
-      speechModel: "experimental_conversations",
-      enhanced: true,
-      timeout: 10, // total wait for the caller to start speaking (was 5)
-      actionOnEmptyResult: true, // continue even when STT returns empty
-    });
+    // STEP 2: Now start listening. Zura Phase 4 records the caller's reply and
+    // transcribes it with OpenAI Whisper (<Record> → /voice/recording-complete).
+    // Setting VOICE_USE_WHISPER=false reverts this to Twilio's built-in <Gather>
+    // STT (→ /voice/process) with no code change. See lib/voice/voice-input.ts.
+    addCallerInput(twiml);
 
     // STEP 3: Fallback if no input was captured.
     const noInput =
