@@ -81,6 +81,10 @@ const PUBLIC_ROUTES = [
   "/thank-you",
   // Hybrid SEO landing system — organic state hub + programmatic city pages.
   "/car-buying-service",
+  // Programmatic SEO vehicle catalog — /cars/[make] and /cars/[make]/[model].
+  // Indexable, anonymous-accessible pages; must never bounce visitors (or
+  // crawlers) to sign-in.
+  "/cars",
   // Twilio voice/SMS webhooks — cannot present a session/CSRF token; each
   // handler validates the X-Twilio-Signature instead.
   "/api/twilio/voice/incoming",
