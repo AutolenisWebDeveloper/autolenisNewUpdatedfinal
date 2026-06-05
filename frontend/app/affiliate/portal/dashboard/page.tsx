@@ -1,5 +1,6 @@
 import { requireAffiliate } from "@/lib/auth/affiliate-session";
 import { getCommissionSummary, getNetworkSize } from "@/lib/services/affiliate/commission.service";
+import { getReferralClickStats } from "@/lib/services/affiliate/referral.service";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -18,7 +19,7 @@ export default async function AffiliateDashboardPage() {
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const [summary, network, recentCommissions, thisMonth] = await Promise.all([
+  const [summary, network, recentCommissions, thisMonth, clickStats] = await Promise.all([
     getCommissionSummary(affiliate.id),
     getNetworkSize(affiliate.id),
     prisma.commission.findMany({
@@ -31,6 +32,7 @@ export default async function AffiliateDashboardPage() {
       _sum: { amountCents: true },
       _count: true,
     }),
+    getReferralClickStats(affiliate.id),
   ]);
 
   const referralLink = `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/auth/signup?ref=${affiliate.referralCode}`;
@@ -197,6 +199,29 @@ export default async function AffiliateDashboardPage() {
                 <div className="flex items-center justify-between">
                   <dt className="text-sm text-slate-500">Est. per deal (L1)</dt>
                   <dd className="text-sm font-semibold text-slate-900">${(L1_PER_DEAL / 100).toFixed(2)}</dd>
+                </div>
+              </dl>
+            </div>
+
+            {/* Group 8 (8A) — referral link click funnel */}
+            <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="referral-click-funnel">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Referral Link Activity</p>
+              <dl className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <dt className="text-sm text-slate-500">Link clicks (all-time)</dt>
+                  <dd className="text-sm font-semibold text-slate-900" data-testid="referral-total-clicks">{clickStats.totalClicks}</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt className="text-sm text-slate-500">Clicks this month</dt>
+                  <dd className="text-sm font-semibold text-slate-900" data-testid="referral-clicks-month">{clickStats.clicksThisMonth}</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt className="text-sm text-slate-500">Converted to signups</dt>
+                  <dd className="text-sm font-semibold text-slate-900" data-testid="referral-converted-clicks">{clickStats.convertedClicks}</dd>
+                </div>
+                <div className="flex items-center justify-between">
+                  <dt className="text-sm text-slate-500">Conversion rate</dt>
+                  <dd className="text-sm font-semibold text-slate-900" data-testid="referral-conversion-rate">{clickStats.conversionRate}%</dd>
                 </div>
               </dl>
             </div>

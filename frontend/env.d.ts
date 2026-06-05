@@ -84,6 +84,9 @@ declare namespace NodeJS {
     // Platform
     NEXT_PUBLIC_APP_URL: string;
     MAINTENANCE_MODE: string;
+    // Group 8 (8A) — salt for hashing visitor IPs on affiliate referral clicks
+    // (optional; falls back to a built-in default when unset).
+    REFERRAL_IP_SALT?: string;
     CURRENT_TERMS_VERSION: string;
     OPENROAD_PARTNER_ID: string;
 
