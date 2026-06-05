@@ -110,6 +110,17 @@ declare namespace NodeJS {
     ELEVENLABS_API_KEY?: string;
     ELEVENLABS_VOICE_ID?: string;
 
+    // Zura Phase 4 — Whisper STT. OpenAI Whisper (whisper-1) transcribes the
+    // caller's recorded speech instead of Twilio's built-in experimental
+    // speech model, dramatically improving accuracy on vehicle names, zip
+    // codes, dollar amounts, and trim levels. Falls back to Twilio STT when
+    // unset or when VOICE_USE_WHISPER === "false".
+    OPENAI_API_KEY?: string;
+    // Rollback switch: set to "false" to revert the voice receptionist to
+    // Twilio's built-in <Gather> STT without a code deploy. Any other value
+    // (or unset) keeps Whisper STT active.
+    VOICE_USE_WHISPER?: string;
+
     // Optional
     REDIS_URL?: string;
     DEV_EMAIL_TO?: string; // Must NOT be set in production
