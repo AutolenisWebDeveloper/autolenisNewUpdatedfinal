@@ -207,6 +207,7 @@ model Affiliate {
   taxProfile           AffiliateTaxProfile?
   paymentProfile       AffiliatePaymentProfile?
   onboardingReview     AffiliateOnboardingReview?
+  clicks               AffiliateClick[]
 
   @@map("affiliates")
 }
@@ -2601,6 +2602,31 @@ model AffiliateReferral {
   totalDeals    Int       @default(0) @map("total_deals")
   @@unique([affiliateId, referredUserId])
   @@map("affiliate_referrals")
+}
+
+// Group 8 (8A) — one row per inbound visit that carried an affiliate ?ref= code.
+// Distinct from AffiliateReferral (which records a completed signup): a click is
+// the top of the funnel, recorded before any account exists. convertedAt links a
+// click to the buyer signup it produced, giving affiliates true click→conversion
+// attribution. IPs are stored only as a salted SHA-256 hash for privacy.
+model AffiliateClick {
+  id             String    @id @default(uuid())
+  affiliateId    String    @map("affiliate_id")
+  affiliate      Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  referralCode   String    @map("referral_code")
+  clickedAt      DateTime  @default(now()) @map("clicked_at")
+  ipHash         String?   @map("ip_hash")
+  userAgent      String?   @map("user_agent")
+  referer        String?
+  landingPath    String?   @map("landing_path")
+  utmSource      String?   @map("utm_source")
+  utmMedium      String?   @map("utm_medium")
+  utmCampaign    String?   @map("utm_campaign")
+  convertedAt    DateTime? @map("converted_at")
+  referredUserId String?   @map("referred_user_id")
+  @@index([affiliateId, clickedAt])
+  @@index([referralCode])
+  @@map("affiliate_clicks")
 }
 
 model AffiliateComplianceRecord {

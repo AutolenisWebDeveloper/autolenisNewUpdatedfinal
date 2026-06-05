@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import { Toaster } from "sonner";
 import ServiceWorkerRegistration from "@/components/pwa/ServiceWorkerRegistration";
 import Clarity from "@/components/seo/Clarity";
+import ReferralCapture from "@/components/referral/ReferralCapture";
 import { JsonLd } from "@/lib/seo/jsonld";
 import { entityGraphSchema } from "@/lib/seo/entity-graph";
 import "./globals.css";
@@ -63,6 +64,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Connected entity graph — sitewide knowledge-graph backbone */}
         <JsonLd id="ld-entity-graph" data={entityGraphSchema} />
         {children}
+        {/* Group 8 (8A) — records affiliate referral clicks sitewide */}
+        <ReferralCapture />
         <Toaster richColors position="bottom-right" />
         {/* Feature 30 — PWA service worker registration */}
         <ServiceWorkerRegistration />

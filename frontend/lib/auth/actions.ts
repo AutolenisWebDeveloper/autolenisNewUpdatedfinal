@@ -215,6 +215,13 @@ async function recordAffiliateAttribution(userId: string, referralCode: string) 
       },
       update: { referralCode },
     });
+
+    // Group 8 (8A) — close the click→conversion loop: mark the most recent
+    // unconverted referral click for this code as converted. Non-blocking.
+    const { attributeConversion } = await import(
+      "@/lib/services/affiliate/referral.service"
+    );
+    await attributeConversion(referralCode, userId);
   } catch (err) {
     console.error("[recordAffiliateAttribution] failed to record attribution:", err);
     // Non-blocking — do not throw; buyer signup must not fail due to attribution error
