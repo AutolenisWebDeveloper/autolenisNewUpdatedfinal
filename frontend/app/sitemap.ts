@@ -106,5 +106,31 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // DB unavailable — skip programmatic entries
   }
 
-  return [...staticEntries, ...carBuyingServiceEntries, ...makeEntries, ...makeModelEntries, ...vehicleEntries];
+  // Buying-guide articles — pulled live from DB (PUBLISHED only).
+  let buyingGuideEntries: MetadataRoute.Sitemap = [];
+  try {
+    const articles = await prisma.contentArticle.findMany({
+      where: { status: "PUBLISHED" },
+      select: { slug: true, publishedAt: true, updatedAt: true },
+      orderBy: { publishedAt: "desc" },
+      take: 5000,
+    });
+    buyingGuideEntries = articles.map((a) => ({
+      url: `${BASE}/buying-guide/${a.slug}`,
+      lastModified: a.publishedAt ?? a.updatedAt,
+      changeFrequency: "monthly" as const,
+      priority: 0.7,
+    }));
+  } catch {
+    // DB unavailable or table not yet migrated — skip buying-guide entries.
+  }
+
+  return [
+    ...staticEntries,
+    ...carBuyingServiceEntries,
+    ...makeEntries,
+    ...makeModelEntries,
+    ...vehicleEntries,
+    ...buyingGuideEntries,
+  ];
 }

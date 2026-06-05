@@ -3470,3 +3470,47 @@ model SmsOptOut {
 
   @@map("sms_opt_outs")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Tier 4 — SEO Content Engine (Phase C1)
+//
+//  One row per programmatic buying-guide article served at /buying-guide/[slug].
+//  Articles are generated from lib/seo/content-keywords.ts (Phase C2), stored as
+//  DRAFT, reviewed in the admin UI (Phase C3), then PUBLISHED. Only PUBLISHED
+//  rows are rendered publicly and listed in the sitemap.
+// ─────────────────────────────────────────────────────────────────────────────
+model ContentArticle {
+  id              String        @id @default(cuid())
+  slug            String        @unique
+  cluster         String // "dealer_quotes" | "otd_price" | "dealer_fees" | "trade_in" | "leasing"
+  make            String? // "Toyota" — null for non-vehicle-specific articles
+  model           String? // "Camry"
+  city            String // "Dallas"
+  state           String        @default("TX")
+  targetKeyword   String        @map("target_keyword")
+  title           String
+  metaDescription String        @map("meta_description")
+  h1              String
+  body            String        @db.Text
+  faqJson         String?       @map("faq_json") @db.Text
+  wordCount       Int?          @map("word_count")
+  status          ArticleStatus @default(DRAFT)
+  publishedAt     DateTime?     @map("published_at")
+  generatedAt     DateTime?     @map("generated_at")
+  groqModel       String?       @map("groq_model")
+  searchGrounded  Boolean?      @map("search_grounded")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  @@index([cluster])
+  @@index([status])
+  @@index([city])
+  @@index([publishedAt])
+  @@map("content_articles")
+}
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
