@@ -13,10 +13,12 @@ interface LiveAuctionViewProps {
   auctionId: string;
   endsAt: string;
   initialOfferCount?: number;
+  initialDealersInvited?: number;
 }
 
 interface LiveStatusData {
   offerCount: number;
+  dealersInvited?: number;
   engagementLevel: string;
   socialProof?: string;
   status?: string;
@@ -38,7 +40,12 @@ const fetcher = (url: string) =>
       return d.data;
     });
 
-export default function LiveAuctionView({ auctionId, endsAt, initialOfferCount = 0 }: LiveAuctionViewProps) {
+export default function LiveAuctionView({
+  auctionId,
+  endsAt,
+  initialOfferCount = 0,
+  initialDealersInvited = 0,
+}: LiveAuctionViewProps) {
   const [remaining, setRemaining] = useState(new Date(endsAt).getTime() - Date.now());
 
   // Feature 12 — SWR polling every 30 seconds against the live-status API
@@ -47,12 +54,17 @@ export default function LiveAuctionView({ auctionId, endsAt, initialOfferCount =
     fetcher,
     {
       refreshInterval: 30000,
-      fallbackData: { offerCount: initialOfferCount, engagementLevel: "Active" },
+      fallbackData: {
+        offerCount: initialOfferCount,
+        dealersInvited: initialDealersInvited,
+        engagementLevel: "Active",
+      },
       revalidateOnFocus: false,
     },
   );
 
   const offerCount = data?.offerCount ?? initialOfferCount;
+  const dealersInvited = data?.dealersInvited ?? initialDealersInvited;
   const engagement = data?.engagementLevel ?? "Active";
   const socialProof = data?.socialProof;
 
@@ -67,7 +79,7 @@ export default function LiveAuctionView({ auctionId, endsAt, initialOfferCount =
   const isActive = remaining > 0;
 
   return (
-    <div className="bg-[#0B5FD1] rounded-2xl p-6 text-white" data-testid="live-auction-view">
+    <div className="bg-[#0B5FD1] rounded-2xl p-6 text-white" data-testid="auction-status-panel">
       <div className="flex items-center gap-2 mb-4">
         <div className={`w-2 h-2 rounded-full ${isActive ? "bg-green-400 animate-pulse" : "bg-slate-400"}`} />
         <span className="text-xs font-semibold text-white/70 uppercase tracking-wider">
@@ -77,15 +89,23 @@ export default function LiveAuctionView({ auctionId, endsAt, initialOfferCount =
 
       {/* Countdown — runs client-side from endsAt */}
       <div className="text-center mb-6" data-testid="auction-countdown">
-        <p className="text-5xl font-bold font-mono tracking-tight">{formatCountdown(remaining)}</p>
+        <p className="text-4xl sm:text-5xl font-bold font-mono tracking-tight">{formatCountdown(remaining)}</p>
         <p className="text-sm text-white/60 mt-1">{isActive ? "remaining" : ""}</p>
       </div>
+
+      {/* Group 7 (7B) — dealer invitation transparency */}
+      {dealersInvited > 0 && (
+        <p className="text-center text-sm text-white/80 mb-4" data-testid="auction-dealers-invited">
+          <span className="font-semibold text-white">{dealersInvited}</span>{" "}
+          dealer{dealersInvited !== 1 ? "s" : ""} invited to compete
+        </p>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="bg-white/10 rounded-xl p-4 text-center" data-testid="auction-offer-count">
           <p className="text-2xl font-bold">{offerCount}</p>
-          <p className="text-xs text-white/60 mt-0.5">Offers submitted</p>
+          <p className="text-xs text-white/60 mt-0.5">Offers received so far</p>
         </div>
         <div className="bg-white/10 rounded-xl p-4 text-center" data-testid="auction-engagement">
           <div className="flex items-center justify-center gap-1.5 mb-0.5">

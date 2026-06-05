@@ -44,7 +44,28 @@ export async function GET(request: NextRequest, { params }: Props) {
     return Math.round(priceCents * r / (1 - Math.pow(1 + r, -months)));
   };
 
-  const rankedOffers = [
+  // Group 7 (7C) — per-offer transparency for the comparison UX:
+  //   - OTD breakdown (vehicle + tax + fees) so the buyer sees what makes up the price
+  //   - response time (how fast the dealer responded after the auction started)
+  type OfferRow = (typeof offers)[number];
+  const auctionStart = auction.startedAt ?? auction.createdAt;
+  const offerExtras = (o: OfferRow) => {
+    let responseTimeHours: number | null = null;
+    if (o.submittedAt && auctionStart) {
+      const ms = o.submittedAt.getTime() - auctionStart.getTime();
+      if (ms >= 0) responseTimeHours = Math.max(1, Math.round(ms / 3_600_000));
+    }
+    return {
+      otdBreakdown: {
+        vehiclePriceCents: o.vehiclePriceCents,
+        taxCents: o.taxCents,
+        feesCents: o.feesCents,
+      },
+      responseTimeHours,
+    };
+  };
+
+  const rankedRaw = [
     {
       offerId: sorted[0].id,
       rankType: "BEST_CASH",
@@ -56,6 +77,7 @@ export async function GET(request: NextRequest, { params }: Props) {
       rankingExplanation: "Lowest out-the-door price among all submitted offers.",
       aprFlag: sorted[0].aprFlag,
       aprRate: sorted[0].aprRate,
+      ...offerExtras(sorted[0]),
     },
     sorted.length > 1 ? (() => {
       // Sort by calculated monthly payment (lowest first) to find the best monthly offer
@@ -74,6 +96,7 @@ export async function GET(request: NextRequest, { params }: Props) {
         rankingExplanation: "Best estimated monthly payment given the offer financing terms.",
         aprFlag: bestMonthlyOffer.aprFlag,
         aprRate: bestMonthlyOffer.aprRate,
+        ...offerExtras(bestMonthlyOffer),
       };
     })() : null,
     {
@@ -87,11 +110,28 @@ export async function GET(request: NextRequest, { params }: Props) {
       rankingExplanation: "Highest overall AutoLenis score, balancing price, fees, and reliability.",
       aprFlag: sorted[Math.floor(sorted.length / 2)].aprFlag,
       aprRate: sorted[Math.floor(sorted.length / 2)].aprRate,
+      ...offerExtras(sorted[Math.floor(sorted.length / 2)]),
     },
-  ].filter(Boolean);
+  ];
+  const rankedOffers = rankedRaw.filter(
+    (o): o is NonNullable<typeof o> => o !== null,
+  );
+
+  // Group 7 (7C) — assign a unique numeric rank (#1, #2, #3) across the displayed
+  // cards, ordered by out-the-door price (lowest = #1). Ties break by card order so
+  // every card gets a distinct rank. Drives the rank badge in the UI.
+  const rankByIndex = new Map<number, number>();
+  rankedOffers
+    .map((o, i) => ({ i, otd: o.otdPriceCents }))
+    .sort((a, b) => a.otd - b.otd || a.i - b.i)
+    .forEach((entry, pos) => rankByIndex.set(entry.i, pos + 1));
+  const rankedWithNumbers = rankedOffers.map((o, i) => ({
+    ...o,
+    rank: rankByIndex.get(i) ?? i + 1,
+  }));
 
   return successResponse({
-    offers: rankedOffers,
+    offers: rankedWithNumbers,
     preliminary: isActive,
     label: isActive ? "Preliminary Rankings — Final rankings after auction closes." : null,
   });

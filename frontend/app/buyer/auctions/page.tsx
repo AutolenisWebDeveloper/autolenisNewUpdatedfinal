@@ -6,8 +6,8 @@ import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ArrowRight, Clock } from "lucide-react";
+import { ArrowRight, Gavel } from "lucide-react";
+import EmptyState from "@/components/buyer/EmptyState";
 
 export const dynamic = "force-dynamic";
 
@@ -30,13 +30,14 @@ export default async function AuctionsPage() {
       <h1 className="text-xl font-bold text-slate-900 mb-6">My Auctions</h1>
 
       {auctions.length === 0 ? (
-        <div className="text-center py-20 bg-white border border-slate-200 rounded-xl" data-testid="no-auctions">
-          <Clock size={32} className="text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500 mb-4">No auctions yet</p>
-          <Button variant="secondary" href="/buyer/deposit" data-testid="start-auction-from-list-btn">
-            Activate Your First Auction
-          </Button>
-        </div>
+        <EmptyState
+          scenario="no-auctions"
+          icon={Gavel}
+          tone="active"
+          heading="No active auctions yet"
+          body="Complete your vehicle request and pay the $99 service fee to launch your 48-hour dealer auction."
+          cta={{ label: "Start My Auction", href: "/buyer/deposit" }}
+        />
       ) : (
         <div className="space-y-3">
           {auctions.map((auction) => (
