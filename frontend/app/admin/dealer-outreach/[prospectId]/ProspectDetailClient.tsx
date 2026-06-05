@@ -42,6 +42,29 @@ export interface ProspectDetail {
     phone: string | null;
     createdAt: string;
   } | null;
+  // Change 1 — web-grounded market context for the linked buyer request.
+  marketInsight: MarketInsight | null;
+}
+
+export interface MarketInsight {
+  regionalPricingInsight: string | null;
+  msrpRange: { low: number | null; high: number | null } | null;
+  currentIncentives: string | null;
+  demandLevel: "high" | "normal" | "low" | null;
+  supplyNote: string | null;
+  localDealers: Array<{
+    name: string;
+    city: string | null;
+    distanceMiles: number | null;
+    hasInventory: boolean | null;
+    inventoryNote: string | null;
+  }>;
+  searchGrounded: boolean;
+  dataAsOf: string | null;
+  // Legacy fields (present even on pre-Change-1 records).
+  typicalMarkup: string | null;
+  goodDealTarget: number | null;
+  notes: string | null;
 }
 
 const STATUS_BADGE: Record<string, string> = {
@@ -267,6 +290,9 @@ export default function ProspectDetailClient({
         </div>
       </div>
 
+      {/* Change 1 — Market Insight */}
+      <MarketInsightSection insight={prospect.marketInsight} />
+
       {/* Phone script */}
       <div className="rounded-lg border border-slate-200 bg-white p-5">
         <div className="flex items-center justify-between mb-3">
@@ -378,6 +404,152 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
     <div className="flex gap-2">
       <dt className="w-28 shrink-0 text-slate-400">{label}</dt>
       <dd className="text-slate-800">{value}</dd>
+    </div>
+  );
+}
+
+const DEMAND_BADGE: Record<string, string> = {
+  high: "bg-red-100 text-red-700",
+  normal: "bg-slate-100 text-slate-600",
+  low: "bg-green-100 text-green-700",
+};
+
+function formatMsrpRange(
+  range: { low: number | null; high: number | null } | null,
+): string {
+  if (!range) return "—";
+  const { low, high } = range;
+  if (low != null && high != null)
+    return `$${low.toLocaleString()} – $${high.toLocaleString()}`;
+  if (low != null) return `from $${low.toLocaleString()}`;
+  if (high != null) return `up to $${high.toLocaleString()}`;
+  return "—";
+}
+
+function MarketInsightSection({ insight }: { insight: MarketInsight | null }) {
+  const [open, setOpen] = useState(false);
+
+  const hasAny =
+    !!insight &&
+    (insight.regionalPricingInsight ||
+      insight.msrpRange ||
+      insight.currentIncentives ||
+      insight.demandLevel ||
+      insight.supplyNote ||
+      insight.localDealers.length > 0 ||
+      insight.notes ||
+      insight.typicalMarkup ||
+      insight.goodDealTarget != null);
+
+  const dealersWithInventory =
+    insight?.localDealers.filter((d) => d.hasInventory === true).length ?? 0;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-5">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2"
+      >
+        <h2 className="flex items-center gap-2 text-sm font-semibold uppercase text-slate-500">
+          Market Insight
+          {insight?.searchGrounded && (
+            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium normal-case text-emerald-700">
+              grounded
+            </span>
+          )}
+        </h2>
+        <span className="text-xs text-slate-400">{open ? "Hide" : "Show"}</span>
+      </button>
+
+      {open &&
+        (hasAny && insight ? (
+          <div className="mt-4 space-y-3 text-sm">
+            <dl className="space-y-2">
+              <Row
+                label="MSRP range"
+                value={formatMsrpRange(insight.msrpRange)}
+              />
+              <Row
+                label="Demand"
+                value={
+                  insight.demandLevel ? (
+                    <span
+                      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                        DEMAND_BADGE[insight.demandLevel] ??
+                        "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      {insight.demandLevel}
+                    </span>
+                  ) : (
+                    "—"
+                  )
+                }
+              />
+              <Row label="Supply" value={insight.supplyNote ?? "—"} />
+              <Row
+                label="Incentives"
+                value={insight.currentIncentives ?? "—"}
+              />
+              <Row
+                label="Typical markup"
+                value={insight.typicalMarkup ?? "—"}
+              />
+              <Row
+                label="Good-deal target"
+                value={
+                  insight.goodDealTarget != null
+                    ? `$${insight.goodDealTarget.toLocaleString()}`
+                    : "—"
+                }
+              />
+              <Row
+                label="Local dealers"
+                value={
+                  insight.localDealers.length > 0
+                    ? `${insight.localDealers.length} found · ${dealersWithInventory} with inventory`
+                    : "—"
+                }
+              />
+            </dl>
+
+            {insight.regionalPricingInsight && (
+              <p className="rounded-md bg-slate-50 p-3 text-slate-700">
+                {insight.regionalPricingInsight}
+              </p>
+            )}
+
+            {insight.localDealers.length > 0 && (
+              <ul className="space-y-1 text-xs text-slate-600">
+                {insight.localDealers.map((d, i) => (
+                  <li key={`${d.name}-${i}`} className="flex flex-wrap gap-1">
+                    <span className="font-medium text-slate-800">{d.name}</span>
+                    {d.city && <span>· {d.city}</span>}
+                    {d.distanceMiles != null && (
+                      <span>· {d.distanceMiles} mi</span>
+                    )}
+                    {d.hasInventory === true && (
+                      <span className="text-emerald-600">· in stock</span>
+                    )}
+                    {d.inventoryNote && (
+                      <span className="text-slate-400">· {d.inventoryNote}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {insight.dataAsOf && (
+              <p className="text-[11px] text-slate-400">
+                Data as of {new Date(insight.dataAsOf).toLocaleDateString()}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-slate-400">
+            No market enrichment data for this request yet.
+          </p>
+        ))}
     </div>
   );
 }

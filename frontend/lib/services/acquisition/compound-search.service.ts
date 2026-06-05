@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/prisma"
-import { discoverDealersViaGeminiMaps } from "./gemini-maps.service"
+import {
+  discoverDealersViaGeminiMaps,
+  enrichMarketViaGemini,
+  type GroundedLocalDealer,
+} from "./gemini-maps.service"
 
 // Cache TTLs
 const MARKET_ENRICHMENT_TTL_HOURS = 24
@@ -167,11 +171,22 @@ async function callCompound(
 // ───────────────────────────────────────────────────
 
 export interface MarketEnrichment {
+  // Legacy fields — consumed by the unified intake service (do-not-touch).
   msrpEstimate: number | null
   avgPaidPrice: number | null
   typicalMarkup: string | null
   goodDealTarget: number | null
   notes: string
+  // Change 1 — web-grounded market context. Optional so older cached records
+  // (and the Groq fallback path) remain valid without these fields.
+  localDealers?: GroundedLocalDealer[]
+  regionalPricingInsight?: string | null
+  msrpRange?: { low: number | null; high: number | null } | null
+  currentIncentives?: string | null
+  demandLevel?: "high" | "normal" | "low" | null
+  supplyNote?: string | null
+  searchGrounded?: boolean
+  dataAsOf?: string | null
 }
 
 const MARKET_ENRICHMENT_SYSTEM_PROMPT = `You are an automotive market research analyst. Your job is to find real pricing data for specific vehicles in specific regions of the United States.
@@ -207,7 +222,34 @@ export async function enrichMarketData(params: {
     return cached as MarketEnrichment
   }
 
-  console.log("[compound-search] Market enrichment cache MISS, calling compound:", cacheKey)
+  console.log("[compound-search] Market enrichment cache MISS:", cacheKey)
+
+  // Change 1 — try Gemini 2.5 Flash + Google Search grounding first. It returns
+  // a superset of the legacy fields plus richer web-grounded market context.
+  try {
+    const grounded = await enrichMarketViaGemini(params)
+    if (grounded) {
+      await setCached(
+        cacheKey,
+        "market_enrichment",
+        { zip: params.zip, make: params.make, model: params.model },
+        grounded,
+        MARKET_ENRICHMENT_TTL_HOURS
+      )
+      return grounded
+    }
+    console.warn(
+      "[change-1] Gemini grounding unavailable — falling back to Groq Compound"
+    )
+  } catch (err) {
+    console.error(
+      "[change-1] Gemini grounding threw — falling back to Groq Compound:",
+      err
+    )
+  }
+
+  // Fallback — Groq Compound web_search (the pre-Change-1 path).
+  console.log("[compound-search] Calling Groq Compound fallback:", cacheKey)
 
   const yearRange = params.yearMin && params.yearMax
     ? `${params.yearMin}-${params.yearMax}`
@@ -260,6 +302,33 @@ Return JSON with msrpEstimate, avgPaidPrice, typicalMarkup, goodDealTarget, and 
   }
 
   return parsed
+}
+
+/**
+ * Change 1 — read-only lookup of the cached market enrichment for a buyer
+ * request. Used by the admin UI to surface grounded market context without
+ * re-running the (paid) enrichment. Ignores TTL expiry so the admin always
+ * sees the last known data; returns null if nothing was ever cached.
+ */
+export async function getCachedMarketEnrichment(params: {
+  zip: string | null
+  make: string | null
+  model: string | null
+}): Promise<MarketEnrichment | null> {
+  if (!params.zip || !params.make || !params.model) return null
+  const cacheKey = buildCacheKey("market_enrichment", {
+    zip: params.zip,
+    make: params.make,
+    model: params.model,
+  })
+  try {
+    const row = await prisma.searchCache.findUnique({ where: { cacheKey } })
+    if (!row) return null
+    return row.result as unknown as MarketEnrichment
+  } catch (err) {
+    console.error("[change-1] getCachedMarketEnrichment failed:", err)
+    return null
+  }
 }
 
 // ───────────────────────────────────────────────────

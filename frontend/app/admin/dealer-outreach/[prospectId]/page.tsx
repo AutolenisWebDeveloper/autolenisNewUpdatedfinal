@@ -4,7 +4,11 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import ProspectDetailClient, { type ProspectDetail } from "./ProspectDetailClient";
+import ProspectDetailClient, {
+  type ProspectDetail,
+  type MarketInsight,
+} from "./ProspectDetailClient";
+import { getCachedMarketEnrichment } from "@/lib/services/acquisition/compound-search.service";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +28,51 @@ export default async function DealerProspectDetailPage({
   if (!prospect) notFound();
 
   const opp = prospect.buyerOpp;
+
+  // Change 1 — pull web-grounded market context for the linked buyer request.
+  // Prefer the cached enrichment blob (richer); fall back to the legacy columns
+  // persisted on the BuyerOpportunity so older records still show something.
+  let marketInsight: MarketInsight | null = null;
+  if (opp) {
+    const cached = await getCachedMarketEnrichment({
+      zip: opp.zip,
+      make: opp.make,
+      model: opp.model,
+    }).catch(() => null);
+
+    const hasLegacyColumns =
+      opp.marketNotes != null ||
+      opp.marketTypicalMarkup != null ||
+      opp.marketGoodDealTarget != null ||
+      opp.marketMsrpEstimate != null;
+
+    if (cached || hasLegacyColumns) {
+      const lowFromColumn =
+        opp.marketMsrpEstimate != null
+          ? { low: opp.marketMsrpEstimate, high: null }
+          : null;
+      marketInsight = {
+        regionalPricingInsight: cached?.regionalPricingInsight ?? null,
+        msrpRange: cached?.msrpRange ?? lowFromColumn,
+        currentIncentives: cached?.currentIncentives ?? null,
+        demandLevel: cached?.demandLevel ?? null,
+        supplyNote: cached?.supplyNote ?? null,
+        localDealers: (cached?.localDealers ?? []).map((d) => ({
+          name: d.name,
+          city: d.city,
+          distanceMiles: d.distanceMiles,
+          hasInventory: d.hasInventory,
+          inventoryNote: d.inventoryNote,
+        })),
+        searchGrounded: cached?.searchGrounded ?? false,
+        dataAsOf: cached?.dataAsOf ?? null,
+        typicalMarkup: cached?.typicalMarkup ?? opp.marketTypicalMarkup ?? null,
+        goodDealTarget:
+          cached?.goodDealTarget ?? opp.marketGoodDealTarget ?? null,
+        notes: cached?.notes ?? opp.marketNotes ?? null,
+      };
+    }
+  }
 
   const detail: ProspectDetail = {
     id: prospect.id,
@@ -66,6 +115,7 @@ export default async function DealerProspectDetailPage({
           createdAt: opp.createdAt.toISOString(),
         }
       : null,
+    marketInsight,
   };
 
   return (
