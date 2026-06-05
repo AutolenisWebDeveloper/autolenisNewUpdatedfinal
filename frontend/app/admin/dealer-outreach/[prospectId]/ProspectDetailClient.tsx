@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { parseSource } from "@/lib/admin/buyer-source";
 
 export interface ProspectDetail {
   id: string;
@@ -40,6 +41,7 @@ export interface ProspectDetail {
     timeline: string | null;
     zip: string | null;
     phone: string | null;
+    source: string | null;
     createdAt: string;
   } | null;
   // Change 1 — web-grounded market context for the linked buyer request.
@@ -282,6 +284,7 @@ export default function ProspectDetailClient({
               <Row label="Timeline" value={humanizeTimeline(opp.timeline)} />
               <Row label="ZIP" value={opp.zip ?? "—"} />
               <Row label="Phone" value={opp.phone ?? "—"} />
+              <Row label="Source" value={parseSource(opp.source).label} />
               <Row label="Created" value={fmt(opp.createdAt)} />
             </dl>
           ) : (

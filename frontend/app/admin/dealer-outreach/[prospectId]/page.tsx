@@ -112,6 +112,7 @@ export default async function DealerProspectDetailPage({
           timeline: opp.timeline,
           zip: opp.zip,
           phone: opp.phone,
+          source: opp.source,
           createdAt: opp.createdAt.toISOString(),
         }
       : null,
