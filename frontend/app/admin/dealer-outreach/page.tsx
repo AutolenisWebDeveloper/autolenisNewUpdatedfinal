@@ -149,7 +149,7 @@ export default async function DealerOutreachPage({
   ];
 
   return (
-    <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-dealer-outreach-page">
+    <div className="p-6 md:p-8 max-w-screen-2xl" data-testid="admin-dealer-outreach-page">
       <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
         <div className="flex items-center gap-3">
           <Phone size={22} className="text-[#0B5FD1]" />
@@ -202,17 +202,17 @@ export default async function DealerOutreachPage({
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>
-              <th className="px-4 py-3 font-medium">Dealer</th>
-              <th className="px-4 py-3 font-medium">Location</th>
-              <th className="px-4 py-3 font-medium">Brand</th>
-              <th className="px-4 py-3 font-medium">Phone</th>
-              <th className="px-4 py-3 font-medium">Email</th>
-              <th className="px-4 py-3 font-medium">Linked Buyer</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Outreach</th>
-              <th className="px-4 py-3 font-medium">Sequence</th>
-              <th className="px-4 py-3 font-medium">Drafted</th>
-              <th className="px-4 py-3 font-medium"></th>
+              <th className="px-3 py-3 font-medium w-40">Dealer</th>
+              <th className="px-3 py-3 font-medium w-32">Location</th>
+              <th className="px-3 py-3 font-medium w-24 hidden xl:table-cell">Brand</th>
+              <th className="px-3 py-3 font-medium w-28 hidden xl:table-cell">Phone</th>
+              <th className="px-3 py-3 font-medium w-44">Email</th>
+              <th className="px-3 py-3 font-medium w-36 hidden xl:table-cell">Linked Buyer</th>
+              <th className="px-3 py-3 font-medium w-24">Status</th>
+              <th className="px-3 py-3 font-medium w-44">Outreach</th>
+              <th className="px-3 py-3 font-medium w-20 hidden xl:table-cell">Sequence</th>
+              <th className="px-3 py-3 font-medium w-28 hidden xl:table-cell">Drafted</th>
+              <th className="px-3 py-3 font-medium w-16"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -231,21 +231,21 @@ export default async function DealerOutreachPage({
                 "vehicle";
               return (
                 <tr key={p.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium text-slate-900">{p.name}</td>
-                  <td className="px-4 py-3 text-slate-600">
+                  <td className="px-3 py-3 font-medium text-slate-900 max-w-[160px] truncate">{p.name}</td>
+                  <td className="px-3 py-3 text-slate-600 max-w-[128px] truncate">
                     {[p.city, p.state].filter(Boolean).join(", ") || "—"}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{p.brand ?? "—"}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3 text-slate-600 hidden xl:table-cell">{p.brand ?? "—"}</td>
+                  <td className="px-3 py-3 hidden xl:table-cell">
                     {p.phone ? (
-                      <a href={`tel:${p.phone}`} className="text-[#0B5FD1] hover:underline">
+                      <a href={`tel:${p.phone}`} className="text-[#0B5FD1] hover:underline whitespace-nowrap">
                         {p.phone}
                       </a>
                     ) : (
                       "—"
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <EmailCell
                       prospectId={p.id}
                       email={p.email}
@@ -257,33 +257,32 @@ export default async function DealerOutreachPage({
                       }
                     />
                   </td>
-                  <td className="px-4 py-3 text-slate-600">
+                  <td className="px-3 py-3 text-slate-600 hidden xl:table-cell max-w-[144px] truncate">
                     {opp ? (
-                      <span>
-                        {vehicle} · {formatBudget(opp.budgetAmount, opp.monthlyPayment)} ·{" "}
-                        {humanizeTimeline(opp.timeline)}
+                      <span title={`${vehicle} · ${formatBudget(opp.budgetAmount, opp.monthlyPayment)} · ${humanizeTimeline(opp.timeline)}`}>
+                        {vehicle} · {formatBudget(opp.budgetAmount, opp.monthlyPayment)}
                       </span>
                     ) : (
                       "—"
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <span
-                      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${
                         STATUS_BADGE[p.status] ?? "bg-slate-100 text-slate-600"
                       }`}
                     >
                       {p.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <OutreachActions
                       prospectId={p.id}
                       hasEmail={!!p.email}
                       lastStatus={latestOutreach.get(p.id) ?? null}
                     />
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3 hidden xl:table-cell">
                     <SequenceCell
                       prospectId={p.id}
                       steps={sequenceSteps.get(p.id) ?? []}
@@ -296,12 +295,12 @@ export default async function DealerOutreachPage({
                       sequencePauseReason={p.sequencePauseReason ?? null}
                     />
                   </td>
-                  <td className="px-4 py-3 text-slate-500 text-xs">
+                  <td className="px-3 py-3 text-slate-500 text-xs hidden xl:table-cell whitespace-nowrap">
                     {p.scriptDraftedAt
                       ? new Date(p.scriptDraftedAt).toLocaleString()
                       : "—"}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-3">
                     <Link
                       href={`/admin/dealer-outreach/${p.id}`}
                       className="rounded-md bg-[#0B5FD1] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#0a52b5]"
