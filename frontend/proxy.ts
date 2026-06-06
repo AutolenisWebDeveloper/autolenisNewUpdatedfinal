@@ -93,6 +93,8 @@ const PUBLIC_ROUTES = [
   "/api/twilio/voice/fallback",
   "/api/twilio/voice/status",
   "/api/twilio/sms/incoming",
+  "/guide",
+  "/api/leads",
 ];
 
 const AUTH_ROUTES = [
