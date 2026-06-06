@@ -82,6 +82,7 @@ model Buyer {
   refinanceApplications RefinanceApplication[]
   preferences           BuyerPreferences?
   complianceEvents      ComplianceEvent[]
+  prequalAttemptErrors  PrequalAttemptError[]
   adminJourneyUnlocks   AdminJourneyUnlock[]
   adminJourneyNotes     AdminJourneyNote[]
   conversations         Conversation[]
@@ -281,13 +282,53 @@ model PreQualification {
   adverseReasonCodes String[]   @default([]) @map("adverse_reason_codes")
   deceasedFlag       Boolean    @default(false) @map("deceased_flag")
   bankruptcyFlag     Boolean    @default(false) @map("bankruptcy_flag")
+  // Provider-failure operability (P0-2). errorStage/errorCode are stored
+  // UNENCRYPTED for admin triage; the raw provider payload stays AES-256-GCM
+  // encrypted in rawResponse. These are populated ONLY when a provider error
+  // was downgraded to MANUAL_REVIEW — a true manual review leaves them null.
+  errorStage         String?    @map("error_stage")
+  errorCode          String?    @map("error_code")
+  errorMessage       String?    @map("error_message")
+  lastErrorAt        DateTime?  @map("last_error_at")
   createdAt           DateTime        @default(now()) @map("created_at")
   updatedAt           DateTime        @updatedAt @map("updated_at")
   buyer               Buyer           @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   consents            PrequalConsent[]
   complianceEvents    ComplianceEvent[]
 
+  @@index([errorStage])
+  @@index([errorCode])
+  @@index([lastErrorAt])
   @@map("pre_qualifications")
+}
+
+// Full per-attempt forensic history of prequal provider failures (P0-2). The
+// PreQualification row upserts in place on retry, so per-attempt detail needs
+// its own append-only table. errorStage/errorCode are unencrypted for admin
+// triage; encryptedPayload mirrors the AES-256-GCM rawResponse when available.
+model PrequalAttemptError {
+  id                   String    @id @default(uuid())
+  buyerId              String    @map("buyer_id")
+  prequalApplicationId String?   @map("prequal_application_id")
+  attemptedAt          DateTime  @default(now()) @map("attempted_at")
+  errorStage           String    @map("error_stage")
+  errorCode            String    @map("error_code")
+  errorMessage         String?   @map("error_message")
+  httpStatus           Int?      @map("http_status")
+  requestedUrl         String?   @map("requested_url")
+  encryptedPayload     String?   @map("encrypted_payload")
+  resolvedAt           DateTime? @map("resolved_at")
+  resolvedBy           String?   @map("resolved_by")
+  resolutionNotes      String?   @map("resolution_notes")
+
+  buyer                Buyer     @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+
+  @@index([buyerId])
+  @@index([prequalApplicationId])
+  @@index([errorStage, errorCode])
+  @@index([attemptedAt])
+  @@index([resolvedAt])
+  @@map("prequal_attempt_errors")
 }
 
 model PrequalConsent {
@@ -318,6 +359,7 @@ model ComplianceEvent {
 
   @@index([buyerId, createdAt])
   @@index([eventType])
+  @@index([prequalApplicationId])
   @@map("compliance_events")
 }
 
@@ -1048,8 +1090,19 @@ model EmailSendLog {
   templateId     String   @map("template_id")
   status         String   @default("SENT")
   resendId       String?  @map("resend_id")
+  // Verified-outcome fields (P0-4). `outcome` mirrors `status` as the canonical
+  // verified value; providerError captures the Resend error on FAILED;
+  // attemptCount/lastAttemptAt track compliance-critical retry attempts;
+  // complianceCritical flags FCRA adverse-action and other regulated sends.
+  outcome            String?  @map("outcome")
+  providerError      String?  @map("provider_error")
+  attemptCount       Int      @default(1) @map("attempt_count")
+  lastAttemptAt      DateTime? @map("last_attempt_at")
+  complianceCritical Boolean  @default(false) @map("compliance_critical")
   sentAt         DateTime @default(now()) @map("sent_at")
 
+  @@index([outcome])
+  @@index([complianceCritical, outcome])
   @@map("email_send_logs")
 }
 

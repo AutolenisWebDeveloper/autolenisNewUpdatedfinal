@@ -134,8 +134,12 @@ let simulateDuplicate = false;
 (prisma as any).emailSendLog = {
   findUnique: async ({ where }: { where: { idempotencyKey: string } }) => {
     capturedKeys.push(where.idempotencyKey);
-    return simulateDuplicate ? { resendId: "prior-id" } : null;
+    // Duplicate suppression only fires for a VERIFIED prior send (status SENT);
+    // a prior FAILED/DEV_SKIPPED row is retryable, matching sendIdempotent.
+    return simulateDuplicate ? { status: "SENT", resendId: "prior-id" } : null;
   },
+  // sendIdempotent upserts the attempt row (retry-safe) rather than create().
+  upsert: async () => ({}),
   create: async () => ({}),
 };
 // Per-decision tests run under placeholder key (DEV_SKIPPED dispatch path);

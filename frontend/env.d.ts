@@ -65,6 +65,10 @@ declare namespace NodeJS {
     // provider errors, dealer-application notifications, morning briefings).
     // Senders fail safe and skip if unset.
     ADMIN_NOTIFICATION_EMAIL?: string;
+    // Escalation inbox for failed compliance-critical (FCRA adverse-action)
+    // email sends (P0-4). complianceSend emails this address after retries are
+    // exhausted; falls back to ADMIN_NOTIFICATION_EMAIL when unset.
+    COMPLIANCE_ALERT_EMAIL?: string;
 
     // AI — Groq is the primary LLM provider. Gemini 2.5 Flash is used only for
     // grounded search (Maps dealer discovery + Phase 4B-1 email enrichment).

@@ -39,6 +39,41 @@ Instead, it will copy all the configuration files and the transitive dependencie
 
 You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
 
+## Migration Discipline (NON-NEGOTIABLE)
+
+- **NEVER** use `prisma db push` against any environment that has migration
+  history. This caused production schema drift; see the corrective migrations
+  `20260914000000_p0_compliance_prequal_index`,
+  `20260914000001_p0_prequal_error_metadata`, and
+  `20260914000002_p0_email_outcome_verification`.
+- All schema changes require **both** a Prisma migration **and** idempotent SQL
+  (`CREATE TABLE/INDEX IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`,
+  `ALTER TYPE ... ADD VALUE IF NOT EXISTS`). `ALTER TYPE ... ADD VALUE` must be
+  a top-level statement — Postgres cannot run it inside a transaction block.
+- Production deploys use `pnpm prisma migrate deploy` **only** — never
+  `db push`.
+
+### Pre-Deploy Checklist
+
+Run from `frontend/` before merging a schema PR or deploying:
+
+```
+pnpm prisma generate
+pnpm check:drift     # requires a reachable shadow Postgres — never point at prod
+pnpm tsc --noEmit
+pnpm lint
+pnpm build
+pnpm test
+```
+
+`pnpm check:drift` (`scripts/check-migration-drift.ts`) runs
+`prisma migrate diff --from-migrations prisma/migrations
+--to-schema-datamodel prisma/schema.prisma --exit-code` and fails if the
+committed migrations do not reproduce `schema.prisma`. Wire it into CI with a
+throwaway Postgres service once it has been confirmed green against a shadow DB
+(it is intentionally not added to `ci.yml` as a hard gate until a shadow
+database is provisioned there).
+
 ## Learn More
 
 You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).

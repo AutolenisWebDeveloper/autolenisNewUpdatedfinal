@@ -26,10 +26,11 @@ import { callIPredict } from "./microbilt.service";
 import { isPrequalValid } from "./prequal.service";
 import {
   sendPrequalApprovedEmail,
-  sendAdverseActionEmail,
   sendPrequalUnderReviewEmail,
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
+import { complianceSend } from "@/lib/services/email/compliance-send";
+import { reasonToErrorMeta } from "./errors";
 
 // Expiry durations — iPredict results expire after 30 days (same as buyer path).
 const IPREDICT_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
@@ -540,6 +541,39 @@ export async function runAdminIPredictPrequalForBuyer(
     return upserted;
   });
 
+  // ── Provider-failure operability (P0-2) ────────────────────────────────────
+  // Mirror the buyer path: surface a downgraded provider error as queryable
+  // metadata + an append-only PrequalAttemptError. Null errorMeta (true manual
+  // review / business decline) leaves the fields untouched. Never blocks.
+  const errorMeta = reasonToErrorMeta(result.reason);
+  if (errorMeta) {
+    try {
+      await prisma.preQualification.update({
+        where: { id: prequal.id },
+        data: {
+          errorStage: errorMeta.stage,
+          errorCode: errorMeta.code,
+          errorMessage: errorMeta.message,
+          lastErrorAt: new Date(),
+        },
+      });
+      await prisma.prequalAttemptError.create({
+        data: {
+          buyerId,
+          prequalApplicationId: prequal.id,
+          errorStage: errorMeta.stage,
+          errorCode: errorMeta.code,
+          errorMessage: errorMeta.message,
+          httpStatus: errorMeta.httpStatus ?? null,
+          requestedUrl: errorMeta.requestedUrl ?? null,
+          encryptedPayload: prequal.rawResponse ?? null,
+        },
+      });
+    } catch (metaErr) {
+      console.error("[admin-prequal] Failed to persist provider error metadata:", metaErr);
+    }
+  }
+
   // ── Admin audit log ────────────────────────────────────────────────────────
   // PII (name/address) is deliberately omitted from audit metadata.
   // authorizationSummary is included as it is the consent record, not PII.
@@ -630,13 +664,14 @@ export async function runAdminIPredictPrequalForBuyer(
     let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
     let adverseActionErrorMessage: string | null = null;
     try {
-      const sendResult = await sendAdverseActionEmail({
+      const sendResult = await complianceSend({
         to: buyer.user.email,
         firstName: input.firstName,
         decisionDate: decisionDateStr,
         prequalApplicationId: prequal.id,
         decisionTimestamp: prequal.updatedAt.toISOString(),
         adverseReasonCodes: prequal.adverseReasonCodes,
+        buyerId,
       });
       outcome = sendResult.outcome;
       adverseActionSent = sendResult.sent;

@@ -16,10 +16,11 @@ import {
 } from "./microbilt.service";
 import {
   sendPrequalApprovedEmail,
-  sendAdverseActionEmail,
   sendPrequalUnderReviewEmail,
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
+import { complianceSend } from "@/lib/services/email/compliance-send";
+import { reasonToErrorMeta } from "./errors";
 
 const PROVIDER_ERROR_REASONS = new Set([
   "TIMEOUT",
@@ -286,6 +287,41 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     return upserted;
   });
 
+  // ── Provider-failure operability (P0-2) ────────────────────────────────────
+  // When callIPredict downgraded a provider error to MANUAL_REVIEW, surface the
+  // failure as queryable metadata for admin triage (errorStage/errorCode on the
+  // row + an append-only PrequalAttemptError). A true MANUAL_REVIEW or a
+  // business DECLINED (INCOME_BELOW_MINIMUM) yields errorMeta === null and is
+  // left untouched. Never blocks the buyer response.
+  const errorMeta = reasonToErrorMeta(result.reason);
+  if (errorMeta) {
+    try {
+      await prisma.preQualification.update({
+        where: { id: prequal.id },
+        data: {
+          errorStage: errorMeta.stage,
+          errorCode: errorMeta.code,
+          errorMessage: errorMeta.message,
+          lastErrorAt: new Date(),
+        },
+      });
+      await prisma.prequalAttemptError.create({
+        data: {
+          buyerId: buyer.id,
+          prequalApplicationId: prequal.id,
+          errorStage: errorMeta.stage,
+          errorCode: errorMeta.code,
+          errorMessage: errorMeta.message,
+          httpStatus: errorMeta.httpStatus ?? null,
+          requestedUrl: errorMeta.requestedUrl ?? null,
+          encryptedPayload: prequal.rawResponse ?? null,
+        },
+      });
+    } catch (metaErr) {
+      console.error("[prequal] Failed to persist provider error metadata:", metaErr);
+    }
+  }
+
   // Send congratulations email and log compliance event for APPROVED decisions.
   // Email failure must never block the approval — catch and log only.
   if (finalDecision === PreQualDecision.APPROVED) {
@@ -345,13 +381,18 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
     let adverseActionErrorMessage: string | null = null;
     try {
-      const result = await sendAdverseActionEmail({
+      // complianceSend retries on a FAILED Resend dispatch and, if all retries
+      // fail, escalates to the compliance/ops inbox. It returns the same
+      // discriminated outcome, so the compliance-event mapping below is
+      // unchanged and still reflects the TRUE final send status.
+      const result = await complianceSend({
         to: buyer.user.email,
         firstName: input.firstName,
         decisionDate,
         prequalApplicationId: prequal.id,
         decisionTimestamp: prequal.updatedAt.toISOString(),
         adverseReasonCodes: prequal.adverseReasonCodes,
+        buyerId: buyer.id,
       });
       outcome = result.outcome;
     } catch (emailErr) {

@@ -126,10 +126,12 @@ async function sendIdempotent(params: {
   subject: string;
   html: string;
   templateId: string;
+  // Flags FCRA / regulated sends on the audit row (P0-4).
+  complianceCritical?: boolean;
 }): Promise<EmailSendOutcome> {
-  // Check idempotency — never send duplicate emails. If the lookup fails
-  // (e.g. transient DB connectivity issue), log and proceed with the send
-  // rather than silently skipping it.
+  // Check idempotency — never RE-send an email that was already verified
+  // delivered. If the lookup fails (e.g. transient DB connectivity issue), log
+  // and proceed with the send rather than silently skipping it.
   let existing: Awaited<ReturnType<typeof prisma.emailSendLog.findUnique>> | null = null;
   try {
     existing = await prisma.emailSendLog.findUnique({
@@ -139,11 +141,15 @@ async function sendIdempotent(params: {
     console.error("[EMAIL] EmailSendLog check failed — proceeding with send:", err);
     // Non-blocking — allow send to proceed even if idempotency check fails
   }
-  if (existing) {
+  // Only a VERIFIED prior send (status SENT) suppresses a re-dispatch. A prior
+  // FAILED / DEV_SKIPPED attempt is retryable — returning DUPLICATE there would
+  // strand a notice (e.g. an FCRA § 615 adverse-action) that never went out.
+  if (existing && existing.status === "SENT") {
     return { sent: false, outcome: "DUPLICATE", resendId: existing.resendId ?? undefined };
   }
 
   let resendId: string | undefined;
+  let providerError: string | null = null;
   let status: "SENT" | "FAILED" | "DEV_SKIPPED" = "SENT";
 
   try {
@@ -171,6 +177,9 @@ async function sendIdempotent(params: {
         // response as FAILED so the audit trail records a real outage instead
         // of silently logging as SENT with no resendId.
         if (result.error || !result.data?.id) {
+          providerError = result.error
+            ? (result.error.message ?? JSON.stringify(result.error))
+            : "Provider returned no message id";
           console.error(
             `[EMAIL] Resend dispatch failed for ${params.to}:`,
             result.error ?? "no id returned",
@@ -182,24 +191,64 @@ async function sendIdempotent(params: {
       }
     }
   } catch (err) {
+    providerError = err instanceof Error ? err.message : String(err);
     console.error(`Email send failed: ${err}`);
     status = "FAILED";
   }
 
-  // Log the send attempt
-  await prisma.emailSendLog.create({
-    data: {
-      idempotencyKey: params.idempotencyKey,
-      recipient: params.to,
-      templateId: params.templateId,
-      status,
-      resendId: resendId ?? null,
-    },
-  });
+  // Log the send attempt. Upsert (not create) so a retry after a prior FAILED
+  // attempt updates the same row instead of colliding on the unique key, and so
+  // attemptCount reflects the true number of dispatch attempts.
+  try {
+    await prisma.emailSendLog.upsert({
+      where: { idempotencyKey: params.idempotencyKey },
+      create: {
+        idempotencyKey: params.idempotencyKey,
+        recipient: params.to,
+        templateId: params.templateId,
+        status,
+        outcome: status,
+        resendId: resendId ?? null,
+        providerError,
+        attemptCount: 1,
+        lastAttemptAt: new Date(),
+        complianceCritical: params.complianceCritical ?? false,
+      },
+      update: {
+        status,
+        outcome: status,
+        resendId: resendId ?? null,
+        providerError,
+        attemptCount: { increment: 1 },
+        lastAttemptAt: new Date(),
+        complianceCritical: params.complianceCritical ?? false,
+      },
+    });
+  } catch (logErr) {
+    console.error("[EMAIL] Failed to write EmailSendLog:", logErr);
+  }
 
   if (status === "SENT")        return { sent: true,  outcome: "SENT", resendId };
   if (status === "FAILED")      return { sent: false, outcome: "FAILED" };
   /* DEV_SKIPPED */              return { sent: false, outcome: "DEV_SKIPPED" };
+}
+
+// Internal escalation email (P0-4). Used by complianceSend to alert the
+// compliance/ops inbox when a regulated send fails after retries. Best-effort;
+// never compliance-critical itself (we don't want to recurse on alerts).
+export async function sendInternalAlertEmail(params: {
+  to: string;
+  subject: string;
+  html: string;
+  idempotencyKey: string;
+}): Promise<EmailSendOutcome> {
+  return sendIdempotent({
+    idempotencyKey: params.idempotencyKey,
+    to: params.to,
+    subject: params.subject,
+    html: params.html,
+    templateId: "internal-compliance-alert",
+  });
 }
 
 // ─── Email Templates ────────────────────────────────────────────────────────
@@ -522,6 +571,7 @@ export async function sendAdverseActionEmail(params: {
     to: params.to,
     templateId: "adverse-action",
     subject: ADVERSE_ACTION_SUBJECT,
+    complianceCritical: true,
     html: renderAdverseActionEmail({
       firstName: params.firstName,
       decisionDate: params.decisionDate,
