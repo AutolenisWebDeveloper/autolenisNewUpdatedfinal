@@ -283,6 +283,47 @@ export async function POST(request: NextRequest) {
   const { buyerOpportunityId, vehicleRequestId } =
     await intakeBuyerRequest(input);
 
+  // ── Auto-advance clean submissions to INTAKE (non-blocking) ───────────────
+  // Submissions that arrive with a make, ZIP, and email are complete enough to
+  // skip manual triage, so move them out of SUBMITTED automatically. Runs after
+  // the response is sent; an audit event records the auto-advance.
+  if (vehicleRequestId) {
+    after(async () => {
+      try {
+        const hasCleanSubmission =
+          !!(input.make ?? data.preferredMake) &&
+          !!data.zip &&
+          !!data.email;
+
+        if (hasCleanSubmission) {
+          await prisma.vehicleRequest.update({
+            where: { id: vehicleRequestId },
+            data: { status: "INTAKE" },
+          });
+
+          // Audit event — best effort.
+          await prisma.vehicleRequestEvent.create({
+            data: {
+              requestId: vehicleRequestId,
+              eventType: "AUTO_INTAKE",
+              payload: {
+                reason: "Clean submission auto-advanced",
+                make: input.make ?? data.preferredMake ?? null,
+                zip: data.zip,
+              },
+            },
+          }).catch(() => {});
+
+          console.log(
+            `[request-vehicle] auto-advanced to INTAKE: ${vehicleRequestId}`
+          );
+        }
+      } catch (err) {
+        console.error("[request-vehicle] auto-intake failed:", err);
+      }
+    });
+  }
+
   // ── Post-intake auto-outreach + buyer notification (non-blocking) ─────────
   // Runs after the response is sent so it never blocks or fails the buyer's
   // submission. Contacts discovered dealers (privacy-safe) and, when at least

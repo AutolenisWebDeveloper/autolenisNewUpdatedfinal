@@ -70,8 +70,30 @@ export async function computeDealRisk(dealId: string): Promise<RiskAssessment> {
     score >= DEAL_RISK_TIERS.HIGH.min ? RiskTier.HIGH :
     score >= DEAL_RISK_TIERS.MEDIUM.min ? RiskTier.MEDIUM : RiskTier.LOW;
 
+  // Capture the prior tier before the update so we can detect escalations.
+  const previousTier = deal.riskTier;
+
   // Update deal risk in DB
   await prisma.deal.update({ where: { id: dealId }, data: { riskScore: score, riskTier: tier } }).catch(() => {});
+
+  // Escalation alert — notify admin when a deal newly reaches HIGH or CRITICAL.
+  if (
+    (tier === RiskTier.HIGH || tier === RiskTier.CRITICAL) &&
+    previousTier !== tier
+  ) {
+    await prisma.notification.create({
+      data: {
+        type: "SYSTEM_ALERT",
+        title: `${tier} risk — deal requires review`,
+        body:
+          `Deal ${deal.id.slice(0, 8)} escalated to ${tier} risk. ` +
+          `Score: ${score}. Review in admin deals.`,
+        actionUrl: `/admin/deals/${deal.id}`,
+      },
+    }).catch(() => {});
+
+    console.log(`[deal-risk] ${tier} alert — deal ${deal.id}`);
+  }
 
   return { score, tier, factors };
 }

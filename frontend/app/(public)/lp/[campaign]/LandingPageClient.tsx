@@ -1180,7 +1180,7 @@ export default function LandingPageClient({
                 },
                 {
                   q: "What if no offer works for me?",
-                  a: "Decline all offers. Your Auction Access Fee is fully refunded — no questions asked.",
+                  a: "You are never obligated to accept any offer. If no dealers submit offers during your auction, your $99 Auction Access Fee is refunded in full. If offers are submitted but none meet your expectations, you can decline them all — your concierge will follow up to discuss next steps.",
                 },
               ].map((item) => (
                 <details
