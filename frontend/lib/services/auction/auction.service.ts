@@ -55,7 +55,7 @@ export async function extendAuction(auctionId: string, hours: number, extendedBy
 export async function processAuctionClose(auctionId: string): Promise<{ offers: number }> {
   const auction = await prisma.auction.findUnique({
     where: { id: auctionId },
-    select: { id: true, buyerId: true, _count: { select: { offers: true } } },
+    select: { id: true, buyerId: true, depositId: true, _count: { select: { offers: true } } },
   });
   if (!auction) return { offers: 0 };
 
@@ -89,6 +89,91 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
       ).catch(err => console.error(`[processAuctionClose] buyer email failed for ${auctionId}:`, err));
     }
   } else {
+    // AUTO-REFUND — zero-offer auction close. The buyer is promised a refund
+    // when no dealers bid; issue it automatically instead of relying on manual
+    // admin action. Best-effort: a failure here raises an admin alert below.
+    try {
+      const depositForRefund = await prisma.deposit.findUnique({
+        where: { id: auction.depositId },
+        select: {
+          id: true,
+          status: true,
+          stripePaymentIntentId: true,
+          amountCents: true,
+          buyer: {
+            select: {
+              firstName: true,
+              user: { select: { email: true } },
+            },
+          },
+        },
+      }).catch(() => null);
+
+      if (
+        depositForRefund &&
+        depositForRefund.stripePaymentIntentId &&
+        depositForRefund.status !== "REFUNDED"
+      ) {
+        const { getStripe } = await import("@/lib/stripe");
+        const stripe = getStripe();
+
+        const refund = await stripe.refunds.create({
+          payment_intent: depositForRefund.stripePaymentIntentId,
+          reason: "requested_by_customer",
+          metadata: {
+            auctionId,
+            reason: "zero_offers",
+            autoRefund: "true",
+          },
+        });
+
+        await prisma.deposit.update({
+          where: { id: depositForRefund.id },
+          data: { status: "REFUNDED", refundedAt: new Date() },
+        });
+
+        console.log(
+          `[processAuctionClose] auto-refund issued — ` +
+          `deposit ${depositForRefund.id}, auction ${auctionId}`
+        );
+
+        // Send refund confirmation email — best effort.
+        if (depositForRefund.buyer?.user?.email) {
+          const { sendRefundConfirmationEmail } = await import(
+            "@/lib/services/email/resend.service"
+          );
+          await sendRefundConfirmationEmail({
+            to: depositForRefund.buyer.user.email,
+            firstName: depositForRefund.buyer.firstName ?? "there",
+            amountCents: depositForRefund.amountCents,
+            reason:
+              "No dealer offers were received for your auction. " +
+              "Your full deposit has been refunded.",
+            refundId: refund.id,
+          }).catch((err: unknown) =>
+            console.error(
+              "[processAuctionClose] refund email failed:", err
+            )
+          );
+        }
+      }
+    } catch (refundErr) {
+      // Auto-refund failed — raise an admin alert for manual action.
+      console.error(
+        `[processAuctionClose] AUTO-REFUND FAILED auction ${auctionId}:`,
+        refundErr
+      );
+      await prisma.notification.create({
+        data: {
+          type: "SYSTEM_ALERT",
+          title: `MANUAL REFUND REQUIRED — Auction ${auctionId.slice(0, 8)}`,
+          body:
+            `Auto-refund failed for auction ${auctionId}. ` +
+            `Check Stripe and issue the deposit refund manually.`,
+        },
+      }).catch(() => {});
+    }
+
     await prisma.notification.create({
       data: {
         buyerId: auction.buyerId,
