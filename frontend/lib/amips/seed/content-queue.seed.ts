@@ -221,6 +221,25 @@ function launchPriority(
   return (population * intentWeight * dealerCoverage) / competitionDifficulty;
 }
 
+// Matured opportunity-score formula (search-demand-based). Swaps the population
+// proxy for real Search Console impressions and folds in realized buyer value
+// (leads), so the queue self-improves as Search Intelligence accumulates.
+//
+//   priorityScore = (searchImpressions x intentWeight x dealerCoverage x buyerValue)
+//                   / competitionDifficulty
+export function searchDemandPriority(
+  searchImpressions: number,
+  intentWeight: number,
+  dealerCoverage: number,
+  buyerValue: number,
+  competitionDifficulty: number,
+): number {
+  return (
+    (searchImpressions * intentWeight * dealerCoverage * buyerValue) /
+    competitionDifficulty
+  );
+}
+
 // Build all queue drafts in memory (deterministic, ordered by priority).
 export function buildQueueDrafts(): QueueDraft[] {
   const drafts: QueueDraft[] = [];
@@ -332,4 +351,96 @@ export async function seedContentQueue(): Promise<{
   );
 
   return { inserted: toInsert.length, skipped, byTier };
+}
+
+// --- AMIPS Phase 3 — search-demand re-prioritization ---------------------
+
+const SEARCH_MATURITY_DAYS = 60;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Metro → launch dealerCoverage / competitionDifficulty, for reuse in the
+// search-demand formula (these factors are metro-level, not search-derived).
+const METRO_FACTORS = new Map(
+  TOP_METROS.map((m) => [
+    m.metro,
+    { dealerCoverage: m.dealerCoverage, competitionDifficulty: m.competitionDifficulty },
+  ]),
+);
+
+/**
+ * True once Search Intelligence has accumulated at least 60 days of data — the
+ * AMIPS threshold for switching the queue from population- to demand-based
+ * prioritization.
+ */
+export async function hasMaturedSearchIntelligence(
+  minDays = SEARCH_MATURITY_DAYS,
+): Promise<boolean> {
+  const earliest = await prisma.searchIntelligence.findFirst({
+    orderBy: { weekOf: "asc" },
+    select: { weekOf: true },
+  });
+  if (!earliest) return false;
+  const ageDays = (Date.now() - new Date(earliest.weekOf).getTime()) / DAY_MS;
+  return ageDays >= minDays;
+}
+
+/**
+ * Re-prioritize the content queue. While Search Intelligence is immature this is
+ * a no-op (the population-based launch scores stand). Once matured, every queue
+ * item linked to a published page is rescored from that page's real Search
+ * Console impressions and realized leads. This is the "cron demand engine"
+ * invoked weekly after the search sync.
+ */
+export async function reprioritizeContentQueue(): Promise<{
+  reprioritized: number;
+  mode: "launch" | "search";
+}> {
+  const matured = await hasMaturedSearchIntelligence();
+  if (!matured) {
+    console.log("[amips-p3-queue] search intelligence immature; keeping launch priority");
+    return { reprioritized: 0, mode: "launch" };
+  }
+
+  // Only items linked to a generated page have real demand to read from.
+  const items = await prisma.contentQueue.findMany({
+    where: { contentPageId: { not: null } },
+    select: { id: true, contentTier: true, metro: true, contentPageId: true },
+  });
+  if (items.length === 0) return { reprioritized: 0, mode: "search" };
+
+  const pageIds = items.map((i) => i.contentPageId as string);
+  const pages = await prisma.amipsPage.findMany({
+    where: { id: { in: pageIds } },
+    select: { id: true, impressions: true, leadsGenerated: true },
+  });
+  const pageById = new Map(pages.map((p) => [p.id, p]));
+
+  let reprioritized = 0;
+  for (const item of items) {
+    const page = item.contentPageId ? pageById.get(item.contentPageId) : undefined;
+    if (!page || page.impressions <= 0) continue; // no demand signal yet
+
+    const intentWeight = INTENT_WEIGHT[item.contentTier] ?? 2.0;
+    const factors = item.metro ? METRO_FACTORS.get(item.metro) : undefined;
+    const dealerCoverage = factors?.dealerCoverage ?? 0.8;
+    const competitionDifficulty = factors?.competitionDifficulty ?? 5;
+    const buyerValue = Math.max(1, page.leadsGenerated);
+
+    const priorityScore = searchDemandPriority(
+      page.impressions,
+      intentWeight,
+      dealerCoverage,
+      buyerValue,
+      competitionDifficulty,
+    );
+
+    await prisma.contentQueue.update({
+      where: { id: item.id },
+      data: { priorityScore },
+    });
+    reprioritized++;
+  }
+
+  console.log(`[amips-p3-queue] reprioritized ${reprioritized} items from search demand`);
+  return { reprioritized, mode: "search" };
 }

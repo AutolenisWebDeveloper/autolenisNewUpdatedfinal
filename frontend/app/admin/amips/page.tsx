@@ -3,8 +3,24 @@ import { prisma } from "@/lib/prisma";
 import { haversineMiles } from "@/lib/utils/zip-coords";
 import { getMetroDefs, METRO_MEMBERSHIP_RADIUS_MILES } from "@/lib/amips/metros";
 import AmipsSyncControls from "@/components/admin/amips/AmipsSyncControls";
+import {
+  computeIndexationGates,
+  type IndexationDecision,
+} from "@/lib/amips/indexation-gate";
 
 export const dynamic = "force-dynamic";
+
+// Indexation-gate decision → badge styling.
+function indexationCls(decision: IndexationDecision): string {
+  switch (decision) {
+    case "scale":
+      return "bg-emerald-100 text-emerald-700";
+    case "hold":
+      return "bg-amber-100 text-amber-700";
+    case "pause":
+      return "bg-red-100 text-red-700";
+  }
+}
 
 function fmtDate(d: Date | null | undefined): string {
   return d ? new Date(d).toISOString().slice(0, 10) : "—";
@@ -40,6 +56,7 @@ export default async function AdminAmipsPage() {
     pagesByLifecycle,
     queueByMetro,
     marketScoreCount,
+    indexationGates,
   ] = await Promise.all([
     prisma.vehicleIntelligence.count(),
     prisma.vehicleIntelligence.findFirst({
@@ -62,6 +79,7 @@ export default async function AdminAmipsPage() {
       where: { metro: { not: null } },
     }),
     prisma.amipsMarketScore.count(),
+    computeIndexationGates(),
   ]);
 
   const dealerCoords = dealerRows.map((d) => ({
@@ -200,6 +218,57 @@ export default async function AdminAmipsPage() {
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Section 4 — Indexation Gate (per publish-week cohort) */}
+      <section className="mt-8">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Indexation Gate
+        </h2>
+        <p className="mt-1 text-xs text-slate-400">
+          Indexed ÷ submitted per publish-week cohort. ≥70% scale · 50–69% hold ·
+          &lt;50% pause.
+        </p>
+        <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-2">Cohort Week</th>
+                <th className="px-4 py-2">Submitted</th>
+                <th className="px-4 py-2">Indexed</th>
+                <th className="px-4 py-2">Rate</th>
+                <th className="px-4 py-2">Decision</th>
+              </tr>
+            </thead>
+            <tbody>
+              {indexationGates.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-3 text-slate-400" colSpan={5}>
+                    No published cohorts yet.
+                  </td>
+                </tr>
+              ) : (
+                indexationGates.map((g) => (
+                  <tr key={g.cohortWeek} className="border-b border-slate-100 last:border-0">
+                    <td className="px-4 py-2 font-medium text-slate-900">{g.cohortWeek}</td>
+                    <td className="px-4 py-2 text-slate-700">{g.submitted}</td>
+                    <td className="px-4 py-2 text-slate-700">{g.indexed}</td>
+                    <td className="px-4 py-2 text-slate-700">
+                      {(g.indexationRate * 100).toFixed(0)}%
+                    </td>
+                    <td className="px-4 py-2">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${indexationCls(g.decision)}`}
+                      >
+                        {g.decision}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
