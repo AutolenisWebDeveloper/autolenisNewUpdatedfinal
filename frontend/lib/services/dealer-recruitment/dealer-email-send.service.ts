@@ -50,7 +50,7 @@ export interface SendDealerEmailResult {
 
 const MAX_PER_HOUR = 50
 const MAX_PER_DAY = 200
-const FROM_NAME = process.env.FROM_NAME ?? "AutoLenis"
+const FROM_NAME = process.env.FROM_NAME ?? "Markist Athelus"
 
 // Phase 4B-2 — env vars that MUST be present before any dealer outreach send.
 // A cold/misconfigured sending domain torches deliverability, so we refuse to
