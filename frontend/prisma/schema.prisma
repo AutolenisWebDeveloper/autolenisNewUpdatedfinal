@@ -3308,9 +3308,12 @@ model BuyerOpportunity {
 model DealerProspect {
   id              String   @id @default(cuid())
 
-  // Relation back to BuyerOpportunity
-  buyerOppId      String   @map("buyer_opp_id")
-  buyerOpp        BuyerOpportunity @relation(fields: [buyerOppId], references: [id], onDelete: Cascade)
+  // Relation back to BuyerOpportunity. Optional: AMIPS bulk dealer discovery
+  // (Gemini Maps / Apollo imports) has no originating buyer, so prospects from
+  // those sources are created with buyerOppId = null. Buyer-intake prospects
+  // still pass a real buyerOppId.
+  buyerOppId      String?  @map("buyer_opp_id")
+  buyerOpp        BuyerOpportunity? @relation(fields: [buyerOppId], references: [id], onDelete: Cascade)
 
   // Dealer details (from web search)
   name            String
