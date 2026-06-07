@@ -135,7 +135,7 @@ async function upsertDealer(
   }
 
   await prisma.dealerProspect.create({
-    data: { ...data, buyerOppId: null, status: "DISCOVERED" },
+    data: { ...data, status: "DISCOVERED" },
   });
   return "inserted";
 }
