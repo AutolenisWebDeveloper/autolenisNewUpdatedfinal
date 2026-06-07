@@ -3,8 +3,18 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 import { JsonLd, articleSchema, faqSchema } from "@/lib/seo/jsonld";
-import { getRelatedPillars } from "@/lib/seo/pillar-links";
+import { getRelatedPillars, getPrimaryClusterForPillar } from "@/lib/seo/pillar-links";
 import ContentTracker from "@/components/analytics/ContentTracker";
+import ProgrammaticGuideLinks from "@/components/content/ProgrammaticGuideLinks";
+
+// Heading for the down-link block, by cluster.
+const CLUSTER_DOWNLINK_HEADING: Record<string, string> = {
+  dealer_quotes: "Dealer quote guides by city",
+  otd_price: "Out-the-door price guides by city",
+  dealer_fees: "Dealer fee guides by city",
+  trade_in: "Trade-in guides by city",
+  leasing: "Lease deal guides by city",
+};
 
 export interface PillarFaq {
   question: string;
@@ -43,6 +53,7 @@ export default function PillarArticle({
   datePublished = "2024-01-01",
 }: PillarArticleProps) {
   const related = getRelatedPillars(slug);
+  const downlinkCluster = getPrimaryClusterForPillar(slug);
 
   return (
     <>
@@ -161,6 +172,16 @@ export default function PillarArticle({
             ))}
           </ul>
         </section>
+
+        {/* Down-links to programmatic, city-level guides for this topic */}
+        {downlinkCluster && (
+          <ProgrammaticGuideLinks
+            heading={CLUSTER_DOWNLINK_HEADING[downlinkCluster] ?? "Guides by city"}
+            cluster={downlinkCluster}
+            limit={6}
+            testId="pillar-programmatic-links"
+          />
+        )}
       </article>
     </>
   );

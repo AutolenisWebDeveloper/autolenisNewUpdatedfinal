@@ -58,6 +58,24 @@ export const CLUSTER_PILLAR_MAP: Record<string, string[]> = {
   leasing: ["lease-vs-buy-car", "how-to-get-best-car-price"],
 };
 
+// Phase C4 — the reverse direction: which programmatic cluster a pillar page
+// links DOWN to. This makes internal linking bidirectional (pillars surface the
+// most relevant programmatic, city-level guides for their topic). Each pillar
+// maps to the single cluster whose articles are the most natural next read.
+export const PILLAR_PRIMARY_CLUSTER: Record<string, string> = {
+  "how-to-get-best-car-price": "dealer_quotes",
+  "how-to-negotiate-car-price": "otd_price",
+  "dealer-fees-complete-guide": "dealer_fees",
+  "lease-vs-buy-car": "leasing",
+  "car-trade-in-value-guide": "trade_in",
+  "car-buying-concierge-service": "dealer_quotes",
+};
+
+/** The programmatic cluster a pillar page should surface city-level guides for. */
+export function getPrimaryClusterForPillar(slug: string): string | undefined {
+  return PILLAR_PRIMARY_CLUSTER[slug];
+}
+
 const PILLARS_BY_SLUG: Record<string, PillarPage> = Object.fromEntries(
   PILLAR_PAGES.map((p) => [p.slug, p]),
 );
