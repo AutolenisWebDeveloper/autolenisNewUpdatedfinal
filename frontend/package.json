@@ -15,7 +15,10 @@
     "seed": "tsx prisma/seed.ts",
     "sandbox:seed-deal": "tsx scripts/seed-sandbox-deal.ts",
     "content:generate": "tsx scripts/generate-articles.ts",
-    "amips:seed": "tsx scripts/amips-seed.ts"
+    "amips:seed": "tsx scripts/amips-seed.ts",
+    "amips:sync-dealers": "tsx scripts/amips-sync-dealers.ts",
+    "amips:sync-markets": "tsx scripts/amips-sync-markets.ts",
+    "amips:compute-scores": "tsx scripts/amips-compute-scores.ts"
   },
   "engines": {
     "node": ">=18.18"
