@@ -88,3 +88,52 @@ export function trackArticleView(params: {
     ...(params.state ? { state: params.state } : {}),
   });
 }
+
+// --- Phase C-Attribution — conversion tracking ----------------------------
+// Both events carry the full content dimension set (cluster / city / state /
+// metro) so GA4 conversions can be reported by metro and state alongside the
+// existing cluster and city reporting.
+
+type ConversionType = "lead" | "deal_created" | "deposit_paid";
+
+interface ContentDimensions {
+  articleSlug?: string;
+  cluster?: string;
+  city?: string;
+  state?: string;
+  metro?: string;
+}
+
+function contentDimensionParams(d: ContentDimensions): Record<string, unknown> {
+  return {
+    ...(d.articleSlug ? { article_slug: d.articleSlug } : {}),
+    ...(d.cluster ? { cluster: d.cluster } : {}),
+    ...(d.city ? { city: d.city } : {}),
+    ...(d.state ? { state: d.state } : {}),
+    ...(d.metro ? { metro: d.metro } : {}),
+  };
+}
+
+/** Micro-conversion — a content-attributed lead was captured. */
+export function trackContentLead(
+  params: ContentDimensions & { source: string; buyerTimeline?: string },
+): void {
+  emit("content_lead", {
+    ...contentDimensionParams(params),
+    source: params.source,
+    ...(params.buyerTimeline ? { buyer_timeline: params.buyerTimeline } : {}),
+  });
+}
+
+/** Macro-conversion — a content-attributed lead became a deal or paid deposit. */
+export function trackContentConversion(
+  params: ContentDimensions & { conversionType: ConversionType; valueCents?: number },
+): void {
+  emit("content_conversion", {
+    ...contentDimensionParams(params),
+    conversion_type: params.conversionType,
+    ...(typeof params.valueCents === "number"
+      ? { value: params.valueCents / 100, currency: "USD" }
+      : {}),
+  });
+}

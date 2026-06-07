@@ -29,6 +29,8 @@ import {
   type FeeAnalysisResult,
   type Verdict,
 } from "@/lib/tools/dealer-fees";
+import { readContentAttribution } from "@/lib/analytics/attribution";
+import { trackContentLead } from "@/lib/analytics/events";
 
 // SSR-safe analytics shim. Phase C0 ships a richer events layer; until then we
 // fire GA4 events directly with a window.gtag null-guard so the calculator is
@@ -207,6 +209,18 @@ export default function DealerFeeCalculator() {
         calculator_name: "dealer_fee_calculator",
         state,
         step: "lead_capture",
+      });
+      // Phase C-Attribution — fire the content_lead conversion event with the
+      // article dimensions if the buyer arrived from a buying-guide page.
+      const attr = readContentAttribution();
+      trackContentLead({
+        articleSlug: attr?.slug,
+        cluster: attr?.cluster,
+        city: attr?.city,
+        state: attr?.state ?? state,
+        metro: attr?.metro,
+        source: "tool:dealer_fee_calculator",
+        buyerTimeline: leadTimeline,
       });
       setStep("done");
     } catch {

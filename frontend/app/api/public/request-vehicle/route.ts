@@ -25,6 +25,10 @@ import {
   intakeBuyerRequest,
   type UnifiedIntakeInput,
 } from "@/lib/services/acquisition/unified-buyer-intake.service";
+import {
+  getAttributionFromCookieHeader,
+  recordContentAttribution,
+} from "@/lib/analytics/content-attribution.server";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -276,6 +280,18 @@ export async function POST(request: NextRequest) {
 
   const { buyerOpportunityId, vehicleRequestId } =
     await intakeBuyerRequest(input);
+
+  // Phase C-Attribution — if this request came from a buyer who read a
+  // buying-guide article, link the opportunity to that article. No-op when
+  // there is no content touch cookie. Best-effort; never blocks submission.
+  if (buyerOpportunityId) {
+    await recordContentAttribution({
+      touch: getAttributionFromCookieHeader(request.headers.get("cookie")),
+      source: "web:request_vehicle",
+      buyerOpportunityId,
+      email: data.email,
+    });
+  }
 
   // Resolve the buyerId the unified service stood up, for CRM identity linking
   // and the QStash welcome sequence. When no VehicleRequest was created the

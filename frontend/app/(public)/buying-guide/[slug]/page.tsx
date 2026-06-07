@@ -93,6 +93,7 @@ export default async function BuyingGuideArticlePage({ params }: PageProps) {
         cluster={article.cluster}
         city={article.city}
         state={article.state}
+        metro={article.metro ?? undefined}
       />
 
       <article

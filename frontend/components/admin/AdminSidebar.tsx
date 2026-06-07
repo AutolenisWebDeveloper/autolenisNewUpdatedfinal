@@ -81,6 +81,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Reports", href: "/admin/reports", icon: BarChart2 },
     { label: "Buyer Funnel", href: "/admin/reports/buyers", icon: Users },
     { label: "Buyer Sources", href: "/admin/buyer-sources", icon: TrendingUp },
+    { label: "Content Attribution", href: "/admin/content/attribution", icon: BarChart2 },
     { label: "Dealer Metrics", href: "/admin/reports/dealers", icon: Building2 },
     { label: "Affiliate Report", href: "/admin/reports/affiliates", icon: Share2 },
     { label: "Revenue", href: "/admin/reports/revenue", icon: DollarSign },
