@@ -1,227 +1,48 @@
-// AMIPS — Wave 1 bulk dealer-discovery enrichment runner.
-//
-// Triggers the existing Gemini Maps dealer-discovery pipeline across the top 25
-// US metros × the top 10 vehicle brands (250 combinations) and upserts every
-// discovered dealer into the DealerProspect table.
-//
-// No buyer required:
-//   DealerProspect.buyerOppId is optional. Bulk market enrichment has no
-//   originating buyer, so every prospect created here is unscoped
-//   (buyerOppId = null). Buyer-intake prospects still carry a real buyerOppId.
-//
-// Dedup:
-//   The table has no compound unique constraint, so createMany({skipDuplicates})
-//   cannot dedup by dealer identity. We match each discovered dealer on its
-//   natural identity (Google Maps source URL when present, else
-//   name + city + state) and update in place rather than inserting a duplicate.
-//
-// Requires DATABASE_URL and GEMINI_API_KEY in the environment.
-//
-// Usage (from frontend/):
-//   pnpm amips:enrich-dealers
-
+#!/usr/bin/env tsx
 import { prisma } from "@/lib/prisma";
-import {
-  discoverDealers,
-  type DiscoveredDealer,
-} from "@/lib/services/acquisition/compound-search.service";
+import { enrichDealerEmail } from "@/lib/services/dealer-recruitment/email-enrichment.service";
 
-// ───────────────────────────────────────────────────
-// WAVE 1 TARGETS
-// ───────────────────────────────────────────────────
+async function main() {
+  const args = process.argv.slice(2);
+  const force = args.includes("--force");
+  const limitArg = args.find((a) => a.startsWith("--limit="));
+  const limit = limitArg ? parseInt(limitArg.split("=")[1], 10) : 500;
 
-interface MetroTarget {
-  metro: string;
-  state: string;
-  // A central ZIP for the metro — the seed point for the 25-mile Gemini Maps
-  // radius search. Mirrors the metro list in lib/amips/seed/content-queue.seed.ts.
-  zip: string;
-}
+  console.log(`[amips-enrich-dealers] starting (force=${force}, limit=${limit})`);
 
-// Top 25 US metros (Wave 1) with a representative downtown ZIP each.
-const WAVE_1_METROS: MetroTarget[] = [
-  { metro: "Dallas-Fort Worth", state: "TX", zip: "75201" },
-  { metro: "Houston", state: "TX", zip: "77002" },
-  { metro: "Los Angeles", state: "CA", zip: "90012" },
-  { metro: "Chicago", state: "IL", zip: "60601" },
-  { metro: "Miami", state: "FL", zip: "33130" },
-  { metro: "Atlanta", state: "GA", zip: "30303" },
-  { metro: "Washington DC", state: "DC", zip: "20001" },
-  { metro: "Phoenix", state: "AZ", zip: "85003" },
-  { metro: "Philadelphia", state: "PA", zip: "19103" },
-  { metro: "Detroit", state: "MI", zip: "48226" },
-  { metro: "Boston", state: "MA", zip: "02108" },
-  { metro: "San Antonio", state: "TX", zip: "78205" },
-  { metro: "Austin", state: "TX", zip: "78701" },
-  { metro: "Seattle", state: "WA", zip: "98101" },
-  { metro: "Denver", state: "CO", zip: "80202" },
-  { metro: "Minneapolis", state: "MN", zip: "55401" },
-  { metro: "Tampa", state: "FL", zip: "33602" },
-  { metro: "Charlotte", state: "NC", zip: "28202" },
-  { metro: "San Diego", state: "CA", zip: "92101" },
-  { metro: "Portland", state: "OR", zip: "97204" },
-  { metro: "Las Vegas", state: "NV", zip: "89101" },
-  { metro: "Nashville", state: "TN", zip: "37203" },
-  { metro: "Baltimore", state: "MD", zip: "21202" },
-  { metro: "Sacramento", state: "CA", zip: "95814" },
-  { metro: "New York", state: "NY", zip: "10007" },
-];
-
-// Top 10 vehicle brands.
-const WAVE_1_BRANDS: string[] = [
-  "Toyota",
-  "Ford",
-  "Chevrolet",
-  "Honda",
-  "Ram",
-  "GMC",
-  "Kia",
-  "Hyundai",
-  "Jeep",
-  "Lexus",
-];
-
-// Knobs.
-const MAX_DEALERS_PER_COMBO = 10;
-const DELAY_BETWEEN_CALLS_MS = 2000;
-const SEARCH_RADIUS_MILES = 25;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// ───────────────────────────────────────────────────
-// UPSERT
-// ───────────────────────────────────────────────────
-
-type UpsertOutcome = "inserted" | "updated";
-
-// Upsert a single discovered dealer, deduping on natural identity. We store the
-// queried brand (not the model-returned one) so the per-brand verification
-// rollup stays clean. Bulk-enrichment prospects are unscoped — buyerOppId = null.
-async function upsertDealer(
-  brand: string,
-  d: DiscoveredDealer,
-): Promise<UpsertOutcome> {
-  // Prefer the Google Maps source URL (CID-based, one per place) as the dedup
-  // key; fall back to name + city + state when no URL was returned.
-  const existing = await prisma.dealerProspect.findFirst({
-    where: d.sourceUrl
-      ? { sourceUrl: d.sourceUrl }
-      : {
-          name: d.name,
-          city: d.city ?? undefined,
-          state: d.state ?? undefined,
-          brand,
-        },
-    select: { id: true },
+  const prospects = await prisma.dealerProspect.findMany({
+    where: force ? {} : { emailEnrichedAt: null },
+    take: limit,
+    select: { id: true, name: true, city: true, state: true, website: true },
   });
 
-  const data = {
-    name: d.name,
-    address: d.address,
-    city: d.city,
-    state: d.state,
-    zip: d.zip,
-    phone: d.phone,
-    email: d.email,
-    website: d.website,
-    brand,
-    sourceUrl: d.sourceUrl,
-    searchScore: d.searchScore,
-  };
+  console.log(`[amips-enrich-dealers] found ${prospects.length} prospects to enrich`);
 
-  if (existing) {
-    await prisma.dealerProspect.update({
-      where: { id: existing.id },
-      data,
-    });
-    return "updated";
-  }
-
-  await prisma.dealerProspect.create({
-    data: { ...data, buyerOppId: null, status: "DISCOVERED" },
-  });
-  return "inserted";
-}
-
-// ───────────────────────────────────────────────────
-// MAIN
-// ───────────────────────────────────────────────────
-
-async function main(): Promise<void> {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY not configured — cannot run dealer discovery");
-  }
-
-  const combos = WAVE_1_METROS.length * WAVE_1_BRANDS.length;
-  console.log(
-    `[amips-enrich] starting — ${WAVE_1_METROS.length} metros × ${WAVE_1_BRANDS.length} brands = ${combos} combinations`,
-  );
-
-  let comboIdx = 0;
-  let totalFound = 0;
-  let totalInserted = 0;
-  let totalUpdated = 0;
-  let totalErrors = 0;
-
-  for (const m of WAVE_1_METROS) {
-    for (const brand of WAVE_1_BRANDS) {
-      comboIdx++;
-      const label = `${m.metro}, ${m.state} + ${brand}`;
-      try {
-        const dealers = await discoverDealers({
-          make: brand,
-          zip: m.zip,
-          radiusMiles: SEARCH_RADIUS_MILES,
-        });
-
-        const slice = dealers.slice(0, MAX_DEALERS_PER_COMBO);
-        let inserted = 0;
-        let updated = 0;
-        for (const d of slice) {
-          const outcome = await upsertDealer(brand, d);
-          if (outcome === "inserted") inserted++;
-          else updated++;
-        }
-
-        totalFound += slice.length;
-        totalInserted += inserted;
-        totalUpdated += updated;
-
-        console.log(
-          `[amips-enrich] ${m.metro} + ${brand} — found ${slice.length} ` +
-            `(${inserted} new, ${updated} updated) [${comboIdx}/${combos}]`,
-        );
-      } catch (err) {
-        totalErrors++;
-        console.error(
-          `[amips-enrich] ${label} FAILED [${comboIdx}/${combos}]:`,
-          err instanceof Error ? err.message : err,
-        );
-      }
-
-      // Rate-limit: pause between Gemini calls, but not after the last combo.
-      if (comboIdx < combos) {
-        await sleep(DELAY_BETWEEN_CALLS_MS);
-      }
+  let enriched = 0;
+  let skipped = 0;
+  for (const p of prospects) {
+    try {
+      const res = await enrichDealerEmail({
+        dealerProspectId: p.id,
+        dealerName: p.name,
+        city: p.city ?? "",
+        state: p.state ?? "",
+        website: p.website ?? null,
+        force,
+      });
+      if (res.skipped) skipped++;
+      else if (res.email) enriched++;
+    } catch (err) {
+      console.error(`[amips-enrich-dealers] FAILED for ${p.id}:`, err);
     }
   }
 
-  const totalProspects = await prisma.dealerProspect.count();
-
-  console.log("");
-  console.log("[amips-enrich] ===== SUMMARY =====");
-  console.log(`[amips-enrich] combinations processed: ${comboIdx}/${combos}`);
-  console.log(`[amips-enrich] dealers found:          ${totalFound}`);
-  console.log(`[amips-enrich] inserted (new):         ${totalInserted}`);
-  console.log(`[amips-enrich] updated (existing):     ${totalUpdated}`);
-  console.log(`[amips-enrich] errors:                 ${totalErrors}`);
-  console.log(`[amips-enrich] dealer_prospects total: ${totalProspects}`);
-  console.log("[amips-enrich] done");
+  console.log(`[amips-enrich-dealers] done — enriched ${enriched}, skipped ${skipped}`);
 }
 
 main()
-  .catch((err) => {
-    console.error("[amips-enrich] FATAL", err);
+  .catch((e) => {
+    console.error(e);
     process.exitCode = 1;
   })
   .finally(async () => {

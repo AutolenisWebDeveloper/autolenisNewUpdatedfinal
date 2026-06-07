@@ -13,6 +13,7 @@
     "test:seo": "tsx --test lib/seo/__tests__/*.test.ts",
     "postinstall": "prisma generate",
     "seed": "tsx prisma/seed.ts",
+    "amips:enrich-dealers": "tsx scripts/amips-enrich-dealers.ts",
     "sandbox:seed-deal": "tsx scripts/seed-sandbox-deal.ts",
     "content:generate": "tsx scripts/generate-articles.ts",
     "apollo:import": "tsx scripts/apollo-import.ts",
