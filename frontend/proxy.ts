@@ -85,6 +85,8 @@ const PUBLIC_ROUTES = [
   // Each entry also covers its subpaths via the startsWith(r + "/") check below.
   "/author",
   "/buying-guide",
+  // AMIPS market-intelligence pages (data-narration engine, Tier A–F).
+  "/intelligence",
   "/tools",
   // Twilio voice/SMS webhooks — cannot present a session/CSRF token; each
   // handler validates the X-Twilio-Signature instead.
