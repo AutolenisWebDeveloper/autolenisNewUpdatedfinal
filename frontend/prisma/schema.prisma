@@ -176,7 +176,43 @@ model Dealer {
   marketplaceAgreementSentAt     DateTime? @map("marketplace_agreement_sent_at")
   marketplaceAgreementSignedAt   DateTime? @map("marketplace_agreement_signed_at")
 
+  // In-house electronic signature for the dealer network participation agreement.
+  agreementSignature DealerAgreementSignature?
+
   @@map("dealers")
+}
+
+model DealerAgreementSignature {
+  id            String  @id @default(cuid())
+  dealerId      String  @unique @map("dealer_id")
+
+  agreementVersion String  @map("agreement_version")
+  agreementHash    String  @map("agreement_hash")
+
+  signerName     String  @map("signer_name")
+  signerEmail    String  @map("signer_email")
+  dealershipName String  @map("dealership_name")
+
+  ipAddress String   @map("ip_address")
+  userAgent String   @db.Text @map("user_agent")
+  signedAt  DateTime @default(now()) @map("signed_at")
+
+  consentedToElectronic Boolean @default(true) @map("consented_to_electronic")
+
+  certificatePdfPath     String?   @map("certificate_pdf_path")
+  certificateGeneratedAt DateTime? @map("certificate_generated_at")
+
+  confirmationEmailSentAt DateTime? @map("confirmation_email_sent_at")
+  confirmationEmailId     String?   @map("confirmation_email_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  dealer Dealer @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+
+  @@index([agreementVersion])
+  @@index([signedAt])
+  @@map("dealer_agreement_signatures")
 }
 
 model Affiliate {

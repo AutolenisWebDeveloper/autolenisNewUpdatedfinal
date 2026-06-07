@@ -37,6 +37,15 @@
   - File size limit: 10MB
   - Allowed MIME types: application/pdf, image/jpeg, image/png, image/webp
 
+- [ ] `legal-documents` bucket — create in Supabase dashboard → Storage → New bucket
+  - Name: `legal-documents`
+  - Public access: OFF (private)
+  - No RLS policies required (service role key governs all access through the API layer)
+  - Path convention: dealer-agreements/{dealerId}/{signatureId}.pdf
+  - Allowed MIME type: application/pdf
+  - File size limit: 5MB
+  - pdfkit installed: pnpm add pdfkit && pnpm add -D @types/pdfkit
+
 ### Stripe (one-time per environment)
 - [ ] Webhook endpoint registered at: `https://autolenis.com/api/webhooks/stripe`
 - [ ] Webhook events enabled: payment_intent.succeeded, checkout.session.completed,
