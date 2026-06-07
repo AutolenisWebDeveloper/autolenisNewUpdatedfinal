@@ -36,7 +36,7 @@ interface GeneratedEmail {
   body: string // plain text, no signature/footer
 }
 
-const FOUNDER_NAME = "Marc Smith"
+const FOUNDER_NAME = "Markist Athelus"
 const FOUNDER_REPLY_TO = process.env.DEALER_OUTREACH_REPLY_TO ?? "markist@skaipay.com"
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://www.autolenis.com").trim()
 
@@ -103,7 +103,7 @@ async function callGroqWithRetry(
   throw lastError
 }
 
-const SYSTEM_PROMPT = `You write professional, personalized B2B cold-outreach emails from Marc, founder of AutoLenis, to car dealerships.
+const SYSTEM_PROMPT = `You write professional, personalized B2B cold-outreach emails from Markist, founder of AutoLenis, to car dealerships.
 
 About AutoLenis:
 - A reverse-auction concierge connecting verified buyers with dealers
@@ -124,7 +124,7 @@ Return ONLY valid JSON in this exact shape, no markdown, no commentary:
 
 The body must NOT include:
 - A greeting line is OK (e.g. "Hi <name>,")
-- Do NOT include the sign-off/signature (Marc / Founder / contact info)
+- Do NOT include the sign-off/signature (Markist / Founder / contact info)
 - Do NOT include any unsubscribe text
 - Do NOT include a physical address or CAN-SPAM footer
 Begin your response with { and end with }.`
@@ -169,7 +169,7 @@ function parseGenerated(
     subject: `${input.dealerName} + AutoLenis: buyers in ${input.city}`,
     body: `${greeting}
 
-I'm Marc, founder of AutoLenis. We connect verified buyers with dealers through a reverse-auction model: a buyer tells us what they want, multiple dealers compete with their best out-the-door price, and the buyer picks the offer they like. There's no upfront cost — dealers only earn on a closed deal.
+I'm Markist, founder of AutoLenis. We connect verified buyers with dealers through a reverse-auction model: a buyer tells us what they want, multiple dealers compete with their best out-the-door price, and the buyer picks the offer they like. There's no upfront cost — dealers only earn on a closed deal.
 
 We have buyers in the ${input.city}, ${input.state} area looking for vehicles you carry, and I'd love to include ${input.dealerName} in the next round.
 
