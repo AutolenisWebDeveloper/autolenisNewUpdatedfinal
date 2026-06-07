@@ -4,6 +4,7 @@ import { ArrowRight } from "lucide-react";
 
 import { buildPageMetadata } from "@/lib/seo/metadata";
 import { PILLAR_PAGES } from "@/lib/seo/pillar-links";
+import ProgrammaticGuideLinks from "@/components/content/ProgrammaticGuideLinks";
 
 export const metadata: Metadata = buildPageMetadata({
   title: "Car Buying Guides — Get the Best Deal on Any Car",
@@ -72,6 +73,13 @@ export default function BuyingGuideIndex() {
           </li>
         ))}
       </ul>
+
+      {/* City-level programmatic guides — hub → article internal links */}
+      <ProgrammaticGuideLinks
+        heading="Popular guides by city"
+        limit={8}
+        testId="hub-programmatic-links"
+      />
     </div>
   );
 }

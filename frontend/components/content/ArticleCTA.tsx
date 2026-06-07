@@ -66,12 +66,35 @@ export default function ArticleCTA({
     );
   }
 
-  // Full-width emphasis block — mid-page / bottom of article.
+  // Mid-page seam — a filled, single-row bar that interrupts the body content
+  // and stands apart from both the light above-fold banner and the large
+  // bottom block, so the reader meets a fresh conversion prompt mid-scroll.
+  if (position === "mid_page") {
+    return (
+      <div
+        className="my-12 rounded-2xl bg-[#0B5FD1] px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        data-testid="article-cta-mid"
+      >
+        <p className="text-sm font-semibold text-white">{headline}</p>
+        <Link
+          href={href}
+          onClick={onClick}
+          data-testid="article-cta-link"
+          className="inline-flex shrink-0 items-center gap-2 px-6 py-3 bg-white text-[#0B5FD1] font-semibold text-sm rounded-xl hover:bg-[#F3F4F6] transition-colors"
+        >
+          Compare offers
+          <ArrowRight size={16} />
+        </Link>
+      </div>
+    );
+  }
+
+  // Full-width emphasis block — bottom of article.
   const location = locationLabel(ctx);
   return (
     <div
       className="mt-12 rounded-2xl bg-[#0B5FD1] px-8 py-10 text-center"
-      data-testid={position === "bottom" ? "article-cta-bottom" : "article-cta-mid"}
+      data-testid="article-cta-bottom"
     >
       <p className="text-xl font-bold text-white mb-3">{headline}</p>
       <p className="text-white/80 mb-6 max-w-lg mx-auto">{buildCtaSubcopy(ctx)}</p>
