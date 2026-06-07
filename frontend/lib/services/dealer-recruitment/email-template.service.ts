@@ -36,7 +36,7 @@ interface GeneratedEmail {
   body: string // plain text, no signature/footer
 }
 
-const FOUNDER_NAME = "Marc Smith"
+const FOUNDER_NAME = "Markist Athelus"
 const FOUNDER_REPLY_TO = process.env.DEALER_OUTREACH_REPLY_TO ?? "markist@skaipay.com"
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://www.autolenis.com").trim()
 
@@ -103,7 +103,7 @@ async function callGroqWithRetry(
   throw lastError
 }
 
-const SYSTEM_PROMPT = `You write professional, personalized B2B cold-outreach emails from Marc, founder of AutoLenis, to car dealerships.
+const SYSTEM_PROMPT = `You write professional, personalized B2B cold-outreach emails from Markist Athelus, founder of AutoLenis, to car dealerships.
 
 About AutoLenis:
 - A reverse-auction concierge connecting verified buyers with dealers
@@ -124,7 +124,7 @@ Return ONLY valid JSON in this exact shape, no markdown, no commentary:
 
 The body must NOT include:
 - A greeting line is OK (e.g. "Hi <name>,")
-- Do NOT include the sign-off/signature (Marc / Founder / contact info)
+- Do NOT include the sign-off/signature (Markist Athelus / Founder / contact info)
 - Do NOT include any unsubscribe text
 - Do NOT include a physical address or CAN-SPAM footer
 Begin your response with { and end with }.`
@@ -169,7 +169,7 @@ function parseGenerated(
     subject: `${input.dealerName} + AutoLenis: buyers in ${input.city}`,
     body: `${greeting}
 
-I'm Marc, founder of AutoLenis. We connect verified buyers with dealers through a reverse-auction model: a buyer tells us what they want, multiple dealers compete with their best out-the-door price, and the buyer picks the offer they like. There's no upfront cost — dealers only earn on a closed deal.
+I'm Markist Athelus, founder of AutoLenis. We connect verified buyers with dealers through a reverse-auction model: a buyer tells us what they want, multiple dealers compete with their best out-the-door price, and the buyer picks the offer they like. There's no upfront cost — dealers only earn on a closed deal.
 
 We have buyers in the ${input.city}, ${input.state} area looking for vehicles you carry, and I'd love to include ${input.dealerName} in the next round.
 
@@ -334,6 +334,109 @@ Either way — no pressure.`
     opts.dealerEmail,
     opts.unsubscribeUrl ?? null,
   )
+}
+
+// ─── Vehicle-specific buyer-opportunity outreach ─────────────────────────────
+//
+// Deterministic (non-LLM) template used by the post-intake auto-outreach flow.
+// Unlike the generic cold-outreach generator above, this email is grounded in a
+// specific BuyerOpportunity. PRIVACY: it carries ONLY non-identifying buyer
+// signal — vehicle interest, a rounded budget RANGE, city + state (never zip),
+// timeline, condition. No buyer name / email / phone / address is ever included.
+
+export interface BuyerOpportunityEmailParams {
+  dealerName: string
+  dealerContactName: string | null
+  vehicleMake: string
+  vehicleModel: string
+  yearRange: string // e.g., "2023-2024" or "2024"
+  budgetRange: string // e.g., "$30,000-$35,000"
+  buyerCity: string // city only — NO zip, NO address
+  buyerState: string // state abbreviation
+  timeline: string // e.g., "within 30 days"
+  condition: string // "New", "Used", or "Either"
+  offerSubmitUrl: string // link for the dealer to submit an offer
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+}
+
+/**
+ * Build a vehicle-specific, CAN-SPAM-compliant dealer outreach email for a
+ * single BuyerOpportunity. Returns subject + HTML body + plain-text fallback.
+ */
+export function generateBuyerOpportunityEmail(
+  params: BuyerOpportunityEmailParams,
+): EmailTemplate {
+  const greetingName = params.dealerContactName?.trim()
+    ? params.dealerContactName.trim().split(/\s+/)[0]
+    : "Internet Sales Team"
+
+  const vehicle = [params.vehicleMake, params.vehicleModel]
+    .filter(Boolean)
+    .join(" ")
+    .trim()
+  const yearVehicle = [params.yearRange, vehicle].filter(Boolean).join(" ").trim()
+  const location = [params.buyerCity, params.buyerState]
+    .filter(Boolean)
+    .join(", ")
+
+  const subject =
+    `Qualified buyer in ${location} seeking ${vehicle}`.slice(0, 160)
+
+  const bodyText = `Hi ${greetingName},
+
+My name is Markist Athelus, founder of AutoLenis. We connect verified car buyers with local dealerships through a competitive offer model.
+
+We have a qualified buyer in ${location} looking for:
+
+Vehicle: ${yearVehicle}
+Condition: ${params.condition}
+Budget: ${params.budgetRange}
+Timeline: ${params.timeline}
+
+This buyer has been pre-screened and is ready to make a purchase decision. There is no cost to participate — dealers only pay when they win a deal.
+
+To submit your best out-the-door offer:
+${params.offerSubmitUrl}
+
+Your contact information will be shared with the buyer ONLY if they select your offer. All offers are submitted through our platform.
+
+Best,
+Markist Athelus
+Founder, AutoLenis
+info@autolenis.com
+https://www.autolenis.com
+
+---
+This email was sent because your dealership matches buyer demand in your area. Reply UNSUBSCRIBE to opt out.
+AutoLenis | 4500 Spring Creek Pkwy, Suite 200, Plano, TX 75024`
+
+  const body = `<div style="font-family:-apple-system,system-ui,sans-serif;max-width:600px;margin:0 auto;color:#1f2937;font-size:14px;line-height:1.7">
+  <p style="margin:0 0 16px">Hi ${escapeHtml(greetingName)},</p>
+  <p style="margin:0 0 16px">My name is Markist Athelus, founder of AutoLenis. We connect verified car buyers with local dealerships through a competitive offer model.</p>
+  <p style="margin:0 0 8px">We have a qualified buyer in <strong>${escapeHtml(location)}</strong> looking for:</p>
+  <table style="margin:0 0 16px;border-collapse:collapse">
+    <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Vehicle:</td><td style="padding:2px 0;font-weight:600">${escapeHtml(yearVehicle)}</td></tr>
+    <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Condition:</td><td style="padding:2px 0;font-weight:600">${escapeHtml(params.condition)}</td></tr>
+    <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Budget:</td><td style="padding:2px 0;font-weight:600">${escapeHtml(params.budgetRange)}</td></tr>
+    <tr><td style="padding:2px 12px 2px 0;color:#6b7280">Timeline:</td><td style="padding:2px 0;font-weight:600">${escapeHtml(params.timeline)}</td></tr>
+  </table>
+  <p style="margin:0 0 20px">This buyer has been pre-screened and is ready to make a purchase decision. There is no cost to participate — dealers only pay when they win a deal.</p>
+  <div style="text-align:center;margin:24px 0">
+    <a href="${escapeHtml(params.offerSubmitUrl)}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">SUBMIT MY OFFER →</a>
+  </div>
+  <p style="margin:0 0 16px">Your contact information will be shared with the buyer ONLY if they select your offer. All offers are submitted through our platform.</p>
+  <p style="margin:0 0 16px">Best,<br/>Markist Athelus<br/>Founder, AutoLenis<br/><a href="mailto:info@autolenis.com" style="color:#0B5FD1">info@autolenis.com</a><br/><a href="https://www.autolenis.com" style="color:#0B5FD1">https://www.autolenis.com</a></p>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0"/>
+  <p style="margin:0;color:#94a3b8;font-size:12px">This email was sent because your dealership matches buyer demand in your area. Reply UNSUBSCRIBE to opt out.<br/>AutoLenis | 4500 Spring Creek Pkwy, Suite 200, Plano, TX 75024</p>
+</div>`
+
+  return { subject, body, bodyText }
 }
 
 /**

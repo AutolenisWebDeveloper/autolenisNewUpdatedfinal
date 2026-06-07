@@ -2,11 +2,13 @@
 // System 4 — Offer submission, validation, revision
 // Max 1 revision per offer (MAX_OFFER_REVISIONS from constants)
 
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { OfferStatus } from "@prisma/client";
 import { MAX_OFFER_REVISIONS } from "@/lib/constants";
 import { writeDealerAudit } from "@/lib/services/audit/dealer-audit.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
+import { sendFirstOfferReceivedEmail } from "@/lib/services/email/buyer-notifications.service";
 
 const APR_SUSPICIOUS_THRESHOLD = 29.0;
 // Allow up to 1 cent rounding tolerance when summing OTD components
@@ -158,6 +160,51 @@ export async function submitOffer(input: OfferInput) {
       type: "OFFER_RECEIVED",
     },
   }).catch(() => {});
+
+  // First-offer buyer email — fires once, when the offer count goes 0 → 1 for
+  // this auction. Non-blocking via after() so a notification failure never
+  // affects the dealer's submission. PRIVACY: the email never reveals which
+  // dealer submitted, the amount, or any dealer contact info — it only drives
+  // the buyer back into the platform.
+  if (offerCount === 1) {
+    after(async () => {
+      try {
+        const [buyer, deposit, vehicle] = await Promise.all([
+          prisma.buyer.findUnique({
+            where: { id: auction.buyerId },
+            select: { firstName: true, user: { select: { email: true } } },
+          }),
+          prisma.deposit.findUnique({
+            where: { id: auction.depositId },
+            select: { status: true },
+          }),
+          prisma.auctionVehicle.findFirst({
+            where: { auctionId: auction.id },
+            select: { make: true, model: true },
+          }),
+        ]);
+
+        const buyerEmail = buyer?.user?.email;
+        if (!buyerEmail) return;
+
+        const appUrl = (
+          process.env.NEXT_PUBLIC_APP_URL ?? "https://www.autolenis.com"
+        ).trim();
+
+        await sendFirstOfferReceivedEmail({
+          buyerEmail,
+          buyerFirstName: buyer?.firstName ?? "there",
+          vehicleMake: vehicle?.make ?? "",
+          vehicleModel: vehicle?.model ?? "",
+          hasDeposit: deposit?.status === "PAID",
+          depositUrl: `${appUrl}/buyer/deposit`,
+          offersUrl: `${appUrl}/buyer/offers`,
+        });
+      } catch (err) {
+        console.error("[first-offer-notification] failed:", err);
+      }
+    });
+  }
 
   // Sync to GHL — fire-and-forget. Buyer email isn't loaded above, so resolve
   // it with a lightweight lookup before tagging.

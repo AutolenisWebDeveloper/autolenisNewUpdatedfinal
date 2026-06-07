@@ -5,6 +5,7 @@
 // unified intake service. Voice collects fewer fields than the web form, so
 // everything beyond name/email is optional.
 
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { UserRole } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
@@ -15,6 +16,8 @@ import {
   intakeBuyerRequest,
   type UnifiedIntakeInput,
 } from "@/lib/services/acquisition/unified-buyer-intake.service";
+import { runPostIntakeOutreach } from "@/lib/services/acquisition/post-intake-outreach.service";
+import { sendDealersContactedEmail } from "@/lib/services/email/buyer-notifications.service";
 import type { VehicleRequestDraft } from "@/lib/voice/conversation-store";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -218,6 +221,31 @@ export async function dispatchVehicleRequest(
       return { success: false, buyerId, error: "could not save vehicle request" };
     }
     vehicleRequestId = result.vehicleRequestId;
+
+    // ── Post-intake auto-outreach + buyer notification (non-blocking) ───────
+    // Contacts discovered dealers (privacy-safe) after the response is sent,
+    // then emails the buyer the dealers-contacted count + $99 CTA.
+    const opportunityId = result.buyerOpportunityId;
+    if (opportunityId) {
+      after(async () => {
+        try {
+          const outreach = await runPostIntakeOutreach(opportunityId);
+
+          if (outreach.dealersContacted > 0) {
+            await sendDealersContactedEmail({
+              buyerEmail: email,
+              buyerFirstName: firstName,
+              vehicleMake: req.make ?? "",
+              vehicleModel: req.model ?? "",
+              dealerCount: outreach.dealersContacted,
+              depositUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://www.autolenis.com"}/buyer/deposit`,
+            });
+          }
+        } catch (err) {
+          console.error("[post-intake] outreach or notification failed:", err);
+        }
+      });
+    }
   } catch (err) {
     console.error("[voice/dispatch] unified intake failed:", err);
     return { success: false, buyerId, error: "could not save vehicle request" };
