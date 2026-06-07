@@ -26,7 +26,12 @@ export default function robots(): MetadataRoute.Robots {
       // Same allow/disallow surface for every AI crawler — explicit allow.
       ...aiCrawlers.map((userAgent) => ({ userAgent, allow: "/", disallow })),
     ],
-    sitemap: [`${base}/sitemap.xml`, `${base}/image-sitemap.xml`],
+    sitemap: [
+      `${base}/sitemap.xml`,
+      `${base}/image-sitemap.xml`,
+      // AMIPS tier-segmented sitemap index (Tiers A–D).
+      `${base}/sitemap-amips.xml`,
+    ],
     host: base,
   };
 }
