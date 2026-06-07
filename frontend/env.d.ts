@@ -81,6 +81,14 @@ declare namespace NodeJS {
     CRON_SECRET: string;
     SUPABASE_JWT_SECRET: string;
 
+    // AMIPS Phase 3 — Search Intelligence (Google Search Console).
+    // Base64-encoded Google service-account JSON; the account must be added as a
+    // user on the Search Console property. Optional — the search-sync cron
+    // no-ops when unset. GSC_SITE_URL overrides the property URL (defaults to
+    // NEXT_PUBLIC_APP_URL).
+    GOOGLE_SEARCH_CONSOLE_KEY?: string;
+    GSC_SITE_URL?: string;
+
     // Platform
     NEXT_PUBLIC_APP_URL: string;
     MAINTENANCE_MODE: string;

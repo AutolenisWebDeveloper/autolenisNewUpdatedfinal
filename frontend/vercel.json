@@ -111,6 +111,14 @@
     {
       "path": "/api/cron/lead-magnet-sequence",
       "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/cron/amips-search-sync",
+      "schedule": "0 5 * * 1"
+    },
+    {
+      "path": "/api/cron/amips-lifecycle",
+      "schedule": "0 4 * * 2"
     }
   ]
 }
