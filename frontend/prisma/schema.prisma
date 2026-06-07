@@ -3794,3 +3794,26 @@ model AmipsPage {
   @@index([lifecycleStatus])
   @@map("amips_pages")
 }
+
+// AMIPS Phase 1 — Market Score cache.
+// Pre-computed AutoLenis Market Score per (make, model, metro) so article
+// generation reads a stored score instead of recomputing on the fly. Refreshed
+// by the market-score batch pipeline whenever dealer/market data changes.
+model AmipsMarketScore {
+  id                    String   @id @default(cuid())
+  make                  String
+  model                 String
+  metro                 String
+  state                 String
+  dealerCount           Int      @default(0) @map("dealer_count")
+  overallBuyerAdvantage Float    @map("overall_buyer_advantage")
+  scoreJson             String   @map("score_json") @db.Text
+  computedAt            DateTime @default(now()) @map("computed_at")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@unique([make, model, metro])
+  @@index([metro])
+  @@index([overallBuyerAdvantage])
+  @@map("amips_market_scores")
+}
