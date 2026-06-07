@@ -1,0 +1,736 @@
+Generating: Houston
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Houston --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Houston"}
+
+(node:7002) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[3/11] trade-in-vs-sell-privately-houston-tx → PUBLISHED (quality 6/6, 701w, compliance ok, openai/gpt-oss-120b)
+[1/11] trade-in-value-houston-tx → PUBLISHED (quality 6/6, 749w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-houston-tx → REVIEW_NEEDED (quality 6/6, 773w, compliance FLAGGED, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-houston-tx → PUBLISHED (quality 6/6, 835w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-houston-tx → PUBLISHED (quality 6/6, 856w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-houston-tx → PUBLISHED (quality 6/6, 803w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-houston-tx → PUBLISHED (quality 6/6, 755w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-houston-tx → PUBLISHED (quality 6/6, 756w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-houston-tx → PUBLISHED (quality 6/6, 727w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-houston-tx → PUBLISHED (quality 6/6, 789w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-houston-tx → PUBLISHED (quality 6/6, 734w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 0
+  PUBLISHED: 10
+  REVIEW_NEEDED: 1
+Done: Houston
+Generating: Los Angeles
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro 'Los Angeles' --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Los Angeles"}
+
+(node:7055) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[3/11] trade-in-vs-sell-privately-los-angeles-ca → PUBLISHED (quality 6/6, 860w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-los-angeles-ca → PUBLISHED (quality 6/6, 731w, compliance ok, openai/gpt-oss-120b)
+[1/11] trade-in-value-los-angeles-ca → PUBLISHED (quality 6/6, 769w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-los-angeles-ca → PUBLISHED (quality 6/6, 716w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-los-angeles-ca → PUBLISHED (quality 6/6, 710w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-los-angeles-ca → PUBLISHED (quality 6/6, 814w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-los-angeles-ca → PUBLISHED (quality 6/6, 749w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-los-angeles-ca → PUBLISHED (quality 6/6, 721w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-los-angeles-ca → PUBLISHED (quality 6/6, 739w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-los-angeles-ca → PUBLISHED (quality 6/6, 777w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-los-angeles-ca → FAILED: Error: model returned no parseable JSON object
+
+──────────── Summary ────────────
+Generated: 10   Failed: 1
+  PUBLISHED: 10
+
+Failures:
+  ford-f150-lease-deals-los-angeles-ca: Error: model returned no parseable JSON object
+Done: Los Angeles
+Generating: Chicago
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Chicago --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Chicago"}
+
+(node:7112) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 12 article(s) (concurrency 3)...
+
+[1/12] honda-accord-dealer-quotes-chicago-il → PUBLISHED (quality 6/6, 734w, compliance ok, openai/gpt-oss-120b)
+[2/12] trade-in-value-chicago-il → PUBLISHED (quality 6/6, 712w, compliance ok, openai/gpt-oss-120b)
+[3/12] maximize-trade-in-value-chicago-il → PUBLISHED (quality 6/6, 711w, compliance ok, openai/gpt-oss-120b)
+[4/12] trade-in-vs-sell-privately-chicago-il → PUBLISHED (quality 6/6, 790w, compliance ok, openai/gpt-oss-120b)
+[5/12] best-trade-in-value-chicago-il → REVIEW_NEEDED (quality 5/6, 678w, compliance ok, openai/gpt-oss-120b)
+[7/12] car-lease-deals-chicago-il → PUBLISHED (quality 6/6, 800w, compliance ok, openai/gpt-oss-120b)
+[6/12] car-trade-in-calculator-chicago-il → PUBLISHED (quality 6/6, 732w, compliance ok, openai/gpt-oss-120b)
+[9/12] lease-vs-buy-chicago-il → PUBLISHED (quality 6/6, 706w, compliance ok, openai/gpt-oss-120b)
+[8/12] best-lease-deals-chicago-il → PUBLISHED (quality 6/6, 716w, compliance ok, openai/gpt-oss-120b)
+[10/12] car-leasing-tips-chicago-il → PUBLISHED (quality 6/6, 777w, compliance ok, openai/gpt-oss-120b)
+[12/12] chevrolet-silverado-lease-deals-chicago-il → PUBLISHED (quality 6/6, 824w, compliance ok, openai/gpt-oss-120b)
+[11/12] ford-f150-lease-deals-chicago-il → REVIEW_NEEDED (quality 5/6, 602w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 12   Failed: 0
+  PUBLISHED: 10
+  REVIEW_NEEDED: 2
+Done: Chicago
+Generating: Miami
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Miami --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Miami"}
+
+(node:7157) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 12 article(s) (concurrency 3)...
+
+[3/12] maximize-trade-in-value-miami-fl → PUBLISHED (quality 6/6, 809w, compliance ok, openai/gpt-oss-120b)
+[2/12] trade-in-value-miami-fl → PUBLISHED (quality 6/6, 729w, compliance ok, openai/gpt-oss-120b)
+[4/12] trade-in-vs-sell-privately-miami-fl → PUBLISHED (quality 6/6, 1153w, compliance ok, openai/gpt-oss-120b)
+[1/12] toyota-tacoma-otd-price-miami-fl → REVIEW_NEEDED (quality 5/6, 660w, compliance ok, openai/gpt-oss-120b)
+[5/12] best-trade-in-value-miami-fl → PUBLISHED (quality 6/6, 744w, compliance ok, openai/gpt-oss-120b)
+[7/12] car-lease-deals-miami-fl → PUBLISHED (quality 6/6, 774w, compliance ok, openai/gpt-oss-120b)
+[6/12] car-trade-in-calculator-miami-fl → REVIEW_NEEDED (quality 5/6, 725w, compliance FLAGGED, openai/gpt-oss-120b)
+[8/12] best-lease-deals-miami-fl → PUBLISHED (quality 6/6, 796w, compliance ok, openai/gpt-oss-120b)
+[9/12] lease-vs-buy-miami-fl → PUBLISHED (quality 6/6, 903w, compliance ok, openai/gpt-oss-120b)
+[11/12] ford-f150-lease-deals-miami-fl → PUBLISHED (quality 6/6, 799w, compliance ok, openai/gpt-oss-120b)
+[10/12] car-leasing-tips-miami-fl → PUBLISHED (quality 6/6, 711w, compliance ok, openai/gpt-oss-120b)
+[12/12] chevrolet-silverado-lease-deals-miami-fl → PUBLISHED (quality 6/6, 720w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 12   Failed: 0
+  PUBLISHED: 10
+  REVIEW_NEEDED: 2
+Done: Miami
+Generating: Atlanta
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Atlanta --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Atlanta"}
+
+(node:7200) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[2/11] maximize-trade-in-value-atlanta-ga → PUBLISHED (quality 6/6, 782w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-atlanta-ga → PUBLISHED (quality 6/6, 893w, compliance ok, openai/gpt-oss-120b)
+[1/11] trade-in-value-atlanta-ga → REVIEW_NEEDED (quality 5/6, 694w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-atlanta-ga → PUBLISHED (quality 6/6, 857w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-atlanta-ga → PUBLISHED (quality 6/6, 744w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-atlanta-ga → PUBLISHED (quality 6/6, 733w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-atlanta-ga → PUBLISHED (quality 6/6, 773w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-atlanta-ga → PUBLISHED (quality 6/6, 818w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-atlanta-ga → REVIEW_NEEDED (quality 5/6, 657w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-atlanta-ga → PUBLISHED (quality 6/6, 934w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-atlanta-ga → REVIEW_NEEDED (quality 5/6, 710w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 0
+  PUBLISHED: 8
+  REVIEW_NEEDED: 3
+Done: Atlanta
+Generating: Washington DC
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro 'Washington DC' --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Washington DC"}
+
+(node:7247) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[1/11] trade-in-value-washington-dc → PUBLISHED (quality 6/6, 830w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-washington-dc → PUBLISHED (quality 6/6, 851w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-washington-dc → PUBLISHED (quality 6/6, 840w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-washington-dc → REVIEW_NEEDED (quality 6/6, 735w, compliance FLAGGED, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-washington-dc → PUBLISHED (quality 6/6, 774w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-washington-dc → PUBLISHED (quality 6/6, 816w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-washington-dc → PUBLISHED (quality 6/6, 786w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-washington-dc → PUBLISHED (quality 6/6, 743w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-washington-dc → PUBLISHED (quality 6/6, 760w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-washington-dc → PUBLISHED (quality 6/6, 770w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-washington-dc → PUBLISHED (quality 6/6, 840w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 0
+  PUBLISHED: 10
+  REVIEW_NEEDED: 1
+Done: Washington DC
+Generating: Phoenix
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Phoenix --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Phoenix"}
+
+(node:7292) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 12 article(s) (concurrency 3)...
+
+[2/12] trade-in-value-phoenix-az → PUBLISHED (quality 6/6, 804w, compliance ok, openai/gpt-oss-120b)
+[3/12] maximize-trade-in-value-phoenix-az → PUBLISHED (quality 6/6, 760w, compliance ok, openai/gpt-oss-120b)
+[1/12] ford-explorer-dealer-quotes-phoenix-az → REVIEW_NEEDED (quality 5/6, 637w, compliance ok, openai/gpt-oss-120b)
+[4/12] trade-in-vs-sell-privately-phoenix-az → PUBLISHED (quality 6/6, 935w, compliance ok, openai/gpt-oss-120b)
+[6/12] car-trade-in-calculator-phoenix-az → REVIEW_NEEDED (quality 4/6, 198w, compliance ok, openai/gpt-oss-120b)
+[5/12] best-trade-in-value-phoenix-az → PUBLISHED (quality 6/6, 725w, compliance ok, openai/gpt-oss-120b)
+[7/12] car-lease-deals-phoenix-az → PUBLISHED (quality 6/6, 1040w, compliance ok, openai/gpt-oss-120b)
+[8/12] best-lease-deals-phoenix-az → PUBLISHED (quality 6/6, 737w, compliance ok, openai/gpt-oss-120b)
+[9/12] lease-vs-buy-phoenix-az → FAILED: Error: model returned no parseable JSON object
+[11/12] ford-f150-lease-deals-phoenix-az → PUBLISHED (quality 6/6, 842w, compliance ok, openai/gpt-oss-120b)
+[10/12] car-leasing-tips-phoenix-az → PUBLISHED (quality 6/6, 744w, compliance ok, openai/gpt-oss-120b)
+[12/12] chevrolet-silverado-lease-deals-phoenix-az → PUBLISHED (quality 6/6, 784w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 1
+  PUBLISHED: 9
+  REVIEW_NEEDED: 2
+
+Failures:
+  lease-vs-buy-phoenix-az: Error: model returned no parseable JSON object
+Done: Phoenix
+Generating: Philadelphia
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Philadelphia --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Philadelphia"}
+
+(node:7341) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[2/11] maximize-trade-in-value-philadelphia-pa → PUBLISHED (quality 6/6, 756w, compliance ok, openai/gpt-oss-120b)
+[1/11] trade-in-value-philadelphia-pa → PUBLISHED (quality 6/6, 730w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-philadelphia-pa → PUBLISHED (quality 6/6, 846w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-philadelphia-pa → PUBLISHED (quality 6/6, 774w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-philadelphia-pa → PUBLISHED (quality 6/6, 762w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-philadelphia-pa → PUBLISHED (quality 6/6, 778w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-philadelphia-pa → PUBLISHED (quality 6/6, 823w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-philadelphia-pa → PUBLISHED (quality 6/6, 953w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-philadelphia-pa → REVIEW_NEEDED (quality 5/6, 577w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-philadelphia-pa → PUBLISHED (quality 6/6, 859w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-philadelphia-pa → FAILED: Error: model returned no parseable JSON object
+
+──────────── Summary ────────────
+Generated: 10   Failed: 1
+  PUBLISHED: 9
+  REVIEW_NEEDED: 1
+
+Failures:
+  chevrolet-silverado-lease-deals-philadelphia-pa: Error: model returned no parseable JSON object
+Done: Philadelphia
+Generating: Detroit
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Detroit --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Detroit"}
+
+(node:7389) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 12 article(s) (concurrency 3)...
+
+[1/12] chevrolet-equinox-otd-price-detroit-mi → PUBLISHED (quality 6/6, 815w, compliance ok, openai/gpt-oss-120b)
+[2/12] trade-in-value-detroit-mi → PUBLISHED (quality 6/6, 815w, compliance ok, openai/gpt-oss-120b)
+[3/12] maximize-trade-in-value-detroit-mi → PUBLISHED (quality 6/6, 839w, compliance ok, openai/gpt-oss-120b)
+[4/12] trade-in-vs-sell-privately-detroit-mi → PUBLISHED (quality 6/6, 942w, compliance ok, openai/gpt-oss-120b)
+[6/12] car-trade-in-calculator-detroit-mi → PUBLISHED (quality 6/6, 722w, compliance ok, openai/gpt-oss-120b)
+[5/12] best-trade-in-value-detroit-mi → REVIEW_NEEDED (quality 6/6, 773w, compliance FLAGGED, openai/gpt-oss-120b)
+[7/12] car-lease-deals-detroit-mi → PUBLISHED (quality 6/6, 795w, compliance ok, openai/gpt-oss-120b)
+[8/12] best-lease-deals-detroit-mi → PUBLISHED (quality 6/6, 715w, compliance ok, openai/gpt-oss-120b)
+[10/12] car-leasing-tips-detroit-mi → PUBLISHED (quality 6/6, 709w, compliance ok, openai/gpt-oss-120b)
+[9/12] lease-vs-buy-detroit-mi → PUBLISHED (quality 6/6, 766w, compliance ok, openai/gpt-oss-120b)
+[12/12] chevrolet-silverado-lease-deals-detroit-mi → PUBLISHED (quality 6/6, 792w, compliance ok, openai/gpt-oss-120b)
+[11/12] ford-f150-lease-deals-detroit-mi → PUBLISHED (quality 6/6, 853w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 12   Failed: 0
+  PUBLISHED: 11
+  REVIEW_NEEDED: 1
+Done: Detroit
+Generating: Boston
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Boston --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Boston"}
+
+(node:7440) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[1/11] trade-in-value-boston-ma → PUBLISHED (quality 6/6, 719w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-boston-ma → PUBLISHED (quality 6/6, 818w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-boston-ma → PUBLISHED (quality 6/6, 727w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-boston-ma → REVIEW_NEEDED (quality 5/6, 633w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-boston-ma → PUBLISHED (quality 6/6, 752w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-boston-ma → PUBLISHED (quality 6/6, 765w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-boston-ma → PUBLISHED (quality 6/6, 723w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-boston-ma → PUBLISHED (quality 6/6, 768w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-boston-ma → PUBLISHED (quality 6/6, 716w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-boston-ma → PUBLISHED (quality 6/6, 798w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-boston-ma → PUBLISHED (quality 6/6, 906w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 0
+  PUBLISHED: 10
+  REVIEW_NEEDED: 1
+Done: Boston
+Generating: San Antonio
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro 'San Antonio' --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"San Antonio"}
+
+(node:7478) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[1/11] trade-in-value-san-antonio-tx → PUBLISHED (quality 6/6, 851w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-san-antonio-tx → REVIEW_NEEDED (quality 5/6, 563w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-san-antonio-tx → REVIEW_NEEDED (quality 5/6, 834w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-san-antonio-tx → PUBLISHED (quality 6/6, 790w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-san-antonio-tx → PUBLISHED (quality 6/6, 797w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-san-antonio-tx → PUBLISHED (quality 6/6, 757w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-san-antonio-tx → PUBLISHED (quality 6/6, 783w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-san-antonio-tx → PUBLISHED (quality 6/6, 796w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-san-antonio-tx → PUBLISHED (quality 6/6, 774w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-san-antonio-tx → PUBLISHED (quality 6/6, 726w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-san-antonio-tx → FAILED: Error: model returned no parseable JSON object
+
+──────────── Summary ────────────
+Generated: 10   Failed: 1
+  PUBLISHED: 8
+  REVIEW_NEEDED: 2
+
+Failures:
+  ford-f150-lease-deals-san-antonio-tx: Error: model returned no parseable JSON object
+Done: San Antonio
+Generating: Austin
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Austin --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Austin"}
+
+(node:7520) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[1/11] trade-in-value-austin-tx → REVIEW_NEEDED (quality 5/6, 541w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-austin-tx → PUBLISHED (quality 6/6, 733w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-austin-tx → FAILED: Error: model returned no parseable JSON object
+[5/11] car-trade-in-calculator-austin-tx → PUBLISHED (quality 6/6, 770w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-austin-tx → PUBLISHED (quality 6/6, 723w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-austin-tx → PUBLISHED (quality 6/6, 923w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-austin-tx → FAILED: Error: model returned no parseable JSON object
+[7/11] best-lease-deals-austin-tx → PUBLISHED (quality 6/6, 748w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-austin-tx → PUBLISHED (quality 6/6, 748w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-austin-tx → PUBLISHED (quality 6/6, 857w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-austin-tx → PUBLISHED (quality 6/6, 834w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 9   Failed: 2
+  REVIEW_NEEDED: 1
+  PUBLISHED: 8
+
+Failures:
+  trade-in-vs-sell-privately-austin-tx: Error: model returned no parseable JSON object
+  car-lease-deals-austin-tx: Error: model returned no parseable JSON object
+Done: Austin
+Generating: Seattle
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Seattle --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Seattle"}
+
+(node:7559) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[2/11] maximize-trade-in-value-seattle-wa → PUBLISHED (quality 6/6, 701w, compliance ok, openai/gpt-oss-120b)
+[1/11] trade-in-value-seattle-wa → REVIEW_NEEDED (quality 5/6, 646w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-seattle-wa → PUBLISHED (quality 6/6, 732w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-seattle-wa → PUBLISHED (quality 6/6, 802w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-seattle-wa → PUBLISHED (quality 6/6, 707w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-seattle-wa → PUBLISHED (quality 6/6, 793w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-seattle-wa → PUBLISHED (quality 6/6, 726w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-seattle-wa → PUBLISHED (quality 6/6, 742w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-seattle-wa → PUBLISHED (quality 6/6, 958w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-seattle-wa → PUBLISHED (quality 6/6, 824w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-seattle-wa → PUBLISHED (quality 6/6, 740w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 0
+  PUBLISHED: 10
+  REVIEW_NEEDED: 1
+Done: Seattle
+Generating: Denver
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Denver --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Denver"}
+
+(node:7599) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[1/11] trade-in-value-denver-co → PUBLISHED (quality 6/6, 833w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-denver-co → PUBLISHED (quality 6/6, 731w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-denver-co → PUBLISHED (quality 6/6, 717w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-denver-co → PUBLISHED (quality 6/6, 751w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-denver-co → PUBLISHED (quality 6/6, 718w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-denver-co → PUBLISHED (quality 6/6, 725w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-denver-co → PUBLISHED (quality 6/6, 746w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-denver-co → REVIEW_NEEDED (quality 5/6, 868w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-denver-co → PUBLISHED (quality 6/6, 725w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-denver-co → PUBLISHED (quality 6/6, 818w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-denver-co → PUBLISHED (quality 6/6, 853w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 0
+  PUBLISHED: 10
+  REVIEW_NEEDED: 1
+Done: Denver
+Generating: Minneapolis
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Minneapolis --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Minneapolis"}
+
+(node:7647) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 12 article(s) (concurrency 3)...
+
+[1/12] ford-explorer-otd-price-minneapolis-mn → PUBLISHED (quality 6/6, 723w, compliance ok, openai/gpt-oss-120b)
+[3/12] maximize-trade-in-value-minneapolis-mn → PUBLISHED (quality 6/6, 724w, compliance ok, openai/gpt-oss-120b)
+[5/12] best-trade-in-value-minneapolis-mn → PUBLISHED (quality 6/6, 757w, compliance ok, openai/gpt-oss-120b)
+[2/12] trade-in-value-minneapolis-mn → PUBLISHED (quality 6/6, 830w, compliance ok, openai/gpt-oss-120b)
+[4/12] trade-in-vs-sell-privately-minneapolis-mn → PUBLISHED (quality 6/6, 718w, compliance ok, openai/gpt-oss-120b)
+[6/12] car-trade-in-calculator-minneapolis-mn → PUBLISHED (quality 6/6, 741w, compliance ok, openai/gpt-oss-120b)
+[7/12] car-lease-deals-minneapolis-mn → PUBLISHED (quality 6/6, 768w, compliance ok, openai/gpt-oss-120b)
+[8/12] best-lease-deals-minneapolis-mn → PUBLISHED (quality 6/6, 729w, compliance ok, openai/gpt-oss-120b)
+[9/12] lease-vs-buy-minneapolis-mn → PUBLISHED (quality 6/6, 849w, compliance ok, openai/gpt-oss-120b)
+[11/12] ford-f150-lease-deals-minneapolis-mn → PUBLISHED (quality 6/6, 749w, compliance ok, openai/gpt-oss-120b)
+[12/12] chevrolet-silverado-lease-deals-minneapolis-mn → PUBLISHED (quality 6/6, 798w, compliance ok, openai/gpt-oss-120b)
+[10/12] car-leasing-tips-minneapolis-mn → REVIEW_NEEDED (quality 4/6, 530w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 12   Failed: 0
+  PUBLISHED: 11
+  REVIEW_NEEDED: 1
+Done: Minneapolis
+Generating: Tampa
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Tampa --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Tampa"}
+
+(node:7704) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[3/11] trade-in-vs-sell-privately-tampa-fl → PUBLISHED (quality 6/6, 873w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-tampa-fl → PUBLISHED (quality 6/6, 717w, compliance ok, openai/gpt-oss-120b)
+[1/11] trade-in-value-tampa-fl → PUBLISHED (quality 6/6, 736w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-tampa-fl → REVIEW_NEEDED (quality 5/6, 687w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-tampa-fl → REVIEW_NEEDED (quality 5/6, 675w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-tampa-fl → PUBLISHED (quality 6/6, 762w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-tampa-fl → PUBLISHED (quality 6/6, 789w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-tampa-fl → PUBLISHED (quality 6/6, 750w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-tampa-fl → PUBLISHED (quality 6/6, 808w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-tampa-fl → PUBLISHED (quality 6/6, 859w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-tampa-fl → PUBLISHED (quality 6/6, 739w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 0
+  PUBLISHED: 9
+  REVIEW_NEEDED: 2
+Done: Tampa
+Generating: Charlotte
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Charlotte --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Charlotte"}
+
+(node:7746) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[3/11] trade-in-vs-sell-privately-charlotte-nc → REVIEW_NEEDED (quality 5/6, 724w, compliance ok, openai/gpt-oss-120b)
+[1/11] trade-in-value-charlotte-nc → PUBLISHED (quality 6/6, 707w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-charlotte-nc → FAILED: Error: model returned no parseable JSON object
+[6/11] car-lease-deals-charlotte-nc → PUBLISHED (quality 6/6, 736w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-charlotte-nc → PUBLISHED (quality 6/6, 808w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-charlotte-nc → PUBLISHED (quality 6/6, 716w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-charlotte-nc → PUBLISHED (quality 6/6, 918w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-charlotte-nc → PUBLISHED (quality 6/6, 862w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-charlotte-nc → PUBLISHED (quality 6/6, 707w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-charlotte-nc → PUBLISHED (quality 6/6, 890w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-charlotte-nc → PUBLISHED (quality 6/6, 778w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 10   Failed: 1
+  REVIEW_NEEDED: 1
+  PUBLISHED: 9
+
+Failures:
+  maximize-trade-in-value-charlotte-nc: Error: model returned no parseable JSON object
+Done: Charlotte
+Generating: San Diego
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro 'San Diego' --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"San Diego"}
+
+(node:7804) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[2/11] maximize-trade-in-value-san-diego-ca → PUBLISHED (quality 6/6, 730w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-san-diego-ca → FAILED: Error: 400 {"error":{"message":"Parsing failed. The model generated output that could not be parsed. Please adjust your prompt. See 'failed_generation' for more details.","type":"invalid_request_error","code":"output_parse_failed","failed_generation":"We need to output valid JSON. The previous output seems to have cut off the last FAQ entry incomplete: it ends with \"{\"question\":\"Do I need to clean my car before a trade‑in?\",\"answer\":\"While not mandatory, a clean interior and exterior can improve the dealer’s perception of condition and may help you secure a slightly higher offer during the appraisal.\"},{\"question\":\""}}
+[1/11] trade-in-value-san-diego-ca → PUBLISHED (quality 6/6, 703w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-san-diego-ca → PUBLISHED (quality 6/6, 795w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-san-diego-ca → REVIEW_NEEDED (quality 5/6, 587w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-san-diego-ca → PUBLISHED (quality 6/6, 802w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-san-diego-ca → PUBLISHED (quality 6/6, 936w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-san-diego-ca → PUBLISHED (quality 6/6, 755w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-san-diego-ca → FAILED: Error: model returned no parseable JSON object
+[10/11] ford-f150-lease-deals-san-diego-ca → PUBLISHED (quality 6/6, 940w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-san-diego-ca → REVIEW_NEEDED (quality 5/6, 668w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 9   Failed: 2
+  PUBLISHED: 7
+  REVIEW_NEEDED: 2
+
+Failures:
+  trade-in-vs-sell-privately-san-diego-ca: Error: 400 {"error":{"message":"Parsing failed. The model generated output that could not be parsed. Please adjust your prompt. See 'failed_generation' for more details.","type":"invalid_request_error","code":"output_parse_failed","failed_generation":"We need to output valid JSON. The previous output seems to have cut off the last FAQ entry incomplete: it ends with \"{\"question\":\"Do I need to clean my car before a trade‑in?\",\"answer\":\"While not mandatory, a clean interior and exterior can improve the dealer’s perception of condition and may help you secure a slightly higher offer during the appraisal.\"},{\"question\":\""}}
+  car-leasing-tips-san-diego-ca: Error: model returned no parseable JSON object
+Done: San Diego
+Generating: Portland
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Portland --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Portland"}
+
+(node:7917) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[3/11] trade-in-vs-sell-privately-portland-or → PUBLISHED (quality 6/6, 763w, compliance ok, openai/gpt-oss-120b)
+[1/11] trade-in-value-portland-or → PUBLISHED (quality 6/6, 872w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-portland-or → PUBLISHED (quality 6/6, 744w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-portland-or → PUBLISHED (quality 6/6, 746w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-portland-or → REVIEW_NEEDED (quality 5/6, 506w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-portland-or → PUBLISHED (quality 6/6, 950w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-portland-or → PUBLISHED (quality 6/6, 927w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-portland-or → DRAFT (quality 3/6, 214w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-portland-or → PUBLISHED (quality 6/6, 751w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-portland-or → PUBLISHED (quality 6/6, 741w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-portland-or → PUBLISHED (quality 6/6, 769w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 0
+  PUBLISHED: 9
+  REVIEW_NEEDED: 1
+  DRAFT: 1
+Done: Portland
+Generating: Las Vegas
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro 'Las Vegas' --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Las Vegas"}
+
+(node:7999) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[1/11] trade-in-value-las-vegas-nv → PUBLISHED (quality 6/6, 779w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-las-vegas-nv → PUBLISHED (quality 6/6, 737w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-las-vegas-nv → REVIEW_NEEDED (quality 5/6, 735w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-las-vegas-nv → PUBLISHED (quality 6/6, 772w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-las-vegas-nv → PUBLISHED (quality 6/6, 725w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-las-vegas-nv → REVIEW_NEEDED (quality 5/6, 711w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-las-vegas-nv → PUBLISHED (quality 6/6, 763w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-las-vegas-nv → REVIEW_NEEDED (quality 5/6, 707w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-las-vegas-nv → PUBLISHED (quality 6/6, 717w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-las-vegas-nv → PUBLISHED (quality 6/6, 824w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-las-vegas-nv → PUBLISHED (quality 6/6, 705w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 0
+  PUBLISHED: 8
+  REVIEW_NEEDED: 3
+Done: Las Vegas
+Generating: Nashville
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Nashville --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Nashville"}
+
+(node:8038) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[1/11] trade-in-value-nashville-tn → PUBLISHED (quality 6/6, 707w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-nashville-tn → PUBLISHED (quality 6/6, 726w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-nashville-tn → FAILED: Error: model returned no parseable JSON object
+[5/11] car-trade-in-calculator-nashville-tn → PUBLISHED (quality 6/6, 712w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-nashville-tn → PUBLISHED (quality 6/6, 928w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-nashville-tn → PUBLISHED (quality 6/6, 753w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-nashville-tn → PUBLISHED (quality 6/6, 825w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-nashville-tn → PUBLISHED (quality 6/6, 808w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-nashville-tn → DRAFT (quality 3/6, 218w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-nashville-tn → REVIEW_NEEDED (quality 5/6, 534w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-nashville-tn → REVIEW_NEEDED (quality 5/6, 634w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 10   Failed: 1
+  PUBLISHED: 7
+  DRAFT: 1
+  REVIEW_NEEDED: 2
+
+Failures:
+  maximize-trade-in-value-nashville-tn: Error: model returned no parseable JSON object
+Done: Nashville
+Generating: Baltimore
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Baltimore --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Baltimore"}
+
+(node:8153) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[1/11] trade-in-value-baltimore-md → PUBLISHED (quality 6/6, 749w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-baltimore-md → PUBLISHED (quality 6/6, 736w, compliance ok, openai/gpt-oss-120b)
+[3/11] trade-in-vs-sell-privately-baltimore-md → PUBLISHED (quality 6/6, 712w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-baltimore-md → PUBLISHED (quality 6/6, 701w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-baltimore-md → REVIEW_NEEDED (quality 5/6, 860w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-baltimore-md → PUBLISHED (quality 6/6, 710w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-baltimore-md → PUBLISHED (quality 6/6, 712w, compliance ok, openai/gpt-oss-120b)
+[8/11] lease-vs-buy-baltimore-md → PUBLISHED (quality 6/6, 823w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-baltimore-md → PUBLISHED (quality 6/6, 769w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-baltimore-md → PUBLISHED (quality 6/6, 708w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-baltimore-md → REVIEW_NEEDED (quality 5/6, 605w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 0
+  PUBLISHED: 9
+  REVIEW_NEEDED: 2
+Done: Baltimore
+Generating: Sacramento
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro Sacramento --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"Sacramento"}
+
+(node:8246) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 12 article(s) (concurrency 3)...
+
+[2/12] trade-in-value-sacramento-ca → PUBLISHED (quality 6/6, 917w, compliance ok, openai/gpt-oss-120b)
+[3/12] maximize-trade-in-value-sacramento-ca → PUBLISHED (quality 6/6, 768w, compliance ok, openai/gpt-oss-120b)
+[1/12] chevrolet-equinox-dealer-quotes-sacramento-ca → PUBLISHED (quality 6/6, 702w, compliance ok, openai/gpt-oss-120b)
+[6/12] car-trade-in-calculator-sacramento-ca → PUBLISHED (quality 6/6, 886w, compliance ok, openai/gpt-oss-120b)
+[4/12] trade-in-vs-sell-privately-sacramento-ca → PUBLISHED (quality 6/6, 899w, compliance ok, openai/gpt-oss-120b)
+[5/12] best-trade-in-value-sacramento-ca → REVIEW_NEEDED (quality 5/6, 599w, compliance ok, openai/gpt-oss-120b)
+[7/12] car-lease-deals-sacramento-ca → PUBLISHED (quality 6/6, 859w, compliance ok, openai/gpt-oss-120b)
+[9/12] lease-vs-buy-sacramento-ca → PUBLISHED (quality 6/6, 853w, compliance ok, openai/gpt-oss-120b)
+[8/12] best-lease-deals-sacramento-ca → REVIEW_NEEDED (quality 5/6, 593w, compliance ok, openai/gpt-oss-120b)
+[10/12] car-leasing-tips-sacramento-ca → PUBLISHED (quality 6/6, 750w, compliance ok, openai/gpt-oss-120b)
+[11/12] ford-f150-lease-deals-sacramento-ca → FAILED: Error: model returned no parseable JSON object
+[12/12] chevrolet-silverado-lease-deals-sacramento-ca → REVIEW_NEEDED (quality 5/6, 695w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 11   Failed: 1
+  PUBLISHED: 8
+  REVIEW_NEEDED: 3
+
+Failures:
+  ford-f150-lease-deals-sacramento-ca: Error: model returned no parseable JSON object
+Done: Sacramento
+Generating: New York
+
+> autolenis@0.1.0 content:generate /Users/markistathelus/Desktop/autolenisNewUpdatedfinal/frontend
+> tsx scripts/generate-articles.ts --metro 'New York' --limit 25
+
+Phase C2 — Article Generation Engine
+Options: {"limit":25,"dryRun":false,"reviewOnly":false,"regenerate":false,"concurrency":3,"metro":"New York"}
+
+(node:8294) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Generating 11 article(s) (concurrency 3)...
+
+[3/11] trade-in-vs-sell-privately-new-york-ny → PUBLISHED (quality 6/6, 778w, compliance ok, openai/gpt-oss-120b)
+[1/11] trade-in-value-new-york-ny → REVIEW_NEEDED (quality 5/6, 694w, compliance ok, openai/gpt-oss-120b)
+[2/11] maximize-trade-in-value-new-york-ny → PUBLISHED (quality 6/6, 703w, compliance ok, openai/gpt-oss-120b)
+[4/11] best-trade-in-value-new-york-ny → PUBLISHED (quality 6/6, 725w, compliance ok, openai/gpt-oss-120b)
+[5/11] car-trade-in-calculator-new-york-ny → PUBLISHED (quality 6/6, 809w, compliance ok, openai/gpt-oss-120b)
+[6/11] car-lease-deals-new-york-ny → PUBLISHED (quality 6/6, 878w, compliance ok, openai/gpt-oss-120b)
+[7/11] best-lease-deals-new-york-ny → FAILED: Error: model returned no parseable JSON object
+[8/11] lease-vs-buy-new-york-ny → PUBLISHED (quality 6/6, 809w, compliance ok, openai/gpt-oss-120b)
+[9/11] car-leasing-tips-new-york-ny → PUBLISHED (quality 6/6, 779w, compliance ok, openai/gpt-oss-120b)
+[10/11] ford-f150-lease-deals-new-york-ny → PUBLISHED (quality 6/6, 817w, compliance ok, openai/gpt-oss-120b)
+[11/11] chevrolet-silverado-lease-deals-new-york-ny → PUBLISHED (quality 6/6, 919w, compliance ok, openai/gpt-oss-120b)
+
+──────────── Summary ────────────
+Generated: 10   Failed: 1
+  PUBLISHED: 9
+  REVIEW_NEEDED: 1
+
+Failures:
+  best-lease-deals-new-york-ny: Error: model returned no parseable JSON object
+Done: New York
+All metros complete!
