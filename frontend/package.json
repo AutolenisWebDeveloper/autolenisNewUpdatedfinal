@@ -14,7 +14,8 @@
     "postinstall": "prisma generate",
     "seed": "tsx prisma/seed.ts",
     "sandbox:seed-deal": "tsx scripts/seed-sandbox-deal.ts",
-    "content:generate": "tsx scripts/generate-articles.ts"
+    "content:generate": "tsx scripts/generate-articles.ts",
+    "amips:seed": "tsx scripts/amips-seed.ts"
   },
   "engines": {
     "node": ">=18.18"
