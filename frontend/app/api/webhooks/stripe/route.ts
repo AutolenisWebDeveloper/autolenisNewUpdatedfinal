@@ -14,6 +14,7 @@ import { launchAuction } from "@/lib/services/auction/auction.service";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { dispatch } from "@/lib/qstash/dispatch";
+import { markContentConversion } from "@/lib/analytics/content-attribution.server";
 
 export async function POST(request: NextRequest) {
   const stripe = getStripe();
@@ -129,6 +130,18 @@ export async function POST(request: NextRequest) {
             // re-trigger transactional emails.
             const buyerEmail = deposit.buyer?.user?.email;
             const buyerName = deposit.buyer?.firstName?.trim() || "valued customer";
+
+            // Phase C-Attribution — credit any content-engine lead carrying this
+            // buyer's email to the conversion. Idempotent (only flips rows still
+            // marked not-converted) and self-contained (never throws), so webhook
+            // retries are safe and a miss here can't break payment processing.
+            if (buyerEmail) {
+              await markContentConversion({
+                email: buyerEmail,
+                conversionValueCents: deposit.amountCents,
+              });
+            }
+
             if (buyerEmail && !existingAuction) {
               try {
                 await sendDepositConfirmationEmail(buyerEmail, buyerName, deposit.id);
