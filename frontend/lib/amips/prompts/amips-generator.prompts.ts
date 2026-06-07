@@ -21,6 +21,7 @@ ABSOLUTE RULES — never violate:
 4. Label all price estimates as estimates derived from manufacturer MSRP data.
 5. If the data object does not contain a number, do not claim that number exists.
 6. The AI narrates. The data decides.
+7. EXCEPTION for verified records: figures inside an "autolenisData" block are real, completed AutoLenis transaction outcomes. State them as facts — never label them as estimates or approximations. Vehicle prices remain estimates as always.
 
 OUTPUT FORMAT: Return ONLY valid JSON, no markdown:
 {
@@ -92,16 +93,38 @@ function buildDataObject(data: AmipsPageData): string {
     };
   }
 
+  // Tier F — verified, real AutoLenis transaction outcomes. State as facts.
+  if (data.tierF) {
+    const f = data.tierF;
+    obj.autolenisData = {
+      note: "VERIFIED AutoLenis transaction records — factual, NOT estimates",
+      metro: data.market?.metro ?? "",
+      completedTransactions: f.transactionCount,
+      dealerResponseRate:
+        f.dealerResponseRatePct != null ? `${f.dealerResponseRatePct}%` : "n/a",
+      avgOffersPerBuyer: f.avgOffersPerBuyer ?? "n/a",
+      medianTimeToBestOffer:
+        f.medianTimeToBestOfferHours != null
+          ? `${f.medianTimeToBestOfferHours} hours`
+          : "n/a",
+    };
+  }
+
   obj.dataAsOf = data.vehicleDataAsOf.toISOString().slice(0, 10);
 
   return JSON.stringify(obj, null, 2);
 }
 
-// The market section + score table are Tier C/D/E only.
+// The market section + score table are Tier C/D/E only. Tier F gets its own
+// proprietary, transaction-backed section in their place.
 function structureSection(data: AmipsPageData): string {
   const v = data.vehicle;
   const isMetro = METRO_TIERS.has(data.tier) && !!data.market;
+  const isTierF = data.tier === "F" && !!data.tierF;
+  const hasScore = !!data.marketScore;
+  const hasMetro = !!data.market;
   const metro = data.market?.metro ?? "";
+  const asOf = data.vehicleDataAsOf.toISOString().slice(0, 10);
 
   const marketH2 = isMetro
     ? `
@@ -112,9 +135,19 @@ scores mean for the buyer in plain English.
 MARKET SCORE TABLE:
 After the market section, restate the overall buyer advantage score in prose.
 (The page renders the full score table from the data — do not draw an ASCII
-table.) Label the figures "Data as of ${data.vehicleDataAsOf
-        .toISOString()
-        .slice(0, 10)}".`
+table.) Label the figures "Data as of ${asOf}".`
+    : "";
+
+  // Tier F proprietary section — narrate the verified autolenisData as facts.
+  const proprietaryH2 = isTierF
+    ? `
+H2: "What Real ${v.make} ${v.model} Buyers in ${metro} Are Seeing"
+This section uses AutoLenis's OWN verified transaction records (the
+"autolenisData" block). State these as facts — NOT estimates. Reference
+completedTransactions, dealerResponseRate, avgOffersPerBuyer, and
+medianTimeToBestOffer. Explain in plain English what these real outcomes mean
+for a buyer. Do not invent any figure that is not in autolenisData. This is
+proprietary AutoLenis data competitors do not have.`
     : "";
 
   const ctaCopy =
@@ -134,25 +167,25 @@ H2: "What Is the ${v.make} ${v.model} Actually Worth?"
 Direct answer first (1-2 sentences with the price data). Explain MSRP, fair
 market range, and aggressive target. Label all as estimates derived from
 manufacturer data.
-${marketH2}
+${marketH2}${proprietaryH2}
 
 H2: "What Negotiation Looks Like for This Vehicle"
 Reference negotiationDifficulty${
-    isMetro ? " and the dealer competition score" : ""
+    hasScore ? " and the dealer competition score" : ""
   }. Give specific buyer strategy for this vehicle${
-    isMetro ? " and market" : ""
+    hasMetro ? " and market" : ""
   } — not generic advice.
 
 H2: "Current Financing and Incentives"
 Reference activeIncentives with the expiration date if available. If no
 incentives: say so directly. Never invent an APR or rebate amount.
 
-H2: "How AutoLenis Works${isMetro ? ` for ${metro} Buyers` : ""}"
+H2: "How AutoLenis Works${hasMetro ? ` for ${metro} Buyers` : ""}"
 Explain the 48-hour auction: 8 dealers compete, the buyer picks the best offer.
 Factual mechanics only. No savings claims.
 
 FAQ SECTION:
-4 questions buyers${isMetro ? ` in ${metro}` : ""} actually ask about the
+4 questions buyers${hasMetro ? ` in ${metro}` : ""} actually ask about the
 ${v.make} ${v.model}. Direct answers only. Reference data where available.
 
 AUTHOR: "By Markist Athelus, Founder of AutoLenis"

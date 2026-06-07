@@ -15,6 +15,7 @@ import {
   type MarketScoreResult,
   type NegotiationDifficulty,
 } from "@/lib/amips/market-score.service";
+import { TIER_F_TRANSACTION_THRESHOLD } from "@/lib/amips/pipelines/tier-f-threshold.pipeline";
 
 // Tiers that require local market + dealer data (Metro, Transaction, Dealer).
 const METRO_TIERS = new Set(["C", "D", "E"]);
@@ -51,12 +52,25 @@ export interface AssembledMarket {
   dealerCount: number;
 }
 
+// Verified AutoLenis transaction facts (Tier F only). These are real,
+// observed values — never estimates — drawn from autolenis_intelligence after
+// the 50-transaction gate has been crossed for this vehicle + metro.
+export interface AssembledTierF {
+  transactionCount: number;
+  dealerResponseRatePct: number | null; // e.g. 73
+  avgOffersPerBuyer: number | null;
+  medianTimeToBestOfferHours: number | null;
+  periodMonth: string;
+  dataAsOf: Date;
+}
+
 export interface AmipsPageData {
   tier: string;
   keywordTarget: string;
   vehicle: AssembledVehicle;
   market?: AssembledMarket;
   marketScore?: MarketScoreResult;
+  tierF?: AssembledTierF;
   ctaType: AmipsCtaType;
   dealerCount: number; // 0 when no dealers in market (or non-metro tier)
   dataTokens: string[]; // real numbers available to embed in the article
@@ -123,6 +137,119 @@ export async function assembleAmipsPageData(
     dollars(vehicle.fairMarketHighCents),
     dollars(vehicle.aggressiveTargetCents),
   ];
+
+  // Tier F — proprietary, transaction-backed. Narrated from verified AutoLenis
+  // data, gated on at least 50 completed transactions for this vehicle + metro.
+  if (tier === "F") {
+    if (!queueItem.metro) return null;
+
+    const al = await prisma.autolenisIntelligence.findFirst({
+      where: {
+        metro: queueItem.metro,
+        vehicleMake: vehicle.make,
+        vehicleModel: vehicle.model,
+      },
+      orderBy: { transactionCount: "desc" },
+    });
+    // Hard gate: no Tier F page before the 50-transaction threshold.
+    if (!al || al.transactionCount < TIER_F_TRANSACTION_THRESHOLD) return null;
+
+    // Median time to the best (final) offer, computed from the real transaction
+    // records — honest data, not an estimate.
+    const txns = await prisma.marketplaceIntelligence.findMany({
+      where: {
+        metro: queueItem.metro,
+        vehicleMake: vehicle.make,
+        vehicleModel: vehicle.model,
+        buyerAcceptedOffer: true,
+        timeToFinalOfferMinutes: { not: null },
+      },
+      select: { timeToFinalOfferMinutes: true },
+    });
+    const times = txns
+      .map((t) => t.timeToFinalOfferMinutes as number)
+      .sort((a, b) => a - b);
+    const medianMin = times.length
+      ? times[Math.floor((times.length - 1) / 2)]
+      : null;
+
+    const tierF: AssembledTierF = {
+      transactionCount: al.transactionCount,
+      dealerResponseRatePct:
+        al.dealerResponseRate != null
+          ? Math.round(al.dealerResponseRate * 100)
+          : null,
+      avgOffersPerBuyer:
+        al.avgOffersReceived != null
+          ? Math.round(al.avgOffersReceived * 10) / 10
+          : null,
+      medianTimeToBestOfferHours:
+        medianMin != null ? Math.round((medianMin / 60) * 10) / 10 : null,
+      periodMonth: al.periodMonth,
+      dataAsOf: al.lastUpdated,
+    };
+
+    // Pre-computed Market Score for context, if available (not freshness-gated
+    // for Tier F — the proven transaction record is the source of authority).
+    const scoreRow = await prisma.amipsMarketScore.findUnique({
+      where: {
+        make_model_metro: {
+          make: vehicle.make,
+          model: vehicle.model,
+          metro: queueItem.metro,
+        },
+      },
+    });
+
+    let marketScore: MarketScoreResult | undefined;
+    if (scoreRow) {
+      try {
+        const parsed = JSON.parse(scoreRow.scoreJson) as MarketScoreResult;
+        if (typeof parsed.overallBuyerAdvantage === "number") {
+          marketScore = parsed;
+        }
+      } catch {
+        marketScore = undefined;
+      }
+    }
+
+    const marketRow = await prisma.marketIntelligence.findFirst({
+      where: { metroName: queueItem.metro },
+    });
+    // Completed transactions prove active, competing dealers exist.
+    const dealerCount =
+      scoreRow?.dealerCount ??
+      Math.max(3, Math.round(tierF.avgOffersPerBuyer ?? 3));
+
+    // Verified Tier F data tokens — all real, observed numbers.
+    dataTokens.push(String(tierF.transactionCount));
+    if (tierF.dealerResponseRatePct != null) {
+      dataTokens.push(`${tierF.dealerResponseRatePct}%`);
+    }
+    if (tierF.avgOffersPerBuyer != null) {
+      dataTokens.push(String(tierF.avgOffersPerBuyer));
+    }
+    if (tierF.medianTimeToBestOfferHours != null) {
+      dataTokens.push(`${tierF.medianTimeToBestOfferHours} hours`);
+    }
+
+    return {
+      tier,
+      keywordTarget: queueItem.keywordTarget,
+      vehicle,
+      market: {
+        metro: queueItem.metro,
+        state: queueItem.state ?? marketRow?.state ?? "",
+        dealerCount,
+      },
+      marketScore,
+      tierF,
+      ctaType: "request_offers", // proven, active, competing dealers
+      dealerCount,
+      dataTokens,
+      vehicleDataAsOf: vehicleRow.lastUpdated,
+    };
+  }
 
   // Tier B (and any other non-metro vehicle tier) stops here — no market.
   if (!METRO_TIERS.has(tier)) {
