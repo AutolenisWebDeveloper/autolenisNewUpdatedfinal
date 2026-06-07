@@ -10,7 +10,12 @@
 // re-export it here so the pipelines and seeders never drift apart.
 
 import { TOP_METROS } from "@/lib/amips/seed/content-queue.seed";
-import type { LatLng } from "@/lib/utils/zip-coords";
+import {
+  haversineMiles,
+  lookupCity,
+  lookupZip,
+  type LatLng,
+} from "@/lib/utils/zip-coords";
 
 export { TOP_METROS };
 
@@ -65,4 +70,30 @@ export function getMetroDefs(): MetroDef[] {
     if (!center) return [];
     return [{ metro: m.metro, state: m.state, population: m.population, center }];
   });
+}
+
+/**
+ * Resolve a buyer location (zip preferred, then city/state) to the nearest
+ * tracked metro within the membership radius. Returns null when the location
+ * cannot be geocoded or falls outside every top-25 metro — Tier F and
+ * Marketplace Intelligence only cover the metros AMIPS tracks, so anything
+ * outside is intentionally dropped rather than mis-attributed.
+ */
+export function resolveMetro(
+  city: string | null | undefined,
+  state: string | null | undefined,
+  zip: string | null | undefined,
+): { metro: string; state: string } | null {
+  const point: LatLng | null =
+    (zip ? lookupZip(zip) : null) ?? lookupCity(city, state);
+  if (!point) return null;
+
+  let best: { metro: string; state: string; dist: number } | null = null;
+  for (const def of getMetroDefs()) {
+    const dist = haversineMiles(point, def.center);
+    if (dist <= METRO_MEMBERSHIP_RADIUS_MILES && (!best || dist < best.dist)) {
+      best = { metro: def.metro, state: def.state, dist };
+    }
+  }
+  return best ? { metro: best.metro, state: best.state } : null;
 }

@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import {
@@ -7,6 +7,7 @@ import {
   sendDealerOfferLostEmail,
 } from "@/lib/services/email/resend.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
+import { recordMarketplaceFromAuction } from "@/lib/amips/pipelines/marketplace-intelligence.recorder";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -98,6 +99,11 @@ export async function POST(request: NextRequest, { params }: Props) {
       }).catch(err => console.error("[select-offer] dealer lost email failed:", err));
     }
   }
+
+  // AMIPS Phase 4 — record this completed transaction into Marketplace
+  // Intelligence. Non-blocking via after() so it never affects the deal flow;
+  // the recorder swallows its own errors and skips untracked metros/vehicles.
+  after(() => recordMarketplaceFromAuction(auctionId));
 
   return successResponse({ deal: { id: deal.id } });
 }
