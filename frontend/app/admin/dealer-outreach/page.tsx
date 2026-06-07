@@ -1,17 +1,18 @@
 // /admin/dealer-outreach — Phase 4A Dealer Recruitment Pipeline.
 // Founder-facing list of dealer prospects with AI-drafted phone scripts.
+// The server shell handles auth, stats, tabs, and the rich initial query; the
+// DealerPipelineClient handles search / filtering / sorting over the loaded set.
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import { Phone, Users } from "lucide-react";
+import { Phone } from "lucide-react";
 import { DealerProspectStatus, type Prisma } from "@prisma/client";
 import BackfillButton from "./BackfillButton";
 import BackfillEmailsButton from "./BackfillEmailsButton";
-import EmailCell from "./EmailCell";
 import EmailHealthBanner from "./EmailHealthBanner";
-import OutreachActions from "./OutreachActions";
 import RunFollowupsButton from "./RunFollowupsButton";
-import SequenceCell, { type SequenceStep } from "./SequenceCell";
+import { type SequenceStep } from "./SequenceCell";
+import DealerPipelineClient, { type ProspectRow } from "./DealerPipelineClient";
 
 export const dynamic = "force-dynamic";
 
@@ -21,29 +22,6 @@ const TAB_FILTERS: Record<string, DealerProspectStatus[]> = {
   Active: ["CONTACTED", "REPLIED"],
   Closed: ["ONBOARDED", "DEAD"],
 };
-
-const STATUS_BADGE: Record<string, string> = {
-  DISCOVERED: "bg-slate-100 text-slate-600",
-  SCRIPTED: "bg-blue-100 text-blue-700",
-  DRAFTED: "bg-indigo-100 text-indigo-700",
-  CONTACTED: "bg-amber-100 text-amber-700",
-  REPLIED: "bg-purple-100 text-purple-700",
-  ONBOARDED: "bg-green-100 text-green-700",
-  DEAD: "bg-red-100 text-red-700",
-};
-
-function humanizeTimeline(t: string | null): string {
-  if (t === "this_week") return "this week";
-  if (t === "1_to_3_months") return "1-3 months";
-  if (t === "researching") return "researching";
-  return t ?? "—";
-}
-
-function formatBudget(amount: number | null, monthly: number | null): string {
-  if (amount) return `$${amount.toLocaleString()}`;
-  if (monthly) return `$${monthly}/mo`;
-  return "flexible";
-}
 
 export default async function DealerOutreachPage({
   searchParams,
@@ -72,7 +50,7 @@ export default async function DealerOutreachPage({
       where,
       include: { buyerOpp: true },
       orderBy: { createdAt: "desc" },
-      take: 100,
+      take: 250,
     });
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Failed to load prospects";
@@ -98,7 +76,6 @@ export default async function DealerOutreachPage({
 
   // Latest email outreach status per displayed prospect (for the Outreach
   // column) plus the per-step send history (Phase 4B-4 Sequence column).
-  // Guarded so the page still renders before the 4B-3/4B-4 migrations run.
   const latestOutreach = new Map<string, string>();
   const sequenceSteps = new Map<string, SequenceStep[]>();
   if (prospects.length > 0) {
@@ -148,176 +125,103 @@ export default async function DealerOutreachPage({
     "DEAD",
   ];
 
+  // Project to a serializable shape the client component can filter/sort.
+  const rows: ProspectRow[] = prospects.map((p) => {
+    const opp = p.buyerOpp;
+    return {
+      id: p.id,
+      name: p.name,
+      city: p.city,
+      state: p.state,
+      brand: p.brand,
+      phone: p.phone,
+      email: p.email,
+      emailSource: p.emailSource,
+      emailEnrichedAt: p.emailEnrichedAt ? p.emailEnrichedAt.toISOString() : null,
+      website: p.website,
+      contactName: p.contactName,
+      contactTitle: p.contactTitle,
+      status: p.status,
+      contactedAt: p.contactedAt ? p.contactedAt.toISOString() : null,
+      createdAt: p.createdAt.toISOString(),
+      replyDetectedAt: p.replyDetectedAt ? p.replyDetectedAt.toISOString() : null,
+      sequencePausedAt: p.sequencePausedAt ? p.sequencePausedAt.toISOString() : null,
+      sequencePauseReason: p.sequencePauseReason,
+      lastOutreachStatus: latestOutreach.get(p.id) ?? null,
+      sequenceSteps: sequenceSteps.get(p.id) ?? [],
+      buyerOpp: opp
+        ? {
+            make: opp.make,
+            model: opp.model,
+            bodyStyle: opp.bodyStyle,
+            budgetAmount: opp.budgetAmount,
+            monthlyPayment: opp.monthlyPayment,
+            timeline: opp.timeline,
+          }
+        : null,
+    };
+  });
+
   return (
-    <div className="p-6 md:p-8 max-w-screen-2xl" data-testid="admin-dealer-outreach-page">
-      <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
-        <div className="flex items-center gap-3">
-          <Phone size={22} className="text-[#0B5FD1]" />
-          <h1 className="text-xl font-bold text-slate-900">Dealer Recruitment Pipeline</h1>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <RunFollowupsButton />
-          <BackfillEmailsButton missingCount={missingEmailCount} />
-          <BackfillButton missingCount={missingScriptCount} />
-        </div>
-      </div>
-
-      {/* Phase 4B-2 — sending-domain readiness indicator */}
-      <EmailHealthBanner />
-
-      {/* Stats row */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6">
-        {statusOrder.map((s) => (
-          <div key={s} className="rounded-lg border border-slate-200 bg-white p-3">
-            <div className="text-2xl font-bold text-slate-900">{counts[s] ?? 0}</div>
-            <div className="text-xs font-medium text-slate-500">{s}</div>
+    <div
+      className="min-h-screen bg-[#F4F6FA] p-6 md:p-8"
+      data-testid="admin-dealer-outreach-page"
+    >
+      <div className="mx-auto max-w-screen-2xl">
+        <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+          <div className="flex items-center gap-3">
+            <Phone size={22} className="text-[#0B5FD1]" />
+            <h1 className="text-xl font-bold text-[#0F172A]">
+              Dealer Recruitment Pipeline
+            </h1>
           </div>
-        ))}
-      </div>
-
-      {/* Filter tabs */}
-      <div className="flex gap-2 mb-4 border-b border-slate-200">
-        {Object.keys(TAB_FILTERS).map((t) => (
-          <Link
-            key={t}
-            href={`/admin/dealer-outreach?tab=${t}`}
-            className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${
-              activeTab === t
-                ? "border-[#0B5FD1] text-[#0B5FD1]"
-                : "border-transparent text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            {t}
-          </Link>
-        ))}
-      </div>
-
-      {loadError && (
-        <div className="rounded-md bg-red-50 border border-red-200 text-red-700 p-4 mb-4 text-sm">
-          {loadError}
+          <div className="flex items-center gap-2 flex-wrap">
+            <RunFollowupsButton />
+            <BackfillEmailsButton missingCount={missingEmailCount} />
+            <BackfillButton missingCount={missingScriptCount} />
+          </div>
         </div>
-      )}
 
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-3 py-3 font-medium w-40">Dealer</th>
-              <th className="px-3 py-3 font-medium w-32">Location</th>
-              <th className="px-3 py-3 font-medium w-24 hidden xl:table-cell">Brand</th>
-              <th className="px-3 py-3 font-medium w-28 hidden xl:table-cell">Phone</th>
-              <th className="px-3 py-3 font-medium w-44">Email</th>
-              <th className="px-3 py-3 font-medium w-36 hidden xl:table-cell">Linked Buyer</th>
-              <th className="px-3 py-3 font-medium w-24">Status</th>
-              <th className="px-3 py-3 font-medium w-44">Outreach</th>
-              <th className="px-3 py-3 font-medium w-20 hidden xl:table-cell">Sequence</th>
-              <th className="px-3 py-3 font-medium w-28 hidden xl:table-cell">Drafted</th>
-              <th className="px-3 py-3 font-medium w-16"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {prospects.length === 0 && (
-              <tr>
-                <td colSpan={11} className="px-4 py-8 text-center text-slate-400">
-                  No prospects in this view yet.
-                </td>
-              </tr>
-            )}
-            {prospects.map((p) => {
-              const opp = p.buyerOpp;
-              const vehicle =
-                [opp?.make, opp?.model].filter(Boolean).join(" ") ||
-                opp?.bodyStyle ||
-                "vehicle";
-              return (
-                <tr key={p.id} className="hover:bg-slate-50">
-                  <td className="px-3 py-3 font-medium text-slate-900 max-w-[160px] truncate">{p.name}</td>
-                  <td className="px-3 py-3 text-slate-600 max-w-[128px] truncate">
-                    {[p.city, p.state].filter(Boolean).join(", ") || "—"}
-                  </td>
-                  <td className="px-3 py-3 text-slate-600 hidden xl:table-cell">{p.brand ?? "—"}</td>
-                  <td className="px-3 py-3 hidden xl:table-cell">
-                    {p.phone ? (
-                      <a href={`tel:${p.phone}`} className="text-[#0B5FD1] hover:underline whitespace-nowrap">
-                        {p.phone}
-                      </a>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-3 py-3">
-                    <EmailCell
-                      prospectId={p.id}
-                      email={p.email}
-                      emailSource={p.emailSource}
-                      emailEnrichedAt={
-                        p.emailEnrichedAt
-                          ? p.emailEnrichedAt.toISOString()
-                          : null
-                      }
-                    />
-                  </td>
-                  <td className="px-3 py-3 text-slate-600 hidden xl:table-cell max-w-[144px] truncate">
-                    {opp ? (
-                      <span title={`${vehicle} · ${formatBudget(opp.budgetAmount, opp.monthlyPayment)} · ${humanizeTimeline(opp.timeline)}`}>
-                        {vehicle} · {formatBudget(opp.budgetAmount, opp.monthlyPayment)}
-                      </span>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-3 py-3">
-                    <span
-                      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${
-                        STATUS_BADGE[p.status] ?? "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      {p.status}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3">
-                    <OutreachActions
-                      prospectId={p.id}
-                      hasEmail={!!p.email}
-                      lastStatus={latestOutreach.get(p.id) ?? null}
-                    />
-                  </td>
-                  <td className="px-3 py-3 hidden xl:table-cell">
-                    <SequenceCell
-                      prospectId={p.id}
-                      steps={sequenceSteps.get(p.id) ?? []}
-                      replyDetectedAt={
-                        p.replyDetectedAt ? p.replyDetectedAt.toISOString() : null
-                      }
-                      sequencePausedAt={
-                        p.sequencePausedAt ? p.sequencePausedAt.toISOString() : null
-                      }
-                      sequencePauseReason={p.sequencePauseReason ?? null}
-                    />
-                  </td>
-                  <td className="px-3 py-3 text-slate-500 text-xs hidden xl:table-cell whitespace-nowrap">
-                    {p.scriptDraftedAt
-                      ? new Date(p.scriptDraftedAt).toLocaleString()
-                      : "—"}
-                  </td>
-                  <td className="px-3 py-3">
-                    <Link
-                      href={`/admin/dealer-outreach/${p.id}`}
-                      className="rounded-md bg-[#0B5FD1] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#0a52b5]"
-                    >
-                      View
-                    </Link>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+        {/* Phase 4B-2 — sending-domain readiness indicator */}
+        <EmailHealthBanner />
 
-      <div className="mt-4 flex items-center gap-2 text-xs text-slate-400">
-        <Users size={14} />
-        Showing up to 100 most recent prospects.
+        {/* Stats row */}
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6">
+          {statusOrder.map((s) => (
+            <div
+              key={s}
+              className="rounded-2xl border border-[#E2E8F0] bg-white p-3 shadow-sm"
+            >
+              <div className="text-2xl font-bold text-[#0F172A]">{counts[s] ?? 0}</div>
+              <div className="text-xs font-medium text-[#64748B]">{s}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Filter tabs */}
+        <div className="flex gap-2 mb-4 border-b border-[#E2E8F0]">
+          {Object.keys(TAB_FILTERS).map((t) => (
+            <Link
+              key={t}
+              href={`/admin/dealer-outreach?tab=${t}`}
+              className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${
+                activeTab === t
+                  ? "border-[#0B5FD1] text-[#0B5FD1]"
+                  : "border-transparent text-[#64748B] hover:text-[#0F172A]"
+              }`}
+            >
+              {t}
+            </Link>
+          ))}
+        </div>
+
+        {loadError && (
+          <div className="rounded-md bg-red-50 border border-red-200 text-red-700 p-4 mb-4 text-sm">
+            {loadError}
+          </div>
+        )}
+
+        <DealerPipelineClient prospects={rows} />
       </div>
     </div>
   );

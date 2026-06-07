@@ -22,7 +22,11 @@ export default async function DealerProspectDetailPage({
 
   const prospect = await prisma.dealerProspect.findUnique({
     where: { id: prospectId },
-    include: { buyerOpp: true },
+    include: {
+      buyerOpp: true,
+      // Full communication history, newest first.
+      outreachLog: { orderBy: { sentAt: "desc" } },
+    },
   });
 
   if (!prospect) notFound();
@@ -86,17 +90,36 @@ export default async function DealerProspectDetailPage({
     brand: prospect.brand,
     sourceUrl: prospect.sourceUrl,
     searchScore: prospect.searchScore,
+    distanceMiles: prospect.distanceMiles,
     status: prospect.status,
     outreachScript: prospect.outreachScript,
     founderNotes: prospect.founderNotes,
+    contactName: prospect.contactName,
+    contactTitle: prospect.contactTitle,
+    email: prospect.email,
+    emailSource: prospect.emailSource,
+    emailEnrichedAt: prospect.emailEnrichedAt?.toISOString() ?? null,
     scriptDraftedAt: prospect.scriptDraftedAt?.toISOString() ?? null,
     createdAt: prospect.createdAt.toISOString(),
+    updatedAt: prospect.updatedAt.toISOString(),
     scriptedAt: prospect.scriptedAt?.toISOString() ?? null,
     contactedAt: prospect.contactedAt?.toISOString() ?? null,
     repliedAt: prospect.repliedAt?.toISOString() ?? null,
     onboardedAt: prospect.onboardedAt?.toISOString() ?? null,
     deadAt: prospect.deadAt?.toISOString() ?? null,
     deadReason: prospect.deadReason,
+    replyDetectedAt: prospect.replyDetectedAt?.toISOString() ?? null,
+    outreachLog: prospect.outreachLog.map((l) => ({
+      id: l.id,
+      outreachType: l.outreachType,
+      channel: l.channel,
+      subject: l.subject,
+      body: l.body,
+      status: l.status,
+      resendId: l.resendId,
+      sentAt: l.sentAt.toISOString(),
+      outreachSequenceStep: l.outreachSequenceStep,
+    })),
     buyerOpp: opp
       ? {
           id: opp.id,
@@ -120,14 +143,19 @@ export default async function DealerProspectDetailPage({
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-dealer-prospect-detail">
-      <Link
-        href="/admin/dealer-outreach"
-        className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mb-4"
-      >
-        <ArrowLeft size={16} /> Back to pipeline
-      </Link>
-      <ProspectDetailClient prospect={detail} />
+    <div
+      className="min-h-screen bg-[#F4F6FA] p-6 md:p-8"
+      data-testid="admin-dealer-prospect-detail"
+    >
+      <div className="mx-auto max-w-6xl">
+        <Link
+          href="/admin/dealer-outreach"
+          className="inline-flex items-center gap-1 text-sm text-[#64748B] hover:text-[#0F172A] mb-4"
+        >
+          <ArrowLeft size={16} /> Back to pipeline
+        </Link>
+        <ProspectDetailClient prospect={detail} />
+      </div>
     </div>
   );
 }
