@@ -6,6 +6,10 @@ import { getServiceSupabase } from "@/lib/supabase-service";
 import { ContactService } from "@/lib/services/contact.service";
 import { sendDealerFeeCalculatorWelcomeEmail } from "@/lib/services/email/resend.service";
 import { getStateFeeRules } from "@/lib/tools/dealer-fees";
+import {
+  getAttributionFromCookieHeader,
+  recordContentAttribution,
+} from "@/lib/analytics/content-attribution.server";
 
 // Phase C-Tools — public lead capture for the Dealer Fee Calculator.
 //
@@ -98,7 +102,7 @@ export async function POST(req: Request) {
 
   try {
     // 1) BuyerOpportunity — the canonical lead record for the auction pipeline.
-    await prisma.buyerOpportunity.create({
+    const opportunity = await prisma.buyerOpportunity.create({
       data: {
         sessionId,
         source: "tool:dealer_fee_calculator",
@@ -112,6 +116,16 @@ export async function POST(req: Request) {
           state ? ` · ${stateName}` : ""
         }`,
       },
+    });
+
+    // 1b) Phase C-Attribution — if the buyer arrived from a buying-guide
+    //     article, link this lead to it. No-op when no content touch cookie.
+    await recordContentAttribution({
+      touch: getAttributionFromCookieHeader(req.headers.get("cookie")),
+      source: "tool:dealer_fee_calculator",
+      buyerOpportunityId: opportunity.id,
+      email: email.toLowerCase(),
+      leadTemperature: temperature,
     });
 
     // 2) CRM contact upsert — this is also where TCPA SMS consent is logged.

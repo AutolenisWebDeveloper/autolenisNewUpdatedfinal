@@ -3240,6 +3240,8 @@ model BuyerOpportunity {
   callReason      String?  @map("call_reason")
   // Inverse relation — canonical VehicleRequest(s) linked to this opportunity.
   vehicleRequests VehicleRequest[]
+  // Phase C-Attribution — content-engine leads attributed to this opportunity.
+  contentAttributions ContentAttribution[]
 
   // Vehicle interest
   vehicleType     String?  @map("vehicle_type")
@@ -3517,4 +3519,42 @@ enum ArticleStatus {
   REVIEW_NEEDED
   PUBLISHED
   ARCHIVED
+}
+
+// Phase C-Attribution — links a content-engine lead back to the buying-guide
+// article that drove it (cluster / city / state / metro), so conversions can be
+// reported by content dimension. A row is created at lead time from the
+// first-party attribution cookie set on buying-guide pages. Conversion is
+// reconciled from the linked BuyerOpportunity (a paid deposit or a created
+// deal); the denormalized converted* fields let a webhook fast-path GA4 and
+// keep the reporting query trivial.
+model ContentAttribution {
+  id                   String    @id @default(cuid())
+  // The buying-guide article that drove the lead.
+  articleSlug          String    @map("article_slug")
+  cluster              String
+  city                 String
+  state                String
+  metro                String?
+  // Which lead surface captured the conversion (mirrors BuyerOpportunity.source).
+  source               String
+  // Soft link to the canonical lead record (application-enforced, no cascade).
+  buyerOpportunityId   String?            @map("buyer_opportunity_id")
+  buyerOpportunity     BuyerOpportunity?  @relation(fields: [buyerOpportunityId], references: [id])
+  email                String?
+  leadTemperature      String?   @map("lead_temperature")
+  // Denormalized conversion outcome — set by reconcile/webhook.
+  converted            Boolean   @default(false)
+  convertedAt          DateTime? @map("converted_at")
+  conversionValueCents Int?      @map("conversion_value_cents")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@index([cluster])
+  @@index([city, state])
+  @@index([metro])
+  @@index([articleSlug])
+  @@index([buyerOpportunityId])
+  @@index([converted])
+  @@map("content_attributions")
 }
