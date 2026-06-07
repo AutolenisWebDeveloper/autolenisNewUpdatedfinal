@@ -3558,3 +3558,239 @@ model ContentAttribution {
   @@index([converted])
   @@map("content_attributions")
 }
+
+// =====================================================
+// AMIPS — AutoLenis Market Intelligence Publishing System
+// Phase 0 — Data Foundation. Six intelligence databases plus
+// the content queue and the AMIPS page store. The database is the
+// asset; the article is the delivery mechanism. No data populated =
+// no article generated. Kept fully separate from content_articles.
+// =====================================================
+
+// AMIPS Database 1 — Vehicle Intelligence.
+// MSRP + computed fair-market pricing per make/model/trim/year,
+// sourced from manufacturer public sites. Populated first.
+model VehicleIntelligence {
+  id                    String    @id @default(cuid())
+  make                  String
+  model                 String
+  trim                  String?
+  year                  Int
+  msrpCents             Int       @map("msrp_cents")
+  fairMarketLowCents    Int       @map("fair_market_low_cents")
+  fairMarketHighCents   Int       @map("fair_market_high_cents")
+  aggressiveTargetCents Int       @map("aggressive_target_cents")
+  activeIncentives      String?   @map("active_incentives") @db.Text
+  incentivesExpiresAt   DateTime? @map("incentives_expires_at")
+  financingNotes        String?   @map("financing_notes") @db.Text
+  leaseNotes            String?   @map("lease_notes") @db.Text
+  negotiationDifficulty String    @map("negotiation_difficulty")
+  dataSource            String    @map("data_source")
+  lastUpdated           DateTime  @default(now()) @map("last_updated")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@unique([make, model, trim, year])
+  @@index([make, model])
+  @@index([lastUpdated])
+  @@map("vehicle_intelligence")
+}
+
+// AMIPS Database 2 — Dealer Intelligence.
+// Derived from the existing Gemini Maps dealer cache (DealerProspect).
+// Density score = same-brand dealers within 30 miles. Populated second.
+model DealerIntelligence {
+  id                  String    @id @default(cuid())
+  dealerName          String    @map("dealer_name")
+  brand               String
+  city                String
+  state               String
+  zip                 String
+  latitude            Float?
+  longitude           Float?
+  website             String?
+  inventorySignal     String    @default("normal") @map("inventory_signal")
+  dealerDensityScore  Float?    @map("dealer_density_score")
+  dealersWithin30mi   Int?      @map("dealers_within_30mi")
+  dataSource          String    @map("data_source")
+  lastUpdated         DateTime  @default(now()) @map("last_updated")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@index([brand, city, state])
+  @@index([state])
+  @@index([lastUpdated])
+  @@map("dealer_intelligence")
+}
+
+// AMIPS Database 3 — Market Intelligence.
+// Metro-level demand/competition/inventory/leverage scores computed
+// from Census population + Dealer Intelligence. Populated second.
+model MarketIntelligence {
+  id                 String   @id @default(cuid())
+  metroName          String   @map("metro_name")
+  state              String
+  population         Int?
+  vehicleDemandScore Float?   @map("vehicle_demand_score")
+  competitionScore   Float?   @map("competition_score")
+  inventoryScore     Float?   @map("inventory_score")
+  buyerLeverageScore Float?   @map("buyer_leverage_score")
+  seasonalNotes      String?  @map("seasonal_notes") @db.Text
+  lastUpdated        DateTime @default(now()) @map("last_updated")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@unique([metroName, state])
+  @@index([state])
+  @@index([buyerLeverageScore])
+  @@map("market_intelligence")
+}
+
+// AMIPS Database 4 — AutoLenis Intelligence.
+// Proprietary platform transaction aggregates per metro + vehicle +
+// month. Schema only at launch; populated from live transactions later.
+model AutolenisIntelligence {
+  id                      String   @id @default(cuid())
+  metro                   String
+  vehicleMake             String   @map("vehicle_make")
+  vehicleModel            String   @map("vehicle_model")
+  requestVolume           Int      @default(0) @map("request_volume")
+  dealerResponseRate      Float?   @map("dealer_response_rate")
+  avgOffersReceived       Float?   @map("avg_offers_received")
+  verifiedSavingsAvgCents Int?     @map("verified_savings_avg_cents")
+  offerWinRate            Float?   @map("offer_win_rate")
+  transactionCount        Int      @default(0) @map("transaction_count")
+  periodMonth             String   @map("period_month")
+  lastUpdated             DateTime @default(now()) @map("last_updated")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  @@unique([metro, vehicleMake, vehicleModel, periodMonth])
+  @@index([metro])
+  @@index([transactionCount])
+  @@map("autolenis_intelligence")
+}
+
+// AMIPS Database 5 — Search Intelligence.
+// Weekly Google Search Console metrics per AMIPS URL. Schema only at
+// launch; populated once pages publish and GSC accumulates data.
+model SearchIntelligence {
+  id                 String   @id @default(cuid())
+  url                String
+  contentTier        String   @map("content_tier")
+  searchImpressions  Int      @default(0) @map("search_impressions")
+  clicks             Int      @default(0)
+  ctr                Float?
+  avgPosition        Float?   @map("avg_position")
+  indexedStatus      Boolean  @default(false) @map("indexed_status")
+  leadsGenerated     Int      @default(0) @map("leads_generated")
+  conversionRate     Float?   @map("conversion_rate")
+  revenueAttribution Int      @default(0) @map("revenue_attribution")
+  weekOf             DateTime @map("week_of")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@unique([url, weekOf])
+  @@index([contentTier])
+  @@index([weekOf])
+  @@index([leadsGenerated])
+  @@map("search_intelligence")
+}
+
+// AMIPS Database 6 — Marketplace Intelligence.
+// One row per completed live buyer/dealer transaction. Powers Tier F.
+// Schema only at launch; populated from real deals later.
+model MarketplaceIntelligence {
+  id                      String   @id @default(cuid())
+  vehicleMake             String   @map("vehicle_make")
+  vehicleModel            String   @map("vehicle_model")
+  vehicleTrim             String?  @map("vehicle_trim")
+  metro                   String
+  dealersInvited          Int      @default(0) @map("dealers_invited")
+  dealersResponded        Int      @default(0) @map("dealers_responded")
+  responseRate            Float?   @map("response_rate")
+  timeToFirstOfferMinutes Int?     @map("time_to_first_offer_minutes")
+  timeToFinalOfferMinutes Int?     @map("time_to_final_offer_minutes")
+  buyerAcceptedOffer      Boolean? @map("buyer_accepted_offer")
+  avgOffersPerRequest     Float?   @map("avg_offers_per_request")
+  leadToRequestConversion Float?   @map("lead_to_request_conversion")
+  requestToDealConversion Float?   @map("request_to_deal_conversion")
+  transactionDate         DateTime @map("transaction_date")
+  buyerOpportunityId      String?  @map("buyer_opportunity_id")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  @@index([vehicleMake, vehicleModel])
+  @@index([metro])
+  @@index([transactionDate])
+  @@map("marketplace_intelligence")
+}
+
+// AMIPS — Content Queue.
+// Priority-ordered backlog of pages to generate. priorityScore is
+// computed from the launch opportunity formula (population-based) and
+// later upgraded to search-demand-based once Search Intelligence matures.
+model ContentQueue {
+  id             String    @id @default(cuid())
+  priorityScore  Float     @map("priority_score")
+  contentTier    String    @map("content_tier")
+  make           String?
+  model          String?
+  metro          String?
+  state          String?
+  intentTemplate String    @map("intent_template") @db.Text
+  keywordTarget  String    @map("keyword_target")
+  status         String    @default("pending")
+  failureReason  String?   @map("failure_reason") @db.Text
+  scheduledDate  DateTime? @map("scheduled_date")
+  contentPageId  String?   @map("content_page_id")
+  attempts       Int       @default(0)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, priorityScore])
+  @@index([contentTier])
+  @@index([scheduledDate])
+  @@map("content_queue")
+}
+
+// AMIPS — Content Pages.
+// The published page store. Every factual claim traces to a data field;
+// dataTokenCount + qualityGateStatus enforce the "no data, no article"
+// rule. Kept fully separate from content_articles (Phase C2 system).
+model AmipsPage {
+  id                String    @id @default(cuid())
+  slug              String    @unique
+  contentTier       String    @map("content_tier")
+  make              String?
+  model             String?
+  metro             String?
+  state             String?
+  title             String
+  metaDescription   String    @map("meta_description")
+  h1                String
+  body              String    @db.Text
+  faqJson           String?   @map("faq_json") @db.Text
+  marketScoreJson   String?   @map("market_score_json") @db.Text
+  dataTokenCount    Int       @default(0) @map("data_token_count")
+  ctaType           String    @map("cta_type")
+  lifecycleStatus   String    @default("ACTIVE") @map("lifecycle_status")
+  qualityGateStatus String    @map("quality_gate_status")
+  qualityGateFlags  String?   @map("quality_gate_flags") @db.Text
+  vehicleDataAsOf   DateTime? @map("vehicle_data_as_of")
+  dealerDataAsOf    DateTime? @map("dealer_data_as_of")
+  marketDataAsOf    DateTime? @map("market_data_as_of")
+  publishedAt       DateTime? @map("published_at")
+  lastRefreshedAt   DateTime? @map("last_refreshed_at")
+  impressions       Int       @default(0)
+  clicks            Int       @default(0)
+  leadsGenerated    Int       @default(0) @map("leads_generated")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([contentTier, lifecycleStatus])
+  @@index([make, model, metro])
+  @@index([publishedAt])
+  @@index([lifecycleStatus])
+  @@map("amips_pages")
+}
