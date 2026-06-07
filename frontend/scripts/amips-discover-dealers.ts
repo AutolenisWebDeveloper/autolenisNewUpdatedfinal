@@ -1,24 +1,24 @@
-// AMIPS — Wave 1 bulk dealer-discovery enrichment runner.
+// AMIPS — bulk dealer-discovery runner.
 //
-// Triggers the existing Gemini Maps dealer-discovery pipeline across the top 25
+// Drives the existing Gemini Maps dealer-discovery pipeline across the top 25
 // US metros × the top 10 vehicle brands (250 combinations) and upserts every
-// discovered dealer into the DealerProspect table.
+// discovered dealer into the DealerProspect table with buyerOppId = null.
 //
 // No buyer required:
-//   DealerProspect.buyerOppId is optional. Bulk market enrichment has no
-//   originating buyer, so every prospect created here is unscoped
+//   DealerProspect.buyerOppId is now optional. Bulk market discovery has no
+//   originating buyer request, so every prospect created here is unscoped
 //   (buyerOppId = null). Buyer-intake prospects still carry a real buyerOppId.
 //
 // Dedup:
 //   The table has no compound unique constraint, so createMany({skipDuplicates})
 //   cannot dedup by dealer identity. We match each discovered dealer on its
-//   natural identity (Google Maps source URL when present, else
-//   name + city + state) and update in place rather than inserting a duplicate.
+//   natural identity (website URL when present, else name + city + state) and
+//   update in place rather than inserting a duplicate.
 //
 // Requires DATABASE_URL and GEMINI_API_KEY in the environment.
 //
 // Usage (from frontend/):
-//   pnpm amips:enrich-dealers
+//   pnpm amips:discover
 
 import { prisma } from "@/lib/prisma";
 import {
@@ -27,48 +27,47 @@ import {
 } from "@/lib/services/acquisition/compound-search.service";
 
 // ───────────────────────────────────────────────────
-// WAVE 1 TARGETS
+// TARGETS
 // ───────────────────────────────────────────────────
 
 interface MetroTarget {
   metro: string;
-  state: string;
-  // A central ZIP for the metro — the seed point for the 25-mile Gemini Maps
-  // radius search. Mirrors the metro list in lib/amips/seed/content-queue.seed.ts.
+  // A central ZIP for the metro — the seed point for the 30-mile Gemini Maps
+  // radius search.
   zip: string;
 }
 
-// Top 25 US metros (Wave 1) with a representative downtown ZIP each.
-const WAVE_1_METROS: MetroTarget[] = [
-  { metro: "Dallas-Fort Worth", state: "TX", zip: "75201" },
-  { metro: "Houston", state: "TX", zip: "77002" },
-  { metro: "Los Angeles", state: "CA", zip: "90012" },
-  { metro: "Chicago", state: "IL", zip: "60601" },
-  { metro: "Miami", state: "FL", zip: "33130" },
-  { metro: "Atlanta", state: "GA", zip: "30303" },
-  { metro: "Washington DC", state: "DC", zip: "20001" },
-  { metro: "Phoenix", state: "AZ", zip: "85003" },
-  { metro: "Philadelphia", state: "PA", zip: "19103" },
-  { metro: "Detroit", state: "MI", zip: "48226" },
-  { metro: "Boston", state: "MA", zip: "02108" },
-  { metro: "San Antonio", state: "TX", zip: "78205" },
-  { metro: "Austin", state: "TX", zip: "78701" },
-  { metro: "Seattle", state: "WA", zip: "98101" },
-  { metro: "Denver", state: "CO", zip: "80202" },
-  { metro: "Minneapolis", state: "MN", zip: "55401" },
-  { metro: "Tampa", state: "FL", zip: "33602" },
-  { metro: "Charlotte", state: "NC", zip: "28202" },
-  { metro: "San Diego", state: "CA", zip: "92101" },
-  { metro: "Portland", state: "OR", zip: "97204" },
-  { metro: "Las Vegas", state: "NV", zip: "89101" },
-  { metro: "Nashville", state: "TN", zip: "37203" },
-  { metro: "Baltimore", state: "MD", zip: "21202" },
-  { metro: "Sacramento", state: "CA", zip: "95814" },
-  { metro: "New York", state: "NY", zip: "10007" },
+// Top 25 US metros with a representative center ZIP each.
+const METROS: MetroTarget[] = [
+  { metro: "Dallas-Fort Worth", zip: "75201" },
+  { metro: "Houston", zip: "77001" },
+  { metro: "Los Angeles", zip: "90001" },
+  { metro: "Chicago", zip: "60601" },
+  { metro: "Miami", zip: "33101" },
+  { metro: "Atlanta", zip: "30301" },
+  { metro: "Washington DC", zip: "20001" },
+  { metro: "Phoenix", zip: "85001" },
+  { metro: "Philadelphia", zip: "19101" },
+  { metro: "Detroit", zip: "48201" },
+  { metro: "Boston", zip: "02101" },
+  { metro: "San Antonio", zip: "78201" },
+  { metro: "Austin", zip: "78701" },
+  { metro: "Seattle", zip: "98101" },
+  { metro: "Denver", zip: "80201" },
+  { metro: "Minneapolis", zip: "55401" },
+  { metro: "Tampa", zip: "33601" },
+  { metro: "Charlotte", zip: "28201" },
+  { metro: "San Diego", zip: "92101" },
+  { metro: "Portland", zip: "97201" },
+  { metro: "Las Vegas", zip: "89101" },
+  { metro: "Nashville", zip: "37201" },
+  { metro: "Baltimore", zip: "21201" },
+  { metro: "Sacramento", zip: "95801" },
+  { metro: "New York", zip: "10001" },
 ];
 
 // Top 10 vehicle brands.
-const WAVE_1_BRANDS: string[] = [
+const BRANDS: string[] = [
   "Toyota",
   "Ford",
   "Chevrolet",
@@ -82,9 +81,8 @@ const WAVE_1_BRANDS: string[] = [
 ];
 
 // Knobs.
-const MAX_DEALERS_PER_COMBO = 10;
 const DELAY_BETWEEN_CALLS_MS = 2000;
-const SEARCH_RADIUS_MILES = 25;
+const SEARCH_RADIUS_MILES = 30;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -95,22 +93,21 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 type UpsertOutcome = "inserted" | "updated";
 
 // Upsert a single discovered dealer, deduping on natural identity. We store the
-// queried brand (not the model-returned one) so the per-brand verification
-// rollup stays clean. Bulk-enrichment prospects are unscoped — buyerOppId = null.
+// queried brand (not the model-returned one) so the per-brand rollup stays
+// clean. Bulk-discovery prospects are unscoped — buyerOppId = null.
 async function upsertDealer(
   brand: string,
   d: DiscoveredDealer,
 ): Promise<UpsertOutcome> {
-  // Prefer the Google Maps source URL (CID-based, one per place) as the dedup
-  // key; fall back to name + city + state when no URL was returned.
+  // Prefer the dealer website URL as the dedup key; fall back to
+  // name + city + state when no website was returned.
   const existing = await prisma.dealerProspect.findFirst({
-    where: d.sourceUrl
-      ? { sourceUrl: d.sourceUrl }
+    where: d.website
+      ? { website: d.website }
       : {
           name: d.name,
           city: d.city ?? undefined,
           state: d.state ?? undefined,
-          brand,
         },
     select: { id: true },
   });
@@ -152,9 +149,9 @@ async function main(): Promise<void> {
     throw new Error("GEMINI_API_KEY not configured — cannot run dealer discovery");
   }
 
-  const combos = WAVE_1_METROS.length * WAVE_1_BRANDS.length;
+  const combos = METROS.length * BRANDS.length;
   console.log(
-    `[amips-enrich] starting — ${WAVE_1_METROS.length} metros × ${WAVE_1_BRANDS.length} brands = ${combos} combinations`,
+    `[amips-discover] starting — ${METROS.length} metros × ${BRANDS.length} brands = ${combos} combinations`,
   );
 
   let comboIdx = 0;
@@ -163,10 +160,9 @@ async function main(): Promise<void> {
   let totalUpdated = 0;
   let totalErrors = 0;
 
-  for (const m of WAVE_1_METROS) {
-    for (const brand of WAVE_1_BRANDS) {
+  for (const m of METROS) {
+    for (const brand of BRANDS) {
       comboIdx++;
-      const label = `${m.metro}, ${m.state} + ${brand}`;
       try {
         const dealers = await discoverDealers({
           make: brand,
@@ -174,27 +170,26 @@ async function main(): Promise<void> {
           radiusMiles: SEARCH_RADIUS_MILES,
         });
 
-        const slice = dealers.slice(0, MAX_DEALERS_PER_COMBO);
         let inserted = 0;
         let updated = 0;
-        for (const d of slice) {
+        for (const d of dealers) {
           const outcome = await upsertDealer(brand, d);
           if (outcome === "inserted") inserted++;
           else updated++;
         }
 
-        totalFound += slice.length;
+        totalFound += dealers.length;
         totalInserted += inserted;
         totalUpdated += updated;
 
         console.log(
-          `[amips-enrich] ${m.metro} + ${brand} — found ${slice.length} ` +
+          `[amips-discover] ${m.metro} + ${brand}: ${dealers.length} found ` +
             `(${inserted} new, ${updated} updated) [${comboIdx}/${combos}]`,
         );
       } catch (err) {
         totalErrors++;
         console.error(
-          `[amips-enrich] ${label} FAILED [${comboIdx}/${combos}]:`,
+          `[amips-discover] ${m.metro} + ${brand} FAILED [${comboIdx}/${combos}]:`,
           err instanceof Error ? err.message : err,
         );
       }
@@ -206,22 +201,21 @@ async function main(): Promise<void> {
     }
   }
 
-  const totalProspects = await prisma.dealerProspect.count();
-
   console.log("");
-  console.log("[amips-enrich] ===== SUMMARY =====");
-  console.log(`[amips-enrich] combinations processed: ${comboIdx}/${combos}`);
-  console.log(`[amips-enrich] dealers found:          ${totalFound}`);
-  console.log(`[amips-enrich] inserted (new):         ${totalInserted}`);
-  console.log(`[amips-enrich] updated (existing):     ${totalUpdated}`);
-  console.log(`[amips-enrich] errors:                 ${totalErrors}`);
-  console.log(`[amips-enrich] dealer_prospects total: ${totalProspects}`);
-  console.log("[amips-enrich] done");
+  console.log("[amips-discover] Complete");
+  console.log(`Total combinations: ${combos}`);
+  console.log(`Total dealers found: ${totalFound}`);
+  console.log(`New records created: ${totalInserted}`);
+  console.log(`Existing records updated: ${totalUpdated}`);
+  if (totalErrors > 0) {
+    console.log(`Errors: ${totalErrors}`);
+  }
+  console.log("Run pnpm amips:sync-dealers to sync to dealer_intelligence");
 }
 
 main()
   .catch((err) => {
-    console.error("[amips-enrich] FATAL", err);
+    console.error("[amips-discover] FATAL", err);
     process.exitCode = 1;
   })
   .finally(async () => {

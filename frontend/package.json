@@ -17,6 +17,7 @@
     "content:generate": "tsx scripts/generate-articles.ts",
     "amips:seed": "tsx scripts/amips-seed.ts",
     "amips:enrich-dealers": "tsx scripts/amips-enrich-dealers.ts",
+    "amips:discover": "tsx scripts/amips-discover-dealers.ts",
     "amips:sync-dealers": "tsx scripts/amips-sync-dealers.ts",
     "amips:sync-markets": "tsx scripts/amips-sync-markets.ts",
     "amips:compute-scores": "tsx scripts/amips-compute-scores.ts"
