@@ -23,6 +23,12 @@ export interface AttributionDimensionRow {
   valueCents: number; // sum of converted deposit value
 }
 
+export interface AttributionTrendPoint {
+  date: string; // YYYY-MM-DD
+  leads: number;
+  conversions: number;
+}
+
 export interface ContentAttributionReport {
   totals: {
     leads: number;
@@ -35,6 +41,7 @@ export interface ContentAttributionReport {
   byState: AttributionDimensionRow[];
   byCity: AttributionDimensionRow[]; // key = "City, ST"
   topArticles: AttributionDimensionRow[]; // key = article slug
+  dailyTrend: AttributionTrendPoint[]; // last 30 days
   generatedAt: string;
 }
 
@@ -45,8 +52,11 @@ const EMPTY_REPORT: ContentAttributionReport = {
   byState: [],
   byCity: [],
   topArticles: [],
+  dailyTrend: [],
   generatedAt: new Date(0).toISOString(),
 };
+
+const TREND_DAYS = 30;
 
 interface Row {
   cluster: string;
@@ -56,6 +66,30 @@ interface Row {
   articleSlug: string;
   converted: boolean;
   conversionValueCents: number | null;
+  createdAt: Date;
+  convertedAt: Date | null;
+}
+
+/** Last `TREND_DAYS` days of leads (by createdAt) and conversions (by convertedAt). */
+function buildTrend(rows: Row[]): AttributionTrendPoint[] {
+  const map = new Map<string, { leads: number; conversions: number }>();
+  for (let i = TREND_DAYS - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    map.set(d.toISOString().slice(0, 10), { leads: 0, conversions: 0 });
+  }
+  for (const r of rows) {
+    const leadKey = r.createdAt.toISOString().slice(0, 10);
+    const leadBucket = map.get(leadKey);
+    if (leadBucket) leadBucket.leads += 1;
+    if (r.converted && r.convertedAt) {
+      const convKey = r.convertedAt.toISOString().slice(0, 10);
+      const convBucket = map.get(convKey);
+      if (convBucket) convBucket.conversions += 1;
+    }
+  }
+  return [...map.entries()].map(([date, v]) => ({ date, ...v }));
 }
 
 function aggregate(rows: Row[], keyFn: (r: Row) => string | null): AttributionDimensionRow[] {
@@ -96,6 +130,8 @@ export async function getContentAttributionReport(): Promise<ContentAttributionR
         articleSlug: true,
         converted: true,
         conversionValueCents: true,
+        createdAt: true,
+        convertedAt: true,
       },
     });
 
@@ -113,6 +149,7 @@ export async function getContentAttributionReport(): Promise<ContentAttributionR
       byState: aggregate(rows, (r) => r.state || null),
       byCity: aggregate(rows, (r) => (r.city ? `${r.city}, ${r.state}` : null)),
       topArticles: aggregate(rows, (r) => r.articleSlug || null).slice(0, 25),
+      dailyTrend: buildTrend(rows),
       generatedAt: new Date().toISOString(),
     };
   } catch (err) {

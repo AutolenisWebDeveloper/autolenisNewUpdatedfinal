@@ -7,6 +7,7 @@ import { CheckCircle2, XCircle, ArrowRight, Clock } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
 import { requireBuyer } from "@/lib/auth/session";
+import ContentConversionTracker from "@/components/analytics/ContentConversionTracker";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,7 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
   let verified  = false;
   let pending   = false;
   let errorMsg: string | null = null;
+  let conversionValueCents: number | undefined;
 
   if (intentId) {
     try {
@@ -27,10 +29,11 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
       if (intent.status === "succeeded") {
         const deposit = await prisma.deposit.findFirst({
           where: { stripePaymentIntentId: intentId, buyerId: buyer.id },
-          select: { id: true, status: true },
+          select: { id: true, status: true, amountCents: true },
         });
         if (deposit?.status === "PAID") {
           verified = true;
+          conversionValueCents = deposit.amountCents;
         } else if (deposit) {
           pending = true;
         } else {
@@ -86,6 +89,7 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
 
   return (
     <div className="p-6 md:p-8 max-w-xl text-center" data-testid="deposit-success-page">
+      <ContentConversionTracker conversionType="deposit_paid" valueCents={conversionValueCents} />
       <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-5">
         <CheckCircle2 size={40} className="text-green-600" />
       </div>

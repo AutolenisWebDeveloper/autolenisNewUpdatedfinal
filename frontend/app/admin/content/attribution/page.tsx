@@ -10,7 +10,9 @@ import {
   type AttributionDimensionRow,
 } from "@/lib/services/analytics/content-attribution-analytics.service";
 import { formatCentsAsUsd } from "@/lib/constants";
-import { BarChart2, Layers, Map as MapIcon, Flag, Building2, FileText } from "lucide-react";
+import {
+  BarChart2, Layers, Map as MapIcon, Flag, Building2, FileText, Download, TrendingUp,
+} from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Content Attribution — Admin" };
@@ -91,6 +93,64 @@ function DimensionTable({
   );
 }
 
+function TrendChart({
+  points,
+}: {
+  points: { date: string; leads: number; conversions: number }[];
+}) {
+  const max = Math.max(1, ...points.map((p) => p.leads));
+  return (
+    <section
+      data-testid="attribution-trend"
+      className="bg-white border border-[#E2E8F0] rounded-2xl p-5 md:p-6 shadow-sm"
+    >
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${BLUE}15` }}>
+            <TrendingUp size={15} style={{ color: BLUE }} />
+          </div>
+          <h2 className="text-sm font-bold tracking-tight" style={{ color: BLUE }}>Last 30 Days</h2>
+        </div>
+        <div className="flex items-center gap-4 text-[11px] text-[#94A3B8]">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: BLUE }} /> Leads
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: GREEN }} /> Conversions
+          </span>
+        </div>
+      </div>
+      <div className="flex items-end gap-1 h-28">
+        {points.map((p) => (
+          <div
+            key={p.date}
+            className="flex-1 flex flex-col items-center justify-end gap-0.5"
+            title={`${p.date}: ${p.leads} leads, ${p.conversions} conversions`}
+          >
+            <div className="w-full flex flex-col justify-end items-center" style={{ height: "100%" }}>
+              <div
+                className="w-full rounded-t"
+                style={{
+                  height: `${Math.round((p.leads / max) * 100)}%`,
+                  backgroundColor: BLUE,
+                  opacity: p.leads === 0 ? 0.15 : 1,
+                }}
+              />
+              <div
+                className="w-full"
+                style={{
+                  height: `${Math.round((p.conversions / max) * 100)}%`,
+                  backgroundColor: GREEN,
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default async function ContentAttributionPage() {
   await requireAdmin();
   const report = await getContentAttributionReport();
@@ -100,18 +160,28 @@ export default async function ContentAttributionPage() {
       data-testid="content-attribution-page"
       className="min-h-screen bg-[#F4F6FA] p-6 md:p-8 max-w-[1400px] mx-auto space-y-6"
     >
-      <header>
-        <div className="flex items-center gap-2 mb-1.5">
-          <BarChart2 size={16} style={{ color: BLUE }} />
-          <p className="text-[10px] text-[#94A3B8] font-semibold uppercase tracking-widest">
-            Content Engine
+      <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <BarChart2 size={16} style={{ color: BLUE }} />
+            <p className="text-[10px] text-[#94A3B8] font-semibold uppercase tracking-widest">
+              Content Engine
+            </p>
+          </div>
+          <h1 className="text-2xl font-bold text-[#0F172A] tracking-tight">Content Attribution</h1>
+          <p className="text-sm text-[#94A3B8] mt-0.5">
+            Leads &amp; conversions by cluster, metro, state, and city · Last updated:{" "}
+            {new Date(report.generatedAt).toLocaleString("en-US")}
           </p>
         </div>
-        <h1 className="text-2xl font-bold text-[#0F172A] tracking-tight">Content Attribution</h1>
-        <p className="text-sm text-[#94A3B8] mt-0.5">
-          Leads &amp; conversions by cluster, metro, state, and city · Last updated:{" "}
-          {new Date(report.generatedAt).toLocaleString("en-US")}
-        </p>
+        <a
+          href="/api/admin/content/attribution/export"
+          data-testid="attribution-export-csv"
+          className="inline-flex shrink-0 items-center gap-2 px-4 py-2.5 bg-white border border-[#E2E8F0] rounded-xl text-sm font-semibold text-[#0F172A] hover:border-[#0B5FD1] hover:text-[#0B5FD1] transition-colors shadow-sm"
+        >
+          <Download size={15} />
+          Export CSV
+        </a>
       </header>
 
       {/* Totals */}
@@ -121,6 +191,8 @@ export default async function ContentAttributionPage() {
         <KPICard label="Conversion" value={`${report.totals.conversionRate}%`} sub="leads → converted" accent={PURPLE} />
         <KPICard label="Attributed Value" value={formatCentsAsUsd(report.totals.valueCents)} sub="deposit value" accent="#D97706" />
       </div>
+
+      <TrendChart points={report.dailyTrend} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <DimensionTable title="By Cluster" icon={Layers} testId="attribution-by-cluster" keyHeader="Cluster" rows={report.byCluster} />
