@@ -14,6 +14,7 @@
     "postinstall": "prisma generate",
     "seed": "tsx prisma/seed.ts",
     "amips:enrich-dealers": "tsx scripts/amips-enrich-dealers.ts",
+    "enrich:contacts": "tsx scripts/enrich-dealer-contacts.ts",
     "sandbox:seed-deal": "tsx scripts/seed-sandbox-deal.ts",
     "content:generate": "tsx scripts/generate-articles.ts",
     "apollo:import": "tsx scripts/apollo-import.ts",
