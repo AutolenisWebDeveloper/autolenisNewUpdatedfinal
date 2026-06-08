@@ -61,6 +61,7 @@ export class BufferProvider implements PublishingProvider {
     }
 
     const fields: Record<string, string | undefined> = {
+      access_token: process.env.BUFFER_API_KEY,
       "profile_ids[]": profileId,
       text: composeText(input.caption, input.hashtags),
     };
@@ -103,7 +104,8 @@ export class BufferProvider implements PublishingProvider {
 
   async getPostStatus(platformPostId: string): Promise<PostStatusResult> {
     try {
-      const res = await fetch(`${BUFFER_BASE}/updates/${platformPostId}.json`, {
+      const token = process.env.BUFFER_API_KEY ?? "";
+      const res = await fetch(`${BUFFER_BASE}/updates/${platformPostId}.json?access_token=${encodeURIComponent(token)}`, {
         method: "GET",
         headers: authHeader(),
       });
@@ -124,7 +126,8 @@ export class BufferProvider implements PublishingProvider {
 
   async getAnalytics(platformPostId: string): Promise<PostAnalyticsResult> {
     try {
-      const res = await fetch(`${BUFFER_BASE}/updates/${platformPostId}/interactions.json`, {
+      const token = process.env.BUFFER_API_KEY ?? "";
+      const res = await fetch(`${BUFFER_BASE}/updates/${platformPostId}/interactions.json?access_token=${encodeURIComponent(token)}&event=clicks`, {
         method: "GET",
         headers: authHeader(),
       });
