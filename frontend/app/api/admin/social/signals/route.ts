@@ -19,12 +19,21 @@ export async function GET(request: NextRequest) {
   if (processed === "true") where.assetsGenerated = true;
   else if (processed === "false") where.assetsGenerated = false;
 
-  const [signals, total] = await Promise.all([
-    prisma.topicSignal.findMany({ where, orderBy: { detectedAt: "desc" }, take: 100 }),
-    prisma.topicSignal.count({ where }),
-  ]);
+  // The social tables are provisioned via a manual Supabase migration that may
+  // not be applied in every environment. If the model/table is missing the
+  // queries throw — return an empty list instead of a 500 so the dashboard
+  // still renders.
+  try {
+    const [signals, total] = await Promise.all([
+      prisma.topicSignal.findMany({ where, orderBy: { detectedAt: "desc" }, take: 100 }),
+      prisma.topicSignal.count({ where }),
+    ]);
 
-  return adminSuccess({ signals, total });
+    return adminSuccess({ signals, total });
+  } catch (err) {
+    console.error("[admin/social] signals query failed:", err);
+    return adminSuccess({ signals: [], total: 0 });
+  }
 }
 
 export async function POST(request: NextRequest) {

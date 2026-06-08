@@ -10,43 +10,61 @@ export async function GET(request: NextRequest) {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
-  const [postGroups, videoGroups, perfAgg, topFranchise, topHook, platformGroups] = await Promise.all([
-    prisma.socialPost.groupBy({ by: ["status"], _count: { _all: true } }),
-    prisma.socialVideo.groupBy({ by: ["status"], _count: { _all: true } }),
-    prisma.socialPerformance.aggregate({
-      _sum: { reach: true, linkClicks: true, vehicleRequests: true, leadScore: true },
-    }),
-    prisma.contentFranchise.findFirst({ where: { avgLeadScore: { not: null } }, orderBy: { avgLeadScore: "desc" }, select: { name: true } }),
-    prisma.hookPerformance.findFirst({ orderBy: { avgLeadScore: "desc" }, select: { hookType: true } }),
-    prisma.socialPost.groupBy({ by: ["platform"], _sum: { leadScore: true }, orderBy: { _sum: { leadScore: "desc" } }, take: 1 }),
-  ]);
+  // The social tables are provisioned via a manual Supabase migration that may
+  // not be applied in every environment. If any model/table is missing the
+  // queries throw — return zeroed-out stats instead of a 500 so the dashboard
+  // still renders.
+  const empty = {
+    posts: { draft: 0, pending: 0, approved: 0, scheduled: 0, published: 0, failed: 0 },
+    videos: { queued: 0, generating: 0, ready: 0, failed: 0 },
+    performance: { totalReach: 0, totalClicks: 0, totalRequests: 0, totalLeadScore: 0 },
+    topFranchise: "—",
+    topHook: "—",
+    topPlatform: "—",
+  };
 
-  const postCount = (s: string) => postGroups.find((g) => g.status === s)?._count._all ?? 0;
-  const videoCount = (s: string) => videoGroups.find((g) => g.status === s)?._count._all ?? 0;
+  try {
+    const [postGroups, videoGroups, perfAgg, topFranchise, topHook, platformGroups] = await Promise.all([
+      prisma.socialPost.groupBy({ by: ["status"], _count: { _all: true } }),
+      prisma.socialVideo.groupBy({ by: ["status"], _count: { _all: true } }),
+      prisma.socialPerformance.aggregate({
+        _sum: { reach: true, linkClicks: true, vehicleRequests: true, leadScore: true },
+      }),
+      prisma.contentFranchise.findFirst({ where: { avgLeadScore: { not: null } }, orderBy: { avgLeadScore: "desc" }, select: { name: true } }),
+      prisma.hookPerformance.findFirst({ orderBy: { avgLeadScore: "desc" }, select: { hookType: true } }),
+      prisma.socialPost.groupBy({ by: ["platform"], _sum: { leadScore: true }, orderBy: { _sum: { leadScore: "desc" } }, take: 1 }),
+    ]);
 
-  return adminSuccess({
-    posts: {
-      draft: postCount("DRAFT"),
-      pending: postCount("PENDING_REVIEW"),
-      approved: postCount("APPROVED"),
-      scheduled: postCount("SCHEDULED"),
-      published: postCount("PUBLISHED"),
-      failed: postCount("FAILED"),
-    },
-    videos: {
-      queued: videoCount("VIDEO_QUEUED"),
-      generating: videoCount("VIDEO_GENERATING"),
-      ready: videoCount("VIDEO_READY"),
-      failed: videoCount("VIDEO_FAILED"),
-    },
-    performance: {
-      totalReach: perfAgg._sum.reach ?? 0,
-      totalClicks: perfAgg._sum.linkClicks ?? 0,
-      totalRequests: perfAgg._sum.vehicleRequests ?? 0,
-      totalLeadScore: perfAgg._sum.leadScore ?? 0,
-    },
-    topFranchise: topFranchise?.name ?? "—",
-    topHook: topHook?.hookType ?? "—",
-    topPlatform: platformGroups[0]?.platform ?? "—",
-  });
+    const postCount = (s: string) => postGroups.find((g) => g.status === s)?._count._all ?? 0;
+    const videoCount = (s: string) => videoGroups.find((g) => g.status === s)?._count._all ?? 0;
+
+    return adminSuccess({
+      posts: {
+        draft: postCount("DRAFT"),
+        pending: postCount("PENDING_REVIEW"),
+        approved: postCount("APPROVED"),
+        scheduled: postCount("SCHEDULED"),
+        published: postCount("PUBLISHED"),
+        failed: postCount("FAILED"),
+      },
+      videos: {
+        queued: videoCount("VIDEO_QUEUED"),
+        generating: videoCount("VIDEO_GENERATING"),
+        ready: videoCount("VIDEO_READY"),
+        failed: videoCount("VIDEO_FAILED"),
+      },
+      performance: {
+        totalReach: perfAgg._sum.reach ?? 0,
+        totalClicks: perfAgg._sum.linkClicks ?? 0,
+        totalRequests: perfAgg._sum.vehicleRequests ?? 0,
+        totalLeadScore: perfAgg._sum.leadScore ?? 0,
+      },
+      topFranchise: topFranchise?.name ?? "—",
+      topHook: topHook?.hookType ?? "—",
+      topPlatform: platformGroups[0]?.platform ?? "—",
+    });
+  } catch (err) {
+    console.error("[admin/social] stats query failed:", err);
+    return adminSuccess(empty);
+  }
 }
