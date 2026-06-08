@@ -140,7 +140,24 @@ function VideoBadge({ status }: { status: string }) {
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: "include", ...init });
-  const json = (await res.json()) as { success?: boolean; data?: T; error?: { message?: string } };
+
+  // Read the raw body first so an empty or non-JSON response (e.g. a crashed
+  // route returning a blank 500) surfaces a real error instead of throwing
+  // "Unexpected end of JSON input".
+  const text = await res.text();
+  if (!text) {
+    console.error(`[fetchJson] empty response body from ${url} (${res.status})`);
+    throw new Error(`Server returned an empty response (${res.status})`);
+  }
+
+  let json: { success?: boolean; data?: T; error?: { message?: string } };
+  try {
+    json = JSON.parse(text) as typeof json;
+  } catch {
+    console.error(`[fetchJson] invalid JSON from ${url}:`, text.slice(0, 200));
+    throw new Error(`Server returned an invalid response (${res.status})`);
+  }
+
   if (!res.ok || json.success === false) {
     throw new Error(json.error?.message ?? `Request failed (${res.status})`);
   }

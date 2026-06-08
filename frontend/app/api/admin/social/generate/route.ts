@@ -16,52 +16,70 @@ const schema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const admin = await getAdminFromRequest(request);
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  try {
+    const admin = await getAdminFromRequest(request);
+    if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
-  const parsed = schema.safeParse(await request.json());
-  if (!parsed.success) return adminError("VALIDATION_ERROR", parsed.error.message, 400);
-  const { signalId, franchiseSlug, platform } = parsed.data;
-
-  const [signal, franchise] = await Promise.all([
-    prisma.topicSignal.findUnique({ where: { id: signalId } }),
-    prisma.contentFranchise.findUnique({ where: { slug: franchiseSlug } }),
-  ]);
-  if (!signal) return adminError("NOT_FOUND", "Signal not found", 404);
-  if (!franchise) return adminError("NOT_FOUND", "Franchise not found", 404);
-
-  const platforms = platform ? [platform] : franchise.platforms;
-  const slots = computePostingSlots(franchise.postingSlots);
-
-  console.log("[social-generate] signal:", signalId, "franchise:", franchiseSlug, "platforms:", platforms);
-
-  const created: string[] = [];
-  const failed: string[] = [];
-  for (let i = 0; i < platforms.length; i++) {
-    const scheduledAt = slots[i % Math.max(slots.length, 1)] ?? computePostingSlots([12])[0];
+    // Guard against an empty or malformed request body so JSON parsing never
+    // throws out of the handler (which would return an empty 500 body).
+    let rawBody: unknown;
     try {
-      console.log("[social-generate] calling orchestrator for platform:", platforms[i]);
-      const post = await generateAndQueuePost({ signal, franchise, platform: platforms[i], scheduledAt });
-      console.log("[social-generate] result: created post", post.id, "status", post.status);
-      created.push(post.id);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[social-generate] platform ${platforms[i]} failed:`, message);
-      failed.push(`${platforms[i]}: ${message}`);
+      rawBody = await request.json();
+    } catch {
+      return adminError("VALIDATION_ERROR", "Request body must be valid JSON", 400);
     }
+
+    const parsed = schema.safeParse(rawBody);
+    if (!parsed.success) return adminError("VALIDATION_ERROR", parsed.error.message, 400);
+    const { signalId, franchiseSlug, platform } = parsed.data;
+
+    const [signal, franchise] = await Promise.all([
+      prisma.topicSignal.findUnique({ where: { id: signalId } }),
+      prisma.contentFranchise.findUnique({ where: { slug: franchiseSlug } }),
+    ]);
+    if (!signal) return adminError("NOT_FOUND", "Signal not found", 404);
+    if (!franchise) return adminError("NOT_FOUND", "Franchise not found", 404);
+
+    const platforms = platform ? [platform] : franchise.platforms;
+    const slots = computePostingSlots(franchise.postingSlots);
+
+    console.log("[social-generate] signal:", signalId, "franchise:", franchiseSlug, "platforms:", platforms);
+
+    const created: string[] = [];
+    const failed: string[] = [];
+    for (let i = 0; i < platforms.length; i++) {
+      const scheduledAt = slots[i % Math.max(slots.length, 1)] ?? computePostingSlots([12])[0];
+      try {
+        console.log("[social-generate] calling orchestrator for platform:", platforms[i]);
+        const post = await generateAndQueuePost({ signal, franchise, platform: platforms[i], scheduledAt });
+        console.log("[social-generate] result: created post", post.id, "status", post.status);
+        created.push(post.id);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[social-generate] platform ${platforms[i]} failed:`, message);
+        failed.push(`${platforms[i]}: ${message}`);
+      }
+    }
+
+    console.log("[social-generate] done. created:", created.length, "failed:", failed.length);
+
+    await createAuditLog(admin, request, {
+      action: "SOCIAL_POST_MANUAL_GENERATE",
+      entityType: "SocialPost",
+      entityId: signalId,
+      metadata: { franchiseSlug, platforms, created: created.length, failed: failed.length },
+    });
+
+    if (created.length === 0) {
+      return adminError("GENERATION_FAILED", failed.join("; ") || "No posts generated", 502);
+    }
+    return adminSuccess({ created, failed });
+  } catch (err) {
+    console.error("[social-generate] unhandled error:", err);
+    return adminError(
+      "INTERNAL_ERROR",
+      err instanceof Error ? err.message : "Unknown error",
+      500
+    );
   }
-
-  console.log("[social-generate] done. created:", created.length, "failed:", failed.length);
-
-  await createAuditLog(admin, request, {
-    action: "SOCIAL_POST_MANUAL_GENERATE",
-    entityType: "SocialPost",
-    entityId: signalId,
-    metadata: { franchiseSlug, platforms, created: created.length, failed: failed.length },
-  });
-
-  if (created.length === 0) {
-    return adminError("GENERATION_FAILED", failed.join("; ") || "No posts generated", 502);
-  }
-  return adminSuccess({ created, failed });
 }
