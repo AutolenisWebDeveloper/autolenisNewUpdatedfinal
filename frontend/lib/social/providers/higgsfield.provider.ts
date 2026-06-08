@@ -5,7 +5,11 @@
 // request/response field mapping is centralized in the small helpers below so a
 // single edit updates every call site.
 //
-// TODO: verify exact field names against Higgsfield API docs.
+// Higgsfield API field names may vary by API version.
+// All field name mappings use fallback chains (a ?? b ?? c)
+// so they degrade gracefully until exact names are confirmed.
+// Update HIGGSFIELD_SUBMIT_ENDPOINT and HIGGSFIELD_STATUS_ENDPOINT
+// in .env.local once you have the API documentation.
 
 import { prisma } from "@/lib/prisma";
 import type { SocialVideo } from "@prisma/client";
@@ -58,11 +62,12 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
         headers: authHeaders(),
         body: JSON.stringify({
           prompt: input.visualPrompt,
-          duration: input.durationSeconds,
-          style: input.style || "cinematic",
+          duration: input.durationSeconds ?? 15,
+          style: input.style ?? "cinematic",
+          aspect_ratio: "9:16",
           voiceover: input.voiceoverText || null,
           on_screen_text: input.onScreenText || null,
-          metadata: { post_id: input.postId, platform: "autolenis" },
+          metadata: { post_id: input.postId, source: "autolenis" },
         }),
       });
 
@@ -73,8 +78,14 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
         return { success: false, error };
       }
 
-      const data = (await res.json()) as { id?: string; job_id?: string; jobId?: string };
-      const providerJobId = data.job_id ?? data.jobId ?? data.id;
+      const data = (await res.json()) as {
+        id?: string;
+        job_id?: string;
+        jobId?: string;
+        generation_id?: string;
+        task_id?: string;
+      };
+      const providerJobId = data.id ?? data.job_id ?? data.generation_id ?? data.task_id ?? data.jobId;
       if (!providerJobId) {
         const error = "Higgsfield response missing job id";
         await this.markVideoFailed(input.postId, error);
@@ -110,17 +121,32 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
       }
       const data = (await res.json()) as {
         status?: string;
+        state?: string;
+        generation_status?: string;
         video_url?: string;
         videoUrl?: string;
+        output_url?: string;
+        url?: string;
+        result?: { video_url?: string };
+        output?: { video_url?: string };
         thumbnail_url?: string;
         thumbnailUrl?: string;
         error?: string;
       };
+      const rawStatus = data.status ?? data.state ?? data.generation_status;
+      const videoUrl =
+        data.video_url ??
+        data.videoUrl ??
+        data.output_url ??
+        data.url ??
+        data.result?.video_url ??
+        data.output?.video_url;
+      const thumbnailUrl = data.thumbnail_url ?? data.thumbnailUrl;
       return {
         jobId,
-        status: mapStatus(data.status),
-        videoUrl: data.video_url ?? data.videoUrl,
-        thumbnailUrl: data.thumbnail_url ?? data.thumbnailUrl,
+        status: mapStatus(rawStatus),
+        videoUrl,
+        thumbnailUrl,
         error: data.error,
       };
     } catch (err) {

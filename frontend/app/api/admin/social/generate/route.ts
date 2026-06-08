@@ -71,9 +71,17 @@ export async function POST(request: NextRequest) {
     });
 
     if (created.length === 0) {
-      return adminError("GENERATION_FAILED", failed.join("; ") || "No posts generated", 502);
+      return adminError("GENERATION_FAILED", failed.join("; ") || "No posts generated — check Vercel logs for details", 502);
     }
-    return adminSuccess({ created, failed });
+    return adminSuccess({
+      message: "Generation complete",
+      postsCreated: created.length,
+      postIds: created,
+      errors: failed,
+      // legacy keys kept for backward compat
+      created,
+      failed,
+    });
   } catch (err) {
     console.error("[social-generate] unhandled error:", err);
     return adminError(
