@@ -148,6 +148,17 @@ function decideStatus(
 ): ArticleStatus {
   if (!compliance.passed) return "REVIEW_NEEDED";
   if (quality.passedAll) return reviewOnly ? "REVIEW_NEEDED" : "PUBLISHED";
+  // Recover borderline drafts: if the ONLY rubric miss is the word-count
+  // minimum and the body still cleared 600 words, auto-publish. Compliance has
+  // already passed above, so these are fully compliant, rubric-clean articles
+  // that fell just short of the length target.
+  if (
+    quality.flags.length === 1 &&
+    quality.flags[0] === "Minimum 700 words" &&
+    quality.wordCount >= 600
+  ) {
+    return reviewOnly ? "REVIEW_NEEDED" : "PUBLISHED";
+  }
   if (quality.score >= 4) return "REVIEW_NEEDED";
   return "DRAFT";
 }

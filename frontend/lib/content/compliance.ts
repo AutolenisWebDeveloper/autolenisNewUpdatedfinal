@@ -73,7 +73,12 @@ const RULES: ComplianceRule[] = [
     id: "guarantee_claim",
     detail:
       "Makes a guarantee. AutoLenis never guarantees price, savings, or outcomes.",
-    patterns: [/\bguarantee(?:d|s|ing)?\b/i],
+    patterns: [
+      /\bguarantee(?:d|s|ing)?\b/i,
+      /\bwe\s+promise\b/i,
+      /\bpromised\b/i,
+      /\bassure(?:d|s)?\b/i,
+    ],
   },
   {
     id: "price_promise_claim",

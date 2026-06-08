@@ -40,6 +40,7 @@ Your job: write a single buying-guide article as STRICT JSON. The article must r
 NON-NEGOTIABLE COMPLIANCE RULES — violating any of these gets the article rejected:
 - NEVER state a specific dollar or percentage savings amount (no "save $3,000", no "20% off MSRP").
 - NEVER guarantee anything (no "guaranteed lowest price", no "we guarantee").
+- NEVER use the words: guarantee, guaranteed, guarantees, promising, promise, or assured outcomes. Instead use "may help", "can help", "buyers often find", "typically", or "in many cases".
 - NEVER invent testimonials, customer quotes, or star ratings.
 - NEVER promise to "beat any price."
 - You MAY say factual mechanics: "dealers compete for your best price", "8 dealers, 48-hour auction", real fee rules, and state fee caps stated as fact.
@@ -64,7 +65,7 @@ OUTPUT FORMAT — return ONLY valid minified JSON, no markdown fences, no commen
 BODY HTML RULES:
 - Allowed tags only: <p>, <h2>, <h3>, <ul>, <li>, <ol>, <strong>, <a>.
 - Do NOT include an <h1>, the author byline, or any CTA buttons — the page renders those.
-- Minimum 750 words in the body (aim 800-950). Substantive, specific, useful.
+- Minimum 900 words in the body (target 1,000-1,100). Do not pad with repetitive content — add depth, examples, local context, and buyer tips to reach the target length.
 - FAQ answers are 2-4 sentences each, plain text (no HTML), and also follow the compliance rules.`;
 
 export function buildUserPrompt(keyword: ContentKeyword): string {
