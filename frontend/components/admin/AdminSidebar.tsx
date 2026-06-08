@@ -101,6 +101,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Refinance", href: "/admin/refinance", icon: RefreshCw },
     { label: "SEO", href: "/admin/seo", icon: Search },
     { label: "Content Engine", href: "/admin/content", icon: Newspaper },
+    { label: "Bulk Articles", href: "/admin/content/bulk", icon: FileText },
     { label: "AMIPS", href: "/admin/amips", icon: Globe },
     { label: "AI Console", href: "/admin/ai", icon: Brain },
     { label: "Faith Content", href: "/admin/faith-content", icon: BookOpen },
