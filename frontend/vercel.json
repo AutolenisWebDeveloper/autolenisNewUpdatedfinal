@@ -127,6 +127,34 @@
     {
       "path": "/api/cron/amips-tier-f",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/social-signal-scan",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/social-generate",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/social-video-queue",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/social-publish-queue",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/social-status-sync",
+      "schedule": "0 */2 * * *"
+    },
+    {
+      "path": "/api/cron/social-analytics-sync",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/social-optimize",
+      "schedule": "0 6 * * 0"
     }
   ]
 }

@@ -12,7 +12,7 @@ import {
   ClipboardCheck, ArrowDownCircle, RotateCcw, Bell,
   Trophy,
   Map, TrendingDown, Globe, PlusCircle, Car, Inbox, ScrollText,
-  Phone, Newspaper,
+  Phone, Newspaper, Radio,
 } from "lucide-react";
 
 type NavItem = {
@@ -102,6 +102,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "SEO", href: "/admin/seo", icon: Search },
     { label: "Content Engine", href: "/admin/content", icon: Newspaper },
     { label: "Bulk Articles", href: "/admin/content/bulk", icon: FileText },
+    { label: "Social", href: "/admin/social", icon: Radio },
     { label: "AMIPS", href: "/admin/amips", icon: Globe },
     { label: "AI Console", href: "/admin/ai", icon: Brain },
     { label: "Faith Content", href: "/admin/faith-content", icon: BookOpen },
