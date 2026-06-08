@@ -3856,3 +3856,410 @@ model AmipsMarketScore {
   @@index([overallBuyerAdvantage])
   @@map("amips_market_scores")
 }
+
+// =====================================================
+// Social Intelligence & Media Engine (Session 1)
+// Full-automation content/video/publishing/attribution pipeline.
+// Reads from existing AMIPS + content + vehicle-request intelligence;
+// never modifies it. Kept self-contained under the social_* tables.
+// =====================================================
+
+// Franchise definitions seeded at startup — recurring content programs.
+model ContentFranchise {
+  id              String   @id @default(cuid())
+  slug            String   @unique
+  name            String
+  description     String?  @db.Text
+  platforms       String[] // ["facebook","instagram","tiktok","youtube","linkedin"]
+  cadence         String   // "daily" | "weekly" | "tuesday" | "friday"
+  postingSlots    Int[]    // [7, 12, 19] — hours in CT
+  hookTypes       String[] // preferred hook types
+  requiresReview  Boolean  @default(false)
+  active          Boolean  @default(true)
+  avgLeadScore    Float?   @map("avg_lead_score")
+  postsGenerated  Int      @default(0) @map("posts_generated")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  posts           SocialPost[]
+
+  @@map("content_franchises")
+}
+
+// Signals from AMIPS and platform data that trigger content generation.
+model TopicSignal {
+  id              String    @id @default(cuid())
+  signalType      String    @map("signal_type")
+  make            String?
+  model           String?
+  city            String?
+  metro           String?
+  state           String?
+  signalValue     Float?    @map("signal_value")
+  signalDelta     Float?    @map("signal_delta")
+  signalContext   Json      @default("{}") @map("signal_context")
+  sourceTable     String?   @map("source_table")
+  sourceId        String?   @map("source_id")
+  assetsGenerated Boolean   @default(false) @map("assets_generated")
+  assetCount      Int       @default(0) @map("asset_count")
+  detectedAt      DateTime  @default(now()) @map("detected_at")
+  expiresAt       DateTime? @map("expires_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  posts           SocialPost[]
+  derivatives     ContentDerivative[]
+
+  @@index([signalType])
+  @@index([make, model, city])
+  @@index([assetsGenerated])
+  @@index([detectedAt])
+  @@map("topic_signals")
+}
+
+// Core post record — every generated asset is a SocialPost.
+model SocialPost {
+  id              String   @id @default(cuid())
+
+  franchiseId     String?  @map("franchise_id")
+  franchise       ContentFranchise? @relation(fields: [franchiseId], references: [id])
+  signalId        String?  @map("signal_id")
+  signal          TopicSignal? @relation(fields: [signalId], references: [id])
+
+  sourceArticleId String?  @map("source_article_id")
+  sourceVehicleRequestId String? @map("source_vehicle_request_id")
+
+  platform        String
+  contentType     String   @map("content_type")
+  hookType        String?  @map("hook_type")
+
+  hook            String   @db.Text
+  script          String   @db.Text
+  caption         String   @db.Text
+  hashtags        String[]
+  ctaText         String?  @map("cta_text")
+  ctaPlacement    String?  @map("cta_placement")
+  visualPrompt    String?  @db.Text @map("visual_prompt")
+  visualStyle     String?  @map("visual_style")
+  voiceoverText   String?  @db.Text @map("voiceover_text")
+  onScreenText    String?  @db.Text @map("on_screen_text")
+  durationSeconds Int?     @map("duration_seconds")
+
+  geoTarget       String?  @map("geo_target")
+  make            String?
+  model           String?
+  metro           String?
+  state           String?
+
+  funnelDestination String? @map("funnel_destination")
+
+  utmSource       String?  @map("utm_source")
+  utmMedium       String?  @map("utm_medium")
+  utmCampaign     String?  @map("utm_campaign")
+  utmContent      String?  @map("utm_content")
+  utmTerm         String?  @map("utm_term")
+  utmHook         String?  @map("utm_hook")
+  utmPlatform     String?  @map("utm_platform")
+  trackedUrl      String?  @map("tracked_url")
+
+  complianceNotes String?  @db.Text @map("compliance_notes")
+  requiresReview  Boolean  @default(false) @map("requires_review")
+
+  automationMode  String   @default("HYBRID_AUTO") @map("automation_mode")
+
+  status          SocialPostStatus @default(DRAFT)
+  rejectionReason String?  @db.Text @map("rejection_reason")
+
+  scheduledAt     DateTime? @map("scheduled_at")
+  publishedAt     DateTime? @map("published_at")
+
+  publishingProvider String? @map("publishing_provider")
+  platformPostId  String?  @map("platform_post_id")
+  publishError    String?  @db.Text @map("publish_error")
+  publishAttempts Int      @default(0) @map("publish_attempts")
+
+  leadScore       Int      @default(0) @map("lead_score")
+
+  creatorId       String?  @map("creator_id")
+  affiliateId     String?  @map("affiliate_id")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  video           SocialVideo?
+  performance     SocialPerformance[]
+  derivatives     ContentDerivative[]
+  revenueAttrib   RevenueAttribution[]
+
+  @@index([platform, status])
+  @@index([scheduledAt])
+  @@index([franchiseId])
+  @@index([signalId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("social_posts")
+}
+
+enum SocialPostStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  SKIPPED
+  REJECTED
+}
+
+// Video generation job per post.
+model SocialVideo {
+  id              String   @id @default(cuid())
+  postId          String   @unique @map("post_id")
+  post            SocialPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  provider        String   @default("higgsfield")
+  providerJobId   String?  @map("provider_job_id")
+  status          SocialVideoStatus @default(SCRIPT_READY)
+
+  visualPrompt    String?  @db.Text @map("visual_prompt")
+  durationSeconds Int?     @map("duration_seconds")
+  style           String?
+
+  videoUrl        String?  @map("video_url")
+  thumbnailUrl    String?  @map("thumbnail_url")
+  fileSize        Int?     @map("file_size")
+  durationActual  Float?   @map("duration_actual")
+
+  lastPolledAt    DateTime? @map("last_polled_at")
+  pollAttempts    Int      @default(0) @map("poll_attempts")
+  errorMessage    String?  @db.Text @map("error_message")
+  retryCount      Int      @default(0) @map("retry_count")
+
+  storagePath     String?  @map("storage_path")
+  storageBucket   String?  @map("storage_bucket")
+
+  generatedAt     DateTime? @map("generated_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([providerJobId])
+  @@map("social_videos")
+}
+
+enum SocialVideoStatus {
+  SCRIPT_READY
+  VIDEO_QUEUED
+  VIDEO_GENERATING
+  VIDEO_READY
+  VIDEO_FAILED
+  PUBLISH_READY
+}
+
+// Performance metrics per post, recorded periodically.
+model SocialPerformance {
+  id              String   @id @default(cuid())
+  postId          String   @map("post_id")
+  post            SocialPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  impressions     Int      @default(0)
+  reach           Int      @default(0)
+  views           Int      @default(0)
+  watchTimePct    Float?   @map("watch_time_pct")
+  completionRate  Float?   @map("completion_rate")
+  likes           Int      @default(0)
+  comments        Int      @default(0)
+  shares          Int      @default(0)
+  saves           Int      @default(0)
+  linkClicks      Int      @default(0) @map("link_clicks")
+  profileVisits   Int      @default(0) @map("profile_visits")
+
+  vehicleRequests Int      @default(0) @map("vehicle_requests")
+  dealerSignups   Int      @default(0) @map("dealer_signups")
+  dealerBids      Int      @default(0) @map("dealer_bids")
+  dealsWon        Int      @default(0) @map("deals_won")
+  revenueGenerated Int     @default(0) @map("revenue_generated")
+
+  leadScore       Int      @default(0) @map("lead_score")
+
+  recordedAt      DateTime @default(now()) @map("recorded_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([postId])
+  @@index([recordedAt])
+  @@map("social_performance")
+}
+
+// Tracks which posts were derived from which signals/articles.
+model ContentDerivative {
+  id              String   @id @default(cuid())
+  signalId        String?  @map("signal_id")
+  signal          TopicSignal? @relation(fields: [signalId], references: [id])
+  sourceArticleId String?  @map("source_article_id")
+  postId          String   @map("post_id")
+  post            SocialPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  platform        String
+  derivativeType  String   @map("derivative_type")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([signalId])
+  @@index([sourceArticleId])
+  @@map("content_derivatives")
+}
+
+// AI-learned winning content patterns, updated weekly by optimization cron.
+model WinningPattern {
+  id              String   @id @default(cuid())
+  platform        String
+  franchiseSlug   String?  @map("franchise_slug")
+  hookType        String?  @map("hook_type")
+  contentType     String?  @map("content_type")
+  geoTarget       String?  @map("geo_target")
+  make            String?
+  dayOfWeek       Int?     @map("day_of_week")
+  hour            Int?
+  avgCtr          Float?   @map("avg_ctr")
+  avgEngagement   Float?   @map("avg_engagement")
+  avgLeadScore    Float?   @map("avg_lead_score")
+  avgVehicleRequests Float? @map("avg_vehicle_requests")
+  avgRevenue      Float?   @map("avg_revenue")
+  sampleSize      Int      @default(0) @map("sample_size")
+  lastUpdated     DateTime @default(now()) @map("last_updated")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([platform, hookType])
+  @@index([platform, franchiseSlug])
+  @@map("winning_patterns")
+}
+
+// Dynamic optimal posting times per platform/day, updated by optimization.
+model PostingWindow {
+  id              String   @id @default(cuid())
+  platform        String
+  dayOfWeek       Int      @map("day_of_week")
+  slot1Hour       Int      @default(7)  @map("slot_1_hour")
+  slot2Hour       Int      @default(12) @map("slot_2_hour")
+  slot3Hour       Int      @default(19) @map("slot_3_hour")
+  slot4Hour       Int?     @map("slot_4_hour")
+  slot5Hour       Int?     @map("slot_5_hour")
+  lastOptimizedAt DateTime? @map("last_optimized_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([platform, dayOfWeek])
+  @@map("posting_windows")
+}
+
+// Performance tracked per hook type per platform.
+model HookPerformance {
+  id                String   @id @default(cuid())
+  platform          String
+  hookType          String   @map("hook_type")
+  avgCompletionRate Float?   @map("avg_completion_rate")
+  avgCtr            Float?   @map("avg_ctr")
+  avgLeadScore      Float?   @map("avg_lead_score")
+  avgVehicleRequests Float?  @map("avg_vehicle_requests")
+  sampleSize        Int      @default(0) @map("sample_size")
+  lastUpdated       DateTime @default(now()) @map("last_updated")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@unique([platform, hookType])
+  @@map("hook_performance")
+}
+
+// Creator/affiliate content distribution network.
+model CreatorNetwork {
+  id              String   @id @default(cuid())
+  affiliateId     String?  @map("affiliate_id")
+
+  name            String
+  email           String?
+  platform        String
+  platforms       String[]
+  handle          String?
+  followerCount   Int?     @map("follower_count")
+  engagementRate  Float?   @map("engagement_rate")
+  niche           String?
+  city            String?
+  state           String?
+  commissionRate  Float?   @map("commission_rate")
+  status          String   @default("PENDING")
+
+  totalPosts      Int      @default(0) @map("total_posts")
+  totalClicks     Int      @default(0) @map("total_clicks")
+  totalRequests   Int      @default(0) @map("total_requests")
+  totalRevenue    Int      @default(0) @map("total_revenue")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  attributions    CreatorAttribution[]
+
+  @@index([status])
+  @@index([platform])
+  @@map("creator_network")
+}
+
+// Tracks which creator distributed which post and what converted.
+model CreatorAttribution {
+  id              String   @id @default(cuid())
+  creatorId       String   @map("creator_id")
+  creator         CreatorNetwork @relation(fields: [creatorId], references: [id])
+  postId          String   @map("post_id")
+
+  platform        String
+  platformPostId  String?  @map("platform_post_id")
+  trackingCode    String?  @map("tracking_code")
+  trackedUrl      String?  @map("tracked_url")
+
+  clicks          Int      @default(0)
+  vehicleRequests Int      @default(0) @map("vehicle_requests")
+  dealerSignups   Int      @default(0) @map("dealer_signups")
+  dealsWon        Int      @default(0) @map("deals_won")
+  revenueGenerated Int     @default(0) @map("revenue_generated")
+  commissionEarned Int     @default(0) @map("commission_earned")
+
+  publishedAt     DateTime? @map("published_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([creatorId])
+  @@index([postId])
+  @@map("creator_attributions")
+}
+
+// Full revenue attribution chain from content to deal.
+model RevenueAttribution {
+  id              String   @id @default(cuid())
+  postId          String   @map("post_id")
+  post            SocialPost @relation(fields: [postId], references: [id])
+
+  utmSource       String?  @map("utm_source")
+  utmCampaign     String?  @map("utm_campaign")
+  utmContent      String?  @map("utm_content")
+  utmHook         String?  @map("utm_hook")
+  utmPlatform     String?  @map("utm_platform")
+
+  vehicleRequestId String? @map("vehicle_request_id")
+  dealId          String?  @map("deal_id")
+  creatorId       String?  @map("creator_id")
+  affiliateId     String?  @map("affiliate_id")
+
+  depositAmountCents Int?  @map("deposit_amount_cents")
+  feeAmountCents  Int?     @map("fee_amount_cents")
+  totalRevenueCents Int?   @map("total_revenue_cents")
+
+  attributionStatus String @default("CLICK") @map("attribution_status")
+
+  clickedAt       DateTime? @map("clicked_at")
+  requestedAt     DateTime? @map("requested_at")
+  dealWonAt       DateTime? @map("deal_won_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([postId])
+  @@index([vehicleRequestId])
+  @@index([dealId])
+  @@index([attributionStatus])
+  @@map("revenue_attributions")
+}
