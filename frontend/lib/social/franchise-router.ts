@@ -66,6 +66,31 @@ export async function routeSignalToFranchises(
       franchise.platforms.length > 0 ? franchise.platforms : DEFAULT_ROUTE.platforms;
     routes.push({ franchise, platforms, assetTypes });
   }
+
+  // Fallback: if none of the mapped franchises resolved (all inactive/missing),
+  // route to a safe always-on franchise so a signal is never silently dropped.
+  if (routes.length === 0) {
+    const fallback = await prisma.contentFranchise.findFirst({
+      where: { slug: { in: ["how_autolenis_works", "dealer_secret_daily"] }, active: true },
+    });
+    if (fallback) {
+      console.warn(
+        `[franchise-router] no mapped franchise for signalType=${signal.signalType}; falling back to ${fallback.slug}`,
+      );
+      const platforms =
+        fallback.platforms.length > 0 ? fallback.platforms : DEFAULT_ROUTE.platforms;
+      routes.push({ franchise: fallback, platforms, assetTypes });
+    } else {
+      console.warn(
+        `[franchise-router] no franchises resolved for signalType=${signal.signalType} and no fallback franchise is active`,
+      );
+    }
+  }
+
+  console.log(
+    `[franchise-router] signalType=${signal.signalType} resolved ${routes.length} route(s):`,
+    routes.map((r) => r.franchise.slug),
+  );
   return routes;
 }
 

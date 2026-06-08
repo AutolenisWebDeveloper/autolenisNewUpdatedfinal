@@ -76,8 +76,18 @@ export async function generateAndQueuePost(
   const platformConfig = getPlatformConfig(platform);
   const { contentType, derivativeType } = assetFor(platform);
 
+  console.log(
+    "[orchestrator] routing signal:",
+    signal.signalType,
+    "franchise:",
+    franchise.slug,
+    "platform:",
+    platform,
+  );
+
   const hookType = await selectHookType(franchise, platform);
 
+  console.log("[orchestrator] generating for platform:", platform, "hookType:", hookType);
   const script = await generateSocialScript({
     franchise,
     signal,
@@ -86,6 +96,7 @@ export async function generateAndQueuePost(
     platformConfig,
     signalContext: (signal.signalContext as Record<string, unknown>) ?? {},
   });
+  console.log("[orchestrator] groq result:", !!script);
 
   const funnelDestination = script.funnelDestination || getFunnelDestination(franchise.slug);
   const trackedUrl = buildUtmUrl({
@@ -107,7 +118,10 @@ export async function generateAndQueuePost(
     .toLowerCase()
     .replace(/\s+/g, "-");
 
-  const post = await prisma.socialPost.create({
+  console.log("[orchestrator] creating post in DB");
+  let post: SocialPost;
+  try {
+    post = await prisma.socialPost.create({
     data: {
       franchiseId: franchise.id,
       signalId: signal.id,
@@ -147,32 +161,70 @@ export async function generateAndQueuePost(
       scheduledAt,
     },
   });
+  } catch (err) {
+    // Surface the real Prisma failure (missing model in the generated client,
+    // table not migrated, constraint violation) instead of letting it bubble
+    // up as an opaque error. Re-thrown so the caller marks this platform failed.
+    console.error(
+      `[orchestrator] socialPost.create FAILED for ${franchise.slug}/${platform}:`,
+      err instanceof Error ? err.message : err,
+    );
+    throw err;
+  }
+  console.log("[orchestrator] post created:", post.id);
 
-  await prisma.contentDerivative.create({
-    data: {
-      signalId: signal.id,
-      sourceArticleId: post.sourceArticleId,
-      postId: post.id,
-      platform,
-      derivativeType,
-    },
-  });
-
-  // Queue video generation when enabled and the post is not held for review.
-  if (ENABLE_VIDEO && status !== "PENDING_REVIEW") {
-    await queueVideoGeneration(post.id, {
-      visualPrompt: script.visualPrompt,
-      durationSeconds: script.durationSeconds,
-      style: script.visualStyle,
-      voiceoverText: script.voiceoverText,
-      onScreenText: script.onScreenText,
+  // ContentDerivative is a bookkeeping link, not core to the post. A failure
+  // here must never discard an already-persisted post.
+  try {
+    await prisma.contentDerivative.create({
+      data: {
+        signalId: signal.id,
+        sourceArticleId: post.sourceArticleId,
+        postId: post.id,
+        platform,
+        derivativeType,
+      },
     });
+  } catch (err) {
+    console.error(
+      `[orchestrator] contentDerivative.create failed for post ${post.id} (non-fatal):`,
+      err instanceof Error ? err.message : err,
+    );
   }
 
-  await prisma.topicSignal.update({
-    where: { id: signal.id },
-    data: { assetsGenerated: true, assetCount: { increment: 1 } },
-  });
+  // Queue video generation when enabled and the post is not held for review.
+  // Video generation is best-effort and runs AFTER the post is durably saved:
+  // a missing Higgsfield key or social_videos table must never roll back or
+  // hide a successfully created post.
+  if (ENABLE_VIDEO && status !== "PENDING_REVIEW") {
+    try {
+      await queueVideoGeneration(post.id, {
+        visualPrompt: script.visualPrompt,
+        durationSeconds: script.durationSeconds,
+        style: script.visualStyle,
+        voiceoverText: script.voiceoverText,
+        onScreenText: script.onScreenText,
+      });
+    } catch (err) {
+      console.error(
+        `[orchestrator] video queue failed for post ${post.id} (non-fatal):`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  // Mark the source signal consumed. Best-effort: the post already exists.
+  try {
+    await prisma.topicSignal.update({
+      where: { id: signal.id },
+      data: { assetsGenerated: true, assetCount: { increment: 1 } },
+    });
+  } catch (err) {
+    console.error(
+      `[orchestrator] topicSignal.update failed for signal ${signal.id} (non-fatal):`,
+      err instanceof Error ? err.message : err,
+    );
+  }
 
   return post;
 }
