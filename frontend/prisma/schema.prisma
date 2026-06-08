@@ -3872,9 +3872,9 @@ model ContentFranchise {
   description     String?  @db.Text
   platforms       String[] // ["facebook","instagram","tiktok","youtube","linkedin"]
   cadence         String   // "daily" | "weekly" | "tuesday" | "friday"
-  postingSlots    Int[]    // [7, 12, 19] — hours in CT
-  hookTypes       String[] // preferred hook types
-  requiresReview  Boolean  @default(false)
+  postingSlots    Int[]    @map("posting_slots") // [7, 12, 19] — hours in CT
+  hookTypes       String[] @map("hook_types") // preferred hook types
+  requiresReview  Boolean  @default(false) @map("requires_review")
   active          Boolean  @default(true)
   avgLeadScore    Float?   @map("avg_lead_score")
   postsGenerated  Int      @default(0) @map("posts_generated")
