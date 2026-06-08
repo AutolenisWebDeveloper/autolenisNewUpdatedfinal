@@ -37,28 +37,37 @@ export async function GET(request: NextRequest) {
     if (!Number.isNaN(start.getTime())) where.scheduledAt = { gte: start, lte: end };
   }
 
-  const [posts, total, grouped] = await Promise.all([
-    prisma.socialPost.findMany({
-      where,
-      include: { video: true, franchise: { select: { slug: true, name: true } } },
-      orderBy: { scheduledAt: "desc" },
-      skip: (page - 1) * limit,
-      take: limit,
-    }),
-    prisma.socialPost.count({ where }),
-    prisma.socialPost.groupBy({ by: ["status"], _count: { _all: true } }),
-  ]);
+  // The social tables are provisioned via a manual Supabase migration that may
+  // not be applied in every environment. If the model/table is missing the
+  // queries throw — return an empty result set instead of a 500 so the
+  // dashboard still renders.
+  try {
+    const [posts, total, grouped] = await Promise.all([
+      prisma.socialPost.findMany({
+        where,
+        include: { video: true, franchise: { select: { slug: true, name: true } } },
+        orderBy: { scheduledAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.socialPost.count({ where }),
+      prisma.socialPost.groupBy({ by: ["status"], _count: { _all: true } }),
+    ]);
 
-  const stats = grouped.reduce<Record<string, number>>((acc, g) => {
-    acc[g.status] = g._count._all;
-    return acc;
-  }, {});
+    const stats = grouped.reduce<Record<string, number>>((acc, g) => {
+      acc[g.status] = g._count._all;
+      return acc;
+    }, {});
 
-  return adminSuccess({
-    posts,
-    total,
-    hasMore: page * limit < total,
-    page,
-    stats,
-  });
+    return adminSuccess({
+      posts,
+      total,
+      hasMore: page * limit < total,
+      page,
+      stats,
+    });
+  } catch (err) {
+    console.error("[admin/social] posts query failed:", err);
+    return adminSuccess({ posts: [], total: 0, hasMore: false, page, stats: {} });
+  }
 }

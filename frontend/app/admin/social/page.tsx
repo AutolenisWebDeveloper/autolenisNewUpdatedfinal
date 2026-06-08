@@ -14,20 +14,30 @@ export const dynamic = "force-dynamic";
 export default async function AdminSocialPage() {
   await requireAdmin();
 
-  const franchises = await prisma.contentFranchise.findMany({
-    orderBy: { name: "asc" },
-    select: {
-      id: true,
-      slug: true,
-      name: true,
-      platforms: true,
-      cadence: true,
-      requiresReview: true,
-      active: true,
-      avgLeadScore: true,
-      postsGenerated: true,
-    },
-  });
+  // The social tables are provisioned via a manual Supabase migration that may
+  // not be applied in every environment. If the table/model is missing, the
+  // query throws — degrade gracefully to an empty list instead of crashing the
+  // whole route so the dashboard shell still renders.
+  let franchises: FranchiseRow[] = [];
+  try {
+    franchises = (await prisma.contentFranchise.findMany({
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        platforms: true,
+        cadence: true,
+        requiresReview: true,
+        active: true,
+        avgLeadScore: true,
+        postsGenerated: true,
+      },
+    })) as FranchiseRow[];
+  } catch (err) {
+    console.error("[admin/social] franchises query failed:", err);
+    // franchises stays as an empty array
+  }
 
   // Platform "connected" = a Buffer profile id is present in the environment.
   const platformConnections: PlatformConnection[] = [
@@ -41,7 +51,7 @@ export default async function AdminSocialPage() {
   return (
     <SocialDashboardClient
       automationMode={AUTOMATION_MODE}
-      franchises={franchises as FranchiseRow[]}
+      franchises={franchises}
       platformConnections={platformConnections}
       videoEnabled={process.env.ENABLE_HIGGSFIELD_VIDEO === "true"}
       publishingEnabled={process.env.ENABLE_BUFFER_PUBLISHING === "true"}
