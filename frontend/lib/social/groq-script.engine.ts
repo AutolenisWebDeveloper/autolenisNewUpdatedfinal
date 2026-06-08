@@ -66,6 +66,7 @@ async function callGroq(options: {
     }),
   });
 
+  console.log("[groq-script] response status:", res.status);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`);
@@ -73,7 +74,9 @@ async function callGroq(options: {
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
-  return data.choices?.[0]?.message?.content ?? "";
+  const rawText = data.choices?.[0]?.message?.content ?? "";
+  console.log("[groq-script] raw response:", rawText?.slice(0, 200));
+  return rawText;
 }
 
 async function callGroqWithRetry(
@@ -232,6 +235,7 @@ export async function generateSocialScript(
   input: SocialScriptInput,
 ): Promise<SocialScriptOutput> {
   const userPrompt = buildUserPrompt(input);
+  console.log("[groq-script] calling Groq for platform:", input.platform);
   try {
     const raw = await callGroqWithRetry({ systemPrompt: SYSTEM_PROMPT, userPrompt });
     return parse(raw, input);

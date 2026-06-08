@@ -33,17 +33,25 @@ export async function POST(request: NextRequest) {
   const platforms = platform ? [platform] : franchise.platforms;
   const slots = computePostingSlots(franchise.postingSlots);
 
+  console.log("[social-generate] signal:", signalId, "franchise:", franchiseSlug, "platforms:", platforms);
+
   const created: string[] = [];
   const failed: string[] = [];
   for (let i = 0; i < platforms.length; i++) {
     const scheduledAt = slots[i % Math.max(slots.length, 1)] ?? computePostingSlots([12])[0];
     try {
+      console.log("[social-generate] calling orchestrator for platform:", platforms[i]);
       const post = await generateAndQueuePost({ signal, franchise, platform: platforms[i], scheduledAt });
+      console.log("[social-generate] result: created post", post.id, "status", post.status);
       created.push(post.id);
     } catch (err) {
-      failed.push(`${platforms[i]}: ${err instanceof Error ? err.message : String(err)}`);
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[social-generate] platform ${platforms[i]} failed:`, message);
+      failed.push(`${platforms[i]}: ${message}`);
     }
   }
+
+  console.log("[social-generate] done. created:", created.length, "failed:", failed.length);
 
   await createAuditLog(admin, request, {
     action: "SOCIAL_POST_MANUAL_GENERATE",
