@@ -22,7 +22,11 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const prospect = await prisma.dealerProspect.findUnique({
       where: { id: prospectId },
-      include: { buyerOpp: true },
+      include: {
+        buyerOpp: true,
+        // Full communication history, newest first (powers the detail timeline).
+        outreachLog: { orderBy: { sentAt: "desc" } },
+      },
     });
     if (!prospect) return adminError("NOT_FOUND", "Prospect not found", 404);
     return adminSuccess({ prospect });
@@ -42,7 +46,27 @@ interface PatchBody {
   deadReason?: string;
   // Phase 4B-1 — manual email override. Pass empty string to clear.
   email?: string;
+  // Inline-editable profile fields (enhanced dealer management page).
+  website?: string;
+  contactName?: string;
+  contactTitle?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  phone?: string;
 }
+
+// String fields that admins may edit inline from the detail page. Each accepts a
+// trimmed value, or an empty string to clear (stored as null).
+const EDITABLE_TEXT_FIELDS = [
+  "website",
+  "contactName",
+  "contactTitle",
+  "city",
+  "state",
+  "zip",
+  "phone",
+] as const;
 
 // Same permissive check the enrichment service uses before persisting.
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -76,6 +100,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
   if (typeof body.deadReason === "string") {
     data.deadReason = body.deadReason;
+  }
+
+  // Inline profile edits — only the explicitly allow-listed fields are accepted.
+  for (const field of EDITABLE_TEXT_FIELDS) {
+    const value = body[field];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      data[field] = trimmed === "" ? null : trimmed;
+    }
   }
 
   // Manual email override — founder-entered address takes precedence over any
