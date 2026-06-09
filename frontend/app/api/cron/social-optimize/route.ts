@@ -172,6 +172,26 @@ export async function GET(request: NextRequest) {
       .catch(() => undefined);
   }
 
+  // Content recycling (Session C): re-publish the top evergreen posts from
+  // 90-180 days ago with freshly trending hashtags. Non-fatal — a failure here
+  // never blocks the rest of the weekly optimization run.
+  try {
+    const { findRecyclablePosts, recyclePost } = await import(
+      "@/lib/social/content-recycling.engine"
+    );
+    const recyclable = await findRecyclablePosts();
+    let recycled = 0;
+    for (const post of recyclable.slice(0, 3)) {
+      const result = await recyclePost(post);
+      if (result) recycled++;
+    }
+    if (recycled > 0) {
+      console.log(`[optimize] recycled ${recycled} top-performing posts`);
+    }
+  } catch (err) {
+    console.error("[optimize] recycling failed:", err);
+  }
+
   // Send weekly SMS market alerts to SMS-consented buyers about the strongest
   // buyer-leverage market. BuyerOpportunity has no metro/city field (only zip),
   // so we cannot target per-metro — instead we query consented buyers once and

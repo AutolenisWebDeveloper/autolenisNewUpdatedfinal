@@ -96,24 +96,33 @@ export async function handleViralAlert(alert: ViralAlert): Promise<void> {
     );
 
   if (alert.action === "spawn_variants") {
-    const post = await prisma.socialPost.findUnique({
-      where: { id: alert.postId },
-      include: { signal: true, franchise: true },
-    });
-    if (post?.signal && post?.franchise) {
-      const otherPlatforms = ["tiktok", "instagram", "facebook", "youtube", "linkedin"].filter(
-        (p) => p !== post.platform,
-      );
-      for (const platform of otherPlatforms.slice(0, 3)) {
-        try {
-          const { generateAndQueuePost } = await import("@/lib/social/social-post.orchestrator");
-          const scheduledAt = new Date(Date.now() + 10 * 60 * 1000);
-          await generateAndQueuePost({ signal: post.signal, franchise: post.franchise, platform, scheduledAt });
-          console.log("[viral] spawned variant for platform:", platform);
-        } catch (err) {
-          console.warn("[viral] spawn failed for", platform, err instanceof Error ? err.message : err);
-        }
+    // Asset recombination (Session C): multiply the winning idea across a
+    // different franchise, other platforms, and other metros via the
+    // recombination engine, which supersedes the old naive cross-platform spawn.
+    try {
+      const originalPost = await prisma.socialPost.findUnique({
+        where: { id: alert.postId },
+        select: {
+          id: true,
+          platform: true,
+          hook: true,
+          hookType: true,
+          franchiseId: true,
+          signalId: true,
+          make: true,
+          metro: true,
+          script: true,
+        },
+      });
+      if (originalPost) {
+        const { recombineViralAsset } = await import(
+          "@/lib/social/asset-recombination.engine"
+        );
+        const { variants } = await recombineViralAsset(originalPost);
+        console.log(`[viral] recombined into ${variants.length} variants`);
       }
+    } catch (err) {
+      console.error("[viral] recombination failed:", err);
     }
   }
 
