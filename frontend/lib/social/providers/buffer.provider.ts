@@ -77,17 +77,21 @@ async function bufferGraphQL(
 
 // GraphQL documents ----------------------------------------------------------
 
+// Buffer's createPost returns a PostActionPayload union of
+// PostActionSuccess | MutationError. The post type exposes `dueAt` (there is no
+// `scheduledAt` field), and the error variant is MutationError (not CoreError).
 const CREATE_POST_MUTATION = `
   mutation CreatePost($input: CreatePostInput!) {
     createPost(input: $input) {
-      ... on Post {
-        id
-        status
-        scheduledAt
+      __typename
+      ... on PostActionSuccess {
+        post {
+          id
+          dueAt
+        }
       }
-      ... on CoreError {
+      ... on MutationError {
         message
-        type
       }
     }
   }
@@ -112,11 +116,9 @@ const GET_POST_QUERY = `
 
 interface CreatePostResult {
   createPost?: {
-    id?: string;
-    status?: string;
-    scheduledAt?: string;
-    message?: string; // CoreError
-    type?: string; // CoreError
+    __typename?: string;
+    post?: { id?: string; dueAt?: string }; // PostActionSuccess
+    message?: string; // MutationError
   };
 }
 
@@ -142,15 +144,17 @@ interface GetPostResult {
 export class BufferProvider implements PublishingProvider {
   readonly name = "buffer";
 
-  // Shared create path for both schedule + publish-now. `scheduledAt` is always
-  // an ISO string Buffer should target.
+  // Shared create path for both schedule + publish-now.
+  //   - customScheduled targets a specific ISO time (`dueAtIso`).
+  //   - addToQueue lets Buffer slot the post into the channel's queue (no time).
   private async createPost(
     input: SchedulePostInput | PublishPostInput,
-    scheduledAtIso: string,
+    mode: "customScheduled" | "addToQueue",
+    dueAtIso?: string,
   ): Promise<PublishResult> {
     const channelId = channelIdFor(input.platform);
     console.log(
-      `[publish:buffer] createPost platform=${input.platform} channel=${channelId ? "set" : "missing"} at=${scheduledAtIso}`,
+      `[publish:buffer] createPost platform=${input.platform} channel=${channelId ? "set" : "missing"} mode=${mode}${dueAtIso ? ` at=${dueAtIso}` : ""}`,
     );
 
     if (!process.env.BUFFER_API_KEY) {
@@ -181,30 +185,40 @@ export class BufferProvider implements PublishingProvider {
       media.push({ url: imageUrl, type: "image" });
     }
 
+    // Buffer's CreatePostInput requires schedulingType + mode. Only attach
+    // dueAt when scheduling a specific time (customScheduled); addToQueue lets
+    // Buffer pick the next queue slot.
+    const postInput: Record<string, unknown> = {
+      channelId,
+      text: composeText(input.caption, input.hashtags),
+      schedulingType: "automatic",
+      mode,
+      media: media.length > 0 ? media : undefined,
+    };
+    if (mode === "customScheduled" && dueAtIso) {
+      postInput.dueAt = dueAtIso;
+    }
+
     try {
       const data = (await bufferGraphQL(CREATE_POST_MUTATION, {
-        input: {
-          channelId,
-          text: composeText(input.caption, input.hashtags),
-          scheduledAt: scheduledAtIso,
-          media: media.length > 0 ? media : undefined,
-        },
+        input: postInput,
       })) as CreatePostResult;
 
       const result = data?.createPost;
       if (!result) {
         return { success: false, error: "Buffer returned no createPost payload", provider: this.name };
       }
-      // CoreError variant carries a message but no id.
-      if (result.message && !result.id) {
-        console.error(`[publish:buffer] CoreError: ${result.type ?? ""} ${result.message}`);
+      // MutationError variant carries a message but no post.
+      if (result.message && !result.post) {
+        console.error(`[publish:buffer] MutationError: ${result.message}`);
         return { success: false, error: result.message, provider: this.name };
       }
-      if (!result.id) {
+      const platformPostId = result.post?.id;
+      if (!platformPostId) {
         return { success: false, error: "Buffer response missing post id", provider: this.name };
       }
-      console.log(`[publish:buffer] created post id=${result.id} status=${result.status ?? "?"}`);
-      return { success: true, platformPostId: result.id, provider: this.name };
+      console.log(`[publish:buffer] created post id=${platformPostId} dueAt=${result.post?.dueAt ?? "?"}`);
+      return { success: true, platformPostId, provider: this.name };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[publish:buffer] createPost failed: ${message}`);
@@ -213,11 +227,13 @@ export class BufferProvider implements PublishingProvider {
   }
 
   async schedulePost(input: SchedulePostInput): Promise<PublishResult> {
-    return this.createPost(input, input.scheduledAt.toISOString());
+    // Schedule at the requested time via customScheduled + dueAt.
+    return this.createPost(input, "customScheduled", input.scheduledAt.toISOString());
   }
 
   async publishNow(input: PublishPostInput): Promise<PublishResult> {
-    return this.createPost(input, new Date().toISOString());
+    // Publish-now hands the post to Buffer's queue (addToQueue, no dueAt).
+    return this.createPost(input, "addToQueue");
   }
 
   async getPostStatus(platformPostId: string): Promise<PostStatusResult> {
