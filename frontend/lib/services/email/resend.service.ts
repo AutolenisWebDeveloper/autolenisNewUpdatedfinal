@@ -478,6 +478,42 @@ export async function sendAdminPrequalAlertEmail(params: {
   });
 }
 
+// AutoLenis Market Index — admin notification that the weekly LinkedIn
+// newsletter was published. Routed to ADMIN_NOTIFICATION_EMAIL; silently skips
+// when unset so the cron is never blocked on ops email availability.
+export async function sendMarketIndexPublishedEmail(params: {
+  weekOf: string;
+  summary: string;
+  linkedInUrl?: string;
+}) {
+  const to = process.env.ADMIN_NOTIFICATION_EMAIL;
+  if (!to) {
+    console.warn("[EMAIL] ADMIN_NOTIFICATION_EMAIL not set — market index alert skipped");
+    return { sent: false as const };
+  }
+  const linkBlock = params.linkedInUrl
+    ? `<p style="margin:16px 0"><a href="${params.linkedInUrl}" style="color:#0B5FD1;font-weight:700">View on LinkedIn →</a></p>`
+    : "";
+  return sendIdempotent({
+    idempotencyKey: `market-index-${params.weekOf.replace(/\s+/g, "-").toLowerCase()}`,
+    to,
+    templateId: "market-index-published",
+    subject: "AutoLenis Market Index Published",
+    html: `
+      <div style="font-family:-apple-system,system-ui,sans-serif;max-width:600px;margin:0 auto;background:#fff">
+        <div style="background:#0B5FD1;padding:28px;text-align:center">
+          <h1 style="color:#fff;margin:0;font-size:20px">AutoLenis Market Index</h1>
+          <p style="color:#cfe0ff;margin:6px 0 0;font-size:13px">Week of ${params.weekOf}</p>
+        </div>
+        <div style="padding:28px;color:#1f2937;line-height:1.7;font-size:14px">
+          <p>${params.summary}</p>
+          ${linkBlock}
+        </div>
+      </div>
+    `,
+  });
+}
+
 // FCRA § 615 adverse action notice. Required by law to be sent to any
 // consumer whose AutoLenis prequalification is DECLINED based in whole or
 // in part on a consumer report (MicroBilt iPredict). See

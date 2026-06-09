@@ -174,6 +174,15 @@ declare namespace NodeJS {
     BUFFER_PROFILE_YOUTUBE?: string;
     BUFFER_PROFILE_LINKEDIN?: string;
 
+    // LinkedIn — direct company-page publishing (v2 ugcPosts API). The LinkedIn
+    // provider no-ops when LINKEDIN_ACCESS_TOKEN is unset (falls back to Buffer).
+    // Access token expires ~2 months after issue — rotate via the LinkedIn
+    // developer OAuth token generator.
+    LINKEDIN_CLIENT_ID?: string;
+    LINKEDIN_CLIENT_SECRET?: string;
+    LINKEDIN_ACCESS_TOKEN?: string;
+    LINKEDIN_COMPANY_PAGE_ID?: string;
+
     // Social automation controls.
     // SOCIAL_AUTOMATION_MODE: MANUAL_REVIEW | HYBRID_AUTO | FULL_AUTO
     SOCIAL_AUTOMATION_MODE?: string;

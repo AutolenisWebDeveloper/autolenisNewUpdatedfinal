@@ -324,6 +324,33 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // ── Social UTM attribution (non-blocking) ────────────────────────────────
+  // If this request came from a social post (utm_source is a social platform),
+  // link it back to the SocialPost that drove it. Non-destructive: runs after
+  // the response is sent and never throws into the submission flow.
+  if (vehicleRequestId && buyerOpportunityId) {
+    after(async () => {
+      try {
+        const { triggerSocialAttribution } = await import(
+          "@/lib/social/attribution-hook"
+        );
+        await triggerSocialAttribution({
+          vehicleRequestId,
+          buyerOpportunityId,
+          utmSource: data.utm_source ?? undefined,
+          utmMedium: data.utm_medium ?? undefined,
+          utmCampaign: data.utm_campaign ?? undefined,
+          utmContent: undefined,
+          utmTerm: undefined,
+          utmHook: data.utm_campaign ?? undefined,
+          utmPlatform: data.utm_source ?? undefined,
+        });
+      } catch (err) {
+        console.error("[request-vehicle] attribution failed:", err);
+      }
+    });
+  }
+
   // ── Post-intake auto-outreach + buyer notification (non-blocking) ─────────
   // Runs after the response is sent so it never blocks or fails the buyer's
   // submission. Contacts discovered dealers (privacy-safe) and, when at least
