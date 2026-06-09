@@ -7,12 +7,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { getVideoProvider } from "@/lib/social/providers/video-generation.factory";
-import { storeImageInSupabase } from "@/lib/social/image-generation.service";
-import { ENABLE_AUTO_PUBLISH } from "@/lib/social/config";
+import {
+  storeImageInSupabase,
+  generateDallePostImage,
+} from "@/lib/social/image-generation.service";
+import { ENABLE_AUTO_PUBLISH, ENABLE_VIDEO } from "@/lib/social/config";
 
 export const maxDuration = 300;
 
 const MAX_PER_RUN = 5;
+// DALL-E backfill is rate-limited (5 img/min on the standard tier) and each call
+// is synchronous, so keep the per-run batch small to stay within maxDuration.
+const MAX_IMAGE_BACKFILL = 5;
 const POLL_STALE_MS = 5 * 60_000;
 
 export async function GET(request: NextRequest) {
@@ -111,6 +117,46 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // ─── DALL-E 3 image backfill ───────────────────────────────────────────────
+  // Primary media path: generate a branded still image for APPROVED posts that
+  // still have no SocialVideo record. DALL-E 3 is preferred when OPENAI_API_KEY
+  // is set; otherwise Higgsfield handles generation via the orchestrator/jobs
+  // above. With neither configured there is nothing to do.
+  const useOpenAI = !!process.env.OPENAI_API_KEY;
+  const useHiggsfield = !!process.env.HF_CREDENTIALS && ENABLE_VIDEO;
+  let imagesGenerated = 0;
+  let imagesFailed = 0;
+
+  if (!useOpenAI && !useHiggsfield) {
+    console.log("[video-queue] no image/video provider configured — skipping backfill");
+  } else if (useOpenAI) {
+    const postsNeedingImages = await prisma.socialPost.findMany({
+      where: { status: "APPROVED", video: { is: null } },
+      orderBy: { createdAt: "asc" },
+      take: MAX_IMAGE_BACKFILL,
+    });
+
+    for (const post of postsNeedingImages) {
+      try {
+        const visuals = await generateDallePostImage(post);
+        if (visuals.imageUrl) {
+          imagesGenerated += 1;
+          console.log("[video-queue] DALL-E image generated for post:", post.id);
+        } else {
+          imagesFailed += 1;
+          console.error("[video-queue] DALL-E backfill failed for post:", post.id);
+        }
+      } catch (err) {
+        imagesFailed += 1;
+        console.error(
+          "[video-queue] DALL-E backfill error for post:",
+          post.id,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+  }
+
   // ─── Poll pending AI media generations ─────────────────────────────────────
   // Picks up text-to-image jobs that didn't finish within the synchronous poll
   // window in the image-generation service, plus any other in-flight Higgsfield
@@ -189,6 +235,8 @@ export async function GET(request: NextRequest) {
     completed,
     failed,
     stillProcessing,
+    imagesGenerated,
+    imagesFailed,
     mediaCompleted,
     mediaProcessing,
     mediaFailed,
