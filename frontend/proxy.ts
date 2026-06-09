@@ -97,6 +97,19 @@ const PUBLIC_ROUTES = [
   "/api/twilio/sms/incoming",
   "/guide",
   "/api/leads",
+  // SEO crawler files — sitemaps + robots must be reachable without a session.
+  // Each is an exact public path; the startsWith(r + "/") check is harmless here.
+  "/sitemap.xml",
+  "/sitemap-intelligence.xml",
+  "/sitemap-intelligence-a.xml",
+  "/sitemap-intelligence-b.xml",
+  "/sitemap-intelligence-c.xml",
+  "/sitemap-intelligence-d.xml",
+  "/robots.txt",
+  "/sitemap-buyer.xml",
+  "/sitemap-dealer.xml",
+  "/sitemap-city.xml",
+  "/sitemap-cities.xml",
 ];
 
 const AUTH_ROUTES = [

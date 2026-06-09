@@ -31,6 +31,8 @@ export default function robots(): MetadataRoute.Robots {
       `${base}/image-sitemap.xml`,
       // AMIPS tier-segmented sitemap index (Tiers A–D).
       `${base}/sitemap-amips.xml`,
+      // Market-intelligence pages (/intelligence/*).
+      `${base}/sitemap-intelligence.xml`,
     ],
     host: base,
   };
