@@ -23,6 +23,10 @@ import {
 import { requiresReview as franchiseRequiresReview } from "@/lib/social/franchise-router";
 import { generateSocialScript } from "@/lib/social/groq-script.engine";
 import { generateHookVariants } from "@/lib/social/hook-ab-testing.engine";
+import { getPersonalityForFranchise } from "@/lib/social/personalities";
+import { getViralFormat } from "@/lib/social/viral-formats";
+import { getVideoLearnings } from "@/lib/social/video-learning.engine";
+import { getOrFetchTrendingData } from "@/lib/social/trending-intelligence.engine";
 import { getPublishingProvider } from "@/lib/social/providers/publishing.factory";
 import { scorePostQuality } from "@/lib/social/content-quality.gate";
 
@@ -130,6 +134,18 @@ export async function generateAndQueuePost(
 
   const hookType = await selectHookType(franchise, platform);
 
+  // ─── Viral intelligence gathering (Session C) ─────────────────────────────
+  // Resolve the personality, viral format, learned hook performance, and live
+  // trending data for this franchise+platform. Each source is non-blocking: a
+  // failure (or missing API key) yields null and generation proceeds without it.
+  const [personality, viralFormat, videoLearnings, trendingData] =
+    await Promise.all([
+      Promise.resolve(getPersonalityForFranchise(franchise.slug, platform)),
+      Promise.resolve(getViralFormat(platform, hookType)),
+      getVideoLearnings(platform).catch(() => null),
+      getOrFetchTrendingData().catch(() => null),
+    ]);
+
   console.log("[orchestrator] generating for platform:", platform, "hookType:", hookType);
   const scriptInput = {
     franchise,
@@ -138,6 +154,10 @@ export async function generateAndQueuePost(
     hookType,
     platformConfig,
     signalContext: (signal.signalContext as Record<string, unknown>) ?? {},
+    personality,
+    viralFormat,
+    videoLearnings,
+    trendingData,
   };
   const script = await generateSocialScript(scriptInput);
   console.log("[orchestrator] groq result:", !!script);

@@ -40,8 +40,16 @@ export async function GET(request: NextRequest) {
 
   const posts = await prisma.socialPost.findMany({
     where: { status: "PUBLISHED", platformPostId: { not: null }, publishedAt: { gte: since } },
+    include: { franchise: true },
     take: 100,
   });
+
+  // Video learning (Session C): records each post's hook performance as a
+  // rolling average on WinningPattern so the generator learns what holds
+  // attention. Imported once and called per-post after its performance lands.
+  const { recordVideoLearning } = await import(
+    "@/lib/social/video-learning.engine"
+  );
 
   let recorded = 0;
   for (const post of posts) {
@@ -73,6 +81,27 @@ export async function GET(request: NextRequest) {
 
       await prisma.socialPerformance.create({ data: { postId: post.id, ...metrics, leadScore } });
       await prisma.socialPost.update({ where: { id: post.id }, data: { leadScore } });
+
+      // Feed this post's hook performance into the video learning engine.
+      await recordVideoLearning(
+        {
+          id: post.id,
+          platform: post.platform,
+          hookType: post.hookType,
+          franchise: post.franchise,
+        },
+        {
+          // Provider analytics do not expose completion rate; learning leans
+          // on CTR (clicks/impressions) until a completion source is wired.
+          completionRate: null,
+          linkClicks: metrics.linkClicks ?? 0,
+          impressions: metrics.impressions ?? 0,
+          vehicleRequests: metrics.vehicleRequests ?? 0,
+        },
+      ).catch((err) =>
+        console.error("[analytics-sync] video learning:", err),
+      );
+
       recorded += 1;
     } catch (err) {
       console.error(`[social-analytics-sync] failed post ${post.id}:`, err instanceof Error ? err.message : err);
