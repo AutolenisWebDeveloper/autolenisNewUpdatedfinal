@@ -3268,6 +3268,11 @@ model BuyerOpportunity {
   firstName       String?  @map("first_name")
   email           String?  @map("email")
 
+  // SMS marketing consent (TCPA) — provisioned via manual Supabase migration.
+  // Gates the weekly market-alert SMS in the social-optimize cron.
+  consentSms      Boolean?  @map("consent_sms")
+  consentAt       DateTime? @map("consent_at")
+
   // Group 5 — entry-point provenance for this opportunity.
   source          String?  @map("source")
   // Zura intelligence — classified intent for the inbound call. One of
