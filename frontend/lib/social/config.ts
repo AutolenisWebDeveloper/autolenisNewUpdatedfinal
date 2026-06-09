@@ -61,17 +61,20 @@ export function getPlatformConfig(platform: string): PlatformConfig {
 }
 
 // Maps a franchise slug to the AutoLenis page its content should drive toward.
-// Trade-in has no dedicated tool yet, so it points at /request-a-car.
+// Social franchises now point at the dedicated /lp/[campaign] social landing
+// pages (each slug renders a tailored headline/copy/CTA). buildUtmUrl() builds
+// tracked links on top of whatever path getFunnelDestination() returns, so the
+// whole social funnel picks up these destinations automatically.
 export const FUNNEL_DESTINATIONS: Record<string, string> = {
-  dealer_secret_daily: "/tools/dealer-fee-calculator",
-  city_market_alert: "/request-a-car",
-  vehicle_price_watch: "/request-a-car",
-  trade_in_tuesday: "/request-a-car",
-  financing_friday: "/request-a-car",
-  dealer_fee_breakdown: "/tools/dealer-fee-calculator",
-  autolenis_market_index: "/buying-guide",
-  buyer_win_story: "/request-a-car",
-  how_autolenis_works: "/request-a-car",
+  dealer_secret_daily: "/lp/dealer-secret",
+  city_market_alert: "/lp/market-alert",
+  vehicle_price_watch: "/lp/price-watch",
+  trade_in_tuesday: "/lp/free-offers",
+  financing_friday: "/lp/free-offers",
+  dealer_fee_breakdown: "/lp/dealer-fees",
+  autolenis_market_index: "/request-a-car",
+  buyer_win_story: "/lp/free-offers",
+  how_autolenis_works: "/lp/how-it-works",
 };
 
 export function getFunnelDestination(franchiseSlug: string): string {

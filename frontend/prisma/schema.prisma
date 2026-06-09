@@ -4302,3 +4302,47 @@ model RevenueAttribution {
   @@index([attributionStatus])
   @@map("revenue_attributions")
 }
+
+// Social lead — buyers captured from social campaign landing pages (/lp/*).
+// Mirrors BuyerOpportunity/VehicleRequest for the buyer's contact + vehicle
+// interest, but is the system of record for the social-specific email nurture
+// sequence (welcome + 5-step) driven by the social-lead-nurture cron.
+model SocialLead {
+  id                  String    @id @default(cuid())
+  socialPostId        String?   @map("social_post_id")
+  platform            String?
+  franchise           String?
+  utmSource           String?   @map("utm_source")
+  utmCampaign         String?   @map("utm_campaign")
+  utmContent          String?   @map("utm_content")
+  utmHook             String?   @map("utm_hook")
+  landingPage         String?   @map("landing_page")
+  firstName           String    @map("first_name")
+  lastName            String?   @map("last_name")
+  email               String
+  phone               String?
+  zip                 String?
+  city                String?
+  state               String?
+  vehicleInterest     String?   @map("vehicle_interest")
+  make                String?
+  model               String?
+  budget              String?
+  timeline            String?
+  buyerOpportunityId  String?   @map("buyer_opp_id")
+  vehicleRequestId    String?   @map("vehicle_request_id")
+  status              String    @default("NEW")
+  nurtureSequence     String?   @map("nurture_sequence")
+  nurtureStep         Int       @default(0) @map("nurture_step")
+  lastEmailSentAt     DateTime? @map("last_email_sent_at")
+  convertedAt         DateTime? @map("converted_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@index([email])
+  @@index([status])
+  @@index([socialPostId])
+  @@index([platform])
+  @@index([createdAt])
+  @@map("social_leads")
+}

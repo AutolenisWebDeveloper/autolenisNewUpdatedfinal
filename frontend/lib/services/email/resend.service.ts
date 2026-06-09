@@ -1708,3 +1708,171 @@ export async function sendCustomAdminEmail(params: {
     html: `<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:32px">${params.body}</div>`,
   });
 }
+
+// ─── Social Lead emails (Social Intelligence & Media Engine) ─────────────────
+// Welcome + 5-step nurture for buyers captured from social campaign landing
+// pages (/lp/*). Mobile-responsive, AutoLenis brand styling, primary button in
+// #0B5FD1, unsubscribe footer on every send. Driven by the request-vehicle
+// intake (welcome) and the social-lead-nurture cron (nurture steps 1–5).
+
+const SOCIAL_REQUEST_URL = `${APP_URL}/request-a-car`;
+const SOCIAL_HOW_IT_WORKS_URL = `${APP_URL}/how-it-works`;
+
+// Shared brand wrapper so every social email looks identical to the rest of the
+// AutoLenis transactional email family (header bar, body, CTA, footer).
+function renderSocialEmail(params: {
+  to: string;
+  heading: string;
+  bodyHtml: string;
+  ctaLabel: string;
+  ctaUrl: string;
+}): string {
+  const unsubscribeUrl = `${APP_URL}/unsubscribe?email=${encodeURIComponent(params.to)}`;
+  return `
+    <div style="font-family:-apple-system,system-ui,'Segoe UI',sans-serif;max-width:600px;margin:0 auto;background:#ffffff">
+      <div style="background:#0B5FD1;padding:32px 24px;text-align:center">
+        <h1 style="color:#ffffff;margin:0;font-size:22px;line-height:1.3">${params.heading}</h1>
+      </div>
+      <div style="padding:32px 24px;color:#1f2937;line-height:1.7;font-size:15px">
+        ${params.bodyHtml}
+        <div style="text-align:center;margin:32px 0 8px">
+          <a href="${params.ctaUrl}" style="display:inline-block;background:#0B5FD1;color:#ffffff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">${params.ctaLabel}</a>
+        </div>
+      </div>
+      <div style="padding:20px 24px;border-top:1px solid #E5E7EB;text-align:center">
+        <p style="margin:0 0 6px;color:#94A3B8;font-size:12px">Questions? Just reply to this email — a real person reads it.</p>
+        <p style="margin:0;color:#94A3B8;font-size:12px">© ${new Date().getFullYear()} AutoLenis, Inc. &middot; <a href="${unsubscribeUrl}" style="color:#94A3B8;text-decoration:underline">Unsubscribe</a></p>
+      </div>
+    </div>
+  `;
+}
+
+// Day-0 welcome — fired at intake for social-sourced submissions. Idempotency
+// is keyed on email + campaign so a same-campaign double submit never
+// double-welcomes, while a later distinct campaign can still greet the buyer.
+export async function sendSocialLeadWelcomeEmail(params: {
+  to: string;
+  firstName: string;
+  vehicleInterest?: string;
+  campaign: string;
+  platform?: string;
+}): Promise<EmailSendOutcome> {
+  const { to, firstName, vehicleInterest, campaign } = params;
+  const interestLine = vehicleInterest
+    ? `<p style="background:#F8F9FB;border-left:3px solid #0B5FD1;padding:12px 16px;margin:16px 0;color:#4B5563"><strong>You're looking for:</strong> ${vehicleInterest}</p>`
+    : "";
+  const bodyHtml = `
+    <p>Hi ${firstName},</p>
+    <p>Great news — we just received your vehicle request and we're already reaching out to qualified dealers in your area.</p>
+    ${interestLine}
+    <p style="font-weight:600;margin-top:20px">Here's what happens next:</p>
+    <ul style="margin:8px 0 16px;padding-left:20px;color:#4B5563;line-height:1.9">
+      <li>We contact qualified local dealers on your behalf</li>
+      <li>Dealers submit their best competing offers privately</li>
+      <li>You compare offers side by side — no pressure ever</li>
+    </ul>
+    <p>Most buyers receive their first dealer offer within 24 hours.</p>
+  `;
+  return sendIdempotent({
+    idempotencyKey: `social-welcome-${to}-${campaign}`.toLowerCase(),
+    to,
+    templateId: "social-lead-welcome",
+    subject: `We're on it, ${firstName} 🚀`,
+    html: renderSocialEmail({
+      to,
+      heading: "Your request is in motion",
+      bodyHtml,
+      ctaLabel: "Track My Request",
+      ctaUrl: SOCIAL_REQUEST_URL,
+    }),
+  });
+}
+
+// 5-step nurture. The social-lead-nurture cron supplies the step; idempotency
+// is keyed on email + step so each step in the sequence sends exactly once.
+export async function sendSocialLeadNurtureEmail(params: {
+  to: string;
+  firstName: string;
+  step: number;
+  vehicleInterest?: string;
+  city?: string;
+}): Promise<EmailSendOutcome> {
+  const { to, firstName, step, vehicleInterest, city } = params;
+
+  let subject: string;
+  let heading: string;
+  let bodyHtml: string;
+  let ctaLabel: string;
+  let ctaUrl: string;
+
+  switch (step) {
+    case 1:
+      subject = `How AutoLenis works, ${firstName}`;
+      heading = "Dealers compete. You choose.";
+      bodyHtml = `
+        <p>Hi ${firstName},</p>
+        <p>Buying a car with AutoLenis is a reverse auction — instead of you chasing dealers, dealers compete for you. Here's all there is to it:</p>
+        <ul style="margin:8px 0 16px;padding-left:20px;color:#4B5563;line-height:1.9">
+          <li><strong>Submit your request</strong> — tell us the vehicle you want.</li>
+          <li><strong>Dealers compete</strong> — qualified local dealers send private offers.</li>
+          <li><strong>You choose</strong> — compare side by side and pick the best price.</li>
+        </ul>
+        <p>No haggling. No showroom visits. No pressure.</p>
+      `;
+      ctaLabel = "See How It Works";
+      ctaUrl = SOCIAL_HOW_IT_WORKS_URL;
+      break;
+    case 2:
+      subject = `Dealers in ${city || "your area"} are ready`;
+      heading = "Your request is still active";
+      bodyHtml = `
+        <p>Hi ${firstName},</p>
+        <p>Dealers on our platform are actively looking for buyers right now. Your request is still active and ready to be matched with competing offers in ${city || "your area"}.</p>
+        <p>It only takes a moment to activate — and there's never any obligation to accept an offer.</p>
+      `;
+      ctaLabel = "Activate My Auction";
+      ctaUrl = SOCIAL_REQUEST_URL;
+      break;
+    case 3:
+      subject = `Real results from AutoLenis buyers`;
+      heading = "Multiple offers, completely free to start";
+      bodyHtml = `
+        <p>Hi ${firstName},</p>
+        <p>AutoLenis buyers consistently receive multiple competing offers within 48 hours. The process is completely free to start — you only pay the $99 Auction Access Fee when you're ready to activate your private auction.</p>
+        <p>That one-time fee is what puts local dealers in real competition for your business.</p>
+      `;
+      ctaLabel = "Get My Competing Offers";
+      ctaUrl = SOCIAL_REQUEST_URL;
+      break;
+    case 4:
+      subject = `Still looking for ${vehicleInterest || "your vehicle"}?`;
+      heading = "Pick up where you left off";
+      bodyHtml = `
+        <p>Hi ${firstName},</p>
+        <p>Your request is still saved. Pick up where you left off — dealers in your area are waiting to compete for ${vehicleInterest || "your next vehicle"}.</p>
+      `;
+      ctaLabel = "Continue My Request";
+      ctaUrl = SOCIAL_REQUEST_URL;
+      break;
+    case 5:
+    default:
+      subject = `Last chance — your dealer request`;
+      heading = "Your free auction is ready";
+      bodyHtml = `
+        <p>Hi ${firstName},</p>
+        <p>We want to make sure you get the best price on your next vehicle. If you're still in the market, your free auction is ready to activate.</p>
+        <p>This is our final follow-up — no pressure either way.</p>
+      `;
+      ctaLabel = "Claim My Free Auction";
+      ctaUrl = SOCIAL_REQUEST_URL;
+      break;
+  }
+
+  return sendIdempotent({
+    idempotencyKey: `social-nurture-${to}-step${step}`.toLowerCase(),
+    to,
+    templateId: `social-lead-nurture-step-${step}`,
+    subject,
+    html: renderSocialEmail({ to, heading, bodyHtml, ctaLabel, ctaUrl }),
+  });
+}
