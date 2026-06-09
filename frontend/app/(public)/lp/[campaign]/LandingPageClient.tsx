@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 
 import { trackFunnelEvent } from "@/lib/analytics/funnel-events";
+import { trackVehicleRequest, trackLPFormStep } from "@/lib/analytics/tiktok-events";
 import ChatWidget from "@/components/public/ChatWidget";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -282,6 +283,7 @@ export default function LandingPageClient({
     }
 
     trackFunnelEvent("lp_form_step_complete", { step: 0, campaign });
+    trackLPFormStep(0, campaign);
     setFormStep(1);
   }
 
@@ -330,8 +332,12 @@ export default function LandingPageClient({
       trackFunnelEvent("lp_form_submit", { campaign, budget, timeline, vehicle_type: vehicleType });
       if (typeof window !== "undefined") {
         window.fbq?.("track", "Lead", { currency: "USD", value: 0 });
-        window.ttq?.track("SubmitForm");
       }
+      // TikTok Pixel conversion events. This LP form captures a vehicle
+      // category and budget range (not make/model or a numeric budget), so we
+      // map the closest available fields: vehicleType -> model, ZIP -> city.
+      trackVehicleRequest({ model: vehicleType || undefined, city: zip });
+      trackLPFormStep(1, campaign);
 
       // Successful submission — clear session-recovery cache so a future
       // visit doesn't restore a request the buyer has already completed.

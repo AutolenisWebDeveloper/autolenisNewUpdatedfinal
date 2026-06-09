@@ -42,7 +42,7 @@ declare global {
     gtag?: (...args: unknown[]) => void;
     clarity?: (...args: unknown[]) => void;
     fbq?: (...args: unknown[]) => void;
-    ttq?: { track: (event: string, props?: Record<string, unknown>) => void };
+    // `ttq` (TikTok Pixel) is declared globally in types/tiktok.d.ts.
     dataLayer?: unknown[];
     AutoLenisAnalytics?: { trackVehicleRequest?: () => void };
   }
