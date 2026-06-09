@@ -158,11 +158,16 @@ declare namespace NodeJS {
     // Higgsfield — AI video generation provider. Endpoints are env-driven so the
     // exact API surface can change without a code deploy. The engine no-ops when
     // HIGGSFIELD_API_KEY is unset (NoopVideoProvider).
+    // Production auth: "key_id:key_secret" used as HTTP Basic. Preferred.
+    HF_CREDENTIALS?: string;
+    // Production platform host, e.g. https://platform.higgsfield.ai
+    HIGGSFIELD_BASE_URL?: string;
+    HIGGSFIELD_WEBHOOK_SECRET?: string;     // verifies media-completion callbacks
+    // Fallback Bearer token when HF_CREDENTIALS is not set.
     HIGGSFIELD_API_KEY?: string;
-    HIGGSFIELD_API_BASE_URL?: string;       // e.g. https://api.higgsfield.ai
-    HIGGSFIELD_SUBMIT_ENDPOINT?: string;    // e.g. /v1/videos/generate
-    HIGGSFIELD_STATUS_ENDPOINT?: string;    // e.g. /v1/videos/status
-    HIGGSFIELD_WEBHOOK_SECRET?: string;     // verifies video-completion callbacks
+    HIGGSFIELD_API_BASE_URL?: string;       // legacy — e.g. https://api.higgsfield.ai
+    HIGGSFIELD_SUBMIT_ENDPOINT?: string;    // legacy — kept for compatibility
+    HIGGSFIELD_STATUS_ENDPOINT?: string;    // legacy — kept for compatibility
 
     // Buffer — social publishing provider. One profile id per platform. The
     // engine no-ops when BUFFER_API_KEY is unset (NoopPublishingProvider).
