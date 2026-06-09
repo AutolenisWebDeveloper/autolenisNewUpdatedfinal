@@ -1,17 +1,16 @@
-// AutoLenis Social Engine — Higgsfield video provider.
+// AutoLenis Social Engine — Higgsfield video provider (production).
 //
-// Submits and polls AI video-generation jobs against Higgsfield. All endpoints
-// are env-driven so the API surface can change without a code deploy, and the
-// request/response field mapping is centralized in the small helpers below so a
-// single edit updates every call site.
+// Submits and polls AI media-generation jobs against the Higgsfield platform
+// API using the confirmed production field names. Every job is mirrored into the
+// AiMediaGeneration table (keyed by the provider request_id) so webhooks and the
+// polling cron can reconcile against a single source of truth.
 //
-// Higgsfield API field names may vary by API version.
-// All field name mappings use fallback chains (a ?? b ?? c)
-// so they degrade gracefully until exact names are confirmed.
-// Update HIGGSFIELD_SUBMIT_ENDPOINT and HIGGSFIELD_STATUS_ENDPOINT
-// in .env.local once you have the API documentation.
+// Auth: HF_CREDENTIALS ("key_id:key_secret") → HTTP Basic, with a
+// HIGGSFIELD_API_KEY Bearer fallback. Base URL is env-driven and defaults to
+// the production platform host.
 
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import type { SocialVideo } from "@prisma/client";
 import type {
   VideoGenerationProvider,
@@ -19,91 +18,158 @@ import type {
   VideoJobResult,
   VideoJobStatus,
 } from "@/lib/social/providers/video-generation.provider";
+import type {
+  AutoLenisAiMediaRequest,
+  HiggsfieldResponse,
+} from "@/lib/social/providers/higgsfield.types";
+
+const WEBHOOK_URL = "https://www.autolenis.com/api/webhooks/higgsfield";
+
+// HTTP Basic from "key_id:key_secret", else Bearer from HIGGSFIELD_API_KEY.
+function getAuthHeader(): string {
+  const creds = process.env.HF_CREDENTIALS;
+  if (creds) {
+    const encoded = Buffer.from(creds).toString("base64");
+    return `Basic ${encoded}`;
+  }
+  const key = process.env.HIGGSFIELD_API_KEY;
+  if (key) return `Bearer ${key}`;
+  throw new Error("No Higgsfield credentials configured");
+}
 
 function baseUrl(): string {
-  return (process.env.HIGGSFIELD_API_BASE_URL ?? "https://api.higgsfield.ai").replace(/\/$/, "");
-}
-function submitEndpoint(): string {
-  return process.env.HIGGSFIELD_SUBMIT_ENDPOINT ?? "/v1/videos/generate";
-}
-function statusEndpoint(): string {
-  return process.env.HIGGSFIELD_STATUS_ENDPOINT ?? "/v1/videos/status";
-}
-function authHeaders(): Record<string, string> {
-  return {
-    Authorization: `Bearer ${process.env.HIGGSFIELD_API_KEY ?? ""}`,
-    "Content-Type": "application/json",
-  };
+  return (process.env.HIGGSFIELD_BASE_URL ?? "https://platform.higgsfield.ai").replace(/\/$/, "");
 }
 
-// Maps a Higgsfield status string to our normalized status union.
-// TODO: verify exact status vocabulary against Higgsfield API docs.
-function mapStatus(raw: unknown): VideoJobStatus["status"] {
-  const s = String(raw ?? "").toLowerCase();
-  if (["completed", "succeeded", "success", "done", "ready"].includes(s)) return "completed";
-  if (["failed", "error", "cancelled", "canceled"].includes(s)) return "failed";
-  if (["processing", "running", "generating", "in_progress"].includes(s)) return "processing";
-  return "pending";
+function webhookConfig(): { url: string; secret: string } | undefined {
+  const secret = process.env.HIGGSFIELD_WEBHOOK_SECRET;
+  if (!secret) return undefined;
+  return { url: WEBHOOK_URL, secret };
+}
+
+// Core request wrapper — POSTs { input, withPolling, webhook } to an endpoint
+// and returns the parsed HiggsfieldResponse.
+async function higgsfieldRequest(args: {
+  endpoint: string;
+  input: Record<string, unknown>;
+  withPolling?: boolean;
+  webhook?: { url: string; secret: string };
+}): Promise<HiggsfieldResponse> {
+  const url = `${baseUrl()}${args.endpoint.startsWith("/") ? "" : "/"}${args.endpoint}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: getAuthHeader(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      input: args.input,
+      withPolling: args.withPolling ?? false,
+      webhook: args.webhook ?? undefined,
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Higgsfield HTTP ${res.status}: ${detail.slice(0, 300)}`);
+  }
+  return (await res.json()) as HiggsfieldResponse;
+}
+
+// Maps a Higgsfield production status to our normalized VideoJobStatus union.
+function mapStatus(raw: HiggsfieldResponse["status"]): VideoJobStatus["status"] {
+  switch (raw) {
+    case "completed":
+      return "completed";
+    case "nsfw":
+    case "failed":
+      return "failed";
+    case "in_progress":
+    case "queued":
+    default:
+      return "processing";
+  }
 }
 
 export class HiggsfieldProvider implements VideoGenerationProvider {
   readonly name = "higgsfield";
 
   async submitJob(input: VideoJobInput): Promise<VideoJobResult> {
-    const apiKey = process.env.HIGGSFIELD_API_KEY;
-    if (!apiKey) {
-      await this.markVideoFailed(input.postId, "HIGGSFIELD_API_KEY not configured");
-      return { success: false, error: "HIGGSFIELD_API_KEY not configured" };
+    if (!process.env.HF_CREDENTIALS && !process.env.HIGGSFIELD_API_KEY) {
+      const error = "No Higgsfield credentials configured";
+      await this.markVideoFailed(input.postId, error);
+      return { success: false, error };
     }
 
+    // Convert the internal job input into an AutoLenis media request.
+    const request: AutoLenisAiMediaRequest = {
+      provider: "higgsfield",
+      generationType: "image_to_video",
+      endpoint: "/v1/image2video/dop",
+      prompt: input.visualPrompt,
+      aspectRatio: "9:16",
+      durationSeconds: input.durationSeconds ?? 15,
+      model: "dop-turbo",
+      socialPostId: input.postId,
+    };
+
+    // Build the confirmed Higgsfield input payload.
+    const payload: Record<string, unknown> = {
+      model: request.model ?? "dop-turbo",
+      prompt: request.prompt,
+      aspect_ratio: request.aspectRatio ?? "9:16",
+      duration: request.durationSeconds ?? 15,
+      motion_strength: request.motionStrength ?? 0.8,
+      seed: request.seed ?? undefined,
+      input_images:
+        request.imageUrls?.map((url) => ({ type: "image_url", image_url: url })) ?? [],
+    };
+
     try {
-      const res = await fetch(`${baseUrl()}${submitEndpoint()}`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({
-          prompt: input.visualPrompt,
-          duration: input.durationSeconds ?? 15,
-          style: input.style ?? "cinematic",
-          aspect_ratio: "9:16",
-          voiceover: input.voiceoverText || null,
-          on_screen_text: input.onScreenText || null,
-          metadata: { post_id: input.postId, source: "autolenis" },
-        }),
+      const response = await higgsfieldRequest({
+        endpoint: request.endpoint,
+        input: payload,
+        withPolling: false,
+        webhook: webhookConfig(),
       });
 
-      if (!res.ok) {
-        const detail = await res.text().catch(() => "");
-        const error = `Higgsfield HTTP ${res.status}: ${detail.slice(0, 200)}`;
+      if (!response.request_id) {
+        const error = "Higgsfield response missing request_id";
         await this.markVideoFailed(input.postId, error);
         return { success: false, error };
       }
 
-      const data = (await res.json()) as {
-        id?: string;
-        job_id?: string;
-        jobId?: string;
-        generation_id?: string;
-        task_id?: string;
-      };
-      const providerJobId = data.id ?? data.job_id ?? data.generation_id ?? data.task_id ?? data.jobId;
-      if (!providerJobId) {
-        const error = "Higgsfield response missing job id";
-        await this.markVideoFailed(input.postId, error);
-        return { success: false, error };
-      }
+      // 1. Mirror the job into the AiMediaGeneration tracking table.
+      await prisma.aiMediaGeneration.create({
+        data: {
+          provider: "higgsfield",
+          endpoint: request.endpoint,
+          generationType: request.generationType,
+          prompt: request.prompt,
+          inputPayload: { endpoint: request.endpoint, input: payload } as Prisma.InputJsonObject,
+          higgsfieldRequestId: response.request_id,
+          status: response.status ?? "queued",
+          statusUrl: response.status_url,
+          cancelUrl: response.cancel_url,
+          socialPostId: input.postId,
+        },
+      });
 
+      // 2. Move the SocialVideo into the generating state.
       await prisma.socialVideo.update({
         where: { postId: input.postId },
         data: {
-          providerJobId,
+          providerJobId: response.request_id,
           status: "VIDEO_GENERATING",
           lastPolledAt: new Date(),
           errorMessage: null,
         },
       });
-      return { success: true, providerJobId };
+
+      return { success: true, providerJobId: response.request_id };
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
+      console.error(`[higgsfield] submitJob failed for post ${input.postId}:`, error);
       await this.markVideoFailed(input.postId, error);
       return { success: false, error };
     }
@@ -111,43 +177,72 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
 
   async getJobStatus(jobId: string): Promise<VideoJobStatus> {
     try {
-      const res = await fetch(`${baseUrl()}${statusEndpoint()}/${jobId}`, {
+      // Prefer the status_url captured at submit time, else construct one.
+      const tracking = await prisma.aiMediaGeneration.findUnique({
+        where: { higgsfieldRequestId: jobId },
+      });
+      const statusUrl =
+        tracking?.statusUrl ?? `${baseUrl()}/v1/status/${jobId}`;
+
+      const res = await fetch(statusUrl, {
         method: "GET",
-        headers: authHeaders(),
+        headers: { Authorization: getAuthHeader() },
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
         return { jobId, status: "failed", error: `Higgsfield HTTP ${res.status}: ${detail.slice(0, 200)}` };
       }
-      const data = (await res.json()) as {
-        status?: string;
-        state?: string;
-        generation_status?: string;
-        video_url?: string;
-        videoUrl?: string;
-        output_url?: string;
-        url?: string;
-        result?: { video_url?: string };
-        output?: { video_url?: string };
-        thumbnail_url?: string;
-        thumbnailUrl?: string;
-        error?: string;
-      };
-      const rawStatus = data.status ?? data.state ?? data.generation_status;
-      const videoUrl =
-        data.video_url ??
-        data.videoUrl ??
-        data.output_url ??
-        data.url ??
-        data.result?.video_url ??
-        data.output?.video_url;
-      const thumbnailUrl = data.thumbnail_url ?? data.thumbnailUrl;
+
+      const response = (await res.json()) as HiggsfieldResponse;
+      const mapped = mapStatus(response.status);
+      const videoUrl = response.video?.url;
+      const thumbnailUrl = response.images?.[0]?.url;
+      const isCompleted = response.status === "completed";
+      const isNsfw = response.status === "nsfw";
+
+      // Update the tracking record.
+      if (tracking) {
+        await prisma.aiMediaGeneration.update({
+          where: { id: tracking.id },
+          data: {
+            status: response.status,
+            outputVideoUrl: isCompleted ? videoUrl : undefined,
+            outputImages: response.images ?? undefined,
+            outputRaw: response as unknown as object,
+            completedAt: isCompleted ? new Date() : undefined,
+            nsfwFlagged: isNsfw ? true : undefined,
+            errorMessage: response.status === "failed" ? "Higgsfield reported failure" : undefined,
+          },
+        });
+      }
+
+      // Mirror onto the SocialVideo (idempotent with the cron's own update).
+      const video = await prisma.socialVideo.findFirst({ where: { providerJobId: jobId } });
+      if (video) {
+        await prisma.socialVideo.update({
+          where: { id: video.id },
+          data: {
+            status:
+              mapped === "completed"
+                ? "VIDEO_READY"
+                : mapped === "failed"
+                  ? "VIDEO_FAILED"
+                  : "VIDEO_GENERATING",
+            videoUrl: isCompleted ? videoUrl : undefined,
+            thumbnailUrl: isCompleted ? thumbnailUrl : undefined,
+            generatedAt: isCompleted ? new Date() : undefined,
+            lastPolledAt: new Date(),
+            pollAttempts: { increment: 1 },
+          },
+        });
+      }
+
       return {
         jobId,
-        status: mapStatus(rawStatus),
+        status: mapped,
         videoUrl,
         thumbnailUrl,
-        error: data.error,
+        error: response.status === "failed" || isNsfw ? `status: ${response.status}` : undefined,
       };
     } catch (err) {
       return { jobId, status: "failed", error: err instanceof Error ? err.message : String(err) };
@@ -165,6 +260,58 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
       durationSeconds: video.durationSeconds ?? 30,
       style: video.style ?? undefined,
     });
+  }
+
+  // Generates a still image (e.g. a vehicle hero shot) and records the job.
+  // Returns the provider request_id for downstream polling.
+  async generateTextToImage(request: {
+    prompt: string;
+    aspectRatio?: "9:16" | "16:9" | "1:1";
+    vehicleId?: string;
+    campaignId?: string;
+  }): Promise<{ success: boolean; requestId?: string; error?: string }> {
+    const endpoint = "flux-pro/kontext/max/text-to-image";
+    const input: Record<string, unknown> = {
+      prompt: request.prompt,
+      aspect_ratio: request.aspectRatio ?? "9:16",
+      safety_tolerance: 2,
+      seed: Math.floor(Math.random() * 99999),
+    };
+
+    try {
+      const response = await higgsfieldRequest({
+        endpoint,
+        input,
+        withPolling: false,
+        webhook: webhookConfig(),
+      });
+
+      if (!response.request_id) {
+        return { success: false, error: "Higgsfield response missing request_id" };
+      }
+
+      await prisma.aiMediaGeneration.create({
+        data: {
+          provider: "higgsfield",
+          endpoint,
+          generationType: "text_to_image",
+          prompt: request.prompt,
+          inputPayload: { endpoint, input } as Prisma.InputJsonObject,
+          higgsfieldRequestId: response.request_id,
+          status: response.status ?? "queued",
+          statusUrl: response.status_url,
+          cancelUrl: response.cancel_url,
+          vehicleId: request.vehicleId,
+          campaignId: request.campaignId,
+        },
+      });
+
+      return { success: true, requestId: response.request_id };
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      console.error("[higgsfield] generateTextToImage failed:", error);
+      return { success: false, error };
+    }
   }
 
   private async markVideoFailed(postId: string, error: string): Promise<void> {

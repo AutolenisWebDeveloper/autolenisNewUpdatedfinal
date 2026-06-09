@@ -4056,6 +4056,45 @@ enum SocialVideoStatus {
   PUBLISH_READY
 }
 
+// Unified tracking record for every AI media-generation job (Higgsfield).
+// One row per submitted job, keyed by the provider request id, capturing the
+// full input payload, lifecycle status, and resolved output URLs. Linkable to a
+// social post / vehicle / article / campaign for downstream attribution.
+model AiMediaGeneration {
+  id                    String    @id @default(cuid())
+  provider              String    @default("higgsfield")
+  endpoint              String
+  generationType        String    @map("generation_type")
+  // text_to_image | image_to_video | speech_to_video
+  prompt                String    @db.Text
+  inputImages           Json?     @map("input_images")
+  inputAudio            Json?     @map("input_audio")
+  inputPayload          Json      @map("input_payload")
+  higgsfieldRequestId   String?   @unique @map("higgsfield_request_id")
+  status                String    @default("queued")
+  // queued | in_progress | nsfw | failed | completed
+  statusUrl             String?   @map("status_url")
+  cancelUrl             String?   @map("cancel_url")
+  outputImages          Json?     @map("output_images")
+  outputVideoUrl        String?   @map("output_video_url")
+  outputRaw             Json?     @map("output_raw")
+  errorMessage          String?   @db.Text @map("error_message")
+  nsfwFlagged           Boolean   @default(false) @map("nsfw_flagged")
+  createdById           String?   @map("created_by_id")
+  vehicleId             String?   @map("vehicle_id")
+  articleId             String?   @map("article_id")
+  socialPostId          String?   @map("social_post_id")
+  campaignId            String?   @map("campaign_id")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  completedAt           DateTime? @map("completed_at")
+
+  @@index([status])
+  @@index([socialPostId])
+  @@index([higgsfieldRequestId])
+  @@map("ai_media_generations")
+}
+
 // Performance metrics per post, recorded periodically.
 model SocialPerformance {
   id              String   @id @default(cuid())
