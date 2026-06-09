@@ -165,12 +165,21 @@ export class BufferProvider implements PublishingProvider {
       };
     }
 
-    const media =
-      input.mediaUrl && input.isVideo
-        ? [{ url: input.mediaUrl, type: "video" }]
-        : input.mediaUrl
-        ? [{ url: input.mediaUrl, type: "image" }]
-        : [];
+    // Attach the best available media: a video (with a poster thumbnail when we
+    // have one) takes priority, otherwise the still image.
+    const videoUrl = input.videoUrl ?? (input.isVideo ? input.mediaUrl : undefined);
+    const imageUrl = input.imageUrl ?? input.thumbnailUrl ?? (!input.isVideo ? input.mediaUrl : undefined);
+
+    const media: Array<{ url: string; type: string; thumbnailUrl?: string }> = [];
+    if (videoUrl) {
+      media.push({
+        url: videoUrl,
+        type: "video",
+        thumbnailUrl: input.thumbnailUrl ?? imageUrl ?? videoUrl,
+      });
+    } else if (imageUrl) {
+      media.push({ url: imageUrl, type: "image" });
+    }
 
     try {
       const data = (await bufferGraphQL(CREATE_POST_MUTATION, {
@@ -178,7 +187,7 @@ export class BufferProvider implements PublishingProvider {
           channelId,
           text: composeText(input.caption, input.hashtags),
           scheduledAt: scheduledAtIso,
-          media,
+          media: media.length > 0 ? media : undefined,
         },
       })) as CreatePostResult;
 

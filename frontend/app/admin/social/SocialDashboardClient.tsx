@@ -679,7 +679,16 @@ function PendingTab({
                 <tr key={p.id} className="border-t border-[#F1F5F9] hover:bg-[#F8FAFC]">
                   <td className="px-4 py-2"><span className="inline-flex items-center gap-1 text-[#0B5FD1] capitalize">{platformIcon(p.platform, 12)}{p.platform}</span></td>
                   <td className="px-4 py-2 text-[#475569]">{p.franchise?.name ?? "—"}</td>
-                  <td className="px-4 py-2 max-w-[180px] truncate text-[#0F172A] font-medium">{p.hook}</td>
+                  <td className="px-4 py-2 max-w-[220px]">
+                    <div className="flex items-center gap-2">
+                      {p.video?.thumbnailUrl ? (
+                        <img src={p.video.thumbnailUrl} alt="" className="w-9 h-9 rounded-md object-cover border border-[#E2E8F0] shrink-0" />
+                      ) : (
+                        <div className="w-9 h-9 rounded-md bg-slate-100 flex items-center justify-center text-[10px] text-slate-400 shrink-0">📸</div>
+                      )}
+                      <span className="truncate text-[#0F172A] font-medium">{p.hook}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-2 max-w-[220px] truncate text-[#64748B]">{p.caption}</td>
                   <td className="px-4 py-2">{p.complianceNotes ? <AlertTriangle size={14} className="text-amber-500" /> : <span className="text-[#94A3B8]">—</span>}</td>
                   <td className="px-4 py-2 text-[#64748B]">{fmtDateTime(p.scheduledAt)}</td>
@@ -1115,6 +1124,32 @@ function PostDrawer({
               </div>
             </div>
           )}
+
+          {/* Visual Assets */}
+          <div className="border-t border-[#E2E8F0] pt-4">
+            <p className="text-xs font-medium text-slate-500 mb-2">VISUAL ASSETS</p>
+            {post.video?.thumbnailUrl ? (
+              <img
+                src={post.video.thumbnailUrl}
+                alt="Generated visual"
+                className="w-full rounded-xl object-cover max-h-64"
+              />
+            ) : (
+              <div className="w-full h-32 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 text-sm">
+                {post.video?.status === "VIDEO_GENERATING"
+                  ? "🎬 Video generating..."
+                  : "📸 Image generating..."}
+              </div>
+            )}
+            {post.video?.videoUrl && (
+              <video
+                src={post.video.videoUrl}
+                className="w-full rounded-xl mt-2 max-h-64"
+                controls
+                muted
+              />
+            )}
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>

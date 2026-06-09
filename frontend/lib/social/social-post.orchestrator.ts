@@ -6,6 +6,7 @@
 // video generation, and marks the source signal consumed. It also handles
 // approval/rejection and the actual publish hand-off to the publishing provider.
 
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type {
   ContentFranchise,
@@ -15,7 +16,6 @@ import type {
 } from "@prisma/client";
 import {
   AUTOMATION_MODE,
-  ENABLE_VIDEO,
   buildUtmUrl,
   getFunnelDestination,
   getPlatformConfig,
@@ -23,7 +23,6 @@ import {
 import { requiresReview as franchiseRequiresReview } from "@/lib/social/franchise-router";
 import { generateSocialScript } from "@/lib/social/groq-script.engine";
 import { generateHookVariants } from "@/lib/social/hook-ab-testing.engine";
-import { getVideoProvider } from "@/lib/social/providers/video-generation.factory";
 import { getPublishingProvider } from "@/lib/social/providers/publishing.factory";
 
 // Per-platform content + derivative type used when materializing a post.
@@ -228,23 +227,9 @@ export async function generateAndQueuePost(
           );
         }
 
-        // Queue video for each variant when enabled and not held for review.
-        if (ENABLE_VIDEO && status !== "PENDING_REVIEW") {
-          try {
-            await queueVideoGeneration(variantPost.id, {
-              visualPrompt: script.visualPrompt,
-              durationSeconds: script.durationSeconds,
-              style: script.visualStyle,
-              voiceoverText: script.voiceoverText,
-              onScreenText: script.onScreenText,
-            });
-          } catch (err) {
-            console.error(
-              `[orchestrator] A/B video queue failed for post ${variantPost.id} (non-fatal):`,
-              err instanceof Error ? err.message : err,
-            );
-          }
-        }
+        // Generate visuals (image now, video async) for each variant in the
+        // background. Self-gates on ENABLE_HIGGSFIELD_VIDEO and never throws.
+        scheduleVisualGeneration(variantPost);
 
         posts.push(variantPost);
       }
@@ -343,26 +328,10 @@ export async function generateAndQueuePost(
     );
   }
 
-  // Queue video generation when enabled and the post is not held for review.
-  // Video generation is best-effort and runs AFTER the post is durably saved:
-  // a missing Higgsfield key or social_videos table must never roll back or
-  // hide a successfully created post.
-  if (ENABLE_VIDEO && status !== "PENDING_REVIEW") {
-    try {
-      await queueVideoGeneration(post.id, {
-        visualPrompt: script.visualPrompt,
-        durationSeconds: script.durationSeconds,
-        style: script.visualStyle,
-        voiceoverText: script.voiceoverText,
-        onScreenText: script.onScreenText,
-      });
-    } catch (err) {
-      console.error(
-        `[orchestrator] video queue failed for post ${post.id} (non-fatal):`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
+  // Generate visuals (image now, video async) in the background AFTER the post
+  // is durably saved. Self-gating on ENABLE_HIGGSFIELD_VIDEO and fully
+  // non-blocking: a missing Higgsfield key must never hide a created post.
+  scheduleVisualGeneration(post);
 
   // Mark the source signal consumed. Best-effort: the post already exists.
   try {
@@ -380,55 +349,70 @@ export async function generateAndQueuePost(
   return post;
 }
 
-// Creates a SocialVideo job for a post (idempotent on postId) and submits it to
-// the video provider. The provider transitions QUEUED → GENERATING or FAILED.
-async function queueVideoGeneration(
-  postId: string,
-  input: {
-    visualPrompt: string;
-    durationSeconds: number;
-    style?: string;
-    voiceoverText?: string;
-    onScreenText?: string;
-  },
-): Promise<void> {
-  await prisma.socialVideo.upsert({
-    where: { postId },
-    create: {
-      postId,
-      status: "VIDEO_QUEUED",
-      visualPrompt: input.visualPrompt,
-      durationSeconds: input.durationSeconds,
-      style: input.style,
-    },
-    update: {
-      status: "VIDEO_QUEUED",
-      visualPrompt: input.visualPrompt,
-      durationSeconds: input.durationSeconds,
-      style: input.style,
-    },
-  });
+// Generates the post's visual assets (image now, video async) in the background
+// after the HTTP response is sent. Non-blocking and fully self-contained: a
+// failure is logged and never propagates back into post creation/publishing.
+function scheduleVisualGeneration(post: SocialPost): void {
+  const run = async () => {
+    try {
+      const { generatePostVisuals } = await import(
+        "@/lib/social/image-generation.service"
+      );
+      const visuals = await generatePostVisuals(post);
+      if (visuals.imageUrl) {
+        console.log("[orchestrator] image generated for post:", post.id);
+      }
+    } catch (err) {
+      console.error("[orchestrator] image generation failed (non-fatal):", err);
+    }
+  };
 
-  const provider = getVideoProvider();
-  await provider.submitJob({
-    postId,
-    visualPrompt: input.visualPrompt,
-    durationSeconds: input.durationSeconds,
-    style: input.style,
-    voiceoverText: input.voiceoverText,
-    onScreenText: input.onScreenText,
-  });
+  // Prefer Next's after() so work runs post-response inside a request scope.
+  // Outside a request scope (e.g. CLI scripts) after() throws — fall back to a
+  // detached promise so visual generation still proceeds.
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
 }
 
 // Publishes (or schedules) an approved post via the publishing provider. Uses
-// the ready video URL when one exists. On failure, records the error and
-// increments the attempt counter so a later cron can retry.
+// the ready video URL when one exists, otherwise the generated image, so no post
+// publishes without a visual when one is available. On failure, records the
+// error and increments the attempt counter so a later cron can retry.
 export async function publishApprovedPost(post: SocialPost): Promise<void> {
   const provider = getPublishingProvider(post.platform);
 
-  const video = await prisma.socialVideo.findUnique({ where: { postId: post.id } });
-  const mediaUrl = video?.status === "VIDEO_READY" ? video.videoUrl ?? undefined : undefined;
-  const isVideo = Boolean(mediaUrl);
+  // Resolve the best available media for this post: a ready video wins, else the
+  // generated still image (stored as the video thumbnail, or on the most recent
+  // completed text-to-image generation record).
+  const video = await prisma.socialVideo
+    .findUnique({ where: { postId: post.id } })
+    .catch(() => null);
+
+  const imageGen = await prisma.aiMediaGeneration
+    .findFirst({
+      where: {
+        socialPostId: post.id,
+        status: "completed",
+        generationType: "text_to_image",
+      },
+      orderBy: { completedAt: "desc" },
+    })
+    .catch(() => null);
+
+  const videoUrl =
+    video?.status === "VIDEO_READY" ? video.videoUrl ?? undefined : undefined;
+
+  const imageFromGen =
+    (imageGen?.outputImages as { url: string }[] | null)?.[0]?.url ?? undefined;
+  const thumbnailUrl = video?.thumbnailUrl ?? imageFromGen;
+
+  // mediaUrl is the single asset the publisher attaches; thumbnailUrl is sent
+  // alongside a video so platforms can show a poster frame.
+  const mediaUrl = videoUrl ?? thumbnailUrl;
+  const isVideo = Boolean(videoUrl);
 
   await prisma.socialPost.update({
     where: { id: post.id },
@@ -446,6 +430,8 @@ export async function publishApprovedPost(post: SocialPost): Promise<void> {
         caption: post.caption,
         hashtags: post.hashtags,
         mediaUrl,
+        thumbnailUrl,
+        imageUrl: thumbnailUrl,
         scheduledAt,
         isVideo,
       })
@@ -455,6 +441,8 @@ export async function publishApprovedPost(post: SocialPost): Promise<void> {
         caption: post.caption,
         hashtags: post.hashtags,
         mediaUrl,
+        thumbnailUrl,
+        imageUrl: thumbnailUrl,
         isVideo,
       });
 
@@ -480,23 +468,17 @@ export async function publishApprovedPost(post: SocialPost): Promise<void> {
   }
 }
 
-// Moves a post from PENDING_REVIEW → APPROVED and queues video generation when
-// enabled. Returns the updated post.
+// Moves a post from PENDING_REVIEW → APPROVED and generates its visuals (image
+// now, video async) when they don't already exist. Returns the updated post.
 export async function approvePost(postId: string): Promise<SocialPost> {
   const post = await prisma.socialPost.update({
     where: { id: postId },
     data: { status: "APPROVED", requiresReview: false, rejectionReason: null },
   });
 
-  if (ENABLE_VIDEO) {
-    await queueVideoGeneration(post.id, {
-      visualPrompt: post.visualPrompt ?? "",
-      durationSeconds: post.durationSeconds ?? 30,
-      style: post.visualStyle ?? undefined,
-      voiceoverText: post.voiceoverText ?? undefined,
-      onScreenText: post.onScreenText ?? undefined,
-    });
-  }
+  // Generate visuals if the post doesn't already have an image/video. The image
+  // service self-gates on ENABLE_HIGGSFIELD_VIDEO and is idempotent.
+  scheduleVisualGeneration(post);
 
   return post;
 }

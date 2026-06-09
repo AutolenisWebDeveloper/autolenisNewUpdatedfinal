@@ -9,7 +9,10 @@ export interface SchedulePostInput {
   platform: string;
   caption: string;
   hashtags: string[];
-  mediaUrl?: string; // video or image URL
+  mediaUrl?: string; // primary video or image URL
+  videoUrl?: string; // explicit video URL (preferred when present)
+  imageUrl?: string; // generated still image URL
+  thumbnailUrl?: string; // poster frame for a video
   scheduledAt: Date;
   isVideo?: boolean;
 }
@@ -20,6 +23,9 @@ export interface PublishPostInput {
   caption: string;
   hashtags: string[];
   mediaUrl?: string;
+  videoUrl?: string;
+  imageUrl?: string;
+  thumbnailUrl?: string;
   isVideo?: boolean;
 }
 
