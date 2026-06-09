@@ -23,6 +23,8 @@ export interface TriggerSocialAttributionInput {
   utmTerm?: string;
   utmHook?: string;
   utmPlatform?: string;
+  utmCreator?: string;
+  utmAffiliate?: string;
 }
 
 export async function triggerSocialAttribution(
@@ -45,6 +47,8 @@ export async function triggerSocialAttribution(
       utmTerm: input.utmTerm,
       utmHook: input.utmHook,
       utmPlatform: input.utmPlatform,
+      utmCreator: input.utmCreator,
+      utmAffiliate: input.utmAffiliate,
     });
 
     console.log("[attribution-hook] social attribution captured");

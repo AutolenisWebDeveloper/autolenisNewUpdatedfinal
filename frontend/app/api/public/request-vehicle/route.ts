@@ -134,6 +134,8 @@ const schema = z.object({
   utm_campaign: z.string().max(100).optional().nullable(),
   utm_content:  z.string().max(100).optional().nullable(),
   utm_hook:     z.string().max(100).optional().nullable(),
+  utm_creator:   z.string().max(100).optional().nullable(),
+  utm_affiliate: z.string().max(100).optional().nullable(),
   source_url:   z.string().max(500).optional().nullable(),
   campaign:     z.string().max(60).optional().nullable(),
   consent_email: z.boolean().optional(),
@@ -347,6 +349,8 @@ export async function POST(request: NextRequest) {
           utmTerm: undefined,
           utmHook: data.utm_hook ?? data.utm_campaign ?? undefined,
           utmPlatform: data.utm_source ?? undefined,
+          utmCreator: data.utm_creator ?? undefined,
+          utmAffiliate: data.utm_affiliate ?? undefined,
         });
       } catch (err) {
         console.error("[request-vehicle] attribution failed:", err);

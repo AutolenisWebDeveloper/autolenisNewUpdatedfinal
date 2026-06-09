@@ -260,6 +260,33 @@ export default function LandingPageClient({
     });
   }, [campaign]);
 
+  // Social CLICK attribution — when a visitor arrives via a social UTM, record
+  // a CLICK-stage RevenueAttribution so we can measure click→conversion. Fires
+  // once on mount, fully fire-and-forget; never blocks or errors the page.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const utmSource = sp.get("utm_source") ?? "";
+    const socialSources = ["facebook", "instagram", "tiktok", "youtube", "linkedin"];
+    if (!socialSources.includes(utmSource.toLowerCase())) return;
+
+    fetch("/api/public/social-click", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        utmSource,
+        utmMedium: sp.get("utm_medium") ?? undefined,
+        utmCampaign: sp.get("utm_campaign") ?? undefined,
+        utmContent: sp.get("utm_content") ?? undefined,
+        utmHook: sp.get("utm_hook") ?? undefined,
+        utmPlatform: sp.get("utm_platform") ?? utmSource,
+        creatorId: sp.get("utm_creator") ?? undefined,
+        affiliateId: sp.get("utm_affiliate") ?? undefined,
+        landingPage: campaign,
+      }),
+    }).catch(() => {});
+  }, []);
+
   // Page-view event (GA4 / Clarity / dataLayer).
   useEffect(() => {
     trackFunnelEvent("lp_view", { campaign });

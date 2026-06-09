@@ -172,6 +172,104 @@ export async function GET(request: NextRequest) {
       .catch(() => undefined);
   }
 
+  // Send weekly SMS market alerts to SMS-consented buyers about the strongest
+  // buyer-leverage market. BuyerOpportunity has no metro/city field (only zip),
+  // so we cannot target per-metro — instead we query consented buyers once and
+  // send each a single alert about the #1 market, avoiding duplicate sends.
+  try {
+    const { sendMarketAlertSMS } = await import(
+      "@/lib/social/sms-distribution.service"
+    );
+
+    const topSmsMarkets = await prisma.marketIntelligence
+      .findMany({
+        where: { buyerLeverageScore: { gte: 7.0 } },
+        orderBy: { buyerLeverageScore: "desc" },
+        take: 3,
+        select: { metroName: true, buyerLeverageScore: true },
+      })
+      .catch(() => []);
+
+    const topMarket = topSmsMarkets[0];
+    if (!topMarket) {
+      console.log("[optimize-sms] no high-leverage markets this week");
+    } else {
+      const leverage = topMarket.buyerLeverageScore ?? 0;
+
+      // SMS-consented buyers with a phone, active in the last 90 days. The
+      // consent gate (consentSms) is required — never send marketing SMS
+      // without it. Capped at 50 sends per week.
+      const buyers = await prisma.buyerOpportunity
+        .findMany({
+          where: {
+            consentSms: true,
+            phone: { not: null },
+            createdAt: {
+              gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+            },
+          },
+          select: { id: true, phone: true, firstName: true },
+          take: 50,
+        })
+        .catch(() => []);
+
+      let smsSent = 0;
+      for (const buyer of buyers) {
+        if (!buyer.phone) continue;
+        try {
+          await sendMarketAlertSMS({
+            phoneNumber: buyer.phone,
+            firstName: buyer.firstName ?? "there",
+            city: topMarket.metroName,
+            marketSignal:
+              `Buyer leverage in ${topMarket.metroName} is at ` +
+              `${leverage.toFixed(1)}/10 this week — ` +
+              `dealers are competing hard for buyers right now`,
+            trackedUrl:
+              `https://www.autolenis.com/lp/market-alert` +
+              `?utm_source=sms&utm_medium=sms` +
+              `&utm_campaign=market_alert_weekly` +
+              `&utm_content=${topMarket.metroName.replace(/\s+/g, "_").toLowerCase()}`,
+          });
+          smsSent++;
+        } catch (smsErr) {
+          console.error("[optimize-sms] send failed:", smsErr);
+        }
+      }
+
+      console.log(
+        `[optimize-sms] sent ${smsSent} alerts for ${topMarket.metroName}`,
+        `(leverage: ${leverage.toFixed(1)})`,
+      );
+    }
+  } catch (err) {
+    console.error("[optimize-sms] block failed:", err);
+  }
+
+  // Refresh the Meta retargeting Custom Audience from non-converting social
+  // leads. Self-gates on META_ACCESS_TOKEN / META_AD_ACCOUNT_ID and no-ops when
+  // unset, so this is safe to call unconditionally.
+  try {
+    const { buildRetargetingAudience } = await import(
+      "@/lib/social/retargeting.service"
+    );
+    await buildRetargetingAudience();
+  } catch (err) {
+    console.error("[optimize] retargeting audience build failed:", err);
+  }
+
+  // Distribute weekly content packages to active creators (gated by flag).
+  if (process.env.ENABLE_CREATOR_DISTRIBUTION === "true") {
+    try {
+      const { distributeCreatorPackages } = await import(
+        "@/lib/social/creator-package.generator"
+      );
+      await distributeCreatorPackages();
+    } catch (err) {
+      console.error("[optimize] creator distribution failed:", err);
+    }
+  }
+
   const summary = {
     performanceRows: rows.length,
     winningPatterns: patterns.size,

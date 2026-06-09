@@ -18,6 +18,8 @@ const schema = z.object({
       utmTerm: z.string().optional(),
       utmHook: z.string().optional(),
       utmPlatform: z.string().optional(),
+      utmCreator: z.string().optional(),
+      utmAffiliate: z.string().optional(),
     })
     .optional(),
 });

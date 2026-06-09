@@ -514,6 +514,45 @@ export async function sendMarketIndexPublishedEmail(params: {
   });
 }
 
+// Creator network — weekly content-package delivery. Sent to each active
+// creator with the week's ready-to-share posts (links pre-built with their
+// attribution). Idempotency-keyed on creator email + week so a re-run of the
+// distribution cron in the same week never double-sends.
+export async function sendCreatorPackageEmail(input: {
+  to: string;
+  name: string;
+  weekOf: string;
+  postsCount: number;
+  emailBody: string;
+}): Promise<void> {
+  const weekKey = input.weekOf.replace(/,/g, "").replace(/\s+/g, "-").toLowerCase();
+  const portalUrl = `${APP_URL}/affiliate/portal/dashboard`;
+  const bodyHtml = input.emailBody
+    .split("\n")
+    .map((line) => (line.trim() ? `<p style="margin:0 0 12px">${line}</p>` : ""))
+    .join("");
+  await sendIdempotent({
+    idempotencyKey: `creator-package-${input.to}-${weekKey}`,
+    to: input.to,
+    templateId: "creator-package",
+    subject: `Your AutoLenis content package — week of ${input.weekOf}`,
+    html: `
+      <div style="font-family:-apple-system,system-ui,sans-serif;max-width:600px;margin:0 auto;background:#fff">
+        <div style="background:#0B5FD1;padding:28px;text-align:center">
+          <h1 style="color:#fff;margin:0;font-size:20px">Your Weekly Content Package</h1>
+          <p style="color:#cfe0ff;margin:6px 0 0;font-size:13px">Week of ${input.weekOf} &middot; ${input.postsCount} post${input.postsCount !== 1 ? "s" : ""}</p>
+        </div>
+        <div style="padding:28px;color:#1f2937;line-height:1.7;font-size:14px">
+          ${bodyHtml}
+          <div style="text-align:center;margin:24px 0">
+            <a href="${portalUrl}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">Open your creator dashboard &rarr;</a>
+          </div>
+        </div>
+      </div>
+    `,
+  });
+}
+
 // FCRA § 615 adverse action notice. Required by law to be sent to any
 // consumer whose AutoLenis prequalification is DECLINED based in whole or
 // in part on a consumer report (MicroBilt iPredict). See

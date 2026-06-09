@@ -525,6 +525,7 @@ export async function publishApprovedPost(post: SocialPost): Promise<void> {
         mediaUrl,
         thumbnailUrl,
         imageUrl: thumbnailUrl,
+        trackedUrl: post.trackedUrl ?? undefined,
         scheduledAt,
         isVideo,
       })
@@ -536,6 +537,7 @@ export async function publishApprovedPost(post: SocialPost): Promise<void> {
         mediaUrl,
         thumbnailUrl,
         imageUrl: thumbnailUrl,
+        trackedUrl: post.trackedUrl ?? undefined,
         isVideo,
       });
 
