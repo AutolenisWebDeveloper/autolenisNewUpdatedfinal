@@ -514,6 +514,79 @@ export async function sendMarketIndexPublishedEmail(params: {
   });
 }
 
+// Social Engine — weekly optimization report (Session D). Sent to the admin
+// after the weekly social-optimize cron with the week's top performers, the
+// posting-window changes the optimizer made, and next-week focus. Idempotency
+// is keyed on the recipient + weekOf so a re-run of the cron never double-sends.
+export async function sendOptimizationReport(input: {
+  to: string;
+  weekOf: string;
+  topFranchise: string;
+  topHook: string;
+  topPlatform: string;
+  topCity: string;
+  totalLeads: number;
+  totalRevenueCents: number;
+  postingWindowChanges: string[];
+  franchiseShifts: string[];
+  nextWeekFocus: string;
+}): Promise<void> {
+  const subject = `AutoLenis Social Engine — Weekly Report (${input.weekOf})`;
+  const dashboardUrl = "https://www.autolenis.com/admin/social";
+  const revenue = `$${(input.totalRevenueCents / 100).toLocaleString("en-US")}`;
+
+  const metricRow = (label: string, value: string) => `
+    <tr>
+      <td style="padding:8px 0;color:#64748B;font-size:13px">${label}</td>
+      <td style="padding:8px 0;color:#0F172A;font-size:13px;font-weight:700;text-align:right">${value}</td>
+    </tr>`;
+
+  const listBlock = (items: string[]) =>
+    items.length > 0
+      ? `<ul style="margin:8px 0 0;padding-left:20px;color:#4B5563;font-size:13px;line-height:1.7">${items
+          .map((i) => `<li>${i}</li>`)
+          .join("")}</ul>`
+      : `<p style="margin:8px 0 0;color:#94A3B8;font-size:13px">No changes this week.</p>`;
+
+  const weekKey = input.weekOf.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+
+  await sendIdempotent({
+    idempotencyKey: `social-optimization-report-${input.to}-${weekKey}`,
+    to: input.to,
+    templateId: "social-optimization-report",
+    subject,
+    html: `
+      <div style="font-family:-apple-system,system-ui,sans-serif;max-width:600px;margin:0 auto;background:#fff">
+        <div style="background:#0B5FD1;padding:28px;text-align:center">
+          <h1 style="color:#fff;margin:0;font-size:20px">Social Engine Weekly Report</h1>
+          <p style="color:#cfe0ff;margin:6px 0 0;font-size:13px">Week of ${input.weekOf}</p>
+        </div>
+        <div style="padding:28px;color:#1f2937;line-height:1.6;font-size:14px">
+          <h2 style="font-size:14px;color:#0F172A;margin:0 0 8px">Performance</h2>
+          <table style="width:100%;border-collapse:collapse">
+            ${metricRow("Top franchise", input.topFranchise)}
+            ${metricRow("Top hook", input.topHook)}
+            ${metricRow("Top platform", input.topPlatform)}
+            ${metricRow("Top market", input.topCity)}
+            ${metricRow("Leads this week", String(input.totalLeads))}
+            ${metricRow("Revenue attributed", revenue)}
+          </table>
+
+          <h2 style="font-size:14px;color:#0F172A;margin:24px 0 4px">Changes</h2>
+          ${listBlock([...input.postingWindowChanges, ...input.franchiseShifts])}
+
+          <h2 style="font-size:14px;color:#0F172A;margin:24px 0 4px">Next Week Focus</h2>
+          <p style="margin:8px 0 0;color:#4B5563;font-size:13px">${input.nextWeekFocus}</p>
+
+          <div style="text-align:center;margin:28px 0 4px">
+            <a href="${dashboardUrl}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">View Full Dashboard &rarr;</a>
+          </div>
+        </div>
+      </div>
+    `,
+  });
+}
+
 // Creator network — weekly content-package delivery. Sent to each active
 // creator with the week's ready-to-share posts (links pre-built with their
 // attribution). Idempotency-keyed on creator email + week so a re-run of the
