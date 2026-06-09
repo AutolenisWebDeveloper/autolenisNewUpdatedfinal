@@ -90,6 +90,87 @@ const TESTIMONIALS: Testimonial[] = [
   },
 ];
 
+// ──────────────────────────────────────────────────────────────────────────
+//  SOCIAL CAMPAIGN CONFIG
+//  Maps a /lp/[campaign] slug coming from a social post to a tailored hero
+//  badge / headline / subheadline / primary-CTA label. Only social-funnel
+//  slugs are listed here. Any slug NOT in this map (facebook, google, tiktok,
+//  youtube, default, …) falls through to the existing fixed brand hero — so
+//  existing campaigns are completely unaffected.
+// ──────────────────────────────────────────────────────────────────────────
+type SocialCampaign = {
+  headline: string;
+  subheadline: string;
+  ctaText: string;
+  badge: string;
+};
+
+const SOCIAL_CAMPAIGNS: Record<string, SocialCampaign> = {
+  "dealer-secret": {
+    headline: "Dealers Add Hidden Fees. Here's How to Stop It.",
+    subheadline:
+      "AutoLenis buyers see every fee before they sign. Get competing offers from local dealers — free.",
+    ctaText: "Get My Free Dealer Offers",
+    badge: "Free • No Obligation • No Dealership Visit",
+  },
+  "price-watch": {
+    headline: "See What Your Next Car Actually Costs Right Now",
+    subheadline:
+      "Real prices from real dealer offers. No estimates. No guesswork. Compare dealers in your area.",
+    ctaText: "See Real Prices in My Area",
+    badge: "Updated Daily With Real Transaction Data",
+  },
+  "market-alert": {
+    headline: "Buyer Leverage Is High in Your Market Right Now",
+    subheadline:
+      "AutoLenis is detecting strong buyer conditions in your area. Lock in your best price before it changes.",
+    ctaText: "Claim My Market Advantage",
+    badge: "Market Conditions Change Weekly",
+  },
+  "how-it-works": {
+    headline: "Let 8 Dealers Compete for Your Business",
+    subheadline:
+      "Submit one request. Get multiple offers. Pick the best price. No haggling. No dealership visits.",
+    ctaText: "Start My Free Auction",
+    badge: "Most Buyers Get First Offer Within 24 Hours",
+  },
+  "dealer-fees": {
+    headline: "What Fees Is Your Dealer Actually Charging?",
+    subheadline:
+      "Most buyers overpay in hidden fees. AutoLenis shows you the full breakdown before you sign anything.",
+    ctaText: "See My Dealer Fee Report",
+    badge: "Free Report • Takes 30 Seconds",
+  },
+  "free-offers": {
+    headline: "Get Competing Dealer Offers on Any Vehicle",
+    subheadline:
+      "The smarter way to buy a car. AutoLenis puts dealers in competition for your business.",
+    ctaText: "Get My Free Offers Now",
+    badge: "Free to Start • No Obligation",
+  },
+  "tiktok-dealer": {
+    headline: "Your Dealer Just Added $800 to Your Contract",
+    subheadline:
+      "AutoLenis shows you every fee before you sign. Get competing offers from local dealers today.",
+    ctaText: "See My Dealer Offers",
+    badge: "Free • Instant • No Dealership Required",
+  },
+  "tiktok-price": {
+    headline: "What Dealers Don't Want You to Know Before You Buy",
+    subheadline:
+      "Get the real OTD price from multiple dealers competing for your business. Takes 60 seconds.",
+    ctaText: "Get Real Dealer Prices",
+    badge: "Join Thousands of Smart Car Buyers",
+  },
+  "instagram-offer": {
+    headline: "Stop Overpaying at the Dealership",
+    subheadline:
+      "AutoLenis buyers get competing offers from local dealers — without stepping foot in a showroom.",
+    ctaText: "Get My Competing Offers",
+    badge: "Free • Private • No Pressure",
+  },
+};
+
 const VEHICLE_TYPES = ["SUV", "Sedan", "Truck", "Van", "Coupe", "Other"] as const;
 const BUDGET_RANGES = [
   "Under $15,000",
@@ -105,6 +186,8 @@ type UtmData = {
   utm_source: string | null;
   utm_medium: string | null;
   utm_campaign: string | null;
+  utm_content: string | null;
+  utm_hook: string | null;
   source_url: string | null;
   campaign: string | null;
 };
@@ -148,11 +231,17 @@ export default function LandingPageClient({
   // start fresh or submits the full form.
   const [formRestored, setFormRestored] = useState(false);
 
+  // Social-campaign hero override (null for non-social slugs — falls through to
+  // the existing fixed brand hero).
+  const social = SOCIAL_CAMPAIGNS[campaign] ?? null;
+
   // Capture UTM params on mount so they ride along with the submit payload.
   const [utm, setUtm] = useState<UtmData>({
     utm_source: null,
     utm_medium: null,
     utm_campaign: null,
+    utm_content: null,
+    utm_hook: null,
     source_url: null,
     campaign,
   });
@@ -164,6 +253,8 @@ export default function LandingPageClient({
       utm_source:   sp.get("utm_source"),
       utm_medium:   sp.get("utm_medium"),
       utm_campaign: sp.get("utm_campaign"),
+      utm_content:  sp.get("utm_content"),
+      utm_hook:     sp.get("utm_hook"),
       source_url:   window.location.href,
       campaign,
     });
@@ -312,6 +403,8 @@ export default function LandingPageClient({
       utm_source:   utm.utm_source,
       utm_medium:   utm.utm_medium,
       utm_campaign: utm.utm_campaign,
+      utm_content:  utm.utm_content,
+      utm_hook:     utm.utm_hook,
       source_url:   utm.source_url,
       campaign:     utm.campaign,
       consent_email: true,
@@ -405,16 +498,23 @@ export default function LandingPageClient({
             {/* ── LEFT COLUMN — headline, copy, CTAs, social proof ─────────── */}
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-4">
-                BUYER-FIRST AUTOMOTIVE CONCIERGE
+                {social ? social.badge : "BUYER-FIRST AUTOMOTIVE CONCIERGE"}
               </p>
-              <h1 className="font-black text-5xl lg:text-6xl tracking-tight text-slate-900 leading-[1.05] mb-5">
-                Buy Smarter.<br />
-                Dealers Compete.<br />
-                <span className="text-[#0B5FD1]">You Win.</span>
-              </h1>
+              {social ? (
+                <h1 className="font-black text-4xl lg:text-5xl tracking-tight text-slate-900 leading-[1.08] mb-5">
+                  {social.headline}
+                </h1>
+              ) : (
+                <h1 className="font-black text-5xl lg:text-6xl tracking-tight text-slate-900 leading-[1.05] mb-5">
+                  Buy Smarter.<br />
+                  Dealers Compete.<br />
+                  <span className="text-[#0B5FD1]">You Win.</span>
+                </h1>
+              )}
               <p className="text-slate-500 text-base leading-relaxed max-w-md mb-7">
-                Verified dealers compete for your business privately so you get real offers, stay in
-                control, and buy smarter from home.
+                {social
+                  ? social.subheadline
+                  : "Verified dealers compete for your business privately so you get real offers, stay in control, and buy smarter from home."}
               </p>
               <div className="space-y-2.5 mb-7">
                 {[
@@ -434,7 +534,7 @@ export default function LandingPageClient({
                   data-testid="lp-hero-cta"
                   className="inline-flex items-center gap-2 bg-[#0B5FD1] hover:bg-[#0944a8] text-white font-bold px-6 py-3 rounded-lg shadow-lg transition-colors"
                 >
-                  Start Your Dealer Auction <ArrowRight size={16} />
+                  {social ? social.ctaText : "Start Your Dealer Auction"} <ArrowRight size={16} />
                 </button>
                 <button
                   onClick={scrollToForm}

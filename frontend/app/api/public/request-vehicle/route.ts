@@ -21,6 +21,7 @@ import {
 import {
   sendVehicleRequestReceived,
   sendDealerNewBuyerOpportunityEmail,
+  sendSocialLeadWelcomeEmail,
 } from "@/lib/services/email/resend.service";
 import { dispatch } from "@/lib/qstash/dispatch";
 import {
@@ -131,6 +132,8 @@ const schema = z.object({
   utm_source:   z.string().max(100).optional().nullable(),
   utm_medium:   z.string().max(100).optional().nullable(),
   utm_campaign: z.string().max(100).optional().nullable(),
+  utm_content:  z.string().max(100).optional().nullable(),
+  utm_hook:     z.string().max(100).optional().nullable(),
   source_url:   z.string().max(500).optional().nullable(),
   campaign:     z.string().max(60).optional().nullable(),
   consent_email: z.boolean().optional(),
@@ -340,15 +343,96 @@ export async function POST(request: NextRequest) {
           utmSource: data.utm_source ?? undefined,
           utmMedium: data.utm_medium ?? undefined,
           utmCampaign: data.utm_campaign ?? undefined,
-          utmContent: undefined,
+          utmContent: data.utm_content ?? undefined,
           utmTerm: undefined,
-          utmHook: data.utm_campaign ?? undefined,
+          utmHook: data.utm_hook ?? data.utm_campaign ?? undefined,
           utmPlatform: data.utm_source ?? undefined,
         });
       } catch (err) {
         console.error("[request-vehicle] attribution failed:", err);
       }
     });
+  }
+
+  // ── Social lead capture + welcome email (non-blocking) ───────────────────
+  // When a submission arrives from a social platform OR a known social-campaign
+  // slug, persist a SocialLead row (the system of record for the social email
+  // nurture sequence) and send the social welcome email. Runs after the
+  // response is sent; failures never touch the buyer's submission flow.
+  {
+    const isSocialSource = [
+      "facebook", "instagram", "tiktok", "youtube", "linkedin",
+    ].includes((data.utm_source ?? "").toLowerCase());
+
+    const isSocialCampaign = [
+      "dealer-secret", "price-watch", "market-alert",
+      "how-it-works", "dealer-fees", "free-offers",
+      "tiktok-dealer", "tiktok-price", "instagram-offer",
+    ].some((slug) =>
+      (data.campaign ?? "").toLowerCase().includes(slug) ||
+      (data.utm_campaign ?? "").toLowerCase().includes(slug),
+    );
+
+    const vehicleInterest =
+      data.preferredMake && data.preferredModel
+        ? `${data.preferredMake} ${data.preferredModel}`
+        : null;
+
+    if (isSocialSource || isSocialCampaign) {
+      after(async () => {
+        try {
+          await prisma.socialLead.create({
+            data: {
+              platform: data.utm_source ?? null,
+              franchise: data.utm_content ?? null,
+              utmSource: data.utm_source ?? null,
+              utmCampaign: data.utm_campaign ?? null,
+              utmContent: data.utm_content ?? null,
+              utmHook: data.utm_hook ?? null,
+              landingPage: data.campaign ?? null,
+              firstName: data.firstName ?? "",
+              lastName: data.lastName ?? null,
+              email: data.email ?? "",
+              phone: data.phone ?? null,
+              zip: data.zip ?? null,
+              city: data.city || null,
+              state: data.state || null,
+              vehicleInterest,
+              make: data.preferredMake ?? null,
+              model: data.preferredModel ?? null,
+              budget: data.budget ?? null,
+              timeline: data.timeline ?? null,
+              buyerOpportunityId: buyerOpportunityId ?? null,
+              vehicleRequestId: vehicleRequestId ?? null,
+              status: "NEW",
+            },
+          });
+          console.log(
+            "[request-vehicle] social lead created for:",
+            data.utm_source,
+            data.campaign,
+          );
+        } catch (err) {
+          console.error("[request-vehicle] social lead creation failed:", err);
+        }
+      });
+    }
+
+    if (isSocialSource) {
+      after(async () => {
+        try {
+          await sendSocialLeadWelcomeEmail({
+            to: data.email,
+            firstName: data.firstName ?? "there",
+            vehicleInterest: vehicleInterest ?? undefined,
+            campaign: data.campaign ?? data.utm_source ?? "social",
+            platform: data.utm_source ?? undefined,
+          });
+        } catch (err) {
+          console.error("[request-vehicle] social welcome email failed:", err);
+        }
+      });
+    }
   }
 
   // ── Post-intake auto-outreach + buyer notification (non-blocking) ─────────
