@@ -10,8 +10,9 @@ import {
   Radio, Search, Sparkles, CheckCircle2, RefreshCw, Calendar, ClipboardCheck,
   Send, BarChart2, Settings as SettingsIcon, X, Copy, AlertTriangle,
   Facebook, Instagram, Youtube, Linkedin, Music2, ThumbsUp, Eye, MousePointerClick,
-  Clock, Film, Loader2, Newspaper, ExternalLink, Video, Users,
+  Clock, Film, Loader2, Newspaper, ExternalLink, Video, Users, Flame, DollarSign,
 } from "lucide-react";
+import { PLATFORM_BENCHMARKS } from "@/lib/social/config";
 
 // ─── Shared types ────────────────────────────────────────────────────────────
 export interface FranchiseRow {
@@ -91,6 +92,18 @@ interface Stats {
   topFranchise: string;
   topHook: string;
   topPlatform: string;
+  revenue?: {
+    totalCents: number;
+    dealsWon: number;
+    byFranchise: { franchise: string; revenueCents: number }[];
+    byPlatform: { platform: string; revenueCents: number }[];
+    topPost: { hook: string; revenueCents: number } | null;
+  };
+}
+interface TrendingData {
+  tiktokHashtags?: string[];
+  redditTopics?: string[];
+  googleTrends?: string[];
 }
 interface SocialLead {
   id: string;
@@ -412,6 +425,18 @@ function OverviewTab({
   const [busy, setBusy] = useState<string | null>(null);
   const [genResults, setGenResults] = useState<Record<string, { ok: boolean; count?: number; error?: string }>>({});
   const [genAllProgress, setGenAllProgress] = useState<{ done: number; total: number } | null>(null);
+  const [trendingData, setTrendingData] = useState<TrendingData | null>(null);
+  const [trendingStale, setTrendingStale] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/social/trending", { credentials: "include" })
+      .then((r) => r.json())
+      .then((d: { data?: { trending?: TrendingData | null; stale?: boolean } }) => {
+        setTrendingData(d.data?.trending ?? null);
+        setTrendingStale(d.data?.stale ?? false);
+      })
+      .catch(() => {});
+  }, []);
 
   const loadSignals = useCallback(async () => {
     try {
@@ -589,6 +614,50 @@ function OverviewTab({
           </table>
         </div>
       </div>
+
+      {trendingData && (
+        <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4 mt-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Flame size={16} className="text-orange-500" />
+            <h3 className="font-medium text-[#0F172A] text-sm">Trending Today</h3>
+            {trendingStale && (
+              <span className="text-xs text-amber-500 ml-auto">Stale — updates at 5AM UTC</span>
+            )}
+          </div>
+
+          {trendingData.tiktokHashtags && (
+            <div className="mb-2">
+              <p className="text-xs text-slate-500 mb-1">TikTok hashtags</p>
+              <div className="flex flex-wrap gap-1">
+                {trendingData.tiktokHashtags.slice(0, 8).map((tag) => (
+                  <span key={tag} className="text-xs bg-[#EFF6FF] text-[#0B5FD1] px-2 py-0.5 rounded-full">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {trendingData.redditTopics && (
+            <div className="mb-2">
+              <p className="text-xs text-slate-500 mb-1">Reddit buyers are asking</p>
+              {trendingData.redditTopics.map((topic, i) => (
+                <p key={i} className="text-xs text-[#475569] italic mb-0.5">&ldquo;{topic}&rdquo;</p>
+              ))}
+            </div>
+          )}
+
+          {trendingData.googleTrends && (
+            <div>
+              <p className="text-xs text-slate-500 mb-1">Google Trends</p>
+              {trendingData.googleTrends.map((trend, i) => (
+                <span key={i} className="text-xs text-emerald-600 mr-2">↑ {trend}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <p className="text-[10px] text-[#94A3B8]">Tip: click a post in any tab to open its detail drawer.</p>
     </div>
   );
@@ -890,6 +959,30 @@ function PerformanceTab({
         <StatCard label="Vehicle Requests" value={stats ? fmtNum(stats.performance.totalRequests) : "—"} accent="text-indigo-600" />
       </div>
 
+      {stats?.revenue && (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-white rounded-xl border border-[#E2E8F0] p-3">
+            <p className="text-xs text-slate-500 flex items-center gap-1"><DollarSign size={12} /> Revenue Attributed</p>
+            <p className="text-lg font-medium text-emerald-600">
+              ${((stats.revenue.totalCents ?? 0) / 100).toLocaleString()}
+            </p>
+          </div>
+          <div className="bg-white rounded-xl border border-[#E2E8F0] p-3">
+            <p className="text-xs text-slate-500">Deals Won via Social</p>
+            <p className="text-lg font-medium text-[#0B5FD1]">{stats.revenue.dealsWon ?? 0}</p>
+          </div>
+          {stats.revenue.topPost && (
+            <div className="col-span-2 bg-white rounded-xl border border-[#E2E8F0] p-3">
+              <p className="text-xs text-slate-500 mb-1">Top Revenue Post</p>
+              <p className="text-xs text-[#0F172A]">&ldquo;{stats.revenue.topPost.hook}&rdquo;</p>
+              <p className="text-xs text-emerald-600 mt-1">
+                ${((stats.revenue.topPost.revenueCents ?? 0) / 100).toLocaleString()}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-4">
         <h2 className="text-sm font-bold text-[#0F172A] mb-3">Lead Score by Platform</h2>
         <div className="space-y-2">
@@ -903,6 +996,25 @@ function PerformanceTab({
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4">
+        <h3 className="font-medium text-sm text-[#0F172A] mb-3">
+          Platform Performance vs Industry Benchmarks
+        </h3>
+        <div className="space-y-2">
+          {Object.entries(PLATFORM_BENCHMARKS).map(([platform, bench]) => (
+            <div key={platform} className="flex items-center justify-between text-xs">
+              <span className="capitalize text-slate-600 w-20">{platform}</span>
+              <div className="flex items-center gap-4">
+                <span className="text-slate-400">Avg CTR: {(bench.avgCTR * 100).toFixed(1)}%</span>
+                <span className="text-slate-400">Avg Completion: {(bench.avgCompletionRate * 100).toFixed(0)}%</span>
+                <span className="text-slate-400">Viral at: {bench.baselineViewsPerHour * bench.viralMultiplier}/hr</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-slate-400 mt-2">Industry averages for automotive content</p>
       </div>
 
       <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">

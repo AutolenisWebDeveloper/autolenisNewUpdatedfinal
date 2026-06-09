@@ -4366,3 +4366,22 @@ model SocialLead {
   @@index([createdAt])
   @@map("social_leads")
 }
+
+// Weekly competitor content scan (Session D). Each row is one content
+// opportunity surfaced by the AI competitor monitor, keyed by the week it was
+// generated. High-engagement opportunities spawn a TopicSignal (signalCreated).
+model CompetitorInsight {
+  id                  String   @id @default(cuid())
+  competitor          String
+  topic               String
+  contentType         String   @map("content_type")
+  estimatedEngagement String   @map("estimated_engagement")
+  opportunity         String   @db.Text
+  suggestedHook       String   @db.Text @map("suggested_hook")
+  signalCreated       Boolean  @default(false) @map("signal_created")
+  weekOf              String   @map("week_of")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@index([weekOf])
+  @@map("competitor_insights")
+}

@@ -290,6 +290,168 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // ─── Smart posting windows update (Session D) ──────────────────────────────
+  // Pull the best-performing hours per platform from the freshly-rebuilt
+  // WinningPattern table and align each platform's PostingWindow slots to them.
+  // platformHours is reused by the weekly report email below.
+  const platformHours: Record<string, number[]> = {};
+  try {
+    for (const platform of ["tiktok", "instagram", "facebook", "youtube", "linkedin"]) {
+      const bestPatterns = await prisma.winningPattern.findMany({
+        where: { platform, hour: { not: null }, sampleSize: { gte: 5 } },
+        orderBy: { avgLeadScore: "desc" },
+        take: 3,
+        select: { hour: true },
+      });
+      if (bestPatterns.length >= 2) {
+        platformHours[platform] = bestPatterns
+          .map((p) => p.hour!)
+          .filter((h): h is number => h != null);
+      }
+    }
+
+    for (const [platform, hours] of Object.entries(platformHours)) {
+      if (hours.length < 2) continue;
+      await prisma.postingWindow.updateMany({
+        where: { platform },
+        data: {
+          slot1Hour: hours[0],
+          slot2Hour: hours[1] ?? 12,
+          slot3Hour: hours[2] ?? 19,
+          lastOptimizedAt: new Date(),
+        },
+      });
+      console.log(`[optimize] updated ${platform} posting windows:`, hours.join(", "));
+    }
+  } catch (err) {
+    console.error("[optimize] posting window update failed:", err);
+  }
+
+  // ─── Franchise volume analysis (Session D) ─────────────────────────────────
+  // Flag franchises that are meaningfully out-performing / under-performing the
+  // cross-franchise average lead score so the content mix can be re-weighted.
+  try {
+    const franchises = await prisma.contentFranchise.findMany({
+      where: { active: true },
+      select: { id: true, slug: true, avgLeadScore: true },
+    });
+    const fScores = franchises.map((f) => f.avgLeadScore ?? 0);
+    const fAvg = fScores.length > 0 ? fScores.reduce((a, b) => a + b, 0) / fScores.length : 1;
+
+    for (const franchise of franchises) {
+      const score = franchise.avgLeadScore ?? 0;
+      if (score > fAvg * 1.5) {
+        console.log(
+          `[optimize] PRIORITY franchise: ${franchise.slug}`,
+          `(score ${score.toFixed(2)} vs avg ${fAvg.toFixed(2)})`,
+        );
+      } else if (score > 0 && score < fAvg * 0.5) {
+        console.log(
+          `[optimize] LOW franchise: ${franchise.slug}`,
+          `(score ${score.toFixed(2)} vs avg ${fAvg.toFixed(2)})`,
+        );
+      }
+    }
+  } catch (err) {
+    console.error("[optimize] franchise analysis failed:", err);
+  }
+
+  // ─── Smart hook selection — confirm top hooks (Session D) ──────────────────
+  // HookPerformance is maintained above; log the leading hook type per platform.
+  try {
+    for (const platform of ["tiktok", "instagram", "facebook"]) {
+      const topHook = await prisma.hookPerformance.findFirst({
+        where: { platform, sampleSize: { gte: 3 } },
+        orderBy: { avgLeadScore: "desc" },
+        select: { hookType: true, avgLeadScore: true },
+      });
+      if (topHook) {
+        console.log(
+          `[optimize] top hook ${platform}: ${topHook.hookType}`,
+          `(lead score: ${topHook.avgLeadScore?.toFixed(2)})`,
+        );
+      }
+    }
+  } catch (err) {
+    console.error("[optimize] hook analysis failed:", err);
+  }
+
+  // ─── Competitor intelligence scan (Session D) ──────────────────────────────
+  try {
+    const { scanCompetitorContent } = await import("@/lib/social/competitor-monitor");
+    const insights = await scanCompetitorContent();
+    console.log(`[optimize] competitor insights: ${insights.length}`);
+  } catch (err) {
+    console.error("[optimize] competitor scan failed:", err);
+  }
+
+  // ─── Weekly optimization report email (Session D) ──────────────────────────
+  try {
+    const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL;
+    if (adminEmail) {
+      const { sendOptimizationReport } = await import(
+        "@/lib/services/email/resend.service"
+      );
+
+      const topFranchiseRecord = await prisma.contentFranchise
+        .findFirst({
+          where: { active: true },
+          orderBy: { avgLeadScore: "desc" },
+          select: { slug: true },
+        })
+        .catch(() => null);
+
+      const topHookRecord = await prisma.hookPerformance
+        .findFirst({
+          orderBy: { avgLeadScore: "desc" },
+          select: { hookType: true, platform: true },
+        })
+        .catch(() => null);
+
+      const topMarketRecord = await prisma.winningPattern
+        .findFirst({
+          where: { geoTarget: { not: null }, sampleSize: { gte: 3 } },
+          orderBy: { avgLeadScore: "desc" },
+          select: { geoTarget: true, platform: true },
+        })
+        .catch(() => null);
+
+      const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const weekLeads = await prisma.socialLead
+        .count({ where: { createdAt: { gte: weekAgo } } })
+        .catch(() => 0);
+
+      const weekRevenue = await prisma.revenueAttribution
+        .aggregate({
+          where: { attributionStatus: "DEAL_WON", dealWonAt: { gte: weekAgo } },
+          _sum: { totalRevenueCents: true },
+        })
+        .catch(() => null);
+
+      await sendOptimizationReport({
+        to: adminEmail,
+        weekOf: new Date().toLocaleDateString(),
+        topFranchise: topFranchiseRecord?.slug ?? "N/A",
+        topHook: topHookRecord
+          ? `${topHookRecord.hookType} (${topHookRecord.platform})`
+          : "N/A",
+        topPlatform: topHookRecord?.platform ?? "N/A",
+        topCity: topMarketRecord?.geoTarget ?? "N/A",
+        totalLeads: weekLeads,
+        totalRevenueCents: weekRevenue?._sum?.totalRevenueCents ?? 0,
+        postingWindowChanges: Object.keys(platformHours).map(
+          (p) => `${p}: updated to optimized hours`,
+        ),
+        franchiseShifts: [],
+        nextWeekFocus: topFranchiseRecord?.slug
+          ? `Focus on ${topFranchiseRecord.slug} — highest lead score`
+          : "Continue current mix",
+      }).catch((err) => console.error("[optimize] report email failed:", err));
+    }
+  } catch (err) {
+    console.error("[optimize] report email block failed:", err);
+  }
+
   const summary = {
     performanceRows: rows.length,
     winningPatterns: patterns.size,

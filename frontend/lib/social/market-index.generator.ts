@@ -291,3 +291,273 @@ export async function publishMarketIndex(): Promise<PublishMarketIndexResult> {
     priceMovements: report.priceMovements.length,
   };
 }
+
+// ─── AutoLenis Intelligence Index (Session D) ────────────────────────────────
+// A compact, gauge-friendly snapshot of the buyer market: four composite 0-100
+// scores plus the top markets/vehicles and a Groq-written weekly insight. Used
+// by the admin Intelligence page and the weekly LinkedIn buyer-intelligence
+// post. Distinct from the long-form Market Index report above.
+
+export interface IntelligenceIndex {
+  weekOf: string;
+  buyerPowerIndex: number; // 0-100
+  dealerCompetitionIndex: number; // 0-100
+  vehiclePricingIndex: number; // 0-100
+  negotiationIndex: number; // 0-100
+  trend: "improving" | "declining" | "stable";
+  topBuyerMarkets: {
+    metro: string;
+    score: number;
+    trend: "up" | "down" | "stable";
+  }[];
+  topVehicles: {
+    make: string;
+    model?: string;
+    priceChange: string;
+  }[];
+  weeklyInsight: string;
+  linkedInPost: string;
+  emailSubject: string;
+  emailBody: string;
+}
+
+export interface IntelligenceScores {
+  weekOf: string;
+  buyerPowerIndex: number;
+  dealerCompetitionIndex: number;
+  vehiclePricingIndex: number;
+  negotiationIndex: number;
+  trend: "improving" | "declining" | "stable";
+  topBuyerMarkets: { metro: string; score: number; trend: "up" | "down" | "stable" }[];
+  topVehicles: { make: string; model?: string; priceChange: string }[];
+}
+
+// Pure DB-backed computation of the four composite index scores plus the top
+// markets/vehicles. No Groq call — safe to invoke on page load. Every query is
+// best-effort so an unprovisioned table degrades to a sensible default.
+export async function computeIntelligenceScores(): Promise<IntelligenceScores> {
+  const weekOf = new Date().toISOString().split("T")[0];
+
+  const markets = await prisma.marketIntelligence
+    .findMany({
+      orderBy: { buyerLeverageScore: "desc" },
+      take: 10,
+      select: { metroName: true, buyerLeverageScore: true, state: true },
+    })
+    .catch(() => [] as { metroName: string; buyerLeverageScore: number | null; state: string }[]);
+
+  const vehicles = await prisma.vehicleIntelligence
+    .findMany({ take: 20, select: { make: true, model: true, msrpCents: true } })
+    .catch(() => [] as { make: string; model: string; msrpCents: number }[]);
+
+  const dealerCount = await prisma.dealerProspect.count().catch(() => 0);
+
+  // buyerPowerIndex — average buyer leverage (0-10) scaled to 0-100.
+  const leverageScores = markets
+    .map((m) => m.buyerLeverageScore ?? 0)
+    .filter((s) => s > 0);
+  const avgLeverage =
+    leverageScores.length > 0
+      ? leverageScores.reduce((a, b) => a + b, 0) / leverageScores.length
+      : 5.0;
+  const buyerPowerIndex = Math.min(Math.round(avgLeverage * 10), 100);
+
+  // dealerCompetitionIndex — dealer coverage toward the 200-prospect goal.
+  const DEALER_TARGET = 200;
+  const dealerCompetitionIndex = Math.min(
+    Math.round((dealerCount / DEALER_TARGET) * 100),
+    100,
+  );
+
+  // vehiclePricingIndex — lower average MSRP ⇒ stronger buyer pricing.
+  const msrps = vehicles.map((v) => v.msrpCents).filter((c) => c > 0);
+  const avgMsrp =
+    msrps.length > 0 ? msrps.reduce((a, b) => a + b, 0) / msrps.length / 100 : 35000;
+  const vehiclePricingIndex = Math.max(
+    0,
+    Math.min(Math.round((1 - avgMsrp / 80000) * 100), 100),
+  );
+
+  // negotiationIndex — composite of buyer power + dealer competition.
+  const negotiationIndex = Math.round((buyerPowerIndex + dealerCompetitionIndex) / 2);
+
+  const topBuyerMarkets = markets.slice(0, 5).map((m) => ({
+    metro: `${m.metroName}${m.state ? `, ${m.state}` : ""}`,
+    score: Math.round((m.buyerLeverageScore ?? 0) * 10) / 10,
+    trend: "stable" as const,
+  }));
+
+  const topVehicles = vehicles.slice(0, 5).map((v) => ({
+    make: v.make,
+    model: v.model,
+    priceChange: `$${Math.round(v.msrpCents / 100).toLocaleString()} MSRP`,
+  }));
+
+  // trend — heuristic on overall buyer favorability this week.
+  const trend: IntelligenceScores["trend"] =
+    negotiationIndex >= 65 ? "improving" : negotiationIndex <= 35 ? "declining" : "stable";
+
+  return {
+    weekOf,
+    buyerPowerIndex,
+    dealerCompetitionIndex,
+    vehiclePricingIndex,
+    negotiationIndex,
+    trend,
+    topBuyerMarkets,
+    topVehicles,
+  };
+}
+
+// Full Intelligence Index: scores + a Groq-written weekly insight + the ready
+// LinkedIn post and admin email copy. Groq is best-effort — a templated insight
+// is used if the model is unavailable so the index is always well-formed.
+export async function generateIntelligenceIndex(): Promise<IntelligenceIndex> {
+  const scores = await computeIntelligenceScores();
+  const topMarket = scores.topBuyerMarkets[0];
+
+  let weeklyInsight = "";
+  try {
+    weeklyInsight = (
+      await callGroq(
+        SYSTEM_PROMPT,
+        `You are the AutoLenis Market Analyst.
+Write a 2-sentence weekly automotive market insight based on this data:
+Buyer Power: ${scores.buyerPowerIndex}/100,
+Dealer Competition: ${scores.dealerCompetitionIndex}/100,
+Top market: ${topMarket?.metro ?? "N/A"}.
+Be specific and professional. No guarantees.`,
+      )
+    ).trim();
+  } catch (err) {
+    console.error(
+      "[intelligence-index] groq insight failed, using fallback:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+  if (!weeklyInsight) {
+    weeklyInsight =
+      `Buyer leverage is strongest in ${topMarket?.metro ?? "top metros"} this week, ` +
+      `with a buyer power reading of ${scores.buyerPowerIndex}/100. ` +
+      `Dealer competition sits at ${scores.dealerCompetitionIndex}/100 — a favorable window to let dealers compete.`;
+  }
+
+  const linkedInPost =
+    `📊 AutoLenis Buyer Intelligence — Week of ${scores.weekOf}\n\n` +
+    `Buyer Power Index: ${scores.buyerPowerIndex}/100\n` +
+    `Dealer Competition: ${scores.dealerCompetitionIndex}/100\n` +
+    `Top Market: ${topMarket?.metro ?? "N/A"} (${topMarket?.score ?? 0} leverage score)\n\n` +
+    `${weeklyInsight}\n\n` +
+    scores.topVehicles
+      .slice(0, 3)
+      .map((v) => `• ${v.make}: ${v.priceChange}`)
+      .join("\n") +
+    "\n\n" +
+    `Full report: autolenis.com/buying-guide\n\n` +
+    `#AutoLenis #CarBuying #AutomotiveMarket #DFW #CarDeals #BuyerPower`;
+
+  const emailSubject = `AutoLenis Intelligence Index — Week of ${scores.weekOf}`;
+  const emailBody =
+    `Buyer Power Index: ${scores.buyerPowerIndex}/100\n` +
+    `Dealer Competition Index: ${scores.dealerCompetitionIndex}/100\n` +
+    `Vehicle Pricing Index: ${scores.vehiclePricingIndex}/100\n` +
+    `Negotiation Index: ${scores.negotiationIndex}/100\n` +
+    `Overall trend: ${scores.trend}\n\n` +
+    `${weeklyInsight}`;
+
+  return {
+    weekOf: scores.weekOf,
+    buyerPowerIndex: scores.buyerPowerIndex,
+    dealerCompetitionIndex: scores.dealerCompetitionIndex,
+    vehiclePricingIndex: scores.vehiclePricingIndex,
+    negotiationIndex: scores.negotiationIndex,
+    trend: scores.trend,
+    topBuyerMarkets: scores.topBuyerMarkets,
+    topVehicles: scores.topVehicles,
+    weeklyInsight,
+    linkedInPost,
+    emailSubject,
+    emailBody,
+  };
+}
+
+// Generate the Intelligence Index, publish the LinkedIn buyer-intelligence post,
+// record it as a SocialPost, and notify the admin. Each side-effect is
+// best-effort so a single failure never discards the index.
+export async function generateAndPublishMarketIndex(): Promise<IntelligenceIndex> {
+  const index = await generateIntelligenceIndex();
+
+  // Publish to LinkedIn (best-effort, dynamic import to avoid circular deps).
+  let platformPostId: string | null = null;
+  let published = false;
+  try {
+    const { LinkedInProvider: Provider } = await import(
+      "@/lib/social/providers/linkedin.provider"
+    );
+    const linkedIn = new Provider();
+    const publishResult = await linkedIn.publishNow({
+      postId: `intelligence-index-${index.weekOf}`,
+      platform: "linkedin",
+      caption: index.linkedInPost,
+      hashtags: [],
+    });
+    published = publishResult.success;
+    platformPostId = publishResult.platformPostId ?? null;
+    if (!publishResult.success) {
+      console.error("[intelligence-index] LinkedIn publish failed:", publishResult.error);
+    }
+  } catch (err) {
+    console.error("[intelligence-index] LinkedIn publish threw:", err);
+  }
+
+  // Record as a SocialPost (best-effort).
+  const franchise = await prisma.contentFranchise
+    .findUnique({ where: { slug: MARKET_INDEX_FRANCHISE_SLUG }, select: { id: true } })
+    .catch(() => null);
+
+  try {
+    await prisma.socialPost.create({
+      data: {
+        franchiseId: franchise?.id ?? null,
+        platform: "linkedin",
+        contentType: "linkedin_post",
+        hook: `${index.weekOf} Market Index`,
+        script: index.weeklyInsight,
+        caption: index.linkedInPost,
+        hashtags: [],
+        funnelDestination: "/buying-guide",
+        utmSource: "linkedin",
+        utmMedium: "social",
+        utmContent: MARKET_INDEX_FRANCHISE_SLUG,
+        utmPlatform: "linkedin",
+        automationMode: "FULL_AUTO",
+        status: published ? "PUBLISHED" : "FAILED",
+        publishingProvider: "linkedin",
+        platformPostId,
+        publishedAt: published ? new Date() : null,
+      },
+    });
+  } catch (err) {
+    console.error(
+      "[intelligence-index] socialPost.create failed (non-fatal):",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  // Notify the admin (reuses the existing market-index email rail).
+  await sendMarketIndexPublishedEmail({
+    weekOf: index.weekOf,
+    summary: index.weeklyInsight,
+    linkedInUrl: platformPostId
+      ? `https://www.linkedin.com/feed/update/${platformPostId}`
+      : undefined,
+  }).catch((err) =>
+    console.error(
+      "[intelligence-index] admin email failed:",
+      err instanceof Error ? err.message : err,
+    ),
+  );
+
+  console.log(`[intelligence-index] published week of ${index.weekOf}`);
+  return index;
+}
