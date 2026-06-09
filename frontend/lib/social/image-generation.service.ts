@@ -17,6 +17,7 @@ import { prisma } from "@/lib/prisma";
 import { ENABLE_VIDEO } from "@/lib/social/config";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { HiggsfieldProvider } from "@/lib/social/providers/higgsfield.provider";
+import { generateDalleImage } from "@/lib/social/providers/dalle.provider";
 import {
   generateVisualPrompt,
   type VisualPromptOutput,
@@ -98,10 +99,120 @@ export async function storeImageInSupabase(imageUrl: string, postId: string): Pr
   return data.publicUrl;
 }
 
+const DALLE_PROVIDER = "dalle3";
+
+// Generates a branded still image for a post via DALL-E 3 and attaches it to the
+// post's SocialVideo record. This is the primary media path: it produces an
+// image synchronously (no async video render) which is enough to publish, and
+// marks the SocialVideo VIDEO_READY so the publishing queue picks the post up
+// immediately. Defensive — a failure returns EMPTY and never throws.
+export async function generateDallePostImage(post: SocialPost): Promise<PostVisuals> {
+  // Idempotency — reuse an existing stored image rather than paying for a new one.
+  const existing = await prisma.socialVideo
+    .findUnique({
+      where: { postId: post.id },
+      select: { thumbnailUrl: true, videoUrl: true },
+    })
+    .catch(() => null);
+  if (existing?.thumbnailUrl) {
+    console.log("[image-gen:dalle] visuals already exist for post:", post.id, "— skipping");
+    return {
+      imageUrl: existing.thumbnailUrl,
+      videoUrl: existing.videoUrl ?? null,
+      thumbnailUrl: existing.thumbnailUrl,
+      aiGenerationId: null,
+    };
+  }
+
+  const franchiseSlug = await resolveFranchiseSlug(post);
+  // Prefer a previously-generated visual prompt, else the post's hook/script.
+  const visualPrompt = post.visualPrompt ?? post.hook ?? post.script;
+
+  const result = await generateDalleImage({
+    visualPrompt,
+    franchise: franchiseSlug,
+    platform: post.platform,
+    make: post.make,
+    metro: post.metro,
+    hookType: post.hookType,
+  });
+
+  if (!result.success || !result.imageUrl) {
+    console.error("[image-gen:dalle] generation failed for post:", post.id, result.error);
+    return EMPTY;
+  }
+
+  // DALL-E URLs expire (~1h) — store the image in Supabase for a stable URL.
+  let storedImageUrl: string;
+  try {
+    storedImageUrl = await storeImageInSupabase(result.imageUrl, post.id);
+  } catch (err) {
+    console.error("[image-gen:dalle] supabase store failed, using provider URL:", err);
+    storedImageUrl = result.imageUrl;
+  }
+
+  // Surface the image on the SocialVideo record as VIDEO_READY. The publishing
+  // queue selects posts whose video job is null OR VIDEO_READY, so this unblocks
+  // publishing without a video render. videoUrl stays null (image-only post).
+  try {
+    await prisma.socialVideo.upsert({
+      where: { postId: post.id },
+      create: {
+        postId: post.id,
+        provider: DALLE_PROVIDER,
+        status: "VIDEO_READY",
+        visualPrompt,
+        durationSeconds: post.durationSeconds ?? 15,
+        thumbnailUrl: storedImageUrl,
+        videoUrl: null,
+        storageBucket: STORAGE_BUCKET,
+        storagePath: `social-posts/${post.id}/image.jpg`,
+        generatedAt: new Date(),
+      },
+      update: {
+        provider: DALLE_PROVIDER,
+        status: "VIDEO_READY",
+        thumbnailUrl: storedImageUrl,
+        storageBucket: STORAGE_BUCKET,
+        storagePath: `social-posts/${post.id}/image.jpg`,
+        generatedAt: new Date(),
+      },
+    });
+  } catch (err) {
+    console.error("[image-gen:dalle] socialVideo upsert failed:", err);
+    return EMPTY;
+  }
+
+  // Persist the resolved visual prompt on the post for observability.
+  try {
+    await prisma.socialPost.update({
+      where: { id: post.id },
+      data: { visualPrompt },
+    });
+  } catch (err) {
+    console.error("[image-gen:dalle] post update failed (non-fatal):", err);
+  }
+
+  console.log("[image-gen:dalle] image attached to post:", post.id);
+  return {
+    imageUrl: storedImageUrl,
+    videoUrl: null,
+    thumbnailUrl: storedImageUrl,
+    aiGenerationId: null,
+  };
+}
+
 // Generates the full visual asset set for a post. Returns the stored image URL
 // immediately so the post can publish with an image while the video renders in
 // the background; the video URL is resolved later by the video-queue cron.
 export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals> {
+  // DALL-E 3 is the primary still-image provider. When OPENAI_API_KEY is set it
+  // generates the post's image synchronously (no async video render), which is
+  // enough to unblock publishing. The Higgsfield path below is the fallback.
+  if (process.env.OPENAI_API_KEY) {
+    return generateDallePostImage(post);
+  }
+
   // Idempotency guard — if this post already has a stored image (thumbnail),
   // don't regenerate (saves Higgsfield cost on re-invocation, e.g. at approval).
   const existing = await prisma.socialVideo
