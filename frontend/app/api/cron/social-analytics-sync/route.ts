@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
 
   const posts = await prisma.socialPost.findMany({
     where: { status: "PUBLISHED", platformPostId: { not: null }, publishedAt: { gte: since } },
+    include: { franchise: true },
     take: 100,
   });
 
@@ -71,9 +72,37 @@ export async function GET(request: NextRequest) {
         dealsWon: metrics.dealsWon,
       });
 
-      await prisma.socialPerformance.create({ data: { postId: post.id, ...metrics, leadScore } });
+      const perf = await prisma.socialPerformance.create({
+        data: { postId: post.id, ...metrics, leadScore },
+      });
       await prisma.socialPost.update({ where: { id: post.id }, data: { leadScore } });
       recorded += 1;
+
+      // Feed the video-learning engine so the Groq engine learns which hook
+      // types win per platform/franchise (Session C). Best-effort, never fatal.
+      try {
+        const { recordVideoLearning } = await import(
+          "@/lib/social/video-learning.engine"
+        );
+        await recordVideoLearning(
+          {
+            id: post.id,
+            platform: post.platform,
+            hookType: post.hookType,
+            franchise: post.franchise,
+          },
+          {
+            completionRate: perf.completionRate,
+            linkClicks: perf.linkClicks ?? 0,
+            impressions: perf.impressions ?? 0,
+            vehicleRequests: perf.vehicleRequests ?? 0,
+          },
+        ).catch((err) =>
+          console.error("[analytics-sync] video learning:", err),
+        );
+      } catch (err) {
+        console.error("[analytics-sync] video learning block:", err);
+      }
     } catch (err) {
       console.error(`[social-analytics-sync] failed post ${post.id}:`, err instanceof Error ? err.message : err);
     }

@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
+import { prisma } from "@/lib/prisma";
 import { scanForTopicSignals } from "@/lib/social/topic-signal.engine";
 
 export const maxDuration = 120;
@@ -17,6 +18,65 @@ export async function GET(request: NextRequest) {
   }
 
   const signals = await scanForTopicSignals();
+
+  // Fetch and cache trending intelligence (Session C), then materialize the top
+  // trending topics/searches as TopicSignals so the generator can act on them.
+  try {
+    const { fetchTrendingIntelligence, cacheTrendingData } = await import(
+      "@/lib/social/trending-intelligence.engine"
+    );
+    const trending = await fetchTrendingIntelligence();
+    await cacheTrendingData(trending);
+
+    // Create TopicSignal for top Reddit topics.
+    for (const topic of trending.redditTopics.slice(0, 3)) {
+      await prisma.topicSignal
+        .create({
+          data: {
+            signalType: "trending_topic",
+            signalContext: {
+              topic,
+              source: "reddit",
+              trendingHashtags: trending.tiktokHashtags,
+            } as object,
+            detectedAt: new Date(),
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            assetsGenerated: false,
+          },
+        })
+        .catch(() => {});
+    }
+
+    // Create TopicSignal for Google Trends.
+    for (const trend of trending.googleTrends.slice(0, 2)) {
+      await prisma.topicSignal
+        .create({
+          data: {
+            signalType: "trending_search",
+            signalContext: {
+              trend,
+              source: "google_trends",
+              trendingHashtags: trending.tiktokHashtags,
+            } as object,
+            detectedAt: new Date(),
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            assetsGenerated: false,
+          },
+        })
+        .catch(() => {});
+    }
+
+    console.log(
+      "[signal-scan] trending:",
+      trending.tiktokHashtags.length,
+      "hashtags,",
+      trending.redditTopics.length,
+      "topics",
+    );
+  } catch (err) {
+    console.error("[signal-scan] trending fetch failed (non-fatal):", err);
+  }
+
   const summary = {
     signalsCreated: signals.length,
     byType: signals.reduce<Record<string, number>>((acc, s) => {

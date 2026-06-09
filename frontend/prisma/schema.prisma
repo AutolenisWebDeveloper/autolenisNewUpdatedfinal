@@ -4159,6 +4159,7 @@ model WinningPattern {
   hour            Int?
   avgCtr          Float?   @map("avg_ctr")
   avgEngagement   Float?   @map("avg_engagement")
+  avgCompletionRate Float? @map("avg_completion_rate")
   avgLeadScore    Float?   @map("avg_lead_score")
   avgVehicleRequests Float? @map("avg_vehicle_requests")
   avgRevenue      Float?   @map("avg_revenue")
@@ -4169,6 +4170,19 @@ model WinningPattern {
   @@index([platform, hookType])
   @@index([platform, franchiseSlug])
   @@map("winning_patterns")
+}
+
+// Generic key/value cache for social viral intelligence (trending data, etc.),
+// stored as JSON with a TTL. Written and read by the trending-intelligence engine.
+model SocialIntelligenceCache {
+  id        String   @id @default(cuid())
+  cacheKey  String   @unique @map("cache_key")
+  data      Json
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("social_intelligence_cache")
 }
 
 // Dynamic optimal posting times per platform/day, updated by optimization.

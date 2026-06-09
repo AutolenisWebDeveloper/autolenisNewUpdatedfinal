@@ -172,12 +172,32 @@ export async function GET(request: NextRequest) {
       .catch(() => undefined);
   }
 
+  // Content recycling (Session C): resurface the best evergreen posts from
+  // 90-180 days ago with fresh, trend-aware hashtags. Best-effort, non-fatal.
+  let recycledCount = 0;
+  try {
+    const { findRecyclablePosts, recyclePost } = await import(
+      "@/lib/social/content-recycling.engine"
+    );
+    const recyclable = await findRecyclablePosts();
+    for (const post of recyclable.slice(0, 3)) {
+      const result = await recyclePost(post);
+      if (result) recycledCount++;
+    }
+    if (recycledCount > 0) {
+      console.log(`[optimize] recycled ${recycledCount} top-performing posts`);
+    }
+  } catch (err) {
+    console.error("[optimize] recycling failed:", err);
+  }
+
   const summary = {
     performanceRows: rows.length,
     winningPatterns: patterns.size,
     hookTypes: hooks.size,
     windowsUpdated,
     franchisesUpdated: franchiseScores.size,
+    postsRecycled: recycledCount,
     timestamp: new Date().toISOString(),
   };
   console.log("[social-optimize]", JSON.stringify(summary));

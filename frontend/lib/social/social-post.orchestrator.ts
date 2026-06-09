@@ -24,6 +24,10 @@ import { requiresReview as franchiseRequiresReview } from "@/lib/social/franchis
 import { generateSocialScript } from "@/lib/social/groq-script.engine";
 import { generateHookVariants } from "@/lib/social/hook-ab-testing.engine";
 import { getPublishingProvider } from "@/lib/social/providers/publishing.factory";
+import { getPersonalityForFranchise } from "@/lib/social/personalities";
+import { getViralFormat } from "@/lib/social/viral-formats";
+import { getVideoLearnings } from "@/lib/social/video-learning.engine";
+import { getOrFetchTrendingData } from "@/lib/social/trending-intelligence.engine";
 
 // Per-platform content + derivative type used when materializing a post.
 const PLATFORM_ASSET: Record<string, { contentType: string; derivativeType: string }> = {
@@ -88,6 +92,16 @@ export async function generateAndQueuePost(
   const hookType = await selectHookType(franchise, platform);
 
   console.log("[orchestrator] generating for platform:", platform, "hookType:", hookType);
+
+  // Gather viral intelligence (Session C) — all non-blocking, best-effort.
+  const [personality, viralFormat, videoLearnings, trendingData] =
+    await Promise.all([
+      Promise.resolve(getPersonalityForFranchise(franchise.slug, platform)),
+      Promise.resolve(getViralFormat(platform, hookType ?? "curiosity")),
+      getVideoLearnings(platform).catch(() => null),
+      getOrFetchTrendingData().catch(() => null),
+    ]);
+
   const script = await generateSocialScript({
     franchise,
     signal,
@@ -95,6 +109,10 @@ export async function generateAndQueuePost(
     hookType,
     platformConfig,
     signalContext: (signal.signalContext as Record<string, unknown>) ?? {},
+    personality,
+    viralFormat,
+    videoLearnings,
+    trendingData,
   });
   console.log("[orchestrator] groq result:", !!script);
 

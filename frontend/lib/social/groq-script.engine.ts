@@ -9,6 +9,10 @@
 import { GROQ_SUMMARY } from "@/lib/ai/acquisition";
 import type { ContentFranchise, TopicSignal } from "@prisma/client";
 import { getFunnelDestination, type PlatformConfig } from "@/lib/social/config";
+import type { TrendingData } from "./trending-intelligence.engine";
+import type { ViralFormat } from "./viral-formats";
+import type { AutoLenisPersonality } from "./personalities";
+import type { VideoLearnings } from "./video-learning.engine";
 
 export interface SocialScriptInput {
   franchise: ContentFranchise;
@@ -17,6 +21,12 @@ export interface SocialScriptInput {
   hookType: string;
   platformConfig: PlatformConfig;
   signalContext?: Record<string, unknown>;
+  // Viral intelligence (Session C) — all optional, injected when available.
+  trendingData?: TrendingData | null;
+  viralFormat?: ViralFormat | null;
+  personality?: AutoLenisPersonality | null;
+  videoLearnings?: VideoLearnings | null;
+  qualityFeedback?: string | null;
 }
 
 export interface SocialScriptOutput {
@@ -149,12 +159,52 @@ Return ONLY valid JSON. No markdown. No explanation.
   "complianceNotes": "null or specific review note",
   "funnelDestination": "which AutoLenis page this should link to"
 }
-Begin your response with { and end with }.`;
+Begin your response with { and end with }.
+
+VIRAL CONTENT RULES — FOLLOW THESE IN ADDITION TO EXISTING RULES:
+
+1. HOOK MUST STOP THE SCROLL IN 3 SECONDS
+   Choose one of these hook mechanics:
+   - Pattern interrupt: say something unexpected
+   - Curiosity gap: force them to watch to find out
+   - Fear trigger: they might be making a mistake right now
+   - Social proof: others are already doing this
+
+2. PLATFORM-SPECIFIC PACING:
+   TikTok: deliver new information every 3-5 seconds.
+           Never front-load context — the payoff first.
+           Create a "watch to the end" moment at midpoint.
+   Instagram: every frame must be worth screenshotting.
+              Include a checklist, warning, or number to save.
+   Facebook: end with a polarizing question that divides opinion.
+             This drives the comments that drive reach.
+   LinkedIn: write 150+ words minimum. Dwell time is the signal.
+   YouTube: first frame IS the thumbnail.
+            Make the text overlay impossible to ignore.
+
+3. VIRAL CTA ROTATION — USE PLATFORM-SPECIFIC CTAs:
+   TikTok: "Save this video 🔖" OR "Share with someone buying
+            a car this month" OR "Comment [WORD] if this happened"
+   Instagram: "Save this post 🔖" OR "Tag someone who needs this"
+   Facebook: End with a specific question asking for personal experience
+   LinkedIn: End with a professional question for discussion
+   YouTube: "Subscribe for weekly dealer secrets"
+
+4. INSTAGRAM SAVE TRIGGER:
+   Every Instagram post MUST contain one save-worthy element:
+   a checklist, a specific warning, a number to remember,
+   or a step they will want to come back to.
+   End every Instagram caption with "Save this 🔖"
+
+5. FACEBOOK LINK RULE:
+   Never put the autolenis.com link in the Facebook caption.
+   Facebook suppresses reach for posts with external links.
+   The link goes in the first comment after publishing.`;
 
 function buildUserPrompt(input: SocialScriptInput): string {
   const { franchise, signal, platform, hookType, platformConfig } = input;
   const context = input.signalContext ?? (signal.signalContext as Record<string, unknown>) ?? {};
-  return `Generate ${platform} content for the ${franchise.name} franchise.
+  const base = `Generate ${platform} content for the ${franchise.name} franchise.
 
 Signal: ${signal.signalType}
 Make: ${signal.make ?? "General automotive"}
@@ -171,6 +221,72 @@ Optimal video duration: ${platformConfig.optimalDurationSecs} seconds
 
 Franchise description: ${franchise.description ?? ""}
 Funnel goal: Drive the viewer to submit a vehicle request at autolenis.com`;
+
+  // ─── Viral intelligence injections (Session C) ────────────────────────────
+  let userPromptAddition = "";
+  const { viralFormat, personality, videoLearnings, trendingData, qualityFeedback } = input;
+
+  // If viralFormat provided:
+  if (viralFormat) {
+    userPromptAddition +=
+      `\nVIRAL FORMAT TO USE: ${viralFormat.name}\n` +
+      `Follow this structure:\n${viralFormat.structure}\n`;
+  }
+
+  // If personality provided:
+  if (personality) {
+    userPromptAddition +=
+      `\nSPEAK AS: ${personality.name}\n` +
+      `Voice: ${personality.voice}\n` +
+      `Speak like: ${personality.speaksLike}\n` +
+      `Natural catchphrases (do not force them):\n` +
+      personality.catchphrases.map((c) => `- ${c}`).join("\n") +
+      "\n" +
+      `Example hook in this voice: "${personality.exampleHook}"\n`;
+  }
+
+  // If videoLearnings provided and has data:
+  if (videoLearnings?.bestHookTypes.length) {
+    userPromptAddition +=
+      `\nVIDEO LEARNING DATA FOR ${platform.toUpperCase()}:\n` +
+      `Best performing hooks: ` +
+      videoLearnings.bestHookTypes
+        .map((h) => `${h.hookType} (${h.avgCompletion}% completion)`)
+        .join(", ") +
+      "\n" +
+      (videoLearnings.worstHookTypes.length
+        ? `Avoid these (low completion): ${videoLearnings.worstHookTypes.join(", ")}\n`
+        : "") +
+      (videoLearnings.insights[0]
+        ? `Key insight: ${videoLearnings.insights[0]}\n`
+        : "");
+  }
+
+  // If trendingData provided:
+  if (trendingData) {
+    if (trendingData.tiktokHashtags.length > 0) {
+      userPromptAddition +=
+        `\nTRENDING TODAY:\n` +
+        `TikTok hashtags: ${trendingData.tiktokHashtags.slice(0, 5).join(", ")}\n`;
+    }
+    if (trendingData.redditTopics.length > 0) {
+      userPromptAddition +=
+        `Reddit buyers are asking: ` +
+        trendingData.redditTopics.join("; ") +
+        "\n" +
+        `If relevant to this content, weave in one of these topics naturally.\n`;
+    }
+  }
+
+  // If qualityFeedback provided (regeneration):
+  if (qualityFeedback) {
+    userPromptAddition +=
+      `\nQUALITY FEEDBACK FROM PREVIOUS ATTEMPT:\n` +
+      `${qualityFeedback}\n` +
+      `Address these specific issues in this generation.\n`;
+  }
+
+  return base + userPromptAddition;
 }
 
 function stripFences(raw: string): string {
