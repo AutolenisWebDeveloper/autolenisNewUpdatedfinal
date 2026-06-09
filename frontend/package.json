@@ -22,7 +22,8 @@
     "amips:discover": "tsx scripts/amips-discover-dealers.ts",
     "amips:sync-dealers": "tsx scripts/amips-sync-dealers.ts",
     "amips:sync-markets": "tsx scripts/amips-sync-markets.ts",
-    "amips:compute-scores": "tsx scripts/amips-compute-scores.ts"
+    "amips:compute-scores": "tsx scripts/amips-compute-scores.ts",
+    "setup:storage": "tsx scripts/setup-storage-buckets.ts"
   },
   "engines": {
     "node": ">=18.18"

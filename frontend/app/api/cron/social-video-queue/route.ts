@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { getVideoProvider } from "@/lib/social/providers/video-generation.factory";
+import { storeImageInSupabase } from "@/lib/social/image-generation.service";
 import { ENABLE_AUTO_PUBLISH } from "@/lib/social/config";
 
 export const maxDuration = 300;
@@ -110,7 +111,89 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const summary = { considered: videos.length, submitted, completed, failed, stillProcessing, timestamp: new Date().toISOString() };
+  // ─── Poll pending AI media generations ─────────────────────────────────────
+  // Picks up text-to-image jobs that didn't finish within the synchronous poll
+  // window in the image-generation service, plus any other in-flight Higgsfield
+  // jobs, and resolves them to stored assets. Only runs with the live provider.
+  let mediaCompleted = 0;
+  let mediaProcessing = 0;
+  let mediaFailed = 0;
+  if (provider.name === "higgsfield") {
+    const pendingGenerations = await prisma.aiMediaGeneration.findMany({
+      where: {
+        status: { in: ["queued", "in_progress"] },
+        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
+      select: {
+        id: true,
+        higgsfieldRequestId: true,
+        statusUrl: true,
+        status: true,
+        generationType: true,
+        socialPostId: true,
+      },
+      take: 10,
+    });
+
+    for (const gen of pendingGenerations) {
+      if (!gen.higgsfieldRequestId) continue;
+      try {
+        // getJobStatus refreshes the AiMediaGeneration row (and mirrors any
+        // matching SocialVideo by providerJobId) as a side effect.
+        const status = await provider.getJobStatus(gen.higgsfieldRequestId);
+
+        if (status.status === "completed" && gen.socialPostId) {
+          if (gen.generationType === "text_to_image") {
+            // Store the still image and surface it as the post's thumbnail so it
+            // can publish with a visual while any video keeps rendering.
+            const imageUrl = status.thumbnailUrl ?? status.videoUrl;
+            if (imageUrl) {
+              const stored = await storeImageInSupabase(imageUrl, gen.socialPostId).catch(
+                () => imageUrl,
+              );
+              await prisma.socialVideo.upsert({
+                where: { postId: gen.socialPostId },
+                create: {
+                  postId: gen.socialPostId,
+                  status: "SCRIPT_READY",
+                  thumbnailUrl: stored,
+                  storageBucket: "social-media-assets",
+                  storagePath: `social-posts/${gen.socialPostId}/image.jpg`,
+                },
+                update: {
+                  thumbnailUrl: stored,
+                  storageBucket: "social-media-assets",
+                  storagePath: `social-posts/${gen.socialPostId}/image.jpg`,
+                },
+              });
+            }
+          }
+          // image_to_video completion is reconciled onto SocialVideo by the
+          // main polling loop above (keyed by providerJobId); nothing to do here.
+          mediaCompleted += 1;
+        } else if (status.status === "failed") {
+          mediaFailed += 1;
+        } else {
+          mediaProcessing += 1;
+        }
+      } catch (err) {
+        console.error("[video-queue] polling failed for:", gen.id, err instanceof Error ? err.message : err);
+        mediaFailed += 1;
+      }
+    }
+  }
+
+  const summary = {
+    considered: videos.length,
+    submitted,
+    completed,
+    failed,
+    stillProcessing,
+    mediaCompleted,
+    mediaProcessing,
+    mediaFailed,
+    timestamp: new Date().toISOString(),
+  };
   console.log("[social-video-queue]", JSON.stringify(summary));
   return NextResponse.json({ success: true, data: summary });
 }

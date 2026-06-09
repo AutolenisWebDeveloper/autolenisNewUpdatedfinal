@@ -267,8 +267,10 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
   async generateTextToImage(request: {
     prompt: string;
     aspectRatio?: "9:16" | "16:9" | "1:1";
+    socialPostId?: string;
     vehicleId?: string;
     campaignId?: string;
+    negativePrompt?: string;
   }): Promise<{ success: boolean; requestId?: string; error?: string }> {
     const endpoint = "flux-pro/kontext/max/text-to-image";
     const input: Record<string, unknown> = {
@@ -276,6 +278,7 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
       aspect_ratio: request.aspectRatio ?? "9:16",
       safety_tolerance: 2,
       seed: Math.floor(Math.random() * 99999),
+      ...(request.negativePrompt ? { negative_prompt: request.negativePrompt } : {}),
     };
 
     try {
@@ -301,6 +304,7 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
           status: response.status ?? "queued",
           statusUrl: response.status_url,
           cancelUrl: response.cancel_url,
+          socialPostId: request.socialPostId,
           vehicleId: request.vehicleId,
           campaignId: request.campaignId,
         },
