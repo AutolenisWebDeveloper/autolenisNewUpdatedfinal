@@ -79,6 +79,18 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Resolve A/B test groups now that fresh performance data has landed: pick
+  // the winning hook variant, record it in HookPerformance, and skip the losers.
+  try {
+    const { resolveAbTests } = await import("@/lib/social/ab-test-resolver");
+    const resolved = await resolveAbTests();
+    if (resolved.length > 0) {
+      console.log(`[analytics-sync] resolved ${resolved.length} A/B tests`);
+    }
+  } catch (err) {
+    console.error("[analytics-sync] A/B resolution failed:", err);
+  }
+
   // Check for viral signals after syncing performance data. Velocity is
   // computed from the freshly-recorded SocialPerformance rows above.
   let viralAlertCount = 0;

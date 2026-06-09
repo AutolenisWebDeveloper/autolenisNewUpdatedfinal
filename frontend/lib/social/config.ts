@@ -75,6 +75,10 @@ export const FUNNEL_DESTINATIONS: Record<string, string> = {
   autolenis_market_index: "/request-a-car",
   buyer_win_story: "/lp/free-offers",
   how_autolenis_works: "/lp/how-it-works",
+  auction_countdown: "/buyer/auction",
+  offer_received: "/buyer/auction",
+  dealer_growth: "/for-dealers",
+  market_stats_dealer: "/for-dealers",
 };
 
 export function getFunnelDestination(franchiseSlug: string): string {
@@ -129,4 +133,111 @@ export function buildUtmUrl(params: UtmParams): string {
   if (params.affiliateId) search.set("utm_affiliate", params.affiliateId);
 
   return url.toString();
+}
+
+// ─── Platform performance benchmarks ─────────────────────────────────────────
+// Industry baselines used to classify a post as viral / underperforming and to
+// estimate expected reach. avgCTR / avgCompletionRate are the platform medians;
+// viralMultiplier / underperformMultiplier bound performance against baseline;
+// baselineViewsPerHour seeds reach estimates before real analytics land.
+export const PLATFORM_BENCHMARKS: Record<
+  string,
+  {
+    avgCTR: number;
+    avgCompletionRate: number;
+    viralMultiplier: number;
+    underperformMultiplier: number;
+    baselineViewsPerHour: number;
+  }
+> = {
+  tiktok: {
+    avgCTR: 0.038,
+    avgCompletionRate: 0.45,
+    viralMultiplier: 3.0,
+    underperformMultiplier: 0.3,
+    baselineViewsPerHour: 100,
+  },
+  instagram: {
+    avgCTR: 0.019,
+    avgCompletionRate: 0.38,
+    viralMultiplier: 3.0,
+    underperformMultiplier: 0.3,
+    baselineViewsPerHour: 50,
+  },
+  facebook: {
+    avgCTR: 0.009,
+    avgCompletionRate: 0.25,
+    viralMultiplier: 3.0,
+    underperformMultiplier: 0.3,
+    baselineViewsPerHour: 30,
+  },
+  youtube: {
+    avgCTR: 0.042,
+    avgCompletionRate: 0.55,
+    viralMultiplier: 3.0,
+    underperformMultiplier: 0.3,
+    baselineViewsPerHour: 20,
+  },
+  linkedin: {
+    avgCTR: 0.008,
+    avgCompletionRate: 0.35,
+    viralMultiplier: 3.0,
+    underperformMultiplier: 0.3,
+    baselineViewsPerHour: 10,
+  },
+};
+
+// ─── Content calendar ────────────────────────────────────────────────────────
+// Day-of-week volume multipliers (Friday is the highest-intent buying day),
+// the franchises to prioritize per day, and high-intensity sales periods that
+// scale generation volume around major automotive buying events.
+export const CONTENT_CALENDAR = {
+  volumeMultiplier: {
+    0: 0.5, // Sunday
+    1: 1.2, // Monday
+    2: 1.0, // Tuesday
+    3: 1.3, // Wednesday
+    4: 1.2, // Thursday
+    5: 1.5, // Friday — highest intent day
+    6: 1.1, // Saturday
+  } as Record<number, number>,
+
+  franchiseByDay: {
+    1: ["city_market_alert", "autolenis_market_index"],
+    2: ["trade_in_tuesday"],
+    3: ["dealer_secret_daily", "dealer_fee_breakdown"],
+    4: ["financing_friday", "how_autolenis_works"],
+    5: ["vehicle_price_watch", "dealer_fee_breakdown"],
+    6: ["buyer_win_story", "how_autolenis_works"],
+    0: ["autolenis_market_index", "buyer_win_story"],
+  } as Record<number, string[]>,
+
+  highIntensityPeriods: [
+    { name: "Labor Day", monthDay: "09-01", weeksAhead: 2, multiplier: 5 },
+    { name: "Memorial Day", monthDay: "05-25", weeksAhead: 2, multiplier: 4 },
+    { name: "Tax Season", monthDay: "03-01", weeksAhead: 1, multiplier: 3 },
+    { name: "Black Friday", monthDay: "11-25", weeksAhead: 2, multiplier: 4 },
+    { name: "New Year", monthDay: "01-01", weeksAhead: 0, multiplier: 3 },
+  ],
+};
+
+// Returns the active high-intensity sales period for `date` (within its lead
+// window) or null. The window opens `weeksAhead` weeks before the event date and
+// closes on the event date itself.
+export function checkHighIntensityPeriod(
+  date: Date,
+): { name: string; multiplier: number } | null {
+  for (const period of CONTENT_CALENDAR.highIntensityPeriods) {
+    const [pMonth, pDay] = period.monthDay.split("-").map(Number);
+    const periodDate = new Date(date.getFullYear(), pMonth - 1, pDay);
+    const daysAhead = period.weeksAhead * 7;
+    const windowStart = new Date(
+      periodDate.getTime() - daysAhead * 24 * 60 * 60 * 1000,
+    );
+    const windowEnd = periodDate;
+    if (date >= windowStart && date <= windowEnd) {
+      return { name: period.name, multiplier: period.multiplier };
+    }
+  }
+  return null;
 }

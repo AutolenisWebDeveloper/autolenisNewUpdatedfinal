@@ -143,6 +143,42 @@ async function scanVehiclePricing(): Promise<PendingSignal[]> {
   }));
 }
 
+// Gate that decides whether a signal is worth generating content from. Keeps
+// low-leverage buyer signals and ultra-luxury price drops (outside AutoLenis's
+// target market) out of the pipeline; trending topics always pass through.
+export function filterSignalQuality(signal: {
+  signalType: string;
+  signalValue?: number | null;
+  make?: string | null;
+}): boolean {
+  // Buyer leverage: only generate if score > 5.0 (neutral threshold)
+  if (signal.signalType === "buyer_leverage") {
+    if ((signal.signalValue ?? 0) < 5.0) {
+      console.log(
+        `[signal-filter] skipping low-leverage signal: ${signal.signalValue}`,
+      );
+      return false;
+    }
+  }
+
+  // Price drop: skip ultra-luxury vehicles (above AutoLenis target market)
+  if (signal.signalType === "price_drop") {
+    if ((signal.signalValue ?? 0) > 80000) {
+      return false;
+    }
+  }
+
+  // Trending topics always pass through
+  if (
+    signal.signalType === "trending_topic" ||
+    signal.signalType === "trending_search"
+  ) {
+    return true;
+  }
+
+  return true;
+}
+
 // Scans all sources and persists non-duplicate signals. Returns the rows
 // actually created this run.
 export async function scanForTopicSignals(): Promise<TopicSignal[]> {

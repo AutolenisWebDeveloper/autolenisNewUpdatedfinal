@@ -8,6 +8,7 @@
 import { prisma } from "@/lib/prisma";
 import type { ContentFranchise, TopicSignal } from "@prisma/client";
 import { AUTOMATION_MODE, AUTO_PUBLISH_FRANCHISES } from "@/lib/social/config";
+import { filterSignalQuality } from "@/lib/social/topic-signal.engine";
 
 export interface FranchiseRoute {
   franchise: ContentFranchise;
@@ -47,6 +48,11 @@ const DEFAULT_ROUTE = {
 export async function routeSignalToFranchises(
   signal: TopicSignal,
 ): Promise<FranchiseRoute[]> {
+  // Drop low-value signals before any DB work or content generation.
+  if (!filterSignalQuality(signal)) {
+    return [];
+  }
+
   const mapping = ROUTING[signal.signalType];
   const slugs = mapping?.slugs ?? DEFAULT_ROUTE.slugs;
   const assetTypes = mapping?.assetTypes ?? DEFAULT_ROUTE.assetTypes;

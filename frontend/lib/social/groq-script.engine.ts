@@ -17,6 +17,9 @@ export interface SocialScriptInput {
   hookType: string;
   platformConfig: PlatformConfig;
   signalContext?: Record<string, unknown>;
+  // Optional steer for a regeneration pass when a first attempt scored too low
+  // on the content quality gate. Appended to the user prompt verbatim.
+  qualityFeedback?: string;
 }
 
 export interface SocialScriptOutput {
@@ -170,7 +173,9 @@ Link in caption: ${platformConfig.linkInCaption}
 Optimal video duration: ${platformConfig.optimalDurationSecs} seconds
 
 Franchise description: ${franchise.description ?? ""}
-Funnel goal: Drive the viewer to submit a vehicle request at autolenis.com`;
+Funnel goal: Drive the viewer to submit a vehicle request at autolenis.com${
+    input.qualityFeedback ? `\n\nREGENERATION FEEDBACK: ${input.qualityFeedback}` : ""
+  }`;
 }
 
 function stripFences(raw: string): string {
