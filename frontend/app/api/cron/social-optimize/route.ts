@@ -198,6 +198,18 @@ export async function GET(request: NextRequest) {
     console.error("[optimize] SMS alerts failed:", err);
   }
 
+  // Refresh the Meta retargeting Custom Audience from non-converting social
+  // leads. Self-gates on META_ACCESS_TOKEN / META_AD_ACCOUNT_ID and no-ops when
+  // unset, so this is safe to call unconditionally.
+  try {
+    const { buildRetargetingAudience } = await import(
+      "@/lib/social/retargeting.service"
+    );
+    await buildRetargetingAudience();
+  } catch (err) {
+    console.error("[optimize] retargeting audience build failed:", err);
+  }
+
   // Distribute weekly content packages to active creators (gated by flag).
   if (process.env.ENABLE_CREATOR_DISTRIBUTION === "true") {
     try {
