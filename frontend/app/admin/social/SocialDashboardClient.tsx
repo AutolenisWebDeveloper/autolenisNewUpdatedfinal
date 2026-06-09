@@ -5,12 +5,12 @@
 // Performance, Settings — plus a shared post-detail drawer and a fixed
 // automation-mode badge. Data is read from /api/admin/social/* endpoints.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Radio, Search, Sparkles, CheckCircle2, RefreshCw, Calendar, ClipboardCheck,
   Send, BarChart2, Settings as SettingsIcon, X, Copy, AlertTriangle,
   Facebook, Instagram, Youtube, Linkedin, Music2, ThumbsUp, Eye, MousePointerClick,
-  Clock, Film, Loader2,
+  Clock, Film, Loader2, Newspaper, ExternalLink, Video,
 } from "lucide-react";
 
 // ─── Shared types ────────────────────────────────────────────────────────────
@@ -28,6 +28,20 @@ export interface FranchiseRow {
 export interface PlatformConnection {
   platform: string;
   connected: boolean;
+}
+interface ProviderConnections {
+  buffer: { connected: boolean; channelCount: number };
+  linkedin: { connected: boolean; pageId: string };
+  higgsfield: { connected: boolean };
+  automationMode: string;
+}
+interface MarketIndexLast {
+  title: string | null;
+  summary: string | null;
+  publishedAt: string | null;
+  platformPostId: string | null;
+  linkedInUrl: string | null;
+  status: string | null;
 }
 type AutomationMode = "MANUAL_REVIEW" | "HYBRID_AUTO" | "FULL_AUTO";
 
@@ -87,6 +101,7 @@ const TABS = [
   { key: "pending", label: "Pending Review", icon: ClipboardCheck },
   { key: "queue", label: "Publishing Queue", icon: Send },
   { key: "performance", label: "Performance", icon: BarChart2 },
+  { key: "market-index", label: "Market Index", icon: Newspaper },
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
@@ -262,6 +277,7 @@ export default function SocialDashboardClient({
       {tab === "pending" && <PendingTab onOpenPost={setDrawerPost} onChanged={loadStats} showToast={showToast} />}
       {tab === "queue" && <QueueTab onOpenPost={setDrawerPost} onChanged={loadStats} showToast={showToast} />}
       {tab === "performance" && <PerformanceTab stats={stats} onOpenPost={setDrawerPost} showToast={showToast} />}
+      {tab === "market-index" && <MarketIndexTab showToast={showToast} />}
       {tab === "settings" && (
         <SettingsTab
           automationMode={automationMode}
@@ -841,6 +857,15 @@ function SettingsTab({
   showToast: (m: string) => void;
 }) {
   const [mode, setMode] = useState<AutomationMode>(automationMode);
+  const [connections, setConnections] = useState<ProviderConnections | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchJson<ProviderConnections>("/api/admin/social/connections")
+      .then((c) => { if (!cancelled) setConnections(c); })
+      .catch((err) => showToast(err instanceof Error ? err.message : "Failed to load connections"));
+    return () => { cancelled = true; };
+  }, [showToast]);
 
   return (
     <div className="space-y-6">
@@ -883,10 +908,32 @@ function SettingsTab({
       </div>
 
       <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5">
-        <h2 className="text-sm font-bold text-[#0F172A] mb-1">Platform Connections</h2>
+        <h2 className="text-sm font-bold text-[#0F172A] mb-1">Provider Connections</h2>
         <p className="text-xs text-[#64748B] mb-3">
           Video: {videoEnabled ? "enabled" : "disabled"} · Publishing: {publishingEnabled ? "enabled" : "disabled"}
         </p>
+        <div className="grid sm:grid-cols-3 gap-2 mb-4" data-testid="provider-connections">
+          <ProviderCard
+            icon={<Send size={16} />}
+            name="Buffer"
+            connected={connections?.buffer.connected ?? false}
+            detail={connections ? `${connections.buffer.channelCount} channel${connections.buffer.channelCount === 1 ? "" : "s"}` : "…"}
+          />
+          <ProviderCard
+            icon={<Linkedin size={16} />}
+            name="LinkedIn"
+            connected={connections?.linkedin.connected ?? false}
+            detail={connections?.linkedin.pageId ? `Page ${connections.linkedin.pageId}` : "Direct publishing"}
+          />
+          <ProviderCard
+            icon={<Video size={16} />}
+            name="Higgsfield"
+            connected={connections?.higgsfield.connected ?? false}
+            detail="Video generation"
+          />
+        </div>
+
+        <h3 className="text-xs font-bold text-[#0F172A] mb-2">Platform Channels</h3>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
           {platformConnections.map((c) => (
             <div key={c.platform} className="flex items-center gap-2 p-3 rounded-xl border border-[#E2E8F0]">
@@ -898,6 +945,109 @@ function SettingsTab({
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ProviderCard({ icon, name, connected, detail }: { icon: ReactNode; name: string; connected: boolean; detail: string }) {
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-xl border border-[#E2E8F0]">
+      <span className="text-[#0B5FD1]">{icon}</span>
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-[#0F172A]">{name}</p>
+        <p className={`text-[10px] font-bold ${connected ? "text-emerald-600" : "text-[#94A3B8]"}`}>
+          {connected ? `✅ Connected · ${detail}` : "Not connected"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab 7: Market Index ─────────────────────────────────────────────────────
+function MarketIndexTab({ showToast }: { showToast: (m: string) => void }) {
+  const [last, setLast] = useState<MarketIndexLast | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setLast(await fetchJson<MarketIndexLast>("/api/admin/social/market-index"));
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to load market index");
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const generateNow = async () => {
+    setGenerating(true);
+    try {
+      await fetchJson("/api/admin/social/market-index", { method: "POST" });
+      showToast("Market Index generated and published");
+      await load();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h2 className="text-sm font-bold text-[#0F172A] flex items-center gap-2"><Newspaper size={16} /> AutoLenis Market Index</h2>
+            <p className="text-xs text-[#64748B]">Weekly LinkedIn market intelligence newsletter. Auto-publishes Mondays 7AM CT.</p>
+          </div>
+          <button
+            data-testid="market-index-generate"
+            disabled={generating}
+            onClick={generateNow}
+            className="bg-[#0B5FD1] text-white text-xs font-semibold px-4 py-2 rounded-lg disabled:opacity-50 flex items-center gap-2">
+            {generating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            {generating ? "Generating…" : "Generate Market Index Now"}
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm p-5" data-testid="market-index-last">
+        <h3 className="text-xs font-bold text-[#0F172A] mb-3">Last Published</h3>
+        {loading ? (
+          <p className="text-xs text-[#94A3B8] flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Loading…</p>
+        ) : last?.publishedAt || last?.title ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase font-bold text-[#94A3B8]">Published</span>
+              <span className="text-xs font-semibold text-[#0F172A]">{fmtDateTime(last.publishedAt)}</span>
+              {last.status && <StatusBadge status={last.status} />}
+            </div>
+            {last.title && (
+              <div>
+                <p className="text-[10px] uppercase font-bold text-[#94A3B8] mb-1">Title</p>
+                <p className="text-sm font-bold text-[#0F172A]">{last.title}</p>
+              </div>
+            )}
+            {last.summary && (
+              <div>
+                <p className="text-[10px] uppercase font-bold text-[#94A3B8] mb-1">Summary</p>
+                <p className="text-xs text-[#475569] leading-relaxed">{last.summary}</p>
+              </div>
+            )}
+            {last.linkedInUrl && (
+              <a href={last.linkedInUrl} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5FD1]">
+                <ExternalLink size={13} /> View on LinkedIn
+              </a>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-[#94A3B8]">No Market Index has been published yet.</p>
+        )}
       </div>
     </div>
   );

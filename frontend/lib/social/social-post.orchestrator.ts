@@ -22,6 +22,7 @@ import {
 } from "@/lib/social/config";
 import { requiresReview as franchiseRequiresReview } from "@/lib/social/franchise-router";
 import { generateSocialScript } from "@/lib/social/groq-script.engine";
+import { generateHookVariants } from "@/lib/social/hook-ab-testing.engine";
 import { getVideoProvider } from "@/lib/social/providers/video-generation.factory";
 import { getPublishingProvider } from "@/lib/social/providers/publishing.factory";
 
@@ -118,6 +119,156 @@ export async function generateAndQueuePost(
     .toLowerCase()
     .replace(/\s+/g, "-");
 
+  const utmCampaign =
+    `${signal.make ?? "general"}_${signal.city ?? signal.metro ?? "national"}_${month}`.toLowerCase();
+
+  // ─── Hook A/B testing (FULL_AUTO only) ───────────────────────────────────
+  // In full-auto mode we generate up to 3 hook variants for the same
+  // signal+franchise and schedule them 5 minutes apart so the analytics cron
+  // can later promote the best-performing hook. The shared script/visual fields
+  // come from the base script above; each variant overrides the textual hook,
+  // caption, hashtags, CTA, and its UTM hook + tracked URL. Falls through to
+  // single-post generation if variant generation fails or yields ≤1 variant.
+  if (AUTOMATION_MODE === "FULL_AUTO") {
+    const variants = await generateHookVariants({
+      franchise,
+      signal,
+      platform,
+      platformConfig,
+    }).catch((err) => {
+      console.warn(
+        "[orchestrator] hook A/B generation failed, falling back to single post:",
+        err instanceof Error ? err.message : err,
+      );
+      return null;
+    });
+
+    if (variants && variants.length > 1) {
+      console.log("[orchestrator] FULL_AUTO A/B: scheduling", variants.length, "hook variants");
+      const posts: SocialPost[] = [];
+      for (let i = 0; i < variants.length; i++) {
+        const variant = variants[i];
+        const variantScheduledAt = new Date(scheduledAt.getTime() + i * 5 * 60 * 1000);
+        const variantTrackedUrl = buildUtmUrl({
+          path: funnelDestination,
+          platform,
+          franchise: franchise.slug,
+          hookType: variant.hookType,
+          contentType,
+          city: signal.city ?? signal.metro ?? undefined,
+          make: signal.make ?? undefined,
+          model: signal.model ?? undefined,
+        });
+
+        let variantPost: SocialPost;
+        try {
+          variantPost = await prisma.socialPost.create({
+            data: {
+              franchiseId: franchise.id,
+              signalId: signal.id,
+              sourceArticleId: signal.sourceTable === "content_articles" ? signal.sourceId : null,
+              platform,
+              contentType,
+              hookType: variant.hookType,
+              hook: variant.hook,
+              script: script.script,
+              caption: variant.caption,
+              hashtags: variant.hashtags,
+              ctaText: variant.ctaText,
+              ctaPlacement: script.ctaPlacement,
+              visualPrompt: script.visualPrompt,
+              visualStyle: script.visualStyle,
+              voiceoverText: script.voiceoverText,
+              onScreenText: script.onScreenText,
+              durationSeconds: script.durationSeconds,
+              geoTarget: signal.city ?? signal.metro ?? null,
+              make: signal.make,
+              model: signal.model,
+              metro: signal.metro,
+              state: signal.state,
+              funnelDestination,
+              utmSource: platform,
+              utmMedium: "social",
+              utmCampaign,
+              utmContent: franchise.slug,
+              utmTerm: contentType,
+              utmHook: variant.hookType,
+              utmPlatform: platform,
+              trackedUrl: variantTrackedUrl,
+              complianceNotes: script.complianceNotes,
+              requiresReview: needsReview,
+              automationMode: AUTOMATION_MODE,
+              status,
+              scheduledAt: variantScheduledAt,
+            },
+          });
+        } catch (err) {
+          console.error(
+            `[orchestrator] A/B variant create FAILED for ${franchise.slug}/${platform} (${variant.hookType}):`,
+            err instanceof Error ? err.message : err,
+          );
+          continue;
+        }
+
+        // ContentDerivative link — best-effort, never discards a saved post.
+        try {
+          await prisma.contentDerivative.create({
+            data: {
+              signalId: signal.id,
+              sourceArticleId: variantPost.sourceArticleId,
+              postId: variantPost.id,
+              platform,
+              derivativeType,
+            },
+          });
+        } catch (err) {
+          console.error(
+            `[orchestrator] A/B contentDerivative.create failed for post ${variantPost.id} (non-fatal):`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+
+        // Queue video for each variant when enabled and not held for review.
+        if (ENABLE_VIDEO && status !== "PENDING_REVIEW") {
+          try {
+            await queueVideoGeneration(variantPost.id, {
+              visualPrompt: script.visualPrompt,
+              durationSeconds: script.durationSeconds,
+              style: script.visualStyle,
+              voiceoverText: script.voiceoverText,
+              onScreenText: script.onScreenText,
+            });
+          } catch (err) {
+            console.error(
+              `[orchestrator] A/B video queue failed for post ${variantPost.id} (non-fatal):`,
+              err instanceof Error ? err.message : err,
+            );
+          }
+        }
+
+        posts.push(variantPost);
+      }
+
+      if (posts.length > 0) {
+        // Mark the source signal consumed once for the whole variant set.
+        try {
+          await prisma.topicSignal.update({
+            where: { id: signal.id },
+            data: { assetsGenerated: true, assetCount: { increment: posts.length } },
+          });
+        } catch (err) {
+          console.error(
+            `[orchestrator] topicSignal.update failed for signal ${signal.id} (non-fatal):`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+        console.log("[orchestrator] FULL_AUTO A/B: created", posts.length, "variant posts");
+        return posts[0];
+      }
+      console.warn("[orchestrator] FULL_AUTO A/B: no variant posts persisted, falling back to single post");
+    }
+  }
+
   console.log("[orchestrator] creating post in DB");
   let post: SocialPost;
   try {
@@ -148,7 +299,7 @@ export async function generateAndQueuePost(
       funnelDestination,
       utmSource: platform,
       utmMedium: "social",
-      utmCampaign: `${signal.make ?? "general"}_${signal.city ?? signal.metro ?? "national"}_${month}`.toLowerCase(),
+      utmCampaign,
       utmContent: franchise.slug,
       utmTerm: contentType,
       utmHook: script.hookType,
@@ -273,7 +424,7 @@ async function queueVideoGeneration(
 // the ready video URL when one exists. On failure, records the error and
 // increments the attempt counter so a later cron can retry.
 export async function publishApprovedPost(post: SocialPost): Promise<void> {
-  const provider = getPublishingProvider();
+  const provider = getPublishingProvider(post.platform);
 
   const video = await prisma.socialVideo.findUnique({ where: { postId: post.id } });
   const mediaUrl = video?.status === "VIDEO_READY" ? video.videoUrl ?? undefined : undefined;

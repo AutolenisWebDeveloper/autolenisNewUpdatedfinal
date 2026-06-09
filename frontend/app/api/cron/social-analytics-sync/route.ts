@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { getPublishingProvider } from "@/lib/social/providers/publishing.factory";
+import { checkViralSignals, handleViralAlert } from "@/lib/social/viral-detection.engine";
 
 export const maxDuration = 300;
 
@@ -35,7 +36,6 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  const provider = getPublishingProvider();
   const since = new Date(Date.now() - LOOKBACK_MS);
 
   const posts = await prisma.socialPost.findMany({
@@ -47,6 +47,9 @@ export async function GET(request: NextRequest) {
   for (const post of posts) {
     if (!post.platformPostId) continue;
     try {
+      // Provider is resolved per-platform so LinkedIn posts use the LinkedIn
+      // provider and everything else uses Buffer.
+      const provider = getPublishingProvider(post.platform);
       const a = await provider.getAnalytics(post.platformPostId);
       const metrics = {
         impressions: a.impressions ?? 0,
@@ -76,7 +79,29 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const summary = { considered: posts.length, recorded, timestamp: new Date().toISOString() };
+  // Check for viral signals after syncing performance data. Velocity is
+  // computed from the freshly-recorded SocialPerformance rows above.
+  let viralAlertCount = 0;
+  try {
+    const viralAlerts = await checkViralSignals();
+    for (const alert of viralAlerts) {
+      await handleViralAlert(alert);
+    }
+    viralAlertCount = viralAlerts.length;
+    if (viralAlerts.length > 0) {
+      console.log(`[social-analytics-sync] viral alerts: ${viralAlerts.length}`);
+    }
+  } catch (viralErr) {
+    console.error("[social-analytics-sync] viral detection failed:", viralErr);
+    // Non-fatal — continue.
+  }
+
+  const summary = {
+    considered: posts.length,
+    recorded,
+    viralAlerts: viralAlertCount,
+    timestamp: new Date().toISOString(),
+  };
   console.log("[social-analytics-sync]", JSON.stringify(summary));
   return NextResponse.json({ success: true, data: summary });
 }

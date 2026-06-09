@@ -1,10 +1,12 @@
-// AutoLenis Social Engine — Buffer publishing provider.
+// AutoLenis Social Engine — Buffer publishing provider (GraphQL API).
 //
-// Schedules/publishes posts and reads back status + interactions via the Buffer
-// v1 API. One Buffer profile id per platform (env-driven). Bodies are
-// form-encoded per the Buffer v1 contract.
+// Buffer retired the old v1 REST API (api.bufferapp.com/1). This provider
+// targets the new GraphQL API at https://api.buffer.com. Authentication is a
+// Bearer token (BUFFER_API_KEY). One Buffer channel id per platform, env-driven.
 //
-// TODO: verify Buffer API v1 field names and form encoding.
+// All methods are defensive: they log start + result, never throw unhandled
+// errors, return typed results, and degrade gracefully when a channel id is
+// not configured.
 
 import type {
   PublishingProvider,
@@ -15,20 +17,22 @@ import type {
   PostAnalyticsResult,
 } from "@/lib/social/providers/publishing.provider";
 
-const BUFFER_BASE = "https://api.bufferapp.com/1";
+const BUFFER_GRAPHQL_URL = "https://api.buffer.com";
 
-function profileMap(): Record<string, string | undefined> {
+// One Buffer channel id per platform, read from the environment. Empty string
+// when unconfigured so callers can skip gracefully.
+function channelIdMap(): Record<string, string> {
   return {
-    facebook: process.env.BUFFER_PROFILE_FACEBOOK,
-    instagram: process.env.BUFFER_PROFILE_INSTAGRAM,
-    tiktok: process.env.BUFFER_PROFILE_TIKTOK,
-    youtube: process.env.BUFFER_PROFILE_YOUTUBE,
-    linkedin: process.env.BUFFER_PROFILE_LINKEDIN,
+    facebook: process.env.BUFFER_PROFILE_FACEBOOK ?? "",
+    instagram: process.env.BUFFER_PROFILE_INSTAGRAM ?? "",
+    tiktok: process.env.BUFFER_PROFILE_TIKTOK ?? "",
+    youtube: process.env.BUFFER_PROFILE_YOUTUBE ?? "",
+    linkedin: process.env.BUFFER_PROFILE_LINKEDIN ?? "",
   };
 }
 
-function authHeader(): Record<string, string> {
-  return { Authorization: `Bearer ${process.env.BUFFER_API_KEY ?? ""}` };
+function channelIdFor(platform: string): string {
+  return channelIdMap()[platform.toLowerCase()] ?? "";
 }
 
 function composeText(caption: string, hashtags: string[]): string {
@@ -36,126 +40,220 @@ function composeText(caption: string, hashtags: string[]): string {
   return tags ? `${caption}\n\n${tags}` : caption;
 }
 
-// Builds the application/x-www-form-urlencoded body Buffer v1 expects.
-function buildForm(fields: Record<string, string | undefined>): URLSearchParams {
-  const form = new URLSearchParams();
-  for (const [key, value] of Object.entries(fields)) {
-    if (value !== undefined && value !== null && value !== "") form.set(key, value);
+// Executes a GraphQL request against the Buffer API. Throws with the full error
+// message from the response body so callers can log it; callers wrap this in
+// try/catch and translate to typed results.
+async function bufferGraphQL(
+  query: string,
+  variables?: Record<string, unknown>,
+): Promise<unknown> {
+  const apiKey = process.env.BUFFER_API_KEY ?? "";
+  const res = await fetch(BUFFER_GRAPHQL_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  const text = await res.text().catch(() => "");
+  let json: { data?: unknown; errors?: Array<{ message?: string }> } | undefined;
+  try {
+    json = text ? (JSON.parse(text) as typeof json) : undefined;
+  } catch {
+    json = undefined;
   }
-  return form;
+
+  if (!res.ok) {
+    const detail = json?.errors?.map((e) => e.message).join("; ") || text.slice(0, 300);
+    throw new Error(`Buffer GraphQL HTTP ${res.status}: ${detail}`);
+  }
+  if (json?.errors && json.errors.length > 0) {
+    throw new Error(`Buffer GraphQL error: ${json.errors.map((e) => e.message).join("; ")}`);
+  }
+  return json?.data;
+}
+
+// GraphQL documents ----------------------------------------------------------
+
+const CREATE_POST_MUTATION = `
+  mutation CreatePost($input: CreatePostInput!) {
+    createPost(input: $input) {
+      ... on Post {
+        id
+        status
+        scheduledAt
+      }
+      ... on CoreError {
+        message
+        type
+      }
+    }
+  }
+`;
+
+const GET_POST_QUERY = `
+  query GetPost($id: String!) {
+    post(id: $id) {
+      id
+      status
+      statistics {
+        impressions
+        clicks
+        likes
+        comments
+        shares
+        reach
+      }
+    }
+  }
+`;
+
+interface CreatePostResult {
+  createPost?: {
+    id?: string;
+    status?: string;
+    scheduledAt?: string;
+    message?: string; // CoreError
+    type?: string; // CoreError
+  };
+}
+
+interface PostStatistics {
+  impressions?: number;
+  clicks?: number;
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  reach?: number;
+}
+
+interface GetPostResult {
+  post?: {
+    id?: string;
+    status?: string;
+    scheduledAt?: string;
+    publishedAt?: string;
+    statistics?: PostStatistics;
+  };
 }
 
 export class BufferProvider implements PublishingProvider {
   readonly name = "buffer";
 
-  private async createUpdate(
+  // Shared create path for both schedule + publish-now. `scheduledAt` is always
+  // an ISO string Buffer should target.
+  private async createPost(
     input: SchedulePostInput | PublishPostInput,
-    opts: { now?: boolean; scheduledAt?: Date },
+    scheduledAtIso: string,
   ): Promise<PublishResult> {
-    const profileId = profileMap()[input.platform.toLowerCase()];
+    const channelId = channelIdFor(input.platform);
+    console.log(
+      `[publish:buffer] createPost platform=${input.platform} channel=${channelId ? "set" : "missing"} at=${scheduledAtIso}`,
+    );
+
     if (!process.env.BUFFER_API_KEY) {
       return { success: false, error: "BUFFER_API_KEY not configured", provider: this.name };
     }
-    if (!profileId) {
-      return { success: false, error: `No Buffer profile for platform ${input.platform}`, provider: this.name };
+    if (!channelId) {
+      // Skip gracefully when no channel id is configured for this platform.
+      return {
+        success: false,
+        error: `No Buffer channel configured for platform ${input.platform}`,
+        provider: this.name,
+      };
     }
 
-    const fields: Record<string, string | undefined> = {
-      access_token: process.env.BUFFER_API_KEY,
-      "profile_ids[]": profileId,
-      text: composeText(input.caption, input.hashtags),
-    };
-    if (opts.now) fields.now = "true";
-    if (opts.scheduledAt) fields.scheduled_at = opts.scheduledAt.toISOString();
-    if (input.mediaUrl && input.isVideo) fields["media[video_url]"] = input.mediaUrl;
-    else if (input.mediaUrl) fields["media[photo]"] = input.mediaUrl;
+    const media =
+      input.mediaUrl && input.isVideo
+        ? [{ url: input.mediaUrl, type: "video" }]
+        : input.mediaUrl
+        ? [{ url: input.mediaUrl, type: "image" }]
+        : [];
 
     try {
-      const res = await fetch(`${BUFFER_BASE}/updates/create.json`, {
-        method: "POST",
-        headers: { ...authHeader(), "Content-Type": "application/x-www-form-urlencoded" },
-        body: buildForm(fields).toString(),
-      });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => "");
-        return { success: false, error: `Buffer HTTP ${res.status}: ${detail.slice(0, 200)}`, provider: this.name };
+      const data = (await bufferGraphQL(CREATE_POST_MUTATION, {
+        input: {
+          channelId,
+          text: composeText(input.caption, input.hashtags),
+          scheduledAt: scheduledAtIso,
+          media,
+        },
+      })) as CreatePostResult;
+
+      const result = data?.createPost;
+      if (!result) {
+        return { success: false, error: "Buffer returned no createPost payload", provider: this.name };
       }
-      const data = (await res.json()) as {
-        success?: boolean;
-        updates?: Array<{ id?: string }>;
-      };
-      const platformPostId = data.updates?.[0]?.id;
-      if (!platformPostId) {
-        return { success: false, error: "Buffer response missing update id", provider: this.name };
+      // CoreError variant carries a message but no id.
+      if (result.message && !result.id) {
+        console.error(`[publish:buffer] CoreError: ${result.type ?? ""} ${result.message}`);
+        return { success: false, error: result.message, provider: this.name };
       }
-      return { success: true, platformPostId, provider: this.name };
+      if (!result.id) {
+        return { success: false, error: "Buffer response missing post id", provider: this.name };
+      }
+      console.log(`[publish:buffer] created post id=${result.id} status=${result.status ?? "?"}`);
+      return { success: true, platformPostId: result.id, provider: this.name };
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : String(err), provider: this.name };
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[publish:buffer] createPost failed: ${message}`);
+      return { success: false, error: message, provider: this.name };
     }
   }
 
   async schedulePost(input: SchedulePostInput): Promise<PublishResult> {
-    return this.createUpdate(input, { scheduledAt: input.scheduledAt });
+    return this.createPost(input, input.scheduledAt.toISOString());
   }
 
   async publishNow(input: PublishPostInput): Promise<PublishResult> {
-    return this.createUpdate(input, { now: true });
+    return this.createPost(input, new Date().toISOString());
   }
 
   async getPostStatus(platformPostId: string): Promise<PostStatusResult> {
+    console.log(`[publish:buffer] getPostStatus id=${platformPostId}`);
+    if (!process.env.BUFFER_API_KEY) {
+      return { platformPostId, status: "unknown", error: "BUFFER_API_KEY not configured" };
+    }
     try {
-      const token = process.env.BUFFER_API_KEY ?? "";
-      const res = await fetch(`${BUFFER_BASE}/updates/${platformPostId}.json?access_token=${encodeURIComponent(token)}`, {
-        method: "GET",
-        headers: authHeader(),
-      });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => "");
-        return { platformPostId, status: "unknown", error: `Buffer HTTP ${res.status}: ${detail.slice(0, 200)}` };
+      const data = (await bufferGraphQL(GET_POST_QUERY, { id: platformPostId })) as GetPostResult;
+      const post = data?.post;
+      if (!post) {
+        return { platformPostId, status: "unknown", error: "Buffer returned no post" };
       }
-      const data = (await res.json()) as { status?: string; sent_at?: number };
       return {
         platformPostId,
-        status: data.status ?? "unknown",
-        publishedAt: data.sent_at ? new Date(data.sent_at * 1000).toISOString() : undefined,
+        status: post.status ?? "unknown",
+        publishedAt: post.publishedAt ?? undefined,
       };
     } catch (err) {
-      return { platformPostId, status: "unknown", error: err instanceof Error ? err.message : String(err) };
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[publish:buffer] getPostStatus failed: ${message}`);
+      return { platformPostId, status: "unknown", error: message };
     }
   }
 
   async getAnalytics(platformPostId: string): Promise<PostAnalyticsResult> {
+    console.log(`[publish:buffer] getAnalytics id=${platformPostId}`);
+    if (!process.env.BUFFER_API_KEY) {
+      return { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0, error: "BUFFER_API_KEY not configured" };
+    }
     try {
-      const token = process.env.BUFFER_API_KEY ?? "";
-      const res = await fetch(`${BUFFER_BASE}/updates/${platformPostId}/interactions.json?access_token=${encodeURIComponent(token)}&event=clicks`, {
-        method: "GET",
-        headers: authHeader(),
-      });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => "");
-        return { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0, error: `Buffer HTTP ${res.status}: ${detail.slice(0, 200)}` };
-      }
-      const data = (await res.json()) as {
-        statistics?: {
-          likes?: number;
-          comments?: number;
-          shares?: number;
-          clicks?: number;
-          reach?: number;
-          impressions?: number;
-        };
-      };
-      const s = data.statistics ?? {};
+      const data = (await bufferGraphQL(GET_POST_QUERY, { id: platformPostId })) as GetPostResult;
+      const stats = data?.post?.statistics ?? {};
       return {
-        likes: s.likes ?? 0,
-        comments: s.comments ?? 0,
-        shares: s.shares ?? 0,
-        clicks: s.clicks ?? 0,
-        reach: s.reach ?? 0,
-        impressions: s.impressions,
+        likes: stats.likes ?? 0,
+        comments: stats.comments ?? 0,
+        shares: stats.shares ?? 0,
+        clicks: stats.clicks ?? 0,
+        reach: stats.reach ?? 0,
+        impressions: stats.impressions,
       };
     } catch (err) {
-      return { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0, error: err instanceof Error ? err.message : String(err) };
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[publish:buffer] getAnalytics failed: ${message}`);
+      return { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0, error: message };
     }
   }
 }
