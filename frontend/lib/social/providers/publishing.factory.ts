@@ -37,6 +37,10 @@ export function getPublishingProvider(platform?: string): PublishingProvider {
     case "tiktok":
       return process.env.TIKTOK_ACCESS_TOKEN ? new TikTokProvider() : bufferOrNoop();
     case "linkedin":
+      // Try LinkedIn direct when a token is configured. The provider fails
+      // cleanly (no retry) when its token can't author the post — e.g. a 403 on
+      // /author because the token lacks org scope — so the publish queue falls
+      // back to Buffer (BUFFER_PROFILE_LINKEDIN) on the next pass.
       return process.env.LINKEDIN_ACCESS_TOKEN ? new LinkedInProvider() : bufferOrNoop();
     default:
       // youtube + unknown publish via Buffer.
