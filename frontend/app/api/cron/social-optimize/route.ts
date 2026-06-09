@@ -172,6 +172,44 @@ export async function GET(request: NextRequest) {
       .catch(() => undefined);
   }
 
+  // Send weekly SMS market alerts to opted-in buyers in the top markets.
+  try {
+    const topMarkets = await prisma.marketIntelligence
+      .findMany({
+        where: { buyerLeverageScore: { gte: 7.0 } },
+        orderBy: { buyerLeverageScore: "desc" },
+        take: 3,
+        select: { metroName: true, buyerLeverageScore: true },
+      })
+      .catch(() => []);
+
+    console.log("[optimize] SMS alerts: top markets found:", topMarkets.length);
+    // Note: actual buyer SMS sending requires reading the correct
+    // buyer/vehicleRequest model for phone + consent, which is not yet wired.
+    // Log the top markets for now and implement full sending once the buyer
+    // model phone/consent fields are confirmed.
+    for (const market of topMarkets) {
+      console.log(
+        `[optimize] top market for SMS: ${market.metroName}`,
+        `leverage: ${market.buyerLeverageScore}`,
+      );
+    }
+  } catch (err) {
+    console.error("[optimize] SMS alerts failed:", err);
+  }
+
+  // Distribute weekly content packages to active creators (gated by flag).
+  if (process.env.ENABLE_CREATOR_DISTRIBUTION === "true") {
+    try {
+      const { distributeCreatorPackages } = await import(
+        "@/lib/social/creator-package.generator"
+      );
+      await distributeCreatorPackages();
+    } catch (err) {
+      console.error("[optimize] creator distribution failed:", err);
+    }
+  }
+
   const summary = {
     performanceRows: rows.length,
     winningPatterns: patterns.size,

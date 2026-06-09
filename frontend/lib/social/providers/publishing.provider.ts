@@ -13,6 +13,7 @@ export interface SchedulePostInput {
   videoUrl?: string; // explicit video URL (preferred when present)
   imageUrl?: string; // generated still image URL
   thumbnailUrl?: string; // poster frame for a video
+  trackedUrl?: string; // UTM-tagged destination — added as the first comment where links are suppressed
   scheduledAt: Date;
   isVideo?: boolean;
 }
@@ -26,6 +27,7 @@ export interface PublishPostInput {
   videoUrl?: string;
   imageUrl?: string;
   thumbnailUrl?: string;
+  trackedUrl?: string; // UTM-tagged destination — added as the first comment where links are suppressed
   isVideo?: boolean;
 }
 

@@ -79,3 +79,92 @@ export async function captureUtmAttribution(input: UtmAttributionInput): Promise
 
   console.log("[attribution] vehicle request attributed to post:", post.id);
 }
+
+// Closes the revenue-attribution loop when a deal is won: promotes the social
+// post's RevenueAttribution chain (CLICK/REQUEST → DEAL_WON), records the
+// deposit/fee/total, bumps the post's lead score + performance deal counters,
+// and marks any matching SocialLead converted. All writes are best-effort so a
+// downstream failure never blocks the deal flow.
+export async function captureDealAttribution(input: {
+  dealId: string;
+  vehicleRequestId: string;
+  depositAmountCents?: number;
+  feeAmountCents?: number;
+  totalRevenueCents?: number;
+}): Promise<void> {
+  try {
+    // Find attribution chain from this vehicle request
+    const attribution = await prisma.revenueAttribution.findFirst({
+      where: {
+        vehicleRequestId: input.vehicleRequestId,
+        attributionStatus: { in: ["CLICK", "REQUEST"] },
+      },
+      include: { post: true },
+    });
+
+    if (!attribution) {
+      console.log(
+        "[attribution] no social attribution found for:",
+        input.vehicleRequestId,
+      );
+      return;
+    }
+
+    // Update attribution to DEAL_WON
+    await prisma.revenueAttribution.update({
+      where: { id: attribution.id },
+      data: {
+        attributionStatus: "DEAL_WON",
+        dealId: input.dealId,
+        depositAmountCents: input.depositAmountCents,
+        feeAmountCents: input.feeAmountCents,
+        totalRevenueCents: input.totalRevenueCents,
+        dealWonAt: new Date(),
+      },
+    });
+
+    // Update SocialPost lead score
+    await prisma.socialPost
+      .update({
+        where: { id: attribution.postId },
+        data: { leadScore: { increment: 50 } },
+      })
+      .catch(() => undefined);
+
+    // Update SocialPerformance — increment dealsWon + revenue
+    await prisma.socialPerformance
+      .updateMany({
+        where: { postId: attribution.postId },
+        data: {
+          dealsWon: { increment: 1 },
+          revenueGenerated: { increment: input.totalRevenueCents ?? 0 },
+        },
+      })
+      .catch(() => undefined);
+
+    // Update SocialLead if exists
+    const lead = await prisma.socialLead
+      .findFirst({ where: { vehicleRequestId: input.vehicleRequestId } })
+      .catch(() => null);
+
+    if (lead) {
+      await prisma.socialLead
+        .update({
+          where: { id: lead.id },
+          data: { convertedAt: new Date(), status: "CONVERTED" },
+        })
+        .catch(() => undefined);
+    }
+
+    console.log(
+      "[attribution] 🎉 deal won attributed to post:",
+      attribution.postId,
+      `revenue: $${((input.totalRevenueCents ?? 0) / 100).toFixed(2)}`,
+    );
+  } catch (err) {
+    console.error(
+      "[attribution] captureDealAttribution failed:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}

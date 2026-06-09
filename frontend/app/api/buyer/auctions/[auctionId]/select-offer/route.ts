@@ -105,5 +105,30 @@ export async function POST(request: NextRequest, { params }: Props) {
   // the recorder swallows its own errors and skips untracked metros/vehicles.
   after(() => recordMarketplaceFromAuction(auctionId));
 
+  // Social revenue-attribution closure — if this buyer arrived via a social
+  // post, promote that post's attribution chain to DEAL_WON. This route has no
+  // vehicleRequestId in scope, so resolve the buyer's most recent request and
+  // pass its id. Non-blocking via after(); fully self-contained on failure.
+  after(async () => {
+    try {
+      const vehicleRequest = await prisma.vehicleRequest.findFirst({
+        where: { buyerId: buyer.id },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      if (!vehicleRequest) return;
+      const { captureDealAttribution } = await import(
+        "@/lib/social/attribution.service"
+      );
+      await captureDealAttribution({
+        dealId: deal.id,
+        vehicleRequestId: vehicleRequest.id,
+        totalRevenueCents: 9900, // $99 deposit
+      });
+    } catch (err) {
+      console.error("[select-offer] attribution failed:", err);
+    }
+  });
+
   return successResponse({ deal: { id: deal.id } });
 }

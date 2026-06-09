@@ -188,6 +188,20 @@ declare namespace NodeJS {
     LINKEDIN_ACCESS_TOKEN?: string;
     LINKEDIN_COMPANY_PAGE_ID?: string;
 
+    // Meta — direct Facebook Page + Instagram Business publishing via the Graph
+    // API (v18.0). The Meta provider no-ops when META_ACCESS_TOKEN is unset
+    // (falls back to Buffer). META_AD_ACCOUNT_ID enables Custom Audience
+    // retargeting uploads (act_<id> form).
+    META_ACCESS_TOKEN?: string;
+    META_PAGE_ID?: string;
+    META_INSTAGRAM_ACCOUNT_ID?: string;
+    META_AD_ACCOUNT_ID?: string;
+
+    // TikTok — direct video publishing via the Content Posting API v2
+    // (PULL_FROM_URL). The TikTok provider no-ops when TIKTOK_ACCESS_TOKEN is
+    // unset (falls back to Buffer).
+    TIKTOK_ACCESS_TOKEN?: string;
+
     // Social automation controls.
     // SOCIAL_AUTOMATION_MODE: MANUAL_REVIEW | HYBRID_AUTO | FULL_AUTO
     SOCIAL_AUTOMATION_MODE?: string;
