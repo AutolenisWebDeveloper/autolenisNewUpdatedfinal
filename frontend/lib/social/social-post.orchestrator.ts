@@ -24,6 +24,44 @@ import { requiresReview as franchiseRequiresReview } from "@/lib/social/franchis
 import { generateSocialScript } from "@/lib/social/groq-script.engine";
 import { generateHookVariants } from "@/lib/social/hook-ab-testing.engine";
 import { getPublishingProvider } from "@/lib/social/providers/publishing.factory";
+import { scorePostQuality } from "@/lib/social/content-quality.gate";
+
+// Cross-platform publish stagger. The same content rolls out platform by
+// platform (TikTok first, LinkedIn last) so one idea seeds discovery on the
+// fastest-moving feed before reaching slower, longer-lived ones.
+const PLATFORM_PUBLISH_DELAY_MS: Record<string, number> = {
+  tiktok: 0,
+  instagram: 2 * 60 * 60 * 1000, // +2 hours
+  facebook: 4 * 60 * 60 * 1000, // +4 hours
+  youtube: 8 * 60 * 60 * 1000, // +8 hours
+  linkedin: 24 * 60 * 60 * 1000, // +24 hours
+};
+
+// Resolves the next optimal posting instant for a platform/day from the learned
+// PostingWindow (slot hours in CT), rolling forward to tomorrow if the slot has
+// already passed today. Falls back to sensible defaults when no window exists.
+export async function getOptimalSlot(
+  platform: string,
+  dayOfWeek: number,
+  slotIndex: number,
+): Promise<Date> {
+  const window = await prisma.postingWindow
+    .findUnique({
+      where: { platform_dayOfWeek: { platform, dayOfWeek } },
+    })
+    .catch(() => null);
+
+  const hours = [
+    window?.slot1Hour ?? 7,
+    window?.slot2Hour ?? 12,
+    window?.slot3Hour ?? 19,
+  ];
+  const hour = hours[slotIndex % 3];
+  const slot = new Date();
+  slot.setHours(hour, 0, 0, 0);
+  if (slot <= new Date()) slot.setDate(slot.getDate() + 1);
+  return slot;
+}
 
 // Per-platform content + derivative type used when materializing a post.
 const PLATFORM_ASSET: Record<string, { contentType: string; derivativeType: string }> = {
@@ -72,9 +110,14 @@ export interface GenerateAndQueueInput {
 export async function generateAndQueuePost(
   input: GenerateAndQueueInput,
 ): Promise<SocialPost> {
-  const { signal, franchise, platform, scheduledAt } = input;
+  const { signal, franchise, platform } = input;
   const platformConfig = getPlatformConfig(platform);
   const { contentType, derivativeType } = assetFor(platform);
+
+  // Cross-platform stagger: roll the same content out platform by platform so
+  // it lands on the fastest feed first. The base slot comes from the caller.
+  const publishDelay = PLATFORM_PUBLISH_DELAY_MS[platform] ?? 0;
+  const scheduledAt = new Date(input.scheduledAt.getTime() + publishDelay);
 
   console.log(
     "[orchestrator] routing signal:",
@@ -88,15 +131,65 @@ export async function generateAndQueuePost(
   const hookType = await selectHookType(franchise, platform);
 
   console.log("[orchestrator] generating for platform:", platform, "hookType:", hookType);
-  const script = await generateSocialScript({
+  const scriptInput = {
     franchise,
     signal,
     platform,
     hookType,
     platformConfig,
     signalContext: (signal.signalContext as Record<string, unknown>) ?? {},
-  });
+  };
+  const script = await generateSocialScript(scriptInput);
   console.log("[orchestrator] groq result:", !!script);
+
+  // ─── Content quality gate ────────────────────────────────────────────────
+  // Score the generated content before persisting. Low scores trigger a single
+  // regeneration pass steered by the failure reasons; we keep whichever version
+  // scores higher. Priority/regeneration outcomes are logged for observability.
+  const quality = scorePostQuality({
+    hook: script.hook,
+    script: script.script,
+    caption: script.caption,
+    ctaText: script.ctaText,
+    platform,
+    franchise: franchise.slug,
+    complianceNotes: script.complianceNotes,
+  });
+
+  console.log(
+    `[orchestrator] quality: ${quality.total}/100`,
+    quality.isPriority ? "🔥 PRIORITY" : "",
+    quality.needsRegeneration ? "⚠️ REGENERATING" : "",
+    quality.reasons.length > 0 ? `(${quality.reasons.join("; ")})` : "",
+  );
+
+  if (quality.needsRegeneration) {
+    try {
+      const retryOutput = await generateSocialScript({
+        ...scriptInput,
+        qualityFeedback:
+          "Previous attempt scored too low. Focus on fixing: " +
+          quality.reasons.join(", ") +
+          ". Make the hook more specific and urgent.",
+      });
+      const retryQuality = scorePostQuality({
+        hook: retryOutput.hook,
+        script: retryOutput.script,
+        caption: retryOutput.caption,
+        ctaText: retryOutput.ctaText,
+        platform,
+        franchise: franchise.slug,
+        complianceNotes: retryOutput.complianceNotes,
+      });
+      if (retryQuality.total > quality.total) {
+        // Use the better version (mutates the shared script object in place).
+        Object.assign(script, retryOutput);
+        console.log(`[orchestrator] retry improved: ${retryQuality.total}/100`);
+      }
+    } catch (retryErr) {
+      console.error("[orchestrator] retry failed, using original:", retryErr);
+    }
+  }
 
   const funnelDestination = script.funnelDestination || getFunnelDestination(franchise.slug);
   const trackedUrl = buildUtmUrl({
