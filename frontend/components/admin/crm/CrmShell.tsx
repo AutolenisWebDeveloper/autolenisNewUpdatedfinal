@@ -13,6 +13,7 @@ import {
   Filter,
   ShieldOff,
   Zap,
+  Workflow,
   BarChart3,
   Activity,
   Search,
@@ -62,6 +63,7 @@ const SECTIONS: NavSection[] = [
     title: 'Automation',
     items: [
       { href: '/admin/crm/automations', label: 'Workflows', icon: Zap },
+      { href: '/admin/crm/scenarios',   label: 'Scenarios', icon: Workflow },
     ],
   },
   {

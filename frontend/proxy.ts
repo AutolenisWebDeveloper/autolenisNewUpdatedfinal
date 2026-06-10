@@ -217,6 +217,14 @@ function validateCsrfToken(request: NextRequest): boolean {
     return true;
   }
 
+  // Skip CSRF for Make.com inbound dispatch — these are server-to-server calls
+  // that cannot present a CSRF token. Each handler validates the
+  // X-AutoLenis-Signature HMAC (CRM_DISPATCH_SECRET) + timestamp skew + DB-level
+  // idempotency in lib/crm/dispatch-auth.ts before acting.
+  if (pathname.startsWith("/api/crm/dispatch/")) {
+    return true;
+  }
+
   // Skip CSRF for admin auth routes — bootstrap session from zero (no prior CSRF token exists)
   if (pathname.startsWith("/api/admin/auth/")) {
     return true;

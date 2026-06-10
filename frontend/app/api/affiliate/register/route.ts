@@ -215,6 +215,23 @@ export async function POST(request: NextRequest) {
     if (affiliateId) {
       await ContactService.linkContactIdentity(crmSupabase, contact.id, 'affiliate', affiliateId);
     }
+
+    // Emit the affiliate_signup domain event → Make.com orchestration (+ legacy
+    // in-app engine behind the cutover flag). Best-effort; never blocks signup.
+    const { emitDomainEvent } = await import("@/lib/events/emit");
+    await emitDomainEvent('affiliate_signup', {
+      domainEntityId: affiliateId || contact.id,
+      supabase: crmSupabase,
+      contact: {
+        email: normalizedEmail,
+        firstName,
+        lastName,
+        source: 'affiliate_signup',
+        consentEmail: true,
+        consentText: 'AutoLenis affiliate registration',
+      },
+      data: { affiliate_id: affiliateId, referral_code: referral },
+    });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[affiliate/register] CRM contact sync failed", err);
