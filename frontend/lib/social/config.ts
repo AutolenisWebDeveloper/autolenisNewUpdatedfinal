@@ -241,3 +241,65 @@ export function checkHighIntensityPeriod(
   }
   return null;
 }
+
+// ─── Daily posting plan ──────────────────────────────────────────────────────
+// The precise, controlled daily schedule: 25 posts/day, 5 per platform, with a
+// 70/20/10 evergreen/trend/breaking content mix. These constants drive the
+// daily-signal.generator + social-generate cron so volume is capped per platform
+// instead of scaling unbounded off the topic_signals backlog.
+
+export const DAILY_POST_TARGETS = {
+  total: 25,
+  perPlatform: 5,
+  platforms: ["tiktok", "instagram", "facebook", "youtube", "linkedin"],
+} as const;
+
+// Per-platform peak posting hours (CT). One slot per daily post (5 each).
+export const PLATFORM_POST_TIMES: Record<string, number[]> = {
+  tiktok: [7, 12, 15, 18, 21],
+  instagram: [8, 12, 15, 18, 21],
+  facebook: [9, 12, 15, 18, 20],
+  youtube: [7, 11, 14, 17, 20],
+  linkedin: [8, 10, 12, 15, 17],
+};
+
+// 70/20/10 content mix applied per platform per day (out of 5 posts).
+export const CONTENT_MIX = {
+  evergreen: {
+    weight: 0.7,
+    postsPerPlatform: 4, // out of 5
+    franchises: [
+      "dealer_secret_daily",
+      "dealer_fee_breakdown",
+      "how_autolenis_works",
+      "financing_friday",
+      "trade_in_tuesday",
+      "buyer_win_story",
+    ],
+  },
+  trend: {
+    weight: 0.2,
+    postsPerPlatform: 1, // out of 5
+    franchises: [
+      "city_market_alert",
+      "vehicle_price_watch",
+      "autolenis_market_index",
+    ],
+  },
+  breaking: {
+    weight: 0.1,
+    postsPerPlatform: 0, // bonus when available
+    signalTypes: ["competitor_gap", "trending_search", "trending_topic"],
+  },
+} as const;
+
+// Day-of-week → the franchises to lead with that day (0 = Sunday … 6 = Saturday).
+export const WEEKLY_PRIMARY_FRANCHISE: Record<number, string[]> = {
+  0: ["autolenis_market_index", "buyer_win_story"], // Sunday
+  1: ["city_market_alert", "autolenis_market_index"], // Monday
+  2: ["trade_in_tuesday"], // Tuesday
+  3: ["dealer_secret_daily", "dealer_fee_breakdown"], // Wednesday
+  4: ["financing_friday", "how_autolenis_works"], // Thursday
+  5: ["vehicle_price_watch", "dealer_fee_breakdown"], // Friday
+  6: ["buyer_win_story", "how_autolenis_works"], // Saturday
+};

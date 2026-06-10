@@ -13,6 +13,7 @@
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { CRON_AUTH_PREFIX } from "@/lib/constants";
 import { generateDalleImage } from "@/lib/social/providers/dalle.provider";
 import { storeImageInSupabase } from "@/lib/social/image-generation.service";
 
@@ -25,8 +26,18 @@ const DALLE_PROVIDER = "dalle3";
 const STORAGE_BUCKET = "social-media-assets";
 
 export async function POST(request: NextRequest) {
-  const admin = await getAdminFromRequest(request);
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  // Allow internal calls from the social-generate cron using the shared
+  // CRON_SECRET; otherwise fall through to the existing admin-session check.
+  const authHeader = request.headers.get("authorization");
+  const cronSecret = process.env.CRON_SECRET;
+  const isCronCall = Boolean(
+    cronSecret && authHeader === `${CRON_AUTH_PREFIX}${cronSecret}`,
+  );
+
+  if (!isCronCall) {
+    const admin = await getAdminFromRequest(request);
+    if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  }
 
   // Check OPENAI_API_KEY first — bail out cleanly with a clear, machine-readable
   // signal rather than failing every post in the batch.
