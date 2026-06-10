@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { prisma } from '@/lib/prisma';
 import { normalizePhone } from '@/lib/utils/phone';
 import { SuppressionService } from '@/lib/services/suppression.service';
+import { isRecipientInQuietHours } from '@/lib/crm/recipient-timezone';
 import type { Contact } from '@/lib/types/crm';
 
 // ---------------------------------------------------------------------------
@@ -44,30 +45,6 @@ export interface CrmSmsResult {
   reason?: string;
 }
 
-// TCPA-safe quiet hours: no marketing/automated SMS before 8am or at/after 9pm
-// in the platform's operating timezone. Make orchestrates send timing, but this
-// is a hard backstop regardless of what Make schedules.
-const QUIET_START_HOUR = 21; // 9pm inclusive
-const QUIET_END_HOUR = 8; // 8am — sends allowed from 08:00
-
-function isWithinQuietHours(now: Date): boolean {
-  const tz = process.env.CRM_SMS_TZ ?? 'America/New_York';
-  let hour: number;
-  try {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz,
-      hour: 'numeric',
-      hour12: false,
-    }).formatToParts(now);
-    hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '12');
-    // Intl can emit "24" for midnight in hour12:false — normalize to 0.
-    if (hour === 24) hour = 0;
-  } catch {
-    hour = now.getUTCHours();
-  }
-  return hour >= QUIET_START_HOUR || hour < QUIET_END_HOUR;
-}
-
 function selectFrom(pool: CrmSmsFromPool): string | undefined {
   return pool === 'tollfree'
     ? process.env.TWILIO_TOLLFREE_NUMBER
@@ -81,11 +58,16 @@ export async function sendCrmSms(params: {
   contact: Pick<Contact, 'id' | 'phone' | 'consent_sms' | 'do_not_contact'>;
   body: string;
   fromPool: CrmSmsFromPool;
+  // Recipient location for TCPA quiet-hours derivation (08:00–21:00 LOCAL to the
+  // recipient). state is preferred; zip is the fallback; when neither resolves
+  // the CONUS-safe intersection (ET ∩ PT) applies. See lib/crm/recipient-timezone.
+  state?: string | null;
+  zip?: string | null;
   // Reserved for parity with the email path / future Twilio idempotency; the
   // dispatch-auth layer already enforces idempotency at the request boundary.
   idempotencyKey: string;
 }): Promise<CrmSmsResult> {
-  const { supabase, contact, body, fromPool } = params;
+  const { supabase, contact, body, fromPool, state, zip } = params;
 
   const phone = normalizePhone(contact.phone ?? '');
   if (!phone) return { status: 'invalid_phone' };
@@ -107,8 +89,8 @@ export async function sendCrmSms(params: {
     return { status: 'failed', reason: 'suppression_check_error' };
   }
 
-  // Quiet-hours backstop.
-  if (isWithinQuietHours(new Date())) {
+  // Quiet-hours backstop — local to the RECIPIENT (TCPA), not a global tz.
+  if (isRecipientInQuietHours(new Date(), { state, zip })) {
     return { status: 'quiet_hours' };
   }
 

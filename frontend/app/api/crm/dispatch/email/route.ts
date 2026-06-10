@@ -5,6 +5,7 @@ import { SuppressionService } from '@/lib/services/suppression.service';
 import { TemplateService } from '@/lib/services/template.service';
 import { sendCrmDispatchEmail } from '@/lib/services/email/resend.service';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
+import { computeEffectiveEmailType } from '@/lib/crm/email-dispatch-policy';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,10 +24,15 @@ export async function POST(request: NextRequest) {
 
   const contactId = body.contactId as string | undefined;
   const email = body.email as string | undefined;
-  const type = (body.type as 'transactional' | 'marketing') ?? 'transactional';
+  const declaredType = (body.type as 'transactional' | 'marketing') ?? 'transactional';
   const scenarioId = (body.scenarioId as string | undefined) ?? null;
   const templateKey = body.templateKey as string | undefined;
   const vars = (body.vars as Record<string, string | number | null> | undefined) ?? {};
+
+  // EFFECTIVE type (Fix C): transactional only if the caller said so AND the
+  // template_key is on the allowlist. Marketing, raw html, or an unlisted key →
+  // marketing → consent required. The label alone can't bypass consent.
+  const effectiveType = computeEffectiveEmailType(declaredType, templateKey);
 
   const finalize = async (result: Record<string, unknown>, http = 200) => {
     await finalizeDispatch(supabase, keyHash, result);
@@ -39,13 +45,18 @@ export async function POST(request: NextRequest) {
     return finalize({ status: 'contact_not_found', error: 'no_email_resolved' }, 404);
   }
 
-  // Marketing requires explicit email consent; transactional is allowed without
-  // it (receipts, confirmations). A contact we resolved governs consent.
-  if (type === 'marketing' && contact && !contact.consent_email) {
-    return finalize({ status: 'no_consent', reason: 'consent_email_required' });
+  // Consent gate keyed on the EFFECTIVE type. Marketing requires explicit email
+  // consent; only allowlisted transactional templates are exempt.
+  if (effectiveType === 'marketing' && contact && !contact.consent_email) {
+    return finalize({
+      status: 'no_consent',
+      reason: 'consent_email_required',
+      declaredType,
+      effectiveType,
+    });
   }
   if (contact?.do_not_contact) {
-    return finalize({ status: 'no_consent', reason: 'do_not_contact' });
+    return finalize({ status: 'no_consent', reason: 'do_not_contact', declaredType, effectiveType });
   }
 
   // Suppression gate.
@@ -109,7 +120,8 @@ export async function POST(request: NextRequest) {
         dispatch: status,
         provider_id: providerId,
         subject,
-        type,
+        declared_type: declaredType,
+        effective_type: effectiveType,
         scenario_id: scenarioId,
         template_key: templateKey ?? null,
       },
@@ -123,7 +135,13 @@ export async function POST(request: NextRequest) {
       action: 'CRM_DISPATCH_EMAIL',
       entity_type: 'contact',
       entity_id: contact?.id ?? toEmail,
-      new_state: { status, provider_id: providerId, type, scenario_id: scenarioId },
+      new_state: {
+        status,
+        provider_id: providerId,
+        declared_type: declaredType,
+        effective_type: effectiveType,
+        scenario_id: scenarioId,
+      },
     },
   );
 

@@ -220,7 +220,7 @@ export async function POST(request: NextRequest) {
     // in-app engine behind the cutover flag). Best-effort; never blocks signup.
     const { emitDomainEvent } = await import("@/lib/events/emit");
     await emitDomainEvent('affiliate_signup', {
-      domainEntityId: affiliateId || contact.id,
+      domainEntityId: affiliateId,
       supabase: crmSupabase,
       contact: {
         email: normalizedEmail,

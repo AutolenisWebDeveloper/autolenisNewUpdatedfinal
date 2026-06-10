@@ -3,6 +3,39 @@ import { authorizeDispatch, finalizeDispatch } from '@/lib/crm/dispatch-auth';
 import { resolveDispatchContact } from '@/lib/crm/resolve-contact';
 import { sendCrmSms, type CrmSmsFromPool } from '@/lib/services/sms/crm-sms';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
+import { prisma } from '@/lib/prisma';
+
+// Resolve the recipient's state/zip for TCPA quiet-hours derivation. Prefers the
+// body-supplied values (Make can pass them), then falls back to the linked
+// Buyer's address. Best-effort — a miss falls through to the CONUS-safe envelope.
+async function resolveRecipientLocation(
+  supabase: import('@supabase/supabase-js').SupabaseClient,
+  contactId: string,
+  body: Record<string, unknown>,
+): Promise<{ state: string | null; zip: string | null }> {
+  let state = (body.state as string | undefined) ?? null;
+  let zip = (body.zip as string | undefined) ?? null;
+  if (state || zip) return { state, zip };
+  try {
+    const { data: identity } = await supabase
+      .from('contact_identities')
+      .select('entity_id')
+      .eq('contact_id', contactId)
+      .eq('entity_type', 'buyer')
+      .maybeSingle();
+    if (identity?.entity_id) {
+      const buyer = await prisma.buyer.findUnique({
+        where: { id: identity.entity_id as string },
+        select: { state: true, zip: true },
+      });
+      state = buyer?.state ?? null;
+      zip = buyer?.zip ?? null;
+    }
+  } catch (err) {
+    console.error('[dispatch/sms] recipient location lookup failed:', err);
+  }
+  return { state, zip };
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -43,11 +76,15 @@ export async function POST(request: NextRequest) {
     return finalize({ status: 'contact_not_found', error: 'no_contact_resolved' }, 404);
   }
 
+  const { state, zip } = await resolveRecipientLocation(supabase, contact.id, body);
+
   const result = await sendCrmSms({
     supabase,
     contact,
     body: messageBody,
     fromPool,
+    state,
+    zip,
     idempotencyKey,
   });
 

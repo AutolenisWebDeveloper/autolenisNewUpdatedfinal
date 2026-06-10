@@ -102,15 +102,23 @@ export async function emitDomainEvent(
 
   // (4) Outbound webhook — non-blocking. Prefer Vercel after() so it runs after
   // the response flushes; if we're already outside a request scope (e.g. nested
-  // inside another after()), fall back to a detached promise.
-  try {
-    after(() => forwardToMake(envelope));
-    fired.webhookScheduled = true;
-  } catch {
-    void forwardToMake(envelope).catch((err) =>
-      console.error(`[emit] detached make forward failed (${idempotencyKey})`, err),
+  // inside another after()), fall back to a detached promise. When
+  // MAKE_WEBHOOK_URL is unset we WARN (never silently swallow) so a prod
+  // misconfig is visible in logs.
+  if (process.env.MAKE_WEBHOOK_URL) {
+    try {
+      after(() => forwardToMake(envelope));
+      fired.webhookScheduled = true;
+    } catch {
+      void forwardToMake(envelope).catch((err) =>
+        console.error(`[emit] detached make forward failed (${idempotencyKey})`, err),
+      );
+      fired.webhookScheduled = true;
+    }
+  } else {
+    console.warn(
+      `[emit] MAKE_WEBHOOK_URL unset — '${event}' (${idempotencyKey}) NOT forwarded to Make`,
     );
-    fired.webhookScheduled = true;
   }
 
   // (5) Legacy in-app engine — only while the cutover flag is on, so the
@@ -131,8 +139,14 @@ export async function emitDomainEvent(
     }
   }
 
+  // Cutover observability — which downstream path(s) actually fired.
+  const paths = [
+    fired.webhookScheduled ? 'make' : null,
+    fired.inAppEngine ? 'inapp' : null,
+  ].filter(Boolean);
   console.info(
-    `[emit] '${event}' contact=${contact.id} key=${idempotencyKey} fired=${JSON.stringify(fired)}`,
+    `[emit] '${event}' contact=${contact.id} key=${idempotencyKey} ` +
+      `paths=${paths.length ? paths.join('+') : 'none'} fired=${JSON.stringify(fired)}`,
   );
   return { contactId: contact.id, idempotencyKey, fired };
 }
