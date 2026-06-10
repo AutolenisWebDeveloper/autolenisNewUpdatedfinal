@@ -178,6 +178,7 @@ const TABS = [
   { key: "calendar", label: "Content Calendar", icon: Calendar },
   { key: "pending", label: "Pending Review", icon: ClipboardCheck },
   { key: "queue", label: "Publishing Queue", icon: Send },
+  { key: "media", label: "Media", icon: Film },
   { key: "performance", label: "Performance", icon: BarChart2 },
   { key: "market-index", label: "Market Index", icon: Newspaper },
   { key: "leads", label: "Leads", icon: Users },
@@ -298,6 +299,7 @@ export default function SocialDashboardClient({
   const [tab, setTab] = useState<TabKey>("overview");
   const [stats, setStats] = useState<Stats | null>(null);
   const [drawerPost, setDrawerPost] = useState<Post | null>(null);
+  const [composeOpen, setComposeOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -334,12 +336,21 @@ export default function SocialDashboardClient({
             <p className="text-xs text-[#64748B]">AI content, video, publishing & attribution</p>
           </div>
         </div>
-        <div
-          data-testid="automation-mode-badge"
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold ${modeBadge.cls}`}
-        >
-          <span>{modeBadge.dot}</span>
-          <span>{modeBadge.label}</span>
+        <div className="flex items-center gap-3">
+          <button
+            data-testid="compose-open"
+            onClick={() => setComposeOpen(true)}
+            className="flex items-center gap-1.5 bg-[#0B5FD1] text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-[#0a54bc] transition-colors"
+          >
+            <Sparkles size={14} /> Compose
+          </button>
+          <div
+            data-testid="automation-mode-badge"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-bold ${modeBadge.cls}`}
+          >
+            <span>{modeBadge.dot}</span>
+            <span>{modeBadge.label}</span>
+          </div>
         </div>
       </div>
 
@@ -370,6 +381,7 @@ export default function SocialDashboardClient({
       {tab === "calendar" && <CalendarTab onOpenPost={setDrawerPost} showToast={showToast} />}
       {tab === "pending" && <PendingTab onOpenPost={setDrawerPost} onChanged={loadStats} showToast={showToast} />}
       {tab === "queue" && <QueueTab onOpenPost={setDrawerPost} onChanged={loadStats} showToast={showToast} />}
+      {tab === "media" && <MediaTab showToast={showToast} />}
       {tab === "performance" && <PerformanceTab stats={stats} onOpenPost={setDrawerPost} showToast={showToast} />}
       {tab === "market-index" && <MarketIndexTab showToast={showToast} />}
       {tab === "leads" && <LeadsTab showToast={showToast} />}
@@ -390,6 +402,15 @@ export default function SocialDashboardClient({
           post={drawerPost}
           onClose={() => setDrawerPost(null)}
           onChanged={() => { void loadStats(); }}
+          showToast={showToast}
+        />
+      )}
+
+      {composeOpen && (
+        <ComposeDrawer
+          franchises={franchises}
+          onClose={() => setComposeOpen(false)}
+          onCreated={() => { void loadStats(); }}
           showToast={showToast}
         />
       )}
@@ -1674,14 +1695,292 @@ function MarketIndexTab({ showToast }: { showToast: (m: string) => void }) {
   );
 }
 
+// ─── Tab: Media ──────────────────────────────────────────────────────────────
+interface MediaItem {
+  id: string;
+  status: string;
+  thumbnailUrl: string | null;
+  videoUrl: string | null;
+  provider: string;
+  generatedAt: string | null;
+  createdAt: string;
+  post: {
+    id: string;
+    platform: string;
+    hook: string;
+    status: string;
+    scheduledAt: string | null;
+    franchise: { name: string; slug: string } | null;
+  } | null;
+}
+
+const MEDIA_TYPE_FILTERS = [
+  { label: "All", value: "all" },
+  { label: "Images", value: "image" },
+  { label: "Videos", value: "video" },
+];
+const MEDIA_STATUS_FILTERS = [
+  { label: "All", value: "all" },
+  { label: "Ready", value: "VIDEO_READY" },
+  { label: "Generating", value: "VIDEO_GENERATING" },
+  { label: "Failed", value: "VIDEO_FAILED" },
+];
+const PLATFORM_BADGE: Record<string, string> = {
+  facebook: "bg-blue-100 text-blue-700",
+  instagram: "bg-pink-100 text-pink-700",
+  tiktok: "bg-slate-900 text-white",
+  youtube: "bg-red-100 text-red-700",
+  linkedin: "bg-sky-100 text-sky-700",
+};
+
+function MediaTab({ showToast }: { showToast: (m: string) => void }) {
+  const [media, setMedia] = useState<MediaItem[]>([]);
+  const [platform, setPlatform] = useState("all");
+  const [type, setType] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (platform !== "all") params.set("platform", platform);
+      if (type !== "all") params.set("type", type);
+      if (status !== "all") params.set("status", status);
+      const data = await fetchJson<{ media: MediaItem[] }>(`/api/admin/social/media?${params.toString()}`);
+      setMedia(data.media);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to load media");
+    } finally {
+      setLoading(false);
+    }
+  }, [platform, type, status, showToast]);
+  useEffect(() => { void load(); }, [load]);
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-1">
+          {["all", ...PLATFORMS].map((p) => (
+            <button key={p} data-testid={`media-platform-${p}`} onClick={() => setPlatform(p)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize ${platform === p ? "bg-[#0B5FD1] text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
+              {p}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-1">
+          {MEDIA_TYPE_FILTERS.map((f) => (
+            <button key={f.value} onClick={() => setType(f.value)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${type === f.value ? "bg-[#0B5FD1] text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-1">
+          {MEDIA_STATUS_FILTERS.map((f) => (
+            <button key={f.value} onClick={() => setStatus(f.value)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${status === f.value ? "bg-[#0B5FD1] text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => void load()} className="ml-auto flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white border border-[#E2E8F0] text-xs font-semibold text-[#64748B] hover:text-[#0F172A]">
+          <RefreshCw size={12} /> Refresh
+        </button>
+      </div>
+
+      {/* Grid */}
+      {loading ? (
+        <div className="py-16 text-center text-[#94A3B8] text-sm flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" /> Loading media…</div>
+      ) : media.length === 0 ? (
+        <div className="py-16 text-center text-[#94A3B8] text-sm">No media assets yet.</div>
+      ) : (
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4" data-testid="media-grid">
+          {media.map((m) => {
+            const url = m.videoUrl ?? m.thumbnailUrl ?? "";
+            const isVideo = Boolean(m.videoUrl);
+            return (
+              <div key={m.id} className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
+                <div className="relative aspect-video bg-slate-100">
+                  {m.thumbnailUrl ? (
+                    <img src={m.thumbnailUrl} alt={m.post?.hook ?? "media"} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-300"><Film size={28} /></div>
+                  )}
+                  {isVideo && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="w-10 h-10 rounded-full bg-black/50 text-white flex items-center justify-center text-sm">▶</span>
+                    </div>
+                  )}
+                  {m.post && (
+                    <span className={`absolute top-2 left-2 text-[10px] font-bold px-2 py-0.5 rounded-full capitalize ${PLATFORM_BADGE[m.post.platform] ?? "bg-slate-100 text-slate-600"}`}>
+                      {m.post.platform}
+                    </span>
+                  )}
+                </div>
+                <div className="p-3 space-y-2">
+                  <p className="text-xs font-medium text-[#0F172A] truncate">{m.post?.hook ?? "—"}</p>
+                  <div className="flex items-center justify-between text-[10px] text-[#94A3B8]">
+                    <span>{m.post?.franchise?.name ?? "—"}</span>
+                    <span>{fmtDateTime(m.generatedAt ?? m.createdAt)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <VideoBadge status={m.status} />
+                    <button onClick={() => { if (url) window.open(url, "_blank"); }} disabled={!url}
+                      className="flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:underline disabled:opacity-40">
+                      ⬇ Download
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Compose drawer ──────────────────────────────────────────────────────────
+const COMPOSE_PLATFORMS = ["tiktok", "instagram", "facebook", "youtube", "linkedin"] as const;
+
+function defaultScheduleAt(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function ComposeDrawer({
+  franchises, onClose, onCreated, showToast,
+}: { franchises: FranchiseRow[]; onClose: () => void; onCreated: () => void; showToast: (m: string) => void }) {
+  const [platform, setPlatform] = useState<string>("tiktok");
+  const [franchiseSlug, setFranchiseSlug] = useState<string>(franchises[0]?.slug ?? "dealer_secret_daily");
+  const [hook, setHook] = useState("");
+  const [caption, setCaption] = useState("");
+  const [hashtags, setHashtags] = useState("");
+  const [scheduledAt, setScheduledAt] = useState(defaultScheduleAt());
+  const [generateImage, setGenerateImage] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!hook.trim() || !caption.trim()) { showToast("Hook and caption are required"); return; }
+    setSaving(true);
+    try {
+      await fetchJson("/api/admin/social/compose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform,
+          franchiseSlug,
+          hook,
+          caption,
+          hashtags: hashtags.split(",").map((h) => h.trim()).filter(Boolean),
+          scheduledAt: new Date(scheduledAt).toISOString(),
+          generateImage,
+        }),
+      });
+      showToast("Post created and scheduled");
+      onCreated();
+      onClose();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to create post");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" data-testid="compose-drawer">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="relative w-full max-w-[560px] bg-white h-full overflow-y-auto shadow-2xl">
+        <div className="sticky top-0 bg-white border-b border-[#E2E8F0] px-5 py-4 flex items-center justify-between">
+          <h2 className="text-sm font-bold text-[#0F172A]">Create Post</h2>
+          <button onClick={onClose} className="text-[#64748B] hover:text-[#0F172A]"><X size={18} /></button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="text-[10px] uppercase font-bold text-[#94A3B8] mb-1 block">Platform *</label>
+            <div className="flex flex-wrap gap-1.5">
+              {COMPOSE_PLATFORMS.map((p) => (
+                <button key={p} onClick={() => setPlatform(p)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold capitalize ${platform === p ? "bg-[#0B5FD1] text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
+                  {platformIcon(p, 12)} {p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase font-bold text-[#94A3B8] mb-1 block">Franchise *</label>
+            <select value={franchiseSlug} onChange={(e) => setFranchiseSlug(e.target.value)}
+              className="w-full bg-white border border-[#E2E8F0] rounded-lg px-3 py-2 text-xs text-[#0F172A]">
+              {franchises.map((f) => <option key={f.id} value={f.slug}>{f.name}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase font-bold text-[#94A3B8] mb-1 block">Hook *</label>
+            <textarea value={hook} maxLength={100} onChange={(e) => setHook(e.target.value)} rows={2}
+              placeholder="Your dealer just added $800 to your contract..."
+              className="w-full text-xs border border-[#E2E8F0] rounded-lg p-2" data-testid="compose-hook" />
+            <p className="text-[10px] text-[#94A3B8] text-right mt-0.5">{hook.length}/100</p>
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase font-bold text-[#94A3B8] mb-1 block">Caption *</label>
+            <textarea value={caption} maxLength={2200} onChange={(e) => setCaption(e.target.value)} rows={6}
+              placeholder="Write your caption here..."
+              className="w-full text-xs border border-[#E2E8F0] rounded-lg p-2" data-testid="compose-caption" />
+            <p className="text-[10px] text-[#94A3B8] text-right mt-0.5">{caption.length}/2200</p>
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase font-bold text-[#94A3B8] mb-1 block">Hashtags</label>
+            <input value={hashtags} onChange={(e) => setHashtags(e.target.value)}
+              placeholder="#CarBuying, #DealerSecrets, #AutoLenis"
+              className="w-full text-xs border border-[#E2E8F0] rounded-lg p-2" />
+          </div>
+
+          <div>
+            <label className="text-[10px] uppercase font-bold text-[#94A3B8] mb-1 block">Schedule Time *</label>
+            <input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)}
+              className="w-full text-xs border border-[#E2E8F0] rounded-lg p-2" />
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={generateImage} onChange={(e) => setGenerateImage(e.target.checked)} />
+            <span className="text-xs text-[#0F172A]">Generate AI image for this post</span>
+          </label>
+        </div>
+
+        <div className="sticky bottom-0 bg-white border-t border-[#E2E8F0] px-5 py-3 flex gap-2">
+          <button disabled={saving} data-testid="compose-submit" onClick={submit}
+            className="flex-1 bg-[#0B5FD1] text-white text-sm font-semibold py-2.5 rounded-xl hover:bg-[#0a54bc] disabled:opacity-50">
+            {saving ? "Creating…" : "Create Post"}
+          </button>
+          <button onClick={onClose} className="text-[#64748B] text-sm font-semibold px-4">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Post detail drawer ──────────────────────────────────────────────────────
 function PostDrawer({
   post, onClose, onChanged, showToast,
 }: { post: Post; onClose: () => void; onChanged: () => void; showToast: (m: string) => void }) {
   const [caption, setCaption] = useState(post.caption);
   const [script, setScript] = useState(post.script);
-  const [scheduledAt, setScheduledAt] = useState(post.scheduledAt ? post.scheduledAt.slice(0, 16) : "");
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState(false);
+  const [newScheduledAt, setNewScheduledAt] = useState(
+    post.scheduledAt ? new Date(post.scheduledAt).toISOString().slice(0, 16) : "",
+  );
 
   const patch = async (body: Record<string, unknown>, msg: string) => {
     setSaving(true);
@@ -1695,6 +1994,52 @@ function PostDrawer({
       onChanged();
     } catch (err) { showToast(err instanceof Error ? err.message : "Action failed"); }
     finally { setSaving(false); }
+  };
+
+  const handleReschedule = async () => {
+    if (!newScheduledAt) return;
+    try {
+      await fetchJson(`/api/admin/social/posts/${post.id}/reschedule`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduledAt: new Date(newScheduledAt).toISOString() }),
+      });
+      setEditingSchedule(false);
+      showToast("Post rescheduled");
+      onChanged();
+    } catch (err) { showToast(err instanceof Error ? err.message : "Reschedule failed"); }
+  };
+
+  const handlePublishNow = async () => {
+    if (!window.confirm("Publish this post immediately?")) return;
+    try {
+      await fetchJson(`/api/admin/social/posts/${post.id}/publish`, { method: "POST" });
+      showToast("Post queued for immediate publishing");
+      onChanged();
+      onClose();
+    } catch (err) { showToast(err instanceof Error ? err.message : "Publish failed"); }
+  };
+
+  const handleGenerateVideo = async () => {
+    setGenerating(true);
+    try {
+      await fetchJson("/api/admin/social/generate-video-single", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ postId: post.id }),
+      });
+      showToast("Video generation started — check back in 1–2 minutes");
+    } catch (err) { showToast(err instanceof Error ? err.message : "Video generation failed"); }
+    finally { setGenerating(false); }
+  };
+
+  const handleGenerateImage = async () => {
+    setGenerating(true);
+    try {
+      await fetchJson("/api/admin/social/generate-images", { method: "POST" });
+      showToast("Image generation started");
+    } catch (err) { showToast(err instanceof Error ? err.message : "Image generation failed"); }
+    finally { setGenerating(false); }
   };
 
   return (
@@ -1737,29 +2082,79 @@ function PostDrawer({
             </div>
           )}
 
-          {/* Visual Assets */}
-          <div className="border-t border-[#E2E8F0] pt-4">
-            <p className="text-xs font-medium text-slate-500 mb-2">VISUAL ASSETS</p>
-            {post.video?.thumbnailUrl ? (
-              <img
-                src={post.video.thumbnailUrl}
-                alt="Generated visual"
-                className="w-full rounded-xl object-cover max-h-64"
-              />
-            ) : (
-              <div className="w-full h-32 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 text-sm">
-                {post.video?.status === "VIDEO_GENERATING"
-                  ? "🎬 Video generating..."
-                  : "📸 Image generating..."}
+          {/* Visual Assets — viewer with download + generation controls */}
+          <div className="border-t border-[#E2E8F0] pt-4 space-y-3">
+            <h3 className="text-sm font-medium text-slate-700">Visual Assets</h3>
+
+            {post.video?.videoUrl ? (
+              <div className="space-y-2">
+                <video
+                  src={post.video.videoUrl}
+                  controls
+                  className="w-full rounded-xl border border-slate-200"
+                  style={{ maxHeight: 300 }}
+                />
+                <div className="flex gap-2">
+                  <a
+                    href={post.video.videoUrl}
+                    download={`autolenis-${post.id}.mp4`}
+                    className="flex-1 flex items-center justify-center gap-2 bg-[#0B5FD1] text-white text-xs font-medium py-2 rounded-lg hover:bg-[#0a54bc] transition-colors"
+                  >
+                    ⬇ Download Video
+                  </a>
+                  {post.video.thumbnailUrl && (
+                    <a
+                      href={post.video.thumbnailUrl}
+                      download={`autolenis-${post.id}.jpg`}
+                      className="flex items-center justify-center gap-2 border border-slate-200 text-slate-600 text-xs font-medium py-2 px-3 rounded-lg hover:bg-slate-50"
+                    >
+                      ⬇ Image
+                    </a>
+                  )}
+                </div>
               </div>
-            )}
-            {post.video?.videoUrl && (
-              <video
-                src={post.video.videoUrl}
-                className="w-full rounded-xl mt-2 max-h-64"
-                controls
-                muted
-              />
+            ) : post.video?.thumbnailUrl ? (
+              <div className="space-y-2">
+                <img
+                  src={post.video.thumbnailUrl}
+                  alt="Generated image"
+                  className="w-full rounded-xl border border-slate-200 object-cover"
+                  style={{ maxHeight: 300 }}
+                />
+                <div className="flex gap-2">
+                  <a
+                    href={post.video.thumbnailUrl}
+                    download={`autolenis-${post.id}.jpg`}
+                    className="flex-1 flex items-center justify-center gap-2 bg-[#0B5FD1] text-white text-xs font-medium py-2 rounded-lg hover:bg-[#0a54bc] transition-colors"
+                  >
+                    ⬇ Download Image
+                  </a>
+                  <button
+                    onClick={handleGenerateVideo}
+                    disabled={generating}
+                    className="flex items-center justify-center gap-2 border border-[#0B5FD1] text-[#0B5FD1] text-xs font-medium py-2 px-3 rounded-lg hover:bg-[#0B5FD1]/5 disabled:opacity-50"
+                  >
+                    🎬 Generate Video
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-32 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                <div className="text-center">
+                  <p className="text-sm text-slate-500">
+                    {post.video?.status === "VIDEO_GENERATING"
+                      ? "🎬 Video generating..."
+                      : "📸 Image generating..."}
+                  </p>
+                  <button
+                    onClick={handleGenerateImage}
+                    disabled={generating}
+                    className="mt-2 text-xs text-[#0B5FD1] underline disabled:opacity-50"
+                  >
+                    Generate Now
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 
@@ -1793,21 +2188,48 @@ function PostDrawer({
           )}
 
           <div>
-            <p className="text-[10px] uppercase font-bold text-[#94A3B8] mb-1 flex items-center gap-1"><Film size={11} /> Video</p>
-            {post.video ? (
-              <div className="space-y-2">
-                <VideoBadge status={post.video.status} />
-                {post.video.videoUrl && (
-                  <video src={post.video.videoUrl} controls className="w-full rounded-lg border border-[#E2E8F0]" />
-                )}
-              </div>
-            ) : <p className="text-xs text-[#94A3B8]">No video job</p>}
+            <p className="text-[10px] uppercase font-bold text-[#94A3B8] mb-1 flex items-center gap-1"><Film size={11} /> Video Job</p>
+            {post.video ? <VideoBadge status={post.video.status} /> : <p className="text-xs text-[#94A3B8]">No video job</p>}
           </div>
 
           <div>
             <p className="text-[10px] uppercase font-bold text-[#94A3B8] mb-1">Scheduled</p>
-            <input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)}
-              className="text-xs border border-[#E2E8F0] rounded-lg p-2" data-testid="drawer-scheduled" />
+            {editingSchedule ? (
+              <div className="flex gap-2 items-center">
+                <input
+                  type="datetime-local"
+                  value={newScheduledAt}
+                  onChange={(e) => setNewScheduledAt(e.target.value)}
+                  className="text-sm border border-slate-200 rounded-lg px-3 py-1.5"
+                  data-testid="drawer-scheduled"
+                />
+                <button
+                  onClick={handleReschedule}
+                  className="text-xs bg-[#0B5FD1] text-white px-3 py-1.5 rounded-lg hover:bg-[#0a54bc]"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setEditingSchedule(false)}
+                  className="text-xs text-slate-500 px-2"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <p className="text-sm text-slate-800">
+                  {post.scheduledAt ? new Date(post.scheduledAt).toLocaleString() : "Not scheduled"}
+                </p>
+                <button
+                  onClick={() => setEditingSchedule(true)}
+                  className="text-xs text-[#0B5FD1] underline"
+                  data-testid="drawer-edit-schedule"
+                >
+                  Edit
+                </button>
+              </div>
+            )}
           </div>
 
           {post.status === "PUBLISHED" && (
@@ -1832,9 +2254,8 @@ function PostDrawer({
             className="bg-rose-600 text-white text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-50">Reject</button>
           <button disabled={saving} data-testid="drawer-save" onClick={() => patch({ action: "update", caption, script }, "Saved")}
             className="bg-[#0B5FD1] text-white text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-50">Save Edits</button>
-          <button disabled={saving || !scheduledAt} data-testid="drawer-publish-now"
-            onClick={() => patch({ action: "reschedule", scheduledAt: new Date(scheduledAt || Date.now()).toISOString() }, "Rescheduled")}
-            className="bg-white border border-[#E2E8F0] text-[#0F172A] text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-50">Reschedule</button>
+          <button disabled={saving} data-testid="drawer-publish-now" onClick={handlePublishNow}
+            className="bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Publish Now</button>
           <button onClick={onClose} className="ml-auto text-[#64748B] text-xs font-semibold px-3 py-2">Close</button>
         </div>
       </div>
