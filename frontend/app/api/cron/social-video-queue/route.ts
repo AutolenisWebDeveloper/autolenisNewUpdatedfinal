@@ -229,6 +229,22 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Runway Gen-4 Turbo video generation. Tier 1 posts (TikTok / Instagram /
+  // YouTube) that already have a DALL-E still get animated into a short video.
+  // Fire-and-forget — the dedicated cron enforces its own daily cap + Tier 1
+  // filter and polls Runway synchronously, so it must not block this run.
+  // (vercel.json is at the 40-cron cap, so this is wired into the existing
+  // video-queue cron rather than scheduled separately.)
+  if (process.env.RUNWAY_API_KEY) {
+    fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/cron/social-video-generate`, {
+      headers: {
+        [CRON_AUTH_HEADER]: `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`,
+      },
+    }).catch((err) =>
+      console.error("[video-queue] runway video trigger failed:", err),
+    );
+  }
+
   const summary = {
     considered: videos.length,
     submitted,

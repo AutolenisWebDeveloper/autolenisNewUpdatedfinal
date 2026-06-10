@@ -13,7 +13,7 @@
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import { CRON_AUTH_PREFIX } from "@/lib/constants";
+import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { generateDalleImage } from "@/lib/social/providers/dalle.provider";
 import { storeImageInSupabase } from "@/lib/social/image-generation.service";
 
@@ -187,6 +187,19 @@ export async function POST(request: NextRequest) {
     `[generate-images] done: ${generated} generated,`,
     `${failed} failed, ${remaining} remaining`,
   );
+
+  // Kick off Runway video generation for the freshly-imaged Tier 1 posts.
+  // Fire-and-forget — a slow or failed video pass must never affect this
+  // response, and the video cron enforces its own daily cap + Tier 1 filter.
+  if (generated > 0 && process.env.RUNWAY_API_KEY) {
+    fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/cron/social-video-generate`, {
+      headers: {
+        [CRON_AUTH_HEADER]: `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`,
+      },
+    }).catch((err) =>
+      console.error("[generate-images] video trigger failed:", err),
+    );
+  }
 
   return adminSuccess({
     processed: postsNeedingImages.length,
