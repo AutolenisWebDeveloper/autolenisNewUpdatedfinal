@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Search,
   Users,
   Loader2,
   Trash2,
@@ -15,6 +15,12 @@ import {
   UserPlus,
   Upload,
   RefreshCcw,
+  ShieldCheck,
+  Activity as ActivityIcon,
+  Briefcase,
+  ExternalLink,
+  Check,
+  Ban,
 } from 'lucide-react';
 import { useDebounce } from '@/lib/hooks/use-debounce';
 import type { Contact, LifecycleStage } from '@/lib/types/crm';
@@ -23,6 +29,20 @@ import { AddContactModal } from './AddContactModal';
 import { ImportContactsModal } from './ImportContactsModal';
 import { BulkComposeEmailModal } from './BulkComposeEmailModal';
 import { BulkComposeSmsModal } from './BulkComposeSmsModal';
+import {
+  Button,
+  DataTable,
+  EmptyState,
+  PageHeader,
+  SlideOver,
+  StatusPill,
+  Tabs,
+  Toolbar,
+  SearchField,
+  SelectField,
+  type Column,
+  type Temperature,
+} from './ui';
 
 type Props = {
   pageTitle?: string;
@@ -33,6 +53,18 @@ type Props = {
 type Toast = { kind: 'success' | 'error'; text: string } | null;
 
 const PER_PAGE = 50;
+
+const HOT_STAGES: LifecycleStage[] = [
+  'deposit_pending', 'deposit_paid', 'auction_active', 'offer_received',
+];
+const WARM_STAGES: LifecycleStage[] = ['prequal_started', 'prequal_completed'];
+
+/** Presentational temperature derived from lifecycle stage (no new data). */
+function temperatureForStage(stage: LifecycleStage): Temperature {
+  if (HOT_STAGES.includes(stage)) return 'hot';
+  if (WARM_STAGES.includes(stage)) return 'warm';
+  return 'cold';
+}
 
 function formatPhone(phone: string | null): string {
   if (!phone) return '—';
@@ -52,6 +84,15 @@ function formatDate(iso: string): string {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+function contactName(c: Contact): string {
+  return (
+    [c.first_name, c.last_name].filter(Boolean).join(' ') ||
+    c.email ||
+    c.phone ||
+    'Unknown'
+  );
 }
 
 export function ContactList({
@@ -78,6 +119,8 @@ export function ContactList({
   const [bulkSmsOpen, setBulkSmsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
+  const [activeContact, setActiveContact] = useState<Contact | null>(null);
+  const [detailTab, setDetailTab] = useState<'activity' | 'compliance' | 'deals'>('activity');
 
   const stageOptions = useMemo(() => {
     if (!lockedStages) return STAGE_OPTIONS;
@@ -198,185 +241,201 @@ export function ContactList({
   const filterActive = !!debouncedQuery.trim() || !!stageFilter;
   const selectedIds = useMemo(() => Array.from(selected), [selected]);
 
+  function openContact(c: Contact) {
+    setActiveContact(c);
+    setDetailTab('activity');
+  }
+
+  const columns: Column<Contact>[] = [
+    {
+      id: 'contact',
+      header: 'Contact',
+      sortable: true,
+      sortValue: (c) => contactName(c).toLowerCase(),
+      cell: (c) => (
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--crm-primary)] text-[12px] font-medium text-[var(--crm-on-primary)]">
+            {(c.first_name?.[0] ?? c.email?.[0] ?? '?').toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <div className="truncate font-medium text-[var(--crm-text-primary)]">{contactName(c)}</div>
+            <div className="truncate text-[12px] text-[var(--crm-text-tertiary)]">{c.email ?? '—'}</div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: 'phone',
+      header: 'Phone',
+      cell: (c) => <span className="tabular-nums text-[var(--crm-text-secondary)]">{formatPhone(c.phone)}</span>,
+    },
+    {
+      id: 'source',
+      header: 'Source',
+      cell: (c) => <span className="text-[var(--crm-text-tertiary)]">{c.source}</span>,
+    },
+    {
+      id: 'temperature',
+      header: 'Temp',
+      sortable: true,
+      sortValue: (c) => {
+        const t = temperatureForStage(c.lifecycle_stage);
+        return t === 'hot' ? 0 : t === 'warm' ? 1 : 2;
+      },
+      cell: (c) => {
+        const t = temperatureForStage(c.lifecycle_stage);
+        return (
+          <StatusPill temperature={t} size="sm" className="capitalize" data-testid="crm-contact-temperature">
+            {t}
+          </StatusPill>
+        );
+      },
+    },
+    {
+      id: 'stage',
+      header: 'Stage',
+      sortable: true,
+      sortValue: (c) => c.lifecycle_stage,
+      cell: (c) => <StageBadge stage={c.lifecycle_stage} />,
+    },
+    {
+      id: 'added',
+      header: 'Added',
+      align: 'right',
+      sortable: true,
+      sortValue: (c) => new Date(c.created_at).getTime(),
+      cell: (c) => <span className="text-[12px] text-[var(--crm-text-tertiary)]">{formatDate(c.created_at)}</span>,
+    },
+  ];
+
   return (
-    <div className="p-6 space-y-5">
-      <header className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">{pageTitle}</h1>
-          <p className="text-sm text-gray-500 mt-1">{pageDescription}</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {total > 0 && (
-            <span className="text-xs text-gray-500 hidden md:inline">
-              Showing <span className="text-gray-900 font-medium">{startRow}–{endRow}</span> of{' '}
-              <span className="text-gray-900 font-medium">{total}</span>
-            </span>
-          )}
-          <button
-            onClick={syncExisting}
-            disabled={syncing}
-            className="flex items-center gap-1.5 text-sm bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg px-3 py-2 transition-colors disabled:opacity-50"
-          >
-            {syncing ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <RefreshCcw className="w-4 h-4" />
+    <div className="p-6 space-y-5" data-testid="crm-contact-list">
+      <PageHeader
+        title={pageTitle}
+        subtitle={pageDescription}
+        data-testid="crm-contacts-header"
+        actions={
+          <>
+            {total > 0 && (
+              <span className="hidden text-[12px] text-[var(--crm-text-tertiary)] md:inline">
+                Showing{' '}
+                <span className="font-medium text-[var(--crm-text-secondary)]">{startRow}–{endRow}</span> of{' '}
+                <span className="font-medium text-[var(--crm-text-secondary)]">{total}</span>
+              </span>
             )}
-            Sync existing records
-          </button>
-          <button
-            onClick={() => setImportOpen(true)}
-            className="flex items-center gap-1.5 text-sm bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg px-3 py-2 transition-colors"
-          >
-            <Upload className="w-4 h-4" /> Import CSV
-          </button>
-          <button
-            onClick={() => setAddOpen(true)}
-            className="flex items-center gap-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-2 transition-colors"
-          >
-            <UserPlus className="w-4 h-4" /> Add Contact
-          </button>
-        </div>
-      </header>
+            <Button
+              variant="secondary"
+              onClick={syncExisting}
+              disabled={syncing}
+              data-testid="crm-contacts-sync"
+            >
+              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+              Sync existing
+            </Button>
+            <Button variant="secondary" onClick={() => setImportOpen(true)} data-testid="crm-contacts-import">
+              <Upload className="h-4 w-4" /> Import CSV
+            </Button>
+            <Button variant="primary" onClick={() => setAddOpen(true)} data-testid="crm-contacts-add">
+              <UserPlus className="h-4 w-4" /> Add contact
+            </Button>
+          </>
+        }
+      />
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+      <DataTable
+        data-testid="crm-contacts-table"
+        columns={columns}
+        rows={contacts}
+        getRowId={(c) => c.id}
+        loading={loading}
+        onSelect={openContact}
+        activeRowId={activeContact?.id ?? null}
+        toolbar={
+          <Toolbar data-testid="crm-contacts-toolbar">
+            <SearchField
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by name, email, or phone…"
+              data-testid="crm-contacts-search"
+            />
+            <SelectField
+              value={stageFilter}
+              onChange={(e) => setStageFilter(e.target.value as LifecycleStage | '')}
+              disabled={lockedStages && lockedStages.length === 1}
+              data-testid="crm-contacts-stage-filter"
+            >
+              <option value="">All stages</option>
+              {stageOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </SelectField>
+          </Toolbar>
+        }
+        leadingHeader={
           <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, email, or phone…"
-            className="w-full bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 outline-none rounded-lg pl-10 pr-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition-colors"
+            type="checkbox"
+            checked={allSelected}
+            onChange={toggleAll}
+            aria-label="Select all"
+            data-testid="crm-contacts-select-all"
+            className="rounded border-[var(--crm-border-strong)] text-[var(--crm-primary)] focus:ring-[var(--crm-ring)]"
           />
-        </div>
-        <select
-          value={stageFilter}
-          onChange={(e) => setStageFilter(e.target.value as LifecycleStage | '')}
-          className="bg-white border border-gray-300 hover:border-gray-400 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
-          disabled={lockedStages && lockedStages.length === 1}
-        >
-          <option value="">All stages</option>
-          {stageOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Table */}
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="py-20 flex items-center justify-center">
-            <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
-          </div>
-        ) : contacts.length === 0 ? (
-          <div className="py-20 text-center">
-            <Users className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-sm text-gray-700 font-medium">No contacts found</p>
-            <p className="text-xs text-gray-500 mt-1">
-              {filterActive
-                ? 'Try adjusting your filters or search query.'
-                : 'Contacts will appear here as buyers, dealers, and leads sign up.'}
-            </p>
-            {!filterActive && (
-              <button
-                onClick={syncExisting}
-                className="mt-4 text-xs text-blue-600 hover:text-blue-700 font-medium"
-              >
-                Sync existing buyers, dealers, and affiliates →
-              </button>
-            )}
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">
-                <th className="px-4 py-3 w-10">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleAll}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                </th>
-                <th className="px-4 py-3 text-left">Contact</th>
-                <th className="px-4 py-3 text-left">Phone</th>
-                <th className="px-4 py-3 text-left">Source</th>
-                <th className="px-4 py-3 text-left">Stage</th>
-                <th className="px-4 py-3 text-left">Added</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {contacts.map((c) => {
-                const name =
-                  [c.first_name, c.last_name].filter(Boolean).join(' ') ||
-                  c.email ||
-                  c.phone ||
-                  'Unknown';
-                return (
-                  <tr
-                    key={c.id}
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
-                    onClick={() => router.push(`/admin/crm/contacts/${c.id}`)}
-                  >
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(c.id)}
-                        onChange={() => toggleOne(c.id)}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-semibold text-white shrink-0">
-                          {(c.first_name?.[0] ?? c.email?.[0] ?? '?').toUpperCase()}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-gray-900 font-medium truncate">{name}</div>
-                          <div className="text-xs text-gray-500 truncate">{c.email ?? '—'}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-gray-700 tabular-nums">
-                      {formatPhone(c.phone)}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">{c.source}</td>
-                    <td className="px-4 py-3">
-                      <StageBadge stage={c.lifecycle_stage} />
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(c.created_at)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        }
+        leading={(c) => (
+          <input
+            type="checkbox"
+            checked={selected.has(c.id)}
+            onChange={() => toggleOne(c.id)}
+            aria-label={`Select ${contactName(c)}`}
+            className="rounded border-[var(--crm-border-strong)] text-[var(--crm-primary)] focus:ring-[var(--crm-ring)]"
+          />
         )}
-      </div>
+        empty={
+          <EmptyState
+            icon={Users}
+            title="No contacts found"
+            description={
+              filterActive
+                ? 'Try adjusting your filters or search query.'
+                : 'Contacts will appear here as buyers, dealers, and leads sign up.'
+            }
+            data-testid="crm-contacts-empty"
+            action={
+              !filterActive ? (
+                <Button variant="secondary" onClick={syncExisting} data-testid="crm-contacts-empty-sync">
+                  Sync existing buyers, dealers, and affiliates
+                </Button>
+              ) : undefined
+            }
+          />
+        }
+      />
 
       {/* Pagination */}
       {!loading && contacts.length > 0 && totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <div className="text-xs text-gray-500">
-            Page <span className="text-gray-900 font-medium">{page}</span> of{' '}
-            <span className="text-gray-900 font-medium">{totalPages}</span>
+        <div className="flex items-center justify-between" data-testid="crm-contacts-pagination">
+          <div className="text-[12px] text-[var(--crm-text-tertiary)]">
+            Page <span className="font-medium text-[var(--crm-text-secondary)]">{page}</span> of{' '}
+            <span className="font-medium text-[var(--crm-text-secondary)]">{totalPages}</span>
           </div>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="p-1.5 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+              data-testid="crm-contacts-prev"
+              className="rounded-[var(--crm-radius-sm)] p-1.5 text-[var(--crm-text-secondary)] hover:bg-[var(--crm-bg-tertiary)] hover:text-[var(--crm-text-primary)] disabled:cursor-not-allowed disabled:opacity-30"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="h-4 w-4" />
             </button>
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
-              className="p-1.5 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed"
+              data-testid="crm-contacts-next"
+              className="rounded-[var(--crm-radius-sm)] p-1.5 text-[var(--crm-text-secondary)] hover:bg-[var(--crm-bg-tertiary)] hover:text-[var(--crm-text-primary)] disabled:cursor-not-allowed disabled:opacity-30"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -384,67 +443,166 @@ export function ContactList({
 
       {/* Bulk action bar */}
       {someSelected && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-3 flex items-center gap-3">
-          <span className="text-sm text-gray-900">
-            <span className="font-semibold">{selected.size}</span> selected
+        <div
+          className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 rounded-[var(--crm-radius-md)] border border-[var(--crm-border-strong)] crm-hairline bg-[var(--crm-bg-primary)] px-4 py-3"
+          data-testid="crm-contacts-bulk-bar"
+        >
+          <span className="text-[13px] text-[var(--crm-text-primary)]">
+            <span className="font-medium">{selected.size}</span> selected
           </span>
-          <span className="text-gray-300">·</span>
+          <span className="text-[var(--crm-text-tertiary)]">·</span>
           <button
             onClick={() => setBulkEmailOpen(true)}
-            className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-gray-900"
+            data-testid="crm-contacts-bulk-email"
+            className="flex items-center gap-1.5 text-[13px] text-[var(--crm-text-secondary)] hover:text-[var(--crm-text-primary)]"
           >
-            <Mail className="w-4 h-4" /> Email
+            <Mail className="h-4 w-4" /> Email
           </button>
           <button
             onClick={() => setBulkSmsOpen(true)}
-            className="flex items-center gap-1.5 text-sm text-gray-700 hover:text-gray-900"
+            data-testid="crm-contacts-bulk-sms"
+            className="flex items-center gap-1.5 text-[13px] text-[var(--crm-text-secondary)] hover:text-[var(--crm-text-primary)]"
           >
-            <MessageSquare className="w-4 h-4" /> SMS
+            <MessageSquare className="h-4 w-4" /> SMS
           </button>
           <button
             onClick={() => setConfirmDelete(true)}
-            className="flex items-center gap-1.5 text-sm text-red-600 hover:text-red-700"
+            data-testid="crm-contacts-bulk-delete"
+            className="flex items-center gap-1.5 text-[13px] text-[var(--crm-danger)] hover:opacity-80"
           >
-            <Trash2 className="w-4 h-4" /> Delete
+            <Trash2 className="h-4 w-4" /> Delete
           </button>
-          <span className="text-gray-300">·</span>
+          <span className="text-[var(--crm-text-tertiary)]">·</span>
           <button
             onClick={() => setSelected(new Set())}
-            className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"
+            data-testid="crm-contacts-bulk-clear"
+            className="flex items-center gap-1 text-[13px] text-[var(--crm-text-tertiary)] hover:text-[var(--crm-text-secondary)]"
           >
-            <X className="w-3.5 h-3.5" /> Clear
+            <X className="h-3.5 w-3.5" /> Clear
           </button>
         </div>
       )}
 
       {/* Delete confirmation */}
       {confirmDelete && (
-        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
-          <div className="bg-white border border-gray-200 rounded-xl p-6 max-w-md w-full shadow-xl">
-            <h3 className="text-base font-semibold text-gray-900">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-md rounded-[var(--crm-radius-lg)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] p-6">
+            <h3 className="text-[16px] font-medium text-[var(--crm-text-primary)]">
               Delete {selected.size} contact{selected.size === 1 ? '' : 's'}?
             </h3>
-            <p className="text-sm text-gray-500 mt-2">
+            <p className="mt-2 text-[13px] text-[var(--crm-text-secondary)]">
               This will soft-delete the selected contacts. They will be hidden from lists but can
               be restored by an admin if needed.
             </p>
-            <div className="flex justify-end gap-2 mt-5">
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="px-4 py-2 text-sm text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors"
-              >
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setConfirmDelete(false)} data-testid="crm-contacts-delete-cancel">
                 Cancel
-              </button>
-              <button
-                onClick={bulkDelete}
-                className="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
-              >
+              </Button>
+              <Button variant="danger" onClick={bulkDelete} data-testid="crm-contacts-delete-confirm">
                 Delete {selected.size} contact{selected.size === 1 ? '' : 's'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Contact profile SlideOver */}
+      <SlideOver
+        open={!!activeContact}
+        onClose={() => setActiveContact(null)}
+        data-testid="crm-contact-slideover"
+        title={activeContact ? contactName(activeContact) : ''}
+        subtitle={activeContact?.email ?? activeContact?.phone ?? undefined}
+        footer={
+          activeContact && (
+            <Link
+              href={`/admin/crm/contacts/${activeContact.id}`}
+              data-testid="crm-contact-open-profile"
+              className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--crm-primary)] hover:text-[var(--crm-primary-hover)]"
+            >
+              Open full profile <ExternalLink className="h-3.5 w-3.5" />
+            </Link>
+          )
+        }
+      >
+        {activeContact && (
+          <div>
+            <div className="px-5 pt-4">
+              <Tabs
+                data-testid="crm-contact-tabs"
+                value={detailTab}
+                onValueChange={(id) => setDetailTab(id as typeof detailTab)}
+                tabs={[
+                  { id: 'activity', label: 'Activity' },
+                  { id: 'compliance', label: 'Consent & compliance', trust: true },
+                  { id: 'deals', label: 'Deals / identities' },
+                ]}
+              />
+            </div>
+
+            <div className="p-5">
+              {detailTab === 'activity' && (
+                <EmptyState
+                  icon={ActivityIcon}
+                  title="Activity lives on the full profile"
+                  description="Open the full profile to see this contact's complete timeline."
+                  data-testid="crm-contact-activity-empty"
+                  action={
+                    <Link
+                      href={`/admin/crm/contacts/${activeContact.id}`}
+                      className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--crm-primary)] hover:text-[var(--crm-primary-hover)]"
+                    >
+                      View timeline <ExternalLink className="h-3.5 w-3.5" />
+                    </Link>
+                  }
+                />
+              )}
+
+              {detailTab === 'compliance' && (
+                <div
+                  className="space-y-3 rounded-[var(--crm-radius-md)] border border-[var(--crm-trust-subtle)] crm-hairline bg-[var(--crm-trust-subtle)] p-4"
+                  data-testid="crm-contact-compliance"
+                >
+                  <div className="flex items-center gap-2 text-[13px] font-medium text-[var(--crm-trust)]">
+                    <ShieldCheck className="h-4 w-4" /> Consent &amp; compliance record
+                  </div>
+                  <ConsentRow label="SMS consent" granted={activeContact.consent_sms} />
+                  <ConsentRow label="Email consent" granted={activeContact.consent_email} />
+                  <ConsentRow label="Do not contact" granted={activeContact.do_not_contact} invert />
+                  <FieldRow label="Consent timestamp" value={activeContact.consent_at ? formatDate(activeContact.consent_at) : '—'} />
+                  <FieldRow label="Consent IP" value={activeContact.consent_ip ?? '—'} mono />
+                  {activeContact.consent_text && (
+                    <div>
+                      <div className="text-[12px] text-[var(--crm-text-tertiary)]">Consent language</div>
+                      <p className="mt-1 text-[12px] text-[var(--crm-text-secondary)]">{activeContact.consent_text}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {detailTab === 'deals' && (
+                <div className="space-y-3" data-testid="crm-contact-deals">
+                  <div className="flex items-center gap-2 text-[13px] font-medium text-[var(--crm-text-primary)]">
+                    <Briefcase className="h-4 w-4 text-[var(--crm-text-tertiary)]" /> Identities &amp; record
+                  </div>
+                  <FieldRow label="Source" value={activeContact.source} />
+                  <FieldRow label="Lifecycle stage" value={<StageBadge stage={activeContact.lifecycle_stage} size="sm" />} />
+                  <FieldRow
+                    label="Tags"
+                    value={
+                      activeContact.tags && activeContact.tags.length > 0
+                        ? activeContact.tags.join(', ')
+                        : '—'
+                    }
+                  />
+                  <FieldRow label="Contact ID" value={activeContact.id} mono />
+                  <FieldRow label="Created" value={formatDate(activeContact.created_at)} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </SlideOver>
 
       {/* Modals */}
       {addOpen && (
@@ -492,15 +650,63 @@ export function ContactList({
       {/* Toast */}
       {toast && (
         <div
-          className={`fixed top-20 right-6 z-50 max-w-sm rounded-lg shadow-lg px-4 py-3 border text-sm font-medium ${
+          data-testid="crm-contacts-toast"
+          className={`fixed right-6 top-20 z-50 max-w-sm rounded-[var(--crm-radius-md)] border px-4 py-3 text-[13px] font-medium ${
             toast.kind === 'success'
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-              : 'bg-red-50 border-red-200 text-red-800'
+              ? 'border-[var(--crm-success-subtle)] bg-[var(--crm-success-subtle)] text-[var(--crm-success)]'
+              : 'border-[var(--crm-danger-subtle)] bg-[var(--crm-danger-subtle)] text-[var(--crm-danger)]'
           }`}
         >
           {toast.text}
         </div>
       )}
+    </div>
+  );
+}
+
+function FieldRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: React.ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <span className="text-[12px] text-[var(--crm-text-tertiary)]">{label}</span>
+      <span
+        className={`text-right text-[13px] text-[var(--crm-text-primary)] ${mono ? 'font-[family-name:var(--font-mono)] text-[12px]' : ''}`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function ConsentRow({
+  label,
+  granted,
+  invert = false,
+}: {
+  label: string;
+  granted: boolean;
+  invert?: boolean;
+}) {
+  // For normal consents, granted = good. For "do not contact", granted = flagged.
+  const positive = invert ? !granted : granted;
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <span className="text-[12px] text-[var(--crm-text-secondary)]">{label}</span>
+      <span
+        className={`inline-flex items-center gap-1 text-[12px] font-medium ${
+          positive ? 'text-[var(--crm-success)]' : 'text-[var(--crm-danger)]'
+        }`}
+      >
+        {positive ? <Check className="h-3.5 w-3.5" /> : <Ban className="h-3.5 w-3.5" />}
+        {granted ? 'Yes' : 'No'}
+      </span>
     </div>
   );
 }

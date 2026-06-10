@@ -92,3 +92,99 @@ body {
 .animate-fadein {
   animation: fadein 280ms ease-out both;
 }
+
+/* ===========================================================================
+   AutoLenis CRM design tokens (#2) — consumed by components/admin/crm/ui/*.
+   Scoped to `.crm-root` so the global `.dark` contract is untouched. Dark mode
+   flips these VARIABLES (`.crm-root[data-theme="dark"]`), never component code.
+   Flat / dense / calm: 0.5px borders, focus rings only, no shadows/gradients.
+   =========================================================================== */
+.crm-root {
+  color-scheme: light;
+
+  /* geometry */
+  --crm-radius-sm: 4px;
+  --crm-radius-md: 6px;
+  --crm-radius-lg: 8px;
+
+  /* surfaces */
+  --crm-bg-primary: #ffffff;
+  --crm-bg-secondary: #f7f8fa;
+  --crm-bg-tertiary: #eef1f5;
+
+  /* borders (rendered at 0.5px) */
+  --crm-border: #e4e7ec;
+  --crm-border-strong: #d0d5dd;
+
+  /* text */
+  --crm-text-primary: #101828;
+  --crm-text-secondary: #475467;
+  --crm-text-tertiary: #98a2b3;
+
+  /* brand primary #0B5FD1 */
+  --crm-primary: #0b5fd1;
+  --crm-primary-hover: #0a54b8;
+  --crm-primary-active: #0948a0;
+  --crm-primary-subtle: #e8f1fc;
+  --crm-on-primary: #ffffff;
+
+  /* trust / compliance #643293 — consent / FCRA / audit / Contract Shield only */
+  --crm-trust: #643293;
+  --crm-trust-subtle: #f1eaf8;
+
+  /* semantic */
+  --crm-success: #15803d;
+  --crm-success-subtle: #ecfdf3;
+  --crm-warning: #b45309;
+  --crm-warning-subtle: #fffaeb;
+  --crm-danger: #dc2626;
+  --crm-danger-subtle: #fef3f2;
+  --crm-info: #0b5fd1;
+  --crm-info-subtle: #e8f1fc;
+
+  /* focus ring */
+  --crm-ring: #0b5fd1;
+
+  background-color: var(--crm-bg-secondary);
+  color: var(--crm-text-primary);
+}
+
+.crm-root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --crm-bg-primary: #0c111d;
+  --crm-bg-secondary: #0a0e16;
+  --crm-bg-tertiary: #1c2533;
+
+  --crm-border: #1f2a37;
+  --crm-border-strong: #344054;
+
+  --crm-text-primary: #f9fafb;
+  --crm-text-secondary: #98a2b3;
+  --crm-text-tertiary: #667085;
+
+  --crm-primary: #4da3ff;
+  --crm-primary-hover: #6fb6ff;
+  --crm-primary-active: #8ec6ff;
+  --crm-primary-subtle: rgba(77, 163, 255, 0.14);
+  --crm-on-primary: #0a0e16;
+
+  --crm-trust: #b794d4;
+  --crm-trust-subtle: rgba(183, 148, 212, 0.16);
+
+  --crm-success: #4ade80;
+  --crm-success-subtle: rgba(74, 222, 128, 0.14);
+  --crm-warning: #fbbf24;
+  --crm-warning-subtle: rgba(251, 191, 36, 0.14);
+  --crm-danger: #f87171;
+  --crm-danger-subtle: rgba(248, 113, 113, 0.14);
+  --crm-info: #4da3ff;
+  --crm-info-subtle: rgba(77, 163, 255, 0.14);
+
+  --crm-ring: #4da3ff;
+}
+
+/* 0.5px hairline borders where supported */
+@supports (border-width: 0.5px) {
+  .crm-hairline { border-width: 0.5px; }
+}
