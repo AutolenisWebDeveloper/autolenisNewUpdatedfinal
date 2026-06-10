@@ -114,7 +114,7 @@ export async function generateDalleImage(input: {
         n: 1,
         size,
         quality: "standard", // "hd" costs 2x — use standard for volume
-        response_format: "url",
+        // response_format removed — OpenAI no longer accepts it; URLs are returned by default
       }),
     });
 
