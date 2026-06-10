@@ -135,6 +135,24 @@ async function syncBuyerContact(
       consentText: 'AutoLenis buyer registration',
     });
     await ContactService.linkContactIdentity(crmSupabase, contact.id, 'buyer', buyer.id);
+
+    // Emit the buyer_signup domain event → Make.com orchestration (+ legacy
+    // in-app engine behind the cutover flag). Best-effort; never blocks signup.
+    const { emitDomainEvent } = await import("@/lib/events/emit");
+    await emitDomainEvent('buyer_signup', {
+      domainEntityId: buyer.id,
+      supabase: crmSupabase,
+      contact: {
+        email,
+        phone: buyer.phone ?? null,
+        firstName: buyer.firstName ?? (meta.firstName as string | undefined),
+        lastName: buyer.lastName ?? (meta.lastName as string | undefined),
+        source: 'buyer_signup',
+        consentEmail: true,
+        consentText: 'AutoLenis buyer registration',
+      },
+      data: { buyer_id: buyer.id },
+    });
   } catch (err) {
     console.error("[auth/callback] CRM contact sync failed:", err);
   }

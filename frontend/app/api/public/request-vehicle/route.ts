@@ -500,7 +500,7 @@ export async function POST(request: NextRequest) {
     try {
       const { getServiceSupabase } = await import("@/lib/supabase-service");
       const { ContactService } = await import("@/lib/services/contact.service");
-      const { WorkflowEngine } = await import("@/lib/services/workflow.engine");
+      const { emitDomainEvent } = await import("@/lib/events/emit");
       const supabase = getServiceSupabase();
       const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? undefined;
 
@@ -581,15 +581,24 @@ export async function POST(request: NextRequest) {
         created_by: null,
       });
 
-      // 5. Trigger the vehicle_request_submitted workflow (prebuilt sequence).
-      //    updateLifecycleStage above only fires triggers mapped in
-      //    STAGE_TO_TRIGGER — prequal_started is not mapped, so we call the
-      //    workflow engine directly here.
-      await WorkflowEngine.triggerForEvent(
+      // 5. Emit the vehicle_request_submitted domain event. This forwards the
+      //    signed envelope to Make.com (the orchestration layer) and ALSO drives
+      //    the legacy in-app engine while CRM_INAPP_ENGINE_ENABLED === 'true'
+      //    (cutover flag) — replacing the prior direct WorkflowEngine call so we
+      //    never double-fire once Make scenarios own the sequence.
+      await emitDomainEvent("vehicle_request_submitted", {
+        domainEntityId: vehicleRequestId,
         supabase,
-        "vehicle_request_submitted",
-        contact.id,
-        {
+        contact: {
+          email:        data.email,
+          phone:        data.phone,
+          firstName:    data.firstName,
+          lastName:     data.lastName,
+          source:       "public_form",
+          consentEmail: data.consent_email ?? true,
+          consentSms:   data.consent_sms ?? false,
+        },
+        data: {
           vehicle_type: data.vehicleType,
           budget:       data.budget,
           timeline:     data.timeline,
@@ -597,7 +606,7 @@ export async function POST(request: NextRequest) {
           utm_source:   data.utm_source ?? null,
           vehicle_request_id: vehicleRequestId,
         },
-      );
+      });
     } catch (crmErr) {
       console.error("[request-vehicle] CRM pipeline sync failed:", crmErr);
     }

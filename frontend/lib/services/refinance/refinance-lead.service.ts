@@ -112,6 +112,29 @@ export async function submitRefinanceLead(input: RefinanceLeadInput): Promise<Re
     },
   });
 
+  // Emit the refinance_inquiry domain event AFTER all FCRA/compliance writes —
+  // additive only, never touching the lending logic above. Best-effort:
+  // a failure here must never block or alter the lead submission outcome.
+  try {
+    const { emitDomainEvent } = await import("@/lib/events/emit");
+    await emitDomainEvent("refinance_inquiry", {
+      domainEntityId: lead.id,
+      contact: {
+        email: input.email.toLowerCase().trim(),
+        phone: input.phone.trim(),
+        firstName: input.firstName.trim(),
+        lastName: input.lastName.trim(),
+        source: "public_form",
+        consentSms: input.consentGiven,
+        consentEmail: input.consentGiven,
+        consentText: "AutoLenis refinance eligibility form (TCPA consent)",
+      },
+      data: { lead_id: lead.id, qualified, status, state: input.state.toUpperCase() },
+    });
+  } catch (err) {
+    console.error("[refinance-lead] emit failed:", err);
+  }
+
   return { leadId: lead.leadId, qualified, status };
 }
 

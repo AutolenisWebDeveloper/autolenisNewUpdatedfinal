@@ -77,6 +77,28 @@ export async function POST(request: NextRequest) {
     console.error("[dealer/invite] Email error:", err);
   }
 
+  // Emit the dealer_invited domain event → Make.com orchestration (+ legacy
+  // in-app engine behind the cutover flag). Best-effort; never blocks the invite.
+  try {
+    const { emitDomainEvent } = await import("@/lib/events/emit");
+    await emitDomainEvent("dealer_invited", {
+      domainEntityId: invitation.id,
+      contact: {
+        email: email.toLowerCase(),
+        firstName: contactName,
+        source: "dealer_signup",
+      },
+      data: {
+        invitation_id: invitation.id,
+        dealership_name: dealershipName,
+        invite_url: inviteUrl,
+        expires_at: expiresAt.toISOString(),
+      },
+    });
+  } catch (err) {
+    console.error("[dealer/invite] emit failed:", err);
+  }
+
   return NextResponse.json({
     success: true,
     data: {

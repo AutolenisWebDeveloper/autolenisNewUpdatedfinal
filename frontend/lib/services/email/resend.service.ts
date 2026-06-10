@@ -202,6 +202,31 @@ async function sendIdempotent(params: {
   /* DEV_SKIPPED */              return { sent: false, outcome: "DEV_SKIPPED" };
 }
 
+// ─── CRM Dispatch Wrapper ─────────────────────────────────────────────────────
+// Outcome-verified entrypoint for the Make.com inbound dispatch endpoint
+// (/api/crm/dispatch/email). It does NOT rewrite the send core — it delegates
+// to the same idempotent rail as every other template, exposing the existing
+// EmailSendOutcome discriminated union so the dispatch route can tell SENT from
+// DUPLICATE / FAILED / DEV_SKIPPED and never record a swallowed success as
+// delivered. Consent + suppression gating happen in the route BEFORE this call.
+export async function sendCrmDispatchEmail(params: {
+  to: string;
+  subject: string;
+  html: string;
+  idempotencyKey: string;
+  // Stable template handle for audit/log attribution (e.g. a Make scenario's
+  // templateKey). Falls back to a generic dispatch label.
+  templateKey?: string;
+}): Promise<EmailSendOutcome> {
+  return sendIdempotent({
+    idempotencyKey: params.idempotencyKey,
+    to: params.to,
+    subject: params.subject,
+    html: params.html,
+    templateId: params.templateKey ?? "crm-dispatch",
+  });
+}
+
 // ─── Email Templates ────────────────────────────────────────────────────────
 
 export async function sendWelcomeEmail(params: {
