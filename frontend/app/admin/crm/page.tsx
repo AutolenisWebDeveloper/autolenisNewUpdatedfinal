@@ -7,14 +7,12 @@ import {
   Inbox,
   AlertTriangle,
   ArrowRight,
-  Send,
-  Zap,
-  BarChart3,
-  type LucideIcon,
 } from 'lucide-react';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import type { LifecycleStage, TimelineEvent } from '@/lib/types/crm';
-import { timelineVisual } from '@/components/admin/crm/TimelineIcon';
+import { OverviewActivityTable, type ActivityRow } from '@/components/admin/crm/OverviewActivityTable';
+import { KpiCard, Badge } from '@/components/admin/crm/ui';
+import { PageHeader } from '@/components/admin/crm/ui/PageHeader';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,26 +30,14 @@ const STAGE_ORDER: LifecycleStage[] = [
 
 const STAGE_LABEL: Record<LifecycleStage, string> = {
   lead: 'Lead',
-  prequal_started: 'Prequal Started',
-  prequal_completed: 'Prequal Completed',
-  deposit_pending: 'Deposit Pending',
-  deposit_paid: 'Deposit Paid',
-  auction_active: 'Auction Active',
-  offer_received: 'Offer Received',
+  prequal_started: 'Prequal started',
+  prequal_completed: 'Prequal completed',
+  deposit_pending: 'Deposit pending',
+  deposit_paid: 'Deposit paid',
+  auction_active: 'Auction active',
+  offer_received: 'Offer received',
   purchase_completed: 'Purchased',
   inactive: 'Inactive',
-};
-
-const STAGE_BAR: Record<LifecycleStage, string> = {
-  lead: 'bg-gray-600',
-  prequal_started: 'bg-yellow-600',
-  prequal_completed: 'bg-yellow-500',
-  deposit_pending: 'bg-orange-500',
-  deposit_paid: 'bg-green-600',
-  auction_active: 'bg-blue-600',
-  offer_received: 'bg-purple-600',
-  purchase_completed: 'bg-emerald-600',
-  inactive: 'bg-gray-700',
 };
 
 const ACTIVE_LEAD_STAGES: LifecycleStage[] = [
@@ -60,18 +46,6 @@ const ACTIVE_LEAD_STAGES: LifecycleStage[] = [
 const IN_PROGRESS_STAGES: LifecycleStage[] = [
   'deposit_paid', 'auction_active', 'offer_received',
 ];
-
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const sec = Math.floor(diff / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  return `${day}d ago`;
-}
 
 export default async function CrmOverviewPage() {
   const supabase = getServiceSupabase();
@@ -153,213 +127,135 @@ export default async function CrmOverviewPage() {
       | { first_name: string | null; last_name: string | null; email: string | null }[]
       | null;
   };
-  const events = ((eventsRes.data ?? []) as unknown as RawEvent[]).map((ev) => ({
-    ...ev,
-    contact: Array.isArray(ev.contact) ? ev.contact[0] ?? null : ev.contact,
+  const events = ((eventsRes.data ?? []) as unknown as RawEvent[]).map((ev) => {
+    const contact = Array.isArray(ev.contact) ? ev.contact[0] ?? null : ev.contact;
+    const name = contact
+      ? [contact.first_name, contact.last_name].filter(Boolean).join(' ') ||
+        contact.email ||
+        'Unknown'
+      : 'Unknown';
+    return { ...ev, name } as RawEvent & { name: string };
+  });
+
+  const activityRows: ActivityRow[] = events.map((ev) => ({
+    id: ev.id,
+    contactId: ev.contact_id,
+    eventType: ev.event_type,
+    name: ev.name,
+    createdAt: ev.created_at,
   }));
 
   return (
-    <div className="p-6 space-y-6">
-      <header>
-        <h1 className="text-xl font-bold text-gray-900">CRM Overview</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Operational snapshot across the entire contact lifecycle.
-        </p>
-      </header>
-
-      {/* Alert banners */}
-      <div className="grid gap-3">
-        {overdue > 0 && (
-          <Link
-            href="/admin/crm/tasks"
-            className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 hover:bg-red-50 transition-colors"
-          >
-            <AlertTriangle className="w-5 h-5 text-red-600" />
-            <div className="flex-1">
-              <div className="text-sm font-semibold text-red-700">
-                {overdue} overdue task{overdue === 1 ? '' : 's'}
-              </div>
-              <div className="text-xs text-red-700/70">
-                Tasks past their due date need attention.
-              </div>
-            </div>
-            <ArrowRight className="w-4 h-4 text-red-700" />
-          </Link>
-        )}
-        {unread > 0 && (
-          <Link
-            href="/admin/crm/inbox"
-            className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/30 rounded-xl px-4 py-3 hover:bg-blue-50 transition-colors"
-          >
-            <Inbox className="w-5 h-5 text-blue-600" />
-            <div className="flex-1">
-              <div className="text-sm font-semibold text-blue-700">
-                {unread} unread message{unread === 1 ? '' : 's'}
-              </div>
-              <div className="text-xs text-blue-700/70">
-                Inbound conversations awaiting reply.
-              </div>
-            </div>
-            <ArrowRight className="w-4 h-4 text-blue-700" />
-          </Link>
-        )}
-      </div>
-
-      {/* Metric grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-        <MetricCard icon={Users}        label="Total Contacts" value={totalContacts} />
-        <MetricCard icon={UserPlus}     label="Active Leads"   value={activeLeads} />
-        <MetricCard icon={Activity}     label="In Progress"    value={inProgress} />
-        <MetricCard icon={CheckCircle2} label="Purchased"      value={purchased} accent="emerald" />
-        <MetricCard icon={Inbox}        label="Unread Msgs"    value={unread} accent={unread > 0 ? 'blue' : undefined} />
-        <MetricCard icon={AlertTriangle} label="Overdue Tasks"  value={overdue} accent={overdue > 0 ? 'red' : undefined} />
-      </div>
-
-      {/* Lifecycle funnel */}
-      <section className="bg-white border border-gray-200 rounded-xl p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-gray-900">Lifecycle Funnel</h2>
+    <div className="p-6 space-y-6" data-testid="crm-overview">
+      <PageHeader
+        title="CRM overview"
+        subtitle="Operational snapshot across the entire contact lifecycle."
+        data-testid="crm-overview-header"
+        actions={
           <Link
             href="/admin/crm/contacts"
-            className="text-xs text-blue-600 hover:text-blue-700"
+            data-testid="crm-overview-view-contacts"
+            className="inline-flex items-center gap-1.5 rounded-[var(--crm-radius-sm)] border border-[var(--crm-border-strong)] crm-hairline bg-[var(--crm-bg-primary)] px-3 py-1.5 text-[13px] font-medium text-[var(--crm-text-secondary)] transition-colors hover:bg-[var(--crm-bg-secondary)] hover:text-[var(--crm-text-primary)]"
           >
-            View contacts →
+            View contacts <ArrowRight className="h-3.5 w-3.5" />
           </Link>
+        }
+      />
+
+      {/* Alert banners */}
+      {(overdue > 0 || unread > 0) && (
+        <div className="grid gap-3" data-testid="crm-overview-alerts">
+          {overdue > 0 && (
+            <Link
+              href="/admin/crm/tasks"
+              data-testid="crm-overview-alert-overdue"
+              className="flex items-center gap-3 rounded-[var(--crm-radius-md)] border border-[var(--crm-danger-subtle)] crm-hairline bg-[var(--crm-danger-subtle)] px-4 py-3 transition-colors hover:brightness-[0.99]"
+            >
+              <AlertTriangle className="h-5 w-5 text-[var(--crm-danger)]" />
+              <div className="flex-1">
+                <div className="text-[13px] font-medium text-[var(--crm-danger)]">
+                  {overdue} overdue task{overdue === 1 ? '' : 's'}
+                </div>
+                <div className="text-[12px] text-[var(--crm-text-tertiary)]">
+                  Tasks past their due date need attention.
+                </div>
+              </div>
+              <ArrowRight className="h-4 w-4 text-[var(--crm-danger)]" />
+            </Link>
+          )}
+          {unread > 0 && (
+            <Link
+              href="/admin/crm/inbox"
+              data-testid="crm-overview-alert-unread"
+              className="flex items-center gap-3 rounded-[var(--crm-radius-md)] border border-[var(--crm-info-subtle)] crm-hairline bg-[var(--crm-info-subtle)] px-4 py-3 transition-colors hover:brightness-[0.99]"
+            >
+              <Inbox className="h-5 w-5 text-[var(--crm-info)]" />
+              <div className="flex-1">
+                <div className="text-[13px] font-medium text-[var(--crm-info)]">
+                  {unread} unread message{unread === 1 ? '' : 's'}
+                </div>
+                <div className="text-[12px] text-[var(--crm-text-tertiary)]">
+                  Inbound conversations awaiting reply.
+                </div>
+              </div>
+              <ArrowRight className="h-4 w-4 text-[var(--crm-info)]" />
+            </Link>
+          )}
+        </div>
+      )}
+
+      {/* KPI grid */}
+      <div
+        className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6"
+        data-testid="crm-overview-kpis"
+      >
+        <KpiCard icon={Users} label="Total contacts" value={totalContacts} data-testid="crm-kpi-total" />
+        <KpiCard icon={UserPlus} label="Active leads" value={activeLeads} data-testid="crm-kpi-active" />
+        <KpiCard icon={Activity} label="In progress" value={inProgress} data-testid="crm-kpi-in-progress" />
+        <KpiCard icon={CheckCircle2} label="Purchased" value={purchased} data-testid="crm-kpi-purchased" />
+        <KpiCard icon={Inbox} label="Unread messages" value={unread} data-testid="crm-kpi-unread" />
+        <KpiCard icon={AlertTriangle} label="Overdue tasks" value={overdue} data-testid="crm-kpi-overdue" />
+      </div>
+
+      {/* Acquisition funnel */}
+      <section
+        className="rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] p-5"
+        data-testid="crm-overview-funnel"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Acquisition funnel</h2>
+          <span className="text-[12px] text-[var(--crm-text-tertiary)]">By lifecycle stage</span>
         </div>
         <div className="space-y-2">
           {STAGE_ORDER.map((stage) => {
             const count = stageCounts[stage];
             const pct = (count / maxStage) * 100;
             return (
-              <div key={stage} className="flex items-center gap-3 text-xs">
-                <div className="w-32 text-gray-500 shrink-0">{STAGE_LABEL[stage]}</div>
-                <div className="flex-1 h-5 bg-white rounded overflow-hidden">
+              <div key={stage} className="flex items-center gap-3 text-[12px]">
+                <div className="w-32 shrink-0 text-[var(--crm-text-secondary)]">{STAGE_LABEL[stage]}</div>
+                <div className="h-5 flex-1 overflow-hidden rounded-[var(--crm-radius-sm)] bg-[var(--crm-bg-tertiary)]">
                   <div
-                    className={`h-full ${STAGE_BAR[stage]} transition-all`}
+                    className="h-full rounded-[var(--crm-radius-sm)] bg-[var(--crm-primary)] transition-all"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <div className="w-12 text-right text-gray-400 tabular-nums">{count}</div>
+                <div className="w-12 text-right tabular-nums text-[var(--crm-text-tertiary)]">{count}</div>
               </div>
             );
           })}
         </div>
       </section>
 
-      <div className="grid lg:grid-cols-3 gap-5">
-        {/* Activity feed */}
-        <section className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Recent Activity</h2>
-          {events.length === 0 ? (
-            <div className="py-10 text-center">
-              <Activity className="w-10 h-10 text-gray-400 mx-auto mb-2" />
-              <p className="text-sm text-gray-500">No activity yet</p>
-              <p className="text-[11px] text-gray-400">
-                Timeline events will appear here as contacts move through the funnel.
-              </p>
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-200">
-              {events.map((ev) => {
-                const v = timelineVisual(ev.event_type);
-                const Icon = v.icon;
-                const name = ev.contact
-                  ? [ev.contact.first_name, ev.contact.last_name].filter(Boolean).join(' ') ||
-                    ev.contact.email ||
-                    'Unknown'
-                  : 'Unknown';
-                return (
-                  <Link
-                    key={ev.id}
-                    href={`/admin/crm/contacts/${ev.contact_id}`}
-                    className="flex items-start gap-3 py-2.5 hover:bg-gray-50 -mx-2 px-2 rounded-lg transition-colors"
-                  >
-                    <Icon className={`w-4 h-4 mt-0.5 ${v.color}`} />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm">
-                        <span className={v.color}>{v.label}</span>{' '}
-                        <span className="text-gray-500">·</span>{' '}
-                        <span className="text-gray-900">{name}</span>
-                      </div>
-                    </div>
-                    <div className="text-[11px] text-gray-500 shrink-0 tabular-nums">
-                      {relativeTime(ev.created_at)}
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
-        {/* Quick actions */}
-        <section className="bg-white border border-gray-200 rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Quick Actions</h2>
-          <div className="space-y-2">
-            <QuickAction href="/admin/crm/campaigns"   icon={Send}      label="New Campaign" />
-            <QuickAction href="/admin/crm/automations" icon={Zap}       label="New Workflow" />
-            <QuickAction href="/admin/crm/contacts"    icon={Users}     label="All Contacts" />
-            <QuickAction href="/admin/crm/analytics"   icon={BarChart3} label="Analytics" />
-          </div>
-        </section>
-      </div>
+      {/* Recent activity */}
+      <section data-testid="crm-overview-activity">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Recent activity</h2>
+          <Badge tone="neutral" data-testid="crm-overview-activity-count">
+            {activityRows.length} event{activityRows.length === 1 ? '' : 's'}
+          </Badge>
+        </div>
+        <OverviewActivityTable rows={activityRows} />
+      </section>
     </div>
-  );
-}
-
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  accent,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: number;
-  accent?: 'blue' | 'red' | 'emerald';
-}) {
-  const accentClass =
-    accent === 'blue'
-      ? 'border-blue-500/30 bg-blue-500/5'
-      : accent === 'red'
-        ? 'border-red-200 bg-red-500/5'
-        : accent === 'emerald'
-          ? 'border-emerald-500/30 bg-emerald-500/5'
-          : 'border-gray-200 bg-white';
-  const iconColor =
-    accent === 'blue'
-      ? 'text-blue-600'
-      : accent === 'red'
-        ? 'text-red-600'
-        : accent === 'emerald'
-          ? 'text-emerald-700'
-          : 'text-gray-500';
-  return (
-    <div className={`border rounded-xl p-4 ${accentClass}`}>
-      <Icon className={`w-5 h-5 ${iconColor}`} />
-      <div className="mt-3 text-2xl font-bold text-gray-900 tabular-nums">{value}</div>
-      <div className="mt-0.5 text-[11px] text-gray-500">{label}</div>
-    </div>
-  );
-}
-
-function QuickAction({
-  href,
-  icon: Icon,
-  label,
-}: {
-  href: string;
-  icon: LucideIcon;
-  label: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-white hover:bg-gray-100 border border-gray-200 hover:border-gray-300 text-sm text-gray-400 hover:text-gray-900 transition-colors"
-    >
-      <Icon className="w-4 h-4 text-blue-500" />
-      <span className="flex-1">{label}</span>
-      <ArrowRight className="w-3.5 h-3.5 text-gray-500" />
-    </Link>
   );
 }
