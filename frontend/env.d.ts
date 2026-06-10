@@ -169,6 +169,11 @@ declare namespace NodeJS {
     HIGGSFIELD_SUBMIT_ENDPOINT?: string;    // legacy — kept for compatibility
     HIGGSFIELD_STATUS_ENDPOINT?: string;    // legacy — kept for compatibility
 
+    // Runway ML — Gen-4 Turbo image-to-video provider. DALL-E stills are
+    // animated into 5-second videos for Tier 1 platforms (TikTok / Instagram /
+    // YouTube). The video-generation cron no-ops when RUNWAY_API_KEY is unset.
+    RUNWAY_API_KEY?: string;
+
     // Buffer — social publishing provider. One profile id per platform. The
     // engine no-ops when BUFFER_API_KEY is unset (NoopPublishingProvider).
     BUFFER_API_KEY?: string;
