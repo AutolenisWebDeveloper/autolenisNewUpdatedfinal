@@ -141,11 +141,36 @@ export default function IntelligenceClient({
   const createPost = async (row: CompetitorInsightRow) => {
     setBusy(`create-${row.id}`);
     try {
-      await post("/api/admin/social/generate", {
-        franchiseSlug: "how_autolenis_works",
-        hook: row.suggestedHook,
-      });
-      showToast("Post generation queued");
+      // Step 1: create a topic signal from the competitor insight so the
+      // generate route (which requires a signalId) has a record to bind to.
+      const signal = (await post("/api/admin/social/create-signal", {
+        signalType: "competitor_gap",
+        signalContext: {
+          opportunity: row.opportunity,
+          competitor: row.competitor,
+          suggestedHook: row.suggestedHook,
+          contentType: row.contentType,
+        },
+      })) as { id?: string } | null;
+      if (!signal?.id) throw new Error("Signal creation failed");
+
+      // Step 2: generate the post with the new signal ID.
+      const platform = row.contentType.includes("linkedin")
+        ? "linkedin"
+        : row.contentType.includes("instagram")
+        ? "instagram"
+        : "tiktok";
+      const result = (await post("/api/admin/social/generate", {
+        signalId: signal.id,
+        franchiseSlug: "dealer_secret_daily",
+        platform,
+      })) as { postIds?: string[] } | null;
+
+      if (result?.postIds?.length) {
+        showToast(`Post created — ${result.postIds.length} queued`);
+      } else {
+        showToast("Post generation queued");
+      }
       router.refresh();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Could not create post");
