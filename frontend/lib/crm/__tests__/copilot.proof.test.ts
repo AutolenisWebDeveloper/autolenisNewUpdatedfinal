@@ -17,6 +17,7 @@ import {
   AutomationPlanSchema,
   scrubProhibitedClaims,
   enforceSmsOptOut,
+  flagUnsubstantiatedClaims,
 } from '@/lib/ai/crm-copilot';
 
 // ─── Zod proof ───────────────────────────────────────────────────────────────
@@ -90,4 +91,39 @@ test('Compliance: every SMS draft carries the STOP opt-out', () => {
   // Idempotent — does not double-append when STOP already present.
   const already = 'Deal ends today. Reply STOP to opt out.';
   assert.equal(enforceSmsOptOut(already), already);
+});
+
+// ─── Unsubstantiated-claim flagging proof ────────────────────────────────────
+
+test('Flagging: a draft with "$4,200" and "rated #1" yields 2 flags', () => {
+  const flags = flagUnsubstantiatedClaims('Save $4,200 today — rated #1 by buyers.');
+  assert.equal(flags.length, 2);
+  assert.ok(flags.some((f) => f.kind === 'currency' && f.match === '$4,200'));
+  assert.ok(flags.some((f) => f.kind === 'ranking' && f.match === 'rated #1'));
+});
+
+test('Flagging: a clean draft yields 0 flags', () => {
+  assert.deepEqual(
+    flagUnsubstantiatedClaims('Many buyers compare offers without walking into a dealership.'),
+    [],
+  );
+});
+
+test('Flagging: detection NEVER mutates the text (byte-identical)', () => {
+  const text = 'Up to 30% off, 4.8 stars, 12,000 customers, 3x faster. Save $4,200, rated #1.';
+  const before = text;
+  const flags = flagUnsubstantiatedClaims(text);
+  assert.equal(text, before); // input untouched
+  // All six categories detected.
+  const kinds = new Set(flags.map((f) => f.kind));
+  for (const k of ['currency', 'percentage', 'rating', 'count', 'ranking', 'multiplier']) {
+    assert.ok(kinds.has(k as never), `missing kind: ${k}`);
+  }
+});
+
+test('Flagging: detectors are reusable across calls (no sticky lastIndex)', () => {
+  const a = flagUnsubstantiatedClaims('Save $100 and $200.');
+  const b = flagUnsubstantiatedClaims('Save $100 and $200.');
+  assert.deepEqual(a, b);
+  assert.equal(a.length, 2);
 });

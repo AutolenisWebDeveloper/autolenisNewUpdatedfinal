@@ -76,6 +76,23 @@ export type ContentDraft = z.infer<typeof ContentDraftSchema>;
 export type AutomationPlan = z.infer<typeof AutomationPlanSchema>;
 export type CopilotMode = 'content' | 'automation_plan';
 
+// ─── Unsubstantiated-claim flagging types ───────────────────────────────────
+//
+// A detector-only annotation. Flags NEVER mutate copy — they tell the human
+// reviewer which spans to substantiate before any send (FTC §5).
+export type ClaimFlag = {
+  kind: 'currency' | 'percentage' | 'rating' | 'count' | 'ranking' | 'multiplier';
+  match: string;
+};
+
+// The content draft as it leaves the server: the validated, compliance-scrubbed
+// copy plus a read-only `flags` array on every email and sms draft.
+export type FlaggedContentDraft = {
+  emails: Array<ContentDraft['emails'][number] & { flags: ClaimFlag[] }>;
+  sms: Array<ContentDraft['sms'][number] & { flags: ClaimFlag[] }>;
+  brief: string;
+};
+
 // ─── Compliance guardrails (shared, verbatim, by both system prompts) ───────
 
 export const COMPLIANCE_GUARDRAILS = `COMPLIANCE GUARDRAILS — NEVER VIOLATE:
@@ -179,6 +196,51 @@ function applyContentCompliance(draft: ContentDraft): ContentDraft {
       body: enforceSmsOptOut(scrubProhibitedClaims(s.body)),
     })),
     brief: scrubProhibitedClaims(draft.brief),
+  };
+}
+
+// ─── Unsubstantiated-claim DETECTION (flag-only, never mutates) ──────────────
+//
+// scrubProhibitedClaims neutralizes guarantee/promise wording, but it does NOT
+// catch fabricated QUANTITATIVE claims (invented dollar amounts, percentages,
+// star ratings, review/customer counts, rankings, multipliers) — an LLM can
+// still invent those, and unsubstantiated numbers are an FTC substantiation
+// exposure on paid traffic. This pass FLAGS those spans for a human to verify;
+// it returns matches only and MUST NOT modify the text.
+const CLAIM_DETECTORS: ReadonlyArray<{ kind: ClaimFlag['kind']; re: RegExp }> = [
+  { kind: 'currency', re: /\$\d[\d,]*(?:\.\d+)?/g },
+  { kind: 'percentage', re: /\d+(?:\.\d+)?%/g },
+  { kind: 'rating', re: /\d(?:\.\d)?\s?(?:stars?|\/5)/gi },
+  { kind: 'count', re: /\d+[,\d]*\s+(?:customers|reviews|buyers|users|dealers)/gi },
+  { kind: 'ranking', re: /#\s?\d+|rated\s+#?1|best|top-rated/gi },
+  { kind: 'multiplier', re: /\d+x\b/gi },
+];
+
+export function flagUnsubstantiatedClaims(text: string): ClaimFlag[] {
+  const flags: ClaimFlag[] = [];
+  for (const { kind, re } of CLAIM_DETECTORS) {
+    // Fresh lastIndex per call — the detectors are module-level and global.
+    re.lastIndex = 0;
+    for (const m of text.matchAll(re)) {
+      flags.push({ kind, match: m[0] });
+    }
+  }
+  return flags;
+}
+
+// Annotate a compliance-scrubbed draft with read-only claim flags. The copy is
+// passed through byte-for-byte (spread) — only `flags` is added.
+function attachClaimFlags(draft: ContentDraft): FlaggedContentDraft {
+  return {
+    emails: draft.emails.map((e) => ({
+      ...e,
+      flags: flagUnsubstantiatedClaims(`${e.subject}\n${e.body}`),
+    })),
+    sms: draft.sms.map((s) => ({
+      ...s,
+      flags: flagUnsubstantiatedClaims(s.body),
+    })),
+    brief: draft.brief,
   };
 }
 
@@ -290,11 +352,12 @@ async function generateValidated<T>(
 export async function generateContentDraft(
   prompt: string,
   context?: string,
-): Promise<ContentDraft> {
+): Promise<FlaggedContentDraft> {
   const userPrompt = context ? `${prompt}\n\nContext: ${context}` : prompt;
   const draft = await generateValidated(CONTENT_SYSTEM_PROMPT, userPrompt, ContentDraftSchema);
-  // Deterministic compliance pass before the draft ever leaves the server.
-  return applyContentCompliance(draft);
+  // Deterministic compliance pass before the draft ever leaves the server, then
+  // a flag-only annotation of unsubstantiated numeric/social-proof claims.
+  return attachClaimFlags(applyContentCompliance(draft));
 }
 
 export async function generateAutomationPlan(

@@ -1,15 +1,24 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { getAdminActor } from '@/lib/auth/admin-actor';
+import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 import { TemplateService } from '@/lib/services/template.service';
 import { CampaignService } from '@/lib/services/campaign.service';
-import { enforceSmsOptOut, scrubProhibitedClaims } from '@/lib/ai/crm-copilot';
+import {
+  enforceSmsOptOut,
+  scrubProhibitedClaims,
+  type ClaimFlag,
+} from '@/lib/ai/crm-copilot';
 
 export const dynamic = 'force-dynamic';
 
+// The approving client echoes the draft's `flags` (the detector output) and
+// whether the reviewer acknowledged them. Both are optional for backward
+// compatibility; a draft with no flags simply carries an empty/absent array.
+type ApproveCommon = { flags?: ClaimFlag[]; flagsAcknowledged?: boolean };
 type ApproveRequest =
-  | { kind: 'email_template'; name?: string; subject?: string; body?: string }
-  | { kind: 'sms_campaign'; name?: string; body?: string };
+  | ({ kind: 'email_template'; name?: string; subject?: string; body?: string } & ApproveCommon)
+  | ({ kind: 'sms_campaign'; name?: string; body?: string } & ApproveCommon);
 
 // POST /api/admin/crm/copilot/approve
 // The ONLY way a copilot draft becomes a stored record. Saves an approved draft
@@ -27,6 +36,15 @@ export async function POST(req: Request) {
   }
 
   const supabase = getServiceSupabase();
+
+  // FTC paper trail: if the draft carried unsubstantiated-claim flags, the
+  // reviewer MUST acknowledge having verified them before we persist anything.
+  const flags = Array.isArray(body.flags) ? body.flags : [];
+  const flagCount = flags.length;
+  const flagsAcknowledged = body.flagsAcknowledged === true;
+  if (flagCount > 0 && !flagsAcknowledged) {
+    return NextResponse.json({ error: 'FLAGS_NOT_ACKNOWLEDGED' }, { status: 422 });
+  }
 
   try {
     if (body.kind === 'email_template') {
@@ -48,6 +66,12 @@ export async function POST(req: Request) {
         },
         actor,
       );
+      await writeCrmAuditLog(supabase, actor, {
+        action: 'CRM_COPILOT_APPROVE',
+        entity_type: 'crm_copilot',
+        entity_id: template?.id ?? '',
+        metadata: { kind: body.kind, flagCount, flagsAcknowledged },
+      });
       return NextResponse.json({ kind: 'email_template', template }, { status: 201 });
     }
 
@@ -65,6 +89,12 @@ export async function POST(req: Request) {
         },
         actor,
       );
+      await writeCrmAuditLog(supabase, actor, {
+        action: 'CRM_COPILOT_APPROVE',
+        entity_type: 'crm_copilot',
+        entity_id: campaign?.id ?? '',
+        metadata: { kind: body.kind, flagCount, flagsAcknowledged },
+      });
       return NextResponse.json({ kind: 'sms_campaign', campaign }, { status: 201 });
     }
 
