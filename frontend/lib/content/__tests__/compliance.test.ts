@@ -75,3 +75,49 @@ test("does NOT flag the 'best price' pillar link anchor text", () => {
 test("stripHtml removes tags and collapses whitespace", () => {
   assert.equal(stripHtml("<p>Hello   <strong>world</strong></p>"), "Hello world");
 });
+
+// --- WO-6 compliance extensions: buyer-not-dealer + pricing language ---
+
+test("flags copy that frames AutoLenis as a dealer/seller", () => {
+  const bad = "<p>We sell quality used cars from our dealership inventory.</p>";
+  const result = validateCompliance(bad);
+  assert.equal(result.passed, false);
+  assert.ok(result.violations.some((v) => v.rule === "buyer_misrepresentation"));
+});
+
+test("flags copy that frames AutoLenis as a lender", () => {
+  const bad = "<p>AutoLenis is a lender that finances your next vehicle.</p>";
+  const result = validateCompliance(bad);
+  assert.equal(result.passed, false);
+  assert.ok(result.violations.some((v) => v.rule === "buyer_misrepresentation"));
+});
+
+test("does NOT flag buyer-advocate framing (dealers compete for you)", () => {
+  const ok =
+    "<p>AutoLenis represents you, the buyer — verified dealers compete for your " +
+    "business in a private auction.</p>";
+  const result = validateCompliance(ok);
+  assert.equal(result.passed, true);
+});
+
+test("flags 'refundable deposit' pricing language", () => {
+  const bad = "<p>Get started with a fully refundable deposit today.</p>";
+  const result = validateCompliance(bad);
+  assert.equal(result.passed, false);
+  assert.ok(result.violations.some((v) => v.rule === "pricing_language"));
+});
+
+test("flags a $99 deposit framing", () => {
+  const bad = "<p>Pay a $99 deposit to enter the auction.</p>";
+  const result = validateCompliance(bad);
+  assert.equal(result.passed, false);
+  assert.ok(result.violations.some((v) => v.rule === "pricing_language"));
+});
+
+test("does NOT flag the canonical non-refundable Auction Access Fee language", () => {
+  const ok =
+    "<p>Start with a one-time, non-refundable $99 Auction Access Fee — it is a " +
+    "fee, not a deposit.</p>";
+  const result = validateCompliance(ok);
+  assert.equal(result.passed, true);
+});

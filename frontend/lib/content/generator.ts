@@ -18,6 +18,12 @@ import type { ContentKeyword } from "@/lib/seo/content-keywords";
 import { buildMessages, buildRetryMessage } from "@/lib/content/prompts";
 import { validateCompliance, type ComplianceResult } from "@/lib/content/compliance";
 import { scoreArticle, type QualityResult } from "@/lib/content/quality";
+import { sanitizeBody } from "@/lib/content/sanitize";
+
+// Re-exported for backward compatibility — the sanitizer now lives in its own
+// dependency-free module so it can also run at render time and in the
+// validation service. See lib/content/sanitize.ts.
+export { sanitizeBody };
 
 export interface ArticleFaq {
   question: string;
@@ -44,19 +50,6 @@ export interface GenerateOptions {
   temperature?: number;
   maxTokens?: number;
 }
-
-const ALLOWED_TAGS = new Set([
-  "p",
-  "h2",
-  "h3",
-  "ul",
-  "ol",
-  "li",
-  "strong",
-  "a",
-  "em",
-  "br",
-]);
 
 // Extract the first balanced top-level JSON object from a model response,
 // tolerating ```json fences and any stray prose around it.
@@ -120,25 +113,6 @@ function parseDraft(raw: string): ParsedDraft {
     : [];
 
   return { body: sanitizeBody(obj.body), faqs };
-}
-
-// Light HTML hardening: drop any tag outside the allowed set (keeping inner
-// text) and strip on*/javascript: attributes. The body is rendered with
-// dangerouslySetInnerHTML, so defense in depth is worth the few lines.
-export function sanitizeBody(html: string): string {
-  let out = html.trim();
-
-  // Remove disallowed elements but keep their text content.
-  out = out.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, (tag, nameRaw) => {
-    const name = String(nameRaw).toLowerCase();
-    if (!ALLOWED_TAGS.has(name)) return "";
-    // Strip event handlers and javascript: URLs from allowed tags.
-    return tag
-      .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-      .replace(/javascript:/gi, "");
-  });
-
-  return out.replace(/\s+\n/g, "\n").trim();
 }
 
 function decideStatus(
