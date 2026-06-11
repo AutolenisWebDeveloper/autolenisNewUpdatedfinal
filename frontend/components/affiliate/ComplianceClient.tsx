@@ -32,7 +32,7 @@ const DISCLOSURES = [
   {
     id: "platform-accuracy",
     title: "Accurate Platform Representation",
-    text: "You must accurately represent AutoLenis features and pricing. You may not claim the $99 deposit is non-refundable or misrepresent the $499 concierge fee structure.",
+    text: "You must accurately represent AutoLenis features and pricing. You may not claim the $99 Auction Access Fee is non-refundable or misrepresent the $499 Premium fee structure. The $99 is refundable if no valuable offer is received, and becomes a deposit credited toward the $499 only if the buyer purchases Premium.",
     required: true,
   },
 ];

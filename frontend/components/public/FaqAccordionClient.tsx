@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
+import { PRICING_COPY } from "@/lib/seo/pricing-copy";
 
 // ─── FAQ Category Data ────────────────────────────────────────────────────────
 
@@ -20,7 +21,7 @@ const FAQ_CATEGORIES = [
       },
       {
         q: "How do I get started?",
-        a: "Create a free account, complete your soft-pull prequalification in about 3 minutes, and browse inventory matched to your budget. When you're ready, activate dealer competition with the Auction Access Deposit.",
+        a: "Create a free account, complete your soft-pull prequalification in about 3 minutes, and browse inventory matched to your budget. When you're ready, activate dealer competition with the Auction Access Fee.",
       },
       {
         q: "Does the prequalification affect my credit score?",
@@ -37,15 +38,15 @@ const FAQ_CATEGORIES = [
     faqs: [
       {
         q: "What are the AutoLenis plans?",
-        a: "AutoLenis offers two plans: Standard (free to start) and Premium Concierge ($499 total). Both require the $99 Auction Access Deposit to activate your auction, which is credited toward your vehicle purchase (Standard) or concierge fee (Premium).",
+        a: `AutoLenis offers two plans: Standard (free to start) and Premium Concierge ($499 total). Both require the $99 Auction Access Fee to activate your auction. ${PRICING_COPY.refundShort}. ${PRICING_COPY.depositConditional}`,
       },
       {
         q: "Is the $99 a plan?",
-        a: "No. The $99 is an Auction Access Deposit — not a plan, subscription, or platform fee. It activates your private dealer auction and is refundable if no competitive offer is received.",
+        a: "No. The $99 is an Auction Access Fee — not a plan, subscription, or platform fee. It activates your private dealer auction and is refundable if no valuable offer is received.",
       },
       {
-        q: "How does the Auction Access Deposit work?",
-        a: "The deposit activates your private 48-hour reverse auction. It unlocks live dealer bidding and competitive offer access — keeping auction quality high. The deposit is fully refundable if no dealers submit offers that meet your expectations, or if you choose not to proceed. On the Standard plan, it is credited toward your vehicle purchase at closing. On Premium, it is credited toward your concierge fee.",
+        q: "How does the Auction Access Fee work?",
+        a: `The Auction Access Fee activates your private 48-hour reverse auction — it unlocks live dealer bidding and competitive offer access, keeping auction quality high. ${PRICING_COPY.refundLong} ${PRICING_COPY.depositConditional}`,
       },
     ],
   },

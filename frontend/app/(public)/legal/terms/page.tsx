@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
+import { PRICING_COPY } from "@/lib/seo/pricing-copy";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.terms);
 export const dynamic = "force-dynamic";
@@ -64,13 +65,11 @@ export default function TermsPage() {
 
         <div className="bg-white border border-[#E5E7EB] rounded-2xl p-7 shadow-sm">
           <h2 className="text-base font-bold text-[#111827] mb-3">
-            3. Deposit and Fee Policy
+            3. Auction Access Fee and Premium Fee Policy
           </h2>
           <p className="text-sm text-[#4B5563] leading-relaxed">
-            The $99 auction activation deposit is fully refundable if no deal is
-            selected. The $499 concierge fee is charged only upon selection of a
-            deal. The $99 deposit is credited toward the $499 fee, resulting in a
-            net charge of $400. All payments are processed via Stripe.
+            {PRICING_COPY.whatItIs} {PRICING_COPY.refundLong} {PRICING_COPY.depositConditional} All
+            payments are processed via Stripe.
           </p>
         </div>
 

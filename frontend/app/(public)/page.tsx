@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { PRICING_COPY } from "@/lib/seo/pricing-copy";
 import {
   ArrowRight,
   BadgeCheck,
@@ -48,8 +49,8 @@ export const revalidate = 3600;
 const HOW_IT_WORKS = [
   { step: "01", title: "Get Prequalified", body: "Free soft-pull prequalification in 3 minutes. See your exact pre-qualified budget — zero credit score impact." },
   { step: "02", title: "Choose Smart Inventory", body: "Browse curated vehicles selected for value and demand. Shortlist up to 5 vehicles with confirmed prices and real mileage." },
-  { step: "03", title: "Activate Dealer Competition", body: "A small refundable Auction Access Deposit launches your auction. Up to 8 pre-vetted dealers compete privately within 48 hours." },
-  { step: "04", title: "Buy With Confidence", body: "Compare offers ranked by total cost, monthly payment, and overall value. Choose the best deal — or decline and receive a full refund." },
+  { step: "03", title: "Activate Dealer Competition", body: "A refundable Auction Access Fee launches your auction. Up to 8 pre-vetted dealers compete privately within 48 hours." },
+  { step: "04", title: "Buy With Confidence", body: "Compare offers ranked by total cost, monthly payment, and overall value. Choose the best deal — or, if no valuable offer is received, get your Auction Access Fee back." },
 ];
 
 const WHY_ITEMS = [
@@ -70,8 +71,8 @@ const FAQ_ITEMS = [
     a: "No. We use a soft credit pull — zero impact on your score. A hard pull only happens with your explicit consent later in the process.",
   },
   {
-    q: "Is the Auction Access Deposit refundable?",
-    a: "Yes, fully. No competitive offer within 48 hours? Complete refund — no disputes, no conditions, no follow-up calls.",
+    q: "Is the Auction Access Fee refundable?",
+    a: `${PRICING_COPY.refundLong} No disputes, no follow-up calls.`,
   },
   {
     q: "How do dealer offers work?",

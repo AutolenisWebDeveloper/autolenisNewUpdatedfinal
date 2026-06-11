@@ -137,7 +137,7 @@ export default function VehicleDetailPanel({
 
         {/* Trust note */}
         <div className="pt-3 border-t border-slate-100 text-xs text-slate-400 space-y-1" data-testid="vehicle-trust-note">
-          <p>• $99 refundable deposit to start your auction</p>
+          <p>• $99 refundable Auction Access Fee to start your auction</p>
           <p>• Dealer identity revealed only after you select a deal</p>
           <p>• Contract Shield reviews every document before signing</p>
         </div>

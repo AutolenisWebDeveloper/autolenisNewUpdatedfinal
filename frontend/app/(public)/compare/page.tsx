@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ArrowRight, CheckCircle2, XCircle, AlertCircle } from "lucide-react";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
-import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { PRICING_COPY } from "@/lib/seo/pricing-copy";
 
 export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.compare);
 export const dynamic = "force-dynamic";
@@ -311,12 +311,10 @@ export default function ComparePage() {
               </ul>
             </div>
             <div className="bg-[#FFFBEB] border border-[#FDE68A] rounded-2xl shadow-sm p-8">
-              <h3 className="font-bold text-[#92400E] mb-5 text-sm">AutoLenis deposit note:</h3>
+              <h3 className="font-bold text-[#92400E] mb-5 text-sm">AutoLenis Auction Access Fee note:</h3>
               <p className="text-sm text-[#78350F] leading-relaxed">
-                The ${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(0)} Auction Access Deposit is required
-                to activate dealer competition. It's fully refundable if no competitive offer is
-                received. This is not a hidden fee — it's how serious dealer engagement is
-                guaranteed.
+                {PRICING_COPY.whatItIs} {PRICING_COPY.refundShort}. This is not a hidden fee — it&apos;s
+                how serious dealer engagement is guaranteed.
               </p>
             </div>
           </div>

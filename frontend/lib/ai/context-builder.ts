@@ -80,7 +80,7 @@ export async function buildAdminContext(adminId: string, role: string): Promise<
 // Build the system prompt with full context injection
 export function buildSystemPromptFromContext(ctx: PlatformContext, agentRole: string): string {
   const platformInfo = `AutoLenis Platform:
-- $${DEPOSIT_AMOUNT_CENTS / 100} refundable deposit → ${AUCTION_DURATION_HOURS}h private auction → select deal → $${PREMIUM_FEE_CENTS / 100} flat concierge fee
+- $${DEPOSIT_AMOUNT_CENTS / 100} Auction Access Fee (refundable if no valuable offer) → ${AUCTION_DURATION_HOURS}h private auction → select deal → $${PREMIUM_FEE_CENTS / 100} Premium concierge fee (only the $${DEPOSIT_AMOUNT_CENTS / 100} is credited toward it if Premium is purchased)
 - Contract Shield reviews every document before signing
 - DocuSign e-signing — no paperwork at dealership`;
 

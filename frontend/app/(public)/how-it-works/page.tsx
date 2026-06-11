@@ -35,7 +35,7 @@ const FAQS = [
   },
   {
     q: "Am I required to accept an offer?",
-    a: "Never. You are under no obligation to accept any offer that arrives. If none of the offers meet your expectations, you can decline them all and receive a full refund of your Auction Access Fee.",
+    a: "Never. You are under no obligation to accept any offer that arrives. You can decline them all, and if no valuable offer is received within your auction window, your Auction Access Fee is refunded in full.",
   },
   {
     q: "Is AutoLenis a dealership?",
@@ -67,7 +67,7 @@ const STEPS = [
     title: "Activate Dealer Competition",
     icon: Gavel,
     body: "A refundable Auction Access Fee opens your private 48-hour dealer competition. Up to 8 verified dealers submit their best offers — you stay anonymous throughout.",
-    tag: "48-hour window · Fully refundable",
+    tag: "48-hour window · Refundable if no offer",
   },
   {
     n: "04",
@@ -187,7 +187,7 @@ export default function HowItWorksPage() {
               </div>
               {/* Trust strip */}
               <div className="flex flex-wrap gap-2">
-                {["Soft-pull only", "48-hour auction", "Fully refundable", "Buyer-first"].map((badge) => (
+                {["Soft-pull only", "48-hour auction", "Refundable if no offer", "Buyer-first"].map((badge) => (
                   <span
                     key={badge}
                     className="text-xs font-medium text-[#4B5563] bg-[#F8F9FB] border border-[#E5E7EB] rounded-full px-3 py-1"
@@ -255,7 +255,7 @@ export default function HowItWorksPage() {
           <CitationBlock
             id="how-autolenis-works"
             question="How does AutoLenis work?"
-            answer="AutoLenis works in 6 steps: (1) Get pre-qualified online with a soft credit pull. (2) Browse and shortlist vehicles. (3) Pay a $99 Limited-Time Auction Access Fee (refundable if no valuable offer is received). (4) AutoLenis launches a private 48-hour dealer auction. (5) Review competing dealer offers side-by-side. (6) Select the best offer and sign via DocuSign. Most buyers save $2,000–$4,000 compared to traditional dealership purchases."
+            answer="AutoLenis works in 6 steps: (1) Get pre-qualified online with a soft credit pull. (2) Browse and shortlist vehicles. (3) Pay a $99 Limited-Time Auction Access Fee (refundable if no valuable offer is received). (4) AutoLenis launches a private 48-hour dealer auction. (5) Review competing dealer offers side-by-side. (6) Select the best offer and sign via DocuSign."
             sourceLabel="AutoLenis Official"
             lastUpdated="2025-01-01"
           />
@@ -644,7 +644,7 @@ export default function HowItWorksPage() {
             </Link>
           </div>
           <p className="text-xs text-white/50">
-            Soft-pull only · Fully refundable · 48-hour auction · No obligation
+            Soft-pull only · Refundable if no offer · 48-hour auction · No obligation
           </p>
         </div>
       </section>

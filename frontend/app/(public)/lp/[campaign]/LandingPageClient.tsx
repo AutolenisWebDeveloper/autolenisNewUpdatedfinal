@@ -35,6 +35,7 @@ import {
 import { trackFunnelEvent } from "@/lib/analytics/funnel-events";
 import { trackVehicleRequest, trackLPFormStep } from "@/lib/analytics/tiktok-events";
 import ChatWidget from "@/components/public/ChatWidget";
+import { PRICING_COPY } from "@/lib/seo/pricing-copy";
 
 // ──────────────────────────────────────────────────────────────────────────
 //  ⚠️ PRODUCTION GATE: testimonials substantiation
@@ -864,8 +865,7 @@ export default function LandingPageClient({
 
                 {/* disclaimers */}
                 <p className="text-[10px] text-slate-400 text-center mt-3 leading-relaxed">
-                  The $99 Auction Access Fee is a one-time, non-refundable fee that activates your
-                  private 48-hour dealer auction. It is not a deposit and is not credited toward a purchase.
+                  {PRICING_COPY.whatItIs} {PRICING_COPY.refundLong} {PRICING_COPY.depositConditional}
                 </p>
                 <p className="text-[10px] text-slate-400 text-center mt-2 leading-relaxed">
                   Savings vary based on vehicle, market conditions, dealer participation, and buyer-selected offer.
@@ -1305,7 +1305,7 @@ export default function LandingPageClient({
                 },
                 {
                   q: "What does it cost?",
-                  a: "A one-time $99 Auction Access Fee unlocks dealer competition. It is a non-refundable access fee — not a deposit, and not credited toward your purchase. Premium concierge is available for buyers who want full hands-off service.",
+                  a: `${PRICING_COPY.whatItIs} ${PRICING_COPY.refundShort}. ${PRICING_COPY.depositConditional} Premium concierge is available for buyers who want full hands-off service.`,
                 },
                 {
                   q: "Do I have to talk to dealers?",

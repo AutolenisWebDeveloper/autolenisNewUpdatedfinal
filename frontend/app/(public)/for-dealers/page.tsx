@@ -308,8 +308,8 @@ export default function ForDealersPage() {
                 body: "Buyers have an approved spending ceiling. You know their budget before you submit.",
               },
               {
-                title: "Auction Access Deposit",
-                body: "Buyers pay a refundable deposit to activate their auction — filtering out window shoppers.",
+                title: "Auction Access Fee",
+                body: "Buyers pay a refundable Auction Access Fee to activate their auction — filtering out window shoppers.",
               },
               {
                 title: "Structured Buying Journey",
@@ -432,7 +432,7 @@ export default function ForDealersPage() {
               },
               {
                 title: "Serious Buyers Only",
-                body: "Every buyer paid an Auction Access Deposit and passed prequalification. Low-intent shoppers don't reach your offer form.",
+                body: "Every buyer paid an Auction Access Fee and passed prequalification. Low-intent shoppers don't reach your offer form.",
               },
             ].map((obj) => (
               <div
@@ -716,7 +716,7 @@ export default function ForDealersPage() {
               },
               {
                 q: "What kind of buyers will I receive?",
-                a: "Every buyer on AutoLenis completed a soft-pull prequalification and paid an Auction Access Deposit to activate their auction. You see their budget range and vehicle request before submitting an offer.",
+                a: "Every buyer on AutoLenis completed a soft-pull prequalification and paid an Auction Access Fee to activate their auction. You see their budget range and vehicle request before submitting an offer.",
               },
               {
                 q: "How many dealers compete for each buyer?",

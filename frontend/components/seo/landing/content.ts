@@ -3,6 +3,10 @@
 //
 // COMPLIANCE: buyer-side language only. AutoLenis is a concierge / buyer's
 // agent — never a dealer, lender, or issuer of credit/loan approvals.
+// Pricing language is single-sourced from lib/seo/pricing-copy.ts so visible
+// copy and structured data never contradict the live refund policy.
+
+import { PRICING_COPY } from "@/lib/seo/pricing-copy";
 
 export interface ReverseAuctionStep {
   name: string;
@@ -93,6 +97,6 @@ export const CORE_FAQS: SeoFaqItem[] = [
   },
   {
     q: "How much does AutoLenis cost?",
-    a: "Submitting a vehicle request is free. A one-time, non-refundable $99 Auction Access Fee activates your private dealer auction — it is not a deposit and is not credited toward a purchase. A premium concierge package is available for fully hands-off service.",
+    a: `Submitting a vehicle request is free. ${PRICING_COPY.whatItIs} ${PRICING_COPY.refundShort}. ${PRICING_COPY.depositConditional}`,
   },
 ];

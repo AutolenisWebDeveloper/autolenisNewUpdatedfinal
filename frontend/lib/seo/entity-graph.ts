@@ -5,6 +5,7 @@
 // understands all entities as parts of one connected business graph.
 
 import { SITE_ORIGIN } from "@/lib/seo/site";
+import { PRICING_SCHEMA } from "@/lib/seo/pricing-copy";
 
 const BASE = SITE_ORIGIN;
 
@@ -112,7 +113,7 @@ export const entityGraphSchema: Record<string, unknown> = {
       areaServed: { "@type": "Country", name: "United States" },
       url: `${BASE}/how-it-works`,
       description:
-        "AutoLenis connects pre-qualified buyers with verified dealers who compete in a private 48-hour auction. Buyers save an average of $2,300.",
+        "AutoLenis connects pre-qualified buyers with verified dealers who compete in a private 48-hour auction to earn the buyer's business.",
       mainEntityOfPage: { "@id": ENTITY_IDS.howItWorks },
     },
 
@@ -123,8 +124,7 @@ export const entityGraphSchema: Record<string, unknown> = {
       name: "Auction Access Fee",
       price: "99.00",
       priceCurrency: "USD",
-      description:
-        "One-time, non-refundable $99 Auction Access Fee that activates a private 48-hour dealer auction for the buyer. It is not a deposit and is not credited toward a purchase.",
+      description: PRICING_SCHEMA.feeOfferDescription,
       offeredBy: { "@id": ENTITY_IDS.organization },
       priceValidUntil: "2027-12-31",
       availability: "https://schema.org/InStock",
@@ -137,8 +137,7 @@ export const entityGraphSchema: Record<string, unknown> = {
       name: "AutoLenis Service Fee",
       price: "499.00",
       priceCurrency: "USD",
-      description:
-        "Full AutoLenis concierge fee covering dealer auction management, offer review, contract coordination, and purchase facilitation.",
+      description: PRICING_SCHEMA.premiumOfferDescription,
       offeredBy: { "@id": ENTITY_IDS.organization },
       priceValidUntil: "2027-12-31",
       availability: "https://schema.org/InStock",

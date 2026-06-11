@@ -78,7 +78,7 @@ const AUTOLENIS_WAY = [
 const FAQS = [
   {
     q: "What if no dealer can fulfill my request?",
-    a: `If no dealer submits a qualifying offer for your request, you'll be notified and can adjust your specifications or browse available inventory instead. The Auction Access Deposit is only required when you're ready to activate a full auction.`,
+    a: `If no dealer submits a qualifying offer for your request, you'll be notified and can adjust your specifications or browse available inventory instead. The Auction Access Fee is only required when you're ready to activate a full auction.`,
   },
   {
     q: "Is this different from browsing inventory?",

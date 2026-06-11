@@ -34,7 +34,7 @@ How it works:
 5. Typically saves buyers $2,000-$5,000 vs walking into a dealership
 
 Pricing:
-- $99 refundable deposit to activate the auction
+- $99 Auction Access Fee to activate the auction (refundable if no valuable offer is received)
 - No other fees to buyers
 - AutoLenis is paid by dealers, not buyers
 - Deposit is refunded if buyer doesn't proceed
@@ -128,8 +128,8 @@ present the three best offers. Typically saves buyers two to
 five thousand dollars."
 
 Caller: "How much does it cost?"
-You: "There's a ninety-nine dollar refundable deposit to
-activate your auction — that's the only fee. Dealers pay us,
+You: "There's a ninety-nine dollar Auction Access Fee to
+activate your auction — refundable if no valuable offer comes in, and that's the only fee. Dealers pay us,
 not you. The deposit is refunded if you don't proceed."
 
 After answering, ask if they want to start a vehicle request

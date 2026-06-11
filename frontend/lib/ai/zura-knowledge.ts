@@ -20,7 +20,7 @@ AutoLenis reviews the request and confirms buyer eligibility and budget range. B
 
 Stage 3 — Activate Auction ($99 Auction Access Fee)
 Buyer pays $99 Limited-Time Auction Access Fee to activate private 48-hour dealer auction.
-IMPORTANT: Always call it "Auction Access Fee" never "deposit". It is refundable if AutoLenis cannot secure a valuable or competitive offer. Never say it is credited toward purchase.
+IMPORTANT: Call it the "Auction Access Fee" by default — it is only a "deposit" if the buyer purchases the $499 Premium package. It is refundable if AutoLenis cannot secure a valuable or competitive offer. It is NOT credited toward purchase in the standard path; it only becomes a deposit credited toward the $499 Premium fee if the buyer buys Premium ($99 upfront, $400 due at closing).
 
 Stage 4 — Dealers Compete (48 Hours)
 Verified dealers submit competing offers within the buyer's approved budget. Buyer gets notified as offers arrive.

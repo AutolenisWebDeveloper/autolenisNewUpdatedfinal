@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import LandingPageClient from "./LandingPageClient";
 import { JsonLd, organizationSchema } from "@/lib/seo/jsonld";
 import { generateFaqSchema } from "@/lib/services/seo/seo-schema.service";
+import { PRICING_COPY, PRICING_SCHEMA } from "@/lib/seo/pricing-copy";
 
 // Force dynamic rendering — LP content is campaign-specific
 export const dynamic = "force-dynamic";
@@ -76,7 +77,7 @@ const LP_FAQS = [
   },
   {
     q: "What is the Auction Access Fee?",
-    a: "The $99 Auction Access Fee is a one-time, non-refundable fee that activates your private 48-hour dealer auction. It signals seriousness to verified dealers. It is not a deposit and is not credited toward your vehicle purchase.",
+    a: `${PRICING_COPY.whatItIs} ${PRICING_COPY.refundLong} ${PRICING_COPY.depositConditional}`,
   },
   {
     q: "How is AutoLenis different from other car buying services?",
@@ -215,14 +216,12 @@ export default async function LandingPage({
             "@type": "Offer",
             price: "0",
             priceCurrency: "USD",
-            description:
-              "Free to submit a vehicle request. A one-time $99 non-refundable Auction Access Fee activates dealer competition.",
+            description: PRICING_SCHEMA.freeTierDescription,
             priceSpecification: {
               "@type": "PriceSpecification",
               price: "99",
               priceCurrency: "USD",
-              description:
-                "One-time, non-refundable Auction Access Fee — not a deposit, not credited toward purchase",
+              description: PRICING_SCHEMA.feeOfferDescription,
             },
           },
           hasOfferCatalog: {
@@ -234,8 +233,7 @@ export default async function LandingPage({
                 itemOffered: {
                   "@type": "Service",
                   name: "Standard Plan",
-                  description:
-                    "Free to start. A one-time $99 non-refundable Auction Access Fee activates your 48-hour dealer auction. Not a deposit; not credited toward purchase.",
+                  description: PRICING_SCHEMA.feeOfferDescription,
                 },
               },
               {

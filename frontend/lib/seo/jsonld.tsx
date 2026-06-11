@@ -1,6 +1,7 @@
 import Script from "next/script";
 import { SITE_ORIGIN } from "@/lib/seo/site";
 import { AUTOLENIS_SAMEAS } from "@/lib/seo/entity-graph";
+import { PRICING_SCHEMA } from "@/lib/seo/pricing-copy";
 
 interface JsonLdProps { id: string; data: Record<string, unknown> | Array<Record<string, unknown>> }
 
@@ -143,7 +144,7 @@ export function pricingSchema() {
       "@context": "https://schema.org",
       "@type": "Product",
       name: "AutoLenis Free Tier",
-      description: "Reverse auction with a one-time $99 non-refundable Auction Access Fee and full Contract Shield protection.",
+      description: PRICING_SCHEMA.freeTierDescription,
       offers: {
         "@type": "Offer",
         price: "99.00",
@@ -153,7 +154,7 @@ export function pricingSchema() {
           price: "99.00",
           priceCurrency: "USD",
           valueAddedTaxIncluded: false,
-          description: "One-time, non-refundable Auction Access Fee — not a deposit and not credited toward purchase.",
+          description: PRICING_SCHEMA.feeOfferDescription,
         },
         availability: "https://schema.org/InStock",
       },
@@ -162,7 +163,7 @@ export function pricingSchema() {
       "@context": "https://schema.org",
       "@type": "Product",
       name: "AutoLenis Premium Concierge",
-      description: "White-glove car-buying concierge with dedicated specialist, full negotiation, paperwork handling, and delivery.",
+      description: PRICING_SCHEMA.premiumOfferDescription,
       offers: {
         "@type": "Offer",
         price: "499.00",

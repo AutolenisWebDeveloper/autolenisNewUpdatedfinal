@@ -106,7 +106,7 @@ const METRICS = [
   },
   {
     value: `$${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(0)}`,
-    label: "Fully refundable deposit",
+    label: "Refundable Auction Access Fee",
   },
   {
     value: "3 min",
