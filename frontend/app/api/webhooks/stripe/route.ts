@@ -170,6 +170,33 @@ export async function POST(request: NextRequest) {
                 }).catch(() => {});
               }
             }
+
+            // CRM event spine — emit deposit_paid for the buyer after the
+            // deposit has been confirmed PAID. Appended tail call only: nothing
+            // in the Stripe handling above changes, and a failure here can never
+            // affect payment processing (the deposit write has already
+            // committed).
+            try {
+              const { emitDomainEvent } = await import("@/lib/events/emit");
+              await emitDomainEvent("deposit_paid", {
+                domainEntityId: deposit.id,
+                contact: {
+                  email: deposit.buyer?.user?.email ?? null,
+                  phone: deposit.buyer?.phone ?? null,
+                  firstName: deposit.buyer?.firstName,
+                  lastName: deposit.buyer?.lastName,
+                  source: "buyer_signup",
+                },
+                data: {
+                  deposit_id: deposit.id,
+                  buyer_id: deposit.buyerId,
+                  amount_cents: deposit.amountCents,
+                  payment_intent_id: pi.id,
+                },
+              });
+            } catch (err) {
+              console.error("[stripe/webhook] deposit_paid emit failed:", err);
+            }
           }
         }
 

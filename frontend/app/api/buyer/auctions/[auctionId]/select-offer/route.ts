@@ -100,6 +100,33 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
   }
 
+  // CRM event spine — emit offer_selected for the buyer after the deal has
+  // formed. Additive tail call: a failure never affects the selection, which
+  // has already committed.
+  try {
+    if (buyerWithEmail) {
+      const { emitDomainEvent } = await import("@/lib/events/emit");
+      await emitDomainEvent("offer_selected", {
+        domainEntityId: deal.id,
+        contact: {
+          email: buyerWithEmail.user?.email ?? null,
+          phone: buyerWithEmail.phone,
+          firstName: buyerWithEmail.firstName,
+          lastName: buyerWithEmail.lastName,
+          source: "buyer_signup",
+        },
+        data: {
+          deal_id: deal.id,
+          offer_id: offer.id,
+          auction_id: auctionId,
+          buyer_id: buyer.id,
+        },
+      });
+    }
+  } catch (err) {
+    console.error("[select-offer] offer_selected emit failed:", err);
+  }
+
   // AMIPS Phase 4 — record this completed transaction into Marketplace
   // Intelligence. Non-blocking via after() so it never affects the deal flow;
   // the recorder swallows its own errors and skips untracked metros/vehicles.

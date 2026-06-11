@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { prisma } from '@/lib/prisma';
+import { resolveDuplicateDispatch } from '@/lib/crm/dispatch-idempotency';
 
 // ---------------------------------------------------------------------------
 // INBOUND DISPATCH AUTH (Step 4 — shared middleware)
@@ -143,18 +144,50 @@ export async function authorizeDispatch(
 
   if (insertError) {
     if ((insertError as { code?: string }).code === '23505') {
-      // Duplicate — return the prior result (may be {} if the original is still
-      // processing; either way we never re-act).
+      // Duplicate key — a prior request owns this idempotency key. Branch on the
+      // stored execution_status so a near-simultaneous retry is resolved by
+      // STATE, never by handing back the (still-null) payload of an in-flight
+      // request as if it were the completed result.
       const { data: prior } = await supabase
         .from('idempotency_keys')
-        .select('response_payload')
+        .select('execution_status, response_payload')
         .eq('key_hash', keyHash)
         .maybeSingle();
+
+      const decision = resolveDuplicateDispatch(
+        prior?.execution_status as string | undefined,
+      );
+
+      if (decision === 'replay') {
+        // The original finished — replay its stored result verbatim.
+        return {
+          ok: true,
+          duplicate: true,
+          priorResult: (prior?.response_payload as Record<string, unknown>) ?? {},
+          supabase,
+        };
+      }
+
+      if (decision === 'reclaim') {
+        // The original attempt did NOT succeed. Treat as not-yet-done: reclaim
+        // the key (back to 'processing', clear any stale payload) and let the
+        // caller re-act so the retry can actually complete the work.
+        await supabase
+          .from('idempotency_keys')
+          .update({ execution_status: 'processing', response_payload: null })
+          .eq('key_hash', keyHash);
+        return { ok: true, duplicate: false, body, idempotencyKey, keyHash, supabase };
+      }
+
+      // decision === 'reject' — the original is still in flight. Returning its
+      // null payload as a 200 would read as a successful empty result; instead
+      // tell the caller to retry once the original settles (409, retryable).
       return {
-        ok: true,
-        duplicate: true,
-        priorResult: (prior?.response_payload as Record<string, unknown>) ?? {},
-        supabase,
+        ok: false,
+        response: NextResponse.json(
+          { status: 'processing', error: 'dispatch_in_flight', retryable: true },
+          { status: 409 },
+        ),
       };
     }
     // Unexpected store error — fail closed with 500 rather than risk a

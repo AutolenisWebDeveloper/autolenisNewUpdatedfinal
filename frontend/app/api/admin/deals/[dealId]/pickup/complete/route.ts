@@ -130,6 +130,31 @@ export async function POST(request: NextRequest, { params }: Props) {
     }).catch(err => console.error("[pickup/complete] dealer payout initiated email failed:", err));
   }
 
+  // CRM event spine — emit purchase_completed for the buyer after the deal has
+  // been marked COMPLETED. Additive tail call: a failure never affects the
+  // pickup completion, which has already committed.
+  try {
+    const { emitDomainEvent } = await import("@/lib/events/emit");
+    await emitDomainEvent("purchase_completed", {
+      domainEntityId: dealId,
+      contact: {
+        email: deal.buyer?.user?.email ?? null,
+        phone: deal.buyer?.phone ?? null,
+        firstName: deal.buyer?.firstName,
+        lastName: deal.buyer?.lastName,
+        source: "buyer_signup",
+      },
+      data: {
+        deal_id: dealId,
+        buyer_id: deal.buyerId,
+        pickup_id: pickup.id,
+        completed_via: "admin_override",
+      },
+    });
+  } catch (err) {
+    console.error("[pickup/complete] purchase_completed emit failed:", err);
+  }
+
   return adminSuccess({
     dealId,
     dealStatus: "COMPLETED",
