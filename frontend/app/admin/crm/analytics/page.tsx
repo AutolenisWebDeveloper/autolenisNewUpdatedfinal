@@ -15,6 +15,7 @@ import Link from 'next/link';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { AnalyticsService } from '@/lib/services/analytics.service';
 import { AnalyticsTabs, type AnalyticsTabKey } from '@/components/admin/crm/AnalyticsTabs';
+import { EmptyState, KpiCard, PageHeader } from '@/components/admin/crm/ui';
 import { formatCents, formatNumber } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -28,6 +29,15 @@ const TABS: { key: AnalyticsTabKey; label: string; icon: typeof Filter }[] = [
   { key: 'revenue',     label: 'Revenue',     icon: DollarSign },
   { key: 'reputation',  label: 'Reputation',  icon: ShieldAlert },
 ];
+
+// Shared token-styled table/section primitives (mirrors the operations screen).
+const SECTION_CLASS =
+  'overflow-hidden rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)]';
+const CARD_CLASS =
+  'rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] p-5';
+const TH_BASE =
+  'border-b border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-secondary)] px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-[var(--crm-text-tertiary)]';
+const TD_BASE = 'px-4 py-2.5 align-middle text-[13px] text-[var(--crm-text-secondary)]';
 
 function resolveTab(raw: string | string[] | undefined): AnalyticsTabKey {
   const v = Array.isArray(raw) ? raw[0] : raw;
@@ -61,15 +71,12 @@ export default async function AnalyticsPage({
   const analytics = new AnalyticsService(getServiceSupabase());
 
   return (
-    <div className="p-6 space-y-6">
-      <header className="flex items-start justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Analytics</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Lifecycle funnel, campaign performance, automations, and revenue across the platform.
-          </p>
-        </div>
-      </header>
+    <div className="space-y-6 p-6" data-testid="crm-analytics">
+      <PageHeader
+        title="Analytics"
+        subtitle="Lifecycle funnel, campaign performance, automations, and revenue across the platform."
+        data-testid="crm-analytics-header"
+      />
 
       <AnalyticsTabs tabs={TABS} active={active} />
 
@@ -97,40 +104,40 @@ async function FunnelTab({ analytics }: { analytics: AnalyticsService }) {
   const maxCount = Math.max(1, ...funnel.stages.map((s) => s.count));
 
   return (
-    <div className="grid lg:grid-cols-3 gap-5">
-      <section className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-5">
-        <h2 className="text-sm font-semibold text-gray-900 mb-4">Stage Distribution</h2>
+    <div className="grid gap-5 lg:grid-cols-3" data-testid="crm-analytics-funnel">
+      <section className={`lg:col-span-2 ${CARD_CLASS}`}>
+        <h2 className="mb-4 text-[13px] font-medium text-[var(--crm-text-primary)]">Stage distribution</h2>
         {funnel.stages.every((s) => s.count === 0) ? (
           <EmptyState
             icon={Filter}
             title="No funnel data yet"
-            subtitle="Contacts will populate stages as the lifecycle progresses."
+            description="Contacts will populate stages as the lifecycle progresses."
           />
         ) : (
           <div className="overflow-hidden">
-            <table className="w-full text-sm">
+            <table className="w-full text-[13px]">
               <thead>
-                <tr className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  <th className="text-left py-2 px-2">Stage</th>
-                  <th className="text-right py-2 px-2 w-20">Reached</th>
-                  <th className="text-right py-2 px-2 w-20">% of Leads</th>
-                  <th className="py-2 px-2 w-1/3">Bar</th>
+                <tr>
+                  <th className={`${TH_BASE} text-left`}>Stage</th>
+                  <th className={`${TH_BASE} w-20 text-right`}>Reached</th>
+                  <th className={`${TH_BASE} w-20 text-right`}>% of Leads</th>
+                  <th className={`${TH_BASE} w-1/3 text-left`}>Bar</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody>
                 {funnel.stages.map((s) => (
-                  <tr key={s.stage} className="hover:bg-gray-50">
-                    <td className="py-2 px-2 text-gray-400">{s.label}</td>
-                    <td className="py-2 px-2 text-right text-gray-900 tabular-nums">
+                  <tr key={s.stage} className="border-b border-[var(--crm-border)] crm-hairline last:border-b-0 hover:bg-[var(--crm-bg-secondary)]">
+                    <td className={TD_BASE}>{s.label}</td>
+                    <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-primary)]`}>
                       {formatNumber(s.count)}
                     </td>
-                    <td className="py-2 px-2 text-right text-gray-500 tabular-nums">
+                    <td className={`${TD_BASE} text-right tabular-nums`}>
                       {s.pct_of_leads.toFixed(1)}%
                     </td>
-                    <td className="py-2 px-2">
-                      <div className="h-4 bg-white rounded overflow-hidden">
+                    <td className={TD_BASE}>
+                      <div className="h-4 overflow-hidden rounded-[var(--crm-radius-sm)] bg-[var(--crm-bg-tertiary)]">
                         <div
-                          className="h-full bg-blue-600 transition-all"
+                          className="h-full bg-[var(--crm-primary)] transition-all"
                           style={{ width: `${(s.count / maxCount) * 100}%` }}
                         />
                       </div>
@@ -143,33 +150,33 @@ async function FunnelTab({ analytics }: { analytics: AnalyticsService }) {
         )}
       </section>
 
-      <section className="bg-white border border-gray-200 rounded-xl p-5">
-        <h2 className="text-sm font-semibold text-gray-900 mb-4">Stage-to-Stage Conversion</h2>
+      <section className={CARD_CLASS}>
+        <h2 className="mb-4 text-[13px] font-medium text-[var(--crm-text-primary)]">Stage-to-stage conversion</h2>
         {funnel.conversions.every((c) => c.from_count === 0) ? (
           <EmptyState
             icon={TrendingUp}
             title="No conversions yet"
-            subtitle="Move a contact between stages to see rates here."
+            description="Move a contact between stages to see rates here."
           />
         ) : (
           <ul className="space-y-3">
             {funnel.conversions.map((c) => (
               <li key={`${c.from_stage}->${c.to_stage}`}>
-                <div className="flex items-baseline justify-between text-xs">
-                  <span className="text-gray-500">
+                <div className="flex items-baseline justify-between text-[12px]">
+                  <span className="text-[var(--crm-text-tertiary)]">
                     {labelize(c.from_stage)} → {labelize(c.to_stage)}
                   </span>
-                  <span className="text-gray-900 tabular-nums">
+                  <span className="tabular-nums text-[var(--crm-text-primary)]">
                     {c.conversion_pct.toFixed(1)}%
                   </span>
                 </div>
-                <div className="mt-1 h-1.5 bg-white rounded overflow-hidden">
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--crm-bg-tertiary)]">
                   <div
-                    className="h-full bg-emerald-500"
+                    className="h-full bg-[var(--crm-success)]"
                     style={{ width: `${Math.min(100, c.conversion_pct)}%` }}
                   />
                 </div>
-                <div className="text-[10px] text-gray-500 mt-0.5 tabular-nums">
+                <div className="mt-0.5 text-[10px] tabular-nums text-[var(--crm-text-tertiary)]">
                   {formatNumber(c.to_count)} of {formatNumber(c.from_count)}
                 </div>
               </li>
@@ -193,10 +200,10 @@ async function CampaignsTab({ analytics }: { analytics: AnalyticsService }) {
   }
 
   return (
-    <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-      <header className="px-5 py-4 border-b border-gray-200">
-        <h2 className="text-sm font-semibold text-gray-900">Campaign Performance</h2>
-        <p className="text-[11px] text-gray-500 mt-0.5">
+    <section className={SECTION_CLASS} data-testid="crm-analytics-campaigns">
+      <header className="border-b border-[var(--crm-border)] crm-hairline px-5 py-4">
+        <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Campaign performance</h2>
+        <p className="mt-0.5 text-[12px] text-[var(--crm-text-tertiary)]">
           Bounce {'>'} 2% flagged warning · {'>'} 5% flagged critical.
         </p>
       </header>
@@ -205,67 +212,67 @@ async function CampaignsTab({ analytics }: { analytics: AnalyticsService }) {
           <EmptyState
             icon={Send}
             title="No campaigns sent yet"
-            subtitle="Launch a campaign from /admin/crm/campaigns to populate this view."
+            description="Launch a campaign from /admin/crm/campaigns to populate this view."
           />
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-[13px]">
             <thead>
-              <tr className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider bg-white/30">
-                <th className="text-left px-4 py-2">Name</th>
-                <th className="text-left px-4 py-2">Type</th>
-                <th className="text-right px-4 py-2">Sent</th>
-                <th className="text-right px-4 py-2">Delivered</th>
-                <th className="text-right px-4 py-2">Open</th>
-                <th className="text-right px-4 py-2">Click</th>
-                <th className="text-right px-4 py-2">Bounce</th>
-                <th className="text-right px-4 py-2">Unsub</th>
-                <th className="text-center px-4 py-2">Health</th>
+              <tr>
+                <th className={`${TH_BASE} text-left`}>Name</th>
+                <th className={`${TH_BASE} text-left`}>Type</th>
+                <th className={`${TH_BASE} text-right`}>Sent</th>
+                <th className={`${TH_BASE} text-right`}>Delivered</th>
+                <th className={`${TH_BASE} text-right`}>Open</th>
+                <th className={`${TH_BASE} text-right`}>Click</th>
+                <th className={`${TH_BASE} text-right`}>Bounce</th>
+                <th className={`${TH_BASE} text-right`}>Unsub</th>
+                <th className={`${TH_BASE} text-center`}>Health</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5">
+                <tr key={r.id} className="border-b border-[var(--crm-border)] crm-hairline last:border-b-0 hover:bg-[var(--crm-bg-secondary)]">
+                  <td className={TD_BASE}>
                     <Link
                       href={`/admin/crm/campaigns/${r.id}`}
-                      className="text-gray-900 hover:text-blue-700"
+                      className="text-[var(--crm-text-primary)] hover:text-[var(--crm-primary)]"
                     >
                       {r.name}
                     </Link>
                     {r.sent_at && (
-                      <div className="text-[11px] text-gray-500">{relativeTime(r.sent_at)}</div>
+                      <div className="text-[11px] text-[var(--crm-text-tertiary)]">{relativeTime(r.sent_at)}</div>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-gray-500 capitalize">{r.type}</td>
-                  <td className="px-4 py-2.5 text-right text-gray-900 tabular-nums">
+                  <td className={`${TD_BASE} capitalize`}>{r.type}</td>
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-primary)]`}>
                     {formatNumber(r.sent_count)}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-400 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-tertiary)]`}>
                     {formatNumber(r.delivered_count)}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-400 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-tertiary)]`}>
                     {r.open_rate.toFixed(1)}%
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-400 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-tertiary)]`}>
                     {r.click_rate.toFixed(1)}%
                   </td>
                   <td
-                    className={`px-4 py-2.5 text-right tabular-nums ${
+                    className={`${TD_BASE} text-right tabular-nums ${
                       r.health === 'critical'
-                        ? 'text-red-600'
+                        ? 'text-[var(--crm-danger)]'
                         : r.health === 'warning'
-                          ? 'text-yellow-700'
-                          : 'text-gray-400'
+                          ? 'text-[var(--crm-warning)]'
+                          : 'text-[var(--crm-text-tertiary)]'
                     }`}
                   >
                     {r.bounce_rate.toFixed(1)}%
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-400 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-tertiary)]`}>
                     {r.unsubscribe_rate.toFixed(1)}%
                   </td>
-                  <td className="px-4 py-2.5 text-center">
+                  <td className={`${TD_BASE} text-center`}>
                     <HealthDot status={r.health} />
                   </td>
                 </tr>
@@ -289,69 +296,69 @@ async function AutomationsTab({ analytics }: { analytics: AnalyticsService }) {
     return <TabError section="Automations" error={err} />;
   }
   return (
-    <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-      <header className="px-5 py-4 border-b border-gray-200">
-        <h2 className="text-sm font-semibold text-gray-900">Workflow Outcomes</h2>
+    <section className={SECTION_CLASS} data-testid="crm-analytics-automations">
+      <header className="border-b border-[var(--crm-border)] crm-hairline px-5 py-4">
+        <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Workflow outcomes</h2>
       </header>
       {rows.length === 0 ? (
         <div className="p-8">
           <EmptyState
             icon={Zap}
             title="No workflows yet"
-            subtitle="Build one from the prebuilt library at /admin/crm/automations."
+            description="Build one from the prebuilt library at /admin/crm/automations."
           />
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-[13px]">
             <thead>
-              <tr className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider bg-white/30">
-                <th className="text-left px-4 py-2">Workflow</th>
-                <th className="text-right px-4 py-2">Enrolled</th>
-                <th className="text-right px-4 py-2">Active</th>
-                <th className="text-right px-4 py-2">Completed</th>
-                <th className="text-right px-4 py-2">Exited / Failed</th>
-                <th className="text-right px-4 py-2">Completion %</th>
-                <th className="text-left px-4 py-2">Top failure node</th>
+              <tr>
+                <th className={`${TH_BASE} text-left`}>Workflow</th>
+                <th className={`${TH_BASE} text-right`}>Enrolled</th>
+                <th className={`${TH_BASE} text-right`}>Active</th>
+                <th className={`${TH_BASE} text-right`}>Completed</th>
+                <th className={`${TH_BASE} text-right`}>Exited / Failed</th>
+                <th className={`${TH_BASE} text-right`}>Completion %</th>
+                <th className={`${TH_BASE} text-left`}>Top failure node</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5">
+                <tr key={r.id} className="border-b border-[var(--crm-border)] crm-hairline last:border-b-0 hover:bg-[var(--crm-bg-secondary)]">
+                  <td className={TD_BASE}>
                     <Link
                       href={`/admin/crm/automations/${r.id}/edit`}
-                      className="text-gray-900 hover:text-blue-700"
+                      className="text-[var(--crm-text-primary)] hover:text-[var(--crm-primary)]"
                     >
                       {r.name}
                     </Link>
-                    <div className="text-[11px] text-gray-500 capitalize">{r.status}</div>
+                    <div className="text-[11px] capitalize text-[var(--crm-text-tertiary)]">{r.status}</div>
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-900 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-primary)]`}>
                     {formatNumber(r.enrolled)}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-blue-700 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-primary)]`}>
                     {formatNumber(r.active)}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-emerald-700 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-success)]`}>
                     {formatNumber(r.completed)}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-red-600 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-danger)]`}>
                     {formatNumber(r.exited + r.failed)}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-400 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-tertiary)]`}>
                     {r.completion_rate.toFixed(1)}%
                   </td>
-                  <td className="px-4 py-2.5 text-gray-500">
+                  <td className={TD_BASE}>
                     {r.top_failure_node ? (
                       <span>
-                        <code className="text-[11px] text-yellow-700">{r.top_failure_node}</code>
-                        <span className="text-[11px] text-gray-500 ml-2">
+                        <code className="text-[11px] text-[var(--crm-warning)]">{r.top_failure_node}</code>
+                        <span className="ml-2 text-[11px] text-[var(--crm-text-tertiary)]">
                           ×{r.top_failure_count}
                         </span>
                       </span>
                     ) : (
-                      <span className="text-gray-400">—</span>
+                      <span className="text-[var(--crm-text-tertiary)]">—</span>
                     )}
                   </td>
                 </tr>
@@ -375,45 +382,45 @@ async function DealersTab({ analytics }: { analytics: AnalyticsService }) {
     return <TabError section="Dealers" error={err} />;
   }
   return (
-    <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-      <header className="px-5 py-4 border-b border-gray-200">
-        <h2 className="text-sm font-semibold text-gray-900">Dealer Performance</h2>
+    <section className={SECTION_CLASS} data-testid="crm-analytics-dealers">
+      <header className="border-b border-[var(--crm-border)] crm-hairline px-5 py-4">
+        <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Dealer performance</h2>
       </header>
       {rows.length === 0 ? (
         <div className="p-8">
-          <EmptyState icon={Store} title="No dealers yet" subtitle="Invite dealers to populate this view." />
+          <EmptyState icon={Store} title="No dealers yet" description="Invite dealers to populate this view." />
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-[13px]">
             <thead>
-              <tr className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider bg-white/30">
-                <th className="text-left px-4 py-2">Dealer</th>
-                <th className="text-right px-4 py-2">Offers Submitted</th>
-                <th className="text-right px-4 py-2">Win Rate</th>
-                <th className="text-right px-4 py-2">Avg Response</th>
-                <th className="text-right px-4 py-2">Last Active</th>
+              <tr>
+                <th className={`${TH_BASE} text-left`}>Dealer</th>
+                <th className={`${TH_BASE} text-right`}>Offers Submitted</th>
+                <th className={`${TH_BASE} text-right`}>Win Rate</th>
+                <th className={`${TH_BASE} text-right`}>Avg Response</th>
+                <th className={`${TH_BASE} text-right`}>Last Active</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5">
-                    <div className="text-gray-900">{r.name}</div>
-                    <div className="text-[11px] text-gray-500">{r.status}</div>
+                <tr key={r.id} className="border-b border-[var(--crm-border)] crm-hairline last:border-b-0 hover:bg-[var(--crm-bg-secondary)]">
+                  <td className={TD_BASE}>
+                    <div className="text-[var(--crm-text-primary)]">{r.name}</div>
+                    <div className="text-[11px] text-[var(--crm-text-tertiary)]">{r.status}</div>
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-900 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-primary)]`}>
                     {formatNumber(r.offers_submitted)}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-emerald-700 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-success)]`}>
                     {r.win_rate.toFixed(1)}%
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-400 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-tertiary)]`}>
                     {r.avg_response_hours === null
                       ? '—'
                       : `${r.avg_response_hours.toFixed(1)}h`}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-500 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-tertiary)]`}>
                     {relativeTime(r.last_active_at)}
                   </td>
                 </tr>
@@ -437,48 +444,48 @@ async function AffiliatesTab({ analytics }: { analytics: AnalyticsService }) {
     return <TabError section="Affiliates" error={err} />;
   }
   return (
-    <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-      <header className="px-5 py-4 border-b border-gray-200">
-        <h2 className="text-sm font-semibold text-gray-900">Affiliate Performance</h2>
+    <section className={SECTION_CLASS} data-testid="crm-analytics-affiliates">
+      <header className="border-b border-[var(--crm-border)] crm-hairline px-5 py-4">
+        <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Affiliate performance</h2>
       </header>
       {rows.length === 0 ? (
         <div className="p-8">
           <EmptyState
             icon={UserPlus}
             title="No affiliates yet"
-            subtitle="Approve an affiliate signup to populate this view."
+            description="Approve an affiliate signup to populate this view."
           />
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-[13px]">
             <thead>
-              <tr className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider bg-white/30">
-                <th className="text-left px-4 py-2">Affiliate</th>
-                <th className="text-left px-4 py-2">Code</th>
-                <th className="text-right px-4 py-2">Sent</th>
-                <th className="text-right px-4 py-2">Converted</th>
-                <th className="text-right px-4 py-2">Conversion</th>
-                <th className="text-right px-4 py-2">Commission</th>
+              <tr>
+                <th className={`${TH_BASE} text-left`}>Affiliate</th>
+                <th className={`${TH_BASE} text-left`}>Code</th>
+                <th className={`${TH_BASE} text-right`}>Sent</th>
+                <th className={`${TH_BASE} text-right`}>Converted</th>
+                <th className={`${TH_BASE} text-right`}>Conversion</th>
+                <th className={`${TH_BASE} text-right`}>Commission</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5 text-gray-900">{r.id.slice(0, 8)}…</td>
-                  <td className="px-4 py-2.5 text-gray-500">
+                <tr key={r.id} className="border-b border-[var(--crm-border)] crm-hairline last:border-b-0 hover:bg-[var(--crm-bg-secondary)]">
+                  <td className={`${TD_BASE} text-[var(--crm-text-primary)]`}>{r.id.slice(0, 8)}…</td>
+                  <td className={TD_BASE}>
                     <code className="text-[11px]">{r.referral_code}</code>
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-900 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-primary)]`}>
                     {formatNumber(r.referrals_sent)}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-emerald-700 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-success)]`}>
                     {formatNumber(r.referrals_converted)}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-gray-400 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-text-tertiary)]`}>
                     {r.conversion_rate.toFixed(1)}%
                   </td>
-                  <td className="px-4 py-2.5 text-right text-emerald-700 tabular-nums">
+                  <td className={`${TD_BASE} text-right tabular-nums text-[var(--crm-success)]`}>
                     {formatCents(r.commission_cents)}
                   </td>
                 </tr>
@@ -502,57 +509,31 @@ async function RevenueTab({ analytics }: { analytics: AnalyticsService }) {
     return <TabError section="Revenue" error={err} />;
   }
   return (
-    <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <RevenueCard
-        label="Deposits Collected"
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="crm-analytics-revenue">
+      <KpiCard
+        label="Deposits collected"
         value={formatCents(r.deposits_collected_cents)}
-        sub={`${formatNumber(r.deposits_count)} deposits`}
-        accent="blue"
+        sublabel={`${formatNumber(r.deposits_count)} deposits`}
+        icon={DollarSign}
       />
-      <RevenueCard
-        label="Purchase Volume"
+      <KpiCard
+        label="Purchase volume"
         value={formatCents(r.purchase_volume_cents)}
-        sub={`${formatNumber(r.purchases_count)} deals`}
-        accent="emerald"
+        sublabel={`${formatNumber(r.purchases_count)} deals`}
+        icon={TrendingUp}
       />
-      <RevenueCard
-        label="Refunds Issued"
+      <KpiCard
+        label="Refunds issued"
         value={formatCents(r.refunds_cents)}
-        sub={`${formatNumber(r.refunds_count)} refunds`}
-        accent="red"
+        sublabel={`${formatNumber(r.refunds_count)} refunds`}
+        icon={AlertTriangle}
       />
-      <RevenueCard
-        label="Net Revenue"
+      <KpiCard
+        label="Net revenue"
         value={formatCents(r.net_revenue_cents)}
-        sub="Deposits + fees − refunds"
-        accent="emerald"
+        sublabel="Deposits + fees − refunds"
+        icon={DollarSign}
       />
-    </div>
-  );
-}
-
-function RevenueCard({
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  accent: 'blue' | 'emerald' | 'red';
-}) {
-  const ring =
-    accent === 'blue'
-      ? 'border-blue-500/30 bg-blue-500/5'
-      : accent === 'emerald'
-        ? 'border-emerald-500/30 bg-emerald-500/5'
-        : 'border-red-200 bg-red-500/5';
-  return (
-    <div className={`border rounded-xl p-5 ${ring}`}>
-      <div className="text-[11px] text-gray-500 uppercase tracking-wider">{label}</div>
-      <div className="mt-2 text-2xl font-bold text-gray-900 tabular-nums">{value}</div>
-      <div className="mt-1 text-[11px] text-gray-500">{sub}</div>
     </div>
   );
 }
@@ -569,67 +550,73 @@ async function ReputationTab({ analytics }: { analytics: AnalyticsService }) {
   }
   const banner =
     r.reputation_status === 'critical'
-      ? { className: 'bg-red-50 border-red-200 text-red-700', icon: ShieldAlert, text: 'CRITICAL — bounce or complaint rate is past the carrier threshold. Sender reputation at risk.' }
+      ? { tone: 'danger', icon: ShieldAlert, text: 'CRITICAL — bounce or complaint rate is past the carrier threshold. Sender reputation at risk.' }
       : r.reputation_status === 'warning'
-        ? { className: 'bg-yellow-50 border-yellow-200 text-yellow-700', icon: AlertTriangle, text: 'WARNING — bounce or complaint rate is elevated. Investigate before next bulk send.' }
-        : { className: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700', icon: CheckCircle2, text: 'Sender reputation healthy.' };
+        ? { tone: 'warning', icon: AlertTriangle, text: 'WARNING — bounce or complaint rate is elevated. Investigate before next bulk send.' }
+        : { tone: 'success', icon: CheckCircle2, text: 'Sender reputation healthy.' };
   const BannerIcon = banner.icon;
 
   return (
-    <div className="space-y-5">
-      <div className={`flex items-center gap-3 border rounded-xl px-4 py-3 ${banner.className}`}>
-        <BannerIcon className="w-5 h-5 shrink-0" />
-        <div className="text-sm font-semibold">{banner.text}</div>
+    <div className="space-y-5" data-testid="crm-analytics-reputation">
+      <div
+        className="flex items-center gap-3 rounded-[var(--crm-radius-md)] border px-4 py-3"
+        style={{
+          color: `var(--crm-${banner.tone})`,
+          borderColor: `var(--crm-${banner.tone}-subtle)`,
+          backgroundColor: `var(--crm-${banner.tone}-subtle)`,
+        }}
+        data-testid="crm-analytics-reputation-banner"
+      >
+        <BannerIcon className="h-5 w-5 shrink-0" />
+        <div className="text-[13px] font-medium">{banner.text}</div>
       </div>
 
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <ReputationCard
-          label="Email Bounce Rate"
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          label="Email bounce rate"
           value={`${r.email_bounce_rate.toFixed(2)}%`}
-          warn={r.email_bounce_rate >= 2}
-          crit={r.email_bounce_rate >= 5}
-          sub={`${formatNumber(r.email_bounced)} of ${formatNumber(r.email_total_sent)}`}
+          sublabel={`${formatNumber(r.email_bounced)} of ${formatNumber(r.email_total_sent)}`}
         />
-        <ReputationCard
-          label="Email Complaint Rate"
+        <KpiCard
+          label="Email complaint rate"
           value={`${r.email_complaint_rate.toFixed(3)}%`}
-          warn={r.email_complaint_rate >= 0.1}
-          crit={r.email_complaint_rate >= 0.3}
-          sub={`${formatNumber(r.email_complained)} complaints`}
+          sublabel={`${formatNumber(r.email_complained)} complaints`}
         />
-        <ReputationCard
-          label="Email Unsubscribes"
+        <KpiCard
+          label="Email unsubscribes"
           value={formatNumber(r.email_unsubscribed)}
-          sub="Total suppressed"
+          sublabel="Total suppressed"
         />
-        <ReputationCard
-          label="SMS Opt-Out Rate"
+        <KpiCard
+          label="SMS opt-out rate"
           value={`${r.sms_optout_rate.toFixed(2)}%`}
-          sub={`${formatNumber(r.sms_stopped)} STOP of ${formatNumber(r.sms_total_sent)} sent`}
+          sublabel={`${formatNumber(r.sms_stopped)} STOP of ${formatNumber(r.sms_total_sent)} sent`}
         />
       </div>
 
-      <section className="bg-white border border-gray-200 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">30-Day Bounce Rate Trend</h3>
+      <section className={CARD_CLASS}>
+        <h3 className="mb-3 text-[13px] font-medium text-[var(--crm-text-primary)]">30-day bounce rate trend</h3>
         {r.bounce_trend.length === 0 ? (
           <EmptyState
             icon={TrendingUp}
             title="No timeline data yet"
-            subtitle="Bounce events will plot here once campaigns start sending."
+            description="Bounce events will plot here once campaigns start sending."
           />
         ) : (
-          <div className="flex items-end gap-1 h-32">
+          <div className="flex h-32 items-end gap-1">
             {r.bounce_trend.map((p) => (
-              <div key={p.day} className="flex-1 flex flex-col items-center gap-1" title={`${p.day}: ${p.bounce_rate.toFixed(1)}%`}>
+              <div key={p.day} className="flex flex-1 flex-col items-center gap-1" title={`${p.day}: ${p.bounce_rate.toFixed(1)}%`}>
                 <div
-                  className={`w-full rounded-t ${
-                    p.bounce_rate >= 5
-                      ? 'bg-red-500'
-                      : p.bounce_rate >= 2
-                        ? 'bg-yellow-500'
-                        : 'bg-blue-500'
-                  }`}
-                  style={{ height: `${Math.max(2, Math.min(100, p.bounce_rate * 5))}%` }}
+                  className="w-full rounded-t-[var(--crm-radius-sm)]"
+                  style={{
+                    height: `${Math.max(2, Math.min(100, p.bounce_rate * 5))}%`,
+                    backgroundColor:
+                      p.bounce_rate >= 5
+                        ? 'var(--crm-danger)'
+                        : p.bounce_rate >= 2
+                          ? 'var(--crm-warning)'
+                          : 'var(--crm-primary)',
+                  }}
                 />
               </div>
             ))}
@@ -640,58 +627,17 @@ async function ReputationTab({ analytics }: { analytics: AnalyticsService }) {
   );
 }
 
-function ReputationCard({
-  label,
-  value,
-  sub,
-  warn,
-  crit,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  warn?: boolean;
-  crit?: boolean;
-}) {
-  const valueColor = crit ? 'text-red-600' : warn ? 'text-yellow-700' : 'text-gray-900';
-  return (
-    <div className="border border-gray-200 bg-white rounded-xl p-5">
-      <div className="text-[11px] text-gray-500 uppercase tracking-wider">{label}</div>
-      <div className={`mt-2 text-2xl font-bold tabular-nums ${valueColor}`}>{value}</div>
-      <div className="mt-1 text-[11px] text-gray-500">{sub}</div>
-    </div>
-  );
-}
-
 // ──────────────────────────────────────────────────────────────────────────
 // SHARED
 // ──────────────────────────────────────────────────────────────────────────
 function HealthDot({ status }: { status: 'ok' | 'warning' | 'critical' }) {
   const color =
     status === 'critical'
-      ? 'bg-red-500'
+      ? 'var(--crm-danger)'
       : status === 'warning'
-        ? 'bg-yellow-500'
-        : 'bg-emerald-500';
-  return <span className={`inline-block w-2 h-2 rounded-full ${color}`} />;
-}
-
-function EmptyState({
-  icon: Icon,
-  title,
-  subtitle,
-}: {
-  icon: typeof Filter;
-  title: string;
-  subtitle: string;
-}) {
-  return (
-    <div className="text-center py-8">
-      <Icon className="w-10 h-10 text-gray-400 mx-auto mb-3" />
-      <p className="text-sm text-gray-500">{title}</p>
-      <p className="text-[11px] text-gray-400 mt-1">{subtitle}</p>
-    </div>
-  );
+        ? 'var(--crm-warning)'
+        : 'var(--crm-success)';
+  return <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />;
 }
 
 // Per-tab fallback. Keeps the rest of the analytics page renderable when a
@@ -706,18 +652,18 @@ function TabError({ section, error }: { section: string; error: unknown }) {
   const message =
     error instanceof Error ? error.message : 'Unknown error fetching analytics.';
   return (
-    <section className="bg-white border border-red-200 rounded-xl p-5">
+    <section className="rounded-[var(--crm-radius-md)] border border-[var(--crm-danger-subtle)] bg-[var(--crm-bg-primary)] p-5">
       <div className="flex items-start gap-3">
-        <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-[var(--crm-danger)]" />
         <div>
-          <h2 className="text-sm font-semibold text-gray-900">
+          <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">
             {section} analytics unavailable
           </h2>
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="mt-1 text-[12px] text-[var(--crm-text-tertiary)]">
             We couldn&rsquo;t load this section. Other tabs may still work. Try
             refreshing in a moment.
           </p>
-          <p className="text-[11px] text-red-700 mt-2 font-mono break-all">{message}</p>
+          <p className="mt-2 break-all font-mono text-[11px] text-[var(--crm-danger)]">{message}</p>
         </div>
       </div>
     </section>

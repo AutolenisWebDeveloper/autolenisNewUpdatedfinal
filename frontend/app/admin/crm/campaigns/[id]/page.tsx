@@ -4,16 +4,17 @@ import { ChevronLeft, Mail, MessageSquare, Layers } from 'lucide-react';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { CampaignService } from '@/lib/services/campaign.service';
 import type { CampaignStatus, CampaignType } from '@/lib/types/crm';
+import { KpiCard, PageHeader, StatusPill, type Tone } from '@/components/admin/crm/ui';
 
 export const dynamic = 'force-dynamic';
 
-const STATUS_BADGE: Record<CampaignStatus, string> = {
-  draft: 'bg-gray-700/40 text-gray-500',
-  scheduled: 'bg-blue-50 text-blue-700',
-  running: 'bg-yellow-50 text-yellow-700',
-  paused: 'bg-orange-50 text-orange-700',
-  completed: 'bg-emerald-50 text-emerald-700',
-  cancelled: 'bg-red-50 text-red-600',
+const STATUS_TONE: Record<CampaignStatus, Tone> = {
+  draft: 'neutral',
+  scheduled: 'info',
+  running: 'primary',
+  paused: 'warning',
+  completed: 'success',
+  cancelled: 'danger',
 };
 
 const TYPE_ICON: Record<CampaignType, typeof Mail> = {
@@ -51,49 +52,52 @@ export default async function CampaignDetailPage({
   const TypeIcon = TYPE_ICON[campaign.type];
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <header className="mb-6">
+    <div className="mx-auto max-w-5xl space-y-6 p-6" data-testid="crm-campaign-detail">
+      <div>
         <Link
           href="/admin/crm/campaigns"
-          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 transition-colors mb-3"
+          data-testid="crm-campaign-detail-back"
+          className="mb-3 inline-flex items-center gap-1 text-[12px] text-[var(--crm-text-tertiary)] transition-colors hover:text-[var(--crm-text-primary)]"
         >
-          <ChevronLeft className="w-3.5 h-3.5" /> Campaigns
+          <ChevronLeft className="h-3.5 w-3.5" /> Campaigns
         </Link>
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">{campaign.name}</h1>
-            <div className="flex items-center gap-3 mt-1.5">
-              <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-                <TypeIcon className="w-3.5 h-3.5" /> {campaign.type}
+        <PageHeader
+          title={campaign.name}
+          data-testid="crm-campaign-detail-header"
+          actions={
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1 text-[12px] capitalize text-[var(--crm-text-tertiary)]">
+                <TypeIcon className="h-3.5 w-3.5" /> {campaign.type}
               </span>
-              <span
-                className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider ${STATUS_BADGE[campaign.status]}`}
-              >
+              <StatusPill tone={STATUS_TONE[campaign.status]} size="sm" className="capitalize" data-testid="crm-campaign-detail-status">
                 {campaign.status}
-              </span>
+              </StatusPill>
               {campaign.scheduled_at && (
-                <span className="text-[11px] text-gray-500">
+                <span className="text-[12px] text-[var(--crm-text-tertiary)]">
                   Scheduled {new Date(campaign.scheduled_at).toLocaleString()}
                 </span>
               )}
             </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <MetricCard label="Recipients" value={campaign.recipient_count} />
-        <MetricCard label="Sent" value={campaign.sent_count} />
-        <MetricCard label="Delivered" value={campaign.delivered_count} />
-        <MetricCard label="Opened" value={campaign.opened_count} />
-        <MetricCard label="Clicked" value={campaign.clicked_count} />
-        <MetricCard label="Bounced" value={campaign.bounced_count} tone="warn" />
-        <MetricCard label="Unsubscribed" value={campaign.unsubscribed_count} tone="warn" />
-        <MetricCard label="Suppressed" value={campaign.suppressed_count} tone="muted" />
+          }
+        />
       </div>
 
-      <section className="bg-white border border-gray-200 rounded-xl p-5">
-        <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="crm-campaign-detail-metrics">
+        <KpiCard label="Recipients" value={campaign.recipient_count.toLocaleString()} />
+        <KpiCard label="Sent" value={campaign.sent_count.toLocaleString()} />
+        <KpiCard label="Delivered" value={campaign.delivered_count.toLocaleString()} />
+        <KpiCard label="Opened" value={campaign.opened_count.toLocaleString()} />
+        <KpiCard label="Clicked" value={campaign.clicked_count.toLocaleString()} />
+        <KpiCard label="Bounced" value={campaign.bounced_count.toLocaleString()} />
+        <KpiCard label="Unsubscribed" value={campaign.unsubscribed_count.toLocaleString()} />
+        <KpiCard label="Suppressed" value={campaign.suppressed_count.toLocaleString()} />
+      </div>
+
+      <section
+        className="rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] p-5"
+        data-testid="crm-campaign-detail-breakdown"
+      >
+        <div className="mb-3 text-[11px] font-medium uppercase tracking-wide text-[var(--crm-text-tertiary)]">
           Recipient breakdown
         </div>
         <div className="space-y-2">
@@ -103,15 +107,15 @@ export default async function CampaignDetailPage({
             const pct = campaign.recipient_count > 0 ? (count / campaign.recipient_count) * 100 : 0;
             return (
               <div key={status}>
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="text-gray-500 capitalize">{status}</span>
-                  <span className="text-gray-400 font-mono">
+                <div className="mb-1 flex items-center justify-between text-[12px]">
+                  <span className="capitalize text-[var(--crm-text-secondary)]">{status}</span>
+                  <span className="tabular-nums text-[var(--crm-text-tertiary)]">
                     {count.toLocaleString()} ({pct.toFixed(1)}%)
                   </span>
                 </div>
-                <div className="h-1.5 bg-white rounded-full overflow-hidden">
+                <div className="h-1.5 overflow-hidden rounded-full bg-[var(--crm-bg-tertiary)]">
                   <div
-                    className="h-full bg-blue-500"
+                    className="h-full rounded-full bg-[var(--crm-primary)]"
                     style={{ width: `${Math.min(pct, 100)}%` }}
                   />
                 </div>
@@ -119,37 +123,12 @@ export default async function CampaignDetailPage({
             );
           })}
           {Object.keys(summary).length === 0 && (
-            <div className="text-xs text-gray-500 italic">
+            <div className="text-[12px] italic text-[var(--crm-text-tertiary)]">
               No recipients written yet — campaign hasn{`'`}t started fan-out.
             </div>
           )}
         </div>
       </section>
-    </div>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  tone = 'default',
-}: {
-  label: string;
-  value: number;
-  tone?: 'default' | 'warn' | 'muted';
-}) {
-  const toneClass =
-    tone === 'warn'
-      ? 'text-yellow-700'
-      : tone === 'muted'
-        ? 'text-gray-500'
-        : 'text-gray-900';
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4">
-      <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
-      <div className={`text-xl font-bold ${toneClass} mt-0.5 tabular-nums`}>
-        {value.toLocaleString()}
-      </div>
     </div>
   );
 }
