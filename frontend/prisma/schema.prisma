@@ -3087,6 +3087,27 @@ model DealerInvitation {
   @@map("dealer_invitations")
 }
 
+// WO-2 — Secure dealer account-claim token.
+// Issued when an admin approves a DealerApplication. The dealer's Supabase user
+// is created WITHOUT a known password; this single-use, hashed, 7-day token lets
+// the dealer set their own password via /dealer/claim. We store ONLY the SHA-256
+// hash of the token — the plaintext exists only in the emailed claim link.
+model DealerAccountClaimToken {
+  id               String    @id @default(uuid())
+  // SHA-256 hash of the raw token. The raw token is never persisted.
+  tokenHash        String    @unique @map("token_hash")
+  dealerId         String    @map("dealer_id")
+  applicationId    String?   @map("application_id")
+  expiresAt        DateTime  @map("expires_at")
+  consumedAt       DateTime? @map("consumed_at")
+  createdByAdminId String    @map("created_by_admin_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@index([tokenHash])
+  @@index([dealerId])
+  @@map("dealer_account_claim_tokens")
+}
+
 // ─── Vehicle Offer System ─────────────────────────────────────────────────
 // Admin-generated dealer offer links. Multiple dealers can submit competing
 // offers for one buyer request. Each submission may include up to 3 vehicle
@@ -3398,6 +3419,19 @@ model DealerProspect {
   // by the Phase 4B-1 enrichment and used to personalize outreach greetings.
   contactName           String?   @map("contact_name")
   contactTitle          String?   @map("contact_title")
+
+  // WO-3 — the Internet Sales Manager is now a first-class extraction, persisted
+  // INDEPENDENTLY of whether a verifiable email was found. These mirror the email
+  // provenance taxonomy so a found-contact-without-email is still imported.
+  // contactSource values: "gemini_search_high_confidence" |
+  //   "gemini_search_medium_confidence" | "gemini_search_inferred" |
+  //   "gemini_maps_discovery" | "manual"
+  // contactConfidence values: "high" | "medium" | "low"
+  contactPhone          String?   @map("contact_phone")
+  contactSourceUrl      String?   @map("contact_source_url")
+  contactSource         String?   @map("contact_source")
+  contactConfidence     String?   @map("contact_confidence")
+  contactEnrichedAt     DateTime? @map("contact_enriched_at")
 
   // Status timestamps
   scriptedAt            DateTime? @map("scripted_at")

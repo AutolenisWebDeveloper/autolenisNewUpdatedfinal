@@ -110,11 +110,12 @@ export async function POST(req: Request) {
 
     // 2) CRM contact upsert — also where TCPA SMS consent is logged. Consent
     //    fields are only persisted when the buyer explicitly checked the box.
+    let crmContactId: string | null = null;
     try {
       const supabase = getServiceSupabase();
       const ip =
         req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? undefined;
-      await ContactService.upsertContact(supabase, {
+      const contact = await ContactService.upsertContact(supabase, {
         email: email.toLowerCase(),
         phone: phone || undefined,
         firstName,
@@ -128,9 +129,49 @@ export async function POST(req: Request) {
           ? `AutoLenis lead magnet (${magnet.title}) — buyer opted in to receive car buying tips by SMS. Msg & data rates apply. Reply STOP to unsubscribe.`
           : undefined,
       });
+      crmContactId = contact.id;
     } catch (crmErr) {
       // A CRM hiccup must never fail the buyer's submission.
       console.error("[lead-magnet] CRM upsert failed:", crmErr);
+    }
+
+    // 2b) Per-source domain event (additive, non-blocking) — emits
+    //     lead_magnet_downloaded so Make can attach a nurture scenario. The emit
+    //     re-resolves the contact (idempotent email dedup) and mirrors the
+    //     consent captured above: email implied by submission, SMS ONLY when the
+    //     buyer explicitly opted in (never defaulted true).
+    if (crmContactId) {
+      try {
+        const supabase = getServiceSupabase();
+        const ip =
+          req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? undefined;
+        const { emitDomainEvent } = await import("@/lib/events/emit");
+        await emitDomainEvent("lead_magnet_downloaded", {
+          domainEntityId: crmContactId,
+          supabase,
+          contact: {
+            email: email.toLowerCase(),
+            phone: phone || undefined,
+            firstName,
+            source: "lead_magnet",
+            utmCampaign: magnet.utmCampaign,
+            sourceUrl,
+            ipAddress: ip,
+            consentEmail: true,
+            consentSms: smsOptIn,
+            consentText: smsOptIn
+              ? `AutoLenis lead magnet (${magnet.title}) — buyer opted in to receive car buying tips by SMS. Msg & data rates apply. Reply STOP to unsubscribe.`
+              : undefined,
+          },
+          data: {
+            magnet_slug: magnet.slug,
+            timeline: buyerTimeline,
+            segment,
+          },
+        });
+      } catch (emitErr) {
+        console.error("[lead-magnet] CRM emit failed:", emitErr);
+      }
     }
 
     // 3) Delivery email — non-blocking; a send failure must not fail the lead.
