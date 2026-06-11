@@ -99,6 +99,42 @@ export async function POST(req: Request) {
       });
     }
 
+    // Per-source domain event (additive, non-blocking) — emits
+    // partial_lead_captured so Make can attach a nurture scenario. The emit
+    // re-resolves the contact (idempotent email dedup) and mirrors the consent
+    // captured above: email implied by submission, SMS ONLY when the buyer
+    // explicitly opted in via the form's smsConsent field (never defaulted true).
+    try {
+      const { emitDomainEvent } = await import('@/lib/events/emit');
+      await emitDomainEvent('partial_lead_captured', {
+        domainEntityId: contact.id,
+        supabase,
+        contact: {
+          email:        email.toLowerCase().trim(),
+          phone:        phone || undefined,
+          firstName:    firstName || undefined,
+          lastName:     lastName  || undefined,
+          source:       'partial_lead',
+          utmSource:    utm_source    ?? undefined,
+          utmMedium:    utm_medium    ?? undefined,
+          utmCampaign:  utm_campaign  ?? undefined,
+          sourceUrl:    source_url    ?? undefined,
+          ipAddress:    ip,
+          consentEmail: true,
+          consentSms:   !!smsConsent,
+          consentText:  smsConsent
+            ? 'AutoLenis Landing Page — buyer opted in to receive car buying tips by SMS. Msg & data rates apply. Reply STOP to unsubscribe.'
+            : undefined,
+        },
+        data: {
+          campaign: campaign ?? 'unknown',
+          zip:      zip ?? null,
+        },
+      });
+    } catch (emitErr) {
+      console.error('[partial-lead] CRM emit failed:', emitErr);
+    }
+
     return NextResponse.json({ ok: true, contact_id: contact.id });
   } catch (err) {
     console.error('[partial-lead]', err);
