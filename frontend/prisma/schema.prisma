@@ -3546,8 +3546,45 @@ model ContentArticle {
   generatedAt     DateTime?     @map("generated_at")
   groqModel       String?       @map("groq_model")
   searchGrounded  Boolean?      @map("search_grounded")
+
+  // --- Phase 1 (Bulk Article → Content Ops) field extensions ---
+  // Scheduling / approval. NOTE: we deliberately do NOT add a SCHEDULED enum
+  // value. Editorial status stays DRAFT/REVIEW_NEEDED/PUBLISHED/ARCHIVED; a
+  // "scheduled" article is status=REVIEW_NEEDED|DRAFT with a non-null
+  // scheduledAt + approvedAt, and the content-publisher cron flips it to
+  // PUBLISHED when due. This mirrors how AMIPS separates editorial status from
+  // lifecycleStatus and keeps the public page + sitemap PUBLISHED filters intact.
+  scheduledAt          DateTime? @map("scheduled_at")
+  approvedAt           DateTime? @map("approved_at")
+  approvedByAdminId    String?   @map("approved_by_admin_id")
+  lastPublishedAt      DateTime? @map("last_published_at")
+  publishFailureReason String?   @map("publish_failure_reason") @db.Text
+  publicationVersion   Int       @default(1) @map("publication_version")
+  // Indexation governance.
+  canonicalUrl         String?   @map("canonical_url")
+  noindex              Boolean   @default(false)
+  // Featured media (populated by the media Inngest function).
+  featuredImageUrl         String?   @map("featured_image_url")
+  featuredImageAlt         String?   @map("featured_image_alt")
+  featuredImageStatus      String?   @map("featured_image_status")
+  featuredImagePrompt      String?   @map("featured_image_prompt") @db.Text
+  featuredImageProvider    String?   @map("featured_image_provider")
+  featuredImageGeneratedAt DateTime? @map("featured_image_generated_at")
+  // Refresh / validation lifecycle (ported from AMIPS naming).
+  lifecycleStatus String    @default("ACTIVE") @map("lifecycle_status")
+  refreshDueAt    DateTime? @map("refresh_due_at")
+  lastValidatedAt DateTime? @map("last_validated_at")
+  lastRefreshedAt DateTime? @map("last_refreshed_at")
+
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  // Domain ledger relations (written by Inngest functions / services).
+  versions           ContentArticleVersion[]
+  generationJobItems ContentGenerationJobItem[]
+  validationResults  ContentValidationResult[]
+  mediaAssets        ContentMediaAsset[]
+  workflowEvents     ContentWorkflowEvent[]
 
   @@index([cluster])
   @@index([status])
@@ -3555,6 +3592,12 @@ model ContentArticle {
   @@index([metro])
   @@index([wave])
   @@index([publishedAt])
+  @@index([scheduledAt])
+  @@index([refreshDueAt])
+  @@index([lifecycleStatus])
+  @@index([cluster, status])
+  @@index([metro, status])
+  @@index([noindex])
   @@map("content_articles")
 }
 
@@ -3563,6 +3606,158 @@ enum ArticleStatus {
   REVIEW_NEEDED
   PUBLISHED
   ARCHIVED
+}
+
+// Status shared by content generation jobs and their per-article items.
+// Inngest owns locking/retry/backoff — these are observability states the
+// functions write, NOT a competing scheduler (no lockedAt/lockedBy/nextRunAt).
+enum ContentJobStatus {
+  QUEUED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  PAUSED
+}
+
+// ---------------------------------------------------------------------------
+// Content Ops domain ledger (Phase 1 / WO-2 model layer).
+// These tables are observability + history records written BY the content
+// Inngest functions and services. They reuse the existing idempotency_keys /
+// jobs_dead_letter infrastructure (raw SQL, see migrations/01) — they do NOT
+// fork a second idempotency table, dead-letter table, or queue runtime.
+// ---------------------------------------------------------------------------
+
+// Immutable snapshot of an article's editorial fields. A new row is written on
+// every generate / regenerate / edit / publish / rollback so history is durable
+// and rollback is exact.
+model ContentArticleVersion {
+  id                   String         @id @default(cuid())
+  articleId            String         @map("article_id")
+  article              ContentArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  versionNumber        Int            @map("version_number")
+  title                String
+  h1                   String
+  metaDescription      String         @map("meta_description")
+  body                 String         @db.Text
+  faqJson              String?        @map("faq_json") @db.Text
+  qualityScore         Int?           @map("quality_score")
+  complianceResultJson String?        @map("compliance_result_json") @db.Text
+  generatedByModel     String?        @map("generated_by_model")
+  createdByAdminId     String?        @map("created_by_admin_id")
+  createdByJobId       String?        @map("created_by_job_id")
+  changeReason         String?        @map("change_reason")
+  createdAt            DateTime       @default(now()) @map("created_at")
+
+  @@unique([articleId, versionNumber])
+  @@index([articleId, versionNumber])
+  @@map("content_article_versions")
+}
+
+// Batch header for a bulk generation/regeneration/validation/media run. The
+// admin UI reads this for live batch progress.
+model ContentGenerationJob {
+  id               String                     @id @default(cuid())
+  status           ContentJobStatus           @default(QUEUED)
+  jobType          String                     @map("job_type") // generate | regenerate | validate | media
+  totalItems       Int                        @default(0) @map("total_items")
+  succeededItems   Int                        @default(0) @map("succeeded_items")
+  failedItems      Int                        @default(0) @map("failed_items")
+  createdByAdminId String?                    @map("created_by_admin_id")
+  filterJson       String?                    @map("filter_json") @db.Text
+  lastError        String?                    @map("last_error") @db.Text
+  startedAt        DateTime?                  @map("started_at")
+  completedAt      DateTime?                  @map("completed_at")
+  createdAt        DateTime                   @default(now()) @map("created_at")
+  updatedAt        DateTime                   @updatedAt @map("updated_at")
+  items            ContentGenerationJobItem[]
+
+  @@index([status])
+  @@index([jobType])
+  @@index([createdAt])
+  @@map("content_generation_jobs")
+}
+
+// Per-article work item. `idempotencyKey` is the stable content identity used to
+// reuse the idempotency_keys guard so retries converge to one article, never a
+// duplicate slug. No lock columns — Inngest owns retry/backoff.
+model ContentGenerationJobItem {
+  id             String               @id @default(cuid())
+  jobId          String               @map("job_id")
+  job            ContentGenerationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  status         ContentJobStatus     @default(QUEUED)
+  attemptCount   Int                  @default(0) @map("attempt_count")
+  lastError      String?              @map("last_error") @db.Text
+  idempotencyKey String               @map("idempotency_key")
+  inngestRunId   String?              @map("inngest_run_id")
+  articleId      String?              @map("article_id")
+  article        ContentArticle?      @relation(fields: [articleId], references: [id], onDelete: SetNull)
+  targetSlug     String?              @map("target_slug")
+  payloadJson    String?              @map("payload_json") @db.Text
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+
+  @@index([jobId, status])
+  @@index([status])
+  @@index([articleId])
+  @@index([idempotencyKey])
+  @@map("content_generation_job_items")
+}
+
+// One row per validation run. checkResultsJson holds the per-layer pass/fail.
+model ContentValidationResult {
+  id                  String         @id @default(cuid())
+  articleId           String         @map("article_id")
+  article             ContentArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  checkResultsJson    String         @map("check_results_json") @db.Text
+  passed              Boolean        @default(false)
+  overriddenByAdminId String?        @map("overridden_by_admin_id")
+  overrideReason      String?        @map("override_reason") @db.Text
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  @@index([articleId])
+  @@index([articleId, createdAt])
+  @@map("content_validation_results")
+}
+
+// A generated/uploaded media asset for an article (featured image, etc.).
+model ContentMediaAsset {
+  id        String         @id @default(cuid())
+  articleId String         @map("article_id")
+  article   ContentArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  url       String
+  alt       String?
+  provider  String?
+  status    String         @default("PENDING")
+  width     Int?
+  height    Int?
+  bytes     Int?
+  prompt    String?        @db.Text
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  @@index([articleId])
+  @@index([status])
+  @@map("content_media_assets")
+}
+
+// Append-only audit of workflow transitions (generate, validate, approve,
+// schedule, publish, rollback, override, …). Complements admin_audit_log with
+// content-domain detail.
+model ContentWorkflowEvent {
+  id          String          @id @default(cuid())
+  articleId   String?         @map("article_id")
+  article     ContentArticle? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+  jobId       String?         @map("job_id")
+  eventType   String          @map("event_type")
+  actor       String
+  payloadJson String?         @map("payload_json") @db.Text
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  @@index([articleId])
+  @@index([jobId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@map("content_workflow_events")
 }
 
 // Phase C-Attribution — links a content-engine lead back to the buying-guide
