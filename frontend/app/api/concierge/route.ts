@@ -51,6 +51,24 @@ interface ConciergeRequest {
   email?: string; // Sent only on first turn after lead gate
 }
 
+// Lead-gate disclosure shown in the public ChatWidget before name/email is
+// collected ("By continuing you agree to receive messages from AutoLenis").
+// Recorded verbatim as the CRM consent basis when a contact is captured so the
+// opt-in is auditable — consent is never defaulted, only set from this opt-in.
+const ZURA_CONSENT_TEXT =
+  "AutoLenis public concierge lead gate — by continuing you agree to receive messages from AutoLenis.";
+
+// First client IP for CRM consent provenance (consent_ip is INET). Returns
+// undefined when no plausible address is present so the upsert stores NULL
+// rather than failing the INET cast.
+function getConsentIp(request: NextRequest): string | undefined {
+  const forwarded = request.headers.get("x-forwarded-for");
+  const candidate = (forwarded ? forwarded.split(",")[0] : request.headers.get("x-real-ip") ?? "").trim();
+  // Plausible IPv4/IPv6 only — anything else (e.g. "unknown") is dropped.
+  if (/^[0-9.]+$/.test(candidate) || /^[0-9a-fA-F:]+$/.test(candidate)) return candidate;
+  return undefined;
+}
+
 export async function POST(request: NextRequest) {
   let body: ConciergeRequest;
   try {
@@ -60,6 +78,11 @@ export async function POST(request: NextRequest) {
   }
 
   const { sessionId, userMessage } = body;
+
+  // Captured at request time so the post-stream after() block can attach it as
+  // CRM consent provenance (the request object isn't safe to read once the
+  // response has flushed).
+  const consentIp = getConsentIp(request);
 
   if (!sessionId || typeof sessionId !== "string") {
     return new Response("sessionId required", { status: 400 });
@@ -428,6 +451,65 @@ CRITICAL RULES:
         console.log("[concierge] STAGE 4 (scoring + notifications) OK");
       } catch (err) {
         console.error("[concierge] STAGE 4 (scoring + notifications) FAILED:", err);
+      }
+
+      // Stage 5: CRM contact-plane capture (additive, non-blocking).
+      // Phone just transitioned null→value, so we now hold a fully contactable
+      // lead (gate name/email + in-conversation phone). Mirror it onto the
+      // universal contact layer exactly once, following the Phase 1 pattern:
+      // ContactService.upsertContact (email→phone dedup) then emitDomainEvent
+      // for the Make nurture fan-out. The phoneJustCaptured guard makes this
+      // fire a single time per opportunity. A CRM hiccup must never affect the
+      // buyer-visible reply, so the whole block is best-effort.
+      try {
+        const email = opportunitySnapshot.email?.trim().toLowerCase() || null;
+        const phone = updated.phone ?? null;
+        const firstName = updated.firstName ?? opportunitySnapshot.firstName ?? undefined;
+
+        // Consent is gated on the explicit lead-gate opt-in, never defaulted.
+        // In public streaming mode the gate is mandatory and name/email arrive
+        // only after the disclosure is accepted, so a captured email is the
+        // opt-in signal for the "receive messages" disclosure (email + SMS).
+        const gateOptIn = !!email;
+
+        const { getServiceSupabase } = await import("@/lib/supabase-service");
+        const { ContactService } = await import("@/lib/services/contact.service");
+        const { emitDomainEvent } = await import("@/lib/events/emit");
+        const supabase = getServiceSupabase();
+
+        const contactInput = {
+          email,
+          phone,
+          firstName,
+          source: "zura" as const,
+          consentEmail: gateOptIn,
+          consentSms: gateOptIn,
+          consentText: gateOptIn ? ZURA_CONSENT_TEXT : undefined,
+          consentIp: gateOptIn ? consentIp : undefined,
+        };
+
+        await ContactService.upsertContact(supabase, contactInput);
+
+        await emitDomainEvent("zura_conversation_captured", {
+          domainEntityId: opportunitySnapshot.id,
+          supabase,
+          contact: contactInput,
+          data: {
+            opportunity_id: opportunitySnapshot.id,
+            session_id: opportunitySnapshot.sessionId,
+            vehicle: [updated.make, updated.model].filter(Boolean).join(" ") || null,
+            body_style: updated.bodyStyle,
+            budget_amount: updated.budgetAmount,
+            monthly_payment: updated.monthlyPayment,
+            timeline: updated.timeline,
+            zip: updated.zip,
+            has_trade_in: updated.hasTradeIn,
+            financing_needed: updated.financingNeeded,
+          },
+        });
+        console.log("[concierge] STAGE 5 (CRM contact-plane capture) OK");
+      } catch (err) {
+        console.error("[concierge] STAGE 5 (CRM contact-plane capture) FAILED:", err);
       }
     }
   });

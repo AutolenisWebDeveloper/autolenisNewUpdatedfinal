@@ -13,7 +13,9 @@ export type ContactSource =
   | 'saved_search'
   | 'exit_intent'
   | 'partial_lead'
-  | 'lead_magnet';
+  | 'lead_magnet'
+  // Public Zura concierge chat (lead-gated name/email + in-conversation phone).
+  | 'zura';
 
 export type LifecycleStage =
   | 'lead'
@@ -345,6 +347,8 @@ export type WorkflowTriggerType =
   | 'exit_intent_captured'
   | 'partial_lead_captured'
   | 'lead_magnet_downloaded'
+  // Public Zura concierge captured a contactable lead (name/email + phone).
+  | 'zura_conversation_captured'
   | 'manual';
 
 // Node types — kept as a closed union so the engine can exhaustively switch.
