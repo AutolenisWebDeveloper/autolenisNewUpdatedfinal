@@ -35,6 +35,17 @@ export type EmailSource =
   | "fallback_info_email"
   | "manual"
 
+// Provenance for the contact identity (Internet Sales Manager). Mirrors the email
+// taxonomy but tracked separately so a found-contact-without-email is still stored.
+export type ContactConfidence = "high" | "medium" | "low" | "none"
+
+export type ContactSource =
+  | "gemini_search_high_confidence"
+  | "gemini_search_medium_confidence"
+  | "gemini_search_inferred"
+  | "gemini_maps_discovery"
+  | "manual"
+
 export interface EmailEnrichmentInput {
   dealerProspectId: string
   dealerName: string
@@ -49,14 +60,21 @@ export interface EmailEnrichmentResult {
   email: string | null
   contactName: string | null
   contactTitle: string | null
+  /** Direct phone for the contact, when surfaced. */
+  contactPhone: string | null
   sourceUrl: string | null
   confidence: EmailConfidence
   source: EmailSource | null
+  /** Contact-identity provenance — tracked separately from the email. */
+  contactConfidence: ContactConfidence
+  contactSource: ContactSource | null
+  /** Source URL the contact identity was found on (staff page / LinkedIn). */
+  contactSourceUrl: string | null
   /** True when the call was short-circuited by the 30-day recency guard. */
   skipped?: boolean
 }
 
-interface GeminiResponse {
+export interface GeminiResponse {
   candidates?: Array<{
     content?: {
       parts?: Array<{ text?: string }>
@@ -85,32 +103,65 @@ function confidenceToSource(confidence: EmailConfidence): EmailSource | null {
   }
 }
 
+// Same mapping for the contact identity. "none" → null (no real contact found).
+function contactConfidenceToSource(
+  confidence: ContactConfidence,
+): ContactSource | null {
+  switch (confidence) {
+    case "high":
+      return "gemini_search_high_confidence"
+    case "medium":
+      return "gemini_search_medium_confidence"
+    case "low":
+      return "gemini_search_inferred"
+    case "none":
+    default:
+      return null
+  }
+}
+
 function buildPrompt(input: EmailEnrichmentInput): string {
-  return `You are finding the Internet Sales Manager email address for a car dealership.
+  return `Your PRIMARY objective is to identify the Internet Sales Manager (ISM) at a
+car dealership — their real name, exact title, direct phone, and the page you
+found them on. Their email is a secondary field: capture it if you can verify it,
+but a found ISM with NO email is still a valuable, valid result.
 
 Dealership: ${input.dealerName}
 Location: ${input.city}, ${input.state}
 Website: ${input.website ?? "unknown"}
 
-Use Google Search to find the email address. Search priority:
-1. Internet Sales Manager email (highest priority)
-2. Internet Sales Department email
-3. Sales Manager email
-4. General Manager email (only if above unavailable)
-5. Generic sales@ or info@ email (last resort)
+Use Google Search. Look at the dealership's staff/team/meet-our-team page,
+LinkedIn, and other public sources. Contact priority (capture whoever you find,
+highest available first):
+1. Internet Sales Manager / Internet Director (highest priority)
+2. Internet Sales Department contact
+3. Sales Manager
+4. General Manager (only if none of the above)
+5. Generic sales@ / info@ (email only, last resort — no named person)
 
-DO NOT make up emails. If you cannot find a real email, return null and set confidence to "none".
+DO NOT fabricate. If you cannot find a real person, return null for the contact
+fields. If you cannot verify a real email, return null email — never invent one.
+Returning a real NAME with a null EMAIL is correct and expected.
 
 Return ONLY this JSON, no markdown, no commentary:
 {
-  "email": "string or null",
   "contactName": "string or null",
   "contactTitle": "string or null",
+  "contactPhone": "string or null",
+  "contactSourceUrl": "string or null",
+  "contactConfidence": "high" | "medium" | "low" | "none",
+  "email": "string or null",
   "sourceUrl": "string or null",
   "confidence": "high" | "medium" | "low" | "none"
 }
 
-confidence levels:
+contactConfidence levels (for the PERSON):
+- "high": Named person with a verified ISM/Internet/Sales title from a primary source (staff page, LinkedIn)
+- "medium": Named person but title or source is less certain
+- "low": Name inferred from a secondary mention
+- "none": No real named person found
+
+confidence levels (for the EMAIL):
 - "high": Found direct named email (firstname.lastname@dealership.com)
 - "medium": Found role email (internetsales@dealership.com)
 - "low": Inferred from pattern, not verified
@@ -181,19 +232,25 @@ async function callGeminiWithRetry(prompt: string): Promise<GeminiResponse> {
 }
 
 // ─── Response parsing with coercion at the LLM boundary ──────────────────────
-function parseEnrichment(
-  data: GeminiResponse,
-): Omit<EmailEnrichmentResult, "source" | "skipped"> {
+export type ParsedEnrichment = Omit<
+  EmailEnrichmentResult,
+  "source" | "contactSource" | "skipped"
+>
+
+export function parseEnrichment(data: GeminiResponse): ParsedEnrichment {
   const content = data.candidates?.[0]?.content?.parts
     ?.map((p) => p.text ?? "")
     .join("") ?? ""
 
-  const empty: Omit<EmailEnrichmentResult, "source" | "skipped"> = {
+  const empty: ParsedEnrichment = {
     email: null,
     contactName: null,
     contactTitle: null,
+    contactPhone: null,
     sourceUrl: null,
     confidence: "none",
+    contactConfidence: "none",
+    contactSourceUrl: null,
   }
 
   if (!content.trim()) {
@@ -225,13 +282,12 @@ function parseEnrichment(
     return trimmed
   }
 
-  const rawConfidence = str(parsed.confidence)?.toLowerCase()
-  const confidence: EmailConfidence =
-    rawConfidence === "high" ||
-    rawConfidence === "medium" ||
-    rawConfidence === "low"
-      ? rawConfidence
-      : "none"
+  const toLevel = (v: unknown): "high" | "medium" | "low" | "none" => {
+    const raw = str(v)?.toLowerCase()
+    return raw === "high" || raw === "medium" || raw === "low" ? raw : "none"
+  }
+
+  const confidence: EmailConfidence = toLevel(parsed.confidence)
 
   const rawEmail = str(parsed.email)
   // Two-tier validation: a real email AND a non-"none" confidence. If the model
@@ -254,23 +310,109 @@ function parseEnrichment(
       (c) => c.web?.uri,
     )?.web?.uri ?? null
 
+  // ── Contact identity — parsed INDEPENDENTLY of the email. A named person with
+  // a non-"none" contactConfidence is a valid result even with no email. ──
+  const contactName = str(parsed.contactName)
+  // Only trust the contact if a real name is present; never let a stray
+  // confidence label conjure a contact out of nothing.
+  const contactConfidence: ContactConfidence = contactName
+    ? toLevel(parsed.contactConfidence)
+    : "none"
+  const contactSourceUrl =
+    str(parsed.contactSourceUrl) ?? str(parsed.sourceUrl) ?? groundingUri
+
   return {
     email,
-    contactName: str(parsed.contactName),
-    contactTitle: str(parsed.contactTitle),
+    contactName: contactConfidence === "none" ? null : contactName,
+    contactTitle: contactConfidence === "none" ? null : str(parsed.contactTitle),
+    contactPhone: contactConfidence === "none" ? null : str(parsed.contactPhone),
     sourceUrl: str(parsed.sourceUrl) ?? groundingUri,
     // If the email got dropped during validation, downgrade confidence to none.
     confidence: email ? confidence : "none",
+    contactConfidence,
+    contactSourceUrl: contactConfidence === "none" ? null : contactSourceUrl,
+  }
+}
+
+// Fields written to dealer_prospects after an enrichment pass.
+export interface EnrichmentPersistData {
+  emailEnrichedAt: Date
+  contactEnrichedAt: Date
+  email?: string
+  emailSource?: string
+  contactName?: string | null
+  contactTitle?: string | null
+  contactPhone?: string | null
+  contactSource?: string
+  contactConfidence?: string
+  contactSourceUrl?: string | null
+}
+
+/**
+ * Pure builder for the persisted update payload. This is where the WO-3
+ * decoupling lives: the email block and the contact block are independent, so a
+ * found ISM with NO verifiable email still writes the contact fields. Always
+ * advances both *EnrichedAt timestamps (recency guard). Exported for unit tests.
+ */
+export function buildPersistData(
+  parsed: ParsedEnrichment,
+  now: Date,
+): EnrichmentPersistData {
+  const source = confidenceToSource(parsed.confidence)
+  const contactSource = contactConfidenceToSource(parsed.contactConfidence)
+
+  const data: EnrichmentPersistData = {
+    emailEnrichedAt: now,
+    contactEnrichedAt: now,
+  }
+
+  // Email block — only when a validated address exists.
+  if (parsed.email && source) {
+    data.email = parsed.email
+    data.emailSource = source
+  }
+
+  // Contact block — INDEPENDENT of the email. A named ISM with no email persists.
+  if (parsed.contactName && contactSource) {
+    data.contactName = parsed.contactName
+    data.contactTitle = parsed.contactTitle
+    data.contactPhone = parsed.contactPhone
+    data.contactSource = contactSource
+    data.contactConfidence = parsed.contactConfidence
+    data.contactSourceUrl = parsed.contactSourceUrl
+  }
+
+  return data
+}
+
+// Shared empty result — no email AND no contact found.
+function emptyResult(
+  extra: Partial<EmailEnrichmentResult> = {},
+): EmailEnrichmentResult {
+  return {
+    email: null,
+    contactName: null,
+    contactTitle: null,
+    contactPhone: null,
+    sourceUrl: null,
+    confidence: "none",
+    source: null,
+    contactConfidence: "none",
+    contactSource: null,
+    contactSourceUrl: null,
+    ...extra,
   }
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 /**
- * Enrich a single dealer prospect with an email address and persist the result.
+ * Enrich a single dealer prospect with the Internet Sales Manager contact and,
+ * when verifiable, their email — then persist the result.
  *
- * Always stamps `emailEnrichedAt` (so the 30-day guard advances on every
- * attempt, success or not). Only writes `email`/`emailSource` when a real
- * address is found — a "none" result never overwrites an existing email.
+ * Always stamps `emailEnrichedAt` and `contactEnrichedAt` (so the 30-day guard
+ * advances on every attempt, success or not). The contact identity is persisted
+ * INDEPENDENTLY of the email: a found ISM with no verifiable email is still
+ * imported. A "none" result never overwrites an existing value.
  */
 export async function enrichDealerEmail(
   input: EmailEnrichmentInput,
@@ -288,20 +430,12 @@ export async function enrichDealerEmail(
       console.log(
         `[phase-4b1] Skipping ${input.dealerProspectId} — enriched ${existing.emailEnrichedAt.toISOString()} (<30d)`,
       )
-      return {
-        email: null,
-        contactName: null,
-        contactTitle: null,
-        sourceUrl: null,
-        confidence: "none",
-        source: null,
-        skipped: true,
-      }
+      return emptyResult({ skipped: true })
     }
   }
 
   const now = new Date()
-  let parsed: Omit<EmailEnrichmentResult, "source" | "skipped">
+  let parsed: ParsedEnrichment
 
   try {
     const data = await callGeminiWithRetry(buildPrompt(input))
@@ -315,42 +449,22 @@ export async function enrichDealerEmail(
     await prisma.dealerProspect
       .update({
         where: { id: input.dealerProspectId },
-        data: { emailEnrichedAt: now },
+        data: { emailEnrichedAt: now, contactEnrichedAt: now },
       })
       .catch((updateErr) => {
         console.error(
-          `[phase-4b1] Failed to stamp emailEnrichedAt for ${input.dealerProspectId}:`,
+          `[phase-4b1] Failed to stamp enrichment timestamps for ${input.dealerProspectId}:`,
           updateErr,
         )
       })
-    return {
-      email: null,
-      contactName: null,
-      contactTitle: null,
-      sourceUrl: null,
-      confidence: "none",
-      source: null,
-    }
+    return emptyResult()
   }
 
   const source = confidenceToSource(parsed.confidence)
+  const contactSource = contactConfidenceToSource(parsed.contactConfidence)
 
-  // Persist. Always advance emailEnrichedAt; only set email/source when we have
-  // a validated address.
-  const data: {
-    emailEnrichedAt: Date
-    email?: string
-    emailSource?: string
-    contactName?: string | null
-    contactTitle?: string | null
-  } = { emailEnrichedAt: now }
-  if (parsed.email && source) {
-    data.email = parsed.email
-    data.emailSource = source
-    // Persist the contact person too — used to personalize outreach greetings.
-    data.contactName = parsed.contactName
-    data.contactTitle = parsed.contactTitle
-  }
+  // Persist via the pure builder so the decoupling is unit-tested in isolation.
+  const data = buildPersistData(parsed, now)
 
   try {
     await prisma.dealerProspect.update({
@@ -364,15 +478,11 @@ export async function enrichDealerEmail(
     )
   }
 
-  if (parsed.email) {
-    console.log(
-      `[phase-4b1] Enriched ${input.dealerName} (${input.dealerProspectId}) → ${parsed.email} [${source}]`,
-    )
-  } else {
-    console.log(
-      `[phase-4b1] No email found for ${input.dealerName} (${input.dealerProspectId})`,
-    )
-  }
+  console.log(
+    `[phase-4b1] Enriched ${input.dealerName} (${input.dealerProspectId}) → ` +
+      `email=${parsed.email ?? "none"} [${source ?? "—"}], ` +
+      `contact=${parsed.contactName ?? "none"} [${contactSource ?? "—"}]`,
+  )
 
-  return { ...parsed, source }
+  return { ...parsed, source, contactSource }
 }

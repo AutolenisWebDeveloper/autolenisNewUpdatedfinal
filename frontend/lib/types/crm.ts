@@ -11,6 +11,9 @@ export type ContactSource =
   // Lead-capture sources wired into the CRM contact plane (additive).
   | 'trade_in'
   | 'saved_search'
+  | 'exit_intent'
+  | 'partial_lead'
+  | 'lead_magnet'
   // Public Zura concierge chat (lead-gated name/email + in-conversation phone).
   | 'zura';
 
@@ -341,6 +344,9 @@ export type WorkflowTriggerType =
   | 'trade_in_submitted'
   | 'saved_search_created'
   | 'calculator_completed'
+  | 'exit_intent_captured'
+  | 'partial_lead_captured'
+  | 'lead_magnet_downloaded'
   // Public Zura concierge captured a contactable lead (name/email + phone).
   | 'zura_conversation_captured'
   | 'manual';

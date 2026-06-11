@@ -115,7 +115,7 @@ test("static-key header presented but CRM_DISPATCH_KEY empty ('') at the real ga
 });
 
 test("signature header presented but CRM_DISPATCH_SECRET unset at the real gate → 401", async () => {
-  delete process.env.CRM_DISPATCH_SECRET;
+  Reflect.deleteProperty(process.env, "CRM_DISPATCH_SECRET");
   const sig = crypto.createHmac("sha256", "anything").update(BODY).digest("hex");
   const req = makeRequest({
     "x-autolenis-signature": sig,

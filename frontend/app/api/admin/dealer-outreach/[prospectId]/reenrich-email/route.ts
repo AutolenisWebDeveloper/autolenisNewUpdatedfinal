@@ -39,7 +39,20 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const updated = await prisma.dealerProspect.findUnique({
       where: { id: prospectId },
-      select: { email: true, emailSource: true, emailEnrichedAt: true },
+      select: {
+        email: true,
+        emailSource: true,
+        emailEnrichedAt: true,
+        // WO-3 — return the ISM contact so the UI reflects it even when no email
+        // was found (the regression this fix targets).
+        contactName: true,
+        contactTitle: true,
+        contactPhone: true,
+        contactSource: true,
+        contactConfidence: true,
+        contactSourceUrl: true,
+        contactEnrichedAt: true,
+      },
     })
 
     return adminSuccess({
@@ -47,6 +60,13 @@ export async function POST(request: NextRequest, { params }: Params) {
       email: updated?.email ?? null,
       emailSource: updated?.emailSource ?? null,
       emailEnrichedAt: updated?.emailEnrichedAt ?? null,
+      contactName: updated?.contactName ?? null,
+      contactTitle: updated?.contactTitle ?? null,
+      contactPhone: updated?.contactPhone ?? null,
+      contactSource: updated?.contactSource ?? null,
+      contactConfidence: updated?.contactConfidence ?? null,
+      contactSourceUrl: updated?.contactSourceUrl ?? null,
+      contactEnrichedAt: updated?.contactEnrichedAt ?? null,
     })
   } catch (err) {
     return adminError(

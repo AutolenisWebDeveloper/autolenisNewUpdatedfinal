@@ -1,49 +1,54 @@
 // Server component - admin dealer applications queue
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
+import type { DealerApplication } from "@prisma/client";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
+// Row shape derived directly from the Prisma DealerApplication model so the
+// admin UI always tracks the real column names (contactEmail/contactPhone/notes
+// — not the stale email/phone/message names a previous version mapped against).
+type ApplicationRow = Pick<
+  DealerApplication,
+  | "id"
+  | "dealershipName"
+  | "dealershipType"
+  | "contactName"
+  | "contactEmail"
+  | "contactPhone"
+  | "city"
+  | "state"
+  | "zip"
+  | "licenseNumber"
+  | "annualVolume"
+  | "status"
+  | "notes"
+> & { createdAt: string };
+
 export default async function AdminDealerApplicationsPage() {
   await requireAdmin();
 
-  // Try to fetch DealerApplication records if model exists
-  let applications: Array<{
-    id: string;
-    dealershipName: string;
-    contactName: string;
-    email: string;
-    phone: string;
-    city: string | null;
-    state: string | null;
-    licenseNumber: string;
-    status: string;
-    createdAt: string;
-    message: string | null;
-  }> = [];
-
-  try {
-    const raw = await prisma.dealerApplication.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 100,
-    });
-    applications = raw.map((a) => ({
-      id: a.id,
-      dealershipName: (a as { dealershipName?: string }).dealershipName ?? "—",
-      contactName: (a as { contactName?: string }).contactName ?? "—",
-      email: (a as { email?: string }).email ?? "—",
-      phone: (a as { phone?: string }).phone ?? "—",
-      city: (a as { city?: string | null }).city ?? null,
-      state: (a as { state?: string | null }).state ?? null,
-      licenseNumber: (a as { licenseNumber?: string }).licenseNumber ?? "—",
-      status: (a as { status?: string }).status ?? "PENDING",
-      createdAt: a.createdAt.toISOString(),
-      message: (a as { message?: string | null }).message ?? null,
-    }));
-  } catch {
-    // DealerApplication model may not exist yet
-  }
+  const raw = await prisma.dealerApplication.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+  const applications: ApplicationRow[] = raw.map((a) => ({
+    id: a.id,
+    dealershipName: a.dealershipName,
+    dealershipType: a.dealershipType,
+    contactName: a.contactName,
+    contactEmail: a.contactEmail,
+    contactPhone: a.contactPhone,
+    city: a.city,
+    state: a.state,
+    zip: a.zip,
+    licenseNumber: a.licenseNumber,
+    annualVolume: a.annualVolume,
+    status: a.status,
+    notes: a.notes,
+    createdAt: a.createdAt.toISOString(),
+  }));
 
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-dealer-applications-page">
@@ -80,6 +85,9 @@ export default async function AdminDealerApplicationsPage() {
                   Contact
                 </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Type / Volume
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   Location
                 </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -108,10 +116,19 @@ export default async function AdminDealerApplicationsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <p>{app.contactName}</p>
-                    <p className="text-xs text-slate-400">{app.email}</p>
+                    <p className="text-xs text-slate-400">{app.contactEmail}</p>
+                    {app.contactPhone && (
+                      <p className="text-xs text-slate-400">{app.contactPhone}</p>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-slate-600">
-                    {[app.city, app.state].filter(Boolean).join(", ") || "—"}
+                    <p>{app.dealershipType || "—"}</p>
+                    {app.annualVolume && (
+                      <p className="text-xs text-slate-400">{app.annualVolume}/yr</p>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {[app.city, app.state, app.zip].filter(Boolean).join(", ") || "—"}
                   </td>
                   <td className="px-4 py-3">
                     <span

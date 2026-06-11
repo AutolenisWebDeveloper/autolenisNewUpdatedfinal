@@ -54,6 +54,34 @@ export async function POST(req: Request) {
       });
     }
 
+    // Per-source domain event (additive, non-blocking) — emits
+    // exit_intent_captured so Make can attach a recovery scenario. The emit
+    // re-resolves the contact (idempotent email dedup) and mirrors the consent
+    // captured above: email implied by submission. This form has NO SMS opt-in
+    // field, so no consentSms key is passed (never defaulted true).
+    try {
+      const { emitDomainEvent } = await import('@/lib/events/emit');
+      await emitDomainEvent('exit_intent_captured', {
+        domainEntityId: contact.id,
+        supabase,
+        contact: {
+          email:        email.toLowerCase().trim(),
+          source:       'exit_intent',
+          utmSource:    utm_source   ?? undefined,
+          utmMedium:    utm_medium   ?? undefined,
+          utmCampaign:  utm_campaign ?? undefined,
+          sourceUrl:    source_url   ?? undefined,
+          ipAddress:    ip,
+          consentEmail: true,
+        },
+        data: {
+          campaign: campaign ?? 'unknown',
+        },
+      });
+    } catch (emitErr) {
+      console.error('[exit-intent] CRM emit failed:', emitErr);
+    }
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('[exit-intent]', err);
