@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GlobalSearch } from './GlobalSearch';
+import { CopilotPanel } from './CopilotPanel';
 
 type NavItem = {
   href: string;
@@ -95,6 +96,7 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
     overdue: 0,
   });
   const [searchOpen, setSearchOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -339,7 +341,12 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <GlobalSearch
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onOpenCopilot={() => setCopilotOpen(true)}
+      />
+      <CopilotPanel open={copilotOpen} onClose={() => setCopilotOpen(false)} />
     </div>
   );
 }

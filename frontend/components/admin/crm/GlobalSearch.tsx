@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, X, User } from 'lucide-react';
+import { Search, X, User, Sparkles } from 'lucide-react';
 import { useDebounce } from '@/lib/hooks/use-debounce';
 import { StageBadge } from './StageBadge';
 import type { LifecycleStage } from '@/lib/types/crm';
@@ -19,9 +19,11 @@ type Result = {
 export function GlobalSearch({
   open,
   onClose,
+  onOpenCopilot,
 }: {
   open: boolean;
   onClose: () => void;
+  onOpenCopilot?: () => void;
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -127,6 +129,31 @@ export function GlobalSearch({
         </div>
 
         <div className="max-h-96 overflow-y-auto">
+          {onOpenCopilot && (
+            <div className="border-b border-gray-200">
+              <div className="px-4 py-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wider bg-white/50">
+                Actions
+              </div>
+              <button
+                data-testid="crm-search-open-copilot"
+                onClick={() => {
+                  onClose();
+                  onOpenCopilot();
+                }}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-gray-100/40"
+              >
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-600 to-purple-700 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-4 h-4 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-gray-900 truncate">AI Copilot</div>
+                  <div className="text-xs text-gray-500 truncate">
+                    Draft marketing content &amp; automation plans
+                  </div>
+                </div>
+              </button>
+            </div>
+          )}
           {debounced.trim().length < 2 ? (
             <div className="p-8 text-center text-sm text-gray-500">
               Type at least 2 characters to search

@@ -184,6 +184,44 @@ export class CampaignService {
     return data as Campaign;
   }
 
+  // Persist an approved copilot SMS/email draft as a DRAFT campaign. Unlike
+  // createCampaign this does NOT require a segment — the copilot produces copy,
+  // and the human attaches an audience/template before the campaign can ever be
+  // scheduled or run (status stays 'draft', so the fan-out worker never picks it
+  // up). Nothing is sent here.
+  static async createCopilotDraft(
+    supabase: SupabaseClient,
+    input: { name: string; type: CampaignType; sms_body?: string | null; template_id?: string | null },
+    actor: CrmAuditActor | null,
+  ): Promise<Campaign> {
+    if (!input.name?.trim()) throw new Error('NAME_REQUIRED');
+
+    const { data, error } = await supabase
+      .from('campaigns')
+      .insert({
+        name: input.name.trim(),
+        type: input.type,
+        status: 'draft',
+        segment_id: null,
+        template_id: input.template_id ?? null,
+        sms_body: input.sms_body ?? null,
+        created_by: actor?.adminId ?? null,
+      })
+      .select('*')
+      .single();
+    if (error) throw error;
+
+    await writeCrmAuditLog(supabase, actor, {
+      action: 'CREATE_CAMPAIGN',
+      entity_type: 'campaign',
+      entity_id: data.id,
+      new_state: data,
+      reason: 'copilot_draft_approved',
+    });
+
+    return data as Campaign;
+  }
+
   static async setStatus(
     supabase: SupabaseClient,
     id: string,
