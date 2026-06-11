@@ -10,7 +10,9 @@ export type ContactSource =
   | 'import'
   // Lead-capture sources wired into the CRM contact plane (additive).
   | 'trade_in'
-  | 'saved_search';
+  | 'saved_search'
+  // Public Zura concierge chat (lead-gated name/email + in-conversation phone).
+  | 'zura';
 
 export type LifecycleStage =
   | 'lead'
@@ -339,6 +341,8 @@ export type WorkflowTriggerType =
   | 'trade_in_submitted'
   | 'saved_search_created'
   | 'calculator_completed'
+  // Public Zura concierge captured a contactable lead (name/email + phone).
+  | 'zura_conversation_captured'
   | 'manual';
 
 // Node types — kept as a closed union so the engine can exhaustively switch.
