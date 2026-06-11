@@ -5,13 +5,19 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { prisma } from '@/lib/prisma';
 import { resolveDuplicateDispatch } from '@/lib/crm/dispatch-idempotency';
+import { decideDispatchAuth } from '@/lib/crm/dispatch-auth-decision';
 
 // ---------------------------------------------------------------------------
 // INBOUND DISPATCH AUTH (Step 4 — shared middleware)
 // ---------------------------------------------------------------------------
 // Every /api/crm/dispatch/* endpoint is called by Make.com to ACT. This module
 // is the single gate in front of those handlers:
-//   - HMAC-SHA256 signature over the RAW body (constant-time compare).
+//   - Auth (two paths, see dispatch-auth-decision.ts):
+//       1. X-AutoLenis-Signature → HMAC-SHA256 over the RAW body (PRIMARY, for
+//          code callers; constant-time compare; unchanged).
+//       2. X-Dispatch-Key → constant-time compare against CRM_DISPATCH_KEY (for
+//          Make's no-code plain-HTTP module). The two secrets are independent.
+//     Every protection below applies to BOTH paths unchanged.
 //   - Replay protection: reject timestamp skew > 5 minutes.
 //   - DB-level idempotency on X-Idempotency-Key (reuses the Supabase
 //     `idempotency_keys` table — sha256 PK, 23505 ⇒ duplicate). A duplicate
@@ -24,14 +30,6 @@ const RATE_LIMIT_MAX = 240; // per endpoint per window — light guard, not a qu
 // Single shared dispatch identity (one CRM_DISPATCH_SECRET). Kept stable so the
 // rate-limit bucket is per-endpoint for the Make integration as a whole.
 const RATE_LIMIT_IDENTIFIER = 'crm_dispatch';
-
-function timingSafeEqualHex(a: string, b: string): boolean {
-  // Hash both sides to fixed length first so timingSafeEqual never throws on a
-  // length mismatch (which would itself leak length via the exception path).
-  const ah = crypto.createHash('sha256').update(a).digest();
-  const bh = crypto.createHash('sha256').update(b).digest();
-  return crypto.timingSafeEqual(ah, bh);
-}
 
 function unauthorized(reason: string): NextResponse {
   return NextResponse.json({ status: 'unauthorized', error: reason }, { status: 401 });
@@ -61,20 +59,29 @@ export async function authorizeDispatch(
   request: NextRequest,
   endpoint: string,
 ): Promise<DispatchAuthResult> {
-  const secret = process.env.CRM_DISPATCH_SECRET;
-  if (!secret) {
-    console.error('[dispatch-auth] CRM_DISPATCH_SECRET unset — refusing all dispatch calls');
-    return { ok: false, response: unauthorized('dispatch_not_configured') };
-  }
-
-  // Read the RAW body once — signature is computed over these exact bytes, and
+  // Read the RAW body once — the HMAC is computed over these exact bytes, and
   // the handler parses JSON from the same string (a request body is single-use).
   const rawBody = await request.text();
 
-  const signature = request.headers.get('x-autolenis-signature') ?? '';
-  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
-  if (!signature || !timingSafeEqualHex(signature, expected)) {
-    return { ok: false, response: unauthorized('bad_signature') };
+  // Auth decision (precedence: HMAC signature → static dispatch key → none).
+  // The HMAC path is unchanged and remains primary for code callers; the
+  // static-key path lets Make use a plain HTTP module without client-side
+  // signing. CRM_DISPATCH_SECRET (HMAC) and CRM_DISPATCH_KEY (static) are
+  // independent — neither weakens the other.
+  const decision = decideDispatchAuth({
+    signatureHeader: request.headers.get('x-autolenis-signature'),
+    dispatchKeyHeader: request.headers.get('x-dispatch-key'),
+    rawBody,
+    hmacSecret: process.env.CRM_DISPATCH_SECRET,
+    staticKey: process.env.CRM_DISPATCH_KEY,
+  });
+  if (!decision.ok) {
+    if (decision.reason === 'dispatch_not_configured') {
+      console.error(
+        '[dispatch-auth] no usable dispatch credential configured for the presented header — refusing call',
+      );
+    }
+    return { ok: false, response: unauthorized(decision.reason) };
   }
 
   // Replay protection.
