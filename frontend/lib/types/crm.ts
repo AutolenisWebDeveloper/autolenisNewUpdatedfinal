@@ -7,7 +7,10 @@ export type ContactSource =
   | 'affiliate_signup'
   | 'public_form'
   | 'sms_inbound'
-  | 'import';
+  | 'import'
+  // Lead-capture sources wired into the CRM contact plane (additive).
+  | 'trade_in'
+  | 'saved_search';
 
 export type LifecycleStage =
   | 'lead'
@@ -330,6 +333,12 @@ export type WorkflowTriggerType =
   | 'dealer_invited'
   | 'affiliate_signup'
   | 'buyer_inactive'
+  // Additive lead-capture events. Each maps 1:1 to a per-source domain event
+  // (DomainEventType is derived from this union, so no drift) so Make can
+  // attach a nurture scenario per source.
+  | 'trade_in_submitted'
+  | 'saved_search_created'
+  | 'calculator_completed'
   | 'manual';
 
 // Node types — kept as a closed union so the engine can exhaustively switch.

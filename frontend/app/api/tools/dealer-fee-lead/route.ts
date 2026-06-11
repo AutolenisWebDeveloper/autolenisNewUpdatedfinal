@@ -154,6 +154,46 @@ export async function POST(req: Request) {
       console.error("[dealer-fee-lead] CRM upsert failed:", crmErr);
     }
 
+    // 2b) Per-source domain event (additive, non-blocking) — emits
+    //     calculator_completed so Make can attach a nurture scenario. The emit
+    //     re-resolves the contact (idempotent email dedup) and mirrors the
+    //     consent captured above: email implied by submission, SMS ONLY when the
+    //     buyer explicitly opted in (never defaulted true). state rides the
+    //     payload for the downstream SMS recipient-timezone resolver.
+    try {
+      const supabase = getServiceSupabase();
+      const ip =
+        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? undefined;
+      const { emitDomainEvent } = await import("@/lib/events/emit");
+      await emitDomainEvent("calculator_completed", {
+        domainEntityId: opportunity.id,
+        supabase,
+        contact: {
+          email: email.toLowerCase(),
+          phone: phone || undefined,
+          firstName,
+          source: "public_form",
+          utmCampaign: "dealer_fee_calculator",
+          sourceUrl,
+          ipAddress: ip,
+          consentEmail: true,
+          consentSms: smsOptIn,
+          consentText: smsOptIn
+            ? "AutoLenis Dealer Fee Calculator — buyer opted in to receive car buying tips by SMS. Msg & data rates apply. Reply STOP to unsubscribe."
+            : undefined,
+        },
+        data: {
+          buyer_opportunity_id: opportunity.id,
+          calculator: "dealer_fee_calculator",
+          timeline: buyerTimeline,
+          segment,
+          state: state || null,
+        },
+      });
+    } catch (emitErr) {
+      console.error("[dealer-fee-lead] CRM emit failed:", emitErr);
+    }
+
     // 3) Welcome email — non-blocking; a send failure must not fail the lead.
     try {
       await sendDealerFeeCalculatorWelcomeEmail({
