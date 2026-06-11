@@ -97,7 +97,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let contentArticleEntries: MetadataRoute.Sitemap = [];
   try {
     const articles = await prisma.contentArticle.findMany({
-      where: { status: "PUBLISHED" },
+      // Only published, indexable, active articles belong in the sitemap.
+      // Excludes draft/review/scheduled/archived, noindexed, and any article
+      // whose lifecycle has moved off ACTIVE (refresh/review/retired).
+      where: { status: "PUBLISHED", noindex: false, lifecycleStatus: "ACTIVE" },
       select: { slug: true, updatedAt: true },
       orderBy: { updatedAt: "desc" },
       take: 50000,

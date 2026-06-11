@@ -101,6 +101,34 @@ const RULES: ComplianceRule[] = [
       /★/,
     ],
   },
+  {
+    // AutoLenis represents the BUYER — never a dealer, seller, or lender. Copy
+    // must not frame AutoLenis as selling cars or financing loans.
+    id: "buyer_misrepresentation",
+    detail:
+      "Frames AutoLenis as a dealer, seller, or lender. AutoLenis represents the buyer — dealers compete for the buyer's business; AutoLenis never sells or finances vehicles.",
+    patterns: [
+      /\b(?:we|autolenis)\s+(?:sell|sells|finance|finances|lend|lends|loan|loans)\b/i,
+      /\bour\s+(?:dealership|dealerships|lot|inventory\s+of\s+cars\s+for\s+sale|financing|loans?)\b/i,
+      /\b(?:as|we\s+are)\s+your\s+(?:dealer|dealership|lender)\b/i,
+      /\bautolenis\s+(?:is\s+a|,?\s+a)\s+(?:dealer|dealership|lender|car\s+dealer)\b/i,
+    ],
+  },
+  {
+    // Canonical pricing language: the $99 is a NON-REFUNDABLE Auction Access
+    // Fee, NOT a deposit. AI must never reintroduce "refundable deposit".
+    id: "pricing_language",
+    detail:
+      'Misstates the $99 pricing. It is a one-time, non-refundable Auction Access Fee — never a "deposit" and never "refundable". Use the canonical phrasing.',
+    patterns: [
+      // "refundable deposit" / "refundable $99" — but NOT "non-refundable …".
+      /(?<!non[-\s])\brefundable\s+deposit\b/i,
+      /\$\s?99[^.<\n]{0,30}\bdeposit\b/i,
+      /\bdeposit\b[^.<\n]{0,30}\$\s?99/i,
+      /(?<!non[-\s])\brefundable\s+\$\s?99\b/i,
+      /\$\s?99[^.<\n]{0,30}(?<!non[-\s])\brefundable\b/i,
+    ],
+  },
 ];
 
 // Validate a block of generated text (HTML or plain). Returns every violation

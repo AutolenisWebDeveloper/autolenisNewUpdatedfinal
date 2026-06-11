@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight, Calculator } from "lucide-react";
@@ -19,6 +20,7 @@ import {
   type RelatedArticleLink,
 } from "@/lib/seo/internal-links";
 import { splitBodyForMidCta } from "@/lib/seo/article-body";
+import { sanitizeBody } from "@/lib/content/sanitize";
 import ContentTracker from "@/components/analytics/ContentTracker";
 import ArticleCTA from "@/components/content/ArticleCTA";
 import RelatedArticles from "@/components/content/RelatedArticles";
@@ -136,11 +138,20 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   if (!article) {
     return { title: "Article not found | AutoLenis", robots: { index: false, follow: false } };
   }
-  return buildPageMetadata({
+  const meta = buildPageMetadata({
     title: article.title,
     description: article.metaDescription,
     path: `/buying-guide/${slug}`,
+    // Honor per-article indexation governance (WO-1 fields).
+    noindex: article.noindex,
+    ogImage: article.featuredImageUrl ?? undefined,
   });
+  // A non-null canonicalUrl overrides the default self-canonical (e.g. when an
+  // article is a localized variant pointing at a canonical metro page).
+  if (article.canonicalUrl) {
+    meta.alternates = { ...meta.alternates, canonical: article.canonicalUrl };
+  }
+  return meta;
 }
 
 export default async function BuyingGuideArticlePage({ params }: PageProps) {
@@ -152,7 +163,10 @@ export default async function BuyingGuideArticlePage({ params }: PageProps) {
   const pillars = getPillarLinksForCluster(article.cluster);
   const related = await loadRelatedArticles(article);
   const cityState = article.state ? `${article.city}, ${article.state}` : article.city;
-  const bodyParts = splitBodyForMidCta(article.body);
+  // Defense in depth: re-sanitize server-side at render time so any legacy or
+  // manually-edited body that predates generation-time sanitization is still
+  // safe before it reaches dangerouslySetInnerHTML.
+  const bodyParts = splitBodyForMidCta(sanitizeBody(article.body));
 
   return (
     <>
@@ -184,6 +198,22 @@ export default async function BuyingGuideArticlePage({ params }: PageProps) {
             </Link>
           </div>
         </header>
+
+        {/* Featured image — LCP hero. width/height fixed for CLS; priority since
+            it's above the fold. alt is required and comes from featuredImageAlt. */}
+        {article.featuredImageUrl && (
+          <div className="mb-10 overflow-hidden rounded-2xl border border-[#E5E7EB]">
+            <Image
+              src={article.featuredImageUrl}
+              alt={article.featuredImageAlt || article.h1}
+              width={1200}
+              height={630}
+              priority
+              sizes="(max-width: 768px) 100vw, 768px"
+              className="h-auto w-full object-cover"
+            />
+          </div>
+        )}
 
         {/* Above-fold conversion element — state- and vehicle-aware, tracked */}
         <ArticleCTA

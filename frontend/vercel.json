@@ -9,6 +9,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/content-publisher",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/holds",
       "schedule": "*/10 * * * *"
     },
