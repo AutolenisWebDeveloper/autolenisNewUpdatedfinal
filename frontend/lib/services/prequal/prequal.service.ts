@@ -286,6 +286,52 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     return upserted;
   });
 
+  // CRM contact-plane sync (additive, non-blocking) — append AFTER the prequal
+  // record is committed so a CRM hiccup can never affect the prequal flow. This
+  // is STARTED-ONLY and FCRA-neutral by construction: it forwards ONLY the
+  // buyer's existing contact identity (email/phone/name the contact already
+  // holds) plus a neutral stage marker. It MUST NEVER carry the iPredict score,
+  // the decision/eligibility result, adverse-action content, or any PII beyond
+  // the contact identity — hence `data: {}`. Do not add decision/score fields.
+  try {
+    const crmBuyer = await prisma.buyer.findUnique({
+      where: { id: buyer.id },
+      include: { user: true },
+    });
+    const email = crmBuyer?.user.email ?? null;
+    if (crmBuyer && email) {
+      const { getServiceSupabase } = await import("@/lib/supabase-service");
+      const { ContactService } = await import("@/lib/services/contact.service");
+      const { emitDomainEvent } = await import("@/lib/events/emit");
+      const supabase = getServiceSupabase();
+
+      const contact = await ContactService.upsertContact(supabase, {
+        email,
+        phone: crmBuyer.phone ?? null,
+        firstName: crmBuyer.firstName ?? undefined,
+        lastName: crmBuyer.lastName ?? undefined,
+        source: "prequal",
+      });
+      await ContactService.linkContactIdentity(supabase, contact.id, "buyer", crmBuyer.id);
+
+      await emitDomainEvent("prequal_started", {
+        domainEntityId: prequal.id,
+        supabase,
+        contact: {
+          email,
+          phone: crmBuyer.phone ?? null,
+          firstName: crmBuyer.firstName ?? undefined,
+          lastName: crmBuyer.lastName ?? undefined,
+          source: "prequal",
+        },
+        // Intentionally EMPTY — no score, no decision, no FCRA-protected data.
+        data: {},
+      });
+    }
+  } catch (err) {
+    console.error("[prequal] CRM prequal_started emit failed:", err);
+  }
+
   // Send congratulations email and log compliance event for APPROVED decisions.
   // Email failure must never block the approval — catch and log only.
   if (finalDecision === PreQualDecision.APPROVED) {

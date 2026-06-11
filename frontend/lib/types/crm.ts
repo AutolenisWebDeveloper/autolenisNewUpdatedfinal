@@ -15,7 +15,9 @@ export type ContactSource =
   | 'partial_lead'
   | 'lead_magnet'
   // Public Zura concierge chat (lead-gated name/email + in-conversation phone).
-  | 'zura';
+  | 'zura'
+  // Buyer-initiated soft prequalification intake (FCRA-neutral contact tag only).
+  | 'prequal';
 
 export type LifecycleStage =
   | 'lead'
@@ -349,6 +351,9 @@ export type WorkflowTriggerType =
   | 'lead_magnet_downloaded'
   // Public Zura concierge captured a contactable lead (name/email + phone).
   | 'zura_conversation_captured'
+  // Buyer initiated soft prequalification. STARTED-ONLY, FCRA-neutral: carries
+  // contact identity + a neutral stage marker, never a score/decision/PII.
+  | 'prequal_started'
   | 'manual';
 
 // Node types — kept as a closed union so the engine can exhaustively switch.
