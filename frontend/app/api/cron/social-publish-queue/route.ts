@@ -20,12 +20,29 @@ export async function GET(request: NextRequest) {
   }
 
   const now = new Date();
+
+  // Media-required platforms: only publish when VIDEO_READY (Buffer rejects
+  // these without an attached image/video).
+  const MEDIA_REQUIRED = ["tiktok", "instagram", "youtube"];
+  // Text-capable platforms: can publish with or without media.
+  const TEXT_OK = ["facebook", "linkedin"];
+
   const posts = await prisma.socialPost.findMany({
     where: {
       status: { in: ["APPROVED", "SCHEDULED"] },
       scheduledAt: { lte: now },
-      // Either no video job, or the video is ready.
-      OR: [{ video: { is: null } }, { video: { status: "VIDEO_READY" } }],
+      OR: [
+        // Media-required platforms: only publish once the video is ready.
+        {
+          platform: { in: MEDIA_REQUIRED },
+          video: { status: "VIDEO_READY" },
+        },
+        // Text-capable platforms: can publish with or without media.
+        {
+          platform: { in: TEXT_OK },
+          OR: [{ video: { is: null } }, { video: { status: "VIDEO_READY" } }],
+        },
+      ],
     },
     orderBy: { scheduledAt: "asc" },
     take: MAX_PER_RUN,

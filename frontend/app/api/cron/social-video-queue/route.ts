@@ -29,6 +29,25 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  // ─── Trigger Runway video generation early ─────────────────────────────────
+  // Fire before the main polling/backfill loops so a timeout later in this
+  // handler cannot prevent video generation from being triggered. Tier 1 posts
+  // (TikTok / Instagram / YouTube) with a DALL-E still get animated into a short
+  // video. Fire-and-forget — the dedicated cron enforces its own daily cap +
+  // Tier 1 filter and polls Runway synchronously, so it must not block this run.
+  // (vercel.json is at the 40-cron cap, so this is wired into the existing
+  // video-queue cron rather than scheduled separately.)
+  if (process.env.RUNWAY_API_KEY && process.env.NEXT_PUBLIC_APP_URL) {
+    fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/cron/social-video-generate`, {
+      headers: {
+        [CRON_AUTH_HEADER]: `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`,
+      },
+    }).catch((err) =>
+      console.error("[video-queue] runway video trigger failed:", err),
+    );
+    console.log("[video-queue] Runway video generation triggered");
+  }
+
   const provider = getVideoProvider();
   const staleBefore = new Date(Date.now() - POLL_STALE_MS);
 
@@ -144,15 +163,65 @@ export async function GET(request: NextRequest) {
           console.log("[video-queue] DALL-E image generated for post:", post.id);
         } else {
           imagesFailed += 1;
-          console.error("[video-queue] DALL-E backfill failed for post:", post.id);
+          console.error(
+            "[video-queue] DALL-E backfill failed for post:",
+            post.id,
+            "— creating VIDEO_FAILED to prevent infinite retry",
+          );
+          // Create VIDEO_FAILED so the post is excluded from future backfill
+          // runs. SocialVideo.postId is @unique, so skip if a record already
+          // exists. Matches the hardened pattern in the generate-images endpoint.
+          const existingVideo = await prisma.socialVideo
+            .findUnique({ where: { postId: post.id }, select: { id: true } })
+            .catch(() => null);
+          if (!existingVideo) {
+            await prisma.socialVideo
+              .create({
+                data: {
+                  postId: post.id,
+                  provider: "dalle3",
+                  status: "VIDEO_FAILED",
+                  errorMessage:
+                    "DALL-E generation returned empty — check OPENAI_API_KEY and account credits",
+                  visualPrompt: post.visualPrompt ?? post.hook ?? "",
+                  generatedAt: new Date(),
+                },
+              })
+              .catch((dbErr) =>
+                console.error(
+                  "[video-queue] VIDEO_FAILED record creation failed:",
+                  post.id,
+                  dbErr,
+                ),
+              );
+          }
         }
       } catch (err) {
         imagesFailed += 1;
+        const errorMsg = err instanceof Error ? err.message : String(err);
         console.error(
           "[video-queue] DALL-E backfill error for post:",
           post.id,
-          err instanceof Error ? err.message : err,
+          errorMsg,
         );
+        // Prevent infinite retry — record the failure (one SocialVideo per post).
+        const existingVideo = await prisma.socialVideo
+          .findUnique({ where: { postId: post.id }, select: { id: true } })
+          .catch(() => null);
+        if (!existingVideo) {
+          await prisma.socialVideo
+            .create({
+              data: {
+                postId: post.id,
+                provider: "dalle3",
+                status: "VIDEO_FAILED",
+                errorMessage: errorMsg.slice(0, 500),
+                visualPrompt: post.visualPrompt ?? post.hook ?? "",
+                generatedAt: new Date(),
+              },
+            })
+            .catch(() => {});
+        }
       }
     }
   }
@@ -227,22 +296,6 @@ export async function GET(request: NextRequest) {
         mediaFailed += 1;
       }
     }
-  }
-
-  // Runway Gen-4 Turbo video generation. Tier 1 posts (TikTok / Instagram /
-  // YouTube) that already have a DALL-E still get animated into a short video.
-  // Fire-and-forget — the dedicated cron enforces its own daily cap + Tier 1
-  // filter and polls Runway synchronously, so it must not block this run.
-  // (vercel.json is at the 40-cron cap, so this is wired into the existing
-  // video-queue cron rather than scheduled separately.)
-  if (process.env.RUNWAY_API_KEY) {
-    fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/cron/social-video-generate`, {
-      headers: {
-        [CRON_AUTH_HEADER]: `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`,
-      },
-    }).catch((err) =>
-      console.error("[video-queue] runway video trigger failed:", err),
-    );
   }
 
   const summary = {
