@@ -11,7 +11,7 @@ import {
   Send, BarChart2, Settings as SettingsIcon, X, Copy, AlertTriangle, Check,
   Facebook, Instagram, Youtube, Linkedin, Music2, ThumbsUp, Eye, MousePointerClick,
   Clock, Film, Loader2, Newspaper, ExternalLink, Video, Users, Flame, DollarSign,
-  Wand2, Zap, Shield, ImageIcon, ChevronDown,
+  Wand2, Zap, Shield, ImageIcon, ChevronDown, TrendingUp,
 } from "lucide-react";
 import { PLATFORM_BENCHMARKS } from "@/lib/social/config";
 
@@ -181,6 +181,7 @@ const TABS = [
   { key: "queue", label: "Publishing Queue", icon: Send },
   { key: "media", label: "Media", icon: Film },
   { key: "performance", label: "Performance", icon: BarChart2 },
+  { key: "analytics", label: "Analytics", icon: TrendingUp },
   { key: "market-index", label: "Market Index", icon: Newspaper },
   { key: "leads", label: "Leads", icon: Users },
   { key: "creators", label: "Creators", icon: Users },
@@ -384,6 +385,7 @@ export default function SocialDashboardClient({
       {tab === "queue" && <QueueTab onOpenPost={setDrawerPost} onChanged={loadStats} showToast={showToast} />}
       {tab === "media" && <MediaTab showToast={showToast} />}
       {tab === "performance" && <PerformanceTab stats={stats} onOpenPost={setDrawerPost} showToast={showToast} />}
+      {tab === "analytics" && <AnalyticsTab showToast={showToast} />}
       {tab === "market-index" && <MarketIndexTab showToast={showToast} />}
       {tab === "leads" && <LeadsTab showToast={showToast} />}
       {tab === "creators" && <CreatorsTab showToast={showToast} />}
@@ -1065,6 +1067,423 @@ function PerformanceTab({
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab: Analytics & Optimization ───────────────────────────────────────────
+type AnalysisResult = {
+  overallScore: number;
+  strengths: string[];
+  weaknesses: string[];
+  recommendations: {
+    priority: string;
+    action: string;
+    expectedImpact: string;
+    howTo: string;
+  }[];
+  hookAnalysis: {
+    score: number;
+    feedback: string;
+    improvedHook: string;
+  };
+  bestTimeToPost: string;
+  viralPotential: string;
+  viralPotentialReason: string;
+  optimizedVersion: {
+    hook: string;
+    caption: string;
+    hashtags: string[];
+    callToAction: string;
+  };
+};
+
+type OptimizedVersions = Record<string, {
+  hook: string;
+  caption: string;
+  hashtags: string[];
+  viralFormat: string;
+  scheduledTime: string;
+  estimatedReach: string;
+}>;
+
+const ANALYTICS_PLATFORMS = ["tiktok", "instagram", "facebook", "youtube", "linkedin"];
+
+function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimized, setOptimized] = useState<OptimizedVersions | null>(null);
+  const [platformFilter, setPlatformFilter] = useState<string>("all");
+
+  const loadPosts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const url = platformFilter === "all"
+        ? "/api/admin/social/posts?status=PUBLISHED&limit=50"
+        : `/api/admin/social/posts?status=PUBLISHED&platform=${platformFilter}&limit=50`;
+      const data = await fetchJson<{ posts: Post[] }>(url);
+      setPosts([...data.posts].sort((a, b) => b.leadScore - a.leadScore));
+    } catch {
+      showToast("Failed to load posts");
+    } finally {
+      setLoading(false);
+    }
+  }, [platformFilter, showToast]);
+
+  useEffect(() => { void loadPosts(); }, [loadPosts]);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetchJson<{ synced: number; message: string }>(
+        "/api/admin/social/analytics/sync",
+        { method: "POST", body: JSON.stringify({}) },
+      );
+      showToast(res.message);
+      void loadPosts();
+    } catch {
+      showToast("Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleAnalyze = async (post: Post) => {
+    setSelectedPost(post);
+    setAnalysis(null);
+    setOptimized(null);
+    setAnalyzing(true);
+    try {
+      const res = await fetchJson<{ analysis: AnalysisResult }>(
+        "/api/admin/social/analytics/analyze",
+        { method: "POST", body: JSON.stringify({ postId: post.id }) },
+      );
+      setAnalysis(res.analysis);
+    } catch {
+      showToast("Analysis failed");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleViralOptimize = async () => {
+    if (!selectedPost) return;
+    setOptimizing(true);
+    try {
+      const res = await fetchJson<{ optimizedVersions: OptimizedVersions }>(
+        "/api/admin/social/analytics/viral-optimize",
+        { method: "POST", body: JSON.stringify({ postId: selectedPost.id }) },
+      );
+      setOptimized(res.optimizedVersions);
+      showToast("Viral optimization complete");
+    } catch {
+      showToast("Optimization failed");
+    } finally {
+      setOptimizing(false);
+    }
+  };
+
+  const handleRepost = async (
+    post: Post,
+    platform: string,
+    overrides?: { hook?: string; caption?: string; hashtags?: string[] },
+  ) => {
+    try {
+      await fetchJson(
+        `/api/admin/social/posts/${post.id}/repost`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            platform,
+            isOptimized: !!overrides,
+            ...overrides,
+          }),
+        },
+      );
+      showToast(`Post queued for ${platform}`);
+    } catch {
+      showToast("Repost failed");
+    }
+  };
+
+  const scoreColor = (score: number) =>
+    score >= 80 ? "text-emerald-600"
+    : score >= 60 ? "text-amber-600"
+    : "text-red-500";
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-bold text-[#0F172A]">
+          Social Analytics &amp; Optimization
+        </h2>
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          className="text-xs bg-[#0B5FD1] text-white px-3 py-1.5 rounded-lg hover:bg-[#0a54bc] disabled:opacity-50"
+        >
+          {syncing ? "Syncing..." : "↻ Sync Analytics"}
+        </button>
+      </div>
+
+      {/* Platform filter */}
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {["all", ...ANALYTICS_PLATFORMS].map((p) => (
+          <button
+            key={p}
+            onClick={() => setPlatformFilter(p)}
+            className={`text-xs px-3 py-1 rounded-full border whitespace-nowrap ${
+              platformFilter === p
+                ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                : "bg-white text-slate-600 border-[#E2E8F0]"
+            }`}
+          >
+            {p === "all" ? "All Platforms" : p.charAt(0).toUpperCase() + p.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Posts list */}
+        <div className="space-y-2">
+          <p className="text-xs text-slate-500">
+            {posts.length} published posts — click to analyze
+          </p>
+          {loading ? (
+            <p className="text-xs text-slate-400">Loading...</p>
+          ) : posts.length === 0 ? (
+            <div className="bg-white rounded-xl border border-[#E2E8F0] p-6 text-center">
+              <p className="text-sm text-slate-500">No published posts yet</p>
+              <p className="text-xs text-slate-400 mt-1">
+                Posts appear here after they are published
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+              {posts.map((post) => (
+                <div
+                  key={post.id}
+                  onClick={() => handleAnalyze(post)}
+                  className={`bg-white rounded-xl border p-3 cursor-pointer hover:border-[#0B5FD1] transition-colors ${
+                    selectedPost?.id === post.id
+                      ? "border-[#0B5FD1] ring-1 ring-[#0B5FD1]/20"
+                      : "border-[#E2E8F0]"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-medium capitalize text-[#0B5FD1] bg-[#EFF6FF] px-1.5 py-0.5 rounded">
+                          {post.platform}
+                        </span>
+                        <span className="text-xs text-slate-400 truncate">
+                          {post.franchise?.name ?? "—"}
+                        </span>
+                      </div>
+                      <p className="text-xs font-medium text-[#0F172A] line-clamp-2">
+                        {post.hook}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {post.publishedAt
+                          ? new Date(post.publishedAt).toLocaleDateString()
+                          : "Not published"}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-bold text-[#0B5FD1]">
+                        {post.leadScore}
+                      </p>
+                      <p className="text-xs text-slate-400">score</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Analysis panel */}
+        <div>
+          {!selectedPost ? (
+            <div className="bg-white rounded-2xl border border-[#E2E8F0] p-6 text-center">
+              <p className="text-sm text-slate-500">
+                Select a post to analyze
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                AI will analyze performance and generate recommendations
+              </p>
+            </div>
+          ) : analyzing ? (
+            <div className="bg-white rounded-2xl border border-[#E2E8F0] p-6 text-center">
+              <p className="text-sm text-slate-500">🤖 Analyzing post...</p>
+              <p className="text-xs text-slate-400 mt-1">
+                This takes a few seconds
+              </p>
+            </div>
+          ) : analysis ? (
+            <div className="space-y-3">
+              {/* Overall score */}
+              <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-[#0F172A]">AI Analysis</h3>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-2xl font-bold ${scoreColor(analysis.overallScore)}`}>
+                      {analysis.overallScore}
+                    </span>
+                    <span className="text-xs text-slate-400">/100</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div className="bg-[#F8FAFC] rounded-lg p-2">
+                    <p className="text-xs text-slate-500">Viral Potential</p>
+                    <p className={`text-sm font-medium capitalize ${
+                      analysis.viralPotential === "high" ? "text-emerald-600"
+                      : analysis.viralPotential === "medium" ? "text-amber-600"
+                      : "text-red-500"
+                    }`}>
+                      {analysis.viralPotential}
+                    </p>
+                  </div>
+                  <div className="bg-[#F8FAFC] rounded-lg p-2">
+                    <p className="text-xs text-slate-500">Hook Score</p>
+                    <p className={`text-sm font-medium ${scoreColor(analysis.hookAnalysis.score)}`}>
+                      {analysis.hookAnalysis.score}/100
+                    </p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-500 mb-1">
+                  {analysis.viralPotentialReason}
+                </p>
+                <p className="text-xs text-slate-500">
+                  Best time: {analysis.bestTimeToPost}
+                </p>
+              </div>
+
+              {/* Strengths */}
+              <div className="bg-white rounded-xl border border-[#E2E8F0] p-3">
+                <h4 className="text-xs font-semibold text-emerald-600 mb-2">
+                  ✓ Strengths
+                </h4>
+                <ul className="space-y-1">
+                  {analysis.strengths.map((s, i) => (
+                    <li key={i} className="text-xs text-slate-600">• {s}</li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Recommendations */}
+              <div className="bg-white rounded-xl border border-[#E2E8F0] p-3">
+                <h4 className="text-xs font-semibold text-[#0B5FD1] mb-2">
+                  ⚡ Recommendations
+                </h4>
+                <div className="space-y-2">
+                  {analysis.recommendations.slice(0, 3).map((r, i) => (
+                    <div key={i} className="border-l-2 border-[#0B5FD1]/30 pl-2">
+                      <div className="flex items-center gap-1 mb-0.5">
+                        <span className={`text-xs font-medium ${
+                          r.priority === "high" ? "text-red-500"
+                          : r.priority === "medium" ? "text-amber-600"
+                          : "text-slate-500"
+                        }`}>
+                          {r.priority.toUpperCase()}
+                        </span>
+                      </div>
+                      <p className="text-xs font-medium text-[#0F172A]">
+                        {r.action}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {r.expectedImpact}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Improved hook */}
+              <div className="bg-[#EFF6FF] rounded-xl border border-[#0B5FD1]/20 p-3">
+                <h4 className="text-xs font-semibold text-[#0B5FD1] mb-1">
+                  💡 Better Hook
+                </h4>
+                <p className="text-xs text-[#0F172A] font-medium">
+                  &ldquo;{analysis.hookAnalysis.improvedHook}&rdquo;
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {analysis.hookAnalysis.feedback}
+                </p>
+              </div>
+
+              {/* Action buttons */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleViralOptimize}
+                  disabled={optimizing}
+                  className="bg-[#643293] text-white text-xs font-medium py-2 rounded-xl hover:bg-[#5a2883] disabled:opacity-50"
+                >
+                  {optimizing ? "Optimizing..." : "🚀 Viral Optimize"}
+                </button>
+                <button
+                  onClick={() => handleRepost(selectedPost, selectedPost.platform)}
+                  className="border border-[#0B5FD1] text-[#0B5FD1] text-xs font-medium py-2 rounded-xl hover:bg-[#0B5FD1]/5"
+                >
+                  ↻ Repost Original
+                </button>
+              </div>
+
+              {/* Optimized versions */}
+              {optimized && (
+                <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4">
+                  <h3 className="text-sm font-bold text-[#0F172A] mb-3">
+                    🚀 Viral Optimized Versions
+                  </h3>
+                  <div className="space-y-3">
+                    {Object.entries(optimized).map(([platform, version]) => (
+                      <div key={platform} className="border border-[#E2E8F0] rounded-xl p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-medium capitalize text-[#0B5FD1] bg-[#EFF6FF] px-2 py-0.5 rounded-full">
+                            {platform}
+                          </span>
+                          <span className="text-xs text-slate-400">
+                            {version.viralFormat}
+                          </span>
+                        </div>
+                        <p className="text-xs font-medium text-[#0F172A] mb-1">
+                          &ldquo;{version.hook}&rdquo;
+                        </p>
+                        <p className="text-xs text-slate-500 line-clamp-2 mb-2">
+                          {version.caption}
+                        </p>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-slate-400">
+                            Est. reach: {version.estimatedReach}
+                          </span>
+                          <button
+                            onClick={() => handleRepost(selectedPost, platform, {
+                              hook: version.hook,
+                              caption: version.caption,
+                              hashtags: version.hashtags,
+                            })}
+                            className="text-xs bg-[#0B5FD1] text-white px-2 py-1 rounded-lg hover:bg-[#0a54bc]"
+                          >
+                            Publish to {platform}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
