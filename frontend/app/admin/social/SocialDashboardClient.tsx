@@ -33,7 +33,7 @@ export interface PlatformConnection {
 interface ProviderConnections {
   buffer: { connected: boolean; channelCount: number };
   linkedin: { connected: boolean; pageId: string };
-  higgsfield: { connected: boolean };
+  runway: { connected: boolean };
   automationMode: string;
 }
 interface MarketIndexLast {
@@ -1569,9 +1569,9 @@ function SettingsTab({
           />
           <ProviderCard
             icon={<Video size={16} />}
-            name="Higgsfield"
-            connected={connections?.higgsfield.connected ?? false}
-            detail="Video generation"
+            name="Runway ML"
+            connected={connections?.runway.connected ?? false}
+            detail="Gen-4 Turbo · Video generation"
           />
         </div>
 

@@ -2,7 +2,7 @@
 //
 // Orchestrates the full visual pipeline for a single social post:
 //   1. Generate a professional visual prompt (visual-prompt.engine).
-//   2. Generate a still image via Higgsfield text-to-image (polled to completion).
+//   2. Generate a still image via the legacy provider text-to-image (polled to completion).
 //   3. Store the image in Supabase storage ("social-media-assets").
 //   4. Kick off image-to-video generation in the background (cron polls it).
 //   5. Persist the chosen visual prompt/style back onto the SocialPost.
@@ -57,7 +57,7 @@ async function resolveFranchiseSlug(post: SocialPost): Promise<string> {
   return franchise?.slug ?? "";
 }
 
-// Polls a Higgsfield text-to-image job until completion or timeout. Returns the
+// Polls a legacy provider text-to-image job until completion or timeout. Returns the
 // resolved image URL or null.
 async function pollImage(
   provider: HiggsfieldProvider,
@@ -208,13 +208,13 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
 export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals> {
   // DALL-E 3 is the primary still-image provider. When OPENAI_API_KEY is set it
   // generates the post's image synchronously (no async video render), which is
-  // enough to unblock publishing. The Higgsfield path below is the fallback.
+  // enough to unblock publishing. The legacy provider path below is the fallback.
   if (process.env.OPENAI_API_KEY) {
     return generateDallePostImage(post);
   }
 
   // Idempotency guard — if this post already has a stored image (thumbnail),
-  // don't regenerate (saves Higgsfield cost on re-invocation, e.g. at approval).
+  // don't regenerate (saves legacy provider cost on re-invocation, e.g. at approval).
   const existing = await prisma.socialVideo
     .findUnique({
       where: { postId: post.id },
@@ -251,7 +251,7 @@ export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals
   }
 
   // STAGE 2 — Generate the image (text-to-image). Gated by the video feature
-  // flag, which also governs all Higgsfield generation.
+  // flag, which also governs all legacy provider generation.
   if (!ENABLE_VIDEO) {
     console.log("[image-gen] ENABLE_HIGGSFIELD_VIDEO disabled — skipping generation");
     return EMPTY;
