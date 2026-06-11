@@ -6,8 +6,12 @@ import { SlideOver } from './ui/SlideOver';
 import { Button } from './ui/Button';
 
 // ── Mirror of the copilot route's response shapes ───────────────────────────
-type EmailDraft = { subject: string; body: string };
-type SmsDraft = { body: string };
+type ClaimFlag = {
+  kind: 'currency' | 'percentage' | 'rating' | 'count' | 'ranking' | 'multiplier';
+  match: string;
+};
+type EmailDraft = { subject: string; body: string; flags: ClaimFlag[] };
+type SmsDraft = { body: string; flags: ClaimFlag[] };
 type ContentDraft = { emails: EmailDraft[]; sms: SmsDraft[]; brief: string };
 type AutomationStep = { channel: 'email' | 'sms'; delayHours: number; templateKey: string };
 type AutomationPlan = { triggerEvent: string; audience: string; steps: AutomationStep[] };
@@ -23,6 +27,46 @@ function SavedTag() {
   );
 }
 
+// Non-blocking warning: lists the unsubstantiated-claim spans the human must
+// verify, plus a required acknowledgment that gates Approve (never generation,
+// never the copy itself).
+function FlagWarning({
+  flags,
+  checked,
+  onToggle,
+}: {
+  flags: ClaimFlag[];
+  checked: boolean;
+  onToggle: (v: boolean) => void;
+}) {
+  if (flags.length === 0) return null;
+  return (
+    <div
+      data-testid="copilot-flags"
+      className="mt-2 rounded-[var(--crm-radius-sm)] border border-[var(--crm-warning)] bg-[var(--crm-warning-subtle)] px-2.5 py-2 text-[12px] text-[var(--crm-warning)]"
+    >
+      <div className="font-medium">⚠ Unsubstantiated claim(s) — verify before use:</div>
+      <ul className="mt-1 list-disc pl-4">
+        {flags.map((f, i) => (
+          <li key={`${f.kind}:${i}`} data-testid="copilot-flag">
+            <span className="font-mono">{f.match}</span>{' '}
+            <span className="text-[var(--crm-text-tertiary)]">({f.kind})</span>
+          </li>
+        ))}
+      </ul>
+      <label className="mt-2 flex cursor-pointer items-center gap-1.5 text-[var(--crm-text-secondary)]">
+        <input
+          type="checkbox"
+          data-testid="copilot-flags-ack"
+          checked={checked}
+          onChange={(e) => onToggle(e.target.checked)}
+        />
+        I have verified these claims.
+      </label>
+    </div>
+  );
+}
+
 export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [prompt, setPrompt] = useState('');
   const [mode, setMode] = useState<Mode>('content');
@@ -33,11 +77,14 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
   // Tracks which drafts have been approved, keyed by `${kind}:${index}`.
   const [saved, setSaved] = useState<Record<string, boolean>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  // Tracks the "I have verified these claims" acknowledgment per flagged draft.
+  const [acked, setAcked] = useState<Record<string, boolean>>({});
 
   function reset() {
     setContent(null);
     setPlan(null);
     setSaved({});
+    setAcked({});
     setError(null);
   }
 
@@ -70,14 +117,18 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
 
   async function approve(
     key: string,
-    payload: { kind: 'email_template'; subject: string; body: string } | { kind: 'sms_campaign'; body: string },
+    payload:
+      | { kind: 'email_template'; subject: string; body: string; flags: ClaimFlag[] }
+      | { kind: 'sms_campaign'; body: string; flags: ClaimFlag[] },
   ) {
     setSavingKey(key);
     try {
       const res = await fetch('/api/admin/crm/copilot/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        // Echo the flags and the reviewer's acknowledgment so the server can
+        // enforce the FTC sign-off and record it in the approval audit row.
+        body: JSON.stringify({ ...payload, flagsAcknowledged: acked[key] === true }),
       });
       if (res.ok) setSaved((s) => ({ ...s, [key]: true }));
       else {
@@ -176,6 +227,11 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
                   <div key={key} className={cardCls} data-testid={`crm-copilot-email-${i}`}>
                     <div className="text-[13px] font-medium text-[var(--crm-text-primary)]">{e.subject}</div>
                     <p className="mt-1 whitespace-pre-wrap text-[12px] text-[var(--crm-text-secondary)]">{e.body}</p>
+                    <FlagWarning
+                      flags={e.flags}
+                      checked={acked[key] === true}
+                      onToggle={(v) => setAcked((a) => ({ ...a, [key]: v }))}
+                    />
                     <div className="mt-2 flex items-center justify-end">
                       {saved[key] ? (
                         <SavedTag />
@@ -183,9 +239,9 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
                         <Button
                           size="sm"
                           variant="secondary"
-                          disabled={savingKey === key}
+                          disabled={savingKey === key || (e.flags.length > 0 && acked[key] !== true)}
                           data-testid={`crm-copilot-save-email-${i}`}
-                          onClick={() => approve(key, { kind: 'email_template', subject: e.subject, body: e.body })}
+                          onClick={() => approve(key, { kind: 'email_template', subject: e.subject, body: e.body, flags: e.flags })}
                         >
                           {savingKey === key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                           Save as draft
@@ -205,6 +261,11 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
                 return (
                   <div key={key} className={cardCls} data-testid={`crm-copilot-sms-${i}`}>
                     <p className="whitespace-pre-wrap text-[12px] text-[var(--crm-text-secondary)]">{s.body}</p>
+                    <FlagWarning
+                      flags={s.flags}
+                      checked={acked[key] === true}
+                      onToggle={(v) => setAcked((a) => ({ ...a, [key]: v }))}
+                    />
                     <div className="mt-2 flex items-center justify-between">
                       <span
                         data-testid={`crm-copilot-sms-count-${i}`}
@@ -218,9 +279,9 @@ export function CopilotPanel({ open, onClose }: { open: boolean; onClose: () => 
                         <Button
                           size="sm"
                           variant="secondary"
-                          disabled={savingKey === key}
+                          disabled={savingKey === key || (s.flags.length > 0 && acked[key] !== true)}
                           data-testid={`crm-copilot-save-sms-${i}`}
-                          onClick={() => approve(key, { kind: 'sms_campaign', body: s.body })}
+                          onClick={() => approve(key, { kind: 'sms_campaign', body: s.body, flags: s.flags })}
                         >
                           {savingKey === key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                           Save as draft

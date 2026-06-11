@@ -45,26 +45,37 @@ export async function POST(req: Request) {
 
   const supabase = getServiceSupabase();
 
-  // Audit the generation attempt: prompt + mode + model. Deliberately NOT the
-  // `context` field, which may contain raw recipient PII.
-  await writeCrmAuditLog(supabase, actor, {
-    action: 'CRM_COPILOT_GENERATE',
-    entity_type: 'crm_copilot',
-    metadata: {
-      mode,
-      model: COPILOT_MODEL,
-      prompt: prompt.slice(0, 2000),
-    },
-  });
+  // Audit the generation attempt: prompt + mode + model + flagCount. Deliberately
+  // NOT the `context` field or the draft text, which may carry recipient PII —
+  // flagCount is a bare count of detected unsubstantiated claims, no copy.
+  const auditGenerate = (flagCount: number) =>
+    writeCrmAuditLog(supabase, actor, {
+      action: 'CRM_COPILOT_GENERATE',
+      entity_type: 'crm_copilot',
+      metadata: {
+        mode,
+        model: COPILOT_MODEL,
+        prompt: prompt.slice(0, 2000),
+        flagCount,
+      },
+    });
 
   try {
     if (mode === 'content') {
       const draft = await generateContentDraft(prompt, body.context);
+      const flagCount =
+        draft.emails.reduce((n, e) => n + e.flags.length, 0) +
+        draft.sms.reduce((n, s) => n + s.flags.length, 0);
+      await auditGenerate(flagCount);
+      // `draft` already carries per-draft `flags`, serialized with the response.
       return NextResponse.json({ mode, draft });
     }
     const plan = await generateAutomationPlan(prompt, body.context);
+    await auditGenerate(0);
     return NextResponse.json({ mode, plan });
   } catch (err) {
+    // Still audit the failed attempt (no draft → no flags).
+    await auditGenerate(0);
     // Validation failure (retry already exhausted inside the generator) → 422,
     // structured, and nothing was persisted.
     if (err instanceof CopilotValidationError) {
