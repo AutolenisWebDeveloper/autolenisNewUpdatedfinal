@@ -140,6 +140,33 @@ export async function handleEnvelopeCompleted(docusignEnvelopeId: string): Promi
       metadata: { docusignEnvelopeId, envelopeId: envelope.id },
     },
   }).catch(() => {});
+
+  // CRM event spine — emit docusign_signed for the buyer once the envelope is
+  // completed. Service-layer seam (called by the DocuSign webhook), so the
+  // webhook perimeter file is untouched. Additive tail call: a failure never
+  // affects the signing transition, which has already committed.
+  try {
+    if (deal?.buyer) {
+      const { emitDomainEvent } = await import("@/lib/events/emit");
+      await emitDomainEvent("docusign_signed", {
+        domainEntityId: docusignEnvelopeId,
+        contact: {
+          email: deal.buyer.user?.email ?? null,
+          phone: deal.buyer.phone,
+          firstName: deal.buyer.firstName,
+          lastName: deal.buyer.lastName,
+          source: "buyer_signup",
+        },
+        data: {
+          envelope_id: docusignEnvelopeId,
+          deal_id: envelope.dealId,
+          buyer_id: deal.buyerId,
+        },
+      });
+    }
+  } catch (err) {
+    console.error("[esign] docusign_signed emit failed:", err);
+  }
 }
 
 export async function voidEnvelope(dealId: string, reason: string): Promise<void> {

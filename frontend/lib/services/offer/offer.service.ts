@@ -228,6 +228,33 @@ export async function submitOffer(input: OfferInput) {
     },
   });
 
+  // CRM event spine — emit offer_received for the linked buyer after the offer
+  // has been committed. Additive tail call: a failure never affects the
+  // dealer's submission. PRIVACY: no dealer identity/amount on the contact.
+  try {
+    if (buyerForGhl) {
+      const { emitDomainEvent } = await import("@/lib/events/emit");
+      await emitDomainEvent("offer_received", {
+        domainEntityId: offer.id,
+        contact: {
+          email: buyerForGhl.user?.email ?? null,
+          phone: buyerForGhl.phone,
+          firstName: buyerForGhl.firstName,
+          lastName: buyerForGhl.lastName,
+          source: "buyer_signup",
+        },
+        data: {
+          offer_id: offer.id,
+          auction_id: input.auctionId,
+          buyer_id: auction.buyerId,
+          offer_count: offerCount,
+        },
+      });
+    }
+  } catch (err) {
+    console.error("[offer.service] offer_received emit failed:", err);
+  }
+
   return offer;
 }
 

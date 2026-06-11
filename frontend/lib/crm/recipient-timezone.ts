@@ -109,8 +109,10 @@ function zip3ToTimezone(zip: string): string | null {
   if (z >= 700 && z <= 729) return 'America/Chicago';
   // 730–749: OK → Central
   if (z >= 730 && z <= 749) return 'America/Chicago';
-  // 750–799: TX → Central (El Paso 79x is Mountain, approximated)
-  if (z >= 750 && z <= 799) return 'America/Chicago';
+  // 750–797: TX → Central
+  if (z >= 750 && z <= 797) return 'America/Chicago';
+  // 798–799: far-west TX (El Paso / Hudspeth) → Mountain
+  if (z >= 798 && z <= 799) return 'America/Denver';
   // 800–831: CO/WY → Mountain
   if (z >= 800 && z <= 831) return 'America/Denver';
   // 832–838: ID → Mountain
@@ -137,17 +139,21 @@ function zip3ToTimezone(zip: string): string | null {
   return null;
 }
 
-// Resolve a recipient's IANA timezone from state (preferred) then ZIP3.
+// Resolve a recipient's IANA timezone. ZIP3 is PREFERRED over state when both
+// are present: a ZIP3 prefix pins the actual zone of a split-zone state (e.g.
+// El Paso, TX is Mountain while the rest of TX is Central), whereas STATE_TZ
+// only knows the state's dominant zone. State is the fallback when ZIP3 doesn't
+// resolve; the caller applies the CONUS-safe envelope when neither does.
 export function resolveRecipientTimezone(
   state?: string | null,
   zip?: string | null,
 ): string | null {
-  if (state) {
-    const tz = STATE_TZ[state.trim().toUpperCase()];
-    if (tz) return tz;
-  }
   if (zip) {
     const tz = zip3ToTimezone(zip);
+    if (tz) return tz;
+  }
+  if (state) {
+    const tz = STATE_TZ[state.trim().toUpperCase()];
     if (tz) return tz;
   }
   return null;

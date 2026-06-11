@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": "../../..",
+    "noEmit": true,
+    "paths": {
+      "@/*": ["./*"],
+      "server-only": ["./lib/crm/__tests__/server-only.stub.ts"]
+    }
+  }
+}

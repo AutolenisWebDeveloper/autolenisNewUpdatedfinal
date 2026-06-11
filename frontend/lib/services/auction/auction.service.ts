@@ -24,10 +24,43 @@ export async function createAuction(buyerId: string, depositId: string) {
 export async function launchAuction(auctionId: string) {
   const now = new Date();
   const endsAt = new Date(now.getTime() + AUCTION_DURATION_HOURS * 3600000);
-  return prisma.auction.update({
+  const auction = await prisma.auction.update({
     where: { id: auctionId },
     data: { status: AuctionStatus.ACTIVE, startedAt: now, endsAt },
   });
+
+  // CRM event spine — emit auction_started after the successful activation.
+  // Additive tail call: this single service-layer seam covers every activation
+  // path (Stripe webhook, admin launch, deposit service) and a failure here can
+  // never affect the auction transition, which has already committed.
+  try {
+    const buyer = await prisma.buyer.findUnique({
+      where: { id: auction.buyerId },
+      include: { user: { select: { email: true } } },
+    });
+    if (buyer) {
+      const { emitDomainEvent } = await import("@/lib/events/emit");
+      await emitDomainEvent("auction_started", {
+        domainEntityId: auction.id,
+        contact: {
+          email: buyer.user?.email ?? null,
+          phone: buyer.phone,
+          firstName: buyer.firstName,
+          lastName: buyer.lastName,
+          source: "buyer_signup",
+        },
+        data: {
+          auction_id: auction.id,
+          buyer_id: auction.buyerId,
+          ends_at: endsAt.toISOString(),
+        },
+      });
+    }
+  } catch (err) {
+    console.error("[auction.service] auction_started emit failed:", err);
+  }
+
+  return auction;
 }
 
 export async function closeAuction(auctionId: string) {
