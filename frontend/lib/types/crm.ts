@@ -42,6 +42,12 @@ export interface Contact {
   tags: string[];
   notes: string | null;
   assigned_to: string | null;
+  // Populated by migration 06 (`lead_score` / `lead_temperature`). Optional and
+  // nullable so the type is correct whether or not the migration has been
+  // applied — the contacts API uses .select('*') so these flow through
+  // automatically once the columns exist.
+  lead_score?: number | null;
+  lead_temperature?: string | null;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;

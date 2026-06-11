@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useDebounce } from '@/lib/hooks/use-debounce';
 import type { Contact, LifecycleStage } from '@/lib/types/crm';
+import { resolveTemperature, leadScoreSortValue } from './lead-temperature';
 import { StageBadge, STAGE_OPTIONS } from './StageBadge';
 import { AddContactModal } from './AddContactModal';
 import { ImportContactsModal } from './ImportContactsModal';
@@ -54,17 +55,7 @@ type Toast = { kind: 'success' | 'error'; text: string } | null;
 
 const PER_PAGE = 50;
 
-const HOT_STAGES: LifecycleStage[] = [
-  'deposit_pending', 'deposit_paid', 'auction_active', 'offer_received',
-];
-const WARM_STAGES: LifecycleStage[] = ['prequal_started', 'prequal_completed'];
-
-/** Presentational temperature derived from lifecycle stage (no new data). */
-function temperatureForStage(stage: LifecycleStage): Temperature {
-  if (HOT_STAGES.includes(stage)) return 'hot';
-  if (WARM_STAGES.includes(stage)) return 'warm';
-  return 'cold';
-}
+const TEMP_RANK: Record<Temperature, number> = { hot: 0, warm: 1, cold: 2 };
 
 function formatPhone(phone: string | null): string {
   if (!phone) return '—';
@@ -275,15 +266,27 @@ export function ContactList({
       cell: (c) => <span className="text-[var(--crm-text-tertiary)]">{c.source}</span>,
     },
     {
+      id: 'score',
+      header: 'Score',
+      align: 'right',
+      sortable: true,
+      // Sort by the REAL lead_score; null/undefined ranks lowest (see helper).
+      sortValue: leadScoreSortValue,
+      cell: (c) => (
+        <span className="tabular-nums text-[var(--crm-text-secondary)]" data-testid="crm-contact-score">
+          {c.lead_score ?? '—'}
+        </span>
+      ),
+    },
+    {
       id: 'temperature',
       header: 'Temp',
       sortable: true,
-      sortValue: (c) => {
-        const t = temperatureForStage(c.lifecycle_stage);
-        return t === 'hot' ? 0 : t === 'warm' ? 1 : 2;
-      },
+      // Drive sort from the REAL lead_temperature, falling back to the
+      // lifecycle-derived temperature when unscored.
+      sortValue: (c) => TEMP_RANK[resolveTemperature(c)],
       cell: (c) => {
-        const t = temperatureForStage(c.lifecycle_stage);
+        const t = resolveTemperature(c);
         return (
           <StatusPill temperature={t} size="sm" className="capitalize" data-testid="crm-contact-temperature">
             {t}

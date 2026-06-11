@@ -2,15 +2,18 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import {
-  CheckSquare,
-  Plus,
-  Loader2,
-  Zap,
-  X,
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { CheckSquare, Plus, X, Zap } from 'lucide-react';
 import type { CRMTask, TaskPriority } from '@/lib/types/crm';
+import {
+  Badge,
+  Button,
+  DataTable,
+  EmptyState,
+  PageHeader,
+  Tabs,
+  type Column,
+  type Tone,
+} from '@/components/admin/crm/ui';
 
 type TaskRow = CRMTask & {
   contact: { id: string; first_name: string | null; last_name: string | null; email: string | null } | null;
@@ -18,11 +21,11 @@ type TaskRow = CRMTask & {
 
 type Filter = 'all' | 'overdue' | 'urgent';
 
-const PRIORITY_DOT: Record<TaskPriority, string> = {
-  urgent: 'bg-red-500',
-  high: 'bg-orange-500',
-  medium: 'bg-yellow-500',
-  low: 'bg-gray-500',
+const PRIORITY_TONE: Record<TaskPriority, Tone> = {
+  urgent: 'danger',
+  high: 'warning',
+  medium: 'info',
+  low: 'neutral',
 };
 
 function formatDue(iso: string | null): string {
@@ -88,123 +91,133 @@ export default function TasksPage() {
     }).catch(() => setRefresh((r) => r + 1));
   }
 
-  return (
-    <div className="p-6 space-y-5">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Tasks</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Open work items across the platform — manual and system-generated.
-          </p>
-        </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-        >
-          <Plus className="w-4 h-4" /> Add Task
-        </button>
-      </header>
-
-      {/* Filter tabs */}
-      <div className="flex gap-1 border-b border-gray-200">
-        <FilterTab
-          active={filter === 'all'}
-          onClick={() => setFilter('all')}
-          label="All"
-          count={counts.all}
-        />
-        <FilterTab
-          active={filter === 'overdue'}
-          onClick={() => setFilter('overdue')}
-          label="Overdue"
-          count={counts.overdue}
-          accent="red"
-        />
-        <FilterTab
-          active={filter === 'urgent'}
-          onClick={() => setFilter('urgent')}
-          label="Urgent"
-          count={counts.urgent}
-          accent="orange"
-        />
-      </div>
-
-      {/* Task list */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        {loading ? (
-          <div className="py-16 flex items-center justify-center">
-            <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+  const columns: Column<TaskRow>[] = [
+    {
+      id: 'title',
+      header: 'Task',
+      sortable: true,
+      sortValue: (t) => t.title.toLowerCase(),
+      cell: (t) => {
+        const contactName = t.contact
+          ? [t.contact.first_name, t.contact.last_name].filter(Boolean).join(' ') || t.contact.email
+          : null;
+        return (
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-[var(--crm-text-primary)]">{t.title}</span>
+              {t.scope === 'system' && (
+                <Badge tone="primary" size="sm" data-testid="crm-task-auto">
+                  <Zap className="h-2.5 w-2.5" /> Auto
+                </Badge>
+              )}
+            </div>
+            {t.description && (
+              <p className="mt-0.5 line-clamp-2 text-[12px] text-[var(--crm-text-tertiary)]">{t.description}</p>
+            )}
+            {contactName && t.contact && (
+              <Link
+                href={`/admin/crm/contacts/${t.contact.id}`}
+                onClick={(e) => e.stopPropagation()}
+                className="mt-1 inline-block text-[12px] text-[var(--crm-primary)] hover:text-[var(--crm-primary-hover)]"
+                data-testid="crm-task-contact"
+              >
+                {contactName}
+              </Link>
+            )}
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="py-16 text-center">
-            <CheckSquare className="w-12 h-12 text-gray-400 mx-auto mb-2" />
-            <p className="text-sm text-gray-500 font-medium">
-              {filter === 'all'
+        );
+      },
+    },
+    {
+      id: 'priority',
+      header: 'Priority',
+      sortable: true,
+      sortValue: (t) => ({ urgent: 0, high: 1, medium: 2, low: 3 })[t.priority],
+      cell: (t) => (
+        <Badge tone={PRIORITY_TONE[t.priority]} size="sm" className="capitalize" data-testid="crm-task-priority">
+          {t.priority}
+        </Badge>
+      ),
+    },
+    {
+      id: 'due',
+      header: 'Due',
+      align: 'right',
+      sortable: true,
+      sortValue: (t) => (t.due_at ? new Date(t.due_at).getTime() : Number.POSITIVE_INFINITY),
+      cell: (t) => {
+        const overdue = !!t.due_at && new Date(t.due_at).getTime() < now;
+        return (
+          <span
+            className={`text-[12px] tabular-nums ${overdue ? 'text-[var(--crm-danger)]' : 'text-[var(--crm-text-tertiary)]'}`}
+            data-testid="crm-task-due"
+          >
+            {overdue && t.due_at ? 'Overdue · ' : ''}
+            {formatDue(t.due_at)}
+          </span>
+        );
+      },
+    },
+  ];
+
+  return (
+    <div className="space-y-5 p-6" data-testid="crm-tasks">
+      <PageHeader
+        title="Tasks"
+        subtitle="Open work items across the platform — manual and system-generated."
+        data-testid="crm-tasks-header"
+        actions={
+          <Button variant="primary" onClick={() => setShowAddModal(true)} data-testid="crm-tasks-add">
+            <Plus className="h-4 w-4" /> Add task
+          </Button>
+        }
+      />
+
+      <Tabs
+        data-testid="crm-tasks-tabs"
+        value={filter}
+        onValueChange={(id) => setFilter(id as Filter)}
+        tabs={[
+          { id: 'all', label: 'All', count: counts.all },
+          { id: 'overdue', label: 'Overdue', count: counts.overdue },
+          { id: 'urgent', label: 'Urgent', count: counts.urgent },
+        ]}
+      />
+
+      <DataTable
+        data-testid="crm-tasks-table"
+        columns={columns}
+        rows={filtered}
+        getRowId={(t) => t.id}
+        loading={loading}
+        leadingHeader={null}
+        leading={(t) => (
+          <button
+            onClick={() => completeTask(t.id)}
+            aria-label="Complete task"
+            data-testid="crm-task-complete"
+            className="mt-0.5 h-4 w-4 rounded border border-[var(--crm-border-strong)] transition-colors hover:border-[var(--crm-success)] hover:bg-[var(--crm-success-subtle)]"
+          />
+        )}
+        empty={
+          <EmptyState
+            icon={CheckSquare}
+            title={
+              filter === 'all'
                 ? 'No open tasks'
                 : filter === 'overdue'
                   ? 'No overdue tasks'
-                  : 'No urgent tasks'}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">
-              {filter === 'all'
+                  : 'No urgent tasks'
+            }
+            description={
+              filter === 'all'
                 ? 'Tasks created here or by automations will appear in this list.'
-                : 'Keep up the good work — nothing pressing right now.'}
-            </p>
-          </div>
-        ) : (
-          <ul className="divide-y divide-gray-200">
-            {filtered.map((task) => {
-              const overdue = !!task.due_at && new Date(task.due_at).getTime() < now;
-              const contactName = task.contact
-                ? [task.contact.first_name, task.contact.last_name].filter(Boolean).join(' ') ||
-                  task.contact.email
-                : null;
-              return (
-                <li key={task.id} className="flex items-start gap-3 px-4 py-3 hover:bg-gray-50">
-                  <button
-                    onClick={() => completeTask(task.id)}
-                    aria-label="Complete task"
-                    className="mt-0.5 w-4 h-4 rounded border border-gray-600 hover:border-emerald-500 hover:bg-emerald-500/10 transition-colors"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-gray-900">{task.title}</span>
-                      {task.scope === 'system' && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded-full">
-                          <Zap className="w-2.5 h-2.5" /> Auto
-                        </span>
-                      )}
-                    </div>
-                    {task.description && (
-                      <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">
-                        {task.description}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-3 mt-1.5 text-[11px]">
-                      {contactName && task.contact && (
-                        <Link
-                          href={`/admin/crm/contacts/${task.contact.id}`}
-                          className="text-blue-600 hover:text-blue-700"
-                        >
-                          {contactName}
-                        </Link>
-                      )}
-                      <span className={overdue ? 'text-red-600' : 'text-gray-500'}>
-                        {overdue && task.due_at ? 'Overdue · ' : ''}
-                        {formatDue(task.due_at)}
-                      </span>
-                    </div>
-                  </div>
-                  <span
-                    className={`w-2 h-2 rounded-full mt-2 shrink-0 ${PRIORITY_DOT[task.priority]}`}
-                    aria-label={`Priority ${task.priority}`}
-                  />
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+                : 'Keep up the good work — nothing pressing right now.'
+            }
+            data-testid="crm-tasks-empty"
+          />
+        }
+      />
 
       {showAddModal && (
         <AddTaskModal
@@ -216,44 +229,6 @@ export default function TasksPage() {
         />
       )}
     </div>
-  );
-}
-
-function FilterTab({
-  active,
-  onClick,
-  label,
-  count,
-  accent,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  count: number;
-  accent?: 'red' | 'orange';
-}) {
-  const accentText =
-    accent === 'red' ? 'text-red-600' : accent === 'orange' ? 'text-orange-700' : 'text-gray-500';
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        '-mb-px px-3 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2',
-        active
-          ? 'border-blue-500 text-gray-900'
-          : 'border-transparent text-gray-500 hover:text-gray-400',
-      )}
-    >
-      {label}
-      <span
-        className={cn(
-          'text-[10px] font-semibold rounded-full px-1.5 py-0.5 bg-gray-50',
-          active ? 'text-gray-900' : accentText,
-        )}
-      >
-        {count}
-      </span>
-    </button>
   );
 }
 
@@ -302,52 +277,61 @@ function AddTaskModal({
     }
   }
 
+  const fieldClass =
+    'w-full rounded-[var(--crm-radius-sm)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] px-3 py-2 text-[13px] text-[var(--crm-text-primary)] outline-none placeholder:text-[var(--crm-text-tertiary)] focus-visible:ring-2 focus-visible:ring-[var(--crm-ring)]';
+  const labelClass = 'mb-1 block text-[12px] text-[var(--crm-text-tertiary)]';
+
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
       onClick={onClose}
+      data-testid="crm-task-modal"
     >
       <div
-        className="bg-white border border-gray-300 rounded-xl p-6 w-full max-w-md"
+        className="w-full max-w-md rounded-[var(--crm-radius-lg)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-gray-900">New Task</h3>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-[16px] font-medium text-[var(--crm-text-primary)]">New task</h3>
           <button
             onClick={onClose}
-            className="p-1 text-gray-500 hover:text-gray-400"
+            className="rounded-[var(--crm-radius-sm)] p-1 text-[var(--crm-text-tertiary)] hover:bg-[var(--crm-bg-tertiary)] hover:text-[var(--crm-text-primary)]"
             aria-label="Close"
+            data-testid="crm-task-modal-close"
           >
-            <X className="w-4 h-4" />
+            <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="space-y-3">
           <div>
-            <label className="text-xs text-gray-500 mb-1 block">Title *</label>
+            <label className={labelClass}>Title *</label>
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What needs to happen?"
-              className="w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition-colors"
+              className={fieldClass}
+              data-testid="crm-task-modal-title"
             />
           </div>
           <div>
-            <label className="text-xs text-gray-500 mb-1 block">Description</label>
+            <label className={labelClass}>Description</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
-              className="w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 resize-none transition-colors"
+              className={`${fieldClass} resize-none`}
+              data-testid="crm-task-modal-description"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">Priority</label>
+              <label className={labelClass}>Priority</label>
               <select
                 value={priority}
                 onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                className="w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
+                className={fieldClass}
+                data-testid="crm-task-modal-priority"
               >
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
@@ -356,42 +340,42 @@ function AddTaskModal({
               </select>
             </div>
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">Due</label>
+              <label className={labelClass}>Due</label>
               <input
                 type="datetime-local"
                 value={dueAt}
                 onChange={(e) => setDueAt(e.target.value)}
-                className="w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
+                className={fieldClass}
+                data-testid="crm-task-modal-due"
               />
             </div>
           </div>
           <div>
-            <label className="text-xs text-gray-500 mb-1 block">Contact ID (optional)</label>
+            <label className={labelClass}>Contact ID (optional)</label>
             <input
               value={contactId}
               onChange={(e) => setContactId(e.target.value)}
               placeholder="UUID of contact, or leave blank for admin task"
-              className="w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-xs font-mono text-gray-900 placeholder-gray-400 transition-colors"
+              className={`${fieldClass} font-[family-name:var(--font-mono)] text-[12px]`}
+              data-testid="crm-task-modal-contact"
             />
           </div>
         </div>
 
-        {error && <p className="text-xs text-red-600 mt-3">{error}</p>}
+        {error && <p className="mt-3 text-[12px] text-[var(--crm-danger)]">{error}</p>}
 
-        <div className="flex justify-end gap-2 mt-5">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-500 hover:text-gray-900 border border-gray-300 hover:border-gray-400 rounded-lg transition-colors"
-          >
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose} data-testid="crm-task-modal-cancel">
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="primary"
             onClick={handleSubmit}
             disabled={!title.trim() || submitting}
-            className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-gray-900 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            data-testid="crm-task-modal-submit"
           >
-            {submitting ? 'Creating…' : 'Create Task'}
-          </button>
+            {submitting ? 'Creating…' : 'Create task'}
+          </Button>
         </div>
       </div>
     </div>
