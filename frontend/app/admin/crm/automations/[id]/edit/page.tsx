@@ -1,8 +1,4 @@
-import { notFound } from 'next/navigation';
-import { getServiceSupabase } from '@/lib/supabase-service';
-import { WorkflowService } from '@/lib/services/workflow.service';
-import { TemplateService } from '@/lib/services/template.service';
-import { WorkflowBuilder } from '@/components/admin/crm/WorkflowBuilder';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,23 +6,9 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
+// The in-app Workflow builder is retired (Make.com owns automation). Any deep
+// link into the builder bounces to the Make scenarios monitor.
 export default async function EditAutomationPage({ params }: PageProps) {
-  const { id } = await params;
-  const supabase = getServiceSupabase();
-
-  const [workflow, templates, versions] = await Promise.all([
-    WorkflowService.getWorkflow(supabase, id),
-    TemplateService.listTemplates(supabase, { status: 'active' }),
-    WorkflowService.listVersions(supabase, id),
-  ]);
-
-  if (!workflow) notFound();
-
-  return (
-    <WorkflowBuilder
-      templates={templates.map((t) => ({ id: t.id, name: t.name, subject: t.subject }))}
-      initialWorkflow={workflow}
-      versions={versions}
-    />
-  );
+  await params;
+  redirect('/admin/crm/scenarios');
 }

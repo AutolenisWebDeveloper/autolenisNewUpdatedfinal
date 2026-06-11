@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { RefreshCw, Loader2 } from 'lucide-react';
+import { Button } from './ui';
 
 export function RefreshAnalyticsButton() {
   const router = useRouter();
@@ -30,16 +31,16 @@ export function RefreshAnalyticsButton() {
 
   return (
     <div className="inline-flex items-center gap-2">
-      <button
-        type="button"
+      <Button
+        variant="secondary"
         onClick={onClick}
         disabled={pending}
-        className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium border border-gray-300 hover:border-gray-400 text-gray-400 rounded-lg disabled:opacity-50 transition-colors"
+        data-testid="crm-analytics-refresh"
       >
-        {pending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+        {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
         Refresh analytics
-      </button>
-      {msg && <span className="text-[11px] text-gray-500">{msg}</span>}
+      </Button>
+      {msg && <span className="text-[11px] text-[var(--crm-text-tertiary)]">{msg}</span>}
     </div>
   );
 }

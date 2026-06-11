@@ -1,17 +1,9 @@
-import { getServiceSupabase } from '@/lib/supabase-service';
-import { TemplateService } from '@/lib/services/template.service';
-import { WorkflowBuilder } from '@/components/admin/crm/WorkflowBuilder';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
-export default async function NewAutomationPage() {
-  const supabase = getServiceSupabase();
-  const templates = await TemplateService.listTemplates(supabase, { status: 'active' });
-
-  return (
-    <WorkflowBuilder
-      templates={templates.map((t) => ({ id: t.id, name: t.name, subject: t.subject }))}
-      initialWorkflow={null}
-    />
-  );
+// The in-app Workflow builder is retired (Make.com owns automation). Any deep
+// link into the builder bounces to the Make scenarios monitor.
+export default function NewAutomationPage() {
+  redirect('/admin/crm/scenarios');
 }

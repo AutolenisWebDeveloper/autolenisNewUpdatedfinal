@@ -24,6 +24,7 @@ import type {
   EmailTemplate,
   Segment,
 } from '@/lib/types/crm';
+import { Button } from './ui';
 
 type Preview = {
   segment_size: number;
@@ -166,53 +167,57 @@ export function CampaignBuilder() {
   const selectedSegment = segments.find((s) => s.id === segmentId) ?? null;
   const selectedTemplate = templates.find((t) => t.id === templateId) ?? null;
 
+  const inputClass =
+    'mt-1 w-full rounded-[var(--crm-radius-sm)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] px-3 py-2 text-[13px] text-[var(--crm-text-primary)] placeholder:text-[var(--crm-text-tertiary)] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--crm-ring)]';
+  const labelClass =
+    'text-[11px] font-medium uppercase tracking-wide text-[var(--crm-text-tertiary)]';
+
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="mx-auto max-w-4xl p-6" data-testid="crm-campaign-builder">
       <header className="mb-6">
         <Link
           href="/admin/crm/campaigns"
-          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 transition-colors mb-2"
+          data-testid="crm-campaign-builder-back-link"
+          className="mb-2 inline-flex items-center gap-1 text-[12px] text-[var(--crm-text-tertiary)] transition-colors hover:text-[var(--crm-text-primary)]"
         >
-          <ChevronLeft className="w-3.5 h-3.5" /> Campaigns
+          <ChevronLeft className="h-3.5 w-3.5" /> Campaigns
         </Link>
-        <h1 className="text-xl font-bold text-gray-900">New campaign</h1>
+        <h1 className="text-[22px] font-medium leading-7 text-[var(--crm-text-primary)]">New campaign</h1>
       </header>
 
       {/* Stepper */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="mb-8 flex items-center justify-between" data-testid="crm-campaign-builder-stepper">
         {STEPS.map((s, idx) => {
           const Icon = s.icon;
           const active = step === s.id;
           const complete = step > s.id;
           return (
-            <div key={s.id} className="flex items-center flex-1">
+            <div key={s.id} className="flex flex-1 items-center">
               <div
                 className={cn(
                   'flex items-center gap-2',
-                  active && 'text-gray-900',
-                  complete && 'text-emerald-700',
-                  !active && !complete && 'text-gray-500',
+                  active && 'text-[var(--crm-text-primary)]',
+                  complete && 'text-[var(--crm-success)]',
+                  !active && !complete && 'text-[var(--crm-text-tertiary)]',
                 )}
               >
                 <div
                   className={cn(
-                    'w-7 h-7 rounded-full flex items-center justify-center border-2',
-                    active && 'border-blue-500 bg-blue-500/10',
-                    complete && 'border-emerald-500 bg-emerald-500/10',
-                    !active && !complete && 'border-gray-300',
+                    'flex h-7 w-7 items-center justify-center rounded-full border',
+                    active && 'border-[var(--crm-primary)] bg-[var(--crm-primary-subtle)] text-[var(--crm-primary)]',
+                    complete && 'border-[var(--crm-success)] bg-[var(--crm-success-subtle)]',
+                    !active && !complete && 'border-[var(--crm-border-strong)]',
                   )}
                 >
-                  {complete ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
+                  {complete ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5" />}
                 </div>
-                <span className="text-[11px] font-semibold uppercase tracking-wider">
-                  {s.label}
-                </span>
+                <span className="text-[11px] font-medium uppercase tracking-wide">{s.label}</span>
               </div>
               {idx < STEPS.length - 1 && (
                 <div
                   className={cn(
-                    'flex-1 h-px mx-3',
-                    complete ? 'bg-emerald-500/50' : 'bg-gray-50',
+                    'mx-3 h-px flex-1',
+                    complete ? 'bg-[var(--crm-success)]' : 'bg-[var(--crm-border)]',
                   )}
                 />
               )}
@@ -222,30 +227,30 @@ export function CampaignBuilder() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-xs text-red-700 mb-4 flex items-start gap-2">
-          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
+        <div
+          className="mb-4 flex items-start gap-2 rounded-[var(--crm-radius-sm)] border border-[var(--crm-danger-subtle)] bg-[var(--crm-danger-subtle)] px-4 py-2.5 text-[12px] text-[var(--crm-danger)]"
+          data-testid="crm-campaign-builder-error"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {error}
         </div>
       )}
 
-      <div className="bg-white border border-gray-200 rounded-xl p-6 min-h-[280px]">
+      <div className="min-h-[280px] rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] p-6">
         {/* Step 1 — Type */}
         {step === 1 && (
           <div className="space-y-5">
             <div>
-              <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                Campaign name
-              </label>
+              <label className={labelClass}>Campaign name</label>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. October deposit reminders"
-                className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition-colors"
+                className={inputClass}
+                data-testid="crm-campaign-builder-name"
               />
             </div>
             <div>
-              <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                Channel
-              </div>
+              <div className={cn(labelClass, 'mb-2')}>Channel</div>
               <div className="grid grid-cols-3 gap-3">
                 <TypeCard
                   active={type === 'email'}
@@ -253,6 +258,7 @@ export function CampaignBuilder() {
                   icon={Mail}
                   label="Email"
                   description="One template, recipient-personalized"
+                  data-testid="crm-campaign-builder-type-email"
                 />
                 <TypeCard
                   active={type === 'sms'}
@@ -260,6 +266,7 @@ export function CampaignBuilder() {
                   icon={MessageSquare}
                   label="SMS"
                   description="160-char body with STOP footer"
+                  data-testid="crm-campaign-builder-type-sms"
                 />
                 <TypeCard
                   active={type === 'mixed'}
@@ -267,6 +274,7 @@ export function CampaignBuilder() {
                   icon={Layers}
                   label="Email + SMS"
                   description="Both channels, gated by consent"
+                  data-testid="crm-campaign-builder-type-mixed"
                 />
               </div>
             </div>
@@ -277,18 +285,16 @@ export function CampaignBuilder() {
         {step === 2 && (
           <div className="space-y-5">
             <div>
-              <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                Segment
-              </label>
+              <label className={labelClass}>Segment</label>
               {loadingDeps ? (
-                <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading segments…
+                <div className="mt-1 flex items-center gap-2 text-[12px] text-[var(--crm-text-tertiary)]">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading segments…
                 </div>
               ) : segments.length === 0 ? (
-                <div className="mt-1 text-xs text-yellow-700 flex items-start gap-2">
-                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5" />
+                <div className="mt-1 flex items-start gap-2 text-[12px] text-[var(--crm-warning)]">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5" />
                   No segments yet —{' '}
-                  <Link href="/admin/crm/segments/new" className="text-blue-600 underline">
+                  <Link href="/admin/crm/segments/new" className="text-[var(--crm-primary)] underline">
                     create one
                   </Link>{' '}
                   before launching a campaign.
@@ -297,7 +303,8 @@ export function CampaignBuilder() {
                 <select
                   value={segmentId}
                   onChange={(e) => setSegmentId(e.target.value)}
-                  className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
+                  className={inputClass}
+                  data-testid="crm-campaign-builder-segment"
                 >
                   <option value="">Select a segment…</option>
                   {segments.map((s) => (
@@ -310,13 +317,14 @@ export function CampaignBuilder() {
             </div>
 
             {selectedSegment && (
-              <div className="bg-white border border-gray-200 rounded-xl p-4">
-                <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                  Recipient preview
-                </div>
+              <div
+                className="rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-secondary)] p-4"
+                data-testid="crm-campaign-builder-preview"
+              >
+                <div className={cn(labelClass, 'mb-2')}>Recipient preview</div>
                 {previewLoading || !preview ? (
-                  <div className="flex items-center gap-2 text-xs text-gray-500">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Computing…
+                  <div className="flex items-center gap-2 text-[12px] text-[var(--crm-text-tertiary)]">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Computing…
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 gap-3">
@@ -334,7 +342,7 @@ export function CampaignBuilder() {
                   </div>
                 )}
                 {preview && (
-                  <ul className="mt-3 space-y-0.5 text-[11px] text-gray-500">
+                  <ul className="mt-3 space-y-0.5 text-[11px] text-[var(--crm-text-tertiary)]">
                     {preview.do_not_contact > 0 && (
                       <li>{preview.do_not_contact.toLocaleString()} flagged do-not-contact</li>
                     )}
@@ -362,18 +370,16 @@ export function CampaignBuilder() {
           <div className="space-y-5">
             {(type === 'email' || type === 'mixed') && (
               <div>
-                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  Email template
-                </label>
+                <label className={labelClass}>Email template</label>
                 {loadingDeps ? (
-                  <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading templates…
+                  <div className="mt-1 flex items-center gap-2 text-[12px] text-[var(--crm-text-tertiary)]">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading templates…
                   </div>
                 ) : templates.length === 0 ? (
-                  <div className="mt-1 text-xs text-yellow-700 flex items-start gap-2">
-                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5" />
+                  <div className="mt-1 flex items-start gap-2 text-[12px] text-[var(--crm-warning)]">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5" />
                     No active templates —{' '}
-                    <Link href="/admin/crm/templates/new" className="text-blue-600 underline">
+                    <Link href="/admin/crm/templates/new" className="text-[var(--crm-primary)] underline">
                       create one
                     </Link>
                     .
@@ -383,7 +389,8 @@ export function CampaignBuilder() {
                     <select
                       value={templateId}
                       onChange={(e) => setTemplateId(e.target.value)}
-                      className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
+                      className={inputClass}
+                      data-testid="crm-campaign-builder-template"
                     >
                       <option value="">Select a template…</option>
                       {templates.map((t) => (
@@ -393,8 +400,8 @@ export function CampaignBuilder() {
                       ))}
                     </select>
                     {selectedTemplate && (
-                      <div className="mt-2 text-[11px] text-gray-500">
-                        Subject: <span className="text-gray-400">{selectedTemplate.subject}</span>
+                      <div className="mt-2 text-[11px] text-[var(--crm-text-tertiary)]">
+                        Subject: <span className="text-[var(--crm-text-secondary)]">{selectedTemplate.subject}</span>
                       </div>
                     )}
                   </>
@@ -404,21 +411,20 @@ export function CampaignBuilder() {
 
             {(type === 'sms' || type === 'mixed') && (
               <div>
-                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  SMS body
-                </label>
+                <label className={labelClass}>SMS body</label>
                 <textarea
                   value={smsBody}
                   onChange={(e) => setSmsBody(e.target.value)}
                   rows={4}
                   placeholder="Hey {{firstName}}, your deposit window closes in 24h…"
-                  className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-xs text-gray-900 font-mono placeholder-gray-400 resize-y transition-colors"
+                  className={cn(inputClass, 'resize-y font-mono text-[12px]')}
+                  data-testid="crm-campaign-builder-sms"
                 />
-                <div className="flex items-center justify-between mt-1.5 text-[10px] text-gray-500">
+                <div className="mt-1.5 flex items-center justify-between text-[10px] text-[var(--crm-text-tertiary)]">
                   <span>
                     {smsBody.length} chars · {smsSegments} segment{smsSegments > 1 ? 's' : ''}
                   </span>
-                  <span className="text-yellow-500">
+                  <span className="text-[var(--crm-warning)]">
                     {`"Reply STOP to opt out."`} appended automatically.
                   </span>
                 </div>
@@ -436,27 +442,28 @@ export function CampaignBuilder() {
                 onClick={() => setScheduleMode('now')}
                 label="Send immediately"
                 description="Fan-out enqueues as soon as you confirm."
+                data-testid="crm-campaign-builder-schedule-now"
               />
               <ScheduleCard
                 active={scheduleMode === 'later'}
                 onClick={() => setScheduleMode('later')}
                 label="Schedule for later"
                 description="Hourly cron picks up due campaigns."
+                data-testid="crm-campaign-builder-schedule-later"
               />
             </div>
             {scheduleMode === 'later' && (
               <div>
-                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  Send at
-                </label>
+                <label className={labelClass}>Send at</label>
                 <input
                   type="datetime-local"
                   value={scheduledAt}
                   onChange={(e) => setScheduledAt(e.target.value)}
                   min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
-                  className="mt-1 w-full bg-white border border-gray-200 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 transition-colors"
+                  className={inputClass}
+                  data-testid="crm-campaign-builder-scheduled-at"
                 />
-                <div className="text-[10px] text-gray-500 mt-1">
+                <div className="mt-1 text-[10px] text-[var(--crm-text-tertiary)]">
                   Picked up within 5 minutes of this time by the scheduled-campaign cron.
                 </div>
               </div>
@@ -466,9 +473,9 @@ export function CampaignBuilder() {
 
         {/* Step 5 — Confirm */}
         {step === 5 && preview && (
-          <div className="space-y-4">
-            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-xs text-red-700 flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <div className="space-y-4" data-testid="crm-campaign-builder-confirm">
+            <div className="flex items-start gap-2 rounded-[var(--crm-radius-sm)] border border-[var(--crm-danger-subtle)] bg-[var(--crm-danger-subtle)] px-4 py-3 text-[12px] text-[var(--crm-danger)]">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <div>
                 You{`'`}re about to send this campaign to{' '}
                 <strong>{preview.will_receive.toLocaleString()}</strong> real contacts. This
@@ -476,7 +483,7 @@ export function CampaignBuilder() {
               </div>
             </div>
 
-            <dl className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-200 text-sm">
+            <dl className="divide-y divide-[var(--crm-border)] rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline text-[13px]">
               <Row k="Name" v={name} />
               <Row k="Type" v={type} />
               <Row k="Segment" v={selectedSegment?.name ?? '—'} />
@@ -496,32 +503,35 @@ export function CampaignBuilder() {
         )}
       </div>
 
-      <div className="flex items-center justify-between mt-5">
+      <div className="mt-5 flex items-center justify-between">
         <button
           onClick={() => setStep((s) => Math.max(1, s - 1))}
           disabled={step === 1}
-          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 transition-colors disabled:opacity-30"
+          data-testid="crm-campaign-builder-back"
+          className="inline-flex items-center gap-1 text-[12px] text-[var(--crm-text-tertiary)] outline-none transition-colors hover:text-[var(--crm-text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--crm-ring)] disabled:opacity-30"
         >
-          <ChevronLeft className="w-3.5 h-3.5" /> Back
+          <ChevronLeft className="h-3.5 w-3.5" /> Back
         </button>
 
         {step < 5 ? (
-          <button
+          <Button
+            variant="primary"
             onClick={() => setStep((s) => s + 1)}
             disabled={!canAdvance()}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            data-testid="crm-campaign-builder-continue"
           >
-            Continue <ChevronRight className="w-4 h-4" />
-          </button>
+            Continue <ChevronRight className="h-4 w-4" />
+          </Button>
         ) : (
-          <button
+          <Button
+            variant="primary"
             onClick={handleLaunch}
             disabled={submitting || !preview || preview.will_receive === 0}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            data-testid="crm-campaign-builder-launch"
           >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             {scheduleMode === 'now' ? 'Launch campaign' : 'Schedule campaign'}
-          </button>
+          </Button>
         )}
       </div>
     </div>
@@ -534,26 +544,30 @@ function TypeCard({
   icon: Icon,
   label,
   description,
+  'data-testid': testId,
 }: {
   active: boolean;
   onClick: () => void;
   icon: typeof Mail;
   label: string;
   description: string;
+  'data-testid'?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      data-testid={testId}
+      aria-pressed={active}
       className={cn(
-        'text-left rounded-xl border-2 p-4 transition-colors',
+        'rounded-[var(--crm-radius-md)] border p-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--crm-ring)]',
         active
-          ? 'border-blue-500 bg-blue-500/10'
-          : 'border-gray-200 bg-white hover:border-gray-300',
+          ? 'border-[var(--crm-primary)] bg-[var(--crm-primary-subtle)]'
+          : 'border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] hover:border-[var(--crm-border-strong)]',
       )}
     >
-      <Icon className={cn('w-5 h-5 mb-2', active ? 'text-blue-600' : 'text-gray-500')} />
-      <div className="text-sm font-semibold text-gray-900">{label}</div>
-      <div className="text-[11px] text-gray-500 mt-1 leading-relaxed">{description}</div>
+      <Icon className={cn('mb-2 h-5 w-5', active ? 'text-[var(--crm-primary)]' : 'text-[var(--crm-text-tertiary)]')} />
+      <div className="text-[13px] font-medium text-[var(--crm-text-primary)]">{label}</div>
+      <div className="mt-1 text-[11px] leading-relaxed text-[var(--crm-text-tertiary)]">{description}</div>
     </button>
   );
 }
@@ -563,24 +577,28 @@ function ScheduleCard({
   onClick,
   label,
   description,
+  'data-testid': testId,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
   description: string;
+  'data-testid'?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      data-testid={testId}
+      aria-pressed={active}
       className={cn(
-        'text-left rounded-xl border-2 p-4 transition-colors',
+        'rounded-[var(--crm-radius-md)] border p-4 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--crm-ring)]',
         active
-          ? 'border-blue-500 bg-blue-500/10'
-          : 'border-gray-200 bg-white hover:border-gray-300',
+          ? 'border-[var(--crm-primary)] bg-[var(--crm-primary-subtle)]'
+          : 'border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] hover:border-[var(--crm-border-strong)]',
       )}
     >
-      <div className="text-sm font-semibold text-gray-900">{label}</div>
-      <div className="text-[11px] text-gray-500 mt-1 leading-relaxed">{description}</div>
+      <div className="text-[13px] font-medium text-[var(--crm-text-primary)]">{label}</div>
+      <div className="mt-1 text-[11px] leading-relaxed text-[var(--crm-text-tertiary)]">{description}</div>
     </button>
   );
 }
@@ -597,11 +615,15 @@ function Stat({
   big?: boolean;
 }) {
   const toneClass =
-    tone === 'good' ? 'text-emerald-700' : tone === 'warn' ? 'text-yellow-700' : 'text-gray-900';
+    tone === 'good'
+      ? 'text-[var(--crm-success)]'
+      : tone === 'warn'
+        ? 'text-[var(--crm-warning)]'
+        : 'text-[var(--crm-text-primary)]';
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
-      <div className={cn('font-bold tabular-nums', big ? 'text-2xl' : 'text-lg', toneClass)}>
+      <div className="text-[10px] uppercase tracking-wide text-[var(--crm-text-tertiary)]">{label}</div>
+      <div className={cn('font-medium tabular-nums', big ? 'text-[22px] leading-7' : 'text-[18px]', toneClass)}>
         {value.toLocaleString()}
       </div>
     </div>
@@ -611,8 +633,8 @@ function Stat({
 function Row({ k, v }: { k: string; v: string | number }) {
   return (
     <div className="flex justify-between px-4 py-2.5">
-      <span className="text-[11px] uppercase tracking-wider text-gray-500">{k}</span>
-      <span className="text-sm text-gray-900">{String(v)}</span>
+      <span className="text-[11px] uppercase tracking-wide text-[var(--crm-text-tertiary)]">{k}</span>
+      <span className="text-[13px] text-[var(--crm-text-primary)]">{String(v)}</span>
     </div>
   );
 }

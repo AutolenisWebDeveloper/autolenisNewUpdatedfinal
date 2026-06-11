@@ -12,7 +12,6 @@ import {
   FileText,
   Filter,
   ShieldOff,
-  Zap,
   Workflow,
   BarChart3,
   Activity,
@@ -66,7 +65,8 @@ const SECTIONS: NavSection[] = [
   {
     title: 'Automation',
     items: [
-      { href: '/admin/crm/automations', label: 'Workflows', icon: Zap },
+      // Workflows (in-app builder) retired — Make.com owns automation. The
+      // Automation nav now points at the Make scenarios monitor.
       { href: '/admin/crm/scenarios',   label: 'Scenarios', icon: Workflow },
     ],
   },

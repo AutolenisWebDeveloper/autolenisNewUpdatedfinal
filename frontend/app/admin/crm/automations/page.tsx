@@ -1,55 +1,52 @@
 import Link from 'next/link';
-import { Plus, Zap } from 'lucide-react';
-import { getServiceSupabase } from '@/lib/supabase-service';
-import { WorkflowService } from '@/lib/services/workflow.service';
-import { PREBUILT_WORKFLOWS } from '@/lib/services/workflow.prebuilt';
-import { WorkflowListClient } from '@/components/admin/crm/WorkflowList';
+import { Workflow, ArrowRight } from 'lucide-react';
+import { Button, PageHeader } from '@/components/admin/crm/ui';
 
 export const dynamic = 'force-dynamic';
 
-export default async function AutomationsPage() {
-  const supabase = getServiceSupabase();
-  const workflows = await WorkflowService.listWorkflows(supabase, {});
-  const stats = await WorkflowService.getStatsForWorkflows(
-    supabase,
-    workflows.map((w) => w.id),
-  );
-
+// The in-app Workflow builder has been retired — Make.com now owns automation.
+// This route is left as a lightweight pointer to the Make scenarios monitor.
+// The WorkflowBuilder / WorkflowList components and the flag-gated in-app engine
+// (CRM_INAPP_ENGINE_ENABLED) remain in place for cutover; their removal is later.
+export default function AutomationsPage() {
   return (
-    <div className="flex flex-col h-full">
-      <header className="border-b border-gray-200 bg-white/80 backdrop-blur px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            <Zap className="w-5 h-5 text-blue-500" />
-            Workflows
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Visual automation engine — triggers, delays, conditions, actions.
-          </p>
-        </div>
-        <Link
-          href="/admin/crm/automations/new"
-          className="bg-blue-600 hover:bg-blue-500 text-gray-900 text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          New Workflow
-        </Link>
-      </header>
+    <div className="mx-auto max-w-3xl space-y-6 p-6" data-testid="crm-automations">
+      <PageHeader
+        title="Workflows"
+        subtitle="In-app automation has moved to Make.com."
+        data-testid="crm-automations-header"
+      />
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        <WorkflowListClient
-          initialWorkflows={workflows}
-          initialStats={stats}
-          prebuilt={PREBUILT_WORKFLOWS.map((p) => ({
-            key: p.key,
-            category: p.category,
-            name: p.name,
-            description: p.description,
-            trigger_type: p.trigger_type,
-            node_count: p.graph.nodes.length,
-          }))}
-        />
-      </div>
+      <section
+        className="rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] p-6"
+        data-testid="crm-automations-pointer"
+      >
+        <div className="flex items-start gap-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--crm-radius-md)] bg-[var(--crm-primary-subtle)] text-[var(--crm-primary)]">
+            <Workflow className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-[16px] font-medium text-[var(--crm-text-primary)]">
+              Automation now runs in Make
+            </h2>
+            <p className="mt-1 max-w-xl text-[13px] leading-relaxed text-[var(--crm-text-secondary)]">
+              AutoLenis emits domain events and Make.com orchestrates them, calling back into{' '}
+              <code className="rounded-[var(--crm-radius-sm)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-secondary)] px-1 py-0.5 text-[12px] text-[var(--crm-text-secondary)]">
+                /api/crm/dispatch/*
+              </code>{' '}
+              to act. Every send, consent check, and audit stays owned by AutoLenis. The legacy
+              in-app builder is retired.
+            </p>
+            <div className="mt-4">
+              <Link href="/admin/crm/scenarios" data-testid="crm-automations-view-scenarios">
+                <Button variant="primary">
+                  View scenarios <ArrowRight className="h-4 w-4" />
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
