@@ -7,7 +7,7 @@ import TikTokPixel from "@/components/analytics/TikTokPixel";
 import ReferralCapture from "@/components/referral/ReferralCapture";
 import { JsonLd } from "@/lib/seo/jsonld";
 import { entityGraphSchema } from "@/lib/seo/entity-graph";
-import OrganizationSchema from "@/components/seo/OrganizationSchema";
+import { SITE_ORIGIN } from "@/lib/seo/site";
 import "./globals.css";
 
 // Self-hosted Google fonts via @fontsource — bundled at build time, no
@@ -40,9 +40,7 @@ export const metadata: Metadata = {
   },
   description:
     "AutoLenis is a premium automotive fintech concierge platform. Skip the negotiation — let dealers compete for your business.",
-  metadataBase: new URL(
-    (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()
-  ),
+  metadataBase: new URL(SITE_ORIGIN),
   // Feature 30 — PWA manifest link
   manifest: "/manifest.json",
   applicationName: "AutoLenis",
@@ -63,10 +61,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} font-[family-name:var(--font-heading)] antialiased`}>
-        {/* Connected entity graph — sitewide knowledge-graph backbone */}
+        {/* Connected entity graph — sitewide knowledge-graph backbone.
+            This is the SINGLE sitewide Organization node (defined with an @id in
+            entity-graph.ts). The former standalone <OrganizationSchema/> (no @id,
+            conflicting description) was removed to avoid a duplicate Org entity. */}
         <JsonLd id="ld-entity-graph" data={entityGraphSchema} />
-        {/* Phase C0 — sitewide Organization schema (national content engine) */}
-        <OrganizationSchema />
         {children}
         {/* Group 8 (8A) — records affiliate referral clicks sitewide */}
         <ReferralCapture />

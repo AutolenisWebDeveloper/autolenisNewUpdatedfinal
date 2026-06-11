@@ -7,6 +7,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import type { User } from "@supabase/supabase-js";
 import { jwtVerify } from "jose";
+import { SITE_HOST } from "@/lib/seo/site";
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET ?? "placeholder-must-set-jwt-secret-in-env"
@@ -320,6 +321,89 @@ function isGatedTestRoute(pathname: string): boolean {
   );
 }
 
+// ─── Canonical URL Governance (WO-2 / D1) ─────────────────────────────────────
+// Edge-level canonicalization that per-page <link rel="canonical"> cannot
+// provide: canonical host, no-trailing-slash, and tracking-param hygiene.
+// Applied to public document GET/HEAD requests only — API and authenticated
+// app surfaces are skipped so portals keep their raw host/params/cookies.
+
+// Canonical host (e.g. `www.autolenis.com`) + its registrable base
+// (`autolenis.com`). Host normalization only fires for hosts under the base
+// domain, so localhost / *.vercel.app previews are never redirected.
+const CANONICAL_HOST = SITE_HOST;
+const CANONICAL_BASE_DOMAIN = CANONICAL_HOST.replace(/^www\./, "");
+
+// App / authenticated surfaces left untouched by canonicalization. `ref` (read
+// at step 0 for affiliate attribution) lives on public paths and is preserved
+// because it is NOT in the tracking-param set below.
+const CANONICAL_SKIP_PREFIXES = ["/api", "/admin", "/buyer", "/dealer", "/affiliate", "/auth", "/_next"];
+
+// Pure marketing/tracking params (no functional meaning). Note: `ref` is
+// intentionally absent — AutoLenis reads it for affiliate attribution.
+const TRACKING_PARAMS = new Set([
+  "gclid", "gbraid", "wbraid", "dclid",
+  "fbclid", "msclkid", "ttclid", "twclid", "yclid",
+  "mc_eid", "mc_cid",
+  "igshid", "_ga", "_gl",
+  "vero_id", "_hsenc", "_hsmi",
+  "mkt_tok", "oly_anon_id", "oly_enc_id",
+]);
+
+function isTrackingParam(key: string): boolean {
+  const k = key.toLowerCase();
+  return k.startsWith("utm_") || TRACKING_PARAMS.has(k);
+}
+
+function shouldCanonicalizeHost(host: string): boolean {
+  if (!host || host === CANONICAL_HOST) return false;
+  // Only apex / other subdomain variants of the production domain — never
+  // localhost or preview deployments.
+  return host === CANONICAL_BASE_DOMAIN || host.endsWith(`.${CANONICAL_BASE_DOMAIN}`);
+}
+
+// Returns a 308 redirect when the request URL is not yet canonical, else null.
+function canonicalRedirect(request: NextRequest): NextResponse | null {
+  if (request.method !== "GET" && request.method !== "HEAD") return null;
+
+  const { pathname } = request.nextUrl;
+  if (CANONICAL_SKIP_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
+    return null;
+  }
+
+  const url = request.nextUrl.clone();
+  const requestHost = (request.headers.get("host") ?? url.host).toLowerCase();
+  let changed = false;
+
+  // 1. Canonical host — apex / non-www variants → www.
+  if (shouldCanonicalizeHost(requestHost)) {
+    url.protocol = "https:";
+    url.host = CANONICAL_HOST;
+    changed = true;
+  }
+
+  // 2. Trailing slash — strip on every path except root.
+  if (url.pathname.length > 1 && url.pathname.endsWith("/")) {
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    changed = true;
+  }
+
+  // 3. Tracking-param hygiene — strip marketing params, preserve functional ones.
+  //    `/lp/*` is the paid funnel (noindex + attribution-dependent), so its query
+  //    is left intact; host + trailing-slash normalization still apply there.
+  if (!url.pathname.startsWith("/lp/") && url.pathname !== "/lp") {
+    const trackingKeys: string[] = [];
+    url.searchParams.forEach((_value, key) => {
+      if (isTrackingParam(key)) trackingKeys.push(key);
+    });
+    if (trackingKeys.length > 0) {
+      for (const key of trackingKeys) url.searchParams.delete(key);
+      changed = true;
+    }
+  }
+
+  return changed ? NextResponse.redirect(url, 308) : null;
+}
+
 // ─── Main Middleware ──────────────────────────────────────────────────────────
 
 export async function proxy(request: NextRequest): Promise<NextResponse> {
@@ -337,6 +421,12 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
       return NextResponse.redirect(new URL("/maintenance", request.url));
     }
   }
+
+  // Canonical URL governance (host / trailing-slash / tracking params). Runs
+  // after the maintenance gate but before auth so we never bounce to signin on a
+  // non-canonical URL. Public document requests only (see CANONICAL_SKIP_PREFIXES).
+  const canonical = canonicalRedirect(request);
+  if (canonical) return canonical;
 
   // Forward the current pathname as a request header so server component layouts
   // can read it via headers() without needing access to the Request object directly.

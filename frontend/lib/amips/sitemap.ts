@@ -7,8 +7,9 @@
 // in lockstep.
 
 import { prisma } from "@/lib/prisma";
+import { SITE_ORIGIN } from "@/lib/seo/site";
 
-const BASE = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
+const BASE = SITE_ORIGIN;
 
 // Per-tier crawl priority (transaction-intent pages rank highest).
 export const TIER_PRIORITY: Record<string, number> = {

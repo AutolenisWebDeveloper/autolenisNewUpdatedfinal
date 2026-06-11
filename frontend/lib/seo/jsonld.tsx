@@ -1,4 +1,6 @@
 import Script from "next/script";
+import { SITE_ORIGIN } from "@/lib/seo/site";
+import { AUTOLENIS_SAMEAS } from "@/lib/seo/entity-graph";
 
 interface JsonLdProps { id: string; data: Record<string, unknown> | Array<Record<string, unknown>> }
 
@@ -10,7 +12,7 @@ export function JsonLd({ id, data }: JsonLdProps) {
   );
 }
 
-const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
+const APP_URL = SITE_ORIGIN;
 
 // ── Canonical NAP (Name / Address / Phone) ────────────────────────────────
 // Single source of truth for structured data. Keep in lockstep with
@@ -30,9 +32,10 @@ export const AUTOLENIS_NAP = {
   longitude: -96.8236,
 } as const;
 
-// {{CONFIRM_WITH_OWNER}} — populate with real social profile URLs
-// (Facebook, Instagram, X, LinkedIn, YouTube) before launch.
-export const AUTOLENIS_SAMEAS: string[] = [];
+// Social profiles are single-sourced from the entity graph so the Organization
+// node renders an identical `sameAs` everywhere (imported at top of file). See
+// entity-graph.ts for the {{CONFIRM_WITH_OWNER}} marker on these handles.
+export { AUTOLENIS_SAMEAS };
 
 export function organizationSchema() {
   return {

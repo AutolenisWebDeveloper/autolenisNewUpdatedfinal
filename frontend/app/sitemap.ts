@@ -2,8 +2,9 @@ import type { MetadataRoute } from "next";
 import { prisma } from "@/lib/prisma";
 import { SEO_LOCATIONS } from "@/lib/seo/locations";
 import { PILLAR_PAGES } from "@/lib/seo/pillar-links";
+import { SITE_ORIGIN } from "@/lib/seo/site";
 
-const BASE = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
+const BASE = SITE_ORIGIN;
 
 // 1-hour ISR — sitemap is built from DB and should not be regenerated on every
 // request, but should refresh frequently enough to reflect new inventory.
@@ -28,12 +29,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // High/medium-impact pages
     { url: `${BASE}/insurance`,         priority: 0.7, changeFrequency: "monthly", lastModified: now },
     { url: `${BASE}/request-vehicle`,    priority: 0.7, changeFrequency: "monthly", lastModified: now },
-    { url: `${BASE}/dealer-application`, priority: 0.6, changeFrequency: "monthly", lastModified: now },
+    // NOTE: `/dealer-application` removed — next.config 308-redirects it to
+    // `/dealer/apply` (a redirect source must never appear in the sitemap, D6).
+    // The indexable dealer funnel page is `/for-dealers` (already listed above).
     // Free buyer tools (Phase C-Tools)
     { url: `${BASE}/tools`,                       priority: 0.7, changeFrequency: "monthly", lastModified: now },
     { url: `${BASE}/tools/dealer-fee-calculator`, priority: 0.8, changeFrequency: "monthly", lastModified: now },
-    // Hope — System 25 brand differentiation page (intentionally indexed)
-    { url: `${BASE}/hope`,              priority: 0.3, changeFrequency: "monthly", lastModified: now },
+    // NOTE: `/hope` removed — PAGE_METADATA.hope is noindex:true, so it must not
+    // appear in the sitemap (indexable ⇔ in sitemap invariant, D7).
     // Legal pages (low priority but indexable)
     { url: `${BASE}/legal/terms`,           priority: 0.3, changeFrequency: "yearly",  lastModified: now },
     { url: `${BASE}/legal/privacy`,         priority: 0.3, changeFrequency: "yearly",  lastModified: now },

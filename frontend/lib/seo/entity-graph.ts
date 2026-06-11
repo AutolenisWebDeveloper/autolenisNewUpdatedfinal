@@ -4,7 +4,9 @@
 // Every JSON-LD object must reference these IDs so the Google Knowledge Graph
 // understands all entities as parts of one connected business graph.
 
-const BASE = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
+import { SITE_ORIGIN } from "@/lib/seo/site";
+
+const BASE = SITE_ORIGIN;
 
 // ─── Canonical Entity IDs ─────────────────────────────────────────────────────
 // Every entity on the site must reference these exact IDs.
@@ -24,11 +26,26 @@ export const ENTITY_IDS = {
   inventoryPage:       `${BASE}/inventory#inventory-page`,
   pricingPage:         `${BASE}/pricing#pricing-page`,
   vehicleCategory:     (slug: string) => `${BASE}/#vehicle-category-${slug}`,
-  cityPage:            (slug: string) => `${BASE}/car-buying-concierge/${slug}#service-area`,
+  // Matches the real programmatic route `/car-buying-service/[city]`.
+  cityPage:            (slug: string) => `${BASE}/car-buying-service/${slug}#service-area`,
   vehicleListing:      (id: string) => `${BASE}/inventory/${id}#vehicle`,
   faqItem:             (id: string) => `${BASE}/faq#faq-${id}`,
-  blogPost:            (slug: string) => `${BASE}/blog/${slug}#article`,
+  // Matches the real content route `/buying-guide/[slug]` (was `/blog/{slug}`).
+  guide:               (slug: string) => `${BASE}/buying-guide/${slug}#article`,
 } as const;
+
+// ─── Canonical social profiles (sameAs) ──────────────────────────────────────
+// SINGLE SOURCE OF TRUTH for AutoLenis social URLs. `jsonld.tsx`
+// (AUTOLENIS_SAMEAS) and `lib/services/seo/seo-schema.service.ts` import this so
+// every Organization node renders an identical `sameAs`.
+// {{CONFIRM_WITH_OWNER}} — verify these four handles are live & owned before
+// launch. Remove any unconfirmed profile rather than guessing a URL.
+export const AUTOLENIS_SAMEAS: readonly string[] = [
+  "https://www.facebook.com/autolenis",
+  "https://www.instagram.com/autolenis",
+  "https://twitter.com/autolenis",
+  "https://www.linkedin.com/company/autolenis",
+] as const;
 
 // ─── Connected Entity Graph ───────────────────────────────────────────────────
 // Defines the semantic relationships between all entities on the site.
@@ -64,12 +81,7 @@ export const entityGraphSchema: Record<string, unknown> = {
         "Automotive Finance",
         "Vehicle Trade-In",
       ],
-      sameAs: [
-        "https://www.facebook.com/autolenis",
-        "https://www.instagram.com/autolenis",
-        "https://twitter.com/autolenis",
-        "https://www.linkedin.com/company/autolenis",
-      ],
+      sameAs: [...AUTOLENIS_SAMEAS],
     },
 
     // Founder — connected to organization

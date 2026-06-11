@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
+import { SITE_ORIGIN } from "@/lib/seo/site";
 
-const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
+const APP_URL = SITE_ORIGIN;
 const OG_IMAGE = `${APP_URL}/og-image.jpg`;
 const SITE_NAME = "AutoLenis";
 const TWITTER_HANDLE = "@autolenis";
@@ -194,7 +195,9 @@ export const PAGE_METADATA = {
     title: "Dealer Application",
     description:
       "Apply to join the AutoLenis marketplace. Reach pre-qualified buyers actively searching for vehicles in your area.",
-    path: "/dealer-application",
+    // `/dealer-application` 308-redirects to `/dealer/apply` (next.config), so the
+    // self-canonical must point at the non-redirecting destination, not the alias.
+    path: "/dealer/apply",
     keywords: ["AutoLenis dealer", "dealer application", "sell cars AutoLenis", "marketplace dealer"],
   },
   hope: {

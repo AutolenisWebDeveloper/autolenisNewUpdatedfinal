@@ -1,7 +1,8 @@
 import type { MetadataRoute } from "next";
+import { SITE_ORIGIN } from "@/lib/seo/site";
 
 export default function robots(): MetadataRoute.Robots {
-  const base = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
+  const base = SITE_ORIGIN;
 
   // Private / functional areas blocked for everyone. /lp/* stays disallowed so
   // the paid funnel never competes with the organic /car-buying-service hub.
