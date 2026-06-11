@@ -8,7 +8,7 @@
     "build": "prisma generate && next build",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test lib/services/prequal/__tests__/*.test.ts",
+    "test": "tsx --test lib/services/prequal/__tests__/*.test.ts lib/services/dealer-recruitment/__tests__/*.test.ts",
     "test:content": "tsx --test lib/content/__tests__/*.test.ts",
     "test:seo": "tsx --test lib/seo/__tests__/*.test.ts",
     "test:crm": "tsx --tsconfig lib/crm/__tests__/tsconfig.test.json --test lib/crm/__tests__/*.test.ts",

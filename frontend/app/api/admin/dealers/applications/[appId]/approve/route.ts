@@ -1,15 +1,15 @@
 // POST /api/admin/dealers/applications/[appId]/approve
-// Creates Supabase user + User + Dealer records, sends approval email with temp password.
+// Creates Supabase user + User + Dealer records, then emails a secure single-use
+// account-claim link. NO plaintext password is ever generated, stored, returned,
+// or emailed — the dealer sets their own password via /dealer/claim (WO-2).
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@supabase/supabase-js";
 import { UserRole, DealerStatus } from "@prisma/client";
-import {
-  sendDealerApprovalEmail,
-  sendDealerApplicationApprovedEmail,
-} from "@/lib/services/email/resend.service";
+import { sendDealerApplicationApprovedEmail } from "@/lib/services/email/resend.service";
+import { issueClaimToken } from "@/lib/services/dealer-recruitment/account-claim.service";
 import crypto from "crypto";
 
 function adminClient() {
@@ -18,10 +18,6 @@ function adminClient() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
-}
-
-function generateTempPassword(): string {
-  return "Dealer@" + crypto.randomBytes(6).toString("hex");
 }
 
 interface RouteContext { params: Promise<{ appId: string }> }
@@ -35,13 +31,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   if (!app) return NextResponse.json({ error: "Application not found" }, { status: 404 });
   if (app.status !== "PENDING") return NextResponse.json({ error: "Application already reviewed" }, { status: 409 });
 
-  const tempPassword = generateTempPassword();
   const supabase = adminClient();
 
-  // Create Supabase user
+  // Create the Supabase user with a random, UNSTORED password. Nobody — not even
+  // us — knows it; the dealer establishes their real password through the claim
+  // flow. This is intentionally a throwaway value, never persisted or returned.
+  const unstoredPassword = crypto.randomBytes(24).toString("base64url");
   const { data: created, error: authErr } = await supabase.auth.admin.createUser({
     email: app.contactEmail.toLowerCase(),
-    password: tempPassword,
+    password: unstoredPassword,
     email_confirm: true,
     user_metadata: { role: "DEALER", dealershipName: app.dealershipName },
   });
@@ -64,6 +62,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   const supabaseUserId = created.user.id;
 
+  let dealerId = "";
   try {
     let dealer: { id: string };
     await prisma.$transaction(async (tx) => {
@@ -107,41 +106,39 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         },
       });
     });
+    dealerId = dealer!.id;
   } catch (err) {
     await supabase.auth.admin.deleteUser(supabaseUserId).catch(() => {});
     console.error("[dealer/applications/approve] DB error:", err);
     return NextResponse.json({ error: "Database error during approval" }, { status: 500 });
   }
 
-  // Send approval email
+  // Mint a secure single-use claim token (hashed at rest, 7-day expiry) and email
+  // the claim link. If token issuance fails we still report success (the account
+  // exists) — an admin can re-issue from the dealer record.
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
   try {
-    await sendDealerApprovalEmail(
-      app.contactEmail,
-      app.contactName,
-      tempPassword,
-      `${appUrl}/dealer/signin`
-    );
-  } catch (err) {
-    console.error("[dealer/applications/approve] Email error:", err);
-  }
+    const { rawToken, expiresAt } = await issueClaimToken({
+      dealerId,
+      applicationId: appId,
+      createdByAdminId: admin.adminId,
+    });
 
-  // Templated approval notice (separate template) — non-blocking.
-  await sendDealerApplicationApprovedEmail({
-    to: app.contactEmail,
-    contactName: app.contactName,
-    dealershipName: app.dealershipName,
-    claimUrl: `${appUrl}/dealer/signin`,
-    expiresAt: new Date(Date.now() + 7 * 24 * 3600_000).toLocaleDateString("en-US", {
-      year: "numeric", month: "long", day: "numeric",
-    }),
-  }).catch(err => console.error("[dealer/applications/approve] templated approved email failed:", err));
+    await sendDealerApplicationApprovedEmail({
+      to: app.contactEmail,
+      contactName: app.contactName,
+      dealershipName: app.dealershipName,
+      claimUrl: `${appUrl}/dealer/claim?token=${rawToken}`,
+      expiresAt: expiresAt.toLocaleDateString("en-US", {
+        year: "numeric", month: "long", day: "numeric",
+      }),
+    });
+  } catch (err) {
+    console.error("[dealer/applications/approve] Claim token / email error:", err);
+  }
 
   return NextResponse.json({
     success: true,
-    message: "Application approved, dealer account created",
-    // Surface tempPassword in non-production environments so sandbox tests
-    // can exercise the forced password-change flow end-to-end.
-    ...(process.env.NODE_ENV !== "production" ? { tempPassword } : {}),
+    message: "Application approved — secure account-claim link emailed to the dealer",
   });
 }
