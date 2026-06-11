@@ -7,7 +7,6 @@ import {
   MessageSquare,
   StickyNote,
   Send,
-  Search,
   CheckCircle2,
   AlertOctagon,
   ExternalLink,
@@ -23,6 +22,17 @@ import type {
   ConversationStatus,
   TimelineEvent,
 } from '@/lib/types/crm';
+import {
+  Badge,
+  Button,
+  DataTable,
+  EmptyState,
+  SearchField,
+  StatusPill,
+  Tabs,
+  type Column,
+  type Tone,
+} from '@/components/admin/crm/ui';
 
 type ConversationListItem = {
   id: string;
@@ -49,10 +59,17 @@ type SentItem = TimelineEvent & {
 };
 
 const STATUS_DOT: Record<ConversationStatus, string> = {
-  open: 'bg-blue-500',
-  assigned: 'bg-purple-500',
-  escalated: 'bg-red-500',
-  resolved: 'bg-emerald-500',
+  open: 'bg-[var(--crm-info)]',
+  assigned: 'bg-[var(--crm-primary)]',
+  escalated: 'bg-[var(--crm-danger)]',
+  resolved: 'bg-[var(--crm-success)]',
+};
+
+const STATUS_TONE: Record<ConversationStatus, Tone> = {
+  open: 'info',
+  assigned: 'primary',
+  escalated: 'danger',
+  resolved: 'success',
 };
 
 function relativeTime(iso: string): string {
@@ -302,38 +319,21 @@ export default function InboxPage() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-56px)] bg-white">
+    <div
+      className="flex h-[calc(100vh-56px)] flex-col bg-[var(--crm-bg-primary)]"
+      data-testid="crm-inbox"
+    >
       {/* Top tabs */}
-      <div className="border-b border-gray-200 px-5 pt-3 bg-white">
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setTab('inbox')}
-            className={cn(
-              'px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
-              tab === 'inbox'
-                ? 'border-blue-600 text-blue-700'
-                : 'border-transparent text-gray-500 hover:text-gray-900',
-            )}
-          >
-            <Inbox className="w-4 h-4" /> Inbox
-            {totalUnread > 0 && (
-              <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
-                {totalUnread}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setTab('sent')}
-            className={cn(
-              'px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5',
-              tab === 'sent'
-                ? 'border-blue-600 text-blue-700'
-                : 'border-transparent text-gray-500 hover:text-gray-900',
-            )}
-          >
-            <Send className="w-4 h-4" /> Sent
-          </button>
-        </div>
+      <div className="border-b border-[var(--crm-border)] crm-hairline px-5 pt-3">
+        <Tabs
+          data-testid="crm-inbox-tabs"
+          value={tab}
+          onValueChange={(id) => setTab(id as 'inbox' | 'sent')}
+          tabs={[
+            { id: 'inbox', label: 'Inbox', count: totalUnread > 0 ? totalUnread : undefined },
+            { id: 'sent', label: 'Sent' },
+          ]}
+        />
       </div>
 
       {tab === 'sent' ? (
@@ -344,61 +344,67 @@ export default function InboxPage() {
           onChannelChange={setSentChannel}
         />
       ) : (
-        <div className="flex flex-1 min-h-0">
+        <div className="flex min-h-0 flex-1">
           {/* Left pane — conversation list */}
-          <aside className="w-80 border-r border-gray-200 flex flex-col bg-white">
-            <div className="px-4 py-3 border-b border-gray-200">
-              <div className="flex items-center justify-between mb-3">
-                <h1 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+          <aside className="flex w-80 flex-col border-r border-[var(--crm-border)] crm-hairline">
+            <div className="border-b border-[var(--crm-border)] crm-hairline px-4 py-3">
+              <div className="mb-3 flex items-center justify-between">
+                <h1 className="flex items-center gap-2 text-[13px] font-medium text-[var(--crm-text-primary)]">
                   Inbox
                   {totalUnread > 0 && (
-                    <span className="text-[10px] font-semibold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
+                    <Badge tone="primary" size="sm" data-testid="crm-inbox-unread">
                       {totalUnread}
-                    </span>
+                    </Badge>
                   )}
                 </h1>
-                <div className="flex bg-gray-100 border border-gray-200 rounded-md p-0.5 text-[10px] font-medium">
+                <div className="flex rounded-[var(--crm-radius-sm)] border border-[var(--crm-border)] crm-hairline p-0.5 text-[11px] font-medium">
                   <button
                     onClick={() => setFilter('open')}
+                    data-testid="crm-inbox-filter-open"
                     className={cn(
-                      'px-2 py-0.5 rounded',
-                      filter === 'open' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500',
+                      'rounded-[var(--crm-radius-sm)] px-2 py-0.5',
+                      filter === 'open'
+                        ? 'bg-[var(--crm-primary-subtle)] text-[var(--crm-primary)]'
+                        : 'text-[var(--crm-text-tertiary)]',
                     )}
                   >
                     Open
                   </button>
                   <button
                     onClick={() => setFilter('all')}
+                    data-testid="crm-inbox-filter-all"
                     className={cn(
-                      'px-2 py-0.5 rounded',
-                      filter === 'all' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500',
+                      'rounded-[var(--crm-radius-sm)] px-2 py-0.5',
+                      filter === 'all'
+                        ? 'bg-[var(--crm-primary-subtle)] text-[var(--crm-primary)]'
+                        : 'text-[var(--crm-text-tertiary)]',
                     )}
                   >
                     All
                   </button>
                 </div>
               </div>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                <input
+              <div className="rounded-[var(--crm-radius-sm)] border border-[var(--crm-border)] crm-hairline">
+                <SearchField
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search…"
-                  className="w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-md pl-8 pr-2 py-1.5 text-xs text-gray-900 placeholder-gray-400 transition-colors"
+                  data-testid="crm-inbox-search"
                 />
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto">
               {loading ? (
-                <div className="p-8 flex items-center justify-center">
-                  <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                <div className="flex items-center justify-center p-8">
+                  <Loader2 className="h-5 w-5 animate-spin text-[var(--crm-primary)]" />
                 </div>
               ) : filteredConversations.length === 0 ? (
-                <div className="p-8 text-center">
-                  <MessageSquare className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-                  <p className="text-xs text-gray-500">No conversations</p>
-                </div>
+                <EmptyState
+                  icon={MessageSquare}
+                  title="No conversations"
+                  data-testid="crm-inbox-empty"
+                />
               ) : (
                 filteredConversations.map((c) => {
                   const name =
@@ -411,39 +417,40 @@ export default function InboxPage() {
                     <button
                       key={c.id}
                       onClick={() => setSelectedId(c.id)}
+                      data-testid="crm-inbox-conversation"
                       className={cn(
-                        'w-full flex items-start gap-3 px-3 py-3 text-left border-l-2 transition-colors',
+                        'flex w-full items-start gap-3 border-l-2 px-3 py-3 text-left transition-colors',
                         isActive
-                          ? 'bg-blue-50 border-l-blue-600'
-                          : 'border-l-transparent hover:bg-gray-50',
+                          ? 'border-l-[var(--crm-primary)] bg-[var(--crm-primary-subtle)]'
+                          : 'border-l-transparent hover:bg-[var(--crm-bg-secondary)]',
                       )}
                     >
                       <div className="relative shrink-0">
-                        <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-xs font-semibold text-white">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--crm-primary)] text-[12px] font-medium text-[var(--crm-on-primary)]">
                           {initial}
                         </div>
                         <div
                           className={cn(
-                            'absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white',
+                            'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--crm-bg-primary)]',
                             STATUS_DOT[c.status],
                           )}
                         />
                       </div>
-                      <div className="flex-1 min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold text-gray-900 truncate">{name}</span>
-                          <span className="text-[10px] text-gray-500 shrink-0">
+                          <span className="truncate text-[13px] font-medium text-[var(--crm-text-primary)]">{name}</span>
+                          <span className="shrink-0 text-[11px] text-[var(--crm-text-tertiary)]">
                             {relativeTime(c.last_message_at)}
                           </span>
                         </div>
-                        <div className="flex items-center justify-between gap-2 mt-0.5">
-                          <span className="text-[11px] text-gray-500 truncate">
+                        <div className="mt-0.5 flex items-center justify-between gap-2">
+                          <span className="truncate text-[12px] text-[var(--crm-text-tertiary)]">
                             {c.last_message?.body ?? 'No messages yet'}
                           </span>
                           {c.unread_count > 0 && (
-                            <span className="text-[10px] font-semibold bg-blue-600 text-white px-1.5 py-0.5 rounded-full shrink-0">
+                            <Badge tone="primary" size="sm" className="shrink-0">
                               {c.unread_count}
-                            </span>
+                            </Badge>
                           )}
                         </div>
                       </div>
@@ -455,63 +462,76 @@ export default function InboxPage() {
           </aside>
 
           {/* Right pane — conversation thread */}
-          <section className="flex-1 flex flex-col bg-white">
+          <section className="flex flex-1 flex-col">
             {!selectedConversation ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center">
-                <Inbox className="w-12 h-12 text-gray-300 mb-3" />
-                <p className="text-sm text-gray-700 font-medium">Select a conversation</p>
-                <p className="text-xs text-gray-500 mt-1 max-w-xs">
-                  Choose a conversation from the left to view messages and reply.
-                </p>
+              <div className="flex flex-1 items-center justify-center">
+                <EmptyState
+                  icon={Inbox}
+                  title="Select a conversation"
+                  description="Choose a conversation from the left to view messages and reply."
+                  data-testid="crm-inbox-no-selection"
+                />
               </div>
             ) : (
               <>
                 {/* Header */}
-                <header className="h-14 px-5 border-b border-gray-200 flex items-center gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-gray-900 truncate">
+                <header className="flex h-14 items-center gap-3 border-b border-[var(--crm-border)] crm-hairline px-5">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] font-medium text-[var(--crm-text-primary)]">
                       {[selectedConversation.contact?.first_name, selectedConversation.contact?.last_name]
                         .filter(Boolean)
                         .join(' ') ||
                         selectedConversation.contact?.email ||
                         formatPhoneShort(selectedConversation.phone)}
                     </div>
-                    <div className="text-[11px] text-gray-500 truncate">
+                    <div className="truncate text-[12px] text-[var(--crm-text-tertiary)]">
                       {formatPhoneShort(selectedConversation.phone)}
                     </div>
                   </div>
-                  <button
+                  <StatusPill
+                    tone={STATUS_TONE[selectedConversation.status]}
+                    size="sm"
+                    className="capitalize"
+                    data-testid="crm-inbox-status"
+                  >
+                    {selectedConversation.status}
+                  </StatusPill>
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={handleResolve}
                     disabled={selectedConversation.status === 'resolved'}
-                    className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 hover:text-emerald-800 bg-white border border-emerald-200 hover:border-emerald-300 rounded-md px-2.5 py-1 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    data-testid="crm-inbox-resolve"
                   >
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Resolve
-                  </button>
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Resolve
+                  </Button>
                   <div className="relative" ref={escalateRef}>
-                    <button
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setEscalateOpen((v) => !v)}
                       disabled={escalating}
-                      className="flex items-center gap-1.5 text-xs font-medium text-orange-700 hover:text-orange-800 bg-white border border-orange-200 hover:border-orange-300 rounded-md px-2.5 py-1 transition-colors disabled:opacity-50"
+                      data-testid="crm-inbox-escalate"
                     >
                       {escalating ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
-                        <AlertOctagon className="w-3.5 h-3.5" />
+                        <AlertOctagon className="h-3.5 w-3.5" />
                       )}
                       Escalate
-                      <ChevronDown className="w-3 h-3" />
-                    </button>
+                      <ChevronDown className="h-3 w-3" />
+                    </Button>
                     {escalateOpen && (
-                      <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-20 overflow-hidden">
-                        <div className="px-3 py-2 border-b border-gray-200">
-                          <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                      <div className="absolute right-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)]">
+                        <div className="border-b border-[var(--crm-border)] crm-hairline px-3 py-2">
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--crm-text-tertiary)]">
                             Assign escalation to
                           </div>
                         </div>
                         <div className="max-h-64 overflow-y-auto py-1">
                           {admins.length === 0 ? (
-                            <div className="px-3 py-4 text-center text-xs text-gray-500">
-                              <Loader2 className="w-4 h-4 text-gray-400 animate-spin mx-auto" />
+                            <div className="px-3 py-4 text-center">
+                              <Loader2 className="mx-auto h-4 w-4 animate-spin text-[var(--crm-text-tertiary)]" />
                             </div>
                           ) : (
                             admins.map((a) => (
@@ -519,21 +539,22 @@ export default function InboxPage() {
                                 key={a.id}
                                 onClick={() => handleEscalate(a.id)}
                                 disabled={escalating}
-                                className="w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors disabled:opacity-50 flex items-center justify-between gap-2"
+                                data-testid="crm-inbox-escalate-option"
+                                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--crm-bg-secondary)] disabled:opacity-50"
                               >
                                 <div className="min-w-0">
-                                  <div className="text-xs font-medium text-gray-900 truncate">
+                                  <div className="truncate text-[13px] font-medium text-[var(--crm-text-primary)]">
                                     {a.email}
                                     {a.is_self && (
-                                      <span className="ml-1.5 text-[9px] font-semibold text-blue-600">
+                                      <span className="ml-1.5 text-[11px] font-medium text-[var(--crm-primary)]">
                                         (you)
                                       </span>
                                     )}
                                   </div>
-                                  <div className="text-[10px] text-gray-500">{a.role}</div>
+                                  <div className="text-[11px] text-[var(--crm-text-tertiary)]">{a.role}</div>
                                 </div>
                                 {selectedConversation?.assigned_to === a.id && (
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--crm-success)]" />
                                 )}
                               </button>
                             ))
@@ -544,20 +565,21 @@ export default function InboxPage() {
                   </div>
                   <Link
                     href={`/admin/crm/contacts/${selectedConversation.contact_id}`}
-                    className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900"
+                    data-testid="crm-inbox-contact-link"
+                    className="flex items-center gap-1 text-[12px] text-[var(--crm-text-tertiary)] hover:text-[var(--crm-text-primary)]"
                   >
-                    Contact <ExternalLink className="w-3 h-3" />
+                    Contact <ExternalLink className="h-3 w-3" />
                   </Link>
                 </header>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 bg-gray-50">
+                <div className="flex-1 space-y-3 overflow-y-auto bg-[var(--crm-bg-secondary)] px-5 py-4">
                   {messagesLoading ? (
                     <div className="flex items-center justify-center py-10">
-                      <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                      <Loader2 className="h-5 w-5 animate-spin text-[var(--crm-primary)]" />
                     </div>
                   ) : messages.length === 0 ? (
-                    <div className="text-center text-xs text-gray-500 py-10">
+                    <div className="py-10 text-center text-[12px] text-[var(--crm-text-tertiary)]">
                       No messages in this conversation yet.
                     </div>
                   ) : (
@@ -565,12 +587,12 @@ export default function InboxPage() {
                       if (m.direction === 'internal') {
                         return (
                           <div key={m.id} className="flex justify-center">
-                            <div className="max-w-md bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-2 text-xs">
-                              <div className="flex items-center gap-1.5 text-yellow-700 font-medium mb-0.5">
-                                <StickyNote className="w-3 h-3" /> Internal note
+                            <div className="max-w-md rounded-[var(--crm-radius-md)] border border-[var(--crm-warning-subtle)] bg-[var(--crm-warning-subtle)] px-4 py-2 text-[12px]">
+                              <div className="mb-0.5 flex items-center gap-1.5 font-medium text-[var(--crm-warning)]">
+                                <StickyNote className="h-3 w-3" /> Internal note
                               </div>
-                              <div className="text-yellow-900 whitespace-pre-wrap">{m.body}</div>
-                              <div className="text-[10px] text-yellow-600/70 mt-1 text-right">
+                              <div className="whitespace-pre-wrap text-[var(--crm-text-primary)]">{m.body}</div>
+                              <div className="mt-1 text-right text-[11px] text-[var(--crm-text-tertiary)]">
                                 {relativeTime(m.created_at)}
                               </div>
                             </div>
@@ -586,17 +608,17 @@ export default function InboxPage() {
                           <div className="max-w-md">
                             <div
                               className={cn(
-                                'px-4 py-2 text-sm whitespace-pre-wrap',
+                                'whitespace-pre-wrap px-4 py-2 text-[13px]',
                                 isOutbound
-                                  ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm'
-                                  : 'bg-white border border-gray-200 text-gray-900 rounded-2xl rounded-tl-sm',
+                                  ? 'rounded-2xl rounded-tr-sm bg-[var(--crm-primary)] text-[var(--crm-on-primary)]'
+                                  : 'rounded-2xl rounded-tl-sm border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] text-[var(--crm-text-primary)]',
                               )}
                             >
                               {m.body}
                             </div>
                             <div
                               className={cn(
-                                'text-[10px] text-gray-500 mt-1 px-2',
+                                'mt-1 px-2 text-[11px] text-[var(--crm-text-tertiary)]',
                                 isOutbound ? 'text-right' : 'text-left',
                               )}
                             >
@@ -611,25 +633,31 @@ export default function InboxPage() {
                 </div>
 
                 {/* Reply area */}
-                <div className="border-t border-gray-200 px-5 py-3 bg-white">
-                  <div className="flex bg-gray-100 border border-gray-200 rounded-md p-0.5 mb-2 w-fit text-[10px] font-medium">
+                <div className="border-t border-[var(--crm-border)] crm-hairline px-5 py-3">
+                  <div className="mb-2 flex w-fit rounded-[var(--crm-radius-sm)] border border-[var(--crm-border)] crm-hairline p-0.5 text-[11px] font-medium">
                     <button
                       onClick={() => setReplyMode('sms')}
+                      data-testid="crm-inbox-reply-sms"
                       className={cn(
-                        'px-2.5 py-1 rounded flex items-center gap-1',
-                        replyMode === 'sms' ? 'bg-blue-600 text-white' : 'text-gray-600',
+                        'flex items-center gap-1 rounded-[var(--crm-radius-sm)] px-2.5 py-1',
+                        replyMode === 'sms'
+                          ? 'bg-[var(--crm-primary)] text-[var(--crm-on-primary)]'
+                          : 'text-[var(--crm-text-secondary)]',
                       )}
                     >
-                      <MessageSquare className="w-3 h-3" /> Reply via SMS
+                      <MessageSquare className="h-3 w-3" /> Reply via SMS
                     </button>
                     <button
                       onClick={() => setReplyMode('note')}
+                      data-testid="crm-inbox-reply-note"
                       className={cn(
-                        'px-2.5 py-1 rounded flex items-center gap-1',
-                        replyMode === 'note' ? 'bg-yellow-500 text-white' : 'text-gray-600',
+                        'flex items-center gap-1 rounded-[var(--crm-radius-sm)] px-2.5 py-1',
+                        replyMode === 'note'
+                          ? 'bg-[var(--crm-warning)] text-white'
+                          : 'text-[var(--crm-text-secondary)]',
                       )}
                     >
-                      <StickyNote className="w-3 h-3" /> Internal Note
+                      <StickyNote className="h-3 w-3" /> Internal note
                     </button>
                   </div>
                   <div className="flex items-end gap-2">
@@ -643,32 +671,34 @@ export default function InboxPage() {
                         }
                       }}
                       rows={2}
+                      data-testid="crm-inbox-reply-input"
                       placeholder={
                         replyMode === 'note'
                           ? 'Write an internal note (not sent to contact)…'
                           : 'Reply via SMS…'
                       }
-                      className="flex-1 bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 resize-none transition-colors"
+                      className="flex-1 resize-none rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] px-3 py-2 text-[13px] text-[var(--crm-text-primary)] outline-none placeholder:text-[var(--crm-text-tertiary)] focus-visible:ring-2 focus-visible:ring-[var(--crm-ring)]"
                     />
                     <button
                       onClick={handleSend}
                       disabled={!reply.trim() || sending}
+                      data-testid="crm-inbox-send"
                       className={cn(
-                        'p-2.5 rounded-lg text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed',
+                        'rounded-[var(--crm-radius-md)] p-2.5 text-white transition-colors disabled:cursor-not-allowed disabled:opacity-30',
                         replyMode === 'note'
-                          ? 'bg-yellow-500 hover:bg-yellow-600'
-                          : 'bg-blue-600 hover:bg-blue-700',
+                          ? 'bg-[var(--crm-warning)] hover:opacity-90'
+                          : 'bg-[var(--crm-primary)] hover:bg-[var(--crm-primary-hover)]',
                       )}
                       aria-label="Send"
                     >
                       {sending ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <Send className="w-4 h-4" />
+                        <Send className="h-4 w-4" />
                       )}
                     </button>
                   </div>
-                  <div className="text-[10px] text-gray-500 mt-1">
+                  <div className="mt-1 text-[11px] text-[var(--crm-text-tertiary)]">
                     Press Enter to send · Shift+Enter for newline
                   </div>
                 </div>
@@ -692,18 +722,93 @@ function SentView({
   channel: 'all' | 'email' | 'sms';
   onChannelChange: (c: 'all' | 'email' | 'sms') => void;
 }) {
+  const columns: Column<SentItem>[] = [
+    {
+      id: 'contact',
+      header: 'Contact',
+      cell: (ev) => {
+        const contact = ev.contact;
+        const name = contact
+          ? [contact.first_name, contact.last_name].filter(Boolean).join(' ') ||
+            contact.email ||
+            contact.phone ||
+            'Unknown'
+          : '(deleted contact)';
+        return (
+          <div className="min-w-0">
+            {contact ? (
+              <Link
+                href={`/admin/crm/contacts/${contact.id}`}
+                className="font-medium text-[var(--crm-text-primary)] hover:text-[var(--crm-primary)]"
+              >
+                {name}
+              </Link>
+            ) : (
+              <span className="text-[var(--crm-text-tertiary)]">{name}</span>
+            )}
+            {contact?.email && (
+              <div className="truncate text-[12px] text-[var(--crm-text-tertiary)]">{contact.email}</div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: 'channel',
+      header: 'Channel',
+      cell: (ev) => {
+        const isEmail = ev.event_type === 'email_sent';
+        return (
+          <Badge tone={isEmail ? 'info' : 'primary'} size="sm">
+            {isEmail ? <Mail className="h-3 w-3" /> : <MessageSquare className="h-3 w-3" />}
+            {isEmail ? 'Email' : 'SMS'}
+          </Badge>
+        );
+      },
+    },
+    {
+      id: 'subject',
+      header: 'Subject / preview',
+      cell: (ev) => {
+        const isEmail = ev.event_type === 'email_sent';
+        const data = ev.event_data ?? {};
+        const subject =
+          (data.subject as string) ||
+          (data.body as string) ||
+          (data.preview as string) ||
+          (isEmail ? 'Email sent' : 'SMS sent');
+        return <span className="block max-w-md truncate text-[var(--crm-text-secondary)]">{subject}</span>;
+      },
+    },
+    {
+      id: 'sent',
+      header: 'Sent',
+      align: 'right',
+      sortable: true,
+      sortValue: (ev) => new Date(ev.created_at).getTime(),
+      cell: (ev) => (
+        <span className="text-[12px] tabular-nums text-[var(--crm-text-tertiary)]">
+          {formatTimestamp(ev.created_at)}
+        </span>
+      ),
+    },
+  ];
+
   return (
-    <div className="flex-1 overflow-y-auto bg-white p-5">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold text-gray-900">Sent Messages</h2>
-        <div className="flex bg-gray-100 border border-gray-200 rounded-md p-0.5 text-xs font-medium">
+    <div className="flex-1 space-y-4 overflow-y-auto p-5" data-testid="crm-inbox-sent">
+      <div className="flex items-center justify-between">
+        <h2 className="text-[16px] font-medium text-[var(--crm-text-primary)]">Sent messages</h2>
+        <div className="flex rounded-[var(--crm-radius-sm)] border border-[var(--crm-border)] crm-hairline p-0.5 text-[12px] font-medium">
           {(['all', 'email', 'sms'] as const).map((c) => (
             <button
               key={c}
               onClick={() => onChannelChange(c)}
+              data-testid={`crm-inbox-sent-channel-${c}`}
               className={cn(
-                'px-2.5 py-1 rounded capitalize',
-                channel === c ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500',
+                'rounded-[var(--crm-radius-sm)] px-2.5 py-1 capitalize',
+                channel === c
+                  ? 'bg-[var(--crm-primary-subtle)] text-[var(--crm-primary)]'
+                  : 'text-[var(--crm-text-tertiary)]',
               )}
             >
               {c}
@@ -712,90 +817,22 @@ function SentView({
         </div>
       </div>
 
-      {loading ? (
-        <div className="py-20 flex items-center justify-center">
-          <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
-        </div>
-      ) : items.length === 0 ? (
-        <div className="py-20 text-center">
-          <Send className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-          <p className="text-sm text-gray-700 font-medium">No sent messages yet</p>
-          <p className="text-xs text-gray-500 mt-1">
-            Sent emails and SMS messages will appear here.
-          </p>
-        </div>
-      ) : (
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50">
-                <th className="px-4 py-3 text-left">Contact</th>
-                <th className="px-4 py-3 text-left">Channel</th>
-                <th className="px-4 py-3 text-left">Subject / Preview</th>
-                <th className="px-4 py-3 text-left">Sent</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {items.map((ev) => {
-                const isEmail = ev.event_type === 'email_sent';
-                const contact = ev.contact;
-                const name = contact
-                  ? [contact.first_name, contact.last_name].filter(Boolean).join(' ') ||
-                    contact.email ||
-                    contact.phone ||
-                    'Unknown'
-                  : '(deleted contact)';
-                const data = ev.event_data ?? {};
-                const subject =
-                  (data.subject as string) ||
-                  (data.body as string) ||
-                  (data.preview as string) ||
-                  (isEmail ? 'Email sent' : 'SMS sent');
-                return (
-                  <tr key={ev.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3">
-                      {contact ? (
-                        <Link
-                          href={`/admin/crm/contacts/${contact.id}`}
-                          className="text-gray-900 hover:text-blue-700 font-medium"
-                        >
-                          {name}
-                        </Link>
-                      ) : (
-                        <span className="text-gray-500">{name}</span>
-                      )}
-                      {contact?.email && (
-                        <div className="text-xs text-gray-500">{contact.email}</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={cn(
-                          'inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full',
-                          isEmail
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'bg-purple-50 text-purple-700',
-                        )}
-                      >
-                        {isEmail ? (
-                          <Mail className="w-3 h-3" />
-                        ) : (
-                          <MessageSquare className="w-3 h-3" />
-                        )}
-                        {isEmail ? 'Email' : 'SMS'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-700 truncate max-w-md">{subject}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs tabular-nums">
-                      {formatTimestamp(ev.created_at)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        data-testid="crm-inbox-sent-table"
+        columns={columns}
+        rows={items}
+        getRowId={(ev) => ev.id}
+        loading={loading}
+        showDensityToggle={false}
+        empty={
+          <EmptyState
+            icon={Send}
+            title="No sent messages yet"
+            description="Sent emails and SMS messages will appear here."
+            data-testid="crm-inbox-sent-empty"
+          />
+        }
+      />
     </div>
   );
 }

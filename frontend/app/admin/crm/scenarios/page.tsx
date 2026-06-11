@@ -2,14 +2,15 @@ import { ExternalLink, Workflow, Mail, MessageSquare, Radio } from 'lucide-react
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { prisma } from '@/lib/prisma';
 import { SCENARIO_REGISTRY, type ScenarioStatus } from '@/lib/crm/scenario-registry';
+import { Badge, KpiCard, PageHeader, type Tone } from '@/components/admin/crm/ui';
 
 export const dynamic = 'force-dynamic';
 
-const STATUS_STYLE: Record<ScenarioStatus, string> = {
-  live: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  draft: 'bg-amber-50 text-amber-700 border-amber-200',
-  planned: 'bg-gray-100 text-gray-600 border-gray-200',
-  paused: 'bg-red-50 text-red-700 border-red-200',
+const STATUS_TONE: Record<ScenarioStatus, Tone> = {
+  live: 'success',
+  draft: 'warning',
+  planned: 'neutral',
+  paused: 'danger',
 };
 
 const EVENT_LABEL: Record<string, string> = {
@@ -50,45 +51,62 @@ export default async function CrmScenariosPage() {
   const eventsEmitted = eventRes.count ?? 0;
 
   return (
-    <div className="p-6 space-y-6">
-      <header>
-        <h1 className="text-xl font-bold text-gray-900">Make.com Scenarios</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Read-only monitor. AutoLenis emits domain events; Make.com orchestrates and calls back
-          into <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">/api/crm/dispatch/*</code> to
-          act. Every send, consent check, and audit stays owned by AutoLenis.
-        </p>
-      </header>
+    <div className="space-y-6 p-6" data-testid="crm-scenarios">
+      <PageHeader
+        title="Make.com scenarios"
+        subtitle="Read-only monitor. AutoLenis emits domain events; Make.com orchestrates and calls back into /api/crm/dispatch/* to act. Every send, consent check, and audit stays owned by AutoLenis."
+        data-testid="crm-scenarios-header"
+      />
 
       {/* Live 24h counters */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Counter icon={Radio} label="Events Emitted (24h)" value={eventsEmitted} />
-        <Counter icon={Mail} label="Email Dispatched (24h)" value={emailDispatched} accent="blue" />
-        <Counter icon={MessageSquare} label="SMS Dispatched (24h)" value={smsDispatched} accent="blue" />
-        <Counter icon={Mail} label="Email Sends Logged (24h)" value={emailLogCount} />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KpiCard
+          label="Events emitted (24h)"
+          value={eventsEmitted}
+          icon={Radio}
+          data-testid="crm-scenarios-kpi-events"
+        />
+        <KpiCard
+          label="Email dispatched (24h)"
+          value={emailDispatched}
+          icon={Mail}
+          data-testid="crm-scenarios-kpi-email"
+        />
+        <KpiCard
+          label="SMS dispatched (24h)"
+          value={smsDispatched}
+          icon={MessageSquare}
+          data-testid="crm-scenarios-kpi-sms"
+        />
+        <KpiCard
+          label="Email sends logged (24h)"
+          value={emailLogCount}
+          icon={Mail}
+          data-testid="crm-scenarios-kpi-email-log"
+        />
       </div>
 
       {/* Registry */}
-      <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-gray-200 flex items-center gap-2">
-          <Workflow className="w-4 h-4 text-gray-500" />
-          <h2 className="text-sm font-semibold text-gray-900">Registered Scenarios</h2>
-          <span className="ml-auto text-xs text-gray-400">{SCENARIO_REGISTRY.length} total</span>
+      <section className="overflow-hidden rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)]">
+        <div className="flex items-center gap-2 border-b border-[var(--crm-border)] crm-hairline px-5 py-4">
+          <Workflow className="h-4 w-4 text-[var(--crm-text-tertiary)]" />
+          <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Registered scenarios</h2>
+          <span className="ml-auto text-[12px] text-[var(--crm-text-tertiary)]">
+            {SCENARIO_REGISTRY.length} total
+          </span>
         </div>
-        <div className="divide-y divide-gray-100">
+        <div className="divide-y divide-[var(--crm-border)]">
           {SCENARIO_REGISTRY.map((s) => (
-            <div key={s.name} className="px-5 py-4 flex items-start gap-4">
-              <div className="flex-1 min-w-0">
+            <div key={s.name} className="flex items-start gap-4 px-5 py-4" data-testid="crm-scenario-row">
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900">{s.name}</span>
-                  <span
-                    className={`text-[10px] uppercase tracking-wide border rounded px-1.5 py-0.5 ${STATUS_STYLE[s.status]}`}
-                  >
+                  <span className="text-[13px] font-medium text-[var(--crm-text-primary)]">{s.name}</span>
+                  <Badge tone={STATUS_TONE[s.status]} size="sm" className="capitalize" data-testid="crm-scenario-status">
                     {s.status}
-                  </span>
+                  </Badge>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">{s.description}</p>
-                <code className="inline-block mt-2 text-[11px] bg-gray-50 border border-gray-200 text-gray-600 rounded px-1.5 py-0.5">
+                <p className="mt-1 text-[12px] text-[var(--crm-text-tertiary)]">{s.description}</p>
+                <code className="mt-2 inline-block rounded-[var(--crm-radius-sm)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-secondary)] px-1.5 py-0.5 text-[11px] text-[var(--crm-text-secondary)]">
                   on: {EVENT_LABEL[s.event] ?? s.event}
                 </code>
               </div>
@@ -97,41 +115,18 @@ export default async function CrmScenariosPage() {
                   href={s.makeUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="shrink-0 inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                  data-testid="crm-scenario-open"
+                  className="inline-flex shrink-0 items-center gap-1 text-[12px] text-[var(--crm-primary)] hover:text-[var(--crm-primary-hover)]"
                 >
-                  Open in Make <ExternalLink className="w-3 h-3" />
+                  Open in Make <ExternalLink className="h-3 w-3" />
                 </a>
               ) : (
-                <span className="shrink-0 text-xs text-gray-400">Not yet linked</span>
+                <span className="shrink-0 text-[12px] text-[var(--crm-text-tertiary)]">Not yet linked</span>
               )}
             </div>
           ))}
         </div>
       </section>
-    </div>
-  );
-}
-
-function Counter({
-  icon: Icon,
-  label,
-  value,
-  accent,
-}: {
-  icon: typeof Mail;
-  label: string;
-  value: number;
-  accent?: 'blue';
-}) {
-  return (
-    <div
-      className={`border rounded-xl p-4 ${
-        accent === 'blue' ? 'border-blue-500/30 bg-blue-500/5' : 'border-gray-200 bg-white'
-      }`}
-    >
-      <Icon className={`w-5 h-5 ${accent === 'blue' ? 'text-blue-600' : 'text-gray-500'}`} />
-      <div className="mt-3 text-2xl font-bold text-gray-900 tabular-nums">{value}</div>
-      <div className="mt-0.5 text-[11px] text-gray-500">{label}</div>
     </div>
   );
 }

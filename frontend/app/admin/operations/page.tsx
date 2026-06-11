@@ -11,6 +11,7 @@ import {
   HelpCircle,
   XCircle,
   Clock,
+  type LucideIcon,
 } from 'lucide-react';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import {
@@ -20,6 +21,7 @@ import {
 } from '@/lib/services/operations.service';
 import { DlqRetryButton } from '@/components/admin/crm/DlqRetryButton';
 import { RefreshAnalyticsButton } from '@/components/admin/crm/RefreshAnalyticsButton';
+import { Badge, Button, EmptyState, KpiCard, PageHeader, type Tone } from '@/components/admin/crm/ui';
 import { formatNumber } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -42,6 +44,12 @@ function truncate(s: string, n: number): string {
   return `${s.slice(0, n)}…`;
 }
 
+const SECTION_CLASS =
+  'overflow-hidden rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)]';
+const TH_CLASS =
+  'border-b border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-secondary)] px-4 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-[var(--crm-text-tertiary)]';
+const TD_CLASS = 'px-4 py-2.5 align-top text-[13px] text-[var(--crm-text-secondary)]';
+
 export default async function OperationsPage({
   searchParams,
 }: {
@@ -60,40 +68,46 @@ export default async function OperationsPage({
     ops.listAuditLog({ limit: 200, query: q }),
   ]);
 
-  const healthBanner =
+  const banner =
     health.status === 'critical'
-      ? { className: 'bg-red-500/10 border-red-500/30 text-red-300', icon: AlertTriangle, text: 'System degraded — high failure backlog. Drain DLQ and failed enrollments.' }
+      ? { tone: 'danger' as Tone, icon: AlertTriangle, text: 'System degraded — high failure backlog. Drain DLQ and failed enrollments.' }
       : health.status === 'degraded'
-        ? { className: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300', icon: AlertTriangle, text: 'Minor issues detected — review failed jobs below.' }
-        : { className: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300', icon: CheckCircle2, text: 'All systems nominal.' };
-  const BannerIcon = healthBanner.icon;
+        ? { tone: 'warning' as Tone, icon: AlertTriangle, text: 'Minor issues detected — review failed jobs below.' }
+        : { tone: 'success' as Tone, icon: CheckCircle2, text: 'All systems nominal.' };
+  const BannerIcon = banner.icon;
+  const bannerColor = `var(--crm-${banner.tone})`;
 
   return (
-    <div className="p-6 space-y-6">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-white">Operations</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            System health, queue failures, workflow exits, and the admin audit log.
-          </p>
-        </div>
-        <RefreshAnalyticsButton />
-      </header>
+    <div className="space-y-6 p-6" data-testid="crm-operations">
+      <PageHeader
+        title="Operations"
+        subtitle="System health, queue failures, workflow exits, and the admin audit log."
+        data-testid="crm-operations-header"
+        actions={<RefreshAnalyticsButton />}
+      />
 
-      <div className={`flex items-center gap-3 border rounded-xl px-4 py-3 ${healthBanner.className}`}>
-        <BannerIcon className="w-5 h-5 shrink-0" />
-        <div className="text-sm font-semibold">{healthBanner.text}</div>
+      <div
+        className="flex items-center gap-3 rounded-[var(--crm-radius-md)] border px-4 py-3"
+        style={{
+          color: bannerColor,
+          borderColor: `var(--crm-${banner.tone}-subtle)`,
+          backgroundColor: `var(--crm-${banner.tone}-subtle)`,
+        }}
+        data-testid="crm-operations-banner"
+      >
+        <BannerIcon className="h-5 w-5 shrink-0" />
+        <div className="text-[13px] font-medium">{banner.text}</div>
       </div>
 
       {/* ─── System Health Overview: dependency statuses ───────────────── */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-        <header className="px-5 py-4 border-b border-gray-800">
-          <h2 className="text-sm font-semibold text-white">System Health Overview</h2>
-          <p className="text-[11px] text-gray-500 mt-0.5">
+      <section className={SECTION_CLASS}>
+        <header className="border-b border-[var(--crm-border)] crm-hairline px-5 py-4">
+          <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">System health overview</h2>
+          <p className="mt-0.5 text-[12px] text-[var(--crm-text-tertiary)]">
             Live status of every platform dependency.
           </p>
         </header>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-5">
+        <div className="grid grid-cols-2 gap-3 p-5 md:grid-cols-3 lg:grid-cols-6">
           {deps.map((dep) => (
             <DependencyCard key={dep.key} dep={dep} />
           ))}
@@ -101,84 +115,88 @@ export default async function OperationsPage({
       </section>
 
       {/* ─── Queue metrics ─────────────────────────────────────────────── */}
-      <section className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        <HealthCard
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <MetricCard
           icon={Server}
-          label="Dead-Letter Jobs"
+          label="Dead-letter jobs"
           value={health.dead_letter_count}
-          accent={health.dead_letter_count > 0 ? 'red' : 'ok'}
+          tone={health.dead_letter_count > 0 ? 'danger' : undefined}
+          testId="crm-operations-metric-dlq"
         />
-        <HealthCard
+        <MetricCard
           icon={Zap}
-          label="Failed Enrollments"
+          label="Failed enrollments"
           value={health.failed_enrollments_count}
-          accent={health.failed_enrollments_count > 0 ? 'red' : 'ok'}
+          tone={health.failed_enrollments_count > 0 ? 'danger' : undefined}
+          testId="crm-operations-metric-failed"
         />
-        <HealthCard
+        <MetricCard
           icon={Activity}
-          label="Active Enrollments"
+          label="Active enrollments"
           value={health.active_enrollments_count}
-          accent="blue"
+          tone="primary"
+          testId="crm-operations-metric-active"
         />
-        <HealthCard
+        <MetricCard
           icon={Database}
-          label="In-Flight Idempotency"
+          label="In-flight idempotency"
           value={health.pending_idempotency_count}
-          accent={health.pending_idempotency_count > 25 ? 'yellow' : 'ok'}
+          tone={health.pending_idempotency_count > 25 ? 'warning' : undefined}
+          testId="crm-operations-metric-idempotency"
         />
-        <div className="border border-gray-800 bg-gray-900 rounded-xl p-4">
-          <ShieldCheck className="w-5 h-5 text-gray-500" />
-          <div className="mt-3 text-sm font-semibold text-white">
-            {relativeTime(health.last_analytics_refresh_at)}
-          </div>
-          <div className="mt-0.5 text-[11px] text-gray-500">Last analytics refresh</div>
-        </div>
+        <KpiCard
+          icon={ShieldCheck}
+          label="Last analytics refresh"
+          value={relativeTime(health.last_analytics_refresh_at)}
+          data-testid="crm-operations-metric-refresh"
+        />
       </section>
 
       {/* ─── Panel 2: Dead Letter Queue ────────────────────────────────── */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-        <header className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+      <section className={SECTION_CLASS}>
+        <header className="flex items-center justify-between border-b border-[var(--crm-border)] crm-hairline px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-white">Dead Letter Queue</h2>
-            <p className="text-[11px] text-gray-500 mt-0.5">
+            <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Dead letter queue</h2>
+            <p className="mt-0.5 text-[12px] text-[var(--crm-text-tertiary)]">
               Inngest jobs that exhausted their retry budget. Retrying re-emits the original event.
             </p>
           </div>
-          <span className="text-[11px] text-gray-500">{dlq.length} of {health.dead_letter_count}</span>
+          <span className="text-[12px] text-[var(--crm-text-tertiary)]">
+            {dlq.length} of {health.dead_letter_count}
+          </span>
         </header>
         {dlq.length === 0 ? (
-          <div className="p-10 text-center">
-            <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
-            <p className="text-sm text-emerald-400 font-semibold">No failed jobs</p>
-            <p className="text-[11px] text-gray-600 mt-1">
-              All queue workers are succeeding within their retry budget.
-            </p>
-          </div>
+          <EmptyState
+            icon={CheckCircle2}
+            title="No failed jobs"
+            description="All queue workers are succeeding within their retry budget."
+            data-testid="crm-operations-dlq-empty"
+          />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
-                <tr className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider bg-gray-950/30">
-                  <th className="text-left px-4 py-2">Event</th>
-                  <th className="text-left px-4 py-2">Error</th>
-                  <th className="text-left px-4 py-2 w-32">Failed</th>
-                  <th className="text-right px-4 py-2 w-28">Action</th>
+                <tr>
+                  <th className={TH_CLASS}>Event</th>
+                  <th className={TH_CLASS}>Error</th>
+                  <th className={`${TH_CLASS} w-32`}>Failed</th>
+                  <th className={`${TH_CLASS} w-28 text-right`}>Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800/50">
+              <tbody>
                 {dlq.map((job) => (
-                  <tr key={job.id} className="hover:bg-gray-800/30 align-top">
-                    <td className="px-4 py-2.5">
-                      <code className="text-[11px] text-blue-300">{job.event_name}</code>
-                      <div className="text-[10px] text-gray-700 mt-0.5 font-mono">{job.job_id.slice(0, 16)}…</div>
+                  <tr key={job.id} className="border-b border-[var(--crm-border)] crm-hairline last:border-b-0">
+                    <td className={TD_CLASS}>
+                      <code className="text-[12px] text-[var(--crm-primary)]">{job.event_name}</code>
+                      <div className="mt-0.5 font-[family-name:var(--font-mono)] text-[11px] text-[var(--crm-text-tertiary)]">
+                        {job.job_id.slice(0, 16)}…
+                      </div>
                     </td>
-                    <td className="px-4 py-2.5 text-gray-400 text-xs">
-                      {truncate(job.error_message, 140)}
-                    </td>
-                    <td className="px-4 py-2.5 text-[11px] text-gray-500 tabular-nums">
+                    <td className={`${TD_CLASS} text-[12px]`}>{truncate(job.error_message, 140)}</td>
+                    <td className={`${TD_CLASS} text-[12px] tabular-nums text-[var(--crm-text-tertiary)]`}>
                       {relativeTime(job.failed_at)}
                     </td>
-                    <td className="px-4 py-2.5 text-right">
+                    <td className={`${TD_CLASS} text-right`}>
                       <DlqRetryButton id={job.id} />
                     </td>
                   </tr>
@@ -190,70 +208,63 @@ export default async function OperationsPage({
       </section>
 
       {/* ─── Panel 3: Failed Enrollments ───────────────────────────────── */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-        <header className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+      <section className={SECTION_CLASS}>
+        <header className="flex items-center justify-between border-b border-[var(--crm-border)] crm-hairline px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-white">Failed Workflow Enrollments</h2>
-            <p className="text-[11px] text-gray-500 mt-0.5">
+            <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Failed workflow enrollments</h2>
+            <p className="mt-0.5 text-[12px] text-[var(--crm-text-tertiary)]">
               Workflow runs that exited or failed mid-execution.
             </p>
           </div>
-          <span className="text-[11px] text-gray-500">{failed.length} of {health.failed_enrollments_count}</span>
+          <span className="text-[12px] text-[var(--crm-text-tertiary)]">
+            {failed.length} of {health.failed_enrollments_count}
+          </span>
         </header>
         {failed.length === 0 ? (
-          <div className="p-10 text-center">
-            <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
-            <p className="text-sm text-emerald-400 font-semibold">No failed enrollments</p>
-            <p className="text-[11px] text-gray-600 mt-1">
-              All workflow runs completed cleanly or are still active.
-            </p>
-          </div>
+          <EmptyState
+            icon={CheckCircle2}
+            title="No failed enrollments"
+            description="All workflow runs completed cleanly or are still active."
+            data-testid="crm-operations-failed-empty"
+          />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
-                <tr className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider bg-gray-950/30">
-                  <th className="text-left px-4 py-2">Workflow</th>
-                  <th className="text-left px-4 py-2">Contact</th>
-                  <th className="text-left px-4 py-2">Reason</th>
-                  <th className="text-left px-4 py-2 w-24">Status</th>
-                  <th className="text-left px-4 py-2 w-32">Enrolled</th>
+                <tr>
+                  <th className={TH_CLASS}>Workflow</th>
+                  <th className={TH_CLASS}>Contact</th>
+                  <th className={TH_CLASS}>Reason</th>
+                  <th className={`${TH_CLASS} w-24`}>Status</th>
+                  <th className={`${TH_CLASS} w-32`}>Enrolled</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800/50">
+              <tbody>
                 {failed.map((e) => (
-                  <tr key={e.id} className="hover:bg-gray-800/30">
-                    <td className="px-4 py-2.5">
+                  <tr key={e.id} className="border-b border-[var(--crm-border)] crm-hairline last:border-b-0">
+                    <td className={TD_CLASS}>
                       <Link
                         href={`/admin/crm/automations/${e.workflow_id}/edit`}
-                        className="text-white hover:text-blue-300"
+                        className="text-[var(--crm-text-primary)] hover:text-[var(--crm-primary)]"
                       >
                         {e.workflow_name}
                       </Link>
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className={TD_CLASS}>
                       <Link
                         href={`/admin/crm/contacts/${e.contact_id}`}
-                        className="text-gray-300 hover:text-blue-300"
+                        className="hover:text-[var(--crm-primary)]"
                       >
                         {e.contact_email ?? e.contact_id.slice(0, 8)}
                       </Link>
                     </td>
-                    <td className="px-4 py-2.5 text-gray-400 text-xs">
-                      {e.exit_reason ?? '—'}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <span
-                        className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded ${
-                          e.status === 'failed'
-                            ? 'bg-red-500/15 text-red-400'
-                            : 'bg-gray-700 text-gray-300'
-                        }`}
-                      >
+                    <td className={`${TD_CLASS} text-[12px]`}>{e.exit_reason ?? '—'}</td>
+                    <td className={TD_CLASS}>
+                      <Badge tone={e.status === 'failed' ? 'danger' : 'neutral'} size="sm" className="capitalize">
                         {e.status}
-                      </span>
+                      </Badge>
                     </td>
-                    <td className="px-4 py-2.5 text-[11px] text-gray-500 tabular-nums">
+                    <td className={`${TD_CLASS} text-[12px] tabular-nums text-[var(--crm-text-tertiary)]`}>
                       {relativeTime(e.enrolled_at)}
                     </td>
                   </tr>
@@ -265,38 +276,39 @@ export default async function OperationsPage({
       </section>
 
       {/* ─── Panel 3b: Cron Job Status ─────────────────────────────────── */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-        <header className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+      <section className={SECTION_CLASS}>
+        <header className="flex items-center justify-between border-b border-[var(--crm-border)] crm-hairline px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-white">Cron Job Status</h2>
-            <p className="text-[11px] text-gray-500 mt-0.5">
+            <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Cron job status</h2>
+            <p className="mt-0.5 text-[12px] text-[var(--crm-text-tertiary)]">
               Most recent run of each scheduled job.
             </p>
           </div>
-          <span className="text-[11px] text-gray-500">{crons.length} job{crons.length === 1 ? '' : 's'}</span>
+          <span className="text-[12px] text-[var(--crm-text-tertiary)]">
+            {crons.length} job{crons.length === 1 ? '' : 's'}
+          </span>
         </header>
         {crons.length === 0 ? (
-          <div className="p-10 text-center">
-            <Clock className="w-10 h-10 text-gray-700 mx-auto mb-3" />
-            <p className="text-sm text-gray-500">No cron history yet</p>
-            <p className="text-[11px] text-gray-600 mt-1">
-              Scheduled jobs will appear here after their first recorded run.
-            </p>
-          </div>
+          <EmptyState
+            icon={Clock}
+            title="No cron history yet"
+            description="Scheduled jobs will appear here after their first recorded run."
+            data-testid="crm-operations-cron-empty"
+          />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
-                <tr className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider bg-gray-950/30">
-                  <th className="text-left px-4 py-2">Job</th>
-                  <th className="text-left px-4 py-2 w-28">Status</th>
-                  <th className="text-left px-4 py-2 w-24">Duration</th>
-                  <th className="text-left px-4 py-2 w-32">Last Run</th>
+                <tr>
+                  <th className={TH_CLASS}>Job</th>
+                  <th className={`${TH_CLASS} w-28`}>Status</th>
+                  <th className={`${TH_CLASS} w-24`}>Duration</th>
+                  <th className={`${TH_CLASS} w-32`}>Last run</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800/50">
+              <tbody>
                 {crons.map((job) => (
-                  <CronRow key={job.id} job={job} relativeTime={relativeTime} />
+                  <CronRow key={job.id} job={job} />
                 ))}
               </tbody>
             </table>
@@ -305,76 +317,74 @@ export default async function OperationsPage({
       </section>
 
       {/* ─── Panel 4: Admin Audit Log ──────────────────────────────────── */}
-      <section className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-        <header className="px-5 py-4 border-b border-gray-800 flex items-center justify-between gap-4">
+      <section className={SECTION_CLASS}>
+        <header className="flex items-center justify-between gap-4 border-b border-[var(--crm-border)] crm-hairline px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-white">Admin Audit Log</h2>
-            <p className="text-[11px] text-gray-500 mt-0.5">
+            <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Admin audit log</h2>
+            <p className="mt-0.5 text-[12px] text-[var(--crm-text-tertiary)]">
               Last {audit.length} admin mutations across the platform.
             </p>
           </div>
-          <form action="/admin/operations" className="flex items-center gap-2">
+          <form action="/admin/operations" className="flex items-center gap-2" data-testid="crm-operations-audit-search">
             <input
               type="text"
               name="q"
               defaultValue={q ?? ''}
               placeholder="Search action or entity…"
-              className="bg-gray-950 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-600 focus:border-blue-500 outline-none w-56"
+              className="h-8 w-56 rounded-[var(--crm-radius-sm)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] px-3 text-[13px] text-[var(--crm-text-primary)] outline-none placeholder:text-[var(--crm-text-tertiary)] focus-visible:ring-2 focus-visible:ring-[var(--crm-ring)]"
             />
-            <button
-              type="submit"
-              className="text-xs px-3 py-1.5 border border-gray-700 hover:border-gray-600 text-gray-400 rounded-lg"
-            >
+            <Button variant="secondary" type="submit" data-testid="crm-operations-audit-submit">
               Search
-            </button>
+            </Button>
           </form>
         </header>
         {audit.length === 0 ? (
-          <div className="p-10 text-center">
-            <Users className="w-10 h-10 text-gray-700 mx-auto mb-3" />
-            <p className="text-sm text-gray-500">
-              {q ? 'No audit log entries match your search.' : 'No admin activity yet.'}
-            </p>
-          </div>
+          <EmptyState
+            icon={Users}
+            title={q ? 'No audit log entries match your search.' : 'No admin activity yet.'}
+            data-testid="crm-operations-audit-empty"
+          />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full">
               <thead>
-                <tr className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider bg-gray-950/30">
-                  <th className="text-left px-4 py-2">Action</th>
-                  <th className="text-left px-4 py-2">Admin</th>
-                  <th className="text-left px-4 py-2">Entity</th>
-                  <th className="text-left px-4 py-2">IP</th>
-                  <th className="text-left px-4 py-2 w-32">When</th>
+                <tr>
+                  <th className={TH_CLASS}>Action</th>
+                  <th className={TH_CLASS}>Admin</th>
+                  <th className={TH_CLASS}>Entity</th>
+                  <th className={TH_CLASS}>IP</th>
+                  <th className={`${TH_CLASS} w-32`}>When</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800/50">
+              <tbody>
                 {audit.map((row) => (
-                  <tr key={row.id} className="hover:bg-gray-800/30">
-                    <td className="px-4 py-2.5">
-                      <code className="text-[11px] text-blue-300">{row.action}</code>
+                  <tr key={row.id} className="border-b border-[var(--crm-border)] crm-hairline last:border-b-0">
+                    <td className={TD_CLASS}>
+                      <code className="text-[12px] text-[var(--crm-primary)]">{row.action}</code>
                     </td>
-                    <td className="px-4 py-2.5 text-gray-300 text-xs">
-                      {row.admin_email ?? <span className="text-gray-700">{row.admin_id.slice(0, 8)}…</span>}
+                    <td className={`${TD_CLASS} text-[12px]`}>
+                      {row.admin_email ?? (
+                        <span className="text-[var(--crm-text-tertiary)]">{row.admin_id.slice(0, 8)}…</span>
+                      )}
                     </td>
-                    <td className="px-4 py-2.5 text-gray-400 text-xs">
+                    <td className={`${TD_CLASS} text-[12px]`}>
                       {row.entity_type ? (
                         <>
                           <span>{row.entity_type}</span>
                           {row.entity_id && (
-                            <code className="text-[10px] text-gray-600 ml-1">
+                            <code className="ml-1 text-[11px] text-[var(--crm-text-tertiary)]">
                               {row.entity_id.slice(0, 8)}…
                             </code>
                           )}
                         </>
                       ) : (
-                        <span className="text-gray-700">—</span>
+                        <span className="text-[var(--crm-text-tertiary)]">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-gray-500 text-[11px] font-mono">
+                    <td className={`${TD_CLASS} font-[family-name:var(--font-mono)] text-[11px] text-[var(--crm-text-tertiary)]`}>
                       {row.ip_address ?? '—'}
                     </td>
-                    <td className="px-4 py-2.5 text-[11px] text-gray-500 tabular-nums">
+                    <td className={`${TD_CLASS} text-[12px] tabular-nums text-[var(--crm-text-tertiary)]`}>
                       {relativeTime(row.created_at)}
                     </td>
                   </tr>
@@ -388,95 +398,80 @@ export default async function OperationsPage({
   );
 }
 
-function HealthCard({
+function MetricCard({
   icon: Icon,
   label,
   value,
-  accent,
+  tone,
+  testId,
 }: {
-  icon: typeof Server;
+  icon: LucideIcon;
   label: string;
   value: number;
-  accent: 'ok' | 'blue' | 'yellow' | 'red';
+  tone?: Tone;
+  testId: string;
 }) {
-  const ring =
-    accent === 'red'
-      ? 'border-red-500/30 bg-red-500/5'
-      : accent === 'yellow'
-        ? 'border-yellow-500/30 bg-yellow-500/5'
-        : accent === 'blue'
-          ? 'border-blue-500/30 bg-blue-500/5'
-          : 'border-gray-800 bg-gray-900';
-  const iconColor =
-    accent === 'red'
-      ? 'text-red-400'
-      : accent === 'yellow'
-        ? 'text-yellow-400'
-        : accent === 'blue'
-          ? 'text-blue-400'
-          : 'text-gray-500';
   return (
-    <div className={`border rounded-xl p-4 ${ring}`}>
-      <Icon className={`w-5 h-5 ${iconColor}`} />
-      <div className="mt-3 text-2xl font-bold text-white tabular-nums">{formatNumber(value)}</div>
-      <div className="mt-0.5 text-[11px] text-gray-500">{label}</div>
+    <div
+      className="rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] p-4"
+      style={tone ? { borderColor: `var(--crm-${tone}-subtle)`, backgroundColor: `var(--crm-${tone}-subtle)` } : undefined}
+      data-testid={testId}
+    >
+      <Icon
+        className="h-5 w-5"
+        style={{ color: tone ? `var(--crm-${tone})` : 'var(--crm-text-tertiary)' }}
+        strokeWidth={1.75}
+      />
+      <div className="mt-3 text-[22px] font-medium leading-7 tabular-nums text-[var(--crm-text-primary)]">
+        {formatNumber(value)}
+      </div>
+      <div className="mt-0.5 text-[12px] text-[var(--crm-text-tertiary)]">{label}</div>
     </div>
   );
 }
 
 function DependencyCard({ dep }: { dep: DependencyStatus }) {
-  const map = {
-    healthy: { ring: 'border-emerald-500/30 bg-emerald-500/5', icon: CheckCircle2, color: 'text-emerald-400', label: 'Healthy' },
-    degraded: { ring: 'border-red-500/30 bg-red-500/5', icon: XCircle, color: 'text-red-400', label: 'Degraded' },
-    unknown: { ring: 'border-gray-800 bg-gray-900', icon: HelpCircle, color: 'text-gray-500', label: 'Unknown' },
-  } as const;
+  const map: Record<DependencyStatus['status'], { tone: Tone; icon: LucideIcon; label: string }> = {
+    healthy: { tone: 'success', icon: CheckCircle2, label: 'Healthy' },
+    degraded: { tone: 'danger', icon: XCircle, label: 'Degraded' },
+    unknown: { tone: 'neutral', icon: HelpCircle, label: 'Unknown' },
+  };
   const cfg = map[dep.status];
   const Icon = cfg.icon;
   return (
-    <div className={`border rounded-xl p-4 ${cfg.ring}`}>
-      <div className="flex items-center gap-2">
-        <Icon className={`w-4 h-4 ${cfg.color}`} />
-        <span className={`text-[11px] font-bold uppercase tracking-wider ${cfg.color}`}>{cfg.label}</span>
-      </div>
-      <div className="mt-3 text-sm font-semibold text-white">{dep.label}</div>
-      <div className="mt-0.5 text-[11px] text-gray-500">{dep.detail}</div>
-      <div className="mt-1 text-[10px] text-gray-600">
+    <div className="rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] p-4">
+      <Badge tone={cfg.tone} size="sm">
+        <Icon className="h-3 w-3" /> {cfg.label}
+      </Badge>
+      <div className="mt-3 text-[13px] font-medium text-[var(--crm-text-primary)]">{dep.label}</div>
+      <div className="mt-0.5 text-[12px] text-[var(--crm-text-tertiary)]">{dep.detail}</div>
+      <div className="mt-1 text-[11px] text-[var(--crm-text-tertiary)]">
         Checked {new Date(dep.checked_at).toLocaleTimeString()}
       </div>
     </div>
   );
 }
 
-function CronRow({
-  job,
-  relativeTime,
-}: {
-  job: CronJobRun;
-  relativeTime: (iso: string | null) => string;
-}) {
-  const badge =
-    job.status === 'COMPLETED'
-      ? 'bg-emerald-500/15 text-emerald-400'
-      : job.status === 'FAILED'
-        ? 'bg-red-500/15 text-red-400'
-        : 'bg-blue-500/15 text-blue-400';
+function CronRow({ job }: { job: CronJobRun }) {
+  const tone: Tone =
+    job.status === 'COMPLETED' ? 'success' : job.status === 'FAILED' ? 'danger' : 'info';
   return (
-    <tr className="hover:bg-gray-800/30 align-top">
-      <td className="px-4 py-2.5">
-        <code className="text-[11px] text-blue-300">{job.cron_name}</code>
+    <tr className="border-b border-[var(--crm-border)] crm-hairline last:border-b-0">
+      <td className={TD_CLASS}>
+        <code className="text-[12px] text-[var(--crm-primary)]">{job.cron_name}</code>
         {job.error && (
-          <div className="text-[10px] text-red-400/80 mt-0.5">{job.error.slice(0, 120)}</div>
+          <div className="mt-0.5 text-[11px] text-[var(--crm-danger)]">{job.error.slice(0, 120)}</div>
         )}
       </td>
-      <td className="px-4 py-2.5">
-        <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded ${badge}`}>
+      <td className={TD_CLASS}>
+        <Badge tone={tone} size="sm">
           {job.status}
-        </span>
+        </Badge>
       </td>
-      <td className="px-4 py-2.5 text-[11px] text-gray-500 tabular-nums">
+      <td className={`${TD_CLASS} text-[12px] tabular-nums text-[var(--crm-text-tertiary)]`}>
         {job.duration != null ? `${job.duration}ms` : '—'}
       </td>
-      <td className="px-4 py-2.5 text-[11px] text-gray-500 tabular-nums">
+      <td className={`${TD_CLASS} text-[12px] tabular-nums text-[var(--crm-text-tertiary)]`}>
         {relativeTime(job.started_at)}
       </td>
     </tr>
