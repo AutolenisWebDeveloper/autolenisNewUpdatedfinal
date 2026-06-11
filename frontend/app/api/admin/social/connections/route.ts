@@ -10,7 +10,7 @@ import { AUTOMATION_MODE } from "@/lib/social/config";
 export interface ConnectionsResponse {
   buffer: { connected: boolean; channelCount: number };
   linkedin: { connected: boolean; pageId: string };
-  higgsfield: { connected: boolean };
+  runway: { connected: boolean };
   automationMode: string;
 }
 
@@ -35,8 +35,8 @@ export async function GET(request: NextRequest) {
       connected: Boolean(process.env.LINKEDIN_ACCESS_TOKEN && process.env.LINKEDIN_ACCESS_TOKEN.trim()),
       pageId: process.env.LINKEDIN_COMPANY_PAGE_ID ?? "",
     },
-    higgsfield: {
-      connected: Boolean(process.env.HIGGSFIELD_API_KEY && process.env.HIGGSFIELD_API_KEY.trim()),
+    runway: {
+      connected: Boolean(process.env.RUNWAY_API_KEY && process.env.RUNWAY_API_KEY.trim()),
     },
     automationMode: AUTOMATION_MODE,
   };
