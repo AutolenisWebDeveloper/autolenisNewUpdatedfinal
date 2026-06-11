@@ -102,6 +102,20 @@ declare namespace NodeJS {
     // tag sync no-ops when unset).
     GHL_WEBHOOK_URL?: string;
 
+    // CRM dispatch auth — the inbound /api/crm/dispatch/* endpoints accept two
+    // independent credentials (lib/crm/dispatch-auth-decision.ts). Either alone
+    // authenticates; the other protections (timestamp skew, idempotency, rate
+    // limit) apply to both paths.
+    //   - CRM_DISPATCH_SECRET: HMAC-SHA256 signing key for code callers
+    //     (X-AutoLenis-Signature). Primary path. UNCHANGED.
+    //   - CRM_DISPATCH_KEY: high-entropy static bearer (X-Dispatch-Key) so Make's
+    //     no-code plain-HTTP module can call without client-side signing. MUST be
+    //     >= 32 random bytes (base64/hex), e.g. `openssl rand -base64 32`. It is
+    //     INDEPENDENT of CRM_DISPATCH_SECRET — rotating one does not touch the
+    //     other.
+    CRM_DISPATCH_SECRET: string;
+    CRM_DISPATCH_KEY?: string;
+
     // QStash (Upstash) — job queue + scheduled automation dispatch
     QSTASH_TOKEN: string;
     QSTASH_CURRENT_SIGNING_KEY: string;
