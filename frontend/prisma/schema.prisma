@@ -4460,6 +4460,46 @@ model HookPerformance {
   @@map("hook_performance")
 }
 
+// A/B test group — a set of hook variants competing for the same
+// franchise+platform. The winner is detected once variants accumulate real
+// engagement; losing variant posts are skipped and the winning hook type is
+// rolled into HookPerformance to steer future generation.
+model ABTestGroup {
+  id            String   @id @default(cuid())
+  name          String
+  platform      String
+  franchiseSlug String   @map("franchise_slug")
+  status        String   @default("RUNNING")
+  // RUNNING | COMPLETED | PAUSED
+  winnerId      String?  @map("winner_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  completedAt   DateTime? @map("completed_at")
+  posts         ABTestVariant[]
+
+  @@index([platform, status])
+  @@map("ab_test_groups")
+}
+
+// One variant within an A/B test group — links to its SocialPost and carries
+// the conversion-weighted score used to pick the winner.
+model ABTestVariant {
+  id            String   @id @default(cuid())
+  groupId       String   @map("group_id")
+  group         ABTestGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  postId        String   @map("post_id")
+  hookType      String   @map("hook_type")
+  hook          String   @db.Text
+  variantLabel  String   @map("variant_label") // "A", "B", "C"
+  isWinner      Boolean  @default(false) @map("is_winner")
+  score         Float    @default(0)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([groupId, postId])
+  @@index([groupId])
+  @@map("ab_test_variants")
+}
+
 // Creator/affiliate content distribution network.
 model CreatorNetwork {
   id              String   @id @default(cuid())
