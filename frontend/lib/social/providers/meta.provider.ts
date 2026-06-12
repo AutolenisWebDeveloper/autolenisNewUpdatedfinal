@@ -251,40 +251,227 @@ export class MetaProvider implements PublishingProvider {
     }
   }
 
-  async getAnalytics(platformPostId: string): Promise<PostAnalyticsResult> {
+  // Platform hint for analytics routing. The PublishingProvider interface only
+  // passes platformPostId to getAnalytics(), so the sync endpoint sets this
+  // before calling so we know whether to hit the Facebook or Instagram surface.
+  private analyticsPlatform?: string;
+
+  // Allow the sync endpoint to scope this provider instance to one platform
+  // (facebook | instagram) so getAnalytics routes to the right Graph surface.
+  setAnalyticsPlatform(platform?: string): this {
+    this.analyticsPlatform = platform?.toLowerCase();
+    return this;
+  }
+
+  // Detect whether a platformPostId looks like a Facebook post (contains an
+  // underscore, e.g. 123456_789012) or an Instagram media id (all digits).
+  private looksLikeFacebookPost(id: string): boolean {
+    return id.includes("_");
+  }
+
+  async getAnalytics(platformPostId: string, platform?: string): Promise<PostAnalyticsResult> {
     const token = this.token();
     const zeros: PostAnalyticsResult = { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0 };
     if (!token) {
       return { ...zeros, error: "META_ACCESS_TOKEN not configured" };
     }
-    try {
-      const res = await fetch(
-        `${GRAPH_BASE}/${platformPostId}/insights` +
-          `?metric=impressions,reach,engaged_users,link_clicks,video_views&access_token=${token}`,
-      );
-      const data = (await res.json().catch(() => ({}))) as {
-        data?: { name?: string; values?: { value?: number }[] }[];
-        error?: { message?: string };
-      };
-      if (!res.ok || data.error || !data.data) {
-        // Non-fatal — return zeros so the sync cron never fails on Meta posts.
-        return zeros;
-      }
-      const metric = (name: string): number =>
-        data.data?.find((m) => m.name === name)?.values?.[0]?.value ?? 0;
 
-      return {
-        likes: metric("engaged_users"),
-        comments: 0,
-        shares: 0,
-        clicks: metric("link_clicks"),
-        reach: metric("reach"),
-        impressions: metric("impressions"),
-        views: metric("video_views"),
-      };
+    // Resolve the platform from (a) the explicit arg, (b) the instance hint set
+    // by the sync endpoint, or (c) the shape of the id as a last resort.
+    const hint = (platform ?? this.analyticsPlatform)?.toLowerCase();
+    const isInstagram =
+      hint === "instagram" ||
+      (hint !== "facebook" && !this.looksLikeFacebookPost(platformPostId));
+
+    try {
+      const perPost = isInstagram
+        ? await this.getInstagramAnalytics(platformPostId, token)
+        : await this.getFacebookAnalytics(platformPostId, token);
+
+      // Best-effort account-level audience demographics (Instagram only).
+      const audience = isInstagram ? await this.getAudienceInsights(token) : {};
+
+      return { ...perPost, ...audience };
     } catch (err) {
       console.error("[publish:meta] getAnalytics failed (non-fatal):", err);
       return zeros;
+    }
+  }
+
+  // ─── Facebook page post insights ───────────────────────────────────────────
+  private async getFacebookAnalytics(postId: string, token: string): Promise<PostAnalyticsResult> {
+    const zeros: PostAnalyticsResult = { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0 };
+    const metrics = [
+      "post_impressions",
+      "post_impressions_unique",
+      "post_engaged_users",
+      "post_clicks",
+      "post_reactions_like_total",
+      "post_video_views",
+      "post_video_complete_views_30s",
+    ].join(",");
+
+    const res = await fetch(
+      `${GRAPH_BASE}/${postId}/insights?metric=${metrics}&access_token=${token}`,
+    );
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: { name?: string; values?: { value?: number }[] }[];
+      error?: { message?: string };
+    };
+    if (!res.ok || data.error || !data.data) {
+      if (data.error) console.error(`[publish:meta] facebook insights: ${data.error.message}`);
+      return zeros;
+    }
+    const metric = (name: string): number =>
+      data.data?.find((m) => m.name === name)?.values?.[0]?.value ?? 0;
+
+    // Comments + shares are not insight metrics — read them off the post object.
+    const { comments, shares } = await this.getFacebookEngagement(postId, token);
+
+    const impressions = metric("post_impressions");
+    const reach = metric("post_impressions_unique");
+    const likes = metric("post_reactions_like_total");
+    const views = metric("post_video_views");
+    const complete = metric("post_video_complete_views_30s");
+
+    return {
+      likes,
+      comments,
+      shares,
+      clicks: metric("post_clicks"),
+      reach,
+      impressions,
+      views,
+      completionRate: views > 0 ? complete / views : undefined,
+      engagementRate: reach > 0 ? (likes + comments + shares) / reach : undefined,
+    };
+  }
+
+  // Comment + share counts via the post object summary (not /insights).
+  private async getFacebookEngagement(
+    postId: string,
+    token: string,
+  ): Promise<{ comments: number; shares: number }> {
+    try {
+      const res = await fetch(
+        `${GRAPH_BASE}/${postId}?fields=comments.summary(true),shares&access_token=${token}`,
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        comments?: { summary?: { total_count?: number } };
+        shares?: { count?: number };
+      };
+      return {
+        comments: data.comments?.summary?.total_count ?? 0,
+        shares: data.shares?.count ?? 0,
+      };
+    } catch {
+      return { comments: 0, shares: 0 };
+    }
+  }
+
+  // ─── Instagram media insights ──────────────────────────────────────────────
+  private async getInstagramAnalytics(mediaId: string, token: string): Promise<PostAnalyticsResult> {
+    const zeros: PostAnalyticsResult = { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0 };
+    const metrics = [
+      "impressions",
+      "reach",
+      "likes",
+      "comments",
+      "shares",
+      "saved",
+      "video_views",
+      "plays",
+      "total_interactions",
+    ].join(",");
+
+    const res = await fetch(
+      `${GRAPH_BASE}/${mediaId}/insights?metric=${metrics}&access_token=${token}`,
+    );
+    const data = (await res.json().catch(() => ({}))) as {
+      data?: { name?: string; values?: { value?: number }[] }[];
+      error?: { message?: string };
+    };
+    if (!res.ok || data.error || !data.data) {
+      if (data.error) console.error(`[publish:meta] instagram insights: ${data.error.message}`);
+      return zeros;
+    }
+    const metric = (name: string): number =>
+      data.data?.find((m) => m.name === name)?.values?.[0]?.value ?? 0;
+
+    const reach = metric("reach");
+    const totalInteractions = metric("total_interactions");
+
+    return {
+      likes: metric("likes"),
+      comments: metric("comments"),
+      shares: metric("shares"),
+      clicks: 0,
+      reach,
+      impressions: metric("impressions"),
+      saves: metric("saved"),
+      views: metric("video_views") || metric("plays"),
+      engagementRate: reach > 0 ? totalInteractions / reach : undefined,
+    };
+  }
+
+  // ─── Account-level audience demographics (Instagram) ───────────────────────
+  // Lifetime audience breakdowns are exposed on the IG Business account, not on
+  // individual media. Only fetched when META_INSTAGRAM_ACCOUNT_ID is set.
+  private async getAudienceInsights(token: string): Promise<Partial<PostAnalyticsResult>> {
+    const igAccountId = this.igAccountId();
+    if (!igAccountId) return {};
+    try {
+      const res = await fetch(
+        `${GRAPH_BASE}/${igAccountId}/insights` +
+          `?metric=audience_country,audience_gender_age&period=lifetime&access_token=${token}`,
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        data?: { name?: string; values?: { value?: Record<string, number> }[] }[];
+        error?: { message?: string };
+      };
+      if (!res.ok || data.error || !data.data) return {};
+
+      const valuesFor = (name: string): Record<string, number> =>
+        data.data?.find((m) => m.name === name)?.values?.[0]?.value ?? {};
+
+      const out: Partial<PostAnalyticsResult> = {};
+
+      // audience_country: { "US": 1234, "CA": 567, ... }
+      const countries = valuesFor("audience_country");
+      const countryTotal = Object.values(countries).reduce((a, b) => a + b, 0);
+      if (countryTotal > 0) {
+        out.audienceCountries = Object.entries(countries)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([country, n]) => ({ country, pct: Math.round((n / countryTotal) * 100) }));
+      }
+
+      // audience_gender_age: { "M.25-34": 100, "F.25-34": 120, ... }
+      const genderAge = valuesFor("audience_gender_age");
+      const gaTotal = Object.values(genderAge).reduce((a, b) => a + b, 0);
+      if (gaTotal > 0) {
+        const ageBuckets = new Map<string, number>();
+        const genderBuckets = new Map<string, number>();
+        for (const [key, n] of Object.entries(genderAge)) {
+          const [gender, range] = key.split(".");
+          if (range) ageBuckets.set(range, (ageBuckets.get(range) ?? 0) + n);
+          if (gender) {
+            const label = gender === "M" ? "male" : gender === "F" ? "female" : "unknown";
+            genderBuckets.set(label, (genderBuckets.get(label) ?? 0) + n);
+          }
+        }
+        out.audienceAgeRanges = [...ageBuckets.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([range, n]) => ({ range, pct: Math.round((n / gaTotal) * 100) }));
+        out.audienceGenders = [...genderBuckets.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([gender, n]) => ({ gender, pct: Math.round((n / gaTotal) * 100) }));
+      }
+
+      return out;
+    } catch (err) {
+      console.error("[publish:meta] audience insights failed (non-fatal):", err);
+      return {};
     }
   }
 }

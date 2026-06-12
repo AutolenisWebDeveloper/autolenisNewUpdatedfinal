@@ -164,10 +164,181 @@ export class LinkedInProvider implements PublishingProvider {
   }
 
   async getAnalytics(platformPostId: string): Promise<PostAnalyticsResult> {
-    // Organization share statistics require the rw_organization_admin scope and
-    // a separate API surface; return zeros best-effort so the sync cron never
-    // fails on LinkedIn posts.
-    console.log(`[publish:linkedin] getAnalytics id=${platformPostId} (not available under basic scopes)`);
-    return { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0 };
+    const zeros: PostAnalyticsResult = { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0 };
+    const token = process.env.LINKEDIN_ACCESS_TOKEN ?? "";
+    if (!token) {
+      return { ...zeros, error: "LINKEDIN_ACCESS_TOKEN not configured" };
+    }
+
+    // Strip any urn: prefix the caller may have stored, then re-derive the bare
+    // share id so we can rebuild the urn consistently below.
+    const shareId = platformPostId.replace(/^urn:li:(share|ugcPost):/, "");
+
+    // Try the organization share-statistics surface first (richer, but requires
+    // r_organization_social). Fall back to the member socialActions endpoint.
+    const orgStats = await this.getOrgShareStatistics(token, shareId);
+    const base = orgStats ?? (await this.getMemberShareStatistics(token, shareId)) ?? zeros;
+
+    // Best-effort account-level follower demographics (org scope only).
+    const audience = await this.getFollowerDemographics(token);
+
+    return { ...base, ...audience };
+  }
+
+  // Organization share statistics — requires r_organization_social +
+  // LINKEDIN_COMPANY_PAGE_ID. Returns null on 403/error so the caller falls back.
+  private async getOrgShareStatistics(
+    token: string,
+    shareId: string,
+  ): Promise<PostAnalyticsResult | null> {
+    const orgId = process.env.LINKEDIN_COMPANY_PAGE_ID ?? "";
+    if (!orgId) return null;
+    try {
+      const org = encodeURIComponent(`urn:li:organization:${orgId}`);
+      const share = encodeURIComponent(`urn:li:share:${shareId}`);
+      const url =
+        `https://api.linkedin.com/v2/organizationalEntityShareStatistics` +
+        `?q=organizationalEntity&organizationalEntity=${org}&shares[0]=${share}`;
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "LinkedIn-Version": LINKEDIN_VERSION,
+          "X-Restli-Protocol-Version": "2.0.0",
+        },
+      });
+      if (res.status === 403) {
+        console.error("[publish:linkedin] LinkedIn org scope needed — falling back to member endpoint");
+        return null;
+      }
+      const data = (await res.json().catch(() => ({}))) as {
+        elements?: Array<{
+          totalShareStatistics?: {
+            likeCount?: number;
+            commentCount?: number;
+            shareCount?: number;
+            clickCount?: number;
+            impressionCount?: number;
+            engagement?: number;
+          };
+        }>;
+      };
+      const stats = data.elements?.[0]?.totalShareStatistics;
+      if (!res.ok || !stats) return null;
+      return {
+        likes: stats.likeCount ?? 0,
+        comments: stats.commentCount ?? 0,
+        shares: stats.shareCount ?? 0,
+        clicks: stats.clickCount ?? 0,
+        reach: stats.impressionCount ?? 0,
+        impressions: stats.impressionCount ?? 0,
+        engagementRate: stats.engagement,
+      };
+    } catch (err) {
+      console.error("[publish:linkedin] org share statistics failed (non-fatal):", err);
+      return null;
+    }
+  }
+
+  // Member share statistics (fallback) — works under w_member_social but only
+  // exposes like + comment counts. Returns null on 403/error → zeros.
+  private async getMemberShareStatistics(
+    token: string,
+    shareId: string,
+  ): Promise<PostAnalyticsResult | null> {
+    try {
+      const urn = encodeURIComponent(`urn:li:share:${shareId}`);
+      const res = await fetch(`https://api.linkedin.com/v2/socialActions/${urn}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "LinkedIn-Version": LINKEDIN_VERSION,
+          "X-Restli-Protocol-Version": "2.0.0",
+        },
+      });
+      if (res.status === 403) {
+        console.error("[publish:linkedin] LinkedIn analytics unavailable — token lacks scope");
+        return null;
+      }
+      const data = (await res.json().catch(() => ({}))) as {
+        likesSummary?: { totalLikes?: number };
+        commentsSummary?: { totalFirstLevelComments?: number };
+      };
+      if (!res.ok) return null;
+      return {
+        likes: data.likesSummary?.totalLikes ?? 0,
+        comments: data.commentsSummary?.totalFirstLevelComments ?? 0,
+        shares: 0, // not available in this endpoint
+        clicks: 0, // not available in this endpoint
+        reach: 0,
+      };
+    } catch (err) {
+      console.error("[publish:linkedin] member share statistics failed (non-fatal):", err);
+      return null;
+    }
+  }
+
+  // Account-level follower demographics (org scope). Only fetched when
+  // LINKEDIN_COMPANY_PAGE_ID is set; failures are non-fatal.
+  private async getFollowerDemographics(token: string): Promise<Partial<PostAnalyticsResult>> {
+    const orgId = process.env.LINKEDIN_COMPANY_PAGE_ID ?? "";
+    if (!orgId) return {};
+    try {
+      const org = encodeURIComponent(`urn:li:organization:${orgId}`);
+      const url =
+        `https://api.linkedin.com/v2/organizationalEntityFollowerStatistics` +
+        `?q=organizationalEntity&organizationalEntity=${org}`;
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "LinkedIn-Version": LINKEDIN_VERSION,
+          "X-Restli-Protocol-Version": "2.0.0",
+        },
+      });
+      if (!res.ok) return {};
+      const data = (await res.json().catch(() => ({}))) as {
+        elements?: Array<{
+          followerCountsByGeoCountry?: Array<{
+            geoCountry?: string;
+            followerCounts?: { organicFollowerCount?: number; paidFollowerCount?: number };
+          }>;
+          followerCountsByStaffCountRange?: Array<{
+            staffCountRange?: string;
+            followerCounts?: { organicFollowerCount?: number; paidFollowerCount?: number };
+          }>;
+        }>;
+      };
+      const el = data.elements?.[0];
+      if (!el) return {};
+
+      const sum = (c?: { organicFollowerCount?: number; paidFollowerCount?: number }): number =>
+        (c?.organicFollowerCount ?? 0) + (c?.paidFollowerCount ?? 0);
+
+      const out: Partial<PostAnalyticsResult> = {};
+
+      const geo = el.followerCountsByGeoCountry ?? [];
+      const geoTotal = geo.reduce((a, g) => a + sum(g.followerCounts), 0);
+      if (geoTotal > 0) {
+        out.audienceCountries = geo
+          .map((g) => ({ country: g.geoCountry ?? "unknown", n: sum(g.followerCounts) }))
+          .sort((a, b) => b.n - a.n)
+          .slice(0, 10)
+          .map((g) => ({ country: g.country, pct: Math.round((g.n / geoTotal) * 100) }));
+      }
+
+      // staffCountRange is a proxy for company-size context, surfaced in the
+      // ageRanges slot since LinkedIn does not expose member age demographics.
+      const staff = el.followerCountsByStaffCountRange ?? [];
+      const staffTotal = staff.reduce((a, s) => a + sum(s.followerCounts), 0);
+      if (staffTotal > 0) {
+        out.audienceAgeRanges = staff
+          .map((s) => ({ range: s.staffCountRange ?? "unknown", n: sum(s.followerCounts) }))
+          .sort((a, b) => b.n - a.n)
+          .map((s) => ({ range: s.range, pct: Math.round((s.n / staffTotal) * 100) }));
+      }
+
+      return out;
+    } catch (err) {
+      console.error("[publish:linkedin] follower demographics failed (non-fatal):", err);
+      return {};
+    }
   }
 }

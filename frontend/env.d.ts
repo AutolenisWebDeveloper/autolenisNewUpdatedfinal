@@ -218,8 +218,16 @@ declare namespace NodeJS {
 
     // TikTok — direct video publishing via the Content Posting API v2
     // (PULL_FROM_URL). The TikTok provider no-ops when TIKTOK_ACCESS_TOKEN is
-    // unset (falls back to Buffer).
+    // unset (falls back to Buffer). The same token authorizes Content API
+    // video/query analytics reads.
     TIKTOK_ACCESS_TOKEN?: string;
+
+    // YouTube — analytics via the YouTube Data API v3 (YOUTUBE_API_KEY, public
+    // stats) with optional richer watch-time + completion metrics from the
+    // YouTube Analytics API when an OAuth token is present. Publishing is
+    // delegated to Buffer. Both unset → YouTube analytics return zeros.
+    YOUTUBE_API_KEY?: string;
+    YOUTUBE_OAUTH_TOKEN?: string;
 
     // Social automation controls.
     // SOCIAL_AUTOMATION_MODE: MANUAL_REVIEW | HYBRID_AUTO | FULL_AUTO

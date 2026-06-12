@@ -46,13 +46,24 @@ export interface PostStatusResult {
 }
 
 export interface PostAnalyticsResult {
+  // Core (all platforms)
   likes: number;
   comments: number;
   shares: number;
   clicks: number;
   reach: number;
+  // Extended — optional per platform
   impressions?: number;
   views?: number;
+  saves?: number; // Instagram, TikTok
+  watchTimeSeconds?: number; // TikTok, YouTube
+  completionRate?: number; // TikTok, YouTube (0-1)
+  profileVisits?: number; // TikTok, Instagram
+  follows?: number; // TikTok
+  audienceCountries?: { country: string; pct: number }[]; // available on some
+  audienceAgeRanges?: { range: string; pct: number }[]; // available on some
+  audienceGenders?: { gender: string; pct: number }[]; // available on some
+  engagementRate?: number; // computed: (likes+comments+shares)/reach
   error?: string;
 }
 

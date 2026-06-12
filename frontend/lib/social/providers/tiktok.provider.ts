@@ -128,9 +128,101 @@ export class TikTokProvider implements PublishingProvider {
   }
 
   async getAnalytics(platformPostId: string): Promise<PostAnalyticsResult> {
-    // TikTok analytics require separate API approval — return zeros gracefully
-    // so the sync cron never fails on TikTok posts.
-    console.log(`[tiktok] getAnalytics id=${platformPostId} (requires separate API approval)`);
-    return { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0 };
+    const zeros: PostAnalyticsResult = { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0 };
+    const token = this.token();
+    if (!token) {
+      return { ...zeros, error: "TIKTOK_ACCESS_TOKEN not configured" };
+    }
+
+    try {
+      const res = await fetch(`${BASE_URL}/video/query/`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filters: { video_ids: [platformPostId] },
+          fields: [
+            "id",
+            "like_count",
+            "comment_count",
+            "share_count",
+            "view_count",
+            "reach",
+            "average_time_watched",
+            "full_video_watched_rate",
+            "profile_deep_dive_count",
+            "follow_count",
+            "impression_sources",
+          ],
+        }),
+      });
+
+      if (res.status === 401) {
+        console.error("[tiktok] getAnalytics 401 — token expired");
+        return zeros;
+      }
+      if (res.status === 403) {
+        console.error("[tiktok] getAnalytics 403 — insufficient scope");
+        return zeros;
+      }
+      if (res.status === 404) {
+        console.error("[tiktok] getAnalytics 404 — video not found (deleted?)");
+        return zeros;
+      }
+
+      const data = (await res.json().catch(() => ({}))) as {
+        data?: {
+          videos?: Array<{
+            id?: string;
+            like_count?: number;
+            comment_count?: number;
+            share_count?: number;
+            view_count?: number;
+            reach?: number;
+            average_time_watched?: number;
+            full_video_watched_rate?: number;
+            profile_deep_dive_count?: number;
+            follow_count?: number;
+          }>;
+        };
+        error?: { code?: string; message?: string };
+      };
+
+      if (!res.ok || (data.error?.code && data.error.code !== "ok")) {
+        console.error(`[tiktok] getAnalytics failed: ${data.error?.message ?? `HTTP ${res.status}`}`);
+        return zeros;
+      }
+
+      const video = data.data?.videos?.[0];
+      if (!video) return zeros;
+
+      const likes = video.like_count ?? 0;
+      const comments = video.comment_count ?? 0;
+      const shares = video.share_count ?? 0;
+      const views = video.view_count ?? 0;
+      const reach = video.reach ?? views;
+
+      // TODO: Add audience demographics
+      // when TikTok Research API access is granted
+
+      return {
+        likes,
+        comments,
+        shares,
+        clicks: 0,
+        reach,
+        views,
+        watchTimeSeconds: video.average_time_watched,
+        completionRate: video.full_video_watched_rate,
+        profileVisits: video.profile_deep_dive_count,
+        follows: video.follow_count,
+        engagementRate: views > 0 ? (likes + comments + shares) / views : undefined,
+      };
+    } catch (err) {
+      console.error("[tiktok] getAnalytics failed (non-fatal):", err);
+      return zeros;
+    }
   }
 }
