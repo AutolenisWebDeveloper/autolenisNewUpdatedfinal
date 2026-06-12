@@ -53,10 +53,17 @@ export class YouTubeProvider implements PublishingProvider {
   }
 
   async getAnalytics(videoId: string): Promise<PostAnalyticsResult> {
-    const zeros: PostAnalyticsResult = { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0 };
+    // Unavailable → null (never a fabricated 0).
+    const unknown: PostAnalyticsResult = {
+      likes: null,
+      comments: null,
+      shares: null,
+      clicks: null,
+      reach: null,
+    };
     const apiKey = process.env.YOUTUBE_API_KEY ?? "";
     if (!apiKey) {
-      return { ...zeros, error: "YOUTUBE_API_KEY not configured" };
+      return { ...unknown, error: "YOUTUBE_API_KEY not configured" };
     }
 
     try {
@@ -77,7 +84,7 @@ export class YouTubeProvider implements PublishingProvider {
       };
       if (!res.ok || data.error || !data.items?.length) {
         if (data.error) console.error(`[youtube] getAnalytics: ${data.error.message}`);
-        return zeros;
+        return unknown;
       }
 
       const item = data.items[0];
@@ -91,13 +98,13 @@ export class YouTubeProvider implements PublishingProvider {
       const base: PostAnalyticsResult = {
         likes,
         comments,
-        shares: 0, // not available via Data API
-        clicks: 0, // not available via Data API
-        reach: views, // YouTube reach ≈ views for Shorts
+        shares: null, // not available via Data API (filled by OAuth path if set)
+        clicks: null, // not available via Data API
+        reach: views, // YouTube reach ≈ views for Shorts (documented approximation)
         views,
-        impressions: views,
+        impressions: null, // Data API exposes no impressions metric
         saves,
-        engagementRate: views > 0 ? (likes + comments) / views : undefined,
+        engagementRate: views > 0 ? (likes + comments) / views : null,
       };
 
       // Richer watch-time + completion metrics require OAuth (Analytics API).
@@ -110,7 +117,7 @@ export class YouTubeProvider implements PublishingProvider {
       return base;
     } catch (err) {
       console.error("[youtube] getAnalytics failed (non-fatal):", err);
-      return zeros;
+      return unknown;
     }
   }
 

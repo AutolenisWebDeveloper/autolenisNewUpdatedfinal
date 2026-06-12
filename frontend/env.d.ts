@@ -221,6 +221,11 @@ declare namespace NodeJS {
     // unset (falls back to Buffer). The same token authorizes Content API
     // video/query analytics reads.
     TIKTOK_ACCESS_TOKEN?: string;
+    // TikTok Business Account API — required for watch-time, completion rate,
+    // reach, profile visits and follows (the public Display API exposes only
+    // like/comment/share/view counts). When unset, those metrics return null.
+    TIKTOK_BUSINESS_ACCESS_TOKEN?: string;
+    TIKTOK_BUSINESS_ID?: string;
 
     // YouTube — analytics via the YouTube Data API v3 (YOUTUBE_API_KEY, public
     // stats) with optional richer watch-time + completion metrics from the

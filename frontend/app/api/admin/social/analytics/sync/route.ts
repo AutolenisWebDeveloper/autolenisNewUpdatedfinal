@@ -7,6 +7,7 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { MetaProvider } from "@/lib/social/providers/meta.provider";
+import { mapAnalyticsToPerformanceMetrics } from "@/lib/social/analytics-mapping";
 import type { Prisma } from "@prisma/client";
 
 export async function POST(request: NextRequest) {
@@ -69,20 +70,13 @@ export async function POST(request: NextRequest) {
         (analytics.shares ?? 0) * 2 +
         (analytics.impressions ?? 0) * 0.01;
 
+      // Persist null (not 0) for any metric the provider reported as unavailable
+      // so the optimization loop can exclude unknowns. Mapping is centralized in
+      // mapAnalyticsToPerformanceMetrics (unit-tested for the null contract).
       await prisma.socialPerformance.create({
         data: {
           postId: post.id,
-          impressions: analytics.impressions ?? 0,
-          reach: analytics.reach ?? 0,
-          views: analytics.views ?? analytics.impressions ?? 0,
-          likes: analytics.likes ?? 0,
-          comments: analytics.comments ?? 0,
-          shares: analytics.shares ?? 0,
-          saves: analytics.saves ?? 0,
-          linkClicks: analytics.clicks ?? 0,
-          profileVisits: analytics.profileVisits ?? 0,
-          watchTimePct: analytics.completionRate ?? null,
-          completionRate: analytics.completionRate ?? null,
+          ...mapAnalyticsToPerformanceMetrics(analytics),
           leadScore: Math.round(leadScore),
         },
       });

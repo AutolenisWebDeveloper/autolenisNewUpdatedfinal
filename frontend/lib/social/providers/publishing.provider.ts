@@ -46,24 +46,28 @@ export interface PostStatusResult {
 }
 
 export interface PostAnalyticsResult {
+  // Degradation contract: a metric the platform/endpoint does NOT return is
+  // `null` (unavailable / unknown). Reserve `0` for a value the API confirmed is
+  // zero. Downstream persistence stores null as null so the optimization loop
+  // can exclude unknowns rather than averaging in fake zeros.
   // Core (all platforms)
-  likes: number;
-  comments: number;
-  shares: number;
-  clicks: number;
-  reach: number;
-  // Extended — optional per platform
-  impressions?: number;
-  views?: number;
-  saves?: number; // Instagram, TikTok
-  watchTimeSeconds?: number; // TikTok, YouTube
-  completionRate?: number; // TikTok, YouTube (0-1)
-  profileVisits?: number; // TikTok, Instagram
-  follows?: number; // TikTok
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  clicks: number | null;
+  reach: number | null;
+  // Extended — optional per platform (null = confirmed-zero distinction applies)
+  impressions?: number | null;
+  views?: number | null;
+  saves?: number | null; // Instagram, TikTok
+  watchTimeSeconds?: number | null; // TikTok, YouTube
+  completionRate?: number | null; // TikTok, YouTube (0-1)
+  profileVisits?: number | null; // TikTok, Instagram
+  follows?: number | null; // TikTok
   audienceCountries?: { country: string; pct: number }[]; // available on some
   audienceAgeRanges?: { range: string; pct: number }[]; // available on some
   audienceGenders?: { gender: string; pct: number }[]; // available on some
-  engagementRate?: number; // computed: (likes+comments+shares)/reach
+  engagementRate?: number | null; // computed: (likes+comments+shares)/reach
   error?: string;
 }
 

@@ -4335,17 +4335,22 @@ model SocialPerformance {
   postId          String   @map("post_id")
   post            SocialPost @relation(fields: [postId], references: [id], onDelete: Cascade)
 
-  impressions     Int      @default(0)
-  reach           Int      @default(0)
-  views           Int      @default(0)
+  // Platform reach/engagement metrics are nullable so an *unavailable* metric
+  // (deprecated Graph field, or an endpoint not in scope for our token) persists
+  // as NULL — distinct from a confirmed zero. The @default(0) keeps writers that
+  // omit a field on the old zero behavior; only an explicit `null` records
+  // "unknown" so the optimization loop can exclude it.
+  impressions     Int?     @default(0)
+  reach           Int?     @default(0)
+  views           Int?     @default(0)
   watchTimePct    Float?   @map("watch_time_pct")
   completionRate  Float?   @map("completion_rate")
-  likes           Int      @default(0)
-  comments        Int      @default(0)
-  shares          Int      @default(0)
-  saves           Int      @default(0)
-  linkClicks      Int      @default(0) @map("link_clicks")
-  profileVisits   Int      @default(0) @map("profile_visits")
+  likes           Int?     @default(0)
+  comments        Int?     @default(0)
+  shares          Int?     @default(0)
+  saves           Int?     @default(0)
+  linkClicks      Int?     @default(0) @map("link_clicks")
+  profileVisits   Int?     @default(0) @map("profile_visits")
 
   vehicleRequests Int      @default(0) @map("vehicle_requests")
   dealerSignups   Int      @default(0) @map("dealer_signups")
