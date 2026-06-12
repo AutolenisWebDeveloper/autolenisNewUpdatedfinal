@@ -296,8 +296,72 @@ export async function getContentArticleList(
 }
 
 // ── Single article ──────────────────────────────────────────────────────────
-export async function getContentArticleById(id: string) {
-  return prisma.contentArticle.findUnique({ where: { id } });
+// Shape consumed by the review / bulk preview drawer. We select an explicit
+// column subset (mirroring getContentArticleList) instead of pulling the whole
+// row: it returns only what the preview renders, and — like the list endpoint —
+// it never touches the Phase-1 lifecycle/media columns, so the read can't fail
+// on a row that predates those extensions.
+export interface ContentArticleDetail {
+  id: string;
+  slug: string;
+  title: string;
+  h1: string;
+  cluster: string;
+  make: string | null;
+  model: string | null;
+  city: string;
+  state: string;
+  metro: string | null;
+  wave: number;
+  targetKeyword: string;
+  authorSlug: string;
+  status: ArticleStatus;
+  qualityScore: number | null;
+  qualityFlags: string | null;
+  wordCount: number | null;
+  searchGrounded: boolean | null;
+  groqModel: string | null;
+  generatedAt: Date | null;
+  publishedAt: Date | null;
+  createdAt: Date;
+  body: string;
+  faqJson: string | null;
+  metaDescription: string;
+}
+
+export async function getContentArticleById(
+  id: string,
+): Promise<ContentArticleDetail | null> {
+  return prisma.contentArticle.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      slug: true,
+      title: true,
+      h1: true,
+      cluster: true,
+      make: true,
+      model: true,
+      city: true,
+      state: true,
+      metro: true,
+      wave: true,
+      targetKeyword: true,
+      authorSlug: true,
+      status: true,
+      qualityScore: true,
+      qualityFlags: true,
+      wordCount: true,
+      searchGrounded: true,
+      groqModel: true,
+      generatedAt: true,
+      publishedAt: true,
+      createdAt: true,
+      body: true,
+      faqJson: true,
+      metaDescription: true,
+    },
+  });
 }
 
 // ── Status mutation ─────────────────────────────────────────────────────────

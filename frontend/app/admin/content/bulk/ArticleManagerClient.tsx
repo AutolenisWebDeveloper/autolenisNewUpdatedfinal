@@ -203,6 +203,7 @@ export default function ArticleManagerClient({
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [drawerArticle, setDrawerArticle] = useState<FullArticle | null>(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerError, setDrawerError] = useState<string | null>(null);
 
   const [confirmAction, setConfirmAction] = useState<BulkAction | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
@@ -344,15 +345,44 @@ export default function ArticleManagerClient({
     async (id: string) => {
       setDrawerId(id);
       setDrawerArticle(null);
+      setDrawerError(null);
       setDrawerLoading(true);
       try {
         const res = await fetch(`/api/admin/content/${id}`);
+
+        // Guard the response before parsing. A failed route can return an empty
+        // body or an HTML error page; calling res.json() on either throws the
+        // opaque "Unexpected end of JSON input". Read the raw text instead and
+        // surface a legible status + message.
+        const contentType = res.headers.get("content-type") ?? "";
+        const isJson = contentType.includes("application/json");
+
+        if (!res.ok || !isJson) {
+          const raw = (await res.text()).trim();
+          let message = `Preview failed (HTTP ${res.status})`;
+          if (isJson && raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              message = parsed?.error?.message ?? message;
+            } catch {
+              /* fall through to the status-only message */
+            }
+          } else if (raw) {
+            message = `${message}: ${raw.slice(0, 200)}`;
+          }
+          throw new Error(message);
+        }
+
         const json = await res.json();
-        if (!res.ok) throw new Error(json?.error?.message ?? "Failed to load article");
-        setDrawerArticle(json.data.article as FullArticle);
+        const article = json?.data?.article as FullArticle | undefined;
+        if (!article) throw new Error("Preview response was missing article data");
+        setDrawerArticle(article);
       } catch (e) {
-        showToast(e instanceof Error ? e.message : "Failed to load article", "error");
-        setDrawerId(null);
+        const message = e instanceof Error ? e.message : "Failed to load article";
+        // Keep the drawer open and show the error in place so the failure is
+        // legible, rather than silently dismissing it behind a transient toast.
+        setDrawerError(message);
+        showToast(message, "error");
       } finally {
         setDrawerLoading(false);
       }
@@ -363,6 +393,7 @@ export default function ArticleManagerClient({
   const closeDrawer = useCallback(() => {
     setDrawerId(null);
     setDrawerArticle(null);
+    setDrawerError(null);
   }, []);
 
   // ── Single-article status change ─────────────────────────────────────────────
@@ -869,13 +900,31 @@ export default function ArticleManagerClient({
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-6 py-5">
-              {drawerLoading || !drawerArticle ? (
+              {drawerLoading ? (
                 <div className="text-center py-20 text-slate-400">
                   <Loader2 size={22} className="animate-spin inline" />
                 </div>
-              ) : (
+              ) : drawerError ? (
+                <div
+                  data-testid="drawer-error"
+                  className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-5 text-sm text-red-700"
+                >
+                  <p className="flex items-center gap-2 font-semibold">
+                    <AlertTriangle size={15} /> Couldn’t load this preview
+                  </p>
+                  <p className="mt-2 text-red-600 break-words">{drawerError}</p>
+                  <button
+                    type="button"
+                    onClick={() => drawerId && openDrawer(drawerId)}
+                    data-testid="drawer-retry"
+                    className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-red-700 hover:bg-red-100 px-2.5 py-1.5 rounded"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : drawerArticle ? (
                 <DrawerBody article={drawerArticle} />
-              )}
+              ) : null}
             </div>
             {drawerArticle && (
               <div className="flex items-center gap-2 px-6 py-4 border-t border-[#E2E8F0]">
