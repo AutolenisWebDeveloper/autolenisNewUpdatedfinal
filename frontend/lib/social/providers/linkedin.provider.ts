@@ -163,11 +163,59 @@ export class LinkedInProvider implements PublishingProvider {
     return { platformPostId, status: "PUBLISHED" };
   }
 
+  // We publish as the member (person URN) under w_member_social, so the only
+  // statistics surface our posts appear on is the member socialActions endpoint
+  // — which exposes like + comment counts. The organizationalEntity* APIs
+  // (share statistics, follower demographics) only cover posts authored AS the
+  // organization, which we never do, so those paths and the
+  // LINKEDIN_COMPANY_PAGE_ID gating are intentionally NOT used here. Metrics the
+  // endpoint cannot provide (shares, clicks, reach, impressions) return null —
+  // unknown, never a fabricated 0.
   async getAnalytics(platformPostId: string): Promise<PostAnalyticsResult> {
-    // Organization share statistics require the rw_organization_admin scope and
-    // a separate API surface; return zeros best-effort so the sync cron never
-    // fails on LinkedIn posts.
-    console.log(`[publish:linkedin] getAnalytics id=${platformPostId} (not available under basic scopes)`);
-    return { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0 };
+    const unknown: PostAnalyticsResult = {
+      likes: null,
+      comments: null,
+      shares: null,
+      clicks: null,
+      reach: null,
+    };
+    const token = process.env.LINKEDIN_ACCESS_TOKEN ?? "";
+    if (!token) {
+      return { ...unknown, error: "LINKEDIN_ACCESS_TOKEN not configured" };
+    }
+
+    // Normalize to a bare share id, then rebuild the canonical share urn.
+    const shareId = platformPostId.replace(/^urn:li:(share|ugcPost):/, "");
+
+    try {
+      const urn = encodeURIComponent(`urn:li:share:${shareId}`);
+      const res = await fetch(`https://api.linkedin.com/v2/socialActions/${urn}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "LinkedIn-Version": LINKEDIN_VERSION,
+          "X-Restli-Protocol-Version": "2.0.0",
+        },
+      });
+      if (res.status === 403) {
+        console.error("[publish:linkedin] analytics unavailable — token lacks scope");
+        return unknown;
+      }
+      const data = (await res.json().catch(() => ({}))) as {
+        likesSummary?: { totalLikes?: number };
+        commentsSummary?: { totalFirstLevelComments?: number };
+      };
+      if (!res.ok) return unknown;
+      return {
+        likes: data.likesSummary?.totalLikes ?? null,
+        comments: data.commentsSummary?.totalFirstLevelComments ?? null,
+        shares: null, // not exposed by socialActions
+        clicks: null, // not exposed by socialActions
+        reach: null, // member surface has no reach/impression metric
+        impressions: null,
+      };
+    } catch (err) {
+      console.error("[publish:linkedin] getAnalytics failed (non-fatal):", err);
+      return unknown;
+    }
   }
 }

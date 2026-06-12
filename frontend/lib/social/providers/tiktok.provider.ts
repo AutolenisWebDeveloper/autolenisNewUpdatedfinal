@@ -21,6 +21,9 @@ import type {
 } from "@/lib/social/providers/publishing.provider";
 
 const BASE_URL = "https://open.tiktokapis.com/v2";
+// TikTok Business Account API host — watch-time / reach / profile metrics that
+// the public Display API does not expose. Used only when a business token is set.
+const BUSINESS_BASE_URL = "https://business-api.tiktok.com/open_api/v1.3";
 
 export class TikTokProvider implements PublishingProvider {
   readonly name = "tiktok";
@@ -128,9 +131,176 @@ export class TikTokProvider implements PublishingProvider {
   }
 
   async getAnalytics(platformPostId: string): Promise<PostAnalyticsResult> {
-    // TikTok analytics require separate API approval — return zeros gracefully
-    // so the sync cron never fails on TikTok posts.
-    console.log(`[tiktok] getAnalytics id=${platformPostId} (requires separate API approval)`);
-    return { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0 };
+    // Unavailable metrics are null (not 0). The Display API (video/query) only
+    // returns like/comment/share/view counts; watch-time, completion, reach,
+    // profile visits and follows require the TikTok Business Account API and are
+    // null unless a business token is configured.
+    const unknown: PostAnalyticsResult = {
+      likes: null,
+      comments: null,
+      shares: null,
+      clicks: null,
+      reach: null,
+    };
+    const token = this.token();
+    if (!token) {
+      return { ...unknown, error: "TIKTOK_ACCESS_TOKEN not configured" };
+    }
+
+    try {
+      const res = await fetch(`${BASE_URL}/video/query/`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filters: { video_ids: [platformPostId] },
+          // Display API exposes only these four interaction counts.
+          fields: ["id", "like_count", "comment_count", "share_count", "view_count"],
+        }),
+      });
+
+      if (res.status === 401) {
+        console.error("[tiktok] getAnalytics 401 — token expired");
+        return unknown;
+      }
+      if (res.status === 403) {
+        console.error("[tiktok] getAnalytics 403 — insufficient scope");
+        return unknown;
+      }
+      if (res.status === 404) {
+        console.error("[tiktok] getAnalytics 404 — video not found (deleted?)");
+        return unknown;
+      }
+
+      const data = (await res.json().catch(() => ({}))) as {
+        data?: {
+          videos?: Array<{
+            id?: string;
+            like_count?: number;
+            comment_count?: number;
+            share_count?: number;
+            view_count?: number;
+          }>;
+        };
+        error?: { code?: string; message?: string };
+      };
+
+      if (!res.ok || (data.error?.code && data.error.code !== "ok")) {
+        console.error(`[tiktok] getAnalytics failed: ${data.error?.message ?? `HTTP ${res.status}`}`);
+        return unknown;
+      }
+
+      const video = data.data?.videos?.[0];
+      if (!video) return unknown;
+
+      const likes = video.like_count ?? null;
+      const comments = video.comment_count ?? null;
+      const shares = video.share_count ?? null;
+      const views = video.view_count ?? null;
+
+      // Watch/profile metrics only exist on the Business Account API. When a
+      // business token is configured, fetch them; otherwise they stay null —
+      // we never fabricate reach/completion from view_count.
+      const business = await this.getBusinessMetrics(platformPostId);
+
+      const engagementBase =
+        views && views > 0 && likes != null
+          ? (likes + (comments ?? 0) + (shares ?? 0)) / views
+          : null;
+
+      // TODO: Add audience demographics
+      // when TikTok Research API access is granted
+
+      return {
+        likes,
+        comments,
+        shares,
+        clicks: null, // TikTok has no link-click metric
+        reach: business.reach ?? null,
+        views,
+        watchTimeSeconds: business.watchTimeSeconds ?? null,
+        completionRate: business.completionRate ?? null,
+        profileVisits: business.profileVisits ?? null,
+        follows: business.follows ?? null,
+        engagementRate: engagementBase,
+      };
+    } catch (err) {
+      console.error("[tiktok] getAnalytics failed (non-fatal):", err);
+      return unknown;
+    }
+  }
+
+  // TikTok Business Account API — watch time, completion rate, reach, profile
+  // visits and follows. Only called when TIKTOK_BUSINESS_ACCESS_TOKEN (+ a
+  // business id) is configured; returns all-null otherwise so the Display-only
+  // path degrades gracefully. average_time_watched is SECONDS (→ watchTimeSeconds)
+  // and is never conflated with full_video_watched_rate (the 0-1 completion rate).
+  private async getBusinessMetrics(videoId: string): Promise<{
+    reach: number | null;
+    watchTimeSeconds: number | null;
+    completionRate: number | null;
+    profileVisits: number | null;
+    follows: number | null;
+  }> {
+    const empty = {
+      reach: null,
+      watchTimeSeconds: null,
+      completionRate: null,
+      profileVisits: null,
+      follows: null,
+    };
+    const businessToken = process.env.TIKTOK_BUSINESS_ACCESS_TOKEN ?? "";
+    const businessId = process.env.TIKTOK_BUSINESS_ID ?? "";
+    if (!businessToken || !businessId) return empty;
+
+    try {
+      const fields = [
+        "video_views",
+        "reach",
+        "average_time_watched",
+        "full_video_watched_rate",
+        "profile_views",
+        "follows",
+      ];
+      const url =
+        `${BUSINESS_BASE_URL}/business/video/list/?business_id=${encodeURIComponent(businessId)}` +
+        `&filters=${encodeURIComponent(JSON.stringify({ video_ids: [videoId] }))}` +
+        `&fields=${encodeURIComponent(JSON.stringify(fields))}`;
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { "Access-Token": businessToken },
+      });
+      if (!res.ok) {
+        console.error(`[tiktok] business metrics HTTP ${res.status}`);
+        return empty;
+      }
+      const data = (await res.json().catch(() => ({}))) as {
+        data?: {
+          videos?: Array<{
+            reach?: number;
+            average_time_watched?: number;
+            full_video_watched_rate?: number;
+            profile_views?: number;
+            follows?: number;
+          }>;
+        };
+        code?: number;
+        message?: string;
+      };
+      const v = data.data?.videos?.[0];
+      if (!v) return empty;
+      return {
+        reach: v.reach ?? null,
+        watchTimeSeconds: v.average_time_watched ?? null,
+        completionRate: v.full_video_watched_rate ?? null,
+        profileVisits: v.profile_views ?? null,
+        follows: v.follows ?? null,
+      };
+    } catch (err) {
+      console.error("[tiktok] business metrics failed (non-fatal):", err);
+      return empty;
+    }
   }
 }

@@ -56,8 +56,9 @@ export async function POST(request: NextRequest) {
     .catch(() => null);
 
   const latestPerf = post.performance[0];
-  const ctr = latestPerf && (latestPerf.impressions ?? 0) > 0
-    ? (latestPerf.linkClicks ?? 0) / latestPerf.impressions
+  const perfImpressions = latestPerf?.impressions ?? 0;
+  const ctr = perfImpressions > 0
+    ? (latestPerf!.linkClicks ?? 0) / perfImpressions
     : 0;
 
   const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -83,12 +84,12 @@ Published: ${post.publishedAt ? new Date(post.publishedAt).toLocaleDateString() 
 
 PERFORMANCE METRICS:
 ${latestPerf ? `
-- Impressions: ${latestPerf.impressions.toLocaleString()}
-- Reach: ${latestPerf.reach.toLocaleString()}
-- Likes: ${latestPerf.likes}
-- Comments: ${latestPerf.comments}
-- Shares: ${latestPerf.shares}
-- Link Clicks: ${latestPerf.linkClicks}
+- Impressions: ${(latestPerf.impressions ?? 0).toLocaleString()}
+- Reach: ${(latestPerf.reach ?? 0).toLocaleString()}
+- Likes: ${latestPerf.likes ?? 0}
+- Comments: ${latestPerf.comments ?? 0}
+- Shares: ${latestPerf.shares ?? 0}
+- Link Clicks: ${latestPerf.linkClicks ?? 0}
 - CTR: ${(ctr * 100).toFixed(2)}%
 ` : "No performance data yet"}
 

@@ -20,6 +20,7 @@ import { BufferProvider } from "@/lib/social/providers/buffer.provider";
 import { LinkedInProvider } from "@/lib/social/providers/linkedin.provider";
 import { MetaProvider } from "@/lib/social/providers/meta.provider";
 import { TikTokProvider } from "@/lib/social/providers/tiktok.provider";
+import { YouTubeProvider } from "@/lib/social/providers/youtube.provider";
 
 // Buffer when enabled + configured, otherwise a no-op so callers never branch.
 function bufferOrNoop(): PublishingProvider {
@@ -42,8 +43,13 @@ export function getPublishingProvider(platform?: string): PublishingProvider {
       // /author because the token lacks org scope — so the publish queue falls
       // back to Buffer (BUFFER_PROFILE_LINKEDIN) on the next pass.
       return process.env.LINKEDIN_ACCESS_TOKEN ? new LinkedInProvider() : bufferOrNoop();
+    case "youtube":
+      // YouTube publishes via Buffer (delegated internally by YouTubeProvider)
+      // while analytics read from the YouTube Data API. The provider degrades
+      // gracefully when YOUTUBE_API_KEY / Buffer config is missing.
+      return new YouTubeProvider();
     default:
-      // youtube + unknown publish via Buffer.
+      // Unknown platforms publish via Buffer.
       return bufferOrNoop();
   }
 }

@@ -59,21 +59,23 @@ export async function GET(request: NextRequest) {
       // provider and everything else uses Buffer.
       const provider = getPublishingProvider(post.platform);
       const a = await provider.getAnalytics(post.platformPostId);
+      // Persist null (not 0) for metrics the provider could not supply, so an
+      // unknown is distinguishable from a confirmed zero downstream.
       const metrics = {
-        impressions: a.impressions ?? 0,
-        reach: a.reach,
-        views: a.views ?? 0,
-        likes: a.likes,
-        comments: a.comments,
-        shares: a.shares,
-        linkClicks: a.clicks,
+        impressions: a.impressions ?? null,
+        reach: a.reach ?? null,
+        views: a.views ?? null,
+        likes: a.likes ?? null,
+        comments: a.comments ?? null,
+        shares: a.shares ?? null,
+        linkClicks: a.clicks ?? null,
         vehicleRequests: 0,
         dealerSignups: 0,
         dealsWon: 0,
       };
       const leadScore = computeLeadScore({
-        linkClicks: metrics.linkClicks,
-        shares: metrics.shares,
+        linkClicks: metrics.linkClicks ?? 0,
+        shares: metrics.shares ?? 0,
         vehicleRequests: metrics.vehicleRequests,
         dealerSignups: metrics.dealerSignups,
         dealsWon: metrics.dealsWon,

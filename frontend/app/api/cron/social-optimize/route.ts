@@ -47,7 +47,9 @@ export async function GET(request: NextRequest) {
     const when = post.publishedAt ?? post.scheduledAt ?? r.recordedAt;
     const dayOfWeek = when.getUTCDay();
     const hour = when.getUTCHours();
-    const ctr = r.reach > 0 ? r.linkClicks / r.reach : 0;
+    // reach/linkClicks may be null ("unknown"); coerce to 0 for the CTR ratio.
+    const reach = r.reach ?? 0;
+    const ctr = reach > 0 ? (r.linkClicks ?? 0) / reach : 0;
     const slug = post.franchise?.slug ?? null;
 
     const pKey = `${post.platform}|${slug}|${post.hookType}|${dayOfWeek}|${hour}`;
@@ -59,7 +61,7 @@ export async function GET(request: NextRequest) {
     p.leadScore.push(r.leadScore);
     p.vehicleRequests.push(r.vehicleRequests);
     p.revenue.push(r.revenueGenerated);
-    p.reach.push(r.reach);
+    p.reach.push(r.reach ?? 0);
 
     if (post.hookType) {
       const hKey = `${post.platform}|${post.hookType}`;

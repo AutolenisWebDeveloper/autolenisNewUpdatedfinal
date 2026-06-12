@@ -1486,6 +1486,149 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
           ) : null}
         </div>
       </div>
+
+      {/* Audience Insights — always visible, populated by Sync Analytics */}
+      <AudienceInsights />
+    </div>
+  );
+}
+
+// ─── Audience Insights ───────────────────────────────────────────────────────
+interface AudienceBreakdown {
+  countries: { country: string; pct: number }[];
+  ageRanges: { range: string; pct: number }[];
+  genders: { gender: string; pct: number }[];
+  updatedAt?: string;
+}
+interface AudienceResponse {
+  platforms: Record<string, AudienceBreakdown | null>;
+  lastUpdated: string | null;
+}
+
+function AudienceBar({ label, pct }: { label: string; pct: number }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-24 text-xs text-slate-600 truncate">{label}</span>
+      <div className="flex-1 h-3 bg-slate-100 rounded-full">
+        <div
+          className="h-full bg-[#0B5FD1] rounded-full"
+          style={{ width: `${Math.min(Math.max(pct, 0), 100)}%` }}
+        />
+      </div>
+      <span className="text-xs text-slate-500 w-8 text-right">{pct}%</span>
+    </div>
+  );
+}
+
+function AudienceInsights() {
+  const [data, setData] = useState<AudienceResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [platform, setPlatform] = useState<string>(ANALYTICS_PLATFORMS[0]);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    fetchJson<AudienceResponse>("/api/admin/social/analytics/audience")
+      .then((res) => {
+        if (active) setData(res);
+      })
+      .catch(() => {
+        if (active) setData(null);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const current = data?.platforms?.[platform] ?? null;
+  const hasData =
+    !!current &&
+    (current.countries.length > 0 ||
+      current.ageRanges.length > 0 ||
+      current.genders.length > 0);
+
+  return (
+    <div className="bg-white rounded-2xl border border-[#E2E8F0] p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-bold text-[#0F172A]">Audience Insights</h3>
+        {data?.lastUpdated && (
+          <span className="text-xs text-slate-400">
+            Updated {new Date(data.lastUpdated).toLocaleDateString()}
+          </span>
+        )}
+      </div>
+
+      {/* Platform selector */}
+      <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
+        {ANALYTICS_PLATFORMS.map((p) => (
+          <button
+            key={p}
+            onClick={() => setPlatform(p)}
+            className={`text-xs px-3 py-1 rounded-full border whitespace-nowrap ${
+              platform === p
+                ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                : "bg-white text-slate-600 border-[#E2E8F0]"
+            }`}
+          >
+            {p.charAt(0).toUpperCase() + p.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <p className="text-xs text-slate-400">Loading...</p>
+      ) : !hasData ? (
+        <p className="text-xs text-slate-400">
+          Run Analytics Sync to load audience data
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Top countries */}
+          <div>
+            <h4 className="text-xs font-semibold text-slate-600 mb-2">Top Countries</h4>
+            <div className="space-y-1.5">
+              {current!.countries.length === 0 ? (
+                <p className="text-xs text-slate-400">No data</p>
+              ) : (
+                current!.countries
+                  .slice(0, 6)
+                  .map((c) => <AudienceBar key={c.country} label={c.country} pct={c.pct} />)
+              )}
+            </div>
+          </div>
+
+          {/* Age ranges */}
+          <div>
+            <h4 className="text-xs font-semibold text-slate-600 mb-2">Age Ranges</h4>
+            <div className="space-y-1.5">
+              {current!.ageRanges.length === 0 ? (
+                <p className="text-xs text-slate-400">No data</p>
+              ) : (
+                current!.ageRanges
+                  .slice(0, 6)
+                  .map((a) => <AudienceBar key={a.range} label={a.range} pct={a.pct} />)
+              )}
+            </div>
+          </div>
+
+          {/* Gender split */}
+          <div>
+            <h4 className="text-xs font-semibold text-slate-600 mb-2">Gender Split</h4>
+            <div className="space-y-1.5">
+              {current!.genders.length === 0 ? (
+                <p className="text-xs text-slate-400">No data</p>
+              ) : (
+                current!.genders.map((g) => (
+                  <AudienceBar key={g.gender} label={g.gender} pct={g.pct} />
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

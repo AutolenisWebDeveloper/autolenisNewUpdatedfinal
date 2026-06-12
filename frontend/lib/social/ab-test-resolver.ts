@@ -83,10 +83,9 @@ export async function resolveAbTests(): Promise<AbTestResult[]> {
     const platform = winner.post.platform;
     const hookType = winner.post.hookType;
     const perf = winner.post.performance[0];
+    const perfImpressions = perf?.impressions ?? 0;
     const ctr =
-      perf && (perf.impressions ?? 0) > 0
-        ? (perf.linkClicks ?? 0) / perf.impressions
-        : 0;
+      perfImpressions > 0 ? (perf!.linkClicks ?? 0) / perfImpressions : 0;
 
     await prisma.hookPerformance.upsert({
       where: { platform_hookType: { platform, hookType } },
