@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Facebook, Instagram, Twitter, Linkedin } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { AutoLenisLogo } from "@/components/shared/AutoLenisLogo";
+import CookieSettingsButton from "@/components/public/CookieSettingsButton";
 
 const SOCIAL_LINKS = [
   { label: "Facebook",  href: "https://www.facebook.com/autolenis",          icon: Facebook },
@@ -49,6 +50,7 @@ const FOOTER_LINKS = {
     { label: "Terms of Service", href: "/legal/terms" },
     { label: "Security",         href: "/trust" },
     { label: "Cookie Policy",    href: "/legal/cookie-policy" },
+    { label: "Cookie Settings",  href: "#cookie-settings" },
   ],
   // Service Areas — organic internal-linking column. State hub + 5 representative
   // cities. Site-wide (appears on every public page that renders this footer).
@@ -80,17 +82,28 @@ export default function PublicFooter() {
             <div key={category}>
               <h3 className="text-xs tracking-widest uppercase font-semibold text-slate-500 mb-4">{category}</h3>
               <ul className="space-y-2.5">
-                {links.map((l) => (
-                  <li key={l.href}>
-                    <Link
-                      href={l.href}
-                      data-testid={`footer-link-${l.label.toLowerCase().replace(/\s+/g, "-")}`}
-                      className="text-sm text-slate-400 hover:text-white transition-colors"
-                    >
-                      {l.label}
-                    </Link>
-                  </li>
-                ))}
+                {links.map((l) =>
+                  l.label === "Cookie Settings" ? (
+                    <li key={l.href}>
+                      <CookieSettingsButton
+                        testId={`footer-link-${l.label.toLowerCase().replace(/\s+/g, "-")}`}
+                        className="text-sm text-slate-400 hover:text-white transition-colors"
+                      >
+                        {l.label}
+                      </CookieSettingsButton>
+                    </li>
+                  ) : (
+                    <li key={l.href}>
+                      <Link
+                        href={l.href}
+                        data-testid={`footer-link-${l.label.toLowerCase().replace(/\s+/g, "-")}`}
+                        className="text-sm text-slate-400 hover:text-white transition-colors"
+                      >
+                        {l.label}
+                      </Link>
+                    </li>
+                  )
+                )}
               </ul>
             </div>
           ))}

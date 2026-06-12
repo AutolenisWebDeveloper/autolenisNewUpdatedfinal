@@ -1,10 +1,32 @@
 "use client";
 
 import Script from "next/script";
+import { useEffect, useState } from "react";
+import { getConsent, type ConsentState } from "@/lib/cookie-consent";
 
 const TIKTOK_PIXEL_ID = "D8JPRC3C77U29JSH5JJ0";
 
 export default function TikTokPixel() {
+  const [analyticsAllowed, setAnalyticsAllowed] = useState(false);
+
+  useEffect(() => {
+    // Check initial consent
+    const consent = getConsent();
+    setAnalyticsAllowed(consent.analytics);
+
+    // Listen for consent updates (when user clicks Accept All)
+    const handleConsentUpdate = (e: Event) => {
+      const detail = (e as CustomEvent<ConsentState>).detail;
+      setAnalyticsAllowed(detail.analytics);
+    };
+    window.addEventListener("consentUpdated", handleConsentUpdate);
+    return () =>
+      window.removeEventListener("consentUpdated", handleConsentUpdate);
+  }, []);
+
+  // Do not load pixel unless analytics consent given
+  if (!analyticsAllowed) return null;
+
   return (
     <Script
       id="tiktok-pixel"
