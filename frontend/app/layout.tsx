@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import ServiceWorkerRegistration from "@/components/pwa/ServiceWorkerRegistration";
 import Clarity from "@/components/seo/Clarity";
 import TikTokPixel from "@/components/analytics/TikTokPixel";
+import CookieBanner from "@/components/public/CookieBanner";
 import ReferralCapture from "@/components/referral/ReferralCapture";
 import { JsonLd } from "@/lib/seo/jsonld";
 import { entityGraphSchema } from "@/lib/seo/entity-graph";
@@ -77,6 +78,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Clarity />
         {/* TikTok Pixel — loads sitewide (buyer, dealer, admin, public, LP pages) */}
         <TikTokPixel />
+        {/* Cookie consent banner — sitewide, must be the last child of body */}
+        <CookieBanner />
       </body>
     </html>
   );
