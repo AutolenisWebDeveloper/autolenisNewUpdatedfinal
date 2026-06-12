@@ -30,11 +30,19 @@ export async function GET(request: NextRequest, { params }: Props) {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
-  const { id } = await params;
-  const article = await getContentArticleById(id);
-  if (!article) return adminError("NOT_FOUND", "Article not found", 404);
+  try {
+    const { id } = await params;
+    const article = await getContentArticleById(id);
+    if (!article) return adminError("NOT_FOUND", "Article not found", 404);
 
-  return adminSuccess({ article });
+    return adminSuccess({ article });
+  } catch (err) {
+    // Never let an exception escape as an empty 500 body — the preview drawer
+    // parses every response as JSON, so an empty body surfaces as the opaque
+    // "Unexpected end of JSON input". Always return a structured JSON error.
+    const message = err instanceof Error ? err.message : "Failed to load article";
+    return adminError("INTERNAL_ERROR", message, 500);
+  }
 }
 
 export async function PATCH(request: NextRequest, { params }: Props) {
