@@ -233,6 +233,13 @@ export const PAGE_METADATA = {
     description: "How AutoLenis uses cookies, tracking, and analytics on our platform.",
     path: "/legal/cookie-policy",
   },
+  dataDeletion: {
+    title: "Data Deletion Policy",
+    description:
+      "How to request deletion of the personal data AutoLenis holds about you, including data connected through Facebook or Instagram.",
+    path: "/legal/data-deletion",
+    keywords: ["AutoLenis data deletion", "delete my data", "data deletion request"],
+  },
 } as const;
 
 export const APP_URL_EXPORT = APP_URL;
