@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import { getServiceSupabase } from '@/lib/supabase-service';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+
   const supabase = getServiceSupabase();
 
   const [{ data: unreadRows }, { count: overdueCount }] = await Promise.all([

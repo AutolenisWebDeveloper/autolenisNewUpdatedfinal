@@ -6,6 +6,9 @@ import { getAdminActor } from '@/lib/auth/admin-actor';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+
   const supabase = getServiceSupabase();
   try {
     const segments = await SegmentService.listSegments(supabase);

@@ -129,7 +129,10 @@ export async function POST(request: NextRequest, { params }: Props) {
 
       if (auction.deposit?.stripePaymentIntentId) {
         try {
-          await getStripe().refunds.create({ payment_intent: auction.deposit.stripePaymentIntentId });
+          await getStripe().refunds.create(
+            { payment_intent: auction.deposit.stripePaymentIntentId },
+            { idempotencyKey: `refund-deposit-${auction.deposit.id}` },
+          );
           await prisma.deposit.update({ where: { id: auction.deposit.id }, data: { status: "REFUNDED", refundedAt: new Date() } });
         } catch (err) {
           return adminError("STRIPE_ERROR", `Refund failed: ${err}`, 500);

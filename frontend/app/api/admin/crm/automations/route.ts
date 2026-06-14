@@ -8,6 +8,9 @@ import type { WorkflowStatus, WorkflowInput } from '@/lib/types/crm';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+
   const url = new URL(req.url);
   const status = url.searchParams.get('status') as WorkflowStatus | null;
   const search = url.searchParams.get('search') ?? undefined;

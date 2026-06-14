@@ -10,6 +10,9 @@ const VALID_PRIORITIES = ['low', 'medium', 'high', 'urgent'] as const;
 const VALID_SCOPES = ['contact', 'system', 'admin'] as const;
 
 export async function GET(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+
   const url = new URL(req.url);
   const statusParam = url.searchParams.get('status') ?? 'open,in_progress';
   const statuses = statusParam

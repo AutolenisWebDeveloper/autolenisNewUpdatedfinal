@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import { getServiceSupabase } from '@/lib/supabase-service';
 
 export const dynamic = 'force-dynamic';
@@ -10,6 +11,9 @@ interface RouteContext {
 // Lists most recent enrollments for a workflow + per-status counts. Powers the
 // workflow detail page and the operations panel's "failed enrollments" table.
 export async function GET(req: Request, ctx: RouteContext) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+
   const { id } = await ctx.params;
   const url = new URL(req.url);
   const status = url.searchParams.get('status');

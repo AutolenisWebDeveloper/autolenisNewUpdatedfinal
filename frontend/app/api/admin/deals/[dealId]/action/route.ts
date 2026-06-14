@@ -155,7 +155,10 @@ export async function POST(request: NextRequest, { params }: Props) {
       });
       if (deposit?.stripePaymentIntentId) {
         try {
-          await getStripe().refunds.create({ payment_intent: deposit.stripePaymentIntentId });
+          await getStripe().refunds.create(
+            { payment_intent: deposit.stripePaymentIntentId },
+            { idempotencyKey: `refund-deposit-${deposit.id}` },
+          );
           await prisma.deposit.update({ where: { id: deposit.id }, data: { status: "REFUNDED", refundedAt: new Date() } });
           refunded = true;
         } catch (err) {
@@ -204,7 +207,10 @@ export async function POST(request: NextRequest, { params }: Props) {
 
       if (deposit?.stripePaymentIntentId) {
         try {
-          await getStripe().refunds.create({ payment_intent: deposit.stripePaymentIntentId });
+          await getStripe().refunds.create(
+            { payment_intent: deposit.stripePaymentIntentId },
+            { idempotencyKey: `refund-deposit-${deposit.id}` },
+          );
           await prisma.deposit.update({ where: { id: deposit.id }, data: { status: "REFUNDED", refundedAt: new Date() } });
         } catch (err) {
           return adminError("STRIPE_ERROR", `Refund failed: ${err}`, 500);
