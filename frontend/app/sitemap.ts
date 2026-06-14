@@ -41,6 +41,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE}/legal/cookie-policy`,   priority: 0.2, changeFrequency: "yearly",  lastModified: now },
     { url: `${BASE}/legal/dealer-terms`,    priority: 0.2, changeFrequency: "yearly",  lastModified: now },
     { url: `${BASE}/legal/prequal-consent`, priority: 0.2, changeFrequency: "yearly",  lastModified: now },
+    { url: `${BASE}/legal/data-deletion`,   priority: 0.2, changeFrequency: "yearly",  lastModified: now },
     // Programmatic SEO category pages
     { url: `${BASE}/cars/suv`,          priority: 0.8, changeFrequency: "daily",   lastModified: now },
     { url: `${BASE}/cars/trucks`,       priority: 0.8, changeFrequency: "daily",   lastModified: now },
