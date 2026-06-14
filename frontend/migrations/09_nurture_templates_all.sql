@@ -3,16 +3,13 @@
 -- Full nurture email-template set for all remaining campaigns.
 -- Generated from gen_campaigns.py (copy-as-data + shared shell).
 -- Pairs with 08 (Welcome) and 05 (LP recovery, already seeded).
--- Idempotent. No inline footer is baked in: TemplateService.renderInline
--- appends the CAN-SPAM footer (physical address + unsubscribe) at render
--- time because these bodies carry no autolenis:footer:v1 marker.
+-- Idempotent; CAN-SPAM footer (unsubscribe + physical address) is appended at
+-- render time by TemplateService.renderInline, so no footer is baked in here.
 -- ============================================================================
 
 BEGIN;
 
--- template_key and its partial unique index are introduced in 05; re-assert
--- them here so this migration is self-contained and safe to run standalone.
--- Reuse 05's index name so this is a true no-op once 05 has applied.
+-- template_key may already exist (added in 05); keep idempotent.
 ALTER TABLE email_templates
   ADD COLUMN IF NOT EXISTS template_key TEXT;
 
@@ -23,13 +20,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_email_templates_template_key
 INSERT INTO email_templates
   (template_key, name, subject, category, status, html_body, text_body, variables)
 VALUES
-(
-  'vr_received',
-  'Vehicle Request — received',
-  '{{firstName}}, your request is in',
-  'transactional',
-  'active',
-  $html$<!doctype html>
+  (
+    'vr_received',
+    'Vehicle Request — received',
+    '{{firstName}}, your request is in',
+    'transactional',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">We are inviting verified dealers to compete for your vehicle.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -48,16 +45,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt$Your request is in, {{firstName}}. We're inviting verified dealers to compete. You'll be notified when your auction opens and offers arrive. View it: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'auction_live',
-  'Auction — live',
-  'Your auction is live, {{firstName}}',
-  'transactional',
-  'active',
-  $html$<!doctype html>
+    $txt$Your request is in, {{firstName}}. We're inviting verified dealers to compete. You'll be notified when your auction opens and offers arrive. View it: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'auction_live',
+    'Auction — live',
+    'Your auction is live, {{firstName}}',
+    'transactional',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Dealers are now competing for your vehicle.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -75,16 +72,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt$Hi {{firstName}}, your AutoLenis auction is live and dealers are competing now. Watch offers come in: {{auctionUrl}}$txt$,
-  '{firstName,auctionUrl}'
-),
-(
-  'offer_in',
-  'Offer — received',
-  'You have a new offer, {{firstName}}',
-  'transactional',
-  'active',
-  $html$<!doctype html>
+    $txt$Hi {{firstName}}, your AutoLenis auction is live and dealers are competing now. Watch offers come in: {{auctionUrl}}$txt$,
+    ARRAY['firstName','auctionUrl']
+  ),
+  (
+    'offer_in',
+    'Offer — received',
+    'You have a new offer, {{firstName}}',
+    'transactional',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">A dealer just submitted an out-the-door offer.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -103,16 +100,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, you have a new out-the-door offer in your AutoLenis auction. See the full breakdown: {{offerUrl}}$txt$,
-  '{firstName,offerUrl}'
-),
-(
-  'offer_multiple',
-  'Offer — multiple received',
-  '{{firstName}}, dealers are competing',
-  'transactional',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, you have a new out-the-door offer in your AutoLenis auction. See the full breakdown: {{offerUrl}}$txt$,
+    ARRAY['firstName','offerUrl']
+  ),
+  (
+    'offer_multiple',
+    'Offer — multiple received',
+    '{{firstName}}, dealers are competing',
+    'transactional',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">You have multiple offers to compare side by side.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -130,16 +127,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, multiple dealers have submitted offers in your auction. Compare them side by side: {{offerUrl}}$txt$,
-  '{firstName,offerUrl}'
-),
-(
-  'deal_formed',
-  'Deal — formed',
-  'Next steps for your vehicle, {{firstName}}',
-  'transactional',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, multiple dealers have submitted offers in your auction. Compare them side by side: {{offerUrl}}$txt$,
+    ARRAY['firstName','offerUrl']
+  ),
+  (
+    'deal_formed',
+    'Deal — formed',
+    'Next steps for your vehicle, {{firstName}}',
+    'transactional',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">You selected an offer — here is what happens next.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -158,16 +155,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, you selected an offer. Next: financing, insurance, contract review, and pickup. Continue: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'deposit_confirmed',
-  'Deposit — confirmed',
-  'Your deposit is confirmed',
-  'transactional',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, you selected an offer. Next: financing, insurance, contract review, and pickup. Continue: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'deposit_confirmed',
+    'Deposit — confirmed',
+    'Your deposit is confirmed',
+    'transactional',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Your deposit is in and your auction can proceed.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -185,16 +182,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, your AutoLenis deposit is confirmed and your auction can proceed. Dashboard: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'contract_signed',
-  'Contract — signed',
-  'Your contract is signed, {{firstName}}',
-  'transactional',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, your AutoLenis deposit is confirmed and your auction can proceed. Dashboard: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'contract_signed',
+    'Contract — signed',
+    'Your contract is signed, {{firstName}}',
+    'transactional',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Signed and saved — pickup is the last step.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -212,16 +209,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, your AutoLenis contract is signed. Last step is pickup — details here: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'trade_in_value',
-  'Trade-In — value',
-  '{{firstName}}, about your trade-in',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, your AutoLenis contract is signed. Last step is pickup — details here: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'trade_in_value',
+    'Trade-In — value',
+    '{{firstName}}, about your trade-in',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Here is how your trade-in fits into a smarter purchase.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -239,16 +236,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, thanks for your trade-in details. On AutoLenis your trade factors into the offers dealers compete with. See options: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'trade_in_equity',
-  'Trade-In — equity',
-  'Understanding your trade-in equity',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, thanks for your trade-in details. On AutoLenis your trade factors into the offers dealers compete with. See options: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'trade_in_equity',
+    'Trade-In — equity',
+    'Understanding your trade-in equity',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">A quick look at how trade equity affects your next vehicle.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -267,16 +264,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, your trade equity can lower what you finance next. On AutoLenis dealers factor it in transparently. Explore: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'trade_in_upgrade',
-  'Trade-In — upgrade',
-  'Ready to put your trade to work?',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, your trade equity can lower what you finance next. On AutoLenis dealers factor it in transparently. Explore: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'trade_in_upgrade',
+    'Trade-In — upgrade',
+    'Ready to put your trade to work?',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Turn your current vehicle into your next one.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -294,16 +291,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, ready to put your trade to work? Start a request and let dealers compete: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'refi_review',
-  'Refinance — review',
-  '{{firstName}}, a look at your auto loan',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, ready to put your trade to work? Start a request and let dealers compete: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'refi_review',
+    'Refinance — review',
+    '{{firstName}}, a look at your auto loan',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">See whether refinancing could fit your situation.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -322,16 +319,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, refinancing replaces your current auto loan with a new one and may change your payment or term. Explore options (no obligation): {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'refi_savings',
-  'Refinance — payment',
-  'How refinancing can change your payment',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, refinancing replaces your current auto loan with a new one and may change your payment or term. Explore options (no obligation): {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'refi_savings',
+    'Refinance — payment',
+    'How refinancing can change your payment',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Lower rate, different term — here is how the math can work.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -350,16 +347,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, a refinance can change your payment via rate and term. Actual terms depend on your situation. Compare options: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'refi_options',
-  'Refinance — options',
-  'Ready to explore refinancing?',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, a refinance can change your payment via rate and term. Actual terms depend on your situation. Compare options: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'refi_options',
+    'Refinance — options',
+    'Ready to explore refinancing?',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Compare without obligation.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -377,16 +374,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, when you're ready to explore refinancing, we can help you compare — no obligation. Start here: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'saved_search_confirm',
-  'Saved Search — confirmed',
-  'Your search is saved, {{firstName}}',
-  'transactional',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, when you're ready to explore refinancing, we can help you compare — no obligation. Start here: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'saved_search_confirm',
+    'Saved Search — confirmed',
+    'Your search is saved, {{firstName}}',
+    'transactional',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">We will let you know when matching vehicles appear.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -404,16 +401,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, your search is saved. We'll alert you when matching vehicles appear. View searches: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'calc_followup',
-  'Calculator — follow-up',
-  '{{firstName}}, your numbers and next step',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, your search is saved. We'll alert you when matching vehicles appear. View searches: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'calc_followup',
+    'Calculator — follow-up',
+    '{{firstName}}, your numbers and next step',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">You ran the numbers — here is how to act on them.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -431,16 +428,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, you ran the numbers. Next step that saves money: let dealers compete on out-the-door price. Start: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'magnet_deliver',
-  'Lead Magnet — deliver',
-  'Here is your guide, {{firstName}}',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, you ran the numbers. Next step that saves money: let dealers compete on out-the-door price. Start: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'magnet_deliver',
+    'Lead Magnet — deliver',
+    'Here is your guide, {{firstName}}',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Your guide is ready, plus how AutoLenis fits in.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -458,16 +455,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, your guide is ready in your dashboard. When you're ready to act on it, AutoLenis makes it easier. Get it: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'magnet_nurture',
-  'Lead Magnet — nurture',
-  '{{firstName}}, the part the guide leaves out',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, your guide is ready in your dashboard. When you're ready to act on it, AutoLenis makes it easier. Get it: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'magnet_nurture',
+    'Lead Magnet — nurture',
+    '{{firstName}}, the part the guide leaves out',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">How to actually get dealers competing for your price.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -485,16 +482,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, most guides say negotiate harder. AutoLenis has dealers compete so you compare, not haggle. See how: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'zura_followup',
-  'Zura — follow-up',
-  'Picking up where we left off, {{firstName}}',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, most guides say negotiate harder. AutoLenis has dealers compete so you compare, not haggle. See how: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'zura_followup',
+    'Zura — follow-up',
+    'Picking up where we left off, {{firstName}}',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Continue the conversation and let dealers compete.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -512,16 +509,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, thanks for chatting with Zura. Pick up where you left off and let dealers compete: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'prequal_finish',
-  'Prequal — finish',
-  '{{firstName}}, finish your prequalification',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, thanks for chatting with Zura. Pick up where you left off and let dealers compete: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'prequal_finish',
+    'Prequal — finish',
+    '{{firstName}}, finish your prequalification',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">A quick step so you can shop within your budget.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -540,16 +537,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, finish your prequalification so you can shop within your budget and let dealers compete on realistic numbers: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'prequal_education',
-  'Prequal — education',
-  'How prequalification helps you shop',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, finish your prequalification so you can shop within your budget and let dealers compete on realistic numbers: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'prequal_education',
+    'Prequal — education',
+    'How prequalification helps you shop',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">What prequalifying does and does not do.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -568,16 +565,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, prequalifying helps you shop within a budget that fits — a soft step, no commitment. Finish when ready: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'dealer_welcome',
-  'Dealer — welcome',
-  'Welcome to AutoLenis',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, prequalifying helps you shop within a budget that fits — a soft step, no commitment. Finish when ready: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'dealer_welcome',
+    'Dealer — welcome',
+    'Welcome to AutoLenis',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Compete for ready-to-buy, budget-qualified buyers.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -595,16 +592,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt$Welcome to AutoLenis. Compete for budget-qualified, ready-to-buy buyers. Complete your profile: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'dealer_profile',
-  'Dealer — profile',
-  'Finish your dealer profile',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt$Welcome to AutoLenis. Compete for budget-qualified, ready-to-buy buyers. Complete your profile: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'dealer_profile',
+    'Dealer — profile',
+    'Finish your dealer profile',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">A complete profile means more auction invitations.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -622,16 +619,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt$Finish your AutoLenis dealer profile so we can invite you to the auctions that fit best. Complete it: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'dealer_auctions',
-  'Dealer — join auctions',
-  'Start competing in auctions',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt$Finish your AutoLenis dealer profile so we can invite you to the auctions that fit best. Complete it: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'dealer_auctions',
+    'Dealer — join auctions',
+    'Start competing in auctions',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Submit your best out-the-door offers and win deals.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -649,16 +646,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt$You're set up for AutoLenis auctions. Submit strong out-the-door offers to win business. View open auctions: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'dealer_wins',
-  'Dealer — increase wins',
-  'How to win more on AutoLenis',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt$You're set up for AutoLenis auctions. Submit strong out-the-door offers to win business. View open auctions: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'dealer_wins',
+    'Dealer — increase wins',
+    'How to win more on AutoLenis',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">A few patterns that help dealers win more auctions.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -676,16 +673,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt$Win more on AutoLenis: respond fast, lead with a clean out-the-door number, keep inventory current. See your performance: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'aff_welcome',
-  'Affiliate — welcome',
-  'Welcome to the AutoLenis affiliate program',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt$Win more on AutoLenis: respond fast, lead with a clean out-the-door number, keep inventory current. See your performance: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'aff_welcome',
+    'Affiliate — welcome',
+    'Welcome to the AutoLenis affiliate program',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Earn by sending buyers to a platform that works for them.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -703,16 +700,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt$Welcome to the AutoLenis affiliate program, {{firstName}}. Get your referral link and tracking: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'aff_first_lead',
-  'Affiliate — first lead',
-  '{{firstName}}, get your first referral',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt$Welcome to the AutoLenis affiliate program, {{firstName}}. Get your referral link and tracking: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'aff_first_lead',
+    'Affiliate — first lead',
+    '{{firstName}}, get your first referral',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Share your link and start tracking referrals.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -730,16 +727,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, get your first AutoLenis referral: share your link where buyers are. Track clicks and signups: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'aff_traffic',
-  'Affiliate — traffic',
-  'Driving traffic that converts',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, get your first AutoLenis referral: share your link where buyers are. Track clicks and signups: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'aff_traffic',
+    'Affiliate — traffic',
+    'Driving traffic that converts',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">What kind of referrals tend to convert best.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -757,16 +754,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, in-market buyers convert best on AutoLenis — people comparing prices or researching a vehicle. See your performance: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'aff_commissions',
-  'Affiliate — commissions',
-  'How your commissions work',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, in-market buyers convert best on AutoLenis — people comparing prices or researching a vehicle. See your performance: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'aff_commissions',
+    'Affiliate — commissions',
+    'How your commissions work',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Tiered commissions, tracked transparently.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -784,16 +781,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, your AutoLenis commissions are tiered and tracked transparently. See referrals, conversions, and earnings: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'aff_scale',
-  'Affiliate — scale',
-  'Scaling your affiliate revenue',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, your AutoLenis commissions are tiered and tracked transparently. See referrals, conversions, and earnings: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'aff_scale',
+    'Affiliate — scale',
+    'Scaling your affiliate revenue',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Patterns that help top affiliates grow.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -811,16 +808,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, scale your AutoLenis revenue: test channels, double down on what converts, focus on in-market buyers. See your data: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'winback_1',
-  'Win-back — touch 1',
-  '{{firstName}}, your dealers are still ready',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, scale your AutoLenis revenue: test channels, double down on what converts, focus on in-market buyers. See your data: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'winback_1',
+    'Win-back — touch 1',
+    '{{firstName}}, your dealers are still ready',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Pick up where you left off and let dealers compete.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -838,16 +835,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, you started on AutoLenis but didn't finish. Pick up anytime and let dealers compete — no pressure: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'winback_2',
-  'Win-back — touch 2',
-  'Still thinking it over, {{firstName}}?',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, you started on AutoLenis but didn't finish. Pick up anytime and let dealers compete — no pressure: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'winback_2',
+    'Win-back — touch 2',
+    'Still thinking it over, {{firstName}}?',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">No rush — here is what is waiting when you are ready.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -865,16 +862,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, no rush on your car search. When ready, AutoLenis has dealers compete while you stay in control: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'postclose_d7_survey',
-  'Post-close — D7 survey',
-  'How did it go, {{firstName}}?',
-  'transactional',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, no rush on your car search. When ready, AutoLenis has dealers compete while you stay in control: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'postclose_d7_survey',
+    'Post-close — D7 survey',
+    'How did it go, {{firstName}}?',
+    'transactional',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">A quick note on your AutoLenis experience.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -892,16 +889,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt$Congrats on your vehicle, {{firstName}}! How did the AutoLenis experience go? Share quick feedback: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'postclose_d30_review',
-  'Post-close — D30 review',
-  '{{firstName}}, would you share your experience?',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt$Congrats on your vehicle, {{firstName}}! How did the AutoLenis experience go? Share quick feedback: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'postclose_d30_review',
+    'Post-close — D30 review',
+    '{{firstName}}, would you share your experience?',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">A short review helps other buyers.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -919,16 +916,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, would you share a short review of your AutoLenis experience? It helps other buyers: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'postclose_d60_referral',
-  'Post-close — D60 referral',
-  'Know someone car shopping, {{firstName}}?',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, would you share a short review of your AutoLenis experience? It helps other buyers: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'postclose_d60_referral',
+    'Post-close — D60 referral',
+    'Know someone car shopping, {{firstName}}?',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Share AutoLenis with someone who would use it.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -946,16 +943,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, know someone car shopping? Send them to AutoLenis for the same buyer-first experience: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'postclose_d180_upgrade',
-  'Post-close — D180 check-in',
-  'Checking in on your vehicle, {{firstName}}',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, know someone car shopping? Send them to AutoLenis for the same buyer-first experience: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'postclose_d180_upgrade',
+    'Post-close — D180 check-in',
+    'Checking in on your vehicle, {{firstName}}',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">How is everything six months in?</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -973,16 +970,16 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, six months in — how's your vehicle? If anything's changed (refi, second car, trade), AutoLenis is here: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-),
-(
-  'postclose_d365_replacement',
-  'Post-close — D365 anniversary',
-  'One year in, {{firstName}}',
-  'automation',
-  'active',
-  $html$<!doctype html>
+    $txt${{firstName}}, six months in — how's your vehicle? If anything's changed (refi, second car, trade), AutoLenis is here: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  ),
+  (
+    'postclose_d365_replacement',
+    'Post-close — D365 anniversary',
+    'One year in, {{firstName}}',
+    'automation',
+    'active',
+    $html$<!doctype html>
 <html><body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;">
   <span style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">Whatever is next, dealers can compete for it.</span>
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#f8fafc;">
@@ -1000,14 +997,13 @@ VALUES
     </td></tr>
   </table>
 </body></html>$html$,
-  $txt${{firstName}}, it's been a year! Whatever's next — upgrade, second car, helping family shop — AutoLenis has dealers compete: {{dashboardUrl}}$txt$,
-  '{firstName,dashboardUrl}'
-)
-ON CONFLICT (template_key) DO NOTHING;
+    $txt${{firstName}}, it's been a year! Whatever's next — upgrade, second car, helping family shop — AutoLenis has dealers compete: {{dashboardUrl}}$txt$,
+    ARRAY['firstName','dashboardUrl']
+  )
+ON CONFLICT (template_key) WHERE template_key IS NOT NULL DO NOTHING;
 
-
--- Seed v1 of the version history for any rows just inserted; rows that
--- already existed keep their existing version history (ON CONFLICT skips).
+-- Seed v1 of the version history for any rows we just inserted. Skipped for
+-- rows that already existed (the version row already exists too).
 INSERT INTO email_template_versions (template_id, version, subject, html_body, text_body)
 SELECT t.id, t.version, t.subject, t.html_body, t.text_body
 FROM email_templates t
