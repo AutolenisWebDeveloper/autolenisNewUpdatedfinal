@@ -5,6 +5,7 @@ import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
 import type { ContactInput, WorkflowTriggerType } from '@/lib/types/crm';
 import { forwardToMake, type DomainEventEnvelope } from './make-webhook';
+import { resolveStageAdvance } from './lifecycle-advance';
 
 // ---------------------------------------------------------------------------
 // DOMAIN EVENT EMITTER (Step 2)
@@ -67,6 +68,39 @@ export async function emitDomainEvent(
   } catch (err) {
     console.error(`[emit] contact resolve failed for '${event}' (${idempotencyKey})`, err);
     return { contactId: null, idempotencyKey, fired };
+  }
+
+  // (1b) Forward-only lifecycle advance. The spine is the single place the
+  // funnel stage moves on a domain event. Mirrors the lead-score
+  // never-downgrade rule: an event may push the contact further along the
+  // funnel but NEVER back to an earlier stage (ranking = the LifecycleStage
+  // union's declared order; buyer_inactive is the lone exception that may set
+  // 'inactive'). A stage_changed timeline row is written ONLY on a real
+  // advance. Best-effort and isolated: a failure here never blocks the
+  // envelope, timeline, or webhook.
+  try {
+    const advancedStage = resolveStageAdvance(contact.lifecycle_stage, event);
+    if (advancedStage) {
+      const previousStage = contact.lifecycle_stage;
+      const { error } = await supabase
+        .from('contacts')
+        .update({ lifecycle_stage: advancedStage, updated_at: new Date().toISOString() })
+        .eq('id', contact.id);
+      if (error) {
+        console.error(`[emit] stage advance failed for '${event}' (${idempotencyKey})`, error);
+      } else {
+        // Keep the in-memory contact (and thus the envelope below) consistent
+        // with the persisted stage.
+        contact.lifecycle_stage = advancedStage;
+        await supabase.from('contact_timeline_events').insert({
+          contact_id: contact.id,
+          event_type: 'stage_changed',
+          event_data: { from: previousStage, to: advancedStage, via: event },
+        });
+      }
+    }
+  } catch (err) {
+    console.error(`[emit] stage advance error for '${event}' (${idempotencyKey})`, err);
   }
 
   // (2) Build the versioned envelope.
