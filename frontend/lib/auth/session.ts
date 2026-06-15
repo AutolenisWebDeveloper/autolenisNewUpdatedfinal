@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { createServerSupabaseClient } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
@@ -26,7 +27,7 @@ export async function getAuthenticatedBuyer() {
     // select that omits those columns so the buyer portal keeps working while
     // the migration is being applied.
     // Required migration: 20260603000000_add_buyer_lifecycle_fields
-    console.error(
+    logger.error(
       "[auth/session] buyer query failed — possible schema mismatch " +
         "(migration 20260603000000_add_buyer_lifecycle_fields may not be applied). " +
         "Retrying with backward-safe fallback.",
@@ -48,7 +49,7 @@ export async function getAuthenticatedBuyer() {
         purgedAt: null as Date | null,
       };
     } catch (fallbackErr) {
-      console.error("[auth/session] backward-safe fallback also failed:", fallbackErr);
+      logger.error("[auth/session] backward-safe fallback also failed:", fallbackErr);
       return null;
     }
   }

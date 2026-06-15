@@ -11,6 +11,7 @@
 // pipeline returns nulls rather than throwing, so it can never block post
 // creation or publishing.
 
+import { logger } from "@/lib/logger";
 import "server-only";
 import type { SocialPost } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -115,7 +116,7 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
     })
     .catch(() => null);
   if (existing?.thumbnailUrl) {
-    console.log("[image-gen:dalle] visuals already exist for post:", post.id, "— skipping");
+    logger.info("[image-gen:dalle] visuals already exist for post:", post.id, "— skipping");
     return {
       imageUrl: existing.thumbnailUrl,
       videoUrl: existing.videoUrl ?? null,
@@ -138,7 +139,7 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
   });
 
   if (!result.success || !result.imageUrl) {
-    console.error("[image-gen:dalle] generation failed for post:", post.id, result.error);
+    logger.error("[image-gen:dalle] generation failed for post:", post.id, result.error);
     return EMPTY;
   }
 
@@ -147,7 +148,7 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
   try {
     storedImageUrl = await storeImageInSupabase(result.imageUrl, post.id);
   } catch (err) {
-    console.error("[image-gen:dalle] supabase store failed, using provider URL:", err);
+    logger.error("[image-gen:dalle] supabase store failed, using provider URL:", err);
     storedImageUrl = result.imageUrl;
   }
 
@@ -179,7 +180,7 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
       },
     });
   } catch (err) {
-    console.error("[image-gen:dalle] socialVideo upsert failed:", err);
+    logger.error("[image-gen:dalle] socialVideo upsert failed:", err);
     return EMPTY;
   }
 
@@ -190,10 +191,10 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
       data: { visualPrompt },
     });
   } catch (err) {
-    console.error("[image-gen:dalle] post update failed (non-fatal):", err);
+    logger.error("[image-gen:dalle] post update failed (non-fatal):", err);
   }
 
-  console.log("[image-gen:dalle] image attached to post:", post.id);
+  logger.info("[image-gen:dalle] image attached to post:", post.id);
   return {
     imageUrl: storedImageUrl,
     videoUrl: null,
@@ -222,7 +223,7 @@ export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals
     })
     .catch(() => null);
   if (existing?.thumbnailUrl && existing.storagePath) {
-    console.log("[image-gen] visuals already exist for post:", post.id, "— skipping");
+    logger.info("[image-gen] visuals already exist for post:", post.id, "— skipping");
     return {
       imageUrl: existing.thumbnailUrl,
       videoUrl: existing.videoUrl ?? null,
@@ -246,14 +247,14 @@ export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals
       script: post.script,
     });
   } catch (err) {
-    console.error("[image-gen] STAGE 1 (visual prompt) failed:", err);
+    logger.error("[image-gen] STAGE 1 (visual prompt) failed:", err);
     return EMPTY;
   }
 
   // STAGE 2 — Generate the image (text-to-image). Gated by the video feature
   // flag, which also governs all legacy provider generation.
   if (!ENABLE_VIDEO) {
-    console.log("[image-gen] ENABLE_HIGGSFIELD_VIDEO disabled — skipping generation");
+    logger.info("[image-gen] ENABLE_HIGGSFIELD_VIDEO disabled — skipping generation");
     return EMPTY;
   }
 
@@ -268,12 +269,12 @@ export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals
       negativePrompt: visual.negativePrompt,
     });
     if (!result.success || !result.requestId) {
-      console.error("[image-gen] STAGE 2 (text-to-image submit) failed:", result.error);
+      logger.error("[image-gen] STAGE 2 (text-to-image submit) failed:", result.error);
       return EMPTY;
     }
     imageRequestId = result.requestId;
   } catch (err) {
-    console.error("[image-gen] STAGE 2 (text-to-image submit) threw:", err);
+    logger.error("[image-gen] STAGE 2 (text-to-image submit) threw:", err);
     return EMPTY;
   }
 
@@ -281,11 +282,11 @@ export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals
   try {
     sourceImageUrl = await pollImage(provider, imageRequestId);
     if (!sourceImageUrl) {
-      console.error("[image-gen] STAGE 2 (polling) did not complete within timeout");
+      logger.error("[image-gen] STAGE 2 (polling) did not complete within timeout");
       return EMPTY;
     }
   } catch (err) {
-    console.error("[image-gen] STAGE 2 (polling) threw:", err);
+    logger.error("[image-gen] STAGE 2 (polling) threw:", err);
     return EMPTY;
   }
 
@@ -299,7 +300,7 @@ export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals
   try {
     storedImageUrl = await storeImageInSupabase(sourceImageUrl, post.id);
   } catch (err) {
-    console.error("[image-gen] STAGE 3 (supabase store) failed:", err);
+    logger.error("[image-gen] STAGE 3 (supabase store) failed:", err);
     // Fall back to the provider URL so the post still has a usable image.
     storedImageUrl = sourceImageUrl;
   }
@@ -327,7 +328,7 @@ export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals
       },
     });
   } catch (err) {
-    console.error("[image-gen] STAGE 3 (socialVideo thumbnail) failed (non-fatal):", err);
+    logger.error("[image-gen] STAGE 3 (socialVideo thumbnail) failed (non-fatal):", err);
   }
 
   // STAGE 4 — Generate the video (image-to-video) for video platforms. Fire and
@@ -342,7 +343,7 @@ export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals
         style: visual.style,
       });
     } catch (err) {
-      console.error("[image-gen] STAGE 4 (image-to-video submit) failed (non-fatal):", err);
+      logger.error("[image-gen] STAGE 4 (image-to-video submit) failed (non-fatal):", err);
     }
   }
 
@@ -353,7 +354,7 @@ export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals
       data: { visualPrompt: visual.imagePrompt, visualStyle: visual.style },
     });
   } catch (err) {
-    console.error("[image-gen] STAGE 5 (post update) failed (non-fatal):", err);
+    logger.error("[image-gen] STAGE 5 (post update) failed (non-fatal):", err);
   }
 
   // STAGE 6 — Return results (video is async, image doubles as the thumbnail).

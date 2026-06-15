@@ -5,6 +5,7 @@
 // weighted engagement; the winner is recorded in HookPerformance so future
 // generations can favor the winning hook type, and losing variants are skipped.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 export interface AbTestResult {
@@ -102,7 +103,7 @@ export async function resolveAbTests(): Promise<AbTestResult[]> {
       },
     });
 
-    console.log(
+    logger.info(
       `[ab-resolver] winner: ${hookType} (score: ${winner.score.toFixed(1)})`,
       `killed: ${loserIds.length} variants`,
     );

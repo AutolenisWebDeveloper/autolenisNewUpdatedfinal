@@ -5,6 +5,7 @@
 // endpoint directly. groqChat() itself is untouched and continues to drive
 // the voice + general-purpose flows.
 
+import { logger } from "@/lib/logger";
 import type { ChatMessage } from "@/lib/ai/groq-client";
 
 // ─── Model lineup ────────────────────────────────────────────────────────────
@@ -218,7 +219,7 @@ Return the merged JSON.`;
       phone: coerceTrimmedString(obj.phone) ?? merged.phone,
     };
   } catch (err) {
-    console.error("[acquisition.extractVehicleData] failed", err);
+    logger.error("[acquisition.extractVehicleData] failed", err);
     return merged;
   }
 }
@@ -269,7 +270,7 @@ Guidance:
     const temp = ["hot", "warm", "cold"].includes(tempStr) ? tempStr : "cold";
     return { score: clamped, temperature: temp, reasoning: reasonStr };
   } catch (err) {
-    console.error("[acquisition.scoreLeadWithGroq] failed", err);
+    logger.error("[acquisition.scoreLeadWithGroq] failed", err);
     return fallback;
   }
 }
@@ -301,7 +302,7 @@ Output ONLY valid JSON: { "isOptOut": boolean }`;
     if (!parsed || typeof parsed !== "object") return false;
     return (parsed as { isOptOut?: unknown }).isOptOut === true;
   } catch (err) {
-    console.error("[acquisition.detectOptOutIntent] failed", err);
+    logger.error("[acquisition.detectOptOutIntent] failed", err);
     return false;
   }
 }
@@ -542,7 +543,7 @@ No commentary. No explanation.`;
     }
     return merged;
   } catch (err) {
-    console.error("[extractStructuredData] Failed:", err);
+    logger.error("[extractStructuredData] Failed:", err);
     return { ...defaultProfile(), ...existing } as BuyerProfile;
   }
 }

@@ -12,6 +12,7 @@
 // functions; each function is responsible for guarding suppression and
 // queuing one Inngest job.
 
+import { logger } from "@/lib/logger";
 import { inngest } from "@/lib/inngest/client";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { SuppressionService } from "@/lib/services/suppression.service";
@@ -50,7 +51,7 @@ async function queueOrSkip(
 ): Promise<{ status: "queued" | "suppressed" }> {
   const supabase = getServiceSupabase();
   if (await SuppressionService.isEmailSuppressed(supabase, params.to)) {
-    console.log(`[nurture] step ${step} suppressed for ${params.to}`);
+    logger.info(`[nurture] step ${step} suppressed for ${params.to}`);
     return { status: "suppressed" };
   }
 

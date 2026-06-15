@@ -25,18 +25,19 @@ const config = [
     },
   },
   {
-    // Lifecycle-critical zones must route logging through lib/logger (structured,
-    // queryable). This is the ratchet seam — extend the glob list as other zones
-    // are migrated off raw console.* (see _completion gap analysis, Gap 10).
-    files: [
-      "lib/services/deal/**/*.ts",
-      "lib/services/esign/**/*.ts",
-      "lib/services/pickup/**/*.ts",
-      "lib/services/payment/**/*.ts",
-      "lib/services/deposit/**/*.ts",
-    ],
+    // All of lib/ must route logging through lib/logger (structured, queryable).
+    // lib/ is console-free as of the Phase 3 migration; this ratchet prevents
+    // regressions. (app/ and components/ are not yet migrated — future work.)
+    files: ["lib/**/*.ts", "lib/**/*.tsx"],
     rules: {
       "no-console": "warn",
+    },
+  },
+  {
+    // The logger itself is the console sink — it must use console.
+    files: ["lib/logger.ts"],
+    rules: {
+      "no-console": "off",
     },
   },
 ];

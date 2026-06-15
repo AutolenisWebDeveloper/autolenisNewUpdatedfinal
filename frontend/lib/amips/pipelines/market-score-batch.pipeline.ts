@@ -10,6 +10,7 @@
 // reads a stored score instead of recomputing per page. Re-running refreshes
 // every score in place (upsert on make/model/metro).
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { haversineMiles, type LatLng } from "@/lib/utils/zip-coords";
 import {
@@ -69,7 +70,7 @@ function dealersForBrandInMetro(
  * skipped (no qualifying dealer).
  */
 export async function computeMarketScoreBatch(): Promise<MarketScoreBatchResult> {
-  console.log("[amips-p1-scores] starting market score batch");
+  logger.info("[amips-p1-scores] starting market score batch");
 
   const [vehicles, markets, dealers] = await Promise.all([
     prisma.vehicleIntelligence.findMany({
@@ -166,7 +167,7 @@ export async function computeMarketScoreBatch(): Promise<MarketScoreBatchResult>
     }
   }
 
-  console.log(
+  logger.info(
     `[amips-p1-scores] done — combinations ${combinations}, computed ${computed}, skipped ${skipped}`,
   );
   return { combinations, computed, skipped };

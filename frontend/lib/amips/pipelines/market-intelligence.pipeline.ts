@@ -16,6 +16,7 @@
 //
 // All upserts key on the model's (metroName, state) unique constraint.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { haversineMiles, type LatLng } from "@/lib/utils/zip-coords";
 import {
@@ -72,7 +73,7 @@ async function fetchCensusPopulations(): Promise<Map<string, number>> {
       `&for=metropolitan%20statistical%20area/micropolitan%20statistical%20area:*`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) {
-      console.warn(`[amips-p1-market] census api ${res.status}; using fallback`);
+      logger.warn(`[amips-p1-market] census api ${res.status}; using fallback`);
       return result;
     }
     // Shape: [["NAME","P1_001N","..."], ["Los Angeles-...","13200998",...], ...]
@@ -87,9 +88,9 @@ async function fetchCensusPopulations(): Promise<Map<string, number>> {
       );
       if (hit) result.set(metro, hit.pop);
     }
-    console.log(`[amips-p1-market] census matched ${result.size}/25 metros`);
+    logger.info(`[amips-p1-market] census matched ${result.size}/25 metros`);
   } catch (err) {
-    console.warn("[amips-p1-market] census fetch failed; using fallback", err);
+    logger.warn("[amips-p1-market] census fetch failed; using fallback", err);
   }
   return result;
 }
@@ -168,7 +169,7 @@ function computeMetroScores(
  * upserted and how many received a non-zero buyer-leverage score.
  */
 export async function syncMarketIntelligence(): Promise<MarketSyncResult> {
-  console.log("[amips-p1-market] starting market intelligence sync");
+  logger.info("[amips-p1-market] starting market intelligence sync");
 
   const defs = getMetroDefs();
   const censusPop = await fetchCensusPopulations();
@@ -224,13 +225,13 @@ export async function syncMarketIntelligence(): Promise<MarketSyncResult> {
       },
     });
 
-    console.log(
+    logger.info(
       `[amips-p1-market] ${def.metro}, ${def.state}: pop=${population} ` +
         `dealers=${metroDealers.length} leverage=${scores.buyerLeverageScore}`,
     );
   }
 
-  console.log(
+  logger.info(
     `[amips-p1-market] done — metros ${defs.length}, scored ${scored}`,
   );
   return { metros: defs.length, scored };

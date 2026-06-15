@@ -13,6 +13,7 @@
 // schedulePost() publishes now and getPostStatus()/getAnalytics() return
 // best-effort results. All methods log and never throw unhandled errors.
 
+import { logger } from "@/lib/logger";
 import type {
   PublishingProvider,
   SchedulePostInput,
@@ -50,21 +51,21 @@ export class LinkedInProvider implements PublishingProvider {
       });
       const text = await res.text().catch(() => "");
       if (!res.ok) {
-        console.error(`[publish:linkedin] userinfo HTTP ${res.status}: ${text.slice(0, 200)}`);
+        logger.error(`[publish:linkedin] userinfo HTTP ${res.status}: ${text.slice(0, 200)}`);
         return undefined;
       }
       const json = text ? (JSON.parse(text) as { sub?: string }) : {};
       return json.sub || undefined;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[publish:linkedin] userinfo failed: ${message}`);
+      logger.error(`[publish:linkedin] userinfo failed: ${message}`);
       return undefined;
     }
   }
 
   private async share(input: SchedulePostInput | PublishPostInput): Promise<PublishResult> {
     const token = process.env.LINKEDIN_ACCESS_TOKEN ?? "";
-    console.log(`[publish:linkedin] share platform=${input.platform}`);
+    logger.info(`[publish:linkedin] share platform=${input.platform}`);
 
     if (!token) {
       return { success: false, error: "LINKEDIN_ACCESS_TOKEN not configured", provider: this.name };
@@ -112,7 +113,7 @@ export class LinkedInProvider implements PublishingProvider {
       const text = await res.text().catch(() => "");
       if (!res.ok) {
         const detail = text.slice(0, 300);
-        console.error(`[publish:linkedin] HTTP ${res.status}: ${detail}`);
+        logger.error(`[publish:linkedin] HTTP ${res.status}: ${detail}`);
         // A 403 referencing the author field means the token lacks the scope to
         // post as this author. Fail cleanly (no retry) so the queue moves on.
         if (res.status === 403 && /author/i.test(text)) {
@@ -136,11 +137,11 @@ export class LinkedInProvider implements PublishingProvider {
       if (!platformPostId) {
         return { success: false, error: "LinkedIn response missing post id", provider: this.name };
       }
-      console.log(`[publish:linkedin] published id=${platformPostId}`);
+      logger.info(`[publish:linkedin] published id=${platformPostId}`);
       return { success: true, platformPostId, provider: this.name };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[publish:linkedin] share failed: ${message}`);
+      logger.error(`[publish:linkedin] share failed: ${message}`);
       return { success: false, error: message, provider: this.name };
     }
   }
@@ -159,7 +160,7 @@ export class LinkedInProvider implements PublishingProvider {
   async getPostStatus(platformPostId: string): Promise<PostStatusResult> {
     // Once published via ugcPosts the share is live; richer status requires
     // additional scopes we don't request.
-    console.log(`[publish:linkedin] getPostStatus id=${platformPostId}`);
+    logger.info(`[publish:linkedin] getPostStatus id=${platformPostId}`);
     return { platformPostId, status: "PUBLISHED" };
   }
 
@@ -197,7 +198,7 @@ export class LinkedInProvider implements PublishingProvider {
         },
       });
       if (res.status === 403) {
-        console.error("[publish:linkedin] analytics unavailable — token lacks scope");
+        logger.error("[publish:linkedin] analytics unavailable — token lacks scope");
         return unknown;
       }
       const data = (await res.json().catch(() => ({}))) as {
@@ -214,7 +215,7 @@ export class LinkedInProvider implements PublishingProvider {
         impressions: null,
       };
     } catch (err) {
-      console.error("[publish:linkedin] getAnalytics failed (non-fatal):", err);
+      logger.error("[publish:linkedin] getAnalytics failed (non-fatal):", err);
       return unknown;
     }
   }

@@ -6,6 +6,7 @@
 // video generation, and marks the source signal consumed. It also handles
 // approval/rejection and the actual publish hand-off to the publishing provider.
 
+import { logger } from "@/lib/logger";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type {
@@ -123,7 +124,7 @@ export async function generateAndQueuePost(
   const publishDelay = PLATFORM_PUBLISH_DELAY_MS[platform] ?? 0;
   const scheduledAt = new Date(input.scheduledAt.getTime() + publishDelay);
 
-  console.log(
+  logger.info(
     "[orchestrator] routing signal:",
     signal.signalType,
     "franchise:",
@@ -146,7 +147,7 @@ export async function generateAndQueuePost(
       getOrFetchTrendingData().catch(() => null),
     ]);
 
-  console.log("[orchestrator] generating for platform:", platform, "hookType:", hookType);
+  logger.info("[orchestrator] generating for platform:", platform, "hookType:", hookType);
   const scriptInput = {
     franchise,
     signal,
@@ -160,7 +161,7 @@ export async function generateAndQueuePost(
     trendingData,
   };
   const script = await generateSocialScript(scriptInput);
-  console.log("[orchestrator] groq result:", !!script);
+  logger.info("[orchestrator] groq result:", !!script);
 
   // ─── Content quality gate ────────────────────────────────────────────────
   // Score the generated content before persisting. Low scores trigger a single
@@ -176,7 +177,7 @@ export async function generateAndQueuePost(
     complianceNotes: script.complianceNotes,
   });
 
-  console.log(
+  logger.info(
     `[orchestrator] quality: ${quality.total}/100`,
     quality.isPriority ? "🔥 PRIORITY" : "",
     quality.needsRegeneration ? "⚠️ REGENERATING" : "",
@@ -204,10 +205,10 @@ export async function generateAndQueuePost(
       if (retryQuality.total > quality.total) {
         // Use the better version (mutates the shared script object in place).
         Object.assign(script, retryOutput);
-        console.log(`[orchestrator] retry improved: ${retryQuality.total}/100`);
+        logger.info(`[orchestrator] retry improved: ${retryQuality.total}/100`);
       }
     } catch (retryErr) {
-      console.error("[orchestrator] retry failed, using original:", retryErr);
+      logger.error("[orchestrator] retry failed, using original:", retryErr);
     }
   }
 
@@ -248,7 +249,7 @@ export async function generateAndQueuePost(
       platform,
       platformConfig,
     }).catch((err) => {
-      console.warn(
+      logger.warn(
         "[orchestrator] hook A/B generation failed, falling back to single post:",
         err instanceof Error ? err.message : err,
       );
@@ -256,7 +257,7 @@ export async function generateAndQueuePost(
     });
 
     if (variants && variants.length > 1) {
-      console.log("[orchestrator] FULL_AUTO A/B: scheduling", variants.length, "hook variants");
+      logger.info("[orchestrator] FULL_AUTO A/B: scheduling", variants.length, "hook variants");
       const posts: SocialPost[] = [];
       for (let i = 0; i < variants.length; i++) {
         const variant = variants[i];
@@ -315,7 +316,7 @@ export async function generateAndQueuePost(
             },
           });
         } catch (err) {
-          console.error(
+          logger.error(
             `[orchestrator] A/B variant create FAILED for ${franchise.slug}/${platform} (${variant.hookType}):`,
             err instanceof Error ? err.message : err,
           );
@@ -334,7 +335,7 @@ export async function generateAndQueuePost(
             },
           });
         } catch (err) {
-          console.error(
+          logger.error(
             `[orchestrator] A/B contentDerivative.create failed for post ${variantPost.id} (non-fatal):`,
             err instanceof Error ? err.message : err,
           );
@@ -355,19 +356,19 @@ export async function generateAndQueuePost(
             data: { assetsGenerated: true, assetCount: { increment: posts.length } },
           });
         } catch (err) {
-          console.error(
+          logger.error(
             `[orchestrator] topicSignal.update failed for signal ${signal.id} (non-fatal):`,
             err instanceof Error ? err.message : err,
           );
         }
-        console.log("[orchestrator] FULL_AUTO A/B: created", posts.length, "variant posts");
+        logger.info("[orchestrator] FULL_AUTO A/B: created", posts.length, "variant posts");
         return posts[0];
       }
-      console.warn("[orchestrator] FULL_AUTO A/B: no variant posts persisted, falling back to single post");
+      logger.warn("[orchestrator] FULL_AUTO A/B: no variant posts persisted, falling back to single post");
     }
   }
 
-  console.log("[orchestrator] creating post in DB");
+  logger.info("[orchestrator] creating post in DB");
   let post: SocialPost;
   try {
     post = await prisma.socialPost.create({
@@ -414,13 +415,13 @@ export async function generateAndQueuePost(
     // Surface the real Prisma failure (missing model in the generated client,
     // table not migrated, constraint violation) instead of letting it bubble
     // up as an opaque error. Re-thrown so the caller marks this platform failed.
-    console.error(
+    logger.error(
       `[orchestrator] socialPost.create FAILED for ${franchise.slug}/${platform}:`,
       err instanceof Error ? err.message : err,
     );
     throw err;
   }
-  console.log("[orchestrator] post created:", post.id);
+  logger.info("[orchestrator] post created:", post.id);
 
   // ContentDerivative is a bookkeeping link, not core to the post. A failure
   // here must never discard an already-persisted post.
@@ -435,7 +436,7 @@ export async function generateAndQueuePost(
       },
     });
   } catch (err) {
-    console.error(
+    logger.error(
       `[orchestrator] contentDerivative.create failed for post ${post.id} (non-fatal):`,
       err instanceof Error ? err.message : err,
     );
@@ -453,7 +454,7 @@ export async function generateAndQueuePost(
       data: { assetsGenerated: true, assetCount: { increment: 1 } },
     });
   } catch (err) {
-    console.error(
+    logger.error(
       `[orchestrator] topicSignal.update failed for signal ${signal.id} (non-fatal):`,
       err instanceof Error ? err.message : err,
     );
@@ -473,10 +474,10 @@ function scheduleVisualGeneration(post: SocialPost): void {
       );
       const visuals = await generatePostVisuals(post);
       if (visuals.imageUrl) {
-        console.log("[orchestrator] image generated for post:", post.id);
+        logger.info("[orchestrator] image generated for post:", post.id);
       }
     } catch (err) {
-      console.error("[orchestrator] image generation failed (non-fatal):", err);
+      logger.error("[orchestrator] image generation failed (non-fatal):", err);
     }
   };
 

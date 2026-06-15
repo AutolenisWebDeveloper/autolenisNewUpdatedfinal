@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import twilio from "twilio";
 
 // Shared Twilio SMS sender for one-off transactional messages (e.g. the voice
@@ -25,14 +26,14 @@ export async function sendSms(to: string, body: string): Promise<boolean> {
   const from = process.env.TWILIO_FROM_NUMBER;
   const client = getTwilioClient();
   if (!client || !from) {
-    console.warn("[sms/twilio] Twilio not configured — SMS skipped");
+    logger.warn("[sms/twilio] Twilio not configured — SMS skipped");
     return false;
   }
   try {
     await client.messages.create({ from, to, body });
     return true;
   } catch (err) {
-    console.error("[sms/twilio] send failed:", err);
+    logger.error("[sms/twilio] send failed:", err);
     return false;
   }
 }

@@ -8,6 +8,7 @@
 // — the LLM is told NOT to include them — so compliance never depends on model
 // behavior.
 
+import { logger } from "@/lib/logger";
 import { GROQ_REASONING } from "@/lib/ai/acquisition"
 
 export interface EmailTemplateInput {
@@ -94,7 +95,7 @@ async function callGroqWithRetry(
       if (!message.includes("429") && !message.includes("503")) throw err
       if (attempt === maxAttempts - 1) throw err
       const backoffMs = Math.min(8000 * Math.pow(2, attempt), 32000)
-      console.warn(
+      logger.warn(
         `[phase-4b3] Groq retry ${attempt + 1}/${maxAttempts} after ${backoffMs}ms: ${message.substring(0, 120)}`,
       )
       await new Promise((resolve) => setTimeout(resolve, backoffMs))
@@ -192,7 +193,7 @@ Would you have 15 minutes this week for a quick call to see how it works?`,
         : fallback.body
     return { subject, body }
   } catch (err) {
-    console.warn(
+    logger.warn(
       `[phase-4b3] Email JSON parse failed, using fallback: ${err instanceof Error ? err.message : String(err)}`,
     )
     return fallback
@@ -456,7 +457,7 @@ export async function generateEmailTemplate(
       maxTokens: 900,
     })
   } catch (err) {
-    console.error(
+    logger.error(
       `[phase-4b3] Groq email generation failed for ${input.dealerName}, using fallback:`,
       err,
     )

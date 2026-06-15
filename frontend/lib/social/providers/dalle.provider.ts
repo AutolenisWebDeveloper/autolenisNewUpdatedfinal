@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 // AutoLenis Social Engine — DALL-E 3 image provider (OpenAI Images API).
 //
 // Primary still-image provider for social posts. Given a post's visual prompt
@@ -120,7 +121,7 @@ export async function generateDalleImage(input: {
 
     if (!response.ok) {
       const errBody = (await response.json().catch(() => null)) as DalleApiError | null;
-      console.error("[dalle] API error:", errBody);
+      logger.error("[dalle] API error:", errBody);
       return {
         success: false,
         error: `DALL-E API ${response.status}: ${
@@ -137,10 +138,10 @@ export async function generateDalleImage(input: {
       return { success: false, error: "No image URL in DALL-E response" };
     }
 
-    console.log("[dalle] generated image for:", input.franchise, input.platform);
+    logger.info("[dalle] generated image for:", input.franchise, input.platform);
     return { success: true, imageUrl, revisedPrompt };
   } catch (err) {
-    console.error("[dalle] generation failed:", err);
+    logger.error("[dalle] generation failed:", err);
     return {
       success: false,
       error: err instanceof Error ? err.message : "Unknown error",

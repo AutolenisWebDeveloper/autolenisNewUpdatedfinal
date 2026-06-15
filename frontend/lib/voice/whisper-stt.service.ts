@@ -9,6 +9,7 @@
 // Every failure path returns provider: "twilio_fallback" so the caller can be
 // re-asked with the standard <Gather> STT — Whisper never breaks the call.
 
+import { logger } from "@/lib/logger";
 import OpenAI, { toFile } from "openai";
 
 const WHISPER_MODEL = "whisper-1";
@@ -55,7 +56,7 @@ async function fetchRecording(recordingUrl: string): Promise<ArrayBuffer | null>
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
   if (!accountSid || !authToken) {
-    console.error("[zura-p4] Missing Twilio credentials — cannot fetch recording");
+    logger.error("[zura-p4] Missing Twilio credentials — cannot fetch recording");
     return null;
   }
 
@@ -71,10 +72,10 @@ async function fetchRecording(recordingUrl: string): Promise<ArrayBuffer | null>
         await sleep(FETCH_BACKOFF_MS[attempt] ?? 1600);
         continue;
       }
-      console.error(`[zura-p4] Recording fetch failed: HTTP ${res.status}`);
+      logger.error(`[zura-p4] Recording fetch failed: HTTP ${res.status}`);
       return null;
     } catch (err) {
-      console.error("[zura-p4] Recording fetch error:", err);
+      logger.error("[zura-p4] Recording fetch error:", err);
       if (attempt < FETCH_ATTEMPTS - 1) {
         await sleep(FETCH_BACKOFF_MS[attempt] ?? 1600);
         continue;
@@ -111,14 +112,14 @@ export async function transcribeAudio(
   };
 
   if (!process.env.OPENAI_API_KEY) {
-    console.warn("[zura-p4] OPENAI_API_KEY unset — falling back to Twilio STT");
+    logger.warn("[zura-p4] OPENAI_API_KEY unset — falling back to Twilio STT");
     return fallback;
   }
 
   try {
     const audio = await fetchRecording(recordingUrl);
     if (!audio || audio.byteLength === 0) {
-      console.warn(`[zura-p4] No audio for recording ${recordingSid} — Twilio fallback`);
+      logger.warn(`[zura-p4] No audio for recording ${recordingSid} — Twilio fallback`);
       return fallback;
     }
 
@@ -144,14 +145,14 @@ export async function transcribeAudio(
     const durationSeconds = typeof raw.duration === "number" ? raw.duration : 0;
     const confidence = text ? scoreConfidence(raw.segments) : "low";
 
-    console.log(
+    logger.info(
       `[zura-p4] Whisper transcribed: "${text.slice(0, 120)}"` +
         ` | confidence: ${confidence}, duration: ${durationSeconds.toFixed(1)}s`,
     );
 
     return { text, confidence, durationSeconds, provider: "whisper" };
   } catch (err) {
-    console.error("[zura-p4] Whisper transcription failed:", err);
+    logger.error("[zura-p4] Whisper transcription failed:", err);
     return fallback;
   }
 }

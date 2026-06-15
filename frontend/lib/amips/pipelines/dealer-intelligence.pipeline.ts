@@ -15,6 +15,7 @@
 // The sync is idempotent: rows are matched on (dealerName, brand, city, state)
 // and updated in place, so re-running refreshes density without duplicating.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import {
   lookupZip,
@@ -70,7 +71,7 @@ interface GeoDealer {
  * rows synced, skipped (no brand / not geocodable), and errored.
  */
 export async function syncDealerIntelligence(): Promise<DealerSyncResult> {
-  console.log("[amips-p1-dealer] starting dealer intelligence sync");
+  logger.info("[amips-p1-dealer] starting dealer intelligence sync");
 
   const prospects = await prisma.dealerProspect.findMany({
     select: {
@@ -84,7 +85,7 @@ export async function syncDealerIntelligence(): Promise<DealerSyncResult> {
     },
   });
 
-  console.log(`[amips-p1-dealer] loaded ${prospects.length} dealer prospects`);
+  logger.info(`[amips-p1-dealer] loaded ${prospects.length} dealer prospects`);
 
   // Build the geocoded working set. Anything without a brand or resolvable
   // coordinate is skipped — density + Market Score need both.
@@ -178,11 +179,11 @@ export async function syncDealerIntelligence(): Promise<DealerSyncResult> {
       synced++;
     } catch (err) {
       errors++;
-      console.error(`[amips-p1-dealer] error syncing dealer ${d.name}:`, err);
+      logger.error(`[amips-p1-dealer] error syncing dealer ${d.name}:`, err);
     }
   }
 
-  console.log(
+  logger.info(
     `[amips-p1-dealer] done — synced ${synced}, skipped ${skipped}, errors ${errors}`,
   );
   return { synced, skipped, errors };

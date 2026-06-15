@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { inngest } from '@/lib/inngest/client';
@@ -508,7 +509,7 @@ export class WorkflowEngine {
         // are visible in workflow_execution_log if the enrollment itself
         // succeeded; if it never enrolled the API call still returns success
         // for the others.
-        console.error('[workflow] enroll failed', w.id, err);
+        logger.error('[workflow] enroll failed', w.id, err);
       }
     }
     return { enrolled, skipped };

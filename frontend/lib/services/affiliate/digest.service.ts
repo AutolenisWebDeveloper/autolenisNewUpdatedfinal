@@ -15,6 +15,7 @@
 // Safe to re-run: a partial failure (e.g. Resend outage) keeps lastDigestSentAt NOT set,
 // so the next cron tick retries. Successfully-sent digests are EmailSendLog-deduped.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { sendAffiliateWeeklyDigest } from "@/lib/services/email/resend.service";
 import crypto from "crypto";
@@ -130,8 +131,7 @@ export async function sendWeeklyDigestForAffiliate(affiliateId: string, now: Dat
       unsubscribeToken,
     });
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error("[affiliate-digest] send failed", { affiliateId, err: err instanceof Error ? err.message : err });
+    logger.error("[affiliate-digest] send failed", { affiliateId, err: err instanceof Error ? err.message : err });
     return { affiliateId, email: affiliate.user.email, status: "failed", reason: "Resend send failed" };
   }
 

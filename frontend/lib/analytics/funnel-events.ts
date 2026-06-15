@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 // Centralized funnel-event taxonomy. Every LP/TY surface fires events through
 // this single channel — GA4, Microsoft Clarity, dataLayer. Pixel-specific
 // events (FB/TikTok) still fire from the calling component because they need
@@ -59,7 +60,7 @@ export function trackFunnelEvent(
     window.dataLayer = window.dataLayer || [];
     window.dataLayer.push({ event, ...payload });
     if (process.env.NODE_ENV !== "production") {
-      console.log("[funnel]", event, payload);
+      logger.info("[funnel]", event, payload);
     }
   } catch {
     // Analytics must never throw into UX.

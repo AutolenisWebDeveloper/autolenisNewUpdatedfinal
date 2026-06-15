@@ -6,6 +6,7 @@
 // are valid. Scheduling is modeled with scheduledAt + approvedAt; the
 // content-publisher cron flips due, approved, validated articles to PUBLISHED.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { snapshot, rollback as rollbackVersion } from "@/lib/services/content/content-version.service";
 import { recordWorkflowEvent } from "@/lib/services/content/content-workflow";
@@ -145,7 +146,7 @@ export async function publishDueScheduled(maxPerRun: number, now = new Date()) {
       published += 1;
     } catch (err) {
       failed += 1;
-      console.error(
+      logger.error(
         `[content-publisher] failed ${a.slug}:`,
         err instanceof Error ? err.message : err,
       );

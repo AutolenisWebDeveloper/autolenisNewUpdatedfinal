@@ -6,6 +6,7 @@
 // minutes apart. selectWinningVariant() is called by the analytics sync cron
 // once enough CTR data is available.
 
+import { logger } from "@/lib/logger";
 import type { ContentFranchise, TopicSignal } from "@prisma/client";
 import type { PlatformConfig } from "@/lib/social/config";
 import { generateSocialScript } from "@/lib/social/groq-script.engine";
@@ -40,7 +41,7 @@ export async function generateHookVariants(input: {
     if (hookTypes.length === 3) break;
   }
 
-  console.log("[hook-ab] generating", hookTypes.length, "variants for", franchise.slug, platform);
+  logger.info("[hook-ab] generating", hookTypes.length, "variants for", franchise.slug, platform);
 
   const results = await Promise.allSettled(
     hookTypes.map((hookType) =>
@@ -60,11 +61,11 @@ export async function generateHookVariants(input: {
         ctaText: r.value.ctaText,
       });
     } else {
-      console.warn("[hook-ab] variant", hookTypes[i], "failed:", r.reason instanceof Error ? r.reason.message : r.reason);
+      logger.warn("[hook-ab] variant", hookTypes[i], "failed:", r.reason instanceof Error ? r.reason.message : r.reason);
     }
   }
 
-  console.log("[hook-ab] variants generated:", variants.length);
+  logger.info("[hook-ab] variants generated:", variants.length);
   return variants;
 }
 
@@ -84,7 +85,7 @@ export function selectWinningVariant(
     if (ctr > bestCtr) { best = v; bestCtr = ctr; }
   }
 
-  console.log("[hook-ab] winning variant:", best.hookType, "ctr:", bestCtr);
+  logger.info("[hook-ab] winning variant:", best.hookType, "ctr:", bestCtr);
   return best;
 }
 
@@ -236,7 +237,7 @@ export async function scoreAndResolveGroup(
     },
   });
 
-  console.log(
+  logger.info(
     `[ab-test] resolved group ${groupId}:`,
     `winner=${winner.hookType} (score=${winner.score.toFixed(1)})`,
   );

@@ -8,6 +8,7 @@
 // The report is real-data-backed: the analyst prompt states figures as fact,
 // never as estimates, and never uses guarantee language.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { GROQ_SUMMARY } from "@/lib/ai/acquisition";
 import { LinkedInProvider } from "@/lib/social/providers/linkedin.provider";
@@ -47,7 +48,7 @@ async function callGroq(systemPrompt: string, userPrompt: string): Promise<strin
     }),
   });
 
-  console.log("[market-index] groq response status:", res.status);
+  logger.info("[market-index] groq response status:", res.status);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`);
@@ -226,7 +227,7 @@ export async function publishMarketIndex(): Promise<PublishMarketIndexResult> {
     hashtags: [],
   });
   if (!publishResult.success) {
-    console.error("[market-index] LinkedIn publish failed:", publishResult.error);
+    logger.error("[market-index] LinkedIn publish failed:", publishResult.error);
   }
 
   // Record as a SocialPost (best-effort).
@@ -260,7 +261,7 @@ export async function publishMarketIndex(): Promise<PublishMarketIndexResult> {
     });
     socialPostId = post.id;
   } catch (err) {
-    console.error(
+    logger.error(
       "[market-index] socialPost.create failed (non-fatal):",
       err instanceof Error ? err.message : err,
     );
@@ -275,10 +276,10 @@ export async function publishMarketIndex(): Promise<PublishMarketIndexResult> {
     summary: report.summary,
     linkedInUrl: linkedInUrl ?? undefined,
   }).catch((err) =>
-    console.error("[market-index] admin email failed:", err instanceof Error ? err.message : err),
+    logger.error("[market-index] admin email failed:", err instanceof Error ? err.message : err),
   );
 
-  console.log(`[market-index] published week of ${report.weekOf}`);
+  logger.info(`[market-index] published week of ${report.weekOf}`);
   return {
     weekOf: report.weekOf,
     published: publishResult.success,
@@ -430,7 +431,7 @@ Be specific and professional. No guarantees.`,
       )
     ).trim();
   } catch (err) {
-    console.error(
+    logger.error(
       "[intelligence-index] groq insight failed, using fallback:",
       err instanceof Error ? err.message : err,
     );
@@ -504,10 +505,10 @@ export async function generateAndPublishMarketIndex(): Promise<IntelligenceIndex
     published = publishResult.success;
     platformPostId = publishResult.platformPostId ?? null;
     if (!publishResult.success) {
-      console.error("[intelligence-index] LinkedIn publish failed:", publishResult.error);
+      logger.error("[intelligence-index] LinkedIn publish failed:", publishResult.error);
     }
   } catch (err) {
-    console.error("[intelligence-index] LinkedIn publish threw:", err);
+    logger.error("[intelligence-index] LinkedIn publish threw:", err);
   }
 
   // Record as a SocialPost (best-effort).
@@ -538,7 +539,7 @@ export async function generateAndPublishMarketIndex(): Promise<IntelligenceIndex
       },
     });
   } catch (err) {
-    console.error(
+    logger.error(
       "[intelligence-index] socialPost.create failed (non-fatal):",
       err instanceof Error ? err.message : err,
     );
@@ -552,12 +553,12 @@ export async function generateAndPublishMarketIndex(): Promise<IntelligenceIndex
       ? `https://www.linkedin.com/feed/update/${platformPostId}`
       : undefined,
   }).catch((err) =>
-    console.error(
+    logger.error(
       "[intelligence-index] admin email failed:",
       err instanceof Error ? err.message : err,
     ),
   );
 
-  console.log(`[intelligence-index] published week of ${index.weekOf}`);
+  logger.info(`[intelligence-index] published week of ${index.weekOf}`);
   return index;
 }

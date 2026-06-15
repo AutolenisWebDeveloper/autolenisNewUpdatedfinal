@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 // Phase C0 — GA4 custom events layer for the content engine.
 // All events flow through window.gtag with an SSR-safe null check. Analytics
 // must never throw into UX, so every call is wrapped defensively.
@@ -20,7 +21,7 @@ function emit(event: string, params: Record<string, unknown>): void {
     window.dataLayer = window.dataLayer || [];
     window.dataLayer.push({ event, ...params });
     if (process.env.NODE_ENV !== "production") {
-      console.log("[content-analytics]", event, params);
+      logger.info("[content-analytics]", event, params);
     }
   } catch {
     // Analytics must never throw into UX.

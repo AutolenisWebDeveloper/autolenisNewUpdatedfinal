@@ -5,6 +5,7 @@
 // unified intake service. Voice collects fewer fields than the web form, so
 // everything beyond name/email is optional.
 
+import { logger } from "@/lib/logger";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { UserRole } from "@prisma/client";
@@ -149,7 +150,7 @@ export async function dispatchVehicleRequest(
         user_metadata: { role: "BUYER", source: "voice-receptionist" },
       });
       if (authErr || !created?.user) {
-        console.error("[voice/dispatch] Supabase createUser failed:", authErr?.message);
+        logger.error("[voice/dispatch] Supabase createUser failed:", authErr?.message);
         return { success: false, error: "could not create buyer account" };
       }
       const supabaseId = created.user.id;
@@ -170,7 +171,7 @@ export async function dispatchVehicleRequest(
       }
     }
   } catch (err) {
-    console.error("[voice/dispatch] buyer resolve/create failed:", err);
+    logger.error("[voice/dispatch] buyer resolve/create failed:", err);
     return { success: false, error: "could not resolve buyer" };
   }
 
@@ -217,7 +218,7 @@ export async function dispatchVehicleRequest(
     };
     const result = await intakeBuyerRequest(input);
     if (!result.vehicleRequestId) {
-      console.error("[voice/dispatch] unified intake returned no vehicleRequestId");
+      logger.error("[voice/dispatch] unified intake returned no vehicleRequestId");
       return { success: false, buyerId, error: "could not save vehicle request" };
     }
     vehicleRequestId = result.vehicleRequestId;
@@ -242,12 +243,12 @@ export async function dispatchVehicleRequest(
             });
           }
         } catch (err) {
-          console.error("[post-intake] outreach or notification failed:", err);
+          logger.error("[post-intake] outreach or notification failed:", err);
         }
       });
     }
   } catch (err) {
-    console.error("[voice/dispatch] unified intake failed:", err);
+    logger.error("[voice/dispatch] unified intake failed:", err);
     return { success: false, buyerId, error: "could not save vehicle request" };
   }
 
@@ -257,7 +258,7 @@ export async function dispatchVehicleRequest(
       const { sendAdminCreatedBuyerEmail } = await import("@/lib/services/email/resend.service");
       await sendAdminCreatedBuyerEmail(email, firstName, tempPassword, `${APP_URL}/auth/signin`);
     } catch (err) {
-      console.error("[voice/dispatch] welcome email failed:", err);
+      logger.error("[voice/dispatch] welcome email failed:", err);
     }
   }
 
@@ -295,7 +296,7 @@ export async function dispatchVehicleRequest(
       created_by: null,
     });
   } catch (crmErr) {
-    console.error("[voice/dispatch] CRM sync failed:", crmErr);
+    logger.error("[voice/dispatch] CRM sync failed:", crmErr);
   }
 
   // 5. Fire the standard post-intake flow (welcome SMS/email + abandonment timer).
@@ -365,14 +366,14 @@ export async function sendFounderMessageAlert(
     const fromPhone = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_FROM_NUMBER;
 
     if (!founderPhone || !fromPhone) {
-      console.error(
+      logger.error(
         "[founder-alert] Missing FOUNDER_PHONE_NUMBER or TWILIO_PHONE_NUMBER/TWILIO_FROM_NUMBER",
       );
       return;
     }
 
     if (founderPhone === fromPhone) {
-      console.error("[founder-alert] FOUNDER_PHONE_NUMBER cannot equal the Twilio from number");
+      logger.error("[founder-alert] FOUNDER_PHONE_NUMBER cannot equal the Twilio from number");
       return;
     }
 
@@ -380,7 +381,7 @@ export async function sendFounderMessageAlert(
     const authToken = process.env.TWILIO_AUTH_TOKEN;
 
     if (!accountSid || !authToken) {
-      console.error("[founder-alert] Missing Twilio credentials");
+      logger.error("[founder-alert] Missing Twilio credentials");
       return;
     }
 
@@ -391,9 +392,9 @@ export async function sendFounderMessageAlert(
       body: smsBody,
     });
 
-    console.log(`[founder-alert] SMS sent for ${input.callReason}`);
+    logger.info(`[founder-alert] SMS sent for ${input.callReason}`);
   } catch (err) {
-    console.error(`[founder-alert] Failed: ${err instanceof Error ? err.message : err}`);
+    logger.error(`[founder-alert] Failed: ${err instanceof Error ? err.message : err}`);
   }
 
   // Also create a BuyerOpportunity record (lightweight) for tracking. The
@@ -417,7 +418,7 @@ export async function sendFounderMessageAlert(
       },
     });
   } catch (err) {
-    console.error(
+    logger.error(
       `[founder-alert] BuyerOpportunity create failed: ${err instanceof Error ? err.message : err}`,
     );
   }

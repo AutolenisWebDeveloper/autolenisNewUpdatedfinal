@@ -8,6 +8,7 @@
 //     bundle small); on any failure we fall back to a deterministic
 //     template so the buyer ALWAYS receives a text.
 
+import { logger } from "@/lib/logger";
 import twilio from "twilio";
 
 export class TwilioSendError extends Error {
@@ -40,7 +41,7 @@ export async function sendSms(to: string, body: string): Promise<string> {
     const msg = await getClient().messages.create({ from, to, body });
     return msg.sid;
   } catch (err) {
-    console.error("[twilio.sendSms] failed", { to, err });
+    logger.error("[twilio.sendSms] failed", { to, err });
     throw new TwilioSendError("Twilio message send failed", err);
   }
 }
@@ -49,7 +50,7 @@ export async function sendSms(to: string, body: string): Promise<string> {
 export async function notifyFounderHotLead(lead: HotLeadData): Promise<void> {
   const founderPhone = process.env.FOUNDER_PHONE_NUMBER;
   if (!founderPhone) {
-    console.warn(
+    logger.warn(
       "[twilio.notifyFounderHotLead] FOUNDER_PHONE_NUMBER not set — skipping",
     );
     return;
@@ -68,7 +69,7 @@ export async function notifyFounderHotLead(lead: HotLeadData): Promise<void> {
     await sendSms(founderPhone, body);
   } catch (err) {
     // Best-effort — never break the scoring flow.
-    console.error("[twilio.notifyFounderHotLead] send failed", err);
+    logger.error("[twilio.notifyFounderHotLead] send failed", err);
   }
 }
 
@@ -91,7 +92,7 @@ function buildFallbackBuyerSms(lead: HotLeadData): string {
 async function draftBuyerSmsWithClaude(lead: HotLeadData): Promise<string | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.warn(
+    logger.warn(
       "[twilio.sendHotLeadBuyerSms] ANTHROPIC_API_KEY not set — using fallback",
     );
     return null;
@@ -131,7 +132,7 @@ ZIP: ${lead.zip}`;
 
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      console.error("[twilio.sendHotLeadBuyerSms] anthropic HTTP error", {
+      logger.error("[twilio.sendHotLeadBuyerSms] anthropic HTTP error", {
         status: res.status,
         detail: detail.slice(0, 300),
       });
@@ -142,14 +143,14 @@ ZIP: ${lead.zip}`;
     const text = data.content?.find((b) => b.type === "text")?.text?.trim();
     return text && text.length > 0 ? text : null;
   } catch (err) {
-    console.error("[twilio.sendHotLeadBuyerSms] anthropic call failed", err);
+    logger.error("[twilio.sendHotLeadBuyerSms] anthropic call failed", err);
     return null;
   }
 }
 
 export async function sendHotLeadBuyerSms(lead: HotLeadData): Promise<void> {
   if (!lead.phone) {
-    console.warn("[twilio.sendHotLeadBuyerSms] no buyer phone — skipping");
+    logger.warn("[twilio.sendHotLeadBuyerSms] no buyer phone — skipping");
     return;
   }
 
@@ -161,6 +162,6 @@ export async function sendHotLeadBuyerSms(lead: HotLeadData): Promise<void> {
   } catch (err) {
     // We've already exhausted the AI fallback — log and swallow so the
     // finder flow returns 200 to the buyer regardless.
-    console.error("[twilio.sendHotLeadBuyerSms] final send failed", err);
+    logger.error("[twilio.sendHotLeadBuyerSms] final send failed", err);
   }
 }

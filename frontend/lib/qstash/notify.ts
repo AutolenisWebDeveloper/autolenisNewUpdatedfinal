@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import "server-only";
 import { Resend } from "resend";
 import twilio from "twilio";
@@ -61,7 +62,7 @@ async function resolveContact(
     if (!data?.contact_id) return null;
     return await ContactService.getContactById(supabase, data.contact_id);
   } catch (err) {
-    console.error(`[qstash/notify] contact resolution failed for ${entityType}:${entityId}`, err);
+    logger.error(`[qstash/notify] contact resolution failed for ${entityType}:${entityId}`, err);
     return null;
   }
 }
@@ -116,7 +117,7 @@ async function sendSms(
 
     const client = getTwilio();
     if (!client) {
-      console.warn(`[qstash/notify] Twilio not configured — SMS skipped for ${phone}`);
+      logger.warn(`[qstash/notify] Twilio not configured — SMS skipped for ${phone}`);
       return false;
     }
 
@@ -127,7 +128,7 @@ async function sendSms(
     });
     return true;
   } catch (err) {
-    console.error("[qstash/notify] SMS send failed:", err);
+    logger.error("[qstash/notify] SMS send failed:", err);
     return false;
   }
 }
@@ -148,7 +149,7 @@ async function sendEmail(
 
     const resend = getResend();
     if (!resend) {
-      console.warn(`[qstash/notify] Resend not configured — email skipped for ${email}`);
+      logger.warn(`[qstash/notify] Resend not configured — email skipped for ${email}`);
       return false;
     }
 
@@ -160,12 +161,12 @@ async function sendEmail(
       headers: { "List-Unsubscribe": `<${APP_URL}/unsubscribe>` },
     });
     if (out.error) {
-      console.error(`[qstash/notify] Resend dispatch failed for ${email}:`, out.error);
+      logger.error(`[qstash/notify] Resend dispatch failed for ${email}:`, out.error);
       return false;
     }
     return true;
   } catch (err) {
-    console.error("[qstash/notify] email send failed:", err);
+    logger.error("[qstash/notify] email send failed:", err);
     return false;
   }
 }

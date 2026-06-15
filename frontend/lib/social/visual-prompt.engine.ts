@@ -6,6 +6,7 @@
 // 429/503, strict JSON output. Falls back to franchise-specific templates when
 // Groq is unavailable so every post can still receive a high-quality visual.
 
+import { logger } from "@/lib/logger";
 import { GROQ_SUMMARY } from "@/lib/ai/acquisition";
 
 export interface VisualPromptInput {
@@ -172,7 +173,7 @@ async function callGroqWithRetry(systemPrompt: string, userPrompt: string): Prom
       if (!message.includes("429") && !message.includes("503")) throw err;
       if (attempt === maxAttempts - 1) throw err;
       const backoffMs = Math.min(8000 * Math.pow(2, attempt), 32000);
-      console.warn(`[visual-prompt] retry ${attempt + 1}/${maxAttempts} after ${backoffMs}ms`);
+      logger.warn(`[visual-prompt] retry ${attempt + 1}/${maxAttempts} after ${backoffMs}ms`);
       await new Promise((r) => setTimeout(r, backoffMs));
     }
   }
@@ -292,7 +293,7 @@ export async function generateVisualPrompt(
       onScreenText: typeof parsed.onScreenText === "string" ? parsed.onScreenText.trim() : "",
     };
   } catch (err) {
-    console.warn(
+    logger.warn(
       "[visual-prompt] Groq generation failed, using franchise template fallback:",
       err instanceof Error ? err.message : err,
     );

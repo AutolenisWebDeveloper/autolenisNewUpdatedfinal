@@ -1,5 +1,6 @@
 // TrueCar adapter — independently failure-isolated
 
+import { logger } from "@/lib/logger";
 import type { IInventoryAdapter, NormalizedVehicle, AdapterRunResult, SearchParams } from "./IInventoryAdapter";
 
 export class TrueCarAdapter implements IInventoryAdapter {
@@ -20,7 +21,7 @@ export class TrueCarAdapter implements IInventoryAdapter {
       const vehicles = await this.parseResponse(response);
       return { adapter: this.name, vehicles, duration: Date.now() - start, fetchedAt: new Date() };
     } catch (error) {
-      console.error(`[TrueCar adapter] Error:`, error);
+      logger.error(`[TrueCar adapter] Error:`, error);
       return { adapter: this.name, vehicles: [], duration: Date.now() - start, error: String(error), fetchedAt: new Date() };
     }
   }

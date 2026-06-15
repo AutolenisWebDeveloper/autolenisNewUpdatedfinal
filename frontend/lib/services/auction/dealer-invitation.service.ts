@@ -1,6 +1,7 @@
 // lib/services/auction/dealer-invitation.service.ts
 // System 3 ENH — Dealer invitation scoring and capacity throttling
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { sendDealerAuctionInvitationEmail } from "@/lib/services/email/resend.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
@@ -156,7 +157,7 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
         expiryHours: AUCTION_DURATION_HOURS,
         auctionId,
       }).catch(err =>
-        console.error(`[dealer-invitation] email failed for dealer ${dealerId}:`, err)
+        logger.error(`[dealer-invitation] email failed for dealer ${dealerId}:`, err)
       );
     }
 

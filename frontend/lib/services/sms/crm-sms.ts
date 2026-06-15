@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import 'server-only';
 import twilio from 'twilio';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -85,7 +86,7 @@ export async function sendCrmSms(params: {
     const optOut = await prisma.smsOptOut.findUnique({ where: { phone } });
     if (optOut) return { status: 'suppressed', reason: 'sms_opt_out' };
   } catch (err) {
-    console.error('[crm-sms] suppression lookup failed — failing closed:', err);
+    logger.error('[crm-sms] suppression lookup failed — failing closed:', err);
     return { status: 'failed', reason: 'suppression_check_error' };
   }
 
@@ -112,7 +113,7 @@ export async function sendCrmSms(params: {
     return { status: 'sent', sid: message.sid };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    console.error('[crm-sms] twilio send failed:', reason);
+    logger.error('[crm-sms] twilio send failed:', reason);
     return { status: 'failed', reason };
   }
 }

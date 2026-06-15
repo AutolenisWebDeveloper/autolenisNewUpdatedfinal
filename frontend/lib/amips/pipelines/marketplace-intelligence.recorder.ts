@@ -9,6 +9,7 @@
 // non-blocking after() hook so a failure here never affects the buyer's deal
 // flow. It records only real, observed values — never estimates.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { resolveMetro } from "@/lib/amips/metros";
 
@@ -58,7 +59,7 @@ export async function recordMarketplaceIntelligence(
     },
   });
 
-  console.log(
+  logger.info(
     `[amips-p4-marketplace] recorded ${input.vehicleMake} ${input.vehicleModel} in ${input.metro} — invited ${input.dealersInvited}, responded ${input.dealersResponded}`,
   );
 }
@@ -95,7 +96,7 @@ export async function recordMarketplaceFromAuction(
 
     const vehicle = auction.vehicles[0];
     if (!vehicle?.make || !vehicle?.model) {
-      console.log(
+      logger.info(
         `[amips-p4-marketplace] skip auction ${auctionId}: no vehicle make/model`,
       );
       return;
@@ -107,7 +108,7 @@ export async function recordMarketplaceFromAuction(
       auction.buyer.zip,
     );
     if (!metro) {
-      console.log(
+      logger.info(
         `[amips-p4-marketplace] skip auction ${auctionId}: buyer not in a tracked metro`,
       );
       return;
@@ -155,7 +156,7 @@ export async function recordMarketplaceFromAuction(
       transactionDate: new Date(),
     });
   } catch (err) {
-    console.error(
+    logger.error(
       `[amips-p4-marketplace] record failed for auction ${auctionId}:`,
       err,
     );

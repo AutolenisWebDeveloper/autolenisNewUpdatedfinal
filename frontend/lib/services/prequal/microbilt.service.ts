@@ -6,6 +6,7 @@
 // call returns MANUAL_REVIEW with reason TIMEOUT. ERROR-status responses are
 // logged and downgraded to MANUAL_REVIEW — never thrown to the buyer.
 
+import { logger } from "@/lib/logger";
 import { createCipheriv, randomBytes } from "crypto";
 import { PreQualDecision, PreQualTier } from "@prisma/client";
 import {
@@ -342,27 +343,27 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   // call apitest. with production credentials, and require both URLs.
   if (!isSandboxMode()) {
     if (reportUrl?.includes("apitest.")) {
-      console.error(
+      logger.error(
         "[microbilt] CRITICAL: production mode but report URL points to " +
         "apitest. Routing to MANUAL_REVIEW."
       );
       return errorResult("CONFIG_MISMATCH");
     }
     if (oauthUrl?.includes("apitest.")) {
-      console.error(
+      logger.error(
         "[microbilt] CRITICAL: production mode but OAuth URL points to " +
         "apitest. Routing to MANUAL_REVIEW."
       );
       return errorResult("CONFIG_MISMATCH");
     }
     if (!reportUrl?.endsWith("/GetReport")) {
-      console.warn(
+      logger.warn(
         "[microbilt] WARNING: report URL does not end with /GetReport — " +
         "verify configuration against spec."
       );
     }
     if (!reportUrl || !oauthUrl) {
-      console.error(
+      logger.error(
         "[microbilt] CRITICAL: missing production URLs. reportUrl=" +
         !!reportUrl + " oauthUrl=" + !!oauthUrl
       );
@@ -371,7 +372,7 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   }
 
   if (!reportUrl || !clientId || clientId.includes("placeholder")) {
-    console.error(
+    logger.error(
       "[microbilt] CONFIG_ERROR: MICROBILT_CLIENT_ID or the iPredict report URL " +
       "is missing or contains a placeholder, and MICROBILT_SANDBOX is not 'true'. " +
       "Routing prequalification to MANUAL_REVIEW until deployment env is fixed.",
@@ -446,7 +447,7 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   try {
     token = await getMicroBiltToken();
   } catch (err) {
-    console.error("[microbilt] OAuth failed:", err);
+    logger.error("[microbilt] OAuth failed:", err);
     return errorResult("OAUTH_FAILED");
   }
 
@@ -470,7 +471,7 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
     });
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") return timeoutResult();
-    console.error("[microbilt] iPredict network error:", err);
+    logger.error("[microbilt] iPredict network error:", err);
     return errorResult("NETWORK_ERROR");
   } finally {
     clearTimeout(timeout);
@@ -478,14 +479,14 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
-    console.error(`[microbilt] iPredict HTTP ${res.status}: ${errBody}`);
+    logger.error(`[microbilt] iPredict HTTP ${res.status}: ${errBody}`);
     return errorResult(`HTTP_${res.status}`);
   }
 
   const raw = (await res.json().catch(() => ({}))) as IPredictResponse;
 
   if (raw.RESPONSE?.STATUS?.type === "ERROR") {
-    console.error("[microbilt] iPredict returned ERROR:", raw.RESPONSE?.STATUS);
+    logger.error("[microbilt] iPredict returned ERROR:", raw.RESPONSE?.STATUS);
     return { ...errorResult("IPREDICT_ERROR"), rawResponse: encryptRawResponse(JSON.stringify(raw)) };
   }
 
@@ -596,7 +597,7 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
       // MicroBilt approved but returned no amount — cannot issue reliable budget
       finalDecision     = PreQualDecision.MANUAL_REVIEW;
       maxOtdAmountCents = 0;
-      console.warn("[microbilt] APPROVED with no loan amount — routing to MANUAL_REVIEW");
+      logger.warn("[microbilt] APPROVED with no loan amount — routing to MANUAL_REVIEW");
     }
   }
 

@@ -7,6 +7,7 @@
 // and city reporting. Degrades to a safe empty state on any error so the
 // dashboard always renders, even on an empty database.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { reconcileContentConversions } from "@/lib/analytics/content-attribution.server";
 
@@ -153,7 +154,7 @@ export async function getContentAttributionReport(): Promise<ContentAttributionR
       generatedAt: new Date().toISOString(),
     };
   } catch (err) {
-    console.error("[content-attribution] getContentAttributionReport failed", err);
+    logger.error("[content-attribution] getContentAttributionReport failed", err);
     return { ...EMPTY_REPORT, generatedAt: new Date().toISOString() };
   }
 }

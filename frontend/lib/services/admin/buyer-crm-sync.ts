@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import 'server-only';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
@@ -49,7 +50,7 @@ export async function syncBuyerLifecycleToCrm(
     await ContactService.updateLifecycleStage(supabase, contactId, stage, actor);
     return { synced: true };
   } catch (err) {
-    console.error('[buyer-crm-sync] lifecycle sync failed', { buyerId, stage, err });
+    logger.error('[buyer-crm-sync] lifecycle sync failed', { buyerId, stage, err });
     return { synced: false };
   }
 }

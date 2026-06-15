@@ -5,6 +5,7 @@
 // to narrate it, run the five quality gates, and persist the result. It never
 // invents data and never publishes a page that fails the gates.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import type { ContentQueue } from "@prisma/client";
 import { groqChat } from "@/lib/ai/groq-client";
@@ -128,7 +129,7 @@ export async function generateAmipsPage(
         failureReason: "Required intelligence data missing or stale",
       },
     });
-    console.log(
+    logger.info(
       `[amips-generator] tier=${queueItem.contentTier} status=pending_enrichment keyword="${queueItem.keywordTarget}"`,
     );
     return { status: "pending_enrichment" };
@@ -153,7 +154,7 @@ export async function generateAmipsPage(
         failureReason: `Unparseable model output: ${String(err)}`,
       },
     });
-    console.log(
+    logger.info(
       `[amips-generator] tier=${data.tier} status=failed reason=parse keyword="${data.keywordTarget}"`,
     );
     return { status: "failed", reason: "parse_error" };
@@ -186,7 +187,7 @@ export async function generateAmipsPage(
         failureReason: gate.failedGates.join("; "),
       },
     });
-    console.log(
+    logger.info(
       `[amips-generator] tier=${data.tier} status=failed score=${gate.score} gates="${gate.failedGates.join("; ")}"`,
     );
     return { status: "failed", qualityScore: gate.score, reason: "quality_gate" };
@@ -265,7 +266,7 @@ export async function generateAmipsPage(
     },
   });
 
-  console.log(
+  logger.info(
     `[amips-generator] tier=${data.tier} status=${gate.status} score=${gate.score} slug="${slug}" model=${completion.model}`,
   );
 
