@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { getAdminBuyerJourney } from "@/lib/services/admin/buyer-journey-admin.service";
@@ -14,7 +15,7 @@ export async function GET(request: NextRequest, { params }: Props) {
     if (!journey) return adminError("NOT_FOUND", "Buyer not found", 404);
     return adminSuccess({ journey });
   } catch (err) {
-    console.error("[admin/journey] Error:", err);
+    logger.error("[admin/journey] Error:", err);
     return adminError(
       "JOURNEY_ERROR",
       err instanceof Error ? err.message : "Failed to load journey",

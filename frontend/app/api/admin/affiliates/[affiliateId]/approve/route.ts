@@ -3,6 +3,7 @@
 // Regenerates referral code if missing. Sends activation email with referral code.
 // Requires admin auth, Zod validation, writes audit log via service.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       try {
         await sendAffiliateActivationEmail(affiliate.user.email, firstName, result.referralCode);
       } catch (err) {
-        console.error("[affiliates/approve] activation email failed", err);
+        logger.error("[affiliates/approve] activation email failed", err);
       }
     }
     syncGhlTag(affiliate?.user?.email, "affiliate-approved");

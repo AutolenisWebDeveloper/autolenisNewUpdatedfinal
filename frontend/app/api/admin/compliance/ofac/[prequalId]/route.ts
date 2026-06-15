@@ -2,6 +2,7 @@
 // Admin OFAC review actions on a PreQualification: CLEAR | ESCALATE.
 // CLEAR resumes the buyer's progress (decision → APPROVED) and notifies them.
 // ESCALATE routes the hit to legal (decision → OFAC_ESCALATED). Both audit-logged.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest, { params }: Props) {
           tier: prequal.tier ?? null,
           decisionDate: new Date(),
           expiryDate: prequal.expiresAt,
-        }).catch(err => console.error("[ofac] cleared approval email failed:", err));
+        }).catch(err => logger.error("[ofac] cleared approval email failed:", err));
       }
 
       result = { cleared: true };

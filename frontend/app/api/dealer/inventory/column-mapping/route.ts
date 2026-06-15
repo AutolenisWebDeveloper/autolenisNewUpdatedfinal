@@ -9,6 +9,7 @@
 //
 // Standard fields the mapping value may take: VIN, Year, Make, Model, Trim,
 // Mileage, Price, Skip.
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestDealer, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
@@ -164,7 +165,7 @@ export async function POST(request: NextRequest) {
         });
         created = result.count;
       } catch (err) {
-        console.error("[dealer/inventory/column-mapping] createMany failed:", err);
+        logger.error("[dealer/inventory/column-mapping] createMany failed:", err);
         return errorResponse("DB_ERROR", "Could not save inventory items", 500);
       }
     }

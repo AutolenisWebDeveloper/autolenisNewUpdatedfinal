@@ -2,6 +2,7 @@
 // Marks a buyer journey stage as organically complete by writing real DB records.
 // Uses existing service functions to ensure DealStatusHistory + audit trails.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -272,7 +273,7 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   return adminSuccess({ stageId, action, completed: true });
   } catch (err) {
-    console.error("[journey/complete] Unhandled error:", err);
+    logger.error("[journey/complete] Unhandled error:", err);
     return adminError(
       "INTERNAL_ERROR",
       err instanceof Error ? err.message : "An unexpected error occurred",

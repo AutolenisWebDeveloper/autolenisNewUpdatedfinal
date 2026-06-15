@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -53,7 +54,7 @@ export async function GET() {
     const stats = await computeStats();
     return NextResponse.json({ success: true, data: stats });
   } catch (err) {
-    console.error("[platform-stats] Database error:", err);
+    logger.error("[platform-stats] Database error:", err);
     return NextResponse.json(
       {
         error: {

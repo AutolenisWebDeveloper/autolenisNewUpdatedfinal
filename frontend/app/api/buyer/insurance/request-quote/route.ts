@@ -3,6 +3,7 @@
 // Updates deal.insuranceStatus to QUOTE_REQUESTED
 // Creates a buyer notification confirming submission
 // Creates an AdminAuditLog entry so the admin can see and respond to the request
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
       }
     }
   } catch (err) {
-    console.error("[insurance-quote] vehicle lookup failed:", err);
+    logger.error("[insurance-quote] vehicle lookup failed:", err);
   }
 
   // Update deal insurance status
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
       },
     },
   }).catch((err: unknown) => {
-    console.error("[insurance-quote] AdminAuditLog failed:", err);
+    logger.error("[insurance-quote] AdminAuditLog failed:", err);
   });
 
   // Notify buyer
@@ -125,7 +126,7 @@ export async function POST(request: NextRequest) {
       body:    `Your insurance quote request for the ${vehicleSummary} has been submitted. Our team will review and respond within 1 business day.`,
     },
   }).catch((err: unknown) => {
-    console.error("[insurance-quote] buyer notification failed:", err);
+    logger.error("[insurance-quote] buyer notification failed:", err);
   });
 
   return successResponse({ status: "QUOTE_REQUESTED", vehicleSummary });

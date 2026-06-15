@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { endImpersonation } from "@/lib/services/admin/admin-support.service";
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       entityType: "AdminImpersonation",
       entityId: impersonationId,
       reason: "Admin ended impersonation session",
-    }).catch(err => console.error("[impersonation/end] audit log failed:", err));
+    }).catch(err => logger.error("[impersonation/end] audit log failed:", err));
     return adminSuccess({ ended: true, impersonationId });
   } catch (err) {
     return adminError("END_FAILED", err instanceof Error ? err.message : "Failed to end impersonation", 400);

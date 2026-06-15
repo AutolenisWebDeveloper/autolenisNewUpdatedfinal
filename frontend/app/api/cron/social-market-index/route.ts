@@ -3,6 +3,7 @@
 // AutoLenis LinkedIn company page, records it as a SocialPost, and emails the
 // admin. Schedule: 0 12 * * 1 (Monday 07:00 CT).
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { publishMarketIndex } from "@/lib/social/market-index.generator";
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
     const result = await publishMarketIndex();
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
-    console.error("[market-index] cron failed:", err instanceof Error ? err.message : err);
+    logger.error("[market-index] cron failed:", err instanceof Error ? err.message : err);
     return NextResponse.json(
       { success: false, error: "Market index publish failed" },
       { status: 500 },

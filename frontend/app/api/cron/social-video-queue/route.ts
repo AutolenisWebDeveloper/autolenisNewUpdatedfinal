@@ -3,6 +3,7 @@
 // VIDEO_READY / VIDEO_FAILED and storing the resulting URLs.
 // Schedule: every 10 minutes.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -43,9 +44,9 @@ export async function GET(request: NextRequest) {
         [CRON_AUTH_HEADER]: `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`,
       },
     }).catch((err) =>
-      console.error("[video-queue] runway video trigger failed:", err),
+      logger.error("[video-queue] runway video trigger failed:", err),
     );
-    console.log("[video-queue] Runway video generation triggered");
+    logger.info("[video-queue] Runway video generation triggered");
   }
 
   const provider = getVideoProvider();
@@ -132,7 +133,7 @@ export async function GET(request: NextRequest) {
       }
     } catch (err) {
       failed += 1;
-      console.error(`[social-video-queue] error on video ${video.id}:`, err instanceof Error ? err.message : err);
+      logger.error(`[social-video-queue] error on video ${video.id}:`, err instanceof Error ? err.message : err);
     }
   }
 
@@ -147,7 +148,7 @@ export async function GET(request: NextRequest) {
   let imagesFailed = 0;
 
   if (!useOpenAI && !useHiggsfield) {
-    console.log("[video-queue] no image/video provider configured — skipping backfill");
+    logger.info("[video-queue] no image/video provider configured — skipping backfill");
   } else if (useOpenAI) {
     const postsNeedingImages = await prisma.socialPost.findMany({
       where: { status: "APPROVED", video: { is: null } },
@@ -160,10 +161,10 @@ export async function GET(request: NextRequest) {
         const visuals = await generateDallePostImage(post);
         if (visuals.imageUrl) {
           imagesGenerated += 1;
-          console.log("[video-queue] DALL-E image generated for post:", post.id);
+          logger.info("[video-queue] DALL-E image generated for post:", post.id);
         } else {
           imagesFailed += 1;
-          console.error(
+          logger.error(
             "[video-queue] DALL-E backfill failed for post:",
             post.id,
             "— creating VIDEO_FAILED to prevent infinite retry",
@@ -188,7 +189,7 @@ export async function GET(request: NextRequest) {
                 },
               })
               .catch((dbErr) =>
-                console.error(
+                logger.error(
                   "[video-queue] VIDEO_FAILED record creation failed:",
                   post.id,
                   dbErr,
@@ -199,7 +200,7 @@ export async function GET(request: NextRequest) {
       } catch (err) {
         imagesFailed += 1;
         const errorMsg = err instanceof Error ? err.message : String(err);
-        console.error(
+        logger.error(
           "[video-queue] DALL-E backfill error for post:",
           post.id,
           errorMsg,
@@ -292,7 +293,7 @@ export async function GET(request: NextRequest) {
           mediaProcessing += 1;
         }
       } catch (err) {
-        console.error("[video-queue] polling failed for:", gen.id, err instanceof Error ? err.message : err);
+        logger.error("[video-queue] polling failed for:", gen.id, err instanceof Error ? err.message : err);
         mediaFailed += 1;
       }
     }
@@ -311,6 +312,6 @@ export async function GET(request: NextRequest) {
     mediaFailed,
     timestamp: new Date().toISOString(),
   };
-  console.log("[social-video-queue]", JSON.stringify(summary));
+  logger.info("[social-video-queue]", JSON.stringify(summary));
   return NextResponse.json({ success: true, data: summary });
 }

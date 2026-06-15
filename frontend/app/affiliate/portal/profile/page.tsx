@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { requireAffiliate } from "@/lib/auth/affiliate-session";
 import { getOnboardingProfile, computeOnboardingCompletion } from "@/lib/services/affiliate/onboarding.service";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +32,7 @@ export default async function AffiliateProfilePage() {
   try {
     onboardingData = await getOnboardingProfile(affiliate.id);
   } catch {
-    console.warn("[profile] onboarding tables not yet migrated — showing basic profile");
+    logger.warn("[profile] onboarding tables not yet migrated — showing basic profile");
   }
   const completion = computeOnboardingCompletion(onboardingData);
   const { profile, taxProfile, paymentProfile } = onboardingData;

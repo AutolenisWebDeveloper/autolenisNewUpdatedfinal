@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { verifyQStashRequest } from "@/lib/qstash/verify";
 import { notifyContact, renderEmail } from "@/lib/qstash/notify";
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("Job failed:", err);
+    logger.error("Job failed:", err);
     // Return 500 so QStash retries.
     return NextResponse.json({ error: "Job failed" }, { status: 500 });
   }

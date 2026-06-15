@@ -1,6 +1,7 @@
 // POST /api/dealer/documents/upload — upload dealer document to Supabase Storage.
 // Accepts multipart/form-data with a "file" field (PDF, JPG, PNG, WEBP).
 // Uploads to bucket "dealer-documents", creates a Document record for the dealer.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { createServiceSupabaseClient } from "@/lib/supabase";
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
     .upload(path, buffer, { contentType: file.type, upsert: false });
 
   if (uploadError) {
-    console.error("[dealer/documents/upload]", uploadError);
+    logger.error("[dealer/documents/upload]", uploadError);
     return errorResponse("STORAGE_ERROR", "File upload failed. Please try again.", 500);
   }
 

@@ -1,4 +1,5 @@
 // POST /api/buyer/prequal/external
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
       title: "Pre-approval submitted",
       body: `Your ${lenderName} pre-approval has been submitted for review. Our team will verify and update your profile within 1 business day.`,
     },
-  }).catch((err: unknown) => { console.error("[ExternalPrequal] Failed to create notification:", err); });
+  }).catch((err: unknown) => { logger.error("[ExternalPrequal] Failed to create notification:", err); });
 
   return successResponse({ submissionId: submission.id, status: submission.status });
 }

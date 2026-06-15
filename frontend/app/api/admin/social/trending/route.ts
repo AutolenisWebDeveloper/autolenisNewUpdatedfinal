@@ -3,6 +3,7 @@
 // topics, Google Trends) from SocialIntelligenceCache. Refreshed by the daily
 // trending cron at 5AM UTC; returns { stale: true } until the first run lands.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
       lastUpdated: cached.updatedAt,
     });
   } catch (err) {
-    console.error("[admin/social] trending GET failed:", err);
+    logger.error("[admin/social] trending GET failed:", err);
     return adminSuccess({ trending: null, stale: true });
   }
 }

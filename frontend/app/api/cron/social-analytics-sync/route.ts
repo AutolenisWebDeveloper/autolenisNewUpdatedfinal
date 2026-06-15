@@ -7,6 +7,7 @@
 // UTM revenue-attribution chain; for now they default to 0 and the lead score
 // reflects engagement + clicks only.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -101,12 +102,12 @@ export async function GET(request: NextRequest) {
           vehicleRequests: metrics.vehicleRequests ?? 0,
         },
       ).catch((err) =>
-        console.error("[analytics-sync] video learning:", err),
+        logger.error("[analytics-sync] video learning:", err),
       );
 
       recorded += 1;
     } catch (err) {
-      console.error(`[social-analytics-sync] failed post ${post.id}:`, err instanceof Error ? err.message : err);
+      logger.error(`[social-analytics-sync] failed post ${post.id}:`, err instanceof Error ? err.message : err);
     }
   }
 
@@ -116,10 +117,10 @@ export async function GET(request: NextRequest) {
     const { resolveAbTests } = await import("@/lib/social/ab-test-resolver");
     const resolved = await resolveAbTests();
     if (resolved.length > 0) {
-      console.log(`[analytics-sync] resolved ${resolved.length} A/B tests`);
+      logger.info(`[analytics-sync] resolved ${resolved.length} A/B tests`);
     }
   } catch (err) {
-    console.error("[analytics-sync] A/B resolution failed:", err);
+    logger.error("[analytics-sync] A/B resolution failed:", err);
   }
 
   // Check for viral signals after syncing performance data. Velocity is
@@ -132,10 +133,10 @@ export async function GET(request: NextRequest) {
     }
     viralAlertCount = viralAlerts.length;
     if (viralAlerts.length > 0) {
-      console.log(`[social-analytics-sync] viral alerts: ${viralAlerts.length}`);
+      logger.info(`[social-analytics-sync] viral alerts: ${viralAlerts.length}`);
     }
   } catch (viralErr) {
-    console.error("[social-analytics-sync] viral detection failed:", viralErr);
+    logger.error("[social-analytics-sync] viral detection failed:", viralErr);
     // Non-fatal — continue.
   }
 
@@ -145,6 +146,6 @@ export async function GET(request: NextRequest) {
     viralAlerts: viralAlertCount,
     timestamp: new Date().toISOString(),
   };
-  console.log("[social-analytics-sync]", JSON.stringify(summary));
+  logger.info("[social-analytics-sync]", JSON.stringify(summary));
   return NextResponse.json({ success: true, data: summary });
 }

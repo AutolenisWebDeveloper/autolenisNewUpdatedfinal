@@ -1,5 +1,6 @@
 "use client";
 
+import { logger } from "@/lib/logger";
 import { useEffect } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ export default function BuyerError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("[buyer] unhandled page error:", error);
+    logger.error("[buyer] unhandled page error:", error);
   }, [error]);
 
   return (

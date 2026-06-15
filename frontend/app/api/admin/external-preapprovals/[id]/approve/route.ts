@@ -7,6 +7,7 @@
 // Writes AuditLog: EXTERNAL_PREQUAL_APPROVED
 // Requires reason (min 10 chars)
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -115,7 +116,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       });
     }
   } catch (err) {
-    console.error("[external-preapprovals/approve] email failed:", err);
+    logger.error("[external-preapprovals/approve] email failed:", err);
   }
 
   return adminSuccess({ approved: true, prequalId: prequal.id });

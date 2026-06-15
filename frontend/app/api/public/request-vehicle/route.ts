@@ -9,6 +9,7 @@
 // and a title prefix of `Vehicle Request:` so they show up on the new
 // `/admin/vehicle-requests` queue page. Best-effort emails go out to the
 // admin and a confirmation to the buyer.
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse, after } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -164,12 +165,12 @@ async function uploadPreApproval(file: File): Promise<string | null> {
       .from("prequal-letters")
       .upload(path, buffer, { contentType: file.type });
     if (upErr) {
-      console.error("[request-vehicle] supabase upload error:", upErr);
+      logger.error("[request-vehicle] supabase upload error:", upErr);
       return null;
     }
     return supabase.storage.from("prequal-letters").getPublicUrl(path).data.publicUrl;
   } catch (err) {
-    console.error("[request-vehicle] upload exception:", err);
+    logger.error("[request-vehicle] upload exception:", err);
     return null;
   }
 }
@@ -319,12 +320,12 @@ export async function POST(request: NextRequest) {
             },
           }).catch(() => {});
 
-          console.log(
+          logger.info(
             `[request-vehicle] auto-advanced to INTAKE: ${vehicleRequestId}`
           );
         }
       } catch (err) {
-        console.error("[request-vehicle] auto-intake failed:", err);
+        logger.error("[request-vehicle] auto-intake failed:", err);
       }
     });
   }
@@ -353,7 +354,7 @@ export async function POST(request: NextRequest) {
           utmAffiliate: data.utm_affiliate ?? undefined,
         });
       } catch (err) {
-        console.error("[request-vehicle] attribution failed:", err);
+        logger.error("[request-vehicle] attribution failed:", err);
       }
     });
   }
@@ -411,13 +412,13 @@ export async function POST(request: NextRequest) {
               status: "NEW",
             },
           });
-          console.log(
+          logger.info(
             "[request-vehicle] social lead created for:",
             data.utm_source,
             data.campaign,
           );
         } catch (err) {
-          console.error("[request-vehicle] social lead creation failed:", err);
+          logger.error("[request-vehicle] social lead creation failed:", err);
         }
       });
     }
@@ -433,7 +434,7 @@ export async function POST(request: NextRequest) {
             platform: data.utm_source ?? undefined,
           });
         } catch (err) {
-          console.error("[request-vehicle] social welcome email failed:", err);
+          logger.error("[request-vehicle] social welcome email failed:", err);
         }
       });
     }
@@ -459,7 +460,7 @@ export async function POST(request: NextRequest) {
           });
         }
       } catch (err) {
-        console.error("[post-intake] outreach or notification failed:", err);
+        logger.error("[post-intake] outreach or notification failed:", err);
       }
     });
   }
@@ -487,7 +488,7 @@ export async function POST(request: NextRequest) {
     });
     buyerId = vr?.buyerId ?? "";
   } else {
-    console.warn(
+    logger.warn(
       "[request-vehicle] unified intake returned no vehicleRequestId — " +
         "skipping CRM linking and VehicleRequest emails",
       { buyerOpportunityId },
@@ -608,7 +609,7 @@ export async function POST(request: NextRequest) {
         },
       });
     } catch (crmErr) {
-      console.error("[request-vehicle] CRM pipeline sync failed:", crmErr);
+      logger.error("[request-vehicle] CRM pipeline sync failed:", crmErr);
     }
   }
 
@@ -648,7 +649,7 @@ export async function POST(request: NextRequest) {
     });
     notificationId = created.id;
   } catch (err) {
-    console.error("[request-vehicle] notification persist failed:", err);
+    logger.error("[request-vehicle] notification persist failed:", err);
   }
 
   // VehicleRequest-specific emails (admin queue notification + buyer
@@ -697,7 +698,7 @@ export async function POST(request: NextRequest) {
     const buyerEmailRequestId = vehicleRequestId ?? notificationId ?? "";
     if (buyerEmailRequestId) {
       await sendVehicleRequestReceived(data.email, fullName, buyerEmailRequestId)
-        .catch(err => console.error("[request-vehicle] buyer confirmation email failed:", err));
+        .catch(err => logger.error("[request-vehicle] buyer confirmation email failed:", err));
     }
   }
 

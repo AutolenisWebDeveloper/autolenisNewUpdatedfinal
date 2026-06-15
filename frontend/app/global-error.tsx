@@ -1,5 +1,6 @@
 "use client";
 
+import { logger } from "@/lib/logger";
 import { useEffect } from "react";
 
 // Root global error boundary. Unlike segment error.tsx boundaries, this replaces
@@ -15,7 +16,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("[global] root layout error:", error);
+    logger.error("[global] root layout error:", error);
   }, [error]);
 
   return (

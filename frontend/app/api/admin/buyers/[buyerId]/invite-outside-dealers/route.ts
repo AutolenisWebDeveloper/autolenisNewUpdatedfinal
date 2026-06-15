@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       auctionUrl: `${APP_URL}/dealer-offer-outside/${invite.token}`,
       expiryHours,
       auctionId,
-    }).catch(err => console.error(`[invite-outside-dealers] email failed (${d.email}):`, err));
+    }).catch(err => logger.error(`[invite-outside-dealers] email failed (${d.email}):`, err));
   }
 
   await prisma.adminAuditLog.create({
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         emails: dealers.map(d => d.email),
       },
     },
-  }).catch(err => console.error("[invite-outside-dealers] audit log failed:", err));
+  }).catch(err => logger.error("[invite-outside-dealers] audit log failed:", err));
 
   return adminSuccess({ invited: created.count, invites: inserted.map(i => ({ id: i.id, email: i.email, token: i.token })) });
 }

@@ -1,6 +1,7 @@
 // POST /api/admin/users/create — create a user directly (bypass public signup)
 // Supports userType: BUYER | DEALER | AFFILIATE
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminWithRole, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -210,7 +211,7 @@ export async function POST(request: NextRequest) {
     }
   } catch (err) {
     await supabase.auth.admin.deleteUser(supabaseUserId).catch(() => {});
-    console.error("[admin/users/create] DB error:", err);
+    logger.error("[admin/users/create] DB error:", err);
     return NextResponse.json({ error: "Database error while creating user" }, { status: 500 });
   }
 

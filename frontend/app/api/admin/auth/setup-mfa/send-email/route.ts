@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
@@ -175,14 +176,14 @@ export async function POST(request: NextRequest) {
       });
     } else {
       // Development — log the confirmation URL to console
-      console.log(
+      logger.info(
         `[EMAIL DEV] MFA confirmation for ${admin.user.email}: ${confirmUrl}`
       );
     }
 
     return NextResponse.json({ sent: true, emailSentTo: admin.user.email });
   } catch (err) {
-    console.error("[setup-mfa/send-email] Error:", err);
+    logger.error("[setup-mfa/send-email] Error:", err);
     return NextResponse.json(
       { error: "Failed to send confirmation email. Please try again." },
       { status: 500 }

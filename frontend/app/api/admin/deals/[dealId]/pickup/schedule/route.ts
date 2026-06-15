@@ -1,5 +1,6 @@
 // POST /api/admin/deals/[dealId]/pickup/schedule
 // Schedules (or reschedules) a pickup for a deal.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   const buyerFirstName = dealWithParties?.buyer?.firstName ?? "there";
   if (buyerEmail) {
     await sendPickupReadyEmail(buyerEmail, buyerFirstName, pickupDateFormatted)
-      .catch(err => console.error("[pickup/schedule] buyer email failed:", err));
+      .catch(err => logger.error("[pickup/schedule] buyer email failed:", err));
   }
 
   const dealerEmail = dealWithParties?.offer?.dealer?.user?.email;
@@ -91,7 +92,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       pickupWindow,
       dealUrl: `${APP_URL}/dealer/deals/${dealId}`,
       dealId,
-    }).catch(err => console.error("[pickup/schedule] dealer email failed:", err));
+    }).catch(err => logger.error("[pickup/schedule] dealer email failed:", err));
   }
 
   return adminSuccess({ success: true });

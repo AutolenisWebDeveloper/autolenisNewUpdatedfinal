@@ -1,5 +1,6 @@
 "use client";
 
+import { logger } from "@/lib/logger";
 import { useEffect } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ export default function PublicError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("[public] unhandled page error:", error);
+    logger.error("[public] unhandled page error:", error);
   }, [error]);
 
   return (

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
@@ -79,12 +80,12 @@ export async function POST(req: Request) {
         },
       });
     } catch (emitErr) {
-      console.error('[exit-intent] CRM emit failed:', emitErr);
+      logger.error('[exit-intent] CRM emit failed:', emitErr);
     }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error('[exit-intent]', err);
+    logger.error('[exit-intent]', err);
     return NextResponse.json({ ok: true });
   }
 }

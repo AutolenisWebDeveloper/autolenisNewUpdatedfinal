@@ -2,6 +2,7 @@
 // Admin review actions on a Contract Shield scan: APPROVE | FLAG | REQUEST_REVISION.
 // reviewId is the ContractScan id. Every action is audit-logged and fires the
 // correct buyer/dealer notifications.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       let envelopeId: string | null = null;
       if (buyerEmail) {
         const envelope = await createEnvelope(deal.id, buyerEmail, buyerName)
-          .catch(err => { console.error("[contract-shield] createEnvelope failed:", err); return null; });
+          .catch(err => { logger.error("[contract-shield] createEnvelope failed:", err); return null; });
         envelopeId = envelope?.envelopeId ?? null;
       }
 
@@ -100,7 +101,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       }).catch(() => {});
       if (buyerEmail) {
         await sendContractApprovedEmail({ to: buyerEmail, firstName: buyerFirstName, dealId: deal.id })
-          .catch(err => console.error("[contract-shield] buyer approved email failed:", err));
+          .catch(err => logger.error("[contract-shield] buyer approved email failed:", err));
       }
       if (dealer) {
         await prisma.notification.create({
@@ -147,13 +148,13 @@ export async function POST(request: NextRequest, { params }: Props) {
       }).catch(() => {});
       if (buyerEmail) {
         await sendContractShieldAlertEmail({ to: buyerEmail, firstName: buyerFirstName, dealId: deal.id, issueCount: flaggedIssues.length })
-          .catch(err => console.error("[contract-shield] buyer flag email failed:", err));
+          .catch(err => logger.error("[contract-shield] buyer flag email failed:", err));
       }
       if (dealerEmail) {
         await sendDealerContractIssuesEmail({
           to: dealerEmail, contactName: dealer?.dealershipName ?? "Dealer",
           vehicleRef, fixItems: flaggedIssues, contractUrl, dealId: deal.id,
-        }).catch(err => console.error("[contract-shield] dealer flag email failed:", err));
+        }).catch(err => logger.error("[contract-shield] dealer flag email failed:", err));
       }
       if (dealer) {
         await prisma.notification.create({
@@ -192,7 +193,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         await sendDealerContractIssuesEmail({
           to: dealerEmail, contactName: dealer?.dealershipName ?? "Dealer",
           vehicleRef, fixItems: [reason], contractUrl, dealId: deal.id,
-        }).catch(err => console.error("[contract-shield] dealer revision email failed:", err));
+        }).catch(err => logger.error("[contract-shield] dealer revision email failed:", err));
       }
       if (dealer) {
         await prisma.notification.create({

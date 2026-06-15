@@ -4,6 +4,7 @@
 // best-performing hours, and refreshes each franchise's avg lead score.
 // Schedule: 0 6 * * 0 (06:00 UTC Sunday).
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -188,10 +189,10 @@ export async function GET(request: NextRequest) {
       if (result) recycled++;
     }
     if (recycled > 0) {
-      console.log(`[optimize] recycled ${recycled} top-performing posts`);
+      logger.info(`[optimize] recycled ${recycled} top-performing posts`);
     }
   } catch (err) {
-    console.error("[optimize] recycling failed:", err);
+    logger.error("[optimize] recycling failed:", err);
   }
 
   // Send weekly SMS market alerts to SMS-consented buyers about the strongest
@@ -214,7 +215,7 @@ export async function GET(request: NextRequest) {
 
     const topMarket = topSmsMarkets[0];
     if (!topMarket) {
-      console.log("[optimize-sms] no high-leverage markets this week");
+      logger.info("[optimize-sms] no high-leverage markets this week");
     } else {
       const leverage = topMarket.buyerLeverageScore ?? 0;
 
@@ -255,17 +256,17 @@ export async function GET(request: NextRequest) {
           });
           smsSent++;
         } catch (smsErr) {
-          console.error("[optimize-sms] send failed:", smsErr);
+          logger.error("[optimize-sms] send failed:", smsErr);
         }
       }
 
-      console.log(
+      logger.info(
         `[optimize-sms] sent ${smsSent} alerts for ${topMarket.metroName}`,
         `(leverage: ${leverage.toFixed(1)})`,
       );
     }
   } catch (err) {
-    console.error("[optimize-sms] block failed:", err);
+    logger.error("[optimize-sms] block failed:", err);
   }
 
   // Refresh the Meta retargeting Custom Audience from non-converting social
@@ -277,7 +278,7 @@ export async function GET(request: NextRequest) {
     );
     await buildRetargetingAudience();
   } catch (err) {
-    console.error("[optimize] retargeting audience build failed:", err);
+    logger.error("[optimize] retargeting audience build failed:", err);
   }
 
   // Distribute weekly content packages to active creators (gated by flag).
@@ -288,7 +289,7 @@ export async function GET(request: NextRequest) {
       );
       await distributeCreatorPackages();
     } catch (err) {
-      console.error("[optimize] creator distribution failed:", err);
+      logger.error("[optimize] creator distribution failed:", err);
     }
   }
 
@@ -323,10 +324,10 @@ export async function GET(request: NextRequest) {
           lastOptimizedAt: new Date(),
         },
       });
-      console.log(`[optimize] updated ${platform} posting windows:`, hours.join(", "));
+      logger.info(`[optimize] updated ${platform} posting windows:`, hours.join(", "));
     }
   } catch (err) {
-    console.error("[optimize] posting window update failed:", err);
+    logger.error("[optimize] posting window update failed:", err);
   }
 
   // ─── Franchise volume analysis (Session D) ─────────────────────────────────
@@ -343,19 +344,19 @@ export async function GET(request: NextRequest) {
     for (const franchise of franchises) {
       const score = franchise.avgLeadScore ?? 0;
       if (score > fAvg * 1.5) {
-        console.log(
+        logger.info(
           `[optimize] PRIORITY franchise: ${franchise.slug}`,
           `(score ${score.toFixed(2)} vs avg ${fAvg.toFixed(2)})`,
         );
       } else if (score > 0 && score < fAvg * 0.5) {
-        console.log(
+        logger.info(
           `[optimize] LOW franchise: ${franchise.slug}`,
           `(score ${score.toFixed(2)} vs avg ${fAvg.toFixed(2)})`,
         );
       }
     }
   } catch (err) {
-    console.error("[optimize] franchise analysis failed:", err);
+    logger.error("[optimize] franchise analysis failed:", err);
   }
 
   // ─── Smart hook selection — confirm top hooks (Session D) ──────────────────
@@ -368,23 +369,23 @@ export async function GET(request: NextRequest) {
         select: { hookType: true, avgLeadScore: true },
       });
       if (topHook) {
-        console.log(
+        logger.info(
           `[optimize] top hook ${platform}: ${topHook.hookType}`,
           `(lead score: ${topHook.avgLeadScore?.toFixed(2)})`,
         );
       }
     }
   } catch (err) {
-    console.error("[optimize] hook analysis failed:", err);
+    logger.error("[optimize] hook analysis failed:", err);
   }
 
   // ─── Competitor intelligence scan (Session D) ──────────────────────────────
   try {
     const { scanCompetitorContent } = await import("@/lib/social/competitor-monitor");
     const insights = await scanCompetitorContent();
-    console.log(`[optimize] competitor insights: ${insights.length}`);
+    logger.info(`[optimize] competitor insights: ${insights.length}`);
   } catch (err) {
-    console.error("[optimize] competitor scan failed:", err);
+    logger.error("[optimize] competitor scan failed:", err);
   }
 
   // ─── Weekly optimization report email (Session D) ──────────────────────────
@@ -448,10 +449,10 @@ export async function GET(request: NextRequest) {
         nextWeekFocus: topFranchiseRecord?.slug
           ? `Focus on ${topFranchiseRecord.slug} — highest lead score`
           : "Continue current mix",
-      }).catch((err) => console.error("[optimize] report email failed:", err));
+      }).catch((err) => logger.error("[optimize] report email failed:", err));
     }
   } catch (err) {
-    console.error("[optimize] report email block failed:", err);
+    logger.error("[optimize] report email block failed:", err);
   }
 
   const summary = {
@@ -462,6 +463,6 @@ export async function GET(request: NextRequest) {
     franchisesUpdated: franchiseScores.size,
     timestamp: new Date().toISOString(),
   };
-  console.log("[social-optimize]", JSON.stringify(summary));
+  logger.info("[social-optimize]", JSON.stringify(summary));
   return NextResponse.json({ success: true, data: summary });
 }

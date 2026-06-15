@@ -2,6 +2,7 @@
 // Scans existing AutoLenis intelligence and materializes fresh TopicSignals.
 // Schedule: 0 5 * * * (05:00 UTC ≈ midnight CT).
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest) {
         .catch(() => {});
     }
 
-    console.log(
+    logger.info(
       "[signal-scan] trending:",
       trending.tiktokHashtags.length,
       "hashtags,",
@@ -75,7 +76,7 @@ export async function GET(request: NextRequest) {
       "topics",
     );
   } catch (err) {
-    console.error("[signal-scan] trending fetch failed (non-fatal):", err);
+    logger.error("[signal-scan] trending fetch failed (non-fatal):", err);
   }
 
   const summary = {
@@ -86,6 +87,6 @@ export async function GET(request: NextRequest) {
     }, {}),
     timestamp: new Date().toISOString(),
   };
-  console.log("[social-signal-scan]", JSON.stringify(summary));
+  logger.info("[social-signal-scan]", JSON.stringify(summary));
   return NextResponse.json({ success: true, data: summary });
 }

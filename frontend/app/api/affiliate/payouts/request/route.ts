@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestAffiliate, successResponse, errorResponse } from "@/lib/auth/affiliate-api";
 import { requestPayout } from "@/lib/services/affiliate/affiliate-payout.service";
@@ -46,7 +47,7 @@ export async function POST(request: NextRequest) {
         }),
       },
     }).catch(err => {
-      console.error("[affiliate/payouts/request] Failed to create admin notification:", err);
+      logger.error("[affiliate/payouts/request] Failed to create admin notification:", err);
     });
 
     return successResponse({ payout }, 201);

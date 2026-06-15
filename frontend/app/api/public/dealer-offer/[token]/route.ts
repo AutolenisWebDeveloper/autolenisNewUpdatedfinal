@@ -2,6 +2,7 @@
 //
 // The token can be either a per-dealer VehicleOfferDealerInvite token (from the
 // invite email flow) or a generic VehicleOffer token (from the shareable link).
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -31,7 +32,7 @@ async function uploadDealerDoc(
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) {
-    console.error("[dealer-offer] Supabase env vars missing for upload");
+    logger.error("[dealer-offer] Supabase env vars missing for upload");
     return null;
   }
   try {
@@ -52,7 +53,7 @@ async function uploadDealerDoc(
       .upload(path, buffer, { contentType: file.type, upsert: false });
 
     if (error) {
-      console.error("[dealer-offer] upload error:", error);
+      logger.error("[dealer-offer] upload error:", error);
       return null;
     }
 
@@ -62,7 +63,7 @@ async function uploadDealerDoc(
 
     return { url: publicUrl, name: file.name, type: file.type, sizeBytes: file.size };
   } catch (err) {
-    console.error("[dealer-offer] upload exception:", err);
+    logger.error("[dealer-offer] upload exception:", err);
     return null;
   }
 }
@@ -207,7 +208,7 @@ export async function POST(request: NextRequest, { params }: Params) {
           documents: uploadedDocs as unknown as
             Parameters<typeof prisma.dealerOfferSubmission.update>[0]["data"]["documents"],
         },
-      }).catch((err) => console.error("[dealer-offer] documents update failed:", err));
+      }).catch((err) => logger.error("[dealer-offer] documents update failed:", err));
     }
   }
 
@@ -224,7 +225,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       where: { id: submission.id },
       data:  { dealerId: registeredDealer.id },
     }).catch(err =>
-      console.error("[dealer-offer] dealer linkage update failed:", err)
+      logger.error("[dealer-offer] dealer linkage update failed:", err)
     );
   }
 
@@ -233,13 +234,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     await prisma.vehicleOfferDealerInvite.update({
       where: { id: invite.id },
       data: { status: "submitted", submittedAt: new Date(), submissionId: submission.id },
-    }).catch((err) => console.error("[dealer-offer] invite status update failed:", err));
+    }).catch((err) => logger.error("[dealer-offer] invite status update failed:", err));
   }
 
   await prisma.vehicleOffer.update({
     where: { id: offer.id },
     data: { requestStatus: "offers_in" },
-  }).catch((err) => console.error("[dealer-offer] offer status update failed:", err));
+  }).catch((err) => logger.error("[dealer-offer] offer status update failed:", err));
 
   const vehicleOfferLabel = `${offer.vehicleYear} ${offer.vehicleMake} ${offer.vehicleModel}${offer.vehicleTrim ? ` ${offer.vehicleTrim}` : ""}`;
 

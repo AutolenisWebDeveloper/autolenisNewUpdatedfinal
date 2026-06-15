@@ -5,6 +5,7 @@
 // SMS to the founder if the score crosses the threshold. The route never
 // returns 5xx on Groq failure — the next question is always served.
 
+import { logger } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
@@ -228,7 +229,7 @@ export async function POST(req: Request) {
       }
     } catch (err) {
       // Scoring is non-blocking — buyer still completes the flow.
-      console.error("[api/finder] scoring step failed", err);
+      logger.error("[api/finder] scoring step failed", err);
     }
   }
 

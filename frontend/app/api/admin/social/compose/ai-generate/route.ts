@@ -3,6 +3,7 @@
 // caption, video script, hashtags, image brief, and an immediate quality score.
 // Powers the AI-first ComposeDrawer in the social dashboard.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -159,7 +160,7 @@ Return ONLY valid JSON, no markdown, no other text:
       franchiseSlug,
     });
   } catch (err) {
-    console.error("[ai-generate] failed:", err);
+    logger.error("[ai-generate] failed:", err);
     return adminError(
       "AI_GENERATION_FAILED",
       "AI generation failed — check GROQ_API_KEY",

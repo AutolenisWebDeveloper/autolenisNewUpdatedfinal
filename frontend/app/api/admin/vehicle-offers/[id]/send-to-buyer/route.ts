@@ -1,5 +1,6 @@
 // POST /api/admin/vehicle-offers/[id]/send-to-buyer — package selected dealer
 // vehicle offers into a BuyerOfferReview with one item per (submission, vehicle).
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
   } catch (err) {
-    console.error("[send-to-buyer] in-app notification failed:", err);
+    logger.error("[send-to-buyer] in-app notification failed:", err);
   }
 
   try {
@@ -117,17 +118,17 @@ export async function POST(request: NextRequest, { params }: Params) {
       adminMessage: data.adminMessage,
     });
   } catch (err) {
-    console.error("[send-to-buyer] email failed:", err);
+    logger.error("[send-to-buyer] email failed:", err);
   }
 
   // Dedicated "your vehicle offer is ready" buyer email — non-blocking.
   await sendVehicleOfferReady(data.buyerEmail, data.buyerName, review.id)
-    .catch(err => console.error("[send-to-buyer] vehicle offer ready email failed:", err));
+    .catch(err => logger.error("[send-to-buyer] vehicle offer ready email failed:", err));
 
   await prisma.vehicleOffer.update({
     where: { id: offer.id },
     data: { requestStatus: "sent_to_buyer" },
-  }).catch((err) => console.error("[send-to-buyer] requestStatus update failed:", err));
+  }).catch((err) => logger.error("[send-to-buyer] requestStatus update failed:", err));
 
   await createAuditLog(admin, request, {
     action: "VEHICLE_OFFER_SENT_TO_BUYER",

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -174,7 +175,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Phase 4B-3 — reflect delivery lifecycle on dealer_outreach_log rows.
     // Best-effort and isolated: never let a logging failure break suppression.
     await updateDealerOutreachLog(supabase, payload.type, payload.data.email_id).catch(
-      (err) => console.error('[resend.webhook] dealer-outreach-log update failed', err)
+      (err) => logger.error('[resend.webhook] dealer-outreach-log update failed', err)
     );
 
     const recipient =
@@ -200,7 +201,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ verified: true });
   } catch (err) {
-    console.error('[resend.webhook] fatal', err);
+    logger.error('[resend.webhook] fatal', err);
     return new NextResponse('Internal Webhook Failure', { status: 500 });
   }
 }

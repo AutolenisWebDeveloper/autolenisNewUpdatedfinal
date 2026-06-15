@@ -1,5 +1,6 @@
 'use client';
 
+import { logger } from "@/lib/logger";
 import { useEffect } from 'react';
 import { AlertCircle, RefreshCcw } from 'lucide-react';
 
@@ -11,8 +12,7 @@ export default function AnalyticsError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.error('[crm/analytics] route error:', error);
+    logger.error('[crm/analytics] route error:', error);
   }, [error]);
 
   return (

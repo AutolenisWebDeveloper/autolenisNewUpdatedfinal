@@ -2,6 +2,7 @@
 // Dashboard summary: post counts by status, video counts by status, aggregate
 // performance, and the current top franchise / hook / platform by lead score.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -141,7 +142,7 @@ export async function GET(request: NextRequest) {
       revenue,
     });
   } catch (err) {
-    console.error("[admin/social] stats query failed:", err);
+    logger.error("[admin/social] stats query failed:", err);
     return adminSuccess(empty);
   }
 }

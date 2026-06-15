@@ -3,6 +3,7 @@
 // Sets Pickup.status = COMPLETED and Deal.status = COMPLETED.
 // Sends buyer notification. AuditLog entry required.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       await sendDealCompleteEmail(buyerEmail, deal.buyer.firstName, dealId);
     }
   } catch (e) {
-    console.error("[pickup/complete] deal complete email failed:", e);
+    logger.error("[pickup/complete] deal complete email failed:", e);
   }
   syncGhlTag(deal.buyer?.user?.email, "purchase-complete");
 
@@ -121,7 +122,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       vehicleRef,
       payoutSchedule: "3-5 business days",
       dealId,
-    }).catch(err => console.error("[pickup/complete] dealer pickup completed email failed:", err));
+    }).catch(err => logger.error("[pickup/complete] dealer pickup completed email failed:", err));
 
     const offerPriceCents = deal.offer?.otdPriceCents ?? 0;
     await sendDealerPayoutInitiatedEmail({
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       amountCents: offerPriceCents,
       estimatedArrival: "3-5 business days",
       payoutId: dealId,
-    }).catch(err => console.error("[pickup/complete] dealer payout initiated email failed:", err));
+    }).catch(err => logger.error("[pickup/complete] dealer payout initiated email failed:", err));
   }
 
   // CRM event spine — emit purchase_completed for the buyer after the deal has
@@ -156,7 +157,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       },
     });
   } catch (err) {
-    console.error("[pickup/complete] purchase_completed emit failed:", err);
+    logger.error("[pickup/complete] purchase_completed emit failed:", err);
   }
 
   return adminSuccess({

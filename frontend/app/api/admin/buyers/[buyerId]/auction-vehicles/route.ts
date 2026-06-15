@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       reason: "Vehicles attached to auction",
       metadata: { buyerId, auctionId, vehicleCount: vehicles.length },
     },
-  }).catch(err => console.error("[auction-vehicles] audit log failed:", err));
+  }).catch(err => logger.error("[auction-vehicles] audit log failed:", err));
 
   return adminSuccess({ attached: created.count });
 }

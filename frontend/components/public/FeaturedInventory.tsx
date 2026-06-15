@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
@@ -34,7 +35,7 @@ async function getFeaturedVehicles() {
 
     return sorted.slice(0, 36);
   } catch (err) {
-    console.error("[FeaturedInventory] failed:", err);
+    logger.error("[FeaturedInventory] failed:", err);
     return [];
   }
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { logger } from "@/lib/logger";
 import { useEffect } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,7 @@ export default function AuthError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("[auth] unhandled page error:", error);
+    logger.error("[auth] unhandled page error:", error);
   }, [error]);
 
   return (

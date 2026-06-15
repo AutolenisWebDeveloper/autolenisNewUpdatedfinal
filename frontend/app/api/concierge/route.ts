@@ -14,6 +14,7 @@
 //   RESEND_API_KEY          - Email provider
 //   NEXT_PUBLIC_APP_URL     - Used in email CTAs
 
+import { logger } from "@/lib/logger";
 import type { NextRequest } from "next/server";
 import { after } from "next/server";
 import type { Prisma } from "@prisma/client";
@@ -213,7 +214,7 @@ CRITICAL RULES:
 
         controller.close();
       } catch (err) {
-        console.error("[concierge] Stream error:", err);
+        logger.error("[concierge] Stream error:", err);
         try {
           controller.enqueue(
             encoder.encode("\n\nI'm having trouble right now. Please try again."),
@@ -261,7 +262,7 @@ CRITICAL RULES:
       };
 
       updated = await extractStructuredData(finalMessages, existingProfile);
-      console.log("[concierge] Extraction completed", {
+      logger.info("[concierge] Extraction completed", {
         opportunityId: opportunitySnapshot.id,
         captured: {
           make: updated.make,
@@ -272,12 +273,12 @@ CRITICAL RULES:
         },
       });
     } catch (err) {
-      console.error("[concierge] STAGE 1 (extraction) FAILED:", err);
+      logger.error("[concierge] STAGE 1 (extraction) FAILED:", err);
       return; // Cannot continue without extraction
     }
 
     if (!updated) {
-      console.error("[concierge] Extraction returned null — aborting after()");
+      logger.error("[concierge] Extraction returned null — aborting after()");
       return;
     }
 
@@ -305,9 +306,9 @@ CRITICAL RULES:
           firstName: updated.firstName,
         },
       });
-      console.log("[concierge] STAGE 2 (persist) OK");
+      logger.info("[concierge] STAGE 2 (persist) OK");
     } catch (err) {
-      console.error("[concierge] STAGE 2 (persist) FAILED:", err);
+      logger.error("[concierge] STAGE 2 (persist) FAILED:", err);
       // Continue to scoring even if persist failed — scoring uses
       // the in-memory profile not the DB
     }
@@ -327,17 +328,17 @@ CRITICAL RULES:
           where: { id: opportunitySnapshot.id },
           data: { completed: true },
         });
-        console.log("[concierge] STAGE 3a (completion flag) OK");
+        logger.info("[concierge] STAGE 3a (completion flag) OK");
       } catch (err) {
-        console.error("[concierge] STAGE 3a (completion flag) FAILED:", err);
+        logger.error("[concierge] STAGE 3a (completion flag) FAILED:", err);
       }
 
       // Compound searches in parallel — best effort
-      console.log("[concierge] STAGE 3b — firing compound searches");
+      logger.info("[concierge] STAGE 3b — firing compound searches");
 
       const enrichmentPromise = (async () => {
         if (!updated!.make || !updated!.model || !updated!.zip) {
-          console.log("[concierge] Skipping market enrichment — missing fields");
+          logger.info("[concierge] Skipping market enrichment — missing fields");
           return null;
         }
         try {
@@ -363,16 +364,16 @@ CRITICAL RULES:
                 marketEnrichedAt: new Date(),
               },
             });
-            console.log("[concierge] Market enrichment saved");
+            logger.info("[concierge] Market enrichment saved");
           }
         } catch (err) {
-          console.error("[concierge] Market enrichment FAILED:", err);
+          logger.error("[concierge] Market enrichment FAILED:", err);
         }
       })();
 
       const dealerPromise = (async () => {
         if (!updated!.make || !updated!.zip) {
-          console.log("[concierge] Skipping dealer discovery — missing fields");
+          logger.info("[concierge] Skipping dealer discovery — missing fields");
           return null;
         }
         try {
@@ -401,7 +402,7 @@ CRITICAL RULES:
               })),
               skipDuplicates: true,
             });
-            console.log(`[concierge] Dealer discovery saved ${dealers.length} prospects`);
+            logger.info(`[concierge] Dealer discovery saved ${dealers.length} prospects`);
 
             // Background script drafting for each newly-discovered prospect
             const insertedProspects = await prisma.dealerProspect.findMany({
@@ -413,26 +414,26 @@ CRITICAL RULES:
               select: { id: true },
             });
 
-            console.log(
+            logger.info(
               `[concierge] Drafting phone scripts for ${insertedProspects.length} prospects`,
             );
 
             for (const p of insertedProspects) {
               try {
                 const ok = await draftAndSaveScript(p.id);
-                console.log(`[concierge] Phone script for ${p.id}: ${ok ? "OK" : "FAILED"}`);
+                logger.info(`[concierge] Phone script for ${p.id}: ${ok ? "OK" : "FAILED"}`);
                 // 12s between gpt-oss-120b calls — respects 8K TPM on free
                 // tier (1500-2000 tokens per call, need most of the minute
                 // budget to recover). Once Groq Developer tier is enabled
                 // this can be reduced to 500ms.
                 await new Promise((resolve) => setTimeout(resolve, 12000));
               } catch (err) {
-                console.error(`[concierge] Script drafting threw for ${p.id}:`, err);
+                logger.error(`[concierge] Script drafting threw for ${p.id}:`, err);
               }
             }
           }
         } catch (err) {
-          console.error("[concierge] Dealer discovery FAILED:", err);
+          logger.error("[concierge] Dealer discovery FAILED:", err);
         }
       })();
 
@@ -448,9 +449,9 @@ CRITICAL RULES:
           updated,
           opportunitySnapshot.email,
         );
-        console.log("[concierge] STAGE 4 (scoring + notifications) OK");
+        logger.info("[concierge] STAGE 4 (scoring + notifications) OK");
       } catch (err) {
-        console.error("[concierge] STAGE 4 (scoring + notifications) FAILED:", err);
+        logger.error("[concierge] STAGE 4 (scoring + notifications) FAILED:", err);
       }
 
       // Stage 5: CRM contact-plane capture (additive, non-blocking).
@@ -507,9 +508,9 @@ CRITICAL RULES:
             financing_needed: updated.financingNeeded,
           },
         });
-        console.log("[concierge] STAGE 5 (CRM contact-plane capture) OK");
+        logger.info("[concierge] STAGE 5 (CRM contact-plane capture) OK");
       } catch (err) {
-        console.error("[concierge] STAGE 5 (CRM contact-plane capture) FAILED:", err);
+        logger.error("[concierge] STAGE 5 (CRM contact-plane capture) FAILED:", err);
       }
     }
   });
@@ -585,7 +586,7 @@ async function scoreAndAlert(
         phone: profile.phone,
       };
 
-      console.log("[concierge] Hot lead detected — firing notifications", {
+      logger.info("[concierge] Hot lead detected — firing notifications", {
         opportunityId,
         phone: profile.phone,
         email,
@@ -642,9 +643,9 @@ async function scoreAndAlert(
 
       channels.forEach(({ name, result }) => {
         if (result.status === "rejected") {
-          console.error(`[concierge] ${name} FAILED:`, result.reason);
+          logger.error(`[concierge] ${name} FAILED:`, result.reason);
         } else {
-          console.log(`[concierge] ${name} succeeded`);
+          logger.info(`[concierge] ${name} succeeded`);
         }
       });
 
@@ -660,6 +661,6 @@ async function scoreAndAlert(
       });
     }
   } catch (err) {
-    console.error("[concierge] scoreAndAlert error:", err);
+    logger.error("[concierge] scoreAndAlert error:", err);
   }
 }

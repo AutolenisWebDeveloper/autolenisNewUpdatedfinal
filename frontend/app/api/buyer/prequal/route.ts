@@ -6,6 +6,7 @@
 // Optional: employmentStatus, employerName, lengthOfEmployment.
 // Employment fields are AutoLenis-internal only and are NEVER forwarded to MicroBilt.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
@@ -125,7 +126,7 @@ export async function POST(request: NextRequest) {
     const safe = toBuyerSafePrequal(result.prequal);
     return successResponse({ ...safe, mocked: result.mocked });
   } catch (err) {
-    console.error("[prequal] initiatePrsequal failed:", err);
+    logger.error("[prequal] initiatePrsequal failed:", err);
     return errorResponse(
       "PREQUAL_FAILED",
       "Unable to process prequalification. Please try again.",

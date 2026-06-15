@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
@@ -44,8 +45,7 @@ export async function POST(request: NextRequest) {
   const isLiveKey = stripeKey.startsWith("sk_live_");
   const isSandboxRuntime = process.env.NODE_ENV !== "production";
   if (isLiveKey && isSandboxRuntime) {
-    // eslint-disable-next-line no-console
-    console.warn("WARNING: Using live Stripe key in sandbox mode — returning mock intent.");
+    logger.warn("WARNING: Using live Stripe key in sandbox mode — returning mock intent.");
     // Reuse an existing mock so the buyer doesn't accumulate orphan PENDING rows.
     if (existingDeposit?.stripePaymentIntentId?.startsWith("pi_sandbox_mock_")) {
       return successResponse({ clientSecret: "pi_sandbox_mock_secret", mock: true });
@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
 
     return successResponse({ clientSecret: paymentIntent.client_secret });
   } catch (err) {
-    console.error("[deposit/create-intent] Stripe error:", err);
+    logger.error("[deposit/create-intent] Stripe error:", err);
     return errorResponse("STRIPE_ERROR", "Payment service unavailable. Please try again.", 503);
   }
 }

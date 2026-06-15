@@ -1,6 +1,7 @@
 // PATCH /api/dealer/settings — save dealer notification preferences.
 // These fields do not yet exist in the Prisma schema; we safely no-op the DB write
 // and return success, logging for observability.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { z } from "zod";
@@ -23,7 +24,7 @@ export async function PATCH(request: NextRequest) {
 
   // Notification preference fields are not yet persisted in DB.
   // Log the intent and return success so the UI flow works end-to-end.
-  console.info("[dealer/settings] prefs update (no-op, schema pending)", {
+  logger.info("[dealer/settings] prefs update (no-op, schema pending)", {
     dealerId: dealer.id,
     prefs: parsed.data,
   });

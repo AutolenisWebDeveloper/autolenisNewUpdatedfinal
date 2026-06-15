@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextResponse, type NextRequest } from 'next/server';
 import { authorizeDispatch, finalizeDispatch } from '@/lib/crm/dispatch-auth';
 import { resolveDispatchContact } from '@/lib/crm/resolve-contact';
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
     buyerId = (identity?.entity_id as string | undefined) ?? null;
   } catch (err) {
-    console.error('[dispatch/score] buyer identity lookup failed:', err);
+    logger.error('[dispatch/score] buyer identity lookup failed:', err);
   }
 
   // Gather the existing (prior) score from every plane so we never downgrade.
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
     });
     consider(prior?.score ?? null, prior?.temperature ?? null);
   } catch (err) {
-    console.error('[dispatch/score] prior LeadScore lookup failed:', err);
+    logger.error('[dispatch/score] prior LeadScore lookup failed:', err);
   }
   // linked Buyer plane
   if (buyerId) {
@@ -86,7 +87,7 @@ export async function POST(request: NextRequest) {
       });
       consider(buyer?.leadScore ?? null, buyer?.leadTemperature ?? null);
     } catch (err) {
-      console.error('[dispatch/score] buyer score lookup failed:', err);
+      logger.error('[dispatch/score] buyer score lookup failed:', err);
     }
   }
 
@@ -129,7 +130,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error('[dispatch/score] LeadScore persist failed:', err);
+    logger.error('[dispatch/score] LeadScore persist failed:', err);
   }
 
   // (D) Sortable contacts plane — visible to the Leads/Segments UI for all contacts.
@@ -139,7 +140,7 @@ export async function POST(request: NextRequest) {
       .update({ lead_score: finalScore, lead_temperature: finalTemp })
       .eq('id', contact.id);
   } catch (err) {
-    console.error('[dispatch/score] contacts plane update failed:', err);
+    logger.error('[dispatch/score] contacts plane update failed:', err);
   }
 
   // (D) Linked Buyer plane — only when a buyer identity exists.
@@ -152,7 +153,7 @@ export async function POST(request: NextRequest) {
       });
       buyerUpdated = true;
     } catch (err) {
-      console.error('[dispatch/score] buyer persist failed:', err);
+      logger.error('[dispatch/score] buyer persist failed:', err);
     }
   }
 

@@ -2,6 +2,7 @@
 // GET  — last published AutoLenis Market Index (for the dashboard tab).
 // POST — generate + publish a new Market Index now (admin "Generate Now").
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
     };
     return adminSuccess(data);
   } catch (err) {
-    console.error("[admin/social] market-index GET failed:", err);
+    logger.error("[admin/social] market-index GET failed:", err);
     // Degrade gracefully when the social tables aren't provisioned.
     return adminSuccess({
       title: null,
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
     const result = await publishMarketIndex();
     return adminSuccess(result);
   } catch (err) {
-    console.error("[admin/social] market-index POST failed:", err);
+    logger.error("[admin/social] market-index POST failed:", err);
     return adminError("MARKET_INDEX_FAILED", "Market index generation failed", 500);
   }
 }

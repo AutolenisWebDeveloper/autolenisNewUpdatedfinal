@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -83,7 +84,7 @@ export async function PATCH(request: NextRequest) {
     entityId: config.id,
     reason: "Admin updated Best Price Engine scoring weights",
     metadata: { ...parsed.data, configId: config.id },
-  }).catch(err => console.error("[best-price/weights] audit log error:", err));
+  }).catch(err => logger.error("[best-price/weights] audit log error:", err));
 
   return adminSuccess({
     id: config.id,

@@ -3,6 +3,7 @@
 // account-claim link. NO plaintext password is ever generated, stored, returned,
 // or emailed — the dealer sets their own password via /dealer/claim (WO-2).
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -109,7 +110,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     dealerId = dealer!.id;
   } catch (err) {
     await supabase.auth.admin.deleteUser(supabaseUserId).catch(() => {});
-    console.error("[dealer/applications/approve] DB error:", err);
+    logger.error("[dealer/applications/approve] DB error:", err);
     return NextResponse.json({ error: "Database error during approval" }, { status: 500 });
   }
 
@@ -134,7 +135,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       }),
     });
   } catch (err) {
-    console.error("[dealer/applications/approve] Claim token / email error:", err);
+    logger.error("[dealer/applications/approve] Claim token / email error:", err);
   }
 
   return NextResponse.json({

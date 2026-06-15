@@ -1,4 +1,5 @@
 // POST /api/admin/dealers/[dealerId]/compliance/flag
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { z } from "zod";
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         to: dealer.user.email,
         contactName: dealer.dealershipName,
         noticeDate: new Date().toISOString().slice(0, 10),
-      }).catch(err => console.error("[compliance/flag] notice email failed:", err));
+      }).catch(err => logger.error("[compliance/flag] notice email failed:", err));
     }
 
     return adminSuccess(result);

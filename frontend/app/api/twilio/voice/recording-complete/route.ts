@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import twilio from "twilio";
 import { parseTwilioRequest, twimlResponse } from "@/lib/voice/twilio-verify";
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
   try {
     const { params, verified } = await parseTwilioRequest(request, PATH);
     if (!verified) {
-      console.error("[zura-p4] Twilio signature invalid — rejecting request");
+      logger.error("[zura-p4] Twilio signature invalid — rejecting request");
       return new Response("Unauthorized", { status: 401 });
     }
 
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
 
     // No audio captured (caller stayed silent) — re-ask without transcribing.
     if (!recordingUrl || recordingDuration === 0) {
-      console.log("[zura-p4] Empty recording — re-asking caller");
+      logger.info("[zura-p4] Empty recording — re-asking caller");
       const xml = await handleVoiceTurn({ callSid, from, speech: "", lowConfidence: true });
       return twimlResponse(xml);
     }
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
     const lowConfidence = sttFailed || !result.text || result.confidence === "low";
 
     if (sttFailed) {
-      console.warn("[zura-p4] Whisper unavailable — re-asking via Twilio STT");
+      logger.warn("[zura-p4] Whisper unavailable — re-asking via Twilio STT");
     }
 
     const xml = await handleVoiceTurn({
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
     });
     return twimlResponse(xml);
   } catch (err) {
-    console.error("[zura-p4] recording-complete error:", err);
+    logger.error("[zura-p4] recording-complete error:", err);
     const twiml = new VoiceResponse();
     twiml.say(
       { voice: "Polly.Joanna-Neural" },

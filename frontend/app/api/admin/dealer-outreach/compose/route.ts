@@ -6,6 +6,7 @@
 // footer used by the template service and dispatch via Resend. Suppression and the
 // missing-env deliverability guard are mirrored inline (we do NOT call the send
 // service so the compose flow stays independent of sequence semantics).
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { Resend } from "resend";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
@@ -55,7 +56,7 @@ async function isSuppressed(email: string): Promise<boolean> {
     const supabase = getServiceSupabase();
     return await SuppressionService.isEmailSuppressed(supabase, email);
   } catch (err) {
-    console.warn(
+    logger.warn(
       `[compose] Suppression check failed (allowing send): ${err instanceof Error ? err.message : String(err)}`,
     );
     return false;

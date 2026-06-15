@@ -1,5 +1,6 @@
 "use client";
 
+import { logger } from "@/lib/logger";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -48,7 +49,7 @@ function SignOutButton() {
     try {
       const res = await fetch("/api/dealer/auth/signout", { method: "POST" });
       if (!res.ok) {
-        console.error("Sign-out request failed:", res.status);
+        logger.error("Sign-out request failed:", res.status);
       }
     } catch {
       // Network error — still redirect; the cookie will expire naturally

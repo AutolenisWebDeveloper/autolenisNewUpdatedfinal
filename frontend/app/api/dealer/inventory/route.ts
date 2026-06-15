@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
@@ -75,8 +76,7 @@ export async function POST(request: NextRequest) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return errorResponse("DUPLICATE_VIN", "A vehicle with this VIN already exists", 409);
     }
-    // eslint-disable-next-line no-console
-    console.error("[dealer/inventory POST]", err);
+    logger.error("[dealer/inventory POST]", err);
     return errorResponse("DB_ERROR", "Could not save inventory item", 500);
   }
 }

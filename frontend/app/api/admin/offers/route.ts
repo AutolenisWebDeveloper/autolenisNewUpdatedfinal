@@ -4,6 +4,7 @@
 // Zod validation on all inputs
 // Standard response shape: { success, data } / { error, correlationId }
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { getOffersForAuction } from "@/lib/services/offer/offer.service";
@@ -243,7 +244,7 @@ export async function POST(request: NextRequest) {
     contactPhone: outsideDealerPhone ?? null,
     otdPriceCents,
     source: "admin_manual",
-  }).catch((e) => console.error("[admin/offers] outside dealer admin notification failed:", e));
+  }).catch((e) => logger.error("[admin/offers] outside dealer admin notification failed:", e));
 
   return adminSuccess({ offer: { id: offer.id, auctionId, otdPriceCents, status: offer.status, outsideDealerName } }, 201);
 }

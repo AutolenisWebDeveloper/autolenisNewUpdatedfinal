@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -155,7 +156,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       body: `You've been invited to bid on auction ${launched.id.slice(-8)}. Submit your offer within ${hours ?? AUCTION_DURATION_HOURS} hours.`,
       actionUrl: `/dealer/auctions/${launched.id}`,
     })),
-  }).catch(err => console.error("[launch-auction] dealer notif failed:", err));
+  }).catch(err => logger.error("[launch-auction] dealer notif failed:", err));
 
   // Buyer in-app notification
   await prisma.notification.create({
@@ -167,7 +168,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       body: `Your auction is active. Dealers are reviewing offers. Closes in ${hours ?? AUCTION_DURATION_HOURS} hours.`,
       actionUrl: `/buyer/auctions`,
     },
-  }).catch(err => console.error("[launch-auction] buyer notif failed:", err));
+  }).catch(err => logger.error("[launch-auction] buyer notif failed:", err));
 
   // Update optional VehicleRequest status (non-blocking)
   if (vehicleRequestId) {
@@ -176,7 +177,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         where: { id: vehicleRequestId, buyerId },
         data: { status: "ACTIVE_SOURCING" },
       })
-      .catch(err => console.error("[launch-auction] vehicleRequest update failed:", err));
+      .catch(err => logger.error("[launch-auction] vehicleRequest update failed:", err));
   }
 
   // Attach auction vehicles (optional)
@@ -246,7 +247,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       auctionUrl: `${APP_URL}/dealer/auctions/${launched.id}`,
       expiryHours: hours ?? AUCTION_DURATION_HOURS,
       auctionId: launched.id,
-    }).catch(err => console.error(`[launch-auction] dealer email failed (${d.id}):`, err));
+    }).catch(err => logger.error(`[launch-auction] dealer email failed (${d.id}):`, err));
   }
 
   // Outside-dealer invitation emails (non-blocking, public token-gated URL)
@@ -263,7 +264,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       auctionUrl: `${APP_URL}/dealer-offer-outside/${inv.token}`,
       expiryHours: hours ?? AUCTION_DURATION_HOURS,
       auctionId: launched.id,
-    }).catch(err => console.error(`[launch-auction] outside dealer email failed (${inv.email}):`, err));
+    }).catch(err => logger.error(`[launch-auction] outside dealer email failed (${inv.email}):`, err));
   }
 
   // Buyer activation email (non-blocking)
@@ -272,7 +273,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       buyer.user.email,
       buyer.firstName ?? "there",
       launched.id
-    ).catch(err => console.error("[launch-auction] buyer email failed:", err));
+    ).catch(err => logger.error("[launch-auction] buyer email failed:", err));
   }
 
   // Audit log
@@ -296,7 +297,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         depositId: deposit.id,
       },
     },
-  }).catch(err => console.error("[launch-auction] audit log failed:", err));
+  }).catch(err => logger.error("[launch-auction] audit log failed:", err));
 
   // Buyer journey advances to auction_active — mirror onto the CRM contact.
   await syncBuyerLifecycleToCrm(

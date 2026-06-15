@@ -6,6 +6,7 @@
 // Stage 1 target. Raise BATCH_LIMIT to 34/run for Stage 2 (100/day) and 100/run
 // for Stage 3 (300/day) once indexation is proven.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
       else if (result.status === "pending_enrichment") pendingEnrichment += 1;
     } catch (err) {
       failed += 1;
-      console.error(
+      logger.error(
         `[amips-cron] generation threw for queue ${item.id}:`,
         err,
       );
@@ -80,7 +81,7 @@ export async function GET(request: NextRequest) {
     pendingEnrichment,
     timestamp: new Date().toISOString(),
   };
-  console.log("[amips-cron]", JSON.stringify(summary));
+  logger.info("[amips-cron]", JSON.stringify(summary));
 
   return NextResponse.json({ success: true, data: summary });
 }

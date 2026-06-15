@@ -1,5 +1,6 @@
 "use client";
 
+import { logger } from "@/lib/logger";
 import { useEffect } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,7 @@ export default function AffiliateError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("[affiliate] unhandled page error:", error);
+    logger.error("[affiliate] unhandled page error:", error);
   }, [error]);
 
   return (

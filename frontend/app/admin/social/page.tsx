@@ -1,6 +1,7 @@
 // /admin/social — Social Intelligence & Media Engine console.
 // Server shell: enforces admin auth and hands the client the current automation
 // mode, franchises, and platform-connection status (derived from env presence).
+import { logger } from "@/lib/logger";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import { AUTOMATION_MODE } from "@/lib/social/config";
@@ -35,7 +36,7 @@ export default async function AdminSocialPage() {
       },
     })) as FranchiseRow[];
   } catch (err) {
-    console.error("[admin/social] franchises query failed:", err);
+    logger.error("[admin/social] franchises query failed:", err);
     // franchises stays as an empty array
   }
 

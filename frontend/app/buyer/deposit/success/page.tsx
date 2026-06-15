@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Auction Access Fee Confirmed", robots: { index: false, follow: false } };
@@ -45,7 +46,7 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
         errorMsg = `Payment status: ${intent.status}. Return to payment and try again.`;
       }
     } catch (err) {
-      console.error("[deposit-success] verify error:", err);
+      logger.error("[deposit-success] verify error:", err);
       errorMsg = "Could not verify payment status. Contact support if charged.";
     }
   } else {

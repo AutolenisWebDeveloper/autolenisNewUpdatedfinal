@@ -2,6 +2,7 @@
 // Runs the AI competitor content scan on demand (admin Intelligence page) and
 // returns the week's opportunities. The scan is idempotent per ISO week.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
     const insights = await scanCompetitorContent();
     return adminSuccess({ insights, count: insights.length });
   } catch (err) {
-    console.error("[admin/social] competitor-scan failed:", err);
+    logger.error("[admin/social] competitor-scan failed:", err);
     return adminError("COMPETITOR_SCAN_FAILED", "Competitor scan failed", 500);
   }
 }

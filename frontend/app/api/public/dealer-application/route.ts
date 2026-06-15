@@ -1,5 +1,6 @@
 // POST /api/public/dealer-application — creates DealerApplication record, sends confirmation emails
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -91,10 +92,10 @@ export async function POST(request: NextRequest) {
     }),
   ]);
   if (dealerResult.status === "rejected") {
-    console.error("[dealer-application] dealer email failed:", dealerResult.reason);
+    logger.error("[dealer-application] dealer email failed:", dealerResult.reason);
   }
   if (adminResult.status === "rejected") {
-    console.error("[dealer-application] admin email failed:", adminResult.reason);
+    logger.error("[dealer-application] admin email failed:", adminResult.reason);
   }
 
   // Templated received-confirmation (separate template/idempotency key from
@@ -103,7 +104,7 @@ export async function POST(request: NextRequest) {
     to: data.contactEmail,
     dealershipName: data.dealershipName,
     contactName: data.contactName,
-  }).catch(err => console.error("[dealer-application] templated received email failed:", err));
+  }).catch(err => logger.error("[dealer-application] templated received email failed:", err));
 
   syncGhlTag(data.contactEmail, "dealer-applied");
 

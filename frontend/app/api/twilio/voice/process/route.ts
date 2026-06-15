@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import twilio from "twilio";
 import { parseTwilioRequest, twimlResponse } from "@/lib/voice/twilio-verify";
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest) {
   try {
     const { params, verified } = await parseTwilioRequest(request, PATH);
     if (!verified) {
-      console.error("[voice/process] Twilio signature invalid — rejecting request");
+      logger.error("[voice/process] Twilio signature invalid — rejecting request");
       return new Response("Unauthorized", { status: 401 });
     }
 
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     const xml = await handleVoiceTurn({ callSid, from, speech, lowConfidence });
     return twimlResponse(xml);
   } catch (err) {
-    console.error("Voice process error:", err);
+    logger.error("Voice process error:", err);
     const twiml = new VoiceResponse();
     twiml.say(
       { voice: "Polly.Joanna-Neural" },

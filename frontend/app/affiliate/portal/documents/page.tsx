@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { requireAffiliate } from "@/lib/auth/affiliate-session";
 import { prisma } from "@/lib/prisma";
 import { FileCheck } from "lucide-react";
@@ -28,7 +29,7 @@ export default async function AffiliateDocumentsPage() {
       orderBy: { uploadedAt: "desc" },
     });
   } catch {
-    console.warn("[documents] affiliate_documents table not yet migrated");
+    logger.warn("[documents] affiliate_documents table not yet migrated");
   }
 
   const docsByType = new Map(documents.map(d => [d.type, d]));

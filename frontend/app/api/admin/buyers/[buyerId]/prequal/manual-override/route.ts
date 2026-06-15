@@ -16,6 +16,7 @@
 //   - AdminAuditLog + ComplianceEvent written on every action.
 //   - Adverse-action email sent when decision is DECLINED (FCRA § 615).
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminWithRole, OPERATIONAL_ROLES, adminSuccess, adminError } from "@/lib/auth/admin-api";
@@ -151,7 +152,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         expiryDate: emailExpiryDate,
       });
     } catch (emailErr) {
-      console.error("[admin/prequal/manual-override] Failed to send approval email:", emailErr);
+      logger.error("[admin/prequal/manual-override] Failed to send approval email:", emailErr);
     }
 
     try {
@@ -171,7 +172,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         },
       });
     } catch (logErr) {
-      console.error("[admin/prequal/manual-override] Failed to log compliance event:", logErr);
+      logger.error("[admin/prequal/manual-override] Failed to log compliance event:", logErr);
     }
   }
 
@@ -200,7 +201,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       });
       outcome = sendResult.outcome;
     } catch (emailErr) {
-      console.error("[admin/prequal/manual-override] Failed to send adverse action email:", emailErr);
+      logger.error("[admin/prequal/manual-override] Failed to send adverse action email:", emailErr);
       adverseActionErrorMessage =
         emailErr instanceof Error ? emailErr.message : String(emailErr);
     }
@@ -230,7 +231,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         },
       });
     } catch (logErr) {
-      console.error("[admin/prequal/manual-override] Failed to log adverse action event:", logErr);
+      logger.error("[admin/prequal/manual-override] Failed to log adverse action event:", logErr);
     }
   }
 

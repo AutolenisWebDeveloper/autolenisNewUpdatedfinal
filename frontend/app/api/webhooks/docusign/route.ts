@@ -12,6 +12,7 @@
 // the post-signing side effects (stage advance, contract record, email) more
 // than once.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
   // envelope-completed events. In dev/staging it surfaces the misconfiguration
   // immediately instead of silently accepting unsigned payloads.
   if (!webhookSecret) {
-    console.error("[docusign/webhook] DOCUSIGN_WEBHOOK_SECRET is not configured — rejecting request");
+    logger.error("[docusign/webhook] DOCUSIGN_WEBHOOK_SECRET is not configured — rejecting request");
     return new NextResponse("Webhook not configured", { status: 503 });
   }
 
@@ -114,7 +115,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ received: true });
   } catch (err) {
-    console.error("[docusign/webhook] processing error:", err);
+    logger.error("[docusign/webhook] processing error:", err);
     // Leave the dedupe row in place with processed=false so an operator can
     // see the failure; return 500 so DocuSign retries the delivery.
     return new NextResponse("Processing error", { status: 500 });

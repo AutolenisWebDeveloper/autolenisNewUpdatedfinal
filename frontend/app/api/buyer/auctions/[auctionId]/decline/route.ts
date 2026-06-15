@@ -1,5 +1,6 @@
 // POST /api/buyer/auctions/[auctionId]/decline
 // Buyer declines all offers and requests deposit refund.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       await refundDeposit(auction.deposit.id, reason ?? "Buyer declined all offers");
       refundInitiated = true;
     } catch (err) {
-      console.error("[decline-auction] refund failed:", err);
+      logger.error("[decline-auction] refund failed:", err);
       // Non-fatal — admin can process manually
     }
   }
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         ? "You passed on this auction. Your $99 deposit refund has been initiated and will appear within 3–5 business days."
         : "You passed on this auction. Our team will process your refund within 1 business day.",
     },
-  }).catch((err: unknown) => console.error("[decline-auction] notification failed:", err));
+  }).catch((err: unknown) => logger.error("[decline-auction] notification failed:", err));
 
   return successResponse({ auctionClosed: true, refundInitiated });
 }

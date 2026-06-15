@@ -2,6 +2,7 @@
 // Creates the User + Admin records with a temporary password and MFA disabled,
 // so the invitee must complete MFA setup before their first authenticated
 // session. The invite email carries the temp password and the sign-in link.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminWithRole, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
       <p style="color:#64748b;font-size:13px">For security, change your password and complete MFA setup on first sign-in.</p>
     `,
     idempotencyKey: `admin-invite-${newAdmin.id}`,
-  }).catch(err => console.error("[admins] invite email failed:", err));
+  }).catch(err => logger.error("[admins] invite email failed:", err));
 
   return adminSuccess({ adminId: newAdmin.id, email: normalizedEmail, role }, 201);
 }

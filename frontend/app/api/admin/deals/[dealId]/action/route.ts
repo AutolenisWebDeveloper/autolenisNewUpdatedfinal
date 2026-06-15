@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest, { params }: Props) {
             dealId,
             vehicleRef: `Deal ${dealId.slice(0, 8)}`,
             uploadUrl: `${APP_URL}/dealer/deals/${dealId}`,
-          }).catch(err => console.error("[deals/action] contract pending email failed:", err));
+          }).catch(err => logger.error("[deals/action] contract pending email failed:", err));
         }
       }
 
@@ -110,10 +111,10 @@ export async function POST(request: NextRequest, { params }: Props) {
             title: "Your deal is complete",
             body: "Congratulations — your purchase is complete. Thank you for choosing AutoLenis.",
           },
-        }).catch(err => console.error("[deals/action] complete buyer notify failed:", err));
+        }).catch(err => logger.error("[deals/action] complete buyer notify failed:", err));
         if (buyer?.user?.email) {
           await sendDealCompleteEmail(buyer.user.email, buyer.firstName ?? "there", dealId)
-            .catch(err => console.error("[deals/action] deal complete email failed:", err));
+            .catch(err => logger.error("[deals/action] deal complete email failed:", err));
         }
         const dealerInfo = await getDealerEmailForDeal(dealId);
         if (dealerInfo?.id) {
@@ -125,7 +126,7 @@ export async function POST(request: NextRequest, { params }: Props) {
               title: "Deal completed",
               body: `Deal ${dealId.slice(0, 8)} has been marked complete.`,
             },
-          }).catch(err => console.error("[deals/action] complete dealer notify failed:", err));
+          }).catch(err => logger.error("[deals/action] complete dealer notify failed:", err));
         }
       }
 
@@ -156,7 +157,7 @@ export async function POST(request: NextRequest, { params }: Props) {
           fixItems: [reason],
           contractUrl: `${APP_URL}/dealer/deals/${dealId}`,
           dealId,
-        }).catch(err => console.error("[deals/action] contract issues email failed:", err));
+        }).catch(err => logger.error("[deals/action] contract issues email failed:", err));
       }
 
       result = { overridden: true };
@@ -199,7 +200,7 @@ export async function POST(request: NextRequest, { params }: Props) {
             ? "Your deal was cancelled and your deposit refunded. Please allow 3–5 business days for funds to appear."
             : "Your deal was cancelled. If a refund is due, our team will follow up shortly.",
         },
-      }).catch(err => console.error("[deals/action] cancel buyer notify failed:", err));
+      }).catch(err => logger.error("[deals/action] cancel buyer notify failed:", err));
 
       // Notify dealer (in-app).
       const dealerInfo = await getDealerEmailForDeal(dealId);
@@ -212,7 +213,7 @@ export async function POST(request: NextRequest, { params }: Props) {
             title: "Deal cancelled",
             body: `Deal ${dealId.slice(0, 8)} was cancelled by the platform.`,
           },
-        }).catch(err => console.error("[deals/action] cancel dealer notify failed:", err));
+        }).catch(err => logger.error("[deals/action] cancel dealer notify failed:", err));
       }
 
       result = { cancelled: true, refunded };

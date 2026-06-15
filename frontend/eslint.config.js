@@ -25,10 +25,11 @@ const config = [
     },
   },
   {
-    // All of lib/ must route logging through lib/logger (structured, queryable).
-    // lib/ is console-free as of the Phase 3 migration; this ratchet prevents
-    // regressions. (app/ and components/ are not yet migrated — future work.)
-    files: ["lib/**/*.ts", "lib/**/*.tsx"],
+    // lib/, app/, and components/ must route logging through lib/logger
+    // (structured, queryable). These trees are console-free as of the Phase 3
+    // migration; this ratchet prevents regressions. (scripts/ and config files
+    // may still use console.)
+    files: ["lib/**/*.ts", "lib/**/*.tsx", "app/**/*.ts", "app/**/*.tsx", "components/**/*.ts", "components/**/*.tsx"],
     rules: {
       "no-console": "warn",
     },

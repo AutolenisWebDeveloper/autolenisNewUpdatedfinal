@@ -8,6 +8,7 @@
 // /api/webhooks/* is already treated as public + CSRF-exempt by proxy.ts; this
 // route does its own signature validation (same HMAC pattern as Stripe).
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
@@ -96,7 +97,7 @@ export async function POST(request: NextRequest) {
           data: { status: "SCHEDULED" },
         });
       }
-      console.log(`[higgsfield-webhook] video ${video.id} ready (request_id ${requestId})`);
+      logger.info(`[higgsfield-webhook] video ${video.id} ready (request_id ${requestId})`);
     }
     return NextResponse.json({ received: true, status: "ready" });
   }
@@ -124,7 +125,7 @@ export async function POST(request: NextRequest) {
         },
       });
     }
-    console.log(`[higgsfield-webhook] NSFW flagged: ${requestId}`);
+    logger.info(`[higgsfield-webhook] NSFW flagged: ${requestId}`);
     return NextResponse.json({ received: true, status: "nsfw" });
   }
 
@@ -153,7 +154,7 @@ export async function POST(request: NextRequest) {
           lastPolledAt: new Date(),
         },
       });
-      console.log(
+      logger.info(
         `[higgsfield-webhook] video ${video.id} failed (request_id ${requestId}), retryable=${retryable}`,
       );
     }

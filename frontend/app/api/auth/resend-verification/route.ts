@@ -2,6 +2,7 @@
 // Resends the AutoLenis branded verification email.
 // Caller supplies: { email: string }
 // Rate limiting: one resend per 60 seconds per email (checked via AdminAuditLog).
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceSupabaseClient } from "@/lib/supabase";
 import { sendWelcomeEmail } from "@/lib/services/email/resend.service";
@@ -94,7 +95,7 @@ export async function POST(request: NextRequest) {
       },
     }).catch(() => {});
   } catch (e) {
-    console.error("[resend-verification]", e);
+    logger.error("[resend-verification]", e);
     // Always return success — never reveal if email exists
   }
 

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import twilio from "twilio";
 import { parseTwilioRequest, twimlResponse } from "@/lib/voice/twilio-verify";
@@ -19,7 +20,7 @@ export async function POST(request: NextRequest) {
   try {
     for (const envVar of REQUIRED_ENV_VARS) {
       if (!process.env[envVar]) {
-        console.error(`[voice/incoming] Missing required env var: ${envVar}`);
+        logger.error(`[voice/incoming] Missing required env var: ${envVar}`);
         const twiml = new VoiceResponse();
         twiml.say(
           { voice: VOICE },
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
 
     const { params, verified } = await parseTwilioRequest(request, PATH);
     if (!verified) {
-      console.error("[voice/incoming] Twilio signature invalid — rejecting request");
+      logger.error("[voice/incoming] Twilio signature invalid — rejecting request");
       return new Response("Unauthorized", { status: 401 });
     }
 
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
     // /voice/process turns can reference it without re-querying.
     const buyerContext = await lookupBuyerByPhone(from);
     if (buyerContext.found) {
-      console.log(
+      logger.info(
         `[zura-phase2] Returning caller: ${buyerContext.firstName ?? "unknown"}, ` +
           `${buyerContext.make ?? "—"} ${buyerContext.model ?? ""}`.trim(),
       );
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
 
     return twimlResponse(twiml.toString());
   } catch (err) {
-    console.error("Voice incoming error:", err);
+    logger.error("Voice incoming error:", err);
     const twiml = new VoiceResponse();
     twiml.say(
       { voice: VOICE },

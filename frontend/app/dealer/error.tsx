@@ -1,5 +1,6 @@
 "use client";
 
+import { logger } from "@/lib/logger";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle } from "lucide-react";
@@ -16,7 +17,7 @@ export default function DealerError({
     // Log the error so the operator can correlate via the digest displayed
     // to the dealer. We deliberately do not surface the raw message because
     // it may include implementation details.
-    console.error("[dealer/error]", error);
+    logger.error("[dealer/error]", error);
   }, [error]);
 
   return (

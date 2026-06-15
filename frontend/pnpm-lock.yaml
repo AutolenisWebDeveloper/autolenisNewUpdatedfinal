@@ -4,6 +4,10 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  postcss@<8.5.10: '>=8.5.10'
+  ws@>=8.0.0 <8.20.1: '>=8.20.1'
+
 importers:
 
   .:
@@ -76,7 +80,7 @@ importers:
         version: 16.2.9(@babel/core@7.29.0)(@opentelemetry/api@1.9.1)(@playwright/test@1.60.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       openai:
         specifier: ^6.42.0
-        version: 6.42.0(ws@8.20.0)(zod@3.25.76)
+        version: 6.42.0(ws@8.21.0)(zod@3.25.76)
       otpauth:
         specifier: ^9.4.0
         version: 9.5.0
@@ -3313,7 +3317,7 @@ packages:
   openai@6.42.0:
     resolution: {integrity: sha512-1WFEt/uXMXOLhYRNkgJWo08Y2YNvNwpVU72K7ibrWgWpNOXd4VojXLbe6SQ4bLiUQ3Y8jz4IiyVkylJCL1DtZg==}
     peerDependencies:
-      ws: ^8.18.0
+      ws: '>=8.20.1'
       zod: ^3.25 || ^4.0
     peerDependenciesMeta:
       ws:
@@ -3424,10 +3428,6 @@ packages:
   possible-typed-array-names@1.1.0:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
     engines: {node: '>= 0.4'}
-
-  postcss@8.4.31:
-    resolution: {integrity: sha512-PS08Iboia9mts/2ygV3eLpY5ghnUcfLV/EXTOW1E2qYxJKGGBUtNjN76FYHnMs36RmARn41bC0AZmn+rR0OVpQ==}
-    engines: {node: ^10 || ^12 || >=14}
 
   postcss@8.5.10:
     resolution: {integrity: sha512-pMMHxBOZKFU6HgAZ4eyGnwXF/EvPGGqUr0MnZ5+99485wwW41kW91A4LOGxSHhgugZmSChL5AlElNdwlNgcnLQ==}
@@ -3974,8 +3974,8 @@ packages:
     resolution: {integrity: sha512-YVGIj2kamLSTxw6NsZjoBxfSwsn0ycdesmc4p+Q21c5zPuZ1pl+NfxVdxPtdHvmNVOQ6XSYG4AUtyt/Fi7D16Q==}
     engines: {node: '>=10'}
 
-  ws@8.20.0:
-    resolution: {integrity: sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA==}
+  ws@8.21.0:
+    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -5380,7 +5380,7 @@ snapshots:
       '@supabase/phoenix': 0.4.0
       '@types/ws': 8.18.1
       tslib: 2.8.1
-      ws: 8.20.0
+      ws: 8.21.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -7260,7 +7260,7 @@ snapshots:
       '@swc/helpers': 0.5.15
       baseline-browser-mapping: 2.10.21
       caniuse-lite: 1.0.30001790
-      postcss: 8.4.31
+      postcss: 8.5.10
       react: 19.2.5
       react-dom: 19.2.5(react@19.2.5)
       styled-jsx: 5.1.6(@babel/core@7.29.0)(react@19.2.5)
@@ -7343,9 +7343,9 @@ snapshots:
       define-properties: 1.2.1
       es-object-atoms: 1.1.1
 
-  openai@6.42.0(ws@8.20.0)(zod@3.25.76):
+  openai@6.42.0(ws@8.21.0)(zod@3.25.76):
     optionalDependencies:
-      ws: 8.20.0
+      ws: 8.21.0
       zod: 3.25.76
 
   optionator@0.9.4:
@@ -7448,12 +7448,6 @@ snapshots:
   pngjs@5.0.0: {}
 
   possible-typed-array-names@1.1.0: {}
-
-  postcss@8.4.31:
-    dependencies:
-      nanoid: 3.3.11
-      picocolors: 1.1.1
-      source-map-js: 1.2.1
 
   postcss@8.5.10:
     dependencies:
@@ -8191,7 +8185,7 @@ snapshots:
       string-width: 4.2.3
       strip-ansi: 6.0.1
 
-  ws@8.20.0: {}
+  ws@8.21.0: {}
 
   xmlbuilder@13.0.2: {}
 
