@@ -114,10 +114,12 @@ export async function POST(request: NextRequest, { params }: Props) {
 
         case "fee":
           if (activeDeal && !activeDeal.feePaidAt) {
+            // Record fee fields (non-status) directly; route the status change through the seam.
             await prisma.deal.update({
               where: { id: activeDeal.id },
-              data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS, status: "FEE_PAID" },
+              data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS },
             });
+            if (activeDeal.status !== "FEE_PAID") await advanceDeal("FEE_PAID");
           }
           break;
 

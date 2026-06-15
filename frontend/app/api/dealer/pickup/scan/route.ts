@@ -7,7 +7,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
-import { INSURANCE_SATISFIED } from "@/lib/services/deal/deal.service";
+import { INSURANCE_SATISFIED, advanceDealStatus, DealTransitionError } from "@/lib/services/deal/deal.service";
 import { Resend } from "resend";
 
 // Lazy Resend client — constructed on first use. Prevents Next.js build-time
@@ -63,14 +63,22 @@ export async function POST(request: NextRequest) {
 
   const completedAt = new Date();
 
+  // Route the lifecycle transition through the guarded seam (enforces canTransition
+  // + the insurance gate; records DealStatusHistory). The pickup record + completion
+  // activity event are written after the deal has advanced.
+  try {
+    await advanceDealStatus(pickup.dealId, "COMPLETED", { actorRole: "DEALER", reason: "Dealer QR pickup scan" });
+  } catch (err) {
+    if (err instanceof DealTransitionError) {
+      return errorResponse("NOT_READY_FOR_PICKUP", "This deal is not ready for pickup completion.", 409);
+    }
+    throw err;
+  }
+
   await prisma.$transaction([
     prisma.pickup.update({
       where: { id: pickup.id },
       data: { status: "COMPLETED", completedAt },
-    }),
-    prisma.deal.update({
-      where: { id: pickup.dealId },
-      data: { status: "COMPLETED" },
     }),
     prisma.buyerActivityEvent.create({
       data: {

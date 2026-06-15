@@ -176,17 +176,15 @@ export async function POST(request: NextRequest, { params }: Props) {
     // fee — mirrors concierge-fee/mark-paid route: feePaidAt + status = FEE_PAID
     case "fee": {
       if (!activeDeal) return adminError("NO_DEAL", "No active deal found", 400);
-      if (activeDeal.feePaidAt) {
-        // Already paid — just ensure status is correct
+      // Record fee fields (non-status) directly; route the status change through the seam.
+      if (!activeDeal.feePaidAt) {
         await prisma.deal.update({
           where: { id: activeDeal.id },
-          data: { status: "FEE_PAID" },
+          data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS },
         });
-      } else {
-        await prisma.deal.update({
-          where: { id: activeDeal.id },
-          data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS, status: "FEE_PAID" },
-        });
+      }
+      if (activeDeal.status !== "FEE_PAID") {
+        await advanceDeal("FEE_PAID");
       }
       action = "JOURNEY_COMPLETE_FEE";
       break;
