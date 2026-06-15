@@ -161,3 +161,22 @@
 **Priority 3 — Verification infrastructure:**
 7. Add a link-graph/build check + per-surface state-branch audit to convert the ~38 `States: UNVERIFIED` rows.
 8. Wire/locate `playwright.config.*`, run full e2e, and add gate-bypass e2e tests for targets #1 and #3.
+
+---
+
+## CLOSURE-SESSION STATE-BRANCH RETIREMENT (2026-06-15)
+
+Static sweep of the ~38 `States`-column UNVERIFIED rows. Per-surface inspection of loading/empty/error/blocked branches (error.tsx boundaries now exist for every role segment). Split into statically-retired vs genuinely-runtime.
+
+**Buyer (23 surfaces incl. substates):** 22 STATE BRANCHES PRESENT → retired to Complete; 1 INCOMPLETE — `/buyer/shortlist` lacks an explicit loading fallback (server-fetched, synchronous initial render; `ShortlistClient` has empty + canActivate gating). Evidence examples: prequal `PrequalPage:484-506/74-81`, search `SearchSkeleton page.tsx:49-68` + `NoInventoryState`, deal `EmptyState 26-33`, esign `40-65`, pickup `39-67`, fee `95-161`.
+
+**Dealer + Affiliate (11):** 9 COMPLETE; 2 INCOMPLETE — `/dealer/apply` and `/dealer/onboarding/agreement` disable the submit button while posting but show no skeleton (no dedicated loading branch). Segment `dealer/error.tsx` + `dealer/loading.tsx` + `affiliate/error.tsx` cover error/route-loading. Blocked states verified (e.g. affiliate dashboard pending/rejected/suspended `dashboard/page.tsx:84-117`, dealer deals contact-gating `:238-243`).
+
+**Admin (12):** 9 COMPLETE (all have `loading.tsx` skeletons + empty states + `admin/error.tsx` + `requireAdmin` gating); `/admin/auctions` and `/admin/notifications` INCOMPLETE — missing a route `loading.tsx` (have explicit error+empty). `/admin/reports` is a nav hub (n/a). `/admin/activity` is COMPLETE on display branches but has a **runtime SSE-polling propagation aspect** (live-feed timing) that is genuinely e2e.
+
+### Split result
+- **Retired statically → Complete: ~40 surfaces** (display-state branches confirmed present with path:line).
+- **Statically-confirmed INCOMPLETE (minor, missing explicit loading branch — NOT a runtime question): 5** — `/buyer/shortlist`, `/dealer/apply`, `/dealer/onboarding/agreement`, `/admin/auctions`, `/admin/notifications`. Recommended (optional, low-risk): add a `loading.tsx` / submit spinner. These are display polish, not lifecycle/integrity gaps.
+- **Remain needs-e2e (genuine runtime — propagation timing + gate-enforcement proof): the cross-role propagation rows** (admin activity live feed, buyer↔admin journey status fan-out) **and the two gate-enforcement runtime proofs** (insurance→COMPLETED 409/throw; shortlist/auction 409; contract→sign + gate-bypass redirects). These are exactly what `tests/e2e/auth-gate-bypass.spec.ts` + lifecycle e2e will retire once `E2E_BASE_URL` is set.
+
+**Net:** the `States` column is no longer a blanket UNVERIFIED. Display branches are statically retired (5 minor INCOMPLETE noted); only **cross-role propagation timing + gate-enforcement runtime proof** legitimately remain for e2e.

@@ -27,6 +27,11 @@ export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  // Force-completing a deal (bypasses the insurance gate) is a privileged override —
+  // restrict to SUPER/OPERATIONS admins, consistent with the other override routes.
+  if (!["SUPER_ADMIN", "OPERATIONS_ADMIN"].includes(admin.role)) {
+    return adminError("FORBIDDEN", "Insufficient permissions — OPERATIONS_ADMIN or SUPER_ADMIN required", 403);
+  }
 
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
