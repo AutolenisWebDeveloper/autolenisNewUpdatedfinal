@@ -120,3 +120,23 @@ It remains **NOT fully READY** under the Definition of Done for exactly one reas
 **Step 4 — verification:** `tsc` 0 · `lint` 0 errors / 84 warnings · `build` PASS · `test` 38/0 · `e2e` still BLOCKED (E2E_BASE_URL unset, expected).
 
 **Remaining to flip §10 → READY:** (1) set `E2E_BASE_URL` (+ `E2E_*` DB/Supabase secrets) to a **non-prod seeded** preview and run the job — this validates the RBAC/redirect/401 specs end-to-end; (2) to also retire the gate-409 + propagation rows, first add the Playwright auth helper + pre-gate seed fixtures (above). Item (1) is the bottleneck; item (2) is a small, named follow-up.
+
+---
+
+## ADDENDUM 2 — GATE-PROOF PREREQUISITES BUILT (2026-06-15)
+
+The prerequisites the prior addendum said were missing are now built (still unrun — needs `E2E_BASE_URL`):
+
+- **Auth helper** (`tests/e2e/helpers/auth.ts`): dealer (real `/api/dealer/auth/signin` API → cookie jar), admin (mints `admin_token` identically to `lib/admin-auth.signAdminJwt` — HS256/issuer/24h/`mfaVerified`, same `JWT_SECRET`), buyer (real `/auth/signin` form → Supabase session). Covers dealer/admin/buyer (affiliate uses the same buyer form mechanism if needed).
+- **Pre-gate fixtures** (`scripts/seed-e2e-gates.ts`, `pnpm sandbox:seed-e2e-gates`): idempotent, scoped to `gate-*@autolenis-test.com`. Produces: CONTRACT_PENDING deal (esign gate), SIGNED deal w/ `insuranceStatus=NOT_STARTED` + pickup QR (insurance gate), buyer w/ active prequal + EMPTY shortlist (shortlist gate), FINANCING_PENDING deals (illegal-jump + propagation), and a SUPER_ADMIN row. Wired into the e2e job after the sandbox seed (E2E_* secrets only).
+- **Specs** (`tests/e2e/lifecycle-gates.spec.ts`, Playwright collects all 5):
+  - insurance gate → **asserts 409 `INSURANCE_REQUIRED`** (dealer scan). Reliability: HIGH (real API auth).
+  - illegal stage jump → **asserts 409 `INVALID_TRANSITION`** (admin action, no force). Reliability: HIGH-by-construction (token mint; needs `E2E_JWT_SECRET` == preview's).
+  - esign gate → **asserts 409 `CONTRACT_NOT_APPROVED`** (buyer). Reliability: MEDIUM (buyer UI login, unrun).
+  - shortlist gate → **asserts 400 `SHORTLIST_REQUIRED`** (buyer). Reliability: MEDIUM (buyer UI login, unrun).
+  - propagation → **asserts the buyer stage-change surfaces on `/api/admin/activity`** (presence by event type + "fee pending" title; the event metadata lacks `dealId`, so it matches type+title, which only this action produces in the seeded env). Reliability: MEDIUM (disclosed identity-match limitation).
+- **Required job secrets for the run:** `E2E_BASE_URL`, `E2E_DATABASE_URL` (+ `E2E_DIRECT_URL`), `E2E_SUPABASE_URL`, `E2E_SUPABASE_SERVICE_ROLE_KEY`, `E2E_JWT_SECRET` (must equal the preview's `JWT_SECRET`).
+
+**Verification:** tsc 0 · lint 0 errors/84 warnings · build PASS · unit tests 38/0 · Playwright **collects 71 tests / 3 files** (not run). e2e BLOCKED on `E2E_BASE_URL` (expected).
+
+**After this + the secrets, what still can't be proven at runtime:** nothing structural — all four gates + propagation now have rejection-asserting specs. Residual risk is execution-only: the buyer-UI-login specs and the propagation identity-match are unvalidated until the first green run; if buyer login selectors or the activity-feed shape differ at runtime, those 3 (esign/shortlist/propagation) may need a one-line adjustment. The 2 HIGH-reliability specs (insurance/illegal-jump) depend only on the dealer API + admin token.

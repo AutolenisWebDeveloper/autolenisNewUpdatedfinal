@@ -113,7 +113,9 @@ jobs:
       # cleanly if E2E_DATABASE_URL is not configured.
       - name: Seed e2e fixtures
         if: ${{ secrets.E2E_DATABASE_URL != '' }}
-        run: pnpm sandbox:seed-deal
+        run: |
+          pnpm sandbox:seed-deal
+          pnpm sandbox:seed-e2e-gates
         env:
           DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.E2E_DIRECT_URL || secrets.E2E_DATABASE_URL }}
@@ -125,3 +127,5 @@ jobs:
         env:
           BASE_URL: ${{ secrets.E2E_BASE_URL }}
           PLAYWRIGHT_NO_SERVER: "1"
+          # Required to mint the admin e2e token — MUST match the deployed preview's JWT_SECRET.
+          JWT_SECRET: ${{ secrets.E2E_JWT_SECRET }}
