@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, ScrollText, CheckCircle } from "lucide-react";
+import { ShieldCheck, ScrollText, CheckCircle, Loader2 } from "lucide-react";
 import {
   CURRENT_DEALER_AGREEMENT_VERSION,
   DEALER_AGREEMENT_TEXT,
@@ -166,7 +166,11 @@ export default function DealerAgreementPage() {
             className="w-full bg-[#643293] hover:bg-[#7a40b0] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-lg transition-colors text-sm"
             data-testid="sign-agreement-btn"
           >
-            {buttonLabel}
+            {loading ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> {buttonLabel}
+              </span>
+            ) : buttonLabel}
           </button>
 
           {/* G. Disclosure footer */}

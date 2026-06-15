@@ -104,6 +104,22 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
+      - name: Generate Prisma client
+        run: pnpm exec prisma generate
+
+      # Seed the sandbox lifecycle fixtures (idempotent; scoped to *@autolenis-test.com
+      # accounts only — never touches other rows). MUST point at the NON-PROD staging DB.
+      # Uses dedicated E2E_* secrets so the prod ref can never be the target. Skips
+      # cleanly if E2E_DATABASE_URL is not configured.
+      - name: Seed e2e fixtures
+        if: ${{ secrets.E2E_DATABASE_URL != '' }}
+        run: pnpm sandbox:seed-deal
+        env:
+          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.E2E_DIRECT_URL || secrets.E2E_DATABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
+
       - name: Run e2e against preview
         run: pnpm test:e2e
         env:

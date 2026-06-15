@@ -176,7 +176,13 @@ Static sweep of the ~38 `States`-column UNVERIFIED rows. Per-surface inspection 
 
 ### Split result
 - **Retired statically → Complete: ~40 surfaces** (display-state branches confirmed present with path:line).
-- **Statically-confirmed INCOMPLETE (minor, missing explicit loading branch — NOT a runtime question): 5** — `/buyer/shortlist`, `/dealer/apply`, `/dealer/onboarding/agreement`, `/admin/auctions`, `/admin/notifications`. Recommended (optional, low-risk): add a `loading.tsx` / submit spinner. These are display polish, not lifecycle/integrity gaps.
+- **Statically-confirmed INCOMPLETE → ALL 5 NOW COMPLETE** (e2e-prep session). On re-verification, 4 of the 5 were already adequate (sweep over-claimed):
+  - `/admin/auctions` — **already had** `app/admin/auctions/loading.tsx` (AdminListSkeleton). ✓
+  - `/admin/notifications` — **already had** `app/admin/notifications/loading.tsx` (AdminDashboardSkeleton). ✓
+  - `/dealer/apply` — already had explicit loading text (`page.tsx:522` "Submitting…" + disabled); **added a `Loader2` spinner** (`page.tsx:4,522`). ✓
+  - `/dealer/onboarding/agreement` — already had loading label (`page.tsx:61` "Processing..."); **added a `Loader2` spinner** (`page.tsx:5,165`). ✓
+  - `/buyer/shortlist` — **genuinely lacked** a loading branch → **added `app/buyer/shortlist/loading.tsx`** (skeleton). ✓
+  Net: 0 statically-incomplete rows remain.
 - **Remain needs-e2e (genuine runtime — propagation timing + gate-enforcement proof): the cross-role propagation rows** (admin activity live feed, buyer↔admin journey status fan-out) **and the two gate-enforcement runtime proofs** (insurance→COMPLETED 409/throw; shortlist/auction 409; contract→sign + gate-bypass redirects). These are exactly what `tests/e2e/auth-gate-bypass.spec.ts` + lifecycle e2e will retire once `E2E_BASE_URL` is set.
 
 **Net:** the `States` column is no longer a blanket UNVERIFIED. Display branches are statically retired (5 minor INCOMPLETE noted); only **cross-role propagation timing + gate-enforcement runtime proof** legitimately remain for e2e.

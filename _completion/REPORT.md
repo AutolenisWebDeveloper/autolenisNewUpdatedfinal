@@ -65,7 +65,7 @@ From `_completion/01_matrix.md` — **42 substantive surface rows.** Original di
 - **Missing 1 → N/A:** `api/admin/reports/operations/route.ts` never existed (stale prior-audit reference).
 - **`States` column — STATICALLY RETIRED this session** (closure sweep, see `01_matrix.md` "CLOSURE-SESSION STATE-BRANCH RETIREMENT"). Per-surface inspection of loading/empty/error/blocked branches:
   - **~40 surfaces → Complete** (display branches confirmed present, path:line; every role segment now has `error.tsx`).
-  - **5 statically-confirmed INCOMPLETE** (minor — missing an explicit loading branch, NOT a runtime question): `/buyer/shortlist`, `/dealer/apply`, `/dealer/onboarding/agreement`, `/admin/auctions`, `/admin/notifications`. Recommended optional `loading.tsx`/spinner; display polish, not integrity.
+  - **5 statically-confirmed INCOMPLETE → ALL RESOLVED** in the e2e-prep session (see Addendum): 4 were over-claimed (already had `loading.tsx`/loading text; 2 dealer buttons got a spinner), and `/buyer/shortlist` got a new `loading.tsx`. 0 remain.
   - **Genuinely needs-e2e (runtime only):** cross-role **propagation timing** (admin activity live feed; buyer↔admin journey status fan-out) and **gate-enforcement runtime proof** (insurance→COMPLETED 409/throw; shortlist/auction 409; contract→sign + gate-bypass redirects). This is the residual the e2e suite retires.
 - **Reason the residual can't be static:** propagation timing and the runtime firing of the 409/throw gates require a running app + seeded data; they are not display-branch questions.
 
@@ -103,3 +103,20 @@ It remains **NOT fully READY** under the Definition of Done for exactly one reas
 **Non-blocking recommendations:** add the 5 missing `loading.tsx`/spinners (§7); add integration tests with a test DB for the insurance + shortlist gate *enforcement* throws (§4 PARTIAL/NO rows); migrate remaining `scripts/` console.* if desired.
 
 **Bottom line:** the verification loop did its job twice (dead state-machine in the prior audit; "all routed" over-claim this session) — keep verify-don't-trust in force through go-live. Once the e2e run is green against a safe seeded preview, this is a defensible **READY on the code axis**, with compliance gates honestly tracked and the binding business constraint being **dealer #1**. Remaining work is hours, not weeks.
+
+---
+
+## ADDENDUM — E2E-READINESS PREP SESSION (2026-06-15, secret-independent)
+
+**Step 1 — 5 statically-incomplete loading rows → all Complete.** Re-verification found 4 of 5 were over-claimed by the prior sweep: `/admin/auctions` + `/admin/notifications` already had `loading.tsx`; `/dealer/apply` (`page.tsx:522`) + `/dealer/onboarding/agreement` (`page.tsx:61`) already had explicit loading *text* — enhanced both with a `Loader2` spinner. Only `/buyer/shortlist` genuinely lacked one → added `app/buyer/shortlist/loading.tsx`. Matrix rows flipped.
+
+**Step 2 — e2e spec assertion inventory (anti-over-claim):**
+- `auth-gate-bypass.spec.ts` — **asserts real outcomes, not render**: 4 unauthenticated role-dashboard requests assert the **redirect** to the role sign-in; the API tests assert **401** (auth rejection). **Strengthened** this session: added 7 unauthenticated mutating-API assertions across buyer/dealer/admin/affiliate namespaces (each must be 401, never 2xx). Reliable — needs no seed/auth.
+- `responsive-overflow.spec.ts` — asserts **no horizontal overflow** at 3 viewports on public routes. This is a **layout/render** test by design (not a gate); left as-is, labeled honestly.
+- **Gate-enforcement specs (esign→409 without CONTRACT_APPROVED; →COMPLETED→409 without insurance; auction→409 empty shortlist; illegal-jump rejection) and cross-role propagation — NOT WRITTEN. UNVERIFIED, with reason:** (a) there is **no programmatic test-login/storageState helper** and **no `isTestWorkspace` seed-auth API** (the dispatch assumed these; they do not exist), and (b) the sandbox seed (`scripts/seed-sandbox-deal.ts`) creates a deal at **`SIGNING_PENDING`** (`:226`) — *past* the gate-rejection states — so it cannot exercise those 409s. Writing these reliably **requires building two prerequisites first**: a Playwright auth helper (Supabase password login → `storageState`) and additional seed fixtures in pre-gate states (FINANCING_PENDING / FEE_PAID / no-shortlist). These are tracked, not faked. The gates themselves are proven by code + `canTransition` unit rejection tests (§4); only their **end-to-end runtime firing** is the open item.
+
+**Step 3 — e2e self-seeding ADDED.** The `workflow_dispatch` E2E job now runs `pnpm sandbox:seed-deal` before the specs (`.github/workflows/ci.yml`), using dedicated **`E2E_*` secrets** (`E2E_DATABASE_URL`/`E2E_SUPABASE_URL`/`E2E_SUPABASE_SERVICE_ROLE_KEY`) so the prod ref can never be the target; skips cleanly if `E2E_DATABASE_URL` is unset. The seed is idempotent and scoped to `*@autolenis-test.com` accounts only.
+
+**Step 4 — verification:** `tsc` 0 · `lint` 0 errors / 84 warnings · `build` PASS · `test` 38/0 · `e2e` still BLOCKED (E2E_BASE_URL unset, expected).
+
+**Remaining to flip §10 → READY:** (1) set `E2E_BASE_URL` (+ `E2E_*` DB/Supabase secrets) to a **non-prod seeded** preview and run the job — this validates the RBAC/redirect/401 specs end-to-end; (2) to also retire the gate-409 + propagation rows, first add the Playwright auth helper + pre-gate seed fixtures (above). Item (1) is the bottleneck; item (2) is a small, named follow-up.

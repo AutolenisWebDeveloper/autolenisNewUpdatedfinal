@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Building2, ClipboardCheck, ShieldCheck, Gavel } from "lucide-react";
+import { CheckCircle2, Building2, ClipboardCheck, ShieldCheck, Gavel, Loader2 } from "lucide-react";
 import Link from "next/link";
 
 const US_STATES = [
@@ -519,7 +519,11 @@ export default function DealerApplyPage() {
             data-testid="dealer-apply-submit-btn"
             className="w-full py-3.5 bg-[#0B5FD1] text-white font-bold text-sm rounded-md hover:bg-[#0A4DB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-[#0B5FD1]/20"
           >
-            {loading ? "Submitting…" : "Submit Application"}
+            {loading ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Submitting…
+              </span>
+            ) : "Submit Application"}
           </button>
 
           <p className="text-center text-xs text-slate-400">
