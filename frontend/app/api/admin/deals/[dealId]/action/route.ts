@@ -3,6 +3,7 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { DealStatus } from "@prisma/client";
 import { getStripe } from "@/lib/stripe";
+import { advanceDealStatus, DealTransitionError, InsuranceRequiredError } from "@/lib/services/deal/deal.service";
 import {
   sendDealerContractPendingEmail,
   sendDealerContractIssuesEmail,
@@ -37,10 +38,11 @@ export async function POST(request: NextRequest, { params }: Props) {
     return adminError("FORBIDDEN", "Insufficient permissions — OPERATIONS_ADMIN or SUPER_ADMIN required", 403);
   }
 
-  const { action, reason, newStatus } = await request.json() as {
+  const { action, reason, newStatus, force } = await request.json() as {
     action: string;
     reason: string;
     newStatus?: string;
+    force?: boolean;
   };
 
   if (!reason?.trim()) {
@@ -57,7 +59,29 @@ export async function POST(request: NextRequest, { params }: Props) {
       if (!newStatus || !Object.values(DealStatus).includes(newStatus as DealStatus)) {
         return adminError("INVALID_STATUS", "Invalid target status", 400);
       }
-      await prisma.deal.update({ where: { id: dealId }, data: { status: newStatus as DealStatus } });
+      // Route through the guarded state machine so illegal jumps (e.g. skipping
+      // fee/insurance/contract gates) are rejected. An explicit `force: true`
+      // performs an audit-logged override for legitimate manual corrections.
+      try {
+        await advanceDealStatus(dealId, newStatus as DealStatus, {
+          actorId: admin.adminId,
+          actorRole: "ADMIN",
+          reason,
+          force: force === true,
+        });
+      } catch (err) {
+        if (err instanceof DealTransitionError) {
+          return adminError(
+            "INVALID_TRANSITION",
+            `Cannot move deal from ${deal.status} to ${newStatus}. Pass force:true to override.`,
+            409,
+          );
+        }
+        if (err instanceof InsuranceRequiredError) {
+          return adminError("INSURANCE_REQUIRED", err.message + ". Pass force:true to override.", 409);
+        }
+        throw err;
+      }
 
       // Notify dealer when the deal enters a contract-pending state — non-blocking.
       if (newStatus === "CONTRACT_PENDING" || newStatus === "CONTRACT_REVIEW") {

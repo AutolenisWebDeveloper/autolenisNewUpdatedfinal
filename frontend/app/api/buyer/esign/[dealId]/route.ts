@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { createDealerEnvelopeFromTemplate } from "@/lib/services/esign/envelope-template.service";
+import { advanceDealStatus, DealTransitionError } from "@/lib/services/deal/deal.service";
 
 // Sentinel value stored by old sandbox mock path — used to detect stale mock envelopes
 const MOCK_ENVELOPE_SENTINEL = "mock-envelope-id";
@@ -49,16 +50,30 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
   }
 
+  // Contract Shield hard gate: a deal can only reach SIGNING_PENDING once it has
+  // been CONTRACT_APPROVED. advanceDealStatus rejects any other source state.
+  if (deal.status !== "CONTRACT_APPROVED" && deal.status !== "SIGNING_PENDING") {
+    return errorResponse(
+      "CONTRACT_NOT_APPROVED",
+      "This contract has not been approved yet. Signing becomes available after Contract Shield review passes.",
+      409,
+    );
+  }
+
   const result = await createDealerEnvelopeFromTemplate(dealId);
 
   if (result.error && !result.envelopeId) {
     return errorResponse("DOCUSIGN_ERROR", result.error, 503);
   }
 
-  await prisma.deal.update({
-    where: { id: dealId },
-    data:  { status: "SIGNING_PENDING" },
-  });
+  try {
+    await advanceDealStatus(dealId, "SIGNING_PENDING", { actorRole: "BUYER" });
+  } catch (err) {
+    if (err instanceof DealTransitionError) {
+      return errorResponse("CONTRACT_NOT_APPROVED", "Signing is not available from the current deal state.", 409);
+    }
+    throw err;
+  }
 
   return successResponse({
     envelopeId: result.envelopeId,

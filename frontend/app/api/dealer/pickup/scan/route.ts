@@ -6,6 +6,7 @@
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
+import { INSURANCE_SATISFIED } from "@/lib/services/deal/deal.service";
 import { Resend } from "resend";
 
 // Lazy Resend client — constructed on first use. Prevents Next.js build-time
@@ -46,6 +47,17 @@ export async function POST(request: NextRequest) {
 
   if (pickup.status === "COMPLETED" || pickup.deal.status === "COMPLETED") {
     return errorResponse("ALREADY_SCANNED", "This QR code has already been scanned.", 409);
+  }
+
+  // Insurance hard gate — a vehicle cannot be released/completed without proof of
+  // insurance on file (a bound platform policy, verified, or the buyer's own-policy
+  // upload). This is the final-release gate; earlier stages are not blocked.
+  if (!INSURANCE_SATISFIED.includes(pickup.deal.insuranceStatus)) {
+    return errorResponse(
+      "INSURANCE_REQUIRED",
+      "Insurance proof is required before this pickup can be completed.",
+      409,
+    );
   }
 
   const completedAt = new Date();

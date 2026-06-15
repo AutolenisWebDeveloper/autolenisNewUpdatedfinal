@@ -15,6 +15,20 @@ export async function POST(request: NextRequest) {
     return errorResponse("PREQUAL_REQUIRED", "Valid prequalification required before deposit", 400);
   }
 
+  // Auction activation precondition: the buyer must have at least one vehicle on
+  // their shortlist — there must be something for dealers to compete over. Paying
+  // the deposit launches the auction, so this gate belongs before payment.
+  const shortlistCount = await prisma.shortlistItem.count({
+    where: { shortlist: { buyerId: buyer.id } },
+  });
+  if (shortlistCount === 0) {
+    return errorResponse(
+      "SHORTLIST_REQUIRED",
+      "Add at least one vehicle to your shortlist before activating your auction.",
+      400,
+    );
+  }
+
   // Check for existing active deposit
   const existingDeposit = await prisma.deposit.findFirst({
     where: { buyerId: buyer.id, status: { in: ["PENDING", "PAID"] } },
