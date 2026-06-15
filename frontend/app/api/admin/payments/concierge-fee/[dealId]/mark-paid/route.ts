@@ -5,6 +5,7 @@
 import { NextRequest } from "next/server";
 import { getAdminWithRole, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { z } from "zod";
 
 interface Props { params: Promise<{ dealId: string }> }
@@ -27,13 +28,16 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const { reason } = parsed.data;
 
-  const updated = await prisma.deal.update({
-    where: { id: dealId },
-    data: {
-      feePaidAt: new Date(),
-      status: "FEE_PAID",
-    },
+  // Admin override: record the fee as paid and advance to FEE_PAID through the
+  // guarded seam (force, audit-logged below + DealStatusHistory).
+  await advanceDealStatus(dealId, "FEE_PAID", {
+    actorId: admin.adminId,
+    actorRole: "ADMIN",
+    reason,
+    force: true,
+    data: { feePaidAt: new Date() },
   });
+  const updated = (await prisma.deal.findUnique({ where: { id: dealId } }))!;
 
   await prisma.adminAuditLog.create({
     data: {

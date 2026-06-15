@@ -6,6 +6,7 @@
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { z } from "zod";
 import {
   sendDealCompleteEmail,
@@ -57,10 +58,13 @@ export async function POST(request: NextRequest, { params }: Props) {
     },
   });
 
-  // Advance deal to COMPLETED
-  await prisma.deal.update({
-    where: { id: dealId },
-    data: { status: "COMPLETED" },
+  // Advance deal to COMPLETED. This is an explicit admin override (reason required),
+  // so the insurance gate is intentionally bypassed via force; recorded in history.
+  await advanceDealStatus(dealId, "COMPLETED", {
+    actorId: admin.adminId,
+    actorRole: "ADMIN",
+    reason,
+    force: true,
   });
 
   // Notify buyer

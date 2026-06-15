@@ -12,6 +12,7 @@ import {
 import { walkCommissionTree } from "@/lib/services/affiliate/commission.service";
 import { launchAuction } from "@/lib/services/auction/auction.service";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { dispatch } from "@/lib/qstash/dispatch";
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
@@ -215,15 +216,24 @@ export async function POST(request: NextRequest) {
             ? { id: metaDealId }
             : { stripeFeePIId: pi.id };
 
-          await prisma.deal.updateMany({
-            where: whereClause,
-            data: {
-              status: "INSURANCE_PENDING",
-              feePaidAt: new Date(),
-              feeAmountCents: PREMIUM_FEE_CENTS,
-              stripeFeePIId: pi.id, // Always record the PI ID for future webhook dedup
-            },
-          });
+          // Source-checked advance (Gap 8): only move the deal forward when it is
+          // actually awaiting fee payment. A deal already past insurance is NOT
+          // regressed — we still record the fee fields for dedup. Fee receipt is an
+          // authoritative payment fact, so the forward transition is forced and the
+          // change is recorded in DealStatusHistory.
+          const feeDeal = await prisma.deal.findFirst({ where: whereClause });
+          if (feeDeal) {
+            const feeData = { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS, stripeFeePIId: pi.id };
+            if (feeDeal.status === "FEE_PENDING") {
+              await advanceDealStatus(feeDeal.id, "FEE_PAID", { actorRole: "SYSTEM", force: true, data: feeData });
+              await advanceDealStatus(feeDeal.id, "INSURANCE_PENDING", { actorRole: "SYSTEM", force: true });
+            } else if (feeDeal.status === "FEE_PAID") {
+              await advanceDealStatus(feeDeal.id, "INSURANCE_PENDING", { actorRole: "SYSTEM", force: true, data: feeData });
+            } else {
+              // Already at/after INSURANCE_PENDING — record fee fields, do not regress status.
+              await prisma.deal.update({ where: { id: feeDeal.id }, data: feeData });
+            }
+          }
 
           // Send the buyer a confirmation that their service fee was received.
           // Routed through the idempotent send rail so webhook retries cannot

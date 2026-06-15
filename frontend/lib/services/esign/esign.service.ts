@@ -2,6 +2,7 @@
 // System 9 — DocuSign JWT auth + envelope lifecycle
 import { prisma } from "@/lib/prisma";
 import { ESignStatus } from "@prisma/client";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { isDocuSignConfigured, getDocuSignConfig, getDocuSignAccessToken } from "./docusign-auth.service";
 
 const DEAL_ID_DISPLAY_LENGTH = 8; // characters used in user-facing deal ID references
@@ -100,7 +101,9 @@ export async function handleEnvelopeCompleted(docusignEnvelopeId: string): Promi
   const envelope = await prisma.eSignEnvelope.findFirst({ where: { docusignEnvelopeId } });
   if (!envelope) return;
   await prisma.eSignEnvelope.update({ where: { id: envelope.id }, data: { status: ESignStatus.COMPLETED, completedAt: new Date() } });
-  await prisma.deal.update({ where: { id: envelope.dealId }, data: { status: "SIGNED" } });
+  // Authoritative external event (DocuSign reports the envelope signed): force the
+  // SIGNED transition so it is always recorded, with DealStatusHistory.
+  await advanceDealStatus(envelope.dealId, "SIGNED", { actorRole: "SYSTEM", force: true });
   const deal = await prisma.deal.findUnique({
     where: { id: envelope.dealId },
     include: { buyer: { include: { user: { select: { email: true } } } } },

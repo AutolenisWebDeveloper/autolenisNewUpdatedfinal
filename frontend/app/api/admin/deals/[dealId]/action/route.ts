@@ -187,7 +187,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         }
       }
 
-      await prisma.deal.update({ where: { id: dealId }, data: { status: "CANCELLED" } });
+      await advanceDealStatus(dealId, "CANCELLED", { actorId: admin.adminId, actorRole: "ADMIN", reason, force: true });
 
       // Notify buyer.
       await prisma.notification.create({
@@ -235,7 +235,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         }
       }
 
-      await prisma.deal.update({ where: { id: dealId }, data: { status: "REFUNDED" } });
+      await advanceDealStatus(dealId, "REFUNDED", { actorId: admin.adminId, actorRole: "ADMIN", reason, force: true });
 
       // Notify buyer
       await prisma.notification.create({

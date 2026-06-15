@@ -7,6 +7,7 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { createEnvelope } from "@/lib/services/esign/esign.service";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import {
   sendContractApprovedEmail,
   sendContractShieldAlertEmail,
@@ -69,9 +70,15 @@ export async function POST(request: NextRequest, { params }: Props) {
         where: { id: reviewId },
         data: { status: "PASS", changeLog: appendChangeLog(scan.changeLog, logEntry("APPROVED")) },
       });
-      await prisma.deal.update({
-        where: { id: deal.id },
-        data: { contractShieldStatus: "PASS", contractShieldScore: scan.score, status: "CONTRACT_APPROVED" },
+      // Contract Shield approval is the gate-setter for SIGNING. Route through the
+      // guarded seam (force, audit-logged below) so CONTRACT_APPROVED is recorded
+      // in DealStatusHistory alongside the shield status/score.
+      await advanceDealStatus(deal.id, "CONTRACT_APPROVED", {
+        actorId: admin.adminId,
+        actorRole: "ADMIN",
+        reason: reason ?? undefined,
+        force: true,
+        data: { contractShieldStatus: "PASS", contractShieldScore: scan.score },
       });
 
       // Trigger the DocuSign envelope to the buyer (mock-safe when DocuSign unconfigured).
@@ -173,9 +180,12 @@ export async function POST(request: NextRequest, { params }: Props) {
         data: { status: "REVISION_REQUESTED", changeLog: appendChangeLog(scan.changeLog, logEntry("REVISION_REQUESTED")) },
       });
       // Send the deal back to the dealer for a corrected upload.
-      await prisma.deal.update({
-        where: { id: deal.id },
-        data: { contractShieldStatus: "REVISION_REQUESTED", status: "CONTRACT_PENDING" },
+      await advanceDealStatus(deal.id, "CONTRACT_PENDING", {
+        actorId: admin.adminId,
+        actorRole: "ADMIN",
+        reason: reason ?? undefined,
+        force: true,
+        data: { contractShieldStatus: "REVISION_REQUESTED" },
       });
 
       if (dealerEmail) {

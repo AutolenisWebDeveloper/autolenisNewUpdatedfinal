@@ -8,11 +8,12 @@
     "build": "prisma generate && next build",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test lib/services/prequal/__tests__/*.test.ts lib/services/dealer-recruitment/__tests__/*.test.ts lib/services/deal/__tests__/*.test.ts",
+    "test": "tsx --test lib/services/prequal/__tests__/*.test.ts lib/services/dealer-recruitment/__tests__/*.test.ts lib/services/deal/__tests__/*.test.ts lib/social/__tests__/*.test.ts components/admin/crm/__tests__/*.test.ts",
     "test:content": "tsx --test lib/content/__tests__/*.test.ts lib/services/content/__tests__/*.test.ts",
     "test:admin-content": "tsx --test --experimental-test-module-mocks app/api/admin/content/__tests__/*.test.ts",
     "test:seo": "tsx --test lib/seo/__tests__/*.test.ts",
     "test:crm": "tsx --tsconfig lib/crm/__tests__/tsconfig.test.json --test lib/crm/__tests__/*.test.ts",
+    "test:e2e": "playwright test",
     "postinstall": "prisma generate",
     "seed": "tsx prisma/seed.ts",
     "amips:enrich-dealers": "tsx scripts/amips-enrich-dealers.ts",
@@ -75,6 +76,7 @@
     "zod": "^3.24.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4.2.4",
     "@types/bcryptjs": "^2.4.6",
     "@types/d3-array": "^3.2.2",

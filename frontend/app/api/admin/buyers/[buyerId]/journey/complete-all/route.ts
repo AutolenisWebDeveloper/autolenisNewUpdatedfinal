@@ -60,7 +60,8 @@ export async function POST(request: NextRequest, { params }: Props) {
       buyerId, adminId, adminEmail,
       activeDeal.id,
       targetStatus as Parameters<typeof moveBuyerWorkflowStage>[4],
-      note
+      note,
+      true, // deliberate admin journey progression — bypass the sequential guard
     );
   }
 
