@@ -5,6 +5,7 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
 
 jobs:
   ci:
@@ -53,6 +54,13 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Unit tests
+        run: pnpm test
+        env:
+          # Prisma client is constructed at import time; provide a placeholder DSN.
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://placeholder:placeholder@localhost:5432/placeholder' }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL || 'postgresql://placeholder:placeholder@localhost:5432/placeholder' }}
+
       - name: Build
         run: pnpm build
         env:
@@ -64,3 +72,40 @@ jobs:
           NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'https://autolenis.com' }}
           JWT_SECRET: ${{ secrets.JWT_SECRET || 'ci-placeholder-jwt-secret-32-characters' }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || 'placeholder' }}
+
+  e2e:
+    # Browser e2e (Playwright). Runs only when an E2E_BASE_URL secret points at a
+    # configured preview/staging deploy (real Supabase, etc.) — the gate-bypass
+    # specs need a real auth backend. Manual trigger; never blocks PR merges.
+    name: E2E (Playwright)
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run e2e against preview
+        run: pnpm test:e2e
+        env:
+          BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          PLAYWRIGHT_NO_SERVER: "1"

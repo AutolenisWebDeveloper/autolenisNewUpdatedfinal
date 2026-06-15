@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { ESignStatus } from "@prisma/client";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
+import { logger } from "@/lib/logger";
 import { isDocuSignConfigured, getDocuSignConfig, getDocuSignAccessToken } from "./docusign-auth.service";
 
 const DEAL_ID_DISPLAY_LENGTH = 8; // characters used in user-facing deal ID references
@@ -81,7 +82,7 @@ export async function createEnvelope(
     return { envelopeId: docusignEnvelopeId, signingUrl, isMock: false };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
-    console.error("[esign.service] createEnvelope error:", error);
+    logger.error("[esign.service] createEnvelope error:", error);
     await prisma.eSignEnvelope.upsert({ where: { dealId }, create: { dealId, status: ESignStatus.PENDING }, update: {} });
     return { envelopeId: null, signingUrl: null, isMock: false, error };
   }
@@ -129,7 +130,7 @@ export async function handleEnvelopeCompleted(docusignEnvelopeId: string): Promi
           envelopeId: docusignEnvelopeId,
         });
       } catch (err) {
-        console.error("[esign] contract signed email failed:", err);
+        logger.error("[esign] contract signed email failed:", err);
       }
     }
   }
@@ -168,7 +169,7 @@ export async function handleEnvelopeCompleted(docusignEnvelopeId: string): Promi
       });
     }
   } catch (err) {
-    console.error("[esign] docusign_signed emit failed:", err);
+    logger.error("[esign] docusign_signed emit failed:", err);
   }
 }
 

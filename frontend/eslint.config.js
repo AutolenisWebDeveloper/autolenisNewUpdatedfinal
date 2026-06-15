@@ -24,6 +24,21 @@ const config = [
       "no-console": "off",
     },
   },
+  {
+    // Lifecycle-critical zones must route logging through lib/logger (structured,
+    // queryable). This is the ratchet seam — extend the glob list as other zones
+    // are migrated off raw console.* (see _completion gap analysis, Gap 10).
+    files: [
+      "lib/services/deal/**/*.ts",
+      "lib/services/esign/**/*.ts",
+      "lib/services/pickup/**/*.ts",
+      "lib/services/payment/**/*.ts",
+      "lib/services/deposit/**/*.ts",
+    ],
+    rules: {
+      "no-console": "warn",
+    },
+  },
 ];
 
 export default config;
