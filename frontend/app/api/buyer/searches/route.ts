@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
       });
     }
   } catch (err) {
-    console.error("[saved-search] CRM emit failed:", err);
+    logger.error("[saved-search] CRM emit failed:", err);
   }
 
   return successResponse({ search }, 201);

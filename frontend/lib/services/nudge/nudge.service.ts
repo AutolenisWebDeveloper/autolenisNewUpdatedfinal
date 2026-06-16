@@ -1,5 +1,6 @@
 // lib/services/nudge/nudge.service.ts — Feature 6 Smart Buyer Nudge Engine
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { NUDGE_DEFAULTS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 import { NudgeChannel, NudgeStage } from "@prisma/client";
@@ -165,7 +166,7 @@ export async function runNudgeEngine(): Promise<number> {
         nudged++;
       }
     } catch (err) {
-      console.error(
+      logger.error(
         `[nudge-engine] deal stage nudge failed for ${cfg.status}:`,
         err
       );

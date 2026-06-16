@@ -4,6 +4,7 @@
 // removes it from the sitemap automatically. Public route — see proxy.ts.
 export const dynamic = "force-dynamic";
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
@@ -41,7 +42,7 @@ export async function GET() {
     });
   } catch (err) {
     // DB unavailable (e.g. at build time) — emit an empty but valid sitemap.
-    console.error("[sitemap-intelligence] error:", err);
+    logger.error("[sitemap-intelligence] error:", err);
     rows = [];
   }
 

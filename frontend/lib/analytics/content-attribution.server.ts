@@ -10,6 +10,7 @@
 // Everything is best-effort and wrapped in try/catch: attribution must never
 // break a buyer's submission or the admin dashboard render.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import {
   ATTRIBUTION_COOKIE,
@@ -61,7 +62,7 @@ export async function recordContentAttribution(params: {
       },
     });
   } catch (err) {
-    console.error("[content-attribution] recordContentAttribution failed", err);
+    logger.error("[content-attribution] recordContentAttribution failed", err);
   }
 }
 
@@ -122,7 +123,7 @@ export async function reconcileContentConversions(): Promise<number> {
     }
     return updated;
   } catch (err) {
-    console.error("[content-attribution] reconcileContentConversions failed", err);
+    logger.error("[content-attribution] reconcileContentConversions failed", err);
     return 0;
   }
 }
@@ -155,7 +156,7 @@ export async function markContentConversion(params: {
     });
     return count;
   } catch (err) {
-    console.error("[content-attribution] markContentConversion failed", err);
+    logger.error("[content-attribution] markContentConversion failed", err);
     return 0;
   }
 }

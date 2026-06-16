@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { getQstash, QSTASH_BASE_URL } from "./client";
 
 interface DispatchOptions {
@@ -23,6 +24,6 @@ export async function dispatch({
       retries,
     });
   } catch (err) {
-    console.error(`QStash dispatch failed for ${path}:`, err);
+    logger.error(`QStash dispatch failed for ${path}:`, err);
   }
 }

@@ -1,5 +1,6 @@
 // CarGurus adapter — independently failure-isolated
 
+import { logger } from "@/lib/logger";
 import type { IInventoryAdapter, NormalizedVehicle, AdapterRunResult, SearchParams } from "./IInventoryAdapter";
 
 export class CarGurusAdapter implements IInventoryAdapter {
@@ -17,7 +18,7 @@ export class CarGurusAdapter implements IInventoryAdapter {
       const vehicles = await this.parseResponse(response);
       return { adapter: this.name, vehicles, duration: Date.now() - start, fetchedAt: new Date() };
     } catch (error) {
-      console.error(`[CarGurus adapter] Error:`, error);
+      logger.error(`[CarGurus adapter] Error:`, error);
       return { adapter: this.name, vehicles: [], duration: Date.now() - start, error: String(error), fetchedAt: new Date() };
     }
   }

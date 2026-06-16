@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 // AutoLenis Social Engine — Runway ML Gen-4 Turbo image-to-video provider.
 //
 // Second stage of the Tier 1 visual pipeline: DALL-E 3 generates a branded
@@ -132,7 +133,7 @@ export async function createRunwayVideoTask(input: {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      console.error("[runway] task creation failed:", res.status, err);
+      logger.error("[runway] task creation failed:", res.status, err);
       return {
         error: `Runway API ${res.status}: ${JSON.stringify(err).slice(0, 200)}`,
       };
@@ -145,10 +146,10 @@ export async function createRunwayVideoTask(input: {
       return { error: "No task ID in Runway response" };
     }
 
-    console.log("[runway] task created:", taskId, "platform:", input.platform);
+    logger.info("[runway] task created:", taskId, "platform:", input.platform);
     return { taskId };
   } catch (err) {
-    console.error("[runway] task creation error:", err);
+    logger.error("[runway] task creation error:", err);
     return {
       error: err instanceof Error ? err.message : "Unknown error",
     };
@@ -169,7 +170,7 @@ export async function pollRunwayTask(taskId: string): Promise<RunwayVideoResult>
       });
 
       if (!res.ok) {
-        console.error("[runway] poll failed:", res.status);
+        logger.error("[runway] poll failed:", res.status);
         return { success: false, taskId, error: `Poll HTTP ${res.status}` };
       }
 
@@ -181,18 +182,18 @@ export async function pollRunwayTask(taskId: string): Promise<RunwayVideoResult>
         if (!videoUrl) {
           return { success: false, taskId, error: "No video URL in response" };
         }
-        console.log("[runway] ✅ task succeeded:", taskId);
+        logger.info("[runway] ✅ task succeeded:", taskId);
         return { success: true, videoUrl, taskId };
       }
 
       if (status === "FAILED") {
         const reason = data?.failure ?? "Unknown failure";
-        console.error("[runway] ❌ task failed:", taskId, reason);
+        logger.error("[runway] ❌ task failed:", taskId, reason);
         return { success: false, taskId, error: reason };
       }
 
       // PENDING or RUNNING — wait and poll again.
-      console.log(
+      logger.info(
         `[runway] task ${taskId} status: ${status}`,
         `(attempt ${attempts + 1}/${MAX_POLLS})`,
       );
@@ -201,7 +202,7 @@ export async function pollRunwayTask(taskId: string): Promise<RunwayVideoResult>
       // Wait 10 seconds between polls.
       await new Promise((r) => setTimeout(r, 10000));
     } catch (err) {
-      console.error("[runway] poll error:", err);
+      logger.error("[runway] poll error:", err);
       return {
         success: false,
         taskId,

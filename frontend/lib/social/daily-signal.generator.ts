@@ -8,6 +8,7 @@
 // turns each DailySignal into a real TopicSignal + SocialPost via the
 // orchestrator. This replaces relying solely on the topic_signals backlog.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import {
   DAILY_POST_TARGETS,
@@ -198,7 +199,7 @@ export async function generateDailySignals(): Promise<DailySignal[]> {
     instagramSignals[0].isRepurpose = true;
   }
 
-  console.log(
+  logger.info(
     `[daily-signal] generated ${signals.length} signals for ${today.toDateString()}`,
     `(${signals.filter((s) => s.contentCategory === "evergreen").length} evergreen,`,
     `${signals.filter((s) => s.contentCategory === "trend").length} trend,`,

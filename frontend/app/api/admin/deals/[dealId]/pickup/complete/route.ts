@@ -3,9 +3,11 @@
 // Sets Pickup.status = COMPLETED and Deal.status = COMPLETED.
 // Sends buyer notification. AuditLog entry required.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { z } from "zod";
 import {
   sendDealCompleteEmail,
@@ -25,6 +27,11 @@ export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  // Force-completing a deal (bypasses the insurance gate) is a privileged override —
+  // restrict to SUPER/OPERATIONS admins, consistent with the other override routes.
+  if (!["SUPER_ADMIN", "OPERATIONS_ADMIN"].includes(admin.role)) {
+    return adminError("FORBIDDEN", "Insufficient permissions — OPERATIONS_ADMIN or SUPER_ADMIN required", 403);
+  }
 
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
@@ -57,10 +64,13 @@ export async function POST(request: NextRequest, { params }: Props) {
     },
   });
 
-  // Advance deal to COMPLETED
-  await prisma.deal.update({
-    where: { id: dealId },
-    data: { status: "COMPLETED" },
+  // Advance deal to COMPLETED. This is an explicit admin override (reason required),
+  // so the insurance gate is intentionally bypassed via force; recorded in history.
+  await advanceDealStatus(dealId, "COMPLETED", {
+    actorId: admin.adminId,
+    actorRole: "ADMIN",
+    reason,
+    force: true,
   });
 
   // Notify buyer
@@ -89,7 +99,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       await sendDealCompleteEmail(buyerEmail, deal.buyer.firstName, dealId);
     }
   } catch (e) {
-    console.error("[pickup/complete] deal complete email failed:", e);
+    logger.error("[pickup/complete] deal complete email failed:", e);
   }
   syncGhlTag(deal.buyer?.user?.email, "purchase-complete");
 
@@ -117,7 +127,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       vehicleRef,
       payoutSchedule: "3-5 business days",
       dealId,
-    }).catch(err => console.error("[pickup/complete] dealer pickup completed email failed:", err));
+    }).catch(err => logger.error("[pickup/complete] dealer pickup completed email failed:", err));
 
     const offerPriceCents = deal.offer?.otdPriceCents ?? 0;
     await sendDealerPayoutInitiatedEmail({
@@ -127,7 +137,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       amountCents: offerPriceCents,
       estimatedArrival: "3-5 business days",
       payoutId: dealId,
-    }).catch(err => console.error("[pickup/complete] dealer payout initiated email failed:", err));
+    }).catch(err => logger.error("[pickup/complete] dealer payout initiated email failed:", err));
   }
 
   // CRM event spine — emit purchase_completed for the buyer after the deal has
@@ -152,7 +162,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       },
     });
   } catch (err) {
-    console.error("[pickup/complete] purchase_completed emit failed:", err);
+    logger.error("[pickup/complete] purchase_completed emit failed:", err);
   }
 
   return adminSuccess({

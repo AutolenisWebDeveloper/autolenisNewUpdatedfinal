@@ -2,6 +2,7 @@
 // Removes or anonymises per-user data. Retains deals, contracts, payments for legal/tax retention.
 // Signs user out by clearing Supabase session.
 
+import { logger } from "@/lib/logger";
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@supabase/supabase-js";
@@ -101,8 +102,7 @@ export async function DELETE() {
       );
       await admin.auth.admin.deleteUser(buyer.user.supabaseId);
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("[buyer/account:DELETE] Supabase admin delete failed", err);
+      logger.error("[buyer/account:DELETE] Supabase admin delete failed", err);
       // Non-fatal — Prisma row is gone/anonymised; user can't re-login anyway
     }
 
@@ -114,8 +114,7 @@ export async function DELETE() {
 
     return successResponse({ deleted: true });
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error("[buyer/account:DELETE] Unexpected error", err);
+    logger.error("[buyer/account:DELETE] Unexpected error", err);
     return errorResponse("DELETE_FAILED", "Account deletion failed. Please contact support.", 500);
   }
 }

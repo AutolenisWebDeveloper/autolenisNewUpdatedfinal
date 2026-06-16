@@ -16,6 +16,7 @@
 // Impression/click history comes from search_intelligence (weekly GSC rows),
 // matched to pages by the /intelligence/<slug> URL.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { slugFromUrl } from "@/lib/amips/pipelines/search-intelligence.pipeline";
 
@@ -117,7 +118,7 @@ async function loadTraffic(now: number): Promise<{
  * are excluded from sitemaps by query, not removed from the table.
  */
 export async function runLifecycleReview(): Promise<LifecycleResult> {
-  console.log("[amips-p3-lifecycle] starting lifecycle review");
+  logger.info("[amips-p3-lifecycle] starting lifecycle review");
   const now = Date.now();
 
   const pages = await prisma.amipsPage.findMany({
@@ -230,7 +231,7 @@ export async function runLifecycleReview(): Promise<LifecycleResult> {
     }
   }
 
-  console.log(
+  logger.info(
     `[amips-p3-lifecycle] done — refresh ${flaggedForRefresh}, review ${flaggedForReview}, retired ${retired}`,
   );
   return { flaggedForRefresh, flaggedForReview, retired };

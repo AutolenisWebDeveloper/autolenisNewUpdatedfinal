@@ -9,6 +9,7 @@
 // HIGGSFIELD_API_KEY Bearer fallback. Base URL is env-driven and defaults to
 // the production platform host.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import type { SocialVideo } from "@prisma/client";
@@ -169,7 +170,7 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
       return { success: true, providerJobId: response.request_id };
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
-      console.error(`[higgsfield] submitJob failed for post ${input.postId}:`, error);
+      logger.error(`[higgsfield] submitJob failed for post ${input.postId}:`, error);
       await this.markVideoFailed(input.postId, error);
       return { success: false, error };
     }
@@ -313,7 +314,7 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
       return { success: true, requestId: response.request_id };
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
-      console.error("[higgsfield] generateTextToImage failed:", error);
+      logger.error("[higgsfield] generateTextToImage failed:", error);
       return { success: false, error };
     }
   }

@@ -8,6 +8,7 @@
 // (Next.js post-response work) and MUST NOT throw or it would crash the worker.
 // On any failure it logs and returns null.
 
+import { logger } from "@/lib/logger";
 import PDFDocument from "pdfkit";
 import { createServiceSupabaseClient } from "@/lib/supabase";
 import { DEALER_AGREEMENT_TEXT } from "@/lib/constants/dealer-agreement";
@@ -181,13 +182,13 @@ export async function generateAndUploadCertificate(
       });
 
     if (error) {
-      console.error("[agreement/certificate] Upload failed:", error);
+      logger.error("[agreement/certificate] Upload failed:", error);
       return null;
     }
 
     return storagePath;
   } catch (err) {
-    console.error("[agreement/certificate] Certificate generation failed:", err);
+    logger.error("[agreement/certificate] Certificate generation failed:", err);
     return null;
   }
 }
@@ -207,13 +208,13 @@ export async function getSignedCertificateUrl(
       .createSignedUrl(storagePath, expirySeconds);
 
     if (error || !data?.signedUrl) {
-      console.error("[agreement/certificate] Signed URL generation failed:", error);
+      logger.error("[agreement/certificate] Signed URL generation failed:", error);
       return null;
     }
 
     return data.signedUrl;
   } catch (err) {
-    console.error("[agreement/certificate] Signed URL generation threw:", err);
+    logger.error("[agreement/certificate] Signed URL generation threw:", err);
     return null;
   }
 }

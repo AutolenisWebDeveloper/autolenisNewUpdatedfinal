@@ -1,5 +1,6 @@
 // POST /api/admin/dealers/invitations/[invId]/resend
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
     await sendDealerInvitationEmail({ to: inv.email, contactName: inv.contactName, dealershipName: inv.dealershipName, claimUrl: inviteUrl, expiresAt: expiresAt.toISOString() });
   } catch (err) {
-    console.error("[invitations/resend] Email error:", err);
+    logger.error("[invitations/resend] Email error:", err);
   }
 
   await prisma.adminAuditLog.create({

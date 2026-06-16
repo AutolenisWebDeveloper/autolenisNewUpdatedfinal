@@ -3,9 +3,11 @@
 // On success: pickup.status=COMPLETED, deal.status=COMPLETED, completedAt timestamps,
 // BuyerActivityEvent emitted, Resend completion email fired (best-effort).
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
+import { INSURANCE_SATISFIED, advanceDealStatus, DealTransitionError } from "@/lib/services/deal/deal.service";
 import { Resend } from "resend";
 
 // Lazy Resend client — constructed on first use. Prevents Next.js build-time
@@ -48,16 +50,35 @@ export async function POST(request: NextRequest) {
     return errorResponse("ALREADY_SCANNED", "This QR code has already been scanned.", 409);
   }
 
+  // Insurance hard gate — a vehicle cannot be released/completed without proof of
+  // insurance on file (a bound platform policy, verified, or the buyer's own-policy
+  // upload). This is the final-release gate; earlier stages are not blocked.
+  if (!INSURANCE_SATISFIED.includes(pickup.deal.insuranceStatus)) {
+    return errorResponse(
+      "INSURANCE_REQUIRED",
+      "Insurance proof is required before this pickup can be completed.",
+      409,
+    );
+  }
+
   const completedAt = new Date();
+
+  // Route the lifecycle transition through the guarded seam (enforces canTransition
+  // + the insurance gate; records DealStatusHistory). The pickup record + completion
+  // activity event are written after the deal has advanced.
+  try {
+    await advanceDealStatus(pickup.dealId, "COMPLETED", { actorRole: "DEALER", reason: "Dealer QR pickup scan" });
+  } catch (err) {
+    if (err instanceof DealTransitionError) {
+      return errorResponse("NOT_READY_FOR_PICKUP", "This deal is not ready for pickup completion.", 409);
+    }
+    throw err;
+  }
 
   await prisma.$transaction([
     prisma.pickup.update({
       where: { id: pickup.id },
       data: { status: "COMPLETED", completedAt },
-    }),
-    prisma.deal.update({
-      where: { id: pickup.dealId },
-      data: { status: "COMPLETED" },
     }),
     prisma.buyerActivityEvent.create({
       data: {
@@ -105,7 +126,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("[pickup/scan] purchase_completed emit failed:", err);
+    logger.error("[pickup/scan] purchase_completed emit failed:", err);
   }
 
   return successResponse({

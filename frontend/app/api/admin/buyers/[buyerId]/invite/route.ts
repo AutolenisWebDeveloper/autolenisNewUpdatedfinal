@@ -2,6 +2,7 @@
 // Send (or resend) account activation invite to a buyer.
 // Logs to AdminAuditLog. Requires reason.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest, { params }: Props) {
           <a href="${appUrl}/auth/signin" style="background:#0B5FD1;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;display:inline-block;margin-top:16px">Sign In →</a>
         </div>`,
       }).catch((err: unknown) => {
-        console.error("[admin/buyer/invite] Email send failed:", err);
+        logger.error("[admin/buyer/invite] Email send failed:", err);
       });
     }
   }

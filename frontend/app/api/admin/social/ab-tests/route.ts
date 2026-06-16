@@ -4,6 +4,7 @@
 //          franchise+platform, materialize a staggered SocialPost per variant,
 //          and persist the ABTestGroup + ABTestVariant records.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -106,7 +107,7 @@ export async function POST(request: NextRequest) {
     platform,
     platformConfig,
   }).catch((err) => {
-    console.error(
+    logger.error(
       "[ab-tests] hook variant generation failed:",
       err instanceof Error ? err.message : err,
     );

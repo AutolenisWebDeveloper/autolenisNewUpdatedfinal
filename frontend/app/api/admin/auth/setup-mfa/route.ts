@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
       entityType: "Admin",
       entityId: admin.id,
     },
-  }).catch(err => console.error("[setup-mfa] audit log error:", err));
+  }).catch(err => logger.error("[setup-mfa] audit log error:", err));
 
   // Generate TOTP secret + QR code — show only after email confirmation
   const secret = generateTotpSecret();
@@ -171,7 +172,7 @@ export async function POST(request: NextRequest) {
       entityId: admin.id,
       metadata: { recoveryCodeCount: freshAdmin.pendingRecoveryCodes.length },
     },
-  }).catch(err => console.error("[setup-mfa] audit log error:", err));
+  }).catch(err => logger.error("[setup-mfa] audit log error:", err));
 
   // Issue full admin session
   const adminToken = await signAdminJwt({

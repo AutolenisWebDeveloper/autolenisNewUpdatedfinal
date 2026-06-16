@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
@@ -15,6 +16,20 @@ export async function POST(request: NextRequest) {
     return errorResponse("PREQUAL_REQUIRED", "Valid prequalification required before deposit", 400);
   }
 
+  // Auction activation precondition: the buyer must have at least one vehicle on
+  // their shortlist — there must be something for dealers to compete over. Paying
+  // the deposit launches the auction, so this gate belongs before payment.
+  const shortlistCount = await prisma.shortlistItem.count({
+    where: { shortlist: { buyerId: buyer.id } },
+  });
+  if (shortlistCount === 0) {
+    return errorResponse(
+      "SHORTLIST_REQUIRED",
+      "Add at least one vehicle to your shortlist before activating your auction.",
+      400,
+    );
+  }
+
   // Check for existing active deposit
   const existingDeposit = await prisma.deposit.findFirst({
     where: { buyerId: buyer.id, status: { in: ["PENDING", "PAID"] } },
@@ -30,8 +45,7 @@ export async function POST(request: NextRequest) {
   const isLiveKey = stripeKey.startsWith("sk_live_");
   const isSandboxRuntime = process.env.NODE_ENV !== "production";
   if (isLiveKey && isSandboxRuntime) {
-    // eslint-disable-next-line no-console
-    console.warn("WARNING: Using live Stripe key in sandbox mode — returning mock intent.");
+    logger.warn("WARNING: Using live Stripe key in sandbox mode — returning mock intent.");
     // Reuse an existing mock so the buyer doesn't accumulate orphan PENDING rows.
     if (existingDeposit?.stripePaymentIntentId?.startsWith("pi_sandbox_mock_")) {
       return successResponse({ clientSecret: "pi_sandbox_mock_secret", mock: true });
@@ -127,7 +141,7 @@ export async function POST(request: NextRequest) {
 
     return successResponse({ clientSecret: paymentIntent.client_secret });
   } catch (err) {
-    console.error("[deposit/create-intent] Stripe error:", err);
+    logger.error("[deposit/create-intent] Stripe error:", err);
     return errorResponse("STRIPE_ERROR", "Payment service unavailable. Please try again.", 503);
   }
 }

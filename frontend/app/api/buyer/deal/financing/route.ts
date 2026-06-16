@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { advanceDealStatus, DealTransitionError } from "@/lib/services/deal/deal.service";
 
 // PATCH /api/buyer/deal/financing — save financing path choice
 export async function PATCH(request: NextRequest) {
@@ -15,9 +16,18 @@ export async function PATCH(request: NextRequest) {
   const deal = await prisma.deal.findFirst({ where: { buyerId: buyer.id }, orderBy: { createdAt: "desc" } });
   if (!deal) return errorResponse("NOT_FOUND", "No active deal", 404);
 
-  await prisma.deal.update({ where: { id: deal.id }, data: { financingPath, status: "FEE_PENDING" } });
+  // Advance FINANCING_PENDING → FEE_PENDING through the guarded seam. If the deal
+  // is already past financing, persist the choice without regressing the status.
+  let status = deal.status;
+  try {
+    await advanceDealStatus(deal.id, "FEE_PENDING", { actorRole: "BUYER", data: { financingPath } });
+    status = "FEE_PENDING";
+  } catch (err) {
+    if (!(err instanceof DealTransitionError)) throw err;
+    await prisma.deal.update({ where: { id: deal.id }, data: { financingPath } });
+  }
 
-  return successResponse({ deal: { id: deal.id, financingPath, status: "FEE_PENDING" } });
+  return successResponse({ deal: { id: deal.id, financingPath, status } });
 }
 
 // GET /api/buyer/deal/financing

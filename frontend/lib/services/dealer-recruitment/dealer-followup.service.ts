@@ -11,6 +11,7 @@
 // dealer-email-send service so suppression, rate limiting, and logging are
 // shared with the initial touch.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma"
 import { sendDealerEmail } from "./dealer-email-send.service"
 import {
@@ -134,16 +135,16 @@ export async function sendFollowUp(dealerProspectId: string): Promise<void> {
   })
 
   if (!prospect) {
-    console.warn(`[phase-4b4] sendFollowUp: prospect ${dealerProspectId} not found`)
+    logger.warn(`[phase-4b4] sendFollowUp: prospect ${dealerProspectId} not found`)
     return
   }
   if (!prospect.email) return
   if (prospect.replyDetectedAt || prospect.sequencePausedAt) {
-    console.log(`[phase-4b4] Skipping ${prospect.name} — sequence paused/replied`)
+    logger.info(`[phase-4b4] Skipping ${prospect.name} — sequence paused/replied`)
     return
   }
   if (prospect.outreachLog.length === 0) {
-    console.warn(`[phase-4b4] sendFollowUp: ${prospect.name} has no prior send`)
+    logger.warn(`[phase-4b4] sendFollowUp: ${prospect.name} has no prior send`)
     return
   }
 
@@ -152,7 +153,7 @@ export async function sendFollowUp(dealerProspectId: string): Promise<void> {
     1,
   )
   if (lastStep >= MAX_SEQUENCE_STEP) {
-    console.log(`[phase-4b4] ${prospect.name} already at step ${lastStep} — done`)
+    logger.info(`[phase-4b4] ${prospect.name} already at step ${lastStep} — done`)
     return
   }
 
@@ -189,11 +190,11 @@ export async function sendFollowUp(dealerProspectId: string): Promise<void> {
   })
 
   if (result.success) {
-    console.log(
+    logger.info(
       `[phase-4b4] Follow-up sent to ${prospect.name} (step ${nextStep}, resend ${result.resendId})`,
     )
   } else {
-    console.warn(
+    logger.warn(
       `[phase-4b4] Follow-up send failed for ${prospect.name} (step ${nextStep}): ${result.error}`,
     )
     // Re-throw so the cron counts it as a failure for observability.
@@ -219,5 +220,5 @@ export async function pauseSequence(
       ...(reason === "replied" ? { replyDetectedAt: now } : {}),
     },
   })
-  console.log(`[phase-4b4] Sequence paused for ${dealerProspectId} (${reason})`)
+  logger.info(`[phase-4b4] Sequence paused for ${dealerProspectId} (${reason})`)
 }

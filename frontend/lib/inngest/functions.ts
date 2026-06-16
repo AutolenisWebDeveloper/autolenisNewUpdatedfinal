@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import crypto from 'crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
@@ -672,7 +673,7 @@ export const inactivityScannerFn = inngest.createFunction(
           });
         } catch (err) {
           // One contact's failure must not block the rest of the batch.
-          console.error('[inactivity-scanner] enroll failed', row.id, err);
+          logger.error('[inactivity-scanner] enroll failed', row.id, err);
         }
       }
     });

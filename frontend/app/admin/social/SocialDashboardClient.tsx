@@ -1,5 +1,6 @@
 "use client";
 
+import { logger } from "@/lib/logger";
 // /admin/social — Social Intelligence & Media Engine dashboard (client).
 // Six tabs: Overview, Content Calendar, Pending Review, Publishing Queue,
 // Performance, Settings — plus a shared post-detail drawer and a fixed
@@ -259,7 +260,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   // "Unexpected end of JSON input".
   const text = await res.text();
   if (!text) {
-    console.error(`[fetchJson] empty response body from ${url} (${res.status})`);
+    logger.error(`[fetchJson] empty response body from ${url} (${res.status})`);
     throw new Error(`Server returned an empty response (${res.status})`);
   }
 
@@ -267,7 +268,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   try {
     json = JSON.parse(text) as typeof json;
   } catch {
-    console.error(`[fetchJson] invalid JSON from ${url}:`, text.slice(0, 200));
+    logger.error(`[fetchJson] invalid JSON from ${url}:`, text.slice(0, 200));
     throw new Error(`Server returned an invalid response (${res.status})`);
   }
 

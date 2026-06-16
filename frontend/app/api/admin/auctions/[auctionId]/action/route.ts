@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest, { params }: Props) {
             title: "Auction deadline extended",
             body: `The deadline for auction ${auctionId.slice(0, 8)} was extended. You now have until ${newEnd.toLocaleString()} to submit or revise your offer.`,
           })),
-        }).catch(err => console.error("[auctions/action] extend dealer notify failed:", err));
+        }).catch(err => logger.error("[auctions/action] extend dealer notify failed:", err));
       }
 
       result = { newEndsAt: newEnd.toISOString(), dealersNotified: invitations.length };
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest, { params }: Props) {
           auctionUrl: `${APP_URL}/dealer/auctions/${auctionId}`,
           expiryHours,
           auctionId,
-        }).catch(err => console.error(`[auctions/action] dealer invite email failed (${dealerId}):`, err));
+        }).catch(err => logger.error(`[auctions/action] dealer invite email failed (${dealerId}):`, err));
       }
 
       result = { dealerInvited: dealerId, auctionId };
@@ -146,7 +147,7 @@ export async function POST(request: NextRequest, { params }: Props) {
           title: "Auction cancelled",
           body: "Your auction was cancelled and your deposit refunded. Please allow 3–5 business days for funds to appear.",
         },
-      }).catch(err => console.error("[auctions/action] cancel buyer notify failed:", err));
+      }).catch(err => logger.error("[auctions/action] cancel buyer notify failed:", err));
 
       // Notify every invited dealer the auction was cancelled.
       const cancelInvitations = await prisma.auctionInvitation.findMany({ where: { auctionId }, select: { dealerId: true } });
@@ -159,7 +160,7 @@ export async function POST(request: NextRequest, { params }: Props) {
             title: "Auction cancelled",
             body: `Auction ${auctionId.slice(0, 8)} was cancelled by the platform. No further action is needed.`,
           })),
-        }).catch(err => console.error("[auctions/action] cancel dealer notify failed:", err));
+        }).catch(err => logger.error("[auctions/action] cancel dealer notify failed:", err));
       }
 
       result = { refunded: true, dealersNotified: cancelInvitations.length };

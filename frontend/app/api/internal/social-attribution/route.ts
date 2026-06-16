@@ -2,6 +2,7 @@
 // Internal endpoint called by the buyer intake flow to capture UTM attribution.
 // Protected by CRON_SECRET so it is not publicly accessible.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { captureUtmAttribution } from "@/lib/social/attribution.service";
 import { z } from "zod";
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("[social-attribution] error:", err instanceof Error ? err.message : err);
+    logger.error("[social-attribution] error:", err instanceof Error ? err.message : err);
     return NextResponse.json({ success: false, error: "Attribution capture failed" }, { status: 500 });
   }
 }

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
@@ -132,12 +133,12 @@ export async function POST(req: Request) {
         },
       });
     } catch (emitErr) {
-      console.error('[partial-lead] CRM emit failed:', emitErr);
+      logger.error('[partial-lead] CRM emit failed:', emitErr);
     }
 
     return NextResponse.json({ ok: true, contact_id: contact.id });
   } catch (err) {
-    console.error('[partial-lead]', err);
+    logger.error('[partial-lead]', err);
     return NextResponse.json({ ok: true });
   }
 }

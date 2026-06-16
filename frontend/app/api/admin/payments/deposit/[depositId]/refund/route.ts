@@ -2,6 +2,7 @@
 // Admin processes a deposit refund via Stripe.
 // Updates depositStatus = REFUNDED. Buyer notified. AuditLog entry.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminWithRole, adminSuccess, adminError, getClientIp } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -58,10 +59,10 @@ export async function POST(request: NextRequest, { params }: Props) {
       // sync our DB state. Any other error means the refund did NOT happen and
       // we must NOT mark the deposit as refunded.
       if (code !== "charge_already_refunded") {
-        console.error("[deposit/refund] Stripe refund failed:", { code, msg, depositId });
+        logger.error("[deposit/refund] Stripe refund failed:", { code, msg, depositId });
         return adminError("STRIPE_REFUND_FAILED", `Stripe refund failed: ${msg}`, 502);
       }
-      console.warn("[deposit/refund] charge already refunded out-of-band — syncing DB only:", { depositId });
+      logger.warn("[deposit/refund] charge already refunded out-of-band — syncing DB only:", { depositId });
     }
   }
 

@@ -1,4 +1,5 @@
 // POST /api/admin/dealers/[dealerId]/approve
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { z } from "zod";
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         contactName: dealer.dealershipName,
         dealershipName: dealer.dealershipName,
         dashboardUrl: `${appUrl}/dealer/dashboard`,
-      }).catch(err => console.error("[admin/dealers/approve] account approved email failed:", err));
+      }).catch(err => logger.error("[admin/dealers/approve] account approved email failed:", err));
     }
     syncGhlTag(dealer?.user?.email, "dealer-approved");
 

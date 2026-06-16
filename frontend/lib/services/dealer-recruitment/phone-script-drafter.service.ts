@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma"
 import { GROQ_REASONING } from "@/lib/ai/acquisition"
 
@@ -83,7 +84,7 @@ async function callGroqWithRetry(params: Parameters<typeof callGroq>[0]): Promis
 
       // Exponential backoff: 8s, 16s, 32s
       const backoffMs = Math.min(8000 * Math.pow(2, attempt), 32000)
-      console.warn(`[phone-script-drafter] Retry ${attempt + 1}/${maxAttempts} after ${backoffMs}ms due to: ${message.substring(0, 100)}`)
+      logger.warn(`[phone-script-drafter] Retry ${attempt + 1}/${maxAttempts} after ${backoffMs}ms due to: ${message.substring(0, 100)}`)
       await new Promise((resolve) => setTimeout(resolve, backoffMs))
     }
   }
@@ -128,13 +129,13 @@ export async function draftPhoneScriptForProspect(
   })
 
   if (!prospect) {
-    console.error(`[phone-script-drafter] Prospect ${prospectId} not found`)
+    logger.error(`[phone-script-drafter] Prospect ${prospectId} not found`)
     return null
   }
 
   const opp = prospect.buyerOpp
   if (!opp) {
-    console.error(`[phone-script-drafter] Buyer opp missing for ${prospectId}`)
+    logger.error(`[phone-script-drafter] Buyer opp missing for ${prospectId}`)
     return null
   }
 
@@ -196,7 +197,7 @@ Output the JSON script structure.`
       maxTokens: 1500,
     })
   } catch (err) {
-    console.error(`[phone-script-drafter] Groq call failed for ${prospectId}:`, err)
+    logger.error(`[phone-script-drafter] Groq call failed for ${prospectId}:`, err)
     return null
   }
 
@@ -204,7 +205,7 @@ Output the JSON script structure.`
   try {
     const jsonMatch = response.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
-      console.error(
+      logger.error(
         `[phone-script-drafter] No JSON in response: ${response.substring(0, 200)}`
       )
       return null
@@ -212,7 +213,7 @@ Output the JSON script structure.`
     const parsed = JSON.parse(jsonMatch[0])
 
     if (!parsed.full_script || typeof parsed.full_script !== "string") {
-      console.error(`[phone-script-drafter] Missing full_script:`, parsed)
+      logger.error(`[phone-script-drafter] Missing full_script:`, parsed)
       return null
     }
 
@@ -224,7 +225,7 @@ Output the JSON script structure.`
       full_script: parsed.full_script,
     }
   } catch (err) {
-    console.error(`[phone-script-drafter] JSON parse failed:`, err)
+    logger.error(`[phone-script-drafter] JSON parse failed:`, err)
     return null
   }
 }

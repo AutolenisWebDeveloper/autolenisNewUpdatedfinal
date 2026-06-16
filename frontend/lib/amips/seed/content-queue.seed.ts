@@ -20,6 +20,7 @@
 // (contentTier, keywordTarget) — we skip rows whose keyword already exists so
 // repeated runs do not duplicate the backlog.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { VEHICLE_SEEDS } from "@/lib/amips/seed/vehicle-intelligence.seed";
 
@@ -309,7 +310,7 @@ export async function seedContentQueue(): Promise<{
   byTier: Record<string, number>;
 }> {
   const drafts = buildQueueDrafts();
-  console.log(
+  logger.info(
     `[amips-seed] content-queue: ${drafts.length} drafts built (A/B/C)`,
   );
 
@@ -343,10 +344,10 @@ export async function seedContentQueue(): Promise<{
     byTier[d.contentTier] = (byTier[d.contentTier] ?? 0) + 1;
   }
 
-  console.log(
+  logger.info(
     `[amips-seed] content-queue: inserted ${toInsert.length}, skipped ${skipped} (already present)`,
   );
-  console.log(
+  logger.info(
     `[amips-seed] content-queue: by tier — A:${byTier.A ?? 0} B:${byTier.B ?? 0} C:${byTier.C ?? 0}`,
   );
 
@@ -397,7 +398,7 @@ export async function reprioritizeContentQueue(): Promise<{
 }> {
   const matured = await hasMaturedSearchIntelligence();
   if (!matured) {
-    console.log("[amips-p3-queue] search intelligence immature; keeping launch priority");
+    logger.info("[amips-p3-queue] search intelligence immature; keeping launch priority");
     return { reprioritized: 0, mode: "launch" };
   }
 
@@ -441,6 +442,6 @@ export async function reprioritizeContentQueue(): Promise<{
     reprioritized++;
   }
 
-  console.log(`[amips-p3-queue] reprioritized ${reprioritized} items from search demand`);
+  logger.info(`[amips-p3-queue] reprioritized ${reprioritized} items from search demand`);
   return { reprioritized, mode: "search" };
 }

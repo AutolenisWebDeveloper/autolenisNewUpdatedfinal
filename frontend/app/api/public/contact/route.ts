@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Resend } from "resend";
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
       replyTo: email,
       subject: `[Contact] ${subject} — from ${name}`,
       text: `New contact form submission.\n\nName: ${name}\nEmail: ${email}${phone ? `\nPhone: ${phone}` : ""}\nSubject: ${subject}\n\nMessage:\n${message}`,
-    }).catch(err => console.error("[contact] admin notification failed:", err));
+    }).catch(err => logger.error("[contact] admin notification failed:", err));
 
     // 2. Send confirmation to user (non-blocking).
     resend.emails.send({
@@ -64,9 +65,9 @@ export async function POST(request: NextRequest) {
       to: email,
       subject: "We received your message — AutoLenis",
       text: `Hi ${name},\n\nThanks for reaching out. We received your message and will get back to you within 1–2 business days.\n\nHere's what you sent:\n\nSubject: ${subject}\n${message}\n\n— The AutoLenis Team`,
-    }).catch(err => console.error("[contact] user confirmation failed:", err));
+    }).catch(err => logger.error("[contact] user confirmation failed:", err));
   } else {
-    console.warn("[contact] Resend client not configured — emails skipped");
+    logger.warn("[contact] Resend client not configured — emails skipped");
   }
 
   // 3. Persist to DB so admin has a paper trail even if email delivery fails.
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
       body: `From: ${name} <${email}>\n\n${message.slice(0, 500)}${message.length > 500 ? "…" : ""}`,
       metadata: { source: "public_contact_form", name, email, phone: phone ?? null, subject, fullMessage: message },
     },
-  }).catch(err => console.error("[contact] DB log failed:", err));
+  }).catch(err => logger.error("[contact] DB log failed:", err));
 
   return NextResponse.json({ success: true, data: { message: "Message sent" } }, { status: 201 });
 }

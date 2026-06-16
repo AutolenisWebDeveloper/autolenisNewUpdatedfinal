@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import Stripe from "stripe";
@@ -12,6 +13,7 @@ import {
 import { walkCommissionTree } from "@/lib/services/affiliate/commission.service";
 import { launchAuction } from "@/lib/services/auction/auction.service";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { dispatch } from "@/lib/qstash/dispatch";
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
@@ -117,10 +119,10 @@ export async function POST(request: NextRequest) {
             // BUG1 FIX: Launch auction and invite dealers (was missing — dealers were never notified)
             if (createdAuction && !existingAuction) {
               await launchAuction(createdAuction.id).catch((err: unknown) =>
-                console.error("[stripe/webhook] launchAuction failed:", err)
+                logger.error("[stripe/webhook] launchAuction failed:", err)
               );
               await inviteDealersToAuction(createdAuction.id, deposit.buyerId).catch((err: unknown) =>
-                console.error("[stripe/webhook] inviteDealersToAuction failed:", err)
+                logger.error("[stripe/webhook] inviteDealersToAuction failed:", err)
               );
             }
 
@@ -146,14 +148,14 @@ export async function POST(request: NextRequest) {
               try {
                 await sendDepositConfirmationEmail(buyerEmail, buyerName, deposit.id);
               } catch (e) {
-                console.error("[stripe/webhook] deposit confirmation email failed:", e);
+                logger.error("[stripe/webhook] deposit confirmation email failed:", e);
               }
               try {
                 if (createdAuction) {
                   await sendAuctionActivatedEmail(buyerEmail, buyerName, createdAuction.id);
                 }
               } catch (e) {
-                console.error("[stripe/webhook] auction activated email failed:", e);
+                logger.error("[stripe/webhook] auction activated email failed:", e);
               }
               syncGhlTag(buyerEmail, "deposit-paid");
 
@@ -195,7 +197,7 @@ export async function POST(request: NextRequest) {
                 },
               });
             } catch (err) {
-              console.error("[stripe/webhook] deposit_paid emit failed:", err);
+              logger.error("[stripe/webhook] deposit_paid emit failed:", err);
             }
           }
         }
@@ -215,15 +217,24 @@ export async function POST(request: NextRequest) {
             ? { id: metaDealId }
             : { stripeFeePIId: pi.id };
 
-          await prisma.deal.updateMany({
-            where: whereClause,
-            data: {
-              status: "INSURANCE_PENDING",
-              feePaidAt: new Date(),
-              feeAmountCents: PREMIUM_FEE_CENTS,
-              stripeFeePIId: pi.id, // Always record the PI ID for future webhook dedup
-            },
-          });
+          // Source-checked advance (Gap 8): only move the deal forward when it is
+          // actually awaiting fee payment. A deal already past insurance is NOT
+          // regressed — we still record the fee fields for dedup. Fee receipt is an
+          // authoritative payment fact, so the forward transition is forced and the
+          // change is recorded in DealStatusHistory.
+          const feeDeal = await prisma.deal.findFirst({ where: whereClause });
+          if (feeDeal) {
+            const feeData = { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS, stripeFeePIId: pi.id };
+            if (feeDeal.status === "FEE_PENDING") {
+              await advanceDealStatus(feeDeal.id, "FEE_PAID", { actorRole: "SYSTEM", force: true, data: feeData });
+              await advanceDealStatus(feeDeal.id, "INSURANCE_PENDING", { actorRole: "SYSTEM", force: true });
+            } else if (feeDeal.status === "FEE_PAID") {
+              await advanceDealStatus(feeDeal.id, "INSURANCE_PENDING", { actorRole: "SYSTEM", force: true, data: feeData });
+            } else {
+              // Already at/after INSURANCE_PENDING — record fee fields, do not regress status.
+              await prisma.deal.update({ where: { id: feeDeal.id }, data: feeData });
+            }
+          }
 
           // Send the buyer a confirmation that their service fee was received.
           // Routed through the idempotent send rail so webhook retries cannot
@@ -249,7 +260,7 @@ export async function POST(request: NextRequest) {
               }
             }
           } catch (err) {
-            console.error("[stripe/webhook] service fee email failed:", err);
+            logger.error("[stripe/webhook] service fee email failed:", err);
           }
 
           // Trigger affiliate commissions — idempotent (commission service checks qualifyingEventId before creating)
@@ -271,7 +282,7 @@ export async function POST(request: NextRequest) {
               }
             }
           } catch (commissionErr) {
-            console.error("[stripe/webhook] commission walk failed (non-fatal):", commissionErr);
+            logger.error("[stripe/webhook] commission walk failed (non-fatal):", commissionErr);
           }
         }
         break;
@@ -347,7 +358,7 @@ export async function POST(request: NextRequest) {
               });
             }
           } catch (err) {
-            console.error("[stripe/webhook] deposit refund email failed:", err);
+            logger.error("[stripe/webhook] deposit refund email failed:", err);
           }
           break;
         }
@@ -384,7 +395,7 @@ export async function POST(request: NextRequest) {
               });
             }
           } catch (err) {
-            console.error("[stripe/webhook] fee refund email failed:", err);
+            logger.error("[stripe/webhook] fee refund email failed:", err);
           }
         }
         break;
@@ -417,7 +428,7 @@ export async function POST(request: NextRequest) {
               dueBy:           dispute.evidence_details?.due_by,
             },
           },
-        }).catch((err: unknown) => console.error("[stripe/webhook] dispute audit log failed:", err));
+        }).catch((err: unknown) => logger.error("[stripe/webhook] dispute audit log failed:", err));
         break;
       }
     }
@@ -430,7 +441,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ received: true });
   } catch (err) {
-    console.error("Webhook processing error:", err);
+    logger.error("Webhook processing error:", err);
     return new NextResponse("Processing error", { status: 500 });
   }
 }

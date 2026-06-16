@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizeEmail, normalizePhone } from '../utils/phone';
 import type {
@@ -253,7 +254,7 @@ export class ContactService {
       } catch (err) {
         // Stage update has already committed — log and continue so callers
         // never see a workflow side-effect masquerade as a CRM failure.
-        console.error('[contact] workflow trigger failed', triggerType, id, err);
+        logger.error('[contact] workflow trigger failed', triggerType, id, err);
       }
     }
 

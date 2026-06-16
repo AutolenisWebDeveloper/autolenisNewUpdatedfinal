@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { submitOffer } from "@/lib/services/offer/offer.service";
@@ -63,7 +64,7 @@ export async function POST(request: NextRequest) {
         submittedAt: submittedAt.toISOString(),
         revisionWindowExpiry: revisionWindowExpiry.toISOString(),
         offerId: offer.id,
-      }).catch(err => console.error("[dealer/offers] submission email failed:", err));
+      }).catch(err => logger.error("[dealer/offers] submission email failed:", err));
     }
 
     // QStash — notify the buyer that a dealer offer arrived (+ follow-up).

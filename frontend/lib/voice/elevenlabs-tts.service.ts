@@ -6,6 +6,7 @@
 // failure path returns null so callers can fall back to Polly <Say> and the
 // call never breaks.
 
+import { logger } from "@/lib/logger";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";
 
@@ -72,7 +73,7 @@ async function uploadAudioAndGetUrl(
     });
 
   if (uploadError) {
-    console.error(`[elevenlabs] Supabase upload failed: ${uploadError.message}`);
+    logger.error(`[elevenlabs] Supabase upload failed: ${uploadError.message}`);
     return null;
   }
 
@@ -81,7 +82,7 @@ async function uploadAudioAndGetUrl(
     .getPublicUrl(fileName);
 
   if (!urlData?.publicUrl) {
-    console.error("[elevenlabs] Failed to get public URL");
+    logger.error("[elevenlabs] Failed to get public URL");
     return null;
   }
 
@@ -97,10 +98,10 @@ export async function generateZuraSpeech(
   // Log which voice is loaded so production logs can confirm the correct
   // ELEVENLABS_VOICE_ID is in use. Only the first 8 chars are logged so the
   // full ID is never exposed. Expected prefix: "ShVXgfhb...".
-  console.log(`[elevenlabs] Using voice ID: ${voiceId?.substring(0, 8)}...`);
+  logger.info(`[elevenlabs] Using voice ID: ${voiceId?.substring(0, 8)}...`);
 
   if (!apiKey || !voiceId) {
-    console.error("[elevenlabs] Missing API key or voice ID");
+    logger.error("[elevenlabs] Missing API key or voice ID");
     return null;
   }
 
@@ -145,19 +146,19 @@ export async function generateZuraSpeech(
   }
 
   // ATTEMPT 1: Eleven V3 (primary, premium quality)
-  console.log(`[elevenlabs] Attempting V3 model`);
+  logger.info(`[elevenlabs] Attempting V3 model`);
   const v3Result = await callElevenLabs(
     ELEVENLABS_PRIMARY_MODEL,
     V3_VOICE_SETTINGS,
   );
 
   if (v3Result.ok && v3Result.audioBytes) {
-    console.log(`[elevenlabs] V3 succeeded`);
+    logger.info(`[elevenlabs] V3 succeeded`);
     return await uploadAudioAndGetUrl(v3Result.audioBytes, supabase);
   }
 
   // V3 failed — log and try fallback
-  console.warn(
+  logger.warn(
     `[elevenlabs] V3 failed (status ${v3Result.status}): ${v3Result.errorText?.substring(0, 200)}. Falling back to Turbo v2.5`,
   );
 
@@ -168,12 +169,12 @@ export async function generateZuraSpeech(
   );
 
   if (turboResult.ok && turboResult.audioBytes) {
-    console.log(`[elevenlabs] Turbo v2.5 fallback succeeded`);
+    logger.info(`[elevenlabs] Turbo v2.5 fallback succeeded`);
     return await uploadAudioAndGetUrl(turboResult.audioBytes, supabase);
   }
 
   // Both failed
-  console.error(
+  logger.error(
     `[elevenlabs] BOTH models failed. Turbo error (status ${turboResult.status}): ${turboResult.errorText?.substring(0, 200)}`,
   );
   return null;

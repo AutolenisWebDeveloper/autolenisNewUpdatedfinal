@@ -8,6 +8,7 @@
 // Reuses the project's lazy-Resend pattern so `next build` never throws when the
 // API key isn't in scope.
 
+import { logger } from "@/lib/logger";
 import { Resend } from "resend"
 import { prisma } from "@/lib/prisma"
 import { getServiceSupabase } from "@/lib/supabase-service"
@@ -122,11 +123,11 @@ async function checkRateLimit(): Promise<boolean> {
   ])
 
   if (hourCount >= MAX_PER_HOUR) {
-    console.warn(`[phase-4b3] Hourly rate limit hit: ${hourCount}/${MAX_PER_HOUR}`)
+    logger.warn(`[phase-4b3] Hourly rate limit hit: ${hourCount}/${MAX_PER_HOUR}`)
     return false
   }
   if (dayCount >= MAX_PER_DAY) {
-    console.warn(`[phase-4b3] Daily rate limit hit: ${dayCount}/${MAX_PER_DAY}`)
+    logger.warn(`[phase-4b3] Daily rate limit hit: ${dayCount}/${MAX_PER_DAY}`)
     return false
   }
   return true
@@ -140,7 +141,7 @@ async function isSuppressed(email: string): Promise<boolean> {
     const supabase = getServiceSupabase()
     return await SuppressionService.isEmailSuppressed(supabase, email)
   } catch (err) {
-    console.warn(
+    logger.warn(
       `[phase-4b3] Suppression check failed (allowing send): ${err instanceof Error ? err.message : String(err)}`,
     )
     return false
@@ -192,7 +193,7 @@ export async function sendDealerEmail(
   // result (not thrown) so one misconfig never cascades through callers.
   const missingEnv = missingEmailEnvVars()
   if (missingEnv.length > 0) {
-    console.warn(
+    logger.warn(
       `[phase-4b2] Send blocked — missing required email env vars: ${missingEnv.join(", ")}`,
     )
     return {
@@ -219,7 +220,7 @@ export async function sendDealerEmail(
 
   // 2. Suppression gate (CAN-SPAM / deliverability).
   if (await isSuppressed(prospect.email)) {
-    console.warn(`[phase-4b3] Skipping suppressed address ${prospect.email}`)
+    logger.warn(`[phase-4b3] Skipping suppressed address ${prospect.email}`)
     return { success: false, error: "Recipient is suppressed (bounced/unsubscribed)" }
   }
 
@@ -282,7 +283,7 @@ export async function sendDealerEmail(
       where: { id: log.id },
       data: { status: "failed", errorMessage: "RESEND_API_KEY not configured" },
     })
-    console.warn("[phase-4b3] RESEND_API_KEY not configured — send skipped")
+    logger.warn("[phase-4b3] RESEND_API_KEY not configured — send skipped")
     return { success: false, error: "Email sending not configured", outreachLogId: log.id }
   }
 
@@ -308,7 +309,7 @@ export async function sendDealerEmail(
         where: { id: log.id },
         data: { status: "failed", errorMessage: msg },
       })
-      console.error(`[phase-4b3] Resend dispatch failed for ${prospect.email}: ${msg}`)
+      logger.error(`[phase-4b3] Resend dispatch failed for ${prospect.email}: ${msg}`)
       return { success: false, error: msg, outreachLogId: log.id }
     }
 
@@ -328,7 +329,7 @@ export async function sendDealerEmail(
         // Non-blocking — the send already succeeded.
       })
 
-    console.log(`[phase-4b3] Email sent to ${prospect.email} (resend ${result.data.id})`)
+    logger.info(`[phase-4b3] Email sent to ${prospect.email} (resend ${result.data.id})`)
     return { success: true, resendId: result.data.id, outreachLogId: log.id }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -336,7 +337,7 @@ export async function sendDealerEmail(
       where: { id: log.id },
       data: { status: "failed", errorMessage: msg },
     })
-    console.error(`[phase-4b3] Email send threw for ${prospect.email}: ${msg}`)
+    logger.error(`[phase-4b3] Email send threw for ${prospect.email}: ${msg}`)
     return { success: false, error: msg, outreachLogId: log.id }
   }
 }

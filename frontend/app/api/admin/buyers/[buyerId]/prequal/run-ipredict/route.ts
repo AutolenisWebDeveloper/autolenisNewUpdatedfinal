@@ -19,6 +19,7 @@
 //   - Writes AdminAuditLog + ComplianceEvent
 //   - Sends approval / adverse-action emails where required
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminWithRole, adminSuccess, adminError } from "@/lib/auth/admin-api";
@@ -161,7 +162,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     if (msg === "Buyer not found") return adminError("NOT_FOUND", "Buyer not found", 404);
-    console.error("[admin/prequal/run-ipredict]", err);
+    logger.error("[admin/prequal/run-ipredict]", err);
     return adminError("SERVER_ERROR", "Failed to run iPredict", 500);
   }
 }

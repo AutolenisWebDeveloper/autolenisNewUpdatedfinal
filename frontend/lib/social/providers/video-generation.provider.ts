@@ -5,6 +5,7 @@
 // concrete Higgsfield implementation lives in higgsfield.provider.ts; the
 // factory selects between them at runtime.
 
+import { logger } from "@/lib/logger";
 import type { SocialVideo } from "@prisma/client";
 
 export interface VideoJobInput {
@@ -43,7 +44,7 @@ export class NoopVideoProvider implements VideoGenerationProvider {
   readonly name = "noop";
 
   async submitJob(input: VideoJobInput): Promise<VideoJobResult> {
-    console.log(`[video:noop] generation disabled — skipping job for post ${input.postId}`);
+    logger.info(`[video:noop] generation disabled — skipping job for post ${input.postId}`);
     return { success: false, error: "video generation disabled" };
   }
 
@@ -52,7 +53,7 @@ export class NoopVideoProvider implements VideoGenerationProvider {
   }
 
   async retryFailed(video: SocialVideo): Promise<VideoJobResult> {
-    console.log(`[video:noop] retry skipped for video ${video.id}`);
+    logger.info(`[video:noop] retry skipped for video ${video.id}`);
     return { success: false, error: "video generation disabled" };
   }
 }

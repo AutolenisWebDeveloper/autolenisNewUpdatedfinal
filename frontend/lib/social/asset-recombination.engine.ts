@@ -5,6 +5,7 @@
 // platforms, and expanded into other metros. Each variant is a fresh scheduled
 // SocialPost so the discovery surface for a proven idea is maximized.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 export async function recombineViralAsset(post: {
@@ -37,7 +38,7 @@ export async function recombineViralAsset(post: {
   ]);
 
   if (!franchise || !signal) {
-    console.log("[recombine] missing franchise or signal — skipping");
+    logger.info("[recombine] missing franchise or signal — skipping");
     return { variants, strategies };
   }
 
@@ -67,7 +68,7 @@ export async function recombineViralAsset(post: {
       }
     }
   } catch (err) {
-    console.error("[recombine] Strategy A failed:", err);
+    logger.error("[recombine] Strategy A failed:", err);
   }
 
   // Strategy C: Same content, different platforms.
@@ -92,7 +93,7 @@ export async function recombineViralAsset(post: {
         strategies.push(`Strategy C: cross-platform → ${platform}`);
       }
     } catch (err) {
-      console.error("[recombine] Strategy C failed:", err);
+      logger.error("[recombine] Strategy C failed:", err);
     }
   }
 
@@ -130,11 +131,11 @@ export async function recombineViralAsset(post: {
         strategies.push(`Strategy D: geo expansion → ${differentMetro}`);
       }
     } catch (err) {
-      console.error("[recombine] Strategy D failed:", err);
+      logger.error("[recombine] Strategy D failed:", err);
     }
   }
 
-  console.log(
+  logger.info(
     `[recombine] created ${variants.length} variants:`,
     strategies.join(", "),
   );

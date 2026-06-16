@@ -5,6 +5,7 @@
 // gracefully when META_ACCESS_TOKEN / META_AD_ACCOUNT_ID are unset. Emails are
 // hashed (lowercased + trimmed) before upload — raw addresses never leave here.
 
+import { logger } from "@/lib/logger";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 
@@ -13,7 +14,7 @@ export async function buildRetargetingAudience(): Promise<void> {
   const adAccountId = process.env.META_AD_ACCOUNT_ID;
 
   if (!token || !adAccountId) {
-    console.log("[retargeting] META credentials not set — skipping");
+    logger.info("[retargeting] META credentials not set — skipping");
     return;
   }
 
@@ -30,7 +31,7 @@ export async function buildRetargetingAudience(): Promise<void> {
   });
 
   if (leads.length === 0) {
-    console.log("[retargeting] no leads to upload");
+    logger.info("[retargeting] no leads to upload");
     return;
   }
 
@@ -76,7 +77,7 @@ export async function buildRetargetingAudience(): Promise<void> {
       audienceId = createData.id ?? null;
     }
   } catch (err) {
-    console.error("[retargeting] audience find/create failed:", err);
+    logger.error("[retargeting] audience find/create failed:", err);
     return;
   }
 
@@ -101,9 +102,9 @@ export async function buildRetargetingAudience(): Promise<void> {
       });
       uploaded += batch.length;
     } catch (err) {
-      console.error("[retargeting] batch upload failed:", err);
+      logger.error("[retargeting] batch upload failed:", err);
     }
   }
 
-  console.log(`[retargeting] uploaded ${uploaded} emails to Meta audience`);
+  logger.info(`[retargeting] uploaded ${uploaded} emails to Meta audience`);
 }

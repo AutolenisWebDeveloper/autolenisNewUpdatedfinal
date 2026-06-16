@@ -6,6 +6,7 @@
 // only writes to topic_signals. Each signal expires after 7 days and is
 // deduplicated against identical signals raised in the trailing 7 days.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import type { TopicSignal, Prisma } from "@prisma/client";
 
@@ -154,7 +155,7 @@ export function filterSignalQuality(signal: {
   // Buyer leverage: only generate if score > 5.0 (neutral threshold)
   if (signal.signalType === "buyer_leverage") {
     if ((signal.signalValue ?? 0) < 5.0) {
-      console.log(
+      logger.info(
         `[signal-filter] skipping low-leverage signal: ${signal.signalValue}`,
       );
       return false;
@@ -187,7 +188,7 @@ export async function scanForTopicSignals(): Promise<TopicSignal[]> {
     try {
       pending.push(...(await scan()));
     } catch (err) {
-      console.error(`[topic-signal] scan ${scan.name} failed:`, err);
+      logger.error(`[topic-signal] scan ${scan.name} failed:`, err);
     }
   }
 
@@ -197,11 +198,11 @@ export async function scanForTopicSignals(): Promise<TopicSignal[]> {
       const row = await createSignal(s);
       if (row) created.push(row);
     } catch (err) {
-      console.error(`[topic-signal] create failed for ${s.signalType}:`, err);
+      logger.error(`[topic-signal] create failed for ${s.signalType}:`, err);
     }
   }
 
-  console.log(
+  logger.info(
     `[topic-signal] scan complete: ${pending.length} candidates, ${created.length} new signals`,
   );
   return created;

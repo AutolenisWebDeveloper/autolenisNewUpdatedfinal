@@ -1,5 +1,6 @@
 // lib/services/trade-in/trade-in.service.ts — System 18
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { TradeInStatus, TradeInCondition } from "@prisma/client";
 
@@ -72,7 +73,7 @@ export async function submitTradeIn(buyerId: string, data: {
       });
     }
   } catch (err) {
-    console.error("[trade-in] CRM emit failed:", err);
+    logger.error("[trade-in] CRM emit failed:", err);
   }
 
   return submission;

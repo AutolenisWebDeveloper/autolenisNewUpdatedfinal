@@ -7,6 +7,7 @@
 // (10:00 CT). Per-step idempotency lives in sendSocialLeadNurtureEmail, so a
 // double cron run never double-sends.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -85,12 +86,12 @@ export async function GET(request: NextRequest) {
 
       emailsSent++;
     } catch (err) {
-      console.error("[social-nurture] failed for lead:", lead.id, err);
+      logger.error("[social-nurture] failed for lead:", lead.id, err);
     }
   }
 
-  console.log(`[social-nurture] emails sent: ${emailsSent}`);
-  console.log(`[social-nurture] sequences completed: ${sequencesCompleted}`);
+  logger.info(`[social-nurture] emails sent: ${emailsSent}`);
+  logger.info(`[social-nurture] sequences completed: ${sequencesCompleted}`);
 
   return NextResponse.json({
     success: true,

@@ -1,5 +1,6 @@
 // POST /api/admin/deals/[dealId]/esign/send
 // Triggers DocuSign envelope creation for a deal
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         vehicleRef: `Deal ${dealId.slice(0, 8)}`,
         signingUrl: result.signingUrl ?? `${APP_URL}/dealer/deals/${dealId}`,
         dealId,
-      }).catch(err => console.error("[esign] dealer notification failed:", err));
+      }).catch(err => logger.error("[esign] dealer notification failed:", err));
     }
   }
 

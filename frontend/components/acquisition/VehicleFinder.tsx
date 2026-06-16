@@ -1,5 +1,6 @@
 "use client";
 
+import { logger } from "@/lib/logger";
 // components/acquisition/VehicleFinder.tsx
 // Streaming AI concierge chat. Posts each user turn to /api/concierge and
 // renders the response token-by-token as it streams in. Structured buyer
@@ -81,7 +82,7 @@ export default function VehicleFinder() {
         setIsComplete(true);
       }
     } catch (err) {
-      console.error("[VehicleFinder] Error:", err);
+      logger.error("[VehicleFinder] Error:", err);
       setMessages((prev) => [
         ...prev,
         { role: "ai", content: "Sorry, something went wrong. Please try again." },

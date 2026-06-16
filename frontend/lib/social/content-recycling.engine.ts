@@ -5,6 +5,7 @@
 // run; recycling the highest lead-score posts squeezes more reach out of the
 // catalog without spending another Groq generation.
 
+import { logger } from "@/lib/logger";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildViralHashtags } from "@/lib/social/hashtag-builder";
@@ -108,14 +109,14 @@ export async function recyclePost(
       },
     });
 
-    console.log(
+    logger.info(
       `[recycle] recycled post ${post.id} → new post ${recycled.id}`,
       `(leadScore: ${post.leadScore}, fresh hashtags: ${freshHashtags.length})`,
     );
 
     return { id: recycled.id };
   } catch (err) {
-    console.error("[recycle] failed for post:", post.id, err);
+    logger.error("[recycle] failed for post:", post.id, err);
     return null;
   }
 }

@@ -2,6 +2,7 @@
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 import { PREMIUM_FEE_CENTS, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 
 export async function createFeePaymentIntent(dealId: string, buyerId: string) {
   const stripe = getStripe();
@@ -27,6 +28,14 @@ export async function recordFeePayment(dealId: string, paymentIntentId: string) 
   const payment = await prisma.serviceFeePayment.create({
     data: { dealId, amountCents: PREMIUM_FEE_CENTS, depositCreditCents: DEPOSIT_AMOUNT_CENTS, netAmountCents: PREMIUM_FEE_CENTS - DEPOSIT_AMOUNT_CENTS, stripePaymentIntentId: paymentIntentId, paidAt: new Date() },
   });
-  await prisma.deal.update({ where: { id: dealId }, data: { status: "INSURANCE_PENDING", feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS, stripeFeePIId: paymentIntentId } });
+  // Route through the guarded seam: FEE_PENDING → FEE_PAID → INSURANCE_PENDING.
+  // force is used because fee receipt is an authoritative payment fact; the
+  // two-step keeps the lifecycle (and DealStatusHistory) consistent.
+  await advanceDealStatus(dealId, "FEE_PAID", {
+    actorRole: "SYSTEM",
+    force: true,
+    data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS, stripeFeePIId: paymentIntentId },
+  });
+  await advanceDealStatus(dealId, "INSURANCE_PENDING", { actorRole: "SYSTEM", force: true });
   return payment;
 }

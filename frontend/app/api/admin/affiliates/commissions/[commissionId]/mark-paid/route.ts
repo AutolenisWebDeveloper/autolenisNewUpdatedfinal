@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       title: "Commission paid",
       body: `Your commission of $${(commission.amountCents / 100).toLocaleString()} has been paid via ${parsed.data.paymentMethod} (ref: ${parsed.data.paymentReference}).`,
     },
-  }).catch((err) => console.error("[commissions/mark-paid] affiliate notification failed:", err));
+  }).catch((err) => logger.error("[commissions/mark-paid] affiliate notification failed:", err));
 
   return adminSuccess({ commissionId, status: "PAID" });
 }

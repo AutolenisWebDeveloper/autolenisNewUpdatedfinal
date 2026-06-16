@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 
@@ -151,7 +152,7 @@ export async function POST(req: Request) {
       });
     } catch (crmErr) {
       // A CRM hiccup must never fail the buyer's submission.
-      console.error("[dealer-fee-lead] CRM upsert failed:", crmErr);
+      logger.error("[dealer-fee-lead] CRM upsert failed:", crmErr);
     }
 
     // 2b) Per-source domain event (additive, non-blocking) — emits
@@ -191,7 +192,7 @@ export async function POST(req: Request) {
         },
       });
     } catch (emitErr) {
-      console.error("[dealer-fee-lead] CRM emit failed:", emitErr);
+      logger.error("[dealer-fee-lead] CRM emit failed:", emitErr);
     }
 
     // 3) Welcome email — non-blocking; a send failure must not fail the lead.
@@ -204,12 +205,12 @@ export async function POST(req: Request) {
         sessionId,
       });
     } catch (emailErr) {
-      console.error("[dealer-fee-lead] welcome email failed:", emailErr);
+      logger.error("[dealer-fee-lead] welcome email failed:", emailErr);
     }
 
     return NextResponse.json({ success: true, segment });
   } catch (err) {
-    console.error("[dealer-fee-lead]", err);
+    logger.error("[dealer-fee-lead]", err);
     return NextResponse.json(
       { success: false, error: "server_error" },
       { status: 500 },

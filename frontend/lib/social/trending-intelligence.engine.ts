@@ -6,6 +6,7 @@
 // a missing key, a failed endpoint, or a malformed response falls back to a
 // sensible default set so generation is never blocked.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 export interface TrendingData {
@@ -162,7 +163,7 @@ export async function fetchTrendingIntelligence(): Promise<TrendingData> {
   const groqKey = process.env.GROQ_API_KEY ?? "";
 
   if (!apiKey) {
-    console.log("[trending] RAPIDAPI_KEY not set — using defaults");
+    logger.info("[trending] RAPIDAPI_KEY not set — using defaults");
     return {
       tiktokHashtags: DEFAULT_HASHTAGS,
       tiktokTrends: [],
@@ -187,7 +188,7 @@ export async function fetchTrendingIntelligence(): Promise<TrendingData> {
     scannedAt: new Date(),
   };
 
-  console.log(
+  logger.info(
     "[trending] fetched:",
     result.tiktokHashtags.length,
     "hashtags,",
@@ -229,7 +230,7 @@ export async function cacheTrendingData(data: TrendingData): Promise<void> {
       },
     });
   } catch (err) {
-    console.error("[trending] cache write failed:", err);
+    logger.error("[trending] cache write failed:", err);
   }
 }
 

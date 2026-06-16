@@ -11,6 +11,7 @@
 // All methods are defensive: they log, never throw unhandled errors, return
 // typed results, and degrade gracefully when the token is unset.
 
+import { logger } from "@/lib/logger";
 import type {
   PublishingProvider,
   SchedulePostInput,
@@ -40,7 +41,7 @@ export class TikTokProvider implements PublishingProvider {
 
     const videoUrl = input.videoUrl ?? (input.isVideo ? input.mediaUrl : undefined);
     if (!videoUrl) {
-      console.log("[tiktok] no video — skipping (text-only not supported on TikTok API)");
+      logger.info("[tiktok] no video — skipping (text-only not supported on TikTok API)");
       return { success: false, error: "TikTok requires a video — text-only not supported", provider: this.name };
     }
 
@@ -76,15 +77,15 @@ export class TikTokProvider implements PublishingProvider {
       // TikTok returns error.code "ok" on success.
       if (!res.ok || !publishId || (data.error?.code && data.error.code !== "ok")) {
         const detail = data.error?.message ?? `HTTP ${res.status}`;
-        console.error(`[tiktok] publish init failed: ${detail}`);
+        logger.error(`[tiktok] publish init failed: ${detail}`);
         return { success: false, error: detail, provider: this.name };
       }
 
-      console.log(`[tiktok] publish init ok publish_id=${publishId}`);
+      logger.info(`[tiktok] publish init ok publish_id=${publishId}`);
       return { success: true, platformPostId: publishId, provider: this.name };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[tiktok] publish failed: ${message}`);
+      logger.error(`[tiktok] publish failed: ${message}`);
       return { success: false, error: message, provider: this.name };
     }
   }
@@ -162,15 +163,15 @@ export class TikTokProvider implements PublishingProvider {
       });
 
       if (res.status === 401) {
-        console.error("[tiktok] getAnalytics 401 — token expired");
+        logger.error("[tiktok] getAnalytics 401 — token expired");
         return unknown;
       }
       if (res.status === 403) {
-        console.error("[tiktok] getAnalytics 403 — insufficient scope");
+        logger.error("[tiktok] getAnalytics 403 — insufficient scope");
         return unknown;
       }
       if (res.status === 404) {
-        console.error("[tiktok] getAnalytics 404 — video not found (deleted?)");
+        logger.error("[tiktok] getAnalytics 404 — video not found (deleted?)");
         return unknown;
       }
 
@@ -188,7 +189,7 @@ export class TikTokProvider implements PublishingProvider {
       };
 
       if (!res.ok || (data.error?.code && data.error.code !== "ok")) {
-        console.error(`[tiktok] getAnalytics failed: ${data.error?.message ?? `HTTP ${res.status}`}`);
+        logger.error(`[tiktok] getAnalytics failed: ${data.error?.message ?? `HTTP ${res.status}`}`);
         return unknown;
       }
 
@@ -227,7 +228,7 @@ export class TikTokProvider implements PublishingProvider {
         engagementRate: engagementBase,
       };
     } catch (err) {
-      console.error("[tiktok] getAnalytics failed (non-fatal):", err);
+      logger.error("[tiktok] getAnalytics failed (non-fatal):", err);
       return unknown;
     }
   }
@@ -273,7 +274,7 @@ export class TikTokProvider implements PublishingProvider {
         headers: { "Access-Token": businessToken },
       });
       if (!res.ok) {
-        console.error(`[tiktok] business metrics HTTP ${res.status}`);
+        logger.error(`[tiktok] business metrics HTTP ${res.status}`);
         return empty;
       }
       const data = (await res.json().catch(() => ({}))) as {
@@ -299,7 +300,7 @@ export class TikTokProvider implements PublishingProvider {
         follows: v.follows ?? null,
       };
     } catch (err) {
-      console.error("[tiktok] business metrics failed (non-fatal):", err);
+      logger.error("[tiktok] business metrics failed (non-fatal):", err);
       return empty;
     }
   }

@@ -13,6 +13,7 @@
 // All methods are defensive: they log, never throw unhandled errors, return
 // typed results, and degrade gracefully when config is missing.
 
+import { logger } from "@/lib/logger";
 import type {
   PublishingProvider,
   SchedulePostInput,
@@ -83,7 +84,7 @@ export class YouTubeProvider implements PublishingProvider {
         error?: { message?: string };
       };
       if (!res.ok || data.error || !data.items?.length) {
-        if (data.error) console.error(`[youtube] getAnalytics: ${data.error.message}`);
+        if (data.error) logger.error(`[youtube] getAnalytics: ${data.error.message}`);
         return unknown;
       }
 
@@ -116,7 +117,7 @@ export class YouTubeProvider implements PublishingProvider {
 
       return base;
     } catch (err) {
-      console.error("[youtube] getAnalytics failed (non-fatal):", err);
+      logger.error("[youtube] getAnalytics failed (non-fatal):", err);
       return unknown;
     }
   }
@@ -151,7 +152,7 @@ export class YouTubeProvider implements PublishingProvider {
         error?: { message?: string };
       };
       if (!res.ok || data.error || !data.rows?.length) {
-        if (data.error) console.error(`[youtube] analytics API: ${data.error.message}`);
+        if (data.error) logger.error(`[youtube] analytics API: ${data.error.message}`);
         return {};
       }
       const headers = data.columnHeaders?.map((h) => h.name) ?? [];
@@ -172,7 +173,7 @@ export class YouTubeProvider implements PublishingProvider {
         follows: value("subscribersGained"),
       };
     } catch (err) {
-      console.error("[youtube] OAuth analytics failed (non-fatal):", err);
+      logger.error("[youtube] OAuth analytics failed (non-fatal):", err);
       return {};
     }
   }

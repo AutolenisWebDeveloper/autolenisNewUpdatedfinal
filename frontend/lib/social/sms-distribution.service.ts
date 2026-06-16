@@ -6,6 +6,7 @@
 // same fire-and-forget error handling. Every body carries the required
 // "Reply STOP" opt-out disclosure inline.
 
+import { logger } from "@/lib/logger";
 import { sendSms } from "@/lib/services/sms/twilio.service";
 
 // SMS billing is per 160-char segment; warn (don't fail) past ~2 segments.
@@ -36,7 +37,7 @@ export async function sendMarketAlertSMS(input: {
     ` Reply STOP to unsubscribe.`;
 
   if (message.length > MAX_SMS_CHARS) {
-    console.warn("[sms] message too long — truncating");
+    logger.warn("[sms] message too long — truncating");
   }
 
   await sendSms(input.phoneNumber, message);

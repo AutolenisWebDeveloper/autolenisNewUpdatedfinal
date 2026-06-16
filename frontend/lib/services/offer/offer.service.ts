@@ -2,6 +2,7 @@
 // System 4 — Offer submission, validation, revision
 // Max 1 revision per offer (MAX_OFFER_REVISIONS from constants)
 
+import { logger } from "@/lib/logger";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { OfferStatus } from "@prisma/client";
@@ -201,7 +202,7 @@ export async function submitOffer(input: OfferInput) {
           offersUrl: `${appUrl}/buyer/offers`,
         });
       } catch (err) {
-        console.error("[first-offer-notification] failed:", err);
+        logger.error("[first-offer-notification] failed:", err);
       }
     });
   }
@@ -252,7 +253,7 @@ export async function submitOffer(input: OfferInput) {
       });
     }
   } catch (err) {
-    console.error("[offer.service] offer_received emit failed:", err);
+    logger.error("[offer.service] offer_received emit failed:", err);
   }
 
   return offer;

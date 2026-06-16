@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, after } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       await sendDealSelectedEmail(buyerWithEmail.user.email, buyerWithEmail.firstName, deal.id);
     }
   } catch (e) {
-    console.error("[select-offer] deal selected email failed:", e);
+    logger.error("[select-offer] deal selected email failed:", e);
   }
   syncGhlTag(buyerWithEmail?.user?.email, "offer-selected");
 
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         buyerLastInitial,
         dealUrl: `${APP_URL}/dealer/deals/${deal.id}`,
         dealId: deal.id,
-      }).catch(err => console.error("[select-offer] dealer won email failed:", err));
+      }).catch(err => logger.error("[select-offer] dealer won email failed:", err));
       syncGhlTag(dealerEmail, "dealer-won");
     } else {
       await sendDealerOfferLostEmail({
@@ -96,7 +97,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         totalOffers,
         insightsUrl: `${APP_URL}/dealer/opportunities`,
         auctionId,
-      }).catch(err => console.error("[select-offer] dealer lost email failed:", err));
+      }).catch(err => logger.error("[select-offer] dealer lost email failed:", err));
     }
   }
 
@@ -124,7 +125,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       });
     }
   } catch (err) {
-    console.error("[select-offer] offer_selected emit failed:", err);
+    logger.error("[select-offer] offer_selected emit failed:", err);
   }
 
   // AMIPS Phase 4 — record this completed transaction into Marketplace
@@ -153,7 +154,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         totalRevenueCents: 9900, // $99 deposit
       });
     } catch (err) {
-      console.error("[select-offer] attribution failed:", err);
+      logger.error("[select-offer] attribution failed:", err);
     }
   });
 

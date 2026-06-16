@@ -1,6 +1,7 @@
 // Generates the daily admin briefing and emails it to the SUPER_ADMIN.
 // generateAndSaveBriefing() handles in-DB persistence; this cron wires the email send.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { generateAndSaveBriefing } from "@/lib/services/admin/morning-briefing.service";
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
         text: content,
       });
     } catch (err) {
-      console.error("[morning-briefing] email failed:", err);
+      logger.error("[morning-briefing] email failed:", err);
     }
   }
 

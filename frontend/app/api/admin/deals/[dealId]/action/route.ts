@@ -1,8 +1,10 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { DealStatus } from "@prisma/client";
 import { getStripe } from "@/lib/stripe";
+import { advanceDealStatus, DealTransitionError, InsuranceRequiredError } from "@/lib/services/deal/deal.service";
 import {
   sendDealerContractPendingEmail,
   sendDealerContractIssuesEmail,
@@ -37,10 +39,11 @@ export async function POST(request: NextRequest, { params }: Props) {
     return adminError("FORBIDDEN", "Insufficient permissions — OPERATIONS_ADMIN or SUPER_ADMIN required", 403);
   }
 
-  const { action, reason, newStatus } = await request.json() as {
+  const { action, reason, newStatus, force } = await request.json() as {
     action: string;
     reason: string;
     newStatus?: string;
+    force?: boolean;
   };
 
   if (!reason?.trim()) {
@@ -57,7 +60,29 @@ export async function POST(request: NextRequest, { params }: Props) {
       if (!newStatus || !Object.values(DealStatus).includes(newStatus as DealStatus)) {
         return adminError("INVALID_STATUS", "Invalid target status", 400);
       }
-      await prisma.deal.update({ where: { id: dealId }, data: { status: newStatus as DealStatus } });
+      // Route through the guarded state machine so illegal jumps (e.g. skipping
+      // fee/insurance/contract gates) are rejected. An explicit `force: true`
+      // performs an audit-logged override for legitimate manual corrections.
+      try {
+        await advanceDealStatus(dealId, newStatus as DealStatus, {
+          actorId: admin.adminId,
+          actorRole: "ADMIN",
+          reason,
+          force: force === true,
+        });
+      } catch (err) {
+        if (err instanceof DealTransitionError) {
+          return adminError(
+            "INVALID_TRANSITION",
+            `Cannot move deal from ${deal.status} to ${newStatus}. Pass force:true to override.`,
+            409,
+          );
+        }
+        if (err instanceof InsuranceRequiredError) {
+          return adminError("INSURANCE_REQUIRED", err.message + ". Pass force:true to override.", 409);
+        }
+        throw err;
+      }
 
       // Notify dealer when the deal enters a contract-pending state — non-blocking.
       if (newStatus === "CONTRACT_PENDING" || newStatus === "CONTRACT_REVIEW") {
@@ -69,7 +94,7 @@ export async function POST(request: NextRequest, { params }: Props) {
             dealId,
             vehicleRef: `Deal ${dealId.slice(0, 8)}`,
             uploadUrl: `${APP_URL}/dealer/deals/${dealId}`,
-          }).catch(err => console.error("[deals/action] contract pending email failed:", err));
+          }).catch(err => logger.error("[deals/action] contract pending email failed:", err));
         }
       }
 
@@ -86,10 +111,10 @@ export async function POST(request: NextRequest, { params }: Props) {
             title: "Your deal is complete",
             body: "Congratulations — your purchase is complete. Thank you for choosing AutoLenis.",
           },
-        }).catch(err => console.error("[deals/action] complete buyer notify failed:", err));
+        }).catch(err => logger.error("[deals/action] complete buyer notify failed:", err));
         if (buyer?.user?.email) {
           await sendDealCompleteEmail(buyer.user.email, buyer.firstName ?? "there", dealId)
-            .catch(err => console.error("[deals/action] deal complete email failed:", err));
+            .catch(err => logger.error("[deals/action] deal complete email failed:", err));
         }
         const dealerInfo = await getDealerEmailForDeal(dealId);
         if (dealerInfo?.id) {
@@ -101,7 +126,7 @@ export async function POST(request: NextRequest, { params }: Props) {
               title: "Deal completed",
               body: `Deal ${dealId.slice(0, 8)} has been marked complete.`,
             },
-          }).catch(err => console.error("[deals/action] complete dealer notify failed:", err));
+          }).catch(err => logger.error("[deals/action] complete dealer notify failed:", err));
         }
       }
 
@@ -132,7 +157,7 @@ export async function POST(request: NextRequest, { params }: Props) {
           fixItems: [reason],
           contractUrl: `${APP_URL}/dealer/deals/${dealId}`,
           dealId,
-        }).catch(err => console.error("[deals/action] contract issues email failed:", err));
+        }).catch(err => logger.error("[deals/action] contract issues email failed:", err));
       }
 
       result = { overridden: true };
@@ -163,7 +188,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         }
       }
 
-      await prisma.deal.update({ where: { id: dealId }, data: { status: "CANCELLED" } });
+      await advanceDealStatus(dealId, "CANCELLED", { actorId: admin.adminId, actorRole: "ADMIN", reason, force: true });
 
       // Notify buyer.
       await prisma.notification.create({
@@ -175,7 +200,7 @@ export async function POST(request: NextRequest, { params }: Props) {
             ? "Your deal was cancelled and your deposit refunded. Please allow 3–5 business days for funds to appear."
             : "Your deal was cancelled. If a refund is due, our team will follow up shortly.",
         },
-      }).catch(err => console.error("[deals/action] cancel buyer notify failed:", err));
+      }).catch(err => logger.error("[deals/action] cancel buyer notify failed:", err));
 
       // Notify dealer (in-app).
       const dealerInfo = await getDealerEmailForDeal(dealId);
@@ -188,7 +213,7 @@ export async function POST(request: NextRequest, { params }: Props) {
             title: "Deal cancelled",
             body: `Deal ${dealId.slice(0, 8)} was cancelled by the platform.`,
           },
-        }).catch(err => console.error("[deals/action] cancel dealer notify failed:", err));
+        }).catch(err => logger.error("[deals/action] cancel dealer notify failed:", err));
       }
 
       result = { cancelled: true, refunded };
@@ -211,7 +236,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         }
       }
 
-      await prisma.deal.update({ where: { id: dealId }, data: { status: "REFUNDED" } });
+      await advanceDealStatus(dealId, "REFUNDED", { actorId: admin.adminId, actorRole: "ADMIN", reason, force: true });
 
       // Notify buyer
       await prisma.notification.create({

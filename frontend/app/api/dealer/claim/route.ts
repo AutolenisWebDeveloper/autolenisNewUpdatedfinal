@@ -8,6 +8,7 @@
 // The token is single-use, hashed at rest, 7-day expiry. No plaintext password is
 // ever stored or returned. Reused / expired tokens are rejected.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
@@ -135,14 +136,14 @@ export async function POST(request: NextRequest) {
     await prisma.dealerAccountClaimToken
       .update({ where: { id: v.tokenId }, data: { consumedAt: null } })
       .catch(() => {});
-    console.error("[dealer/claim] Supabase password set failed:", pwErr.message);
+    logger.error("[dealer/claim] Supabase password set failed:", pwErr.message);
     return NextResponse.json({ error: "Failed to set password. Please try again." }, { status: 500 });
   }
 
   // Clear the forced-password-change flag now that the dealer set their own.
   await prisma.user
     .update({ where: { id: dealer.user.id }, data: { requiresPasswordChange: false } })
-    .catch((err) => console.error("[dealer/claim] clear requiresPasswordChange failed:", err));
+    .catch((err) => logger.error("[dealer/claim] clear requiresPasswordChange failed:", err));
 
   // Audit the self-service claim (no admin actor — system/dealer-self).
   await prisma.adminAuditLog
@@ -158,7 +159,7 @@ export async function POST(request: NextRequest) {
         metadata: { applicationId: v.applicationId, tokenId: v.tokenId },
       },
     })
-    .catch((err) => console.error("[dealer/claim] audit log failed:", err));
+    .catch((err) => logger.error("[dealer/claim] audit log failed:", err));
 
   const jwtToken = await signDealerJwt({
     dealerId: dealer.id,

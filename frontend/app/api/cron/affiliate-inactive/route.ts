@@ -3,6 +3,7 @@
 // haven't been nudged recently, and dispatches the affiliate-inactive job.
 // Cron schedule configured in vercel.json. Manually runnable via authenticated GET.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -86,7 +87,7 @@ export async function GET(request: NextRequest) {
     dispatched += 1;
   }
 
-  console.log("[cron/affiliate-inactive]", {
+  logger.info("[cron/affiliate-inactive]", {
     scanned: affiliates.length,
     dispatched,
     skippedActive,

@@ -1,6 +1,7 @@
 // lib/services/auction/auction.service.ts
 // System 3 — Auction lifecycle management
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { AuctionStatus, Prisma } from "@prisma/client";
 import { AUCTION_DURATION_HOURS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
@@ -57,7 +58,7 @@ export async function launchAuction(auctionId: string) {
       });
     }
   } catch (err) {
-    console.error("[auction.service] auction_started emit failed:", err);
+    logger.error("[auction.service] auction_started emit failed:", err);
   }
 
   return auction;
@@ -96,7 +97,7 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
 
   if (auction._count.offers > 0) {
     await rankOffers(auctionId).catch(err =>
-      console.error(`[processAuctionClose] rankOffers failed for ${auctionId}:`, err)
+      logger.error(`[processAuctionClose] rankOffers failed for ${auctionId}:`, err)
     );
 
     await prisma.notification.create({
@@ -119,7 +120,7 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
         buyer.firstName ?? "there",
         auctionId,
         auction._count.offers,
-      ).catch(err => console.error(`[processAuctionClose] buyer email failed for ${auctionId}:`, err));
+      ).catch(err => logger.error(`[processAuctionClose] buyer email failed for ${auctionId}:`, err));
     }
   } else {
     // AUTO-REFUND — zero-offer auction close. The buyer is promised a refund
@@ -165,7 +166,7 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
           data: { status: "REFUNDED", refundedAt: new Date() },
         });
 
-        console.log(
+        logger.info(
           `[processAuctionClose] auto-refund issued — ` +
           `deposit ${depositForRefund.id}, auction ${auctionId}`
         );
@@ -184,7 +185,7 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
               "Your full deposit has been refunded.",
             refundId: refund.id,
           }).catch((err: unknown) =>
-            console.error(
+            logger.error(
               "[processAuctionClose] refund email failed:", err
             )
           );
@@ -192,7 +193,7 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
       }
     } catch (refundErr) {
       // Auto-refund failed — raise an admin alert for manual action.
-      console.error(
+      logger.error(
         `[processAuctionClose] AUTO-REFUND FAILED auction ${auctionId}:`,
         refundErr
       );

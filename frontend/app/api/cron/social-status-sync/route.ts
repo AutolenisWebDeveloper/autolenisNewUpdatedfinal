@@ -2,6 +2,7 @@
 // Reconciles recently published posts against the provider's reported status
 // (e.g. a scheduled Buffer update that has since gone out). Schedule: every 2h.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -48,11 +49,11 @@ export async function GET(request: NextRequest) {
         transitioned += 1;
       }
     } catch (err) {
-      console.error(`[social-status-sync] failed post ${post.id}:`, err instanceof Error ? err.message : err);
+      logger.error(`[social-status-sync] failed post ${post.id}:`, err instanceof Error ? err.message : err);
     }
   }
 
   const summary = { considered: posts.length, synced, transitioned, timestamp: new Date().toISOString() };
-  console.log("[social-status-sync]", JSON.stringify(summary));
+  logger.info("[social-status-sync]", JSON.stringify(summary));
   return NextResponse.json({ success: true, data: summary });
 }

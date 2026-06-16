@@ -2,6 +2,7 @@
 // Queues a personalized email to each selected prospect with a 2s jitter
 // between sends (deliverability) inside Vercel after(), so the request returns
 // immediately with the queued count.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server"
 import { after } from "next/server"
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api"
@@ -59,13 +60,13 @@ export async function POST(request: NextRequest) {
         else failed++
       } catch (err) {
         failed++
-        console.error(`[phase-4b3] Batch send threw for ${ids[i]}:`, err)
+        logger.error(`[phase-4b3] Batch send threw for ${ids[i]}:`, err)
       }
       if (i < ids.length - 1) {
         await new Promise((resolve) => setTimeout(resolve, JITTER_MS))
       }
     }
-    console.log(
+    logger.info(
       `[phase-4b3] Batch finished — queued ${ids.length}, sent ${sent}, failed ${failed}`,
     )
   })

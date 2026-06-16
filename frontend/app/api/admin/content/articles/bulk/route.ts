@@ -8,6 +8,7 @@
 // value — the platform's terminal/withdrawn state is ARCHIVED. The "reject"
 // action therefore maps to ARCHIVED. See route audit notes in the PR summary.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import {
@@ -106,7 +107,7 @@ export async function POST(request: NextRequest) {
     updated = res.count;
   }
 
-  console.log(`[bulk-articles] ${action}: ${updated} articles`);
+  logger.info(`[bulk-articles] ${action}: ${updated} articles`);
 
   await createAuditLog(admin, request, {
     action: "CONTENT_ARTICLE_BULK_STATUS_CHANGED",

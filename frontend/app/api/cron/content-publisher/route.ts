@@ -3,6 +3,7 @@
 // (scheduledAt reached). Mirrors the social-publish-queue cron: CRON_SECRET /
 // x-vercel-cron auth, maxDuration, MAX_PER_RUN. Schedule: every 5 minutes.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { publishDueScheduled } from "@/lib/services/content/content-publishing.service";
@@ -20,6 +21,6 @@ export async function GET(request: NextRequest) {
   }
 
   const summary = await publishDueScheduled(MAX_PER_RUN);
-  console.log("[content-publisher]", JSON.stringify(summary));
+  logger.info("[content-publisher]", JSON.stringify(summary));
   return NextResponse.json({ success: true, data: summary });
 }

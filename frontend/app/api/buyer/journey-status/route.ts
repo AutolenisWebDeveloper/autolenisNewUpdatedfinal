@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
@@ -85,8 +86,7 @@ export async function GET(request: NextRequest) {
       nextAction: getNextAction(currentStage),
     });
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error("[journey-status] Error:", err);
+    logger.error("[journey-status] Error:", err);
     return errorResponse("JOURNEY_STATUS_ERROR", "Unable to compute journey status", 500);
   }
 }

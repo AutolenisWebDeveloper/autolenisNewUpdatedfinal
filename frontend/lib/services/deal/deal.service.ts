@@ -4,9 +4,10 @@
 // CONTRACT_PENDING → CONTRACT_REVIEW → CONTRACT_APPROVED → SIGNING_PENDING
 
 import { prisma } from "@/lib/prisma";
-import { DealStatus, Prisma } from "@prisma/client";
+import { DealStatus, InsuranceStatus, Prisma } from "@prisma/client";
 
-// Valid state transitions
+// Valid forward state transitions. CANCELLED/REFUNDED are handled separately in
+// canTransition() because they are reachable from (almost) any state.
 const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   PENDING: ["ACTIVE"],
   ACTIVE: ["FINANCING_PENDING"],
@@ -19,26 +20,107 @@ const TRANSITIONS: Record<DealStatus, DealStatus[]> = {
   CONTRACT_APPROVED: ["SIGNING_PENDING"],
   SIGNING_PENDING: ["SIGNED"],
   SIGNED: ["PICKUP_SCHEDULED"],
-  PICKUP_SCHEDULED: ["PICKUP_COMPLETE"],
+  // A scheduled pickup may be marked complete directly (dealer QR scan / admin
+  // override) or step through the intermediate PICKUP_COMPLETE state.
+  PICKUP_SCHEDULED: ["PICKUP_COMPLETE", "COMPLETED"],
   PICKUP_COMPLETE: ["COMPLETED"],
   COMPLETED: [],
-  CANCELLED: [],
+  CANCELLED: ["REFUNDED"],
   REFUNDED: [],
 };
 
+const TERMINAL: DealStatus[] = [DealStatus.COMPLETED, DealStatus.CANCELLED, DealStatus.REFUNDED];
+
+// Insurance proof states that satisfy the final-release gate. Must stay in sync
+// with the UI "satisfied" set (components/.../AdminBuyerCommandCenter.tsx and
+// app/buyer/insurance/page.tsx). EXTERNAL_UPLOADED is the buyer's own-policy fallback.
+export const INSURANCE_SATISFIED: InsuranceStatus[] = [
+  InsuranceStatus.VERIFIED,
+  InsuranceStatus.POLICY_BOUND,
+  InsuranceStatus.EXTERNAL_UPLOADED,
+];
+
+export class DealTransitionError extends Error {
+  code = "INVALID_TRANSITION";
+  constructor(public readonly from: DealStatus, public readonly to: DealStatus) {
+    super(`Invalid transition: ${from} → ${to}`);
+    this.name = "DealTransitionError";
+  }
+}
+
+export class InsuranceRequiredError extends Error {
+  code = "INSURANCE_REQUIRED";
+  constructor() {
+    super("Insurance proof is required before the deal can be completed");
+    this.name = "InsuranceRequiredError";
+  }
+}
+
 export function canTransition(from: DealStatus, to: DealStatus): boolean {
+  if (from === to) return false;
+  // Cancellation is allowed from any non-terminal state.
+  if (to === DealStatus.CANCELLED) return !TERMINAL.includes(from);
+  // Refund is allowed from CANCELLED, or directly from any non-terminal state.
+  if (to === DealStatus.REFUNDED) return from === DealStatus.CANCELLED || !TERMINAL.includes(from);
   return TRANSITIONS[from]?.includes(to) ?? false;
 }
 
-export async function advanceDealStatus(dealId: string, newStatus: DealStatus, actorId?: string): Promise<void> {
+interface AdvanceOptions {
+  actorId?: string;
+  actorRole?: string;
+  reason?: string;
+  /** Bypass the transition + insurance guards (intentional admin override). Still audit-logged. */
+  force?: boolean;
+  /** Extra deal fields to write atomically alongside the status change. */
+  data?: Prisma.DealUpdateInput;
+}
+
+/**
+ * Single guarded seam for every deal lifecycle transition.
+ * - Rejects illegal transitions with DealTransitionError unless `force` is set.
+ * - Enforces the insurance hard-gate before COMPLETED unless `force` is set.
+ * - Writes DealStatusHistory + a buyer activity event.
+ */
+export async function advanceDealStatus(
+  dealId: string,
+  newStatus: DealStatus,
+  opts: AdvanceOptions = {},
+): Promise<void> {
   const deal = await prisma.deal.findUnique({ where: { id: dealId } });
   if (!deal) throw new Error("Deal not found");
 
-  if (!canTransition(deal.status, newStatus)) {
-    throw new Error(`Invalid transition: ${deal.status} → ${newStatus}`);
+  // Idempotent no-op when already in the target state (still merge extra data).
+  if (deal.status === newStatus) {
+    if (opts.data) await prisma.deal.update({ where: { id: dealId }, data: opts.data });
+    return;
   }
 
-  await prisma.deal.update({ where: { id: dealId }, data: { status: newStatus } });
+  if (!opts.force && !canTransition(deal.status, newStatus)) {
+    throw new DealTransitionError(deal.status, newStatus);
+  }
+
+  // Insurance hard-gate: final release requires proof on file (or explicit override).
+  if (newStatus === DealStatus.COMPLETED && !opts.force) {
+    if (!INSURANCE_SATISFIED.includes(deal.insuranceStatus)) {
+      throw new InsuranceRequiredError();
+    }
+  }
+
+  await prisma.deal.update({
+    where: { id: dealId },
+    data: { status: newStatus, ...(opts.data ?? {}) },
+  });
+
+  await prisma.dealStatusHistory.create({
+    data: {
+      dealId,
+      fromStatus: deal.status,
+      toStatus: newStatus,
+      actorId: opts.actorId ?? null,
+      actorRole: opts.actorRole ?? null,
+      reason: opts.reason ?? (opts.force ? "force override" : null),
+    },
+  }).catch(() => {});
 
   // Log activity
   await prisma.buyerActivityEvent.create({
@@ -88,7 +170,9 @@ export async function cancelDeal(dealId: string, reason: string): Promise<void> 
   const deal = await prisma.deal.findUnique({ where: { id: dealId } });
   if (!deal) throw new Error("Deal not found");
 
-  await prisma.deal.update({ where: { id: dealId }, data: { status: DealStatus.CANCELLED } });
+  // Route the status change through the guarded seam (records DealStatusHistory).
+  // Force is used so an already-cancelled/terminal deal does not throw here.
+  await advanceDealStatus(dealId, DealStatus.CANCELLED, { reason, actorRole: "SYSTEM", force: true });
 
   await prisma.buyerActivityEvent.create({
     data: { buyerId: deal.buyerId, eventType: "DEAL_CANCELLED", title: "Deal cancelled", metadata: { reason } },

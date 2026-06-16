@@ -1,5 +1,6 @@
 // POST /api/admin/dealers/applications/[appId]/reject
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -54,12 +55,12 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
     await sendDealerApplicationRejectedEmail({ to: app.contactEmail, contactName: app.contactName, dealershipName: app.dealershipName });
   } catch (err) {
-    console.error("[dealer/applications/reject] Email error:", err);
+    logger.error("[dealer/applications/reject] Email error:", err);
   }
 
   // Plain-text rejection notice with optional reason — non-blocking.
   await sendDealerRejectionEmail(app.contactEmail, app.contactName, reason)
-    .catch(err => console.error("[dealer/applications/reject] rejection email failed:", err));
+    .catch(err => logger.error("[dealer/applications/reject] rejection email failed:", err));
 
   return NextResponse.json({ success: true });
 }

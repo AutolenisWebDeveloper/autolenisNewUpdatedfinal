@@ -1,4 +1,5 @@
 // POST /api/admin/dealers/[dealerId]/suspend
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { z } from "zod";
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         dealershipName: dealer.dealershipName,
         reasonCategory: parsed.data.reason,
         adminContactEmail: process.env.ADMIN_NOTIFICATION_EMAIL ?? "support@autolenis.com",
-      }).catch(err => console.error("[admin/dealers/suspend] suspend email failed:", err));
+      }).catch(err => logger.error("[admin/dealers/suspend] suspend email failed:", err));
     }
 
     return adminSuccess(result);

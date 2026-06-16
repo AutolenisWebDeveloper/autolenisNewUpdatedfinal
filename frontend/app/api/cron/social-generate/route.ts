@@ -6,6 +6,7 @@
 // + breaking topic signals) rather than the unbounded topic_signals backlog.
 // Schedule: 0 6 * * * (06:00 UTC ≈ 01:00 CT).
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
   );
 
   if (platformsNeedingPosts.length === 0) {
-    console.log("[social-generate] daily cap reached for all platforms");
+    logger.info("[social-generate] daily cap reached for all platforms");
     return NextResponse.json({
       success: true,
       message: "Daily cap reached",
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  console.log(
+  logger.info(
     "[social-generate] platforms needing posts:",
     platformsNeedingPosts,
     "current counts:",
@@ -90,7 +91,7 @@ export async function GET(request: NextRequest) {
         where: { slug: signal.franchiseSlug },
       });
       if (!franchise) {
-        console.log(
+        logger.info(
           "[social-generate] franchise not found:",
           signal.franchiseSlug,
         );
@@ -142,13 +143,13 @@ export async function GET(request: NextRequest) {
         (updatedCounts[signal.platform] ?? 0) + 1;
       created++;
 
-      console.log(
+      logger.info(
         `[social-generate] ✅ ${signal.platform} post created:`,
         `${signal.franchiseSlug} (${signal.contentCategory})`,
         `slot hour: ${signal.scheduledHour}`,
       );
     } catch (err) {
-      console.error(
+      logger.error(
         "[social-generate] ❌ failed:",
         signal.platform,
         signal.franchiseSlug,
@@ -171,7 +172,7 @@ export async function GET(request: NextRequest) {
         },
       },
     ).catch((err) =>
-      console.error("[social-generate] image trigger failed:", err),
+      logger.error("[social-generate] image trigger failed:", err),
     );
   }
 
@@ -182,6 +183,6 @@ export async function GET(request: NextRequest) {
     platformCounts: updatedCounts,
     message: `Generated ${created} posts across platforms`,
   };
-  console.log("[social-generate]", JSON.stringify(summary));
+  logger.info("[social-generate]", JSON.stringify(summary));
   return NextResponse.json(summary);
 }

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import 'server-only';
 import crypto from 'crypto';
 
@@ -43,7 +44,7 @@ export async function forwardToMake(envelope: DomainEventEnvelope): Promise<void
   const url = process.env.MAKE_WEBHOOK_URL;
   if (!url) {
     // Safe no-op in dev/preview where no Make router is wired.
-    console.warn(
+    logger.warn(
       `[make-webhook] MAKE_WEBHOOK_URL unset — skipped forward of '${envelope.event}' (${envelope.idempotencyKey})`,
     );
     return;
@@ -51,7 +52,7 @@ export async function forwardToMake(envelope: DomainEventEnvelope): Promise<void
 
   const secret = process.env.MAKE_WEBHOOK_SECRET ?? '';
   if (!secret) {
-    console.error('[make-webhook] MAKE_WEBHOOK_SECRET unset — refusing to send an unsigned event');
+    logger.error('[make-webhook] MAKE_WEBHOOK_SECRET unset — refusing to send an unsigned event');
     return;
   }
 
@@ -76,13 +77,13 @@ export async function forwardToMake(envelope: DomainEventEnvelope): Promise<void
       signal: controller.signal,
     });
     if (!res.ok) {
-      console.error(
+      logger.error(
         `[make-webhook] non-2xx from Make (provider=make status=${res.status}) for '${envelope.event}' ${envelope.idempotencyKey}`,
       );
     }
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    console.error(
+    logger.error(
       `[make-webhook] forward failed (provider=make) for '${envelope.event}' ${envelope.idempotencyKey}: ${reason}`,
     );
   } finally {

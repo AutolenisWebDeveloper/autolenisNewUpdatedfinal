@@ -6,6 +6,7 @@
 //
 // Free-tier plans return up to 50 listings/call; paid tiers return up to 1000.
 
+import { logger } from "@/lib/logger";
 import type { IInventoryAdapter, NormalizedVehicle, AdapterRunResult, SearchParams } from "./IInventoryAdapter";
 import { buildSourceKey } from "./IInventoryAdapter";
 
@@ -53,8 +54,7 @@ export class MarketCheckAdapter implements IInventoryAdapter {
 
     // Gracefully skip when not configured — never fail the orchestrator
     if (!apiKey) {
-      // eslint-disable-next-line no-console
-      console.warn("[MarketCheck adapter] MARKETCHECK_API_KEY not set — skipping. Provision the key in env to activate this source.");
+      logger.warn("[MarketCheck adapter] MARKETCHECK_API_KEY not set — skipping. Provision the key in env to activate this source.");
       return {
         adapter: this.name,
         vehicles: [],
@@ -91,8 +91,7 @@ export class MarketCheckAdapter implements IInventoryAdapter {
         fetchedAt: new Date(),
       };
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error("[MarketCheck adapter] Error:", error);
+      logger.error("[MarketCheck adapter] Error:", error);
       return {
         adapter: this.name,
         vehicles: [],

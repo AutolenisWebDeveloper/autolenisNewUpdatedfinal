@@ -6,6 +6,7 @@
 // cached per ISO week in competitor_insights; high-engagement opportunities
 // also spawn a TopicSignal so the generation pipeline can act on them.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 export interface CompetitorInsight {
@@ -129,14 +130,14 @@ Return ONLY valid JSON array, no other text:
             .catch(() => undefined);
         }
       } catch (err) {
-        console.error("[competitor] store failed:", err);
+        logger.error("[competitor] store failed:", err);
       }
     }
 
-    console.log(`[competitor] found ${stored.length} opportunities`);
+    logger.info(`[competitor] found ${stored.length} opportunities`);
     return stored;
   } catch (err) {
-    console.error("[competitor] scan failed:", err);
+    logger.error("[competitor] scan failed:", err);
     return [];
   }
 }

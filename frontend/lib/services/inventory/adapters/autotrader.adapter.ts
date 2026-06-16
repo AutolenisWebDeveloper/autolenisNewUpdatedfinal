@@ -1,6 +1,7 @@
 // AutoTrader adapter — independently failure-isolated
 // Uses public AutoTrader search endpoint (web fetch, no API key required)
 
+import { logger } from "@/lib/logger";
 import type { IInventoryAdapter, NormalizedVehicle, AdapterRunResult, SearchParams } from "./IInventoryAdapter";
 import { buildSourceKey } from "./IInventoryAdapter";
 
@@ -27,7 +28,7 @@ export class AutoTraderAdapter implements IInventoryAdapter {
 
     } catch (error) {
       // Failure-isolated: always returns result, logs error
-      console.error(`[AutoTrader adapter] Error:`, error);
+      logger.error(`[AutoTrader adapter] Error:`, error);
       return {
         adapter: this.name,
         vehicles: [],

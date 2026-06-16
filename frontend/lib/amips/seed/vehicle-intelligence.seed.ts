@@ -12,6 +12,7 @@
 // The seed is idempotent — it upserts on (make, model, trim, year), so it is
 // safe to run repeatedly. All MSRP figures are stored in cents.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 export type NegotiationDifficulty = "easy" | "moderate" | "hard";
@@ -84,7 +85,7 @@ export function computeFairMarket(msrpCents: number): {
 export async function seedVehicleIntelligence(): Promise<{
   upserted: number;
 }> {
-  console.log(
+  logger.info(
     `[amips-seed] vehicle-intelligence: seeding ${VEHICLE_SEEDS.length} vehicles (MY ${SEED_YEAR})`,
   );
 
@@ -122,12 +123,12 @@ export async function seedVehicleIntelligence(): Promise<{
     });
 
     upserted += 1;
-    console.log(
+    logger.info(
       `[amips-seed] vehicle-intelligence: upserted ${v.make} ${v.model} ${v.trim} (${v.year}) — MSRP $${(v.msrpCents / 100).toLocaleString()}`,
     );
   }
 
-  console.log(
+  logger.info(
     `[amips-seed] vehicle-intelligence: done — ${upserted} vehicles upserted`,
   );
 

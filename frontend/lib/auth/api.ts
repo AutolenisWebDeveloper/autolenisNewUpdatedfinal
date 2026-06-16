@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -67,7 +68,7 @@ export async function getRequestBuyer(request: NextRequest) {
   } catch (primaryErr) {
     // Migration 20260603000000_add_buyer_lifecycle_fields may not be applied yet.
     // Fall back to an explicit select that omits the lifecycle columns.
-    console.error(
+    logger.error(
       "[auth/api] buyer query failed — trying backward-safe fallback.",
       primaryErr,
     );
@@ -84,7 +85,7 @@ export async function getRequestBuyer(request: NextRequest) {
         purgedAt: null as Date | null,
       };
     } catch (fallbackErr) {
-      console.error("[auth/api] backward-safe fallback also failed:", fallbackErr);
+      logger.error("[auth/api] backward-safe fallback also failed:", fallbackErr);
       return null;
     }
   }

@@ -1,4 +1,5 @@
 // holds — release deposits for expired auctions with no offers
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
   let released = 0;
   for (const auction of auctionsNoOffers) {
     if (auction._count.offers === 0 && auction.deposit?.status === "PAID") {
-      await refundDeposit(auction.deposit.id, "No offers received").catch(err => console.error("Refund error:", err));
+      await refundDeposit(auction.deposit.id, "No offers received").catch(err => logger.error("Refund error:", err));
       released++;
     }
   }

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, after } from "next/server";
 import { z } from "zod";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
@@ -220,7 +221,7 @@ export async function POST(request: NextRequest) {
           });
         }
       } catch (err) {
-        console.error("[post-intake] outreach or notification failed:", err);
+        logger.error("[post-intake] outreach or notification failed:", err);
       }
     });
   }

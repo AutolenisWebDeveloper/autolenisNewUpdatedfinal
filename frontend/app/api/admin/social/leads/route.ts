@@ -3,6 +3,7 @@
 // filterable list of SocialLead rows plus summary stats (this week / today /
 // top platform / conversion rate, and breakdowns by platform + landing page).
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -104,7 +105,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("[admin/social] leads query failed:", err);
+    logger.error("[admin/social] leads query failed:", err);
     return adminSuccess(empty);
   }
 }

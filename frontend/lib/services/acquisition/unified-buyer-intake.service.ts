@@ -15,6 +15,7 @@
 // Phase 5.1 builds this service only. Wiring the entry points to it happens in
 // phases 5.2-5.4, so nothing here is invoked by existing routes yet.
 
+import { logger } from "@/lib/logger";
 import { after } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -188,7 +189,7 @@ async function resolveBuyerId(
     });
     return guestBuyer.id;
   } catch (err) {
-    console.error("[unified-intake] buyer find/create failed:", err);
+    logger.error("[unified-intake] buyer find/create failed:", err);
     return null;
   }
 }
@@ -251,7 +252,7 @@ export async function intakeBuyerRequest(
     },
   });
   const opportunityId = opportunity.id;
-  console.log("[unified-intake] BuyerOpportunity created", {
+  logger.info("[unified-intake] BuyerOpportunity created", {
     opportunityId,
     source,
   });
@@ -294,7 +295,7 @@ export async function intakeBuyerRequest(
         vehicleRequestId = vehicleRequest.id;
       } catch (err) {
         if (isMissingColumnError(err)) {
-          console.warn(
+          logger.warn(
             "[unified-intake] landingSource/referrer migration pending — retrying without",
           );
           const vehicleRequest = await prisma.vehicleRequest.create({
@@ -315,15 +316,15 @@ export async function intakeBuyerRequest(
         });
       }
 
-      console.log("[unified-intake] VehicleRequest created + linked", {
+      logger.info("[unified-intake] VehicleRequest created + linked", {
         opportunityId,
         vehicleRequestId,
       });
     } catch (err) {
-      console.error("[unified-intake] VehicleRequest create failed:", err);
+      logger.error("[unified-intake] VehicleRequest create failed:", err);
     }
   } else {
-    console.log(
+    logger.info(
       "[unified-intake] No buyer resolved — skipping VehicleRequest",
       { opportunityId },
     );
@@ -335,11 +336,11 @@ export async function intakeBuyerRequest(
   //    already done above, so we resume at 3b.
   after(async () => {
     // Stage 3b — compound searches in parallel (best effort).
-    console.log("[unified-intake] STAGE 3b — firing compound searches");
+    logger.info("[unified-intake] STAGE 3b — firing compound searches");
 
     const enrichmentPromise = (async () => {
       if (!input.make || !input.model || !input.zip) {
-        console.log(
+        logger.info(
           "[unified-intake] Skipping market enrichment — missing fields",
         );
         return;
@@ -367,16 +368,16 @@ export async function intakeBuyerRequest(
               marketEnrichedAt: new Date(),
             },
           });
-          console.log("[unified-intake] Market enrichment saved");
+          logger.info("[unified-intake] Market enrichment saved");
         }
       } catch (err) {
-        console.error("[unified-intake] Market enrichment FAILED:", err);
+        logger.error("[unified-intake] Market enrichment FAILED:", err);
       }
     })();
 
     const dealerPromise = (async () => {
       if (!input.make || !input.zip) {
-        console.log(
+        logger.info(
           "[unified-intake] Skipping dealer discovery — missing fields",
         );
         return;
@@ -407,7 +408,7 @@ export async function intakeBuyerRequest(
             })),
             skipDuplicates: true,
           });
-          console.log(
+          logger.info(
             `[unified-intake] Dealer discovery saved ${dealers.length} prospects`,
           );
 
@@ -421,21 +422,21 @@ export async function intakeBuyerRequest(
             select: { id: true },
           });
 
-          console.log(
+          logger.info(
             `[unified-intake] Drafting phone scripts for ${insertedProspects.length} prospects`,
           );
 
           for (const p of insertedProspects) {
             try {
               const ok = await draftAndSaveScript(p.id);
-              console.log(
+              logger.info(
                 `[unified-intake] Phone script for ${p.id}: ${ok ? "OK" : "FAILED"}`,
               );
               // 12s between gpt-oss-120b calls — respects the free-tier TPM
               // budget, matching the concierge pipeline pacing.
               await new Promise((resolve) => setTimeout(resolve, 12000));
             } catch (err) {
-              console.error(
+              logger.error(
                 `[unified-intake] Script drafting threw for ${p.id}:`,
                 err,
               );
@@ -443,7 +444,7 @@ export async function intakeBuyerRequest(
           }
         }
       } catch (err) {
-        console.error("[unified-intake] Dealer discovery FAILED:", err);
+        logger.error("[unified-intake] Dealer discovery FAILED:", err);
       }
     })();
 
@@ -454,9 +455,9 @@ export async function intakeBuyerRequest(
     if (input.phone) {
       try {
         await scoreAndAlert(opportunityId, input);
-        console.log("[unified-intake] STAGE 4 (scoring + notifications) OK");
+        logger.info("[unified-intake] STAGE 4 (scoring + notifications) OK");
       } catch (err) {
-        console.error(
+        logger.error(
           "[unified-intake] STAGE 4 (scoring + notifications) FAILED:",
           err,
         );
@@ -541,7 +542,7 @@ async function scoreAndAlert(
         phone: input.phone,
       };
 
-      console.log("[unified-intake] Hot lead detected — firing notifications", {
+      logger.info("[unified-intake] Hot lead detected — firing notifications", {
         opportunityId,
         phone: input.phone,
         email: input.email,
@@ -605,9 +606,9 @@ async function scoreAndAlert(
 
       channels.forEach(({ name, result }) => {
         if (result.status === "rejected") {
-          console.error(`[unified-intake] ${name} FAILED:`, result.reason);
+          logger.error(`[unified-intake] ${name} FAILED:`, result.reason);
         } else {
-          console.log(`[unified-intake] ${name} succeeded`);
+          logger.info(`[unified-intake] ${name} succeeded`);
         }
       });
 
@@ -622,6 +623,6 @@ async function scoreAndAlert(
       });
     }
   } catch (err) {
-    console.error("[unified-intake] scoreAndAlert error:", err);
+    logger.error("[unified-intake] scoreAndAlert error:", err);
   }
 }

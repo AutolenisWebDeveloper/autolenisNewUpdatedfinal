@@ -3,6 +3,7 @@
 // with a platformPostId in the last 30 days, records a SocialPerformance
 // snapshot, and recalculates the post lead score.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
       });
       synced++;
     } catch (err) {
-      console.error("[analytics-sync] failed:", post.id, err);
+      logger.error("[analytics-sync] failed:", post.id, err);
       failed++;
     }
   }

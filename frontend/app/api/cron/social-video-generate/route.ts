@@ -11,6 +11,7 @@
 // enforced so a frequent schedule cannot over-spend. Facebook + LinkedIn use
 // static images only and are never selected here.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
@@ -80,7 +81,7 @@ export async function GET(request: NextRequest) {
   });
 
   if (todayVideoCount >= DAILY_VIDEO_LIMIT) {
-    console.log(
+    logger.info(
       `[video-generate] daily limit reached: ${todayVideoCount}/${DAILY_VIDEO_LIMIT}`,
     );
     return NextResponse.json({
@@ -114,7 +115,7 @@ export async function GET(request: NextRequest) {
   });
 
   if (postsNeedingVideo.length === 0) {
-    console.log("[video-generate] no posts need video generation");
+    logger.info("[video-generate] no posts need video generation");
     return NextResponse.json({
       success: true,
       message: "No posts need video",
@@ -122,7 +123,7 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  console.log(
+  logger.info(
     `[video-generate] generating ${postsNeedingVideo.length} videos`,
     `(${todayVideoCount} already done today, limit: ${DAILY_VIDEO_LIMIT})`,
   );
@@ -135,7 +136,7 @@ export async function GET(request: NextRequest) {
     if (!post || !socialVideo.thumbnailUrl) continue;
 
     try {
-      console.log(
+      logger.info(
         "[video-generate] starting:",
         post.id,
         post.platform,
@@ -169,7 +170,7 @@ export async function GET(request: NextRequest) {
         try {
           storedVideoUrl = await storeVideoInSupabase(result.videoUrl, post.id);
         } catch (storeErr) {
-          console.warn(
+          logger.warn(
             "[video-generate] supabase video store failed, using Runway URL (may expire):",
             post.id,
             storeErr,
@@ -188,7 +189,7 @@ export async function GET(request: NextRequest) {
           },
         });
 
-        console.log(
+        logger.info(
           "[video-generate] ✅ video generated:",
           post.id,
           "platform:",
@@ -204,11 +205,11 @@ export async function GET(request: NextRequest) {
             providerJobId: result.taskId,
           },
         });
-        console.error("[video-generate] ❌ failed:", post.id, result.error);
+        logger.error("[video-generate] ❌ failed:", post.id, result.error);
         failed++;
       }
     } catch (err) {
-      console.error("[video-generate] error for:", socialVideo.id, err);
+      logger.error("[video-generate] error for:", socialVideo.id, err);
       await prisma.socialVideo
         .update({
           where: { id: socialVideo.id },

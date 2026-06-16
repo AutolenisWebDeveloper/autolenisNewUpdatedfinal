@@ -8,6 +8,7 @@
 // the request returns immediately with the queued count — enrichment can take
 // several seconds per dealer and we never want the admin's click to block.
 // Per-dealer success/failure is logged with the [phase-4b1] tag (Vercel logs).
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server"
 import { after } from "next/server"
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api"
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
         else if (r.status === "rejected") failed++
       }
     }
-    console.log(
+    logger.info(
       `[phase-4b1] Backfill finished — attempted ${prospects.length}, captured ${succeeded}, errored ${failed}`,
     )
   })

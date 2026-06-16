@@ -10,6 +10,7 @@
 // The generator (assembler + quality gate) does the actual page production and
 // re-checks the 50-transaction gate, so this stays purely about unlocking.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { TOP_METROS } from "@/lib/amips/seed/content-queue.seed";
 
@@ -127,7 +128,7 @@ export async function runTierFThresholdMonitor(): Promise<TierFMonitorResult> {
     queueItemsSeeded += items.length;
     unlocked += 1;
 
-    console.log(
+    logger.info(
       `[amips-tier-f-unlocked] ${make} ${model} in ${metro} — ${count} verified transactions, seeded ${items.length} Tier F items`,
     );
   }
@@ -138,7 +139,7 @@ export async function runTierFThresholdMonitor(): Promise<TierFMonitorResult> {
     queueItemsSeeded,
     aggregated,
   };
-  console.log(
+  logger.info(
     `[amips-p4-tier-f] combosOverThreshold ${result.combosOverThreshold}, unlocked ${result.unlocked}, queueItemsSeeded ${result.queueItemsSeeded}, aggregated ${result.aggregated}`,
   );
   return result;

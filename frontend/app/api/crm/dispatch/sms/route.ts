@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextResponse, type NextRequest } from 'next/server';
 import { authorizeDispatch, finalizeDispatch } from '@/lib/crm/dispatch-auth';
 import { resolveDispatchContact } from '@/lib/crm/resolve-contact';
@@ -32,7 +33,7 @@ async function resolveRecipientLocation(
       zip = buyer?.zip ?? null;
     }
   } catch (err) {
-    console.error('[dispatch/sms] recipient location lookup failed:', err);
+    logger.error('[dispatch/sms] recipient location lookup failed:', err);
   }
   return { state, zip };
 }

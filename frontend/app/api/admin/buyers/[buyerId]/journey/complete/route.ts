@@ -2,6 +2,7 @@
 // Marks a buyer journey stage as organically complete by writing real DB records.
 // Uses existing service functions to ensure DealStatusHistory + audit trails.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -72,7 +73,8 @@ export async function POST(request: NextRequest, { params }: Props) {
       adminEmail,
       activeDeal.id,
       targetStatus as Parameters<typeof moveBuyerWorkflowStage>[4],
-      reason
+      reason,
+      true, // deliberate admin journey progression — bypass the sequential guard
     );
   }
 
@@ -174,17 +176,15 @@ export async function POST(request: NextRequest, { params }: Props) {
     // fee — mirrors concierge-fee/mark-paid route: feePaidAt + status = FEE_PAID
     case "fee": {
       if (!activeDeal) return adminError("NO_DEAL", "No active deal found", 400);
-      if (activeDeal.feePaidAt) {
-        // Already paid — just ensure status is correct
+      // Record fee fields (non-status) directly; route the status change through the seam.
+      if (!activeDeal.feePaidAt) {
         await prisma.deal.update({
           where: { id: activeDeal.id },
-          data: { status: "FEE_PAID" },
+          data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS },
         });
-      } else {
-        await prisma.deal.update({
-          where: { id: activeDeal.id },
-          data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS, status: "FEE_PAID" },
-        });
+      }
+      if (activeDeal.status !== "FEE_PAID") {
+        await advanceDeal("FEE_PAID");
       }
       action = "JOURNEY_COMPLETE_FEE";
       break;
@@ -271,7 +271,7 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   return adminSuccess({ stageId, action, completed: true });
   } catch (err) {
-    console.error("[journey/complete] Unhandled error:", err);
+    logger.error("[journey/complete] Unhandled error:", err);
     return adminError(
       "INTERNAL_ERROR",
       err instanceof Error ? err.message : "An unexpected error occurred",

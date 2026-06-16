@@ -1,6 +1,7 @@
 // Custom adapter template — ENH-20
 // Allows admin to configure custom inventory adapters at runtime
 
+import { logger } from "@/lib/logger";
 import type { IInventoryAdapter, NormalizedVehicle, AdapterRunResult, SearchParams } from "./IInventoryAdapter";
 import { buildSourceKey } from "./IInventoryAdapter";
 
@@ -42,7 +43,7 @@ export class CustomAdapter implements IInventoryAdapter {
       const vehicles = await this.parseFeed(response);
       return { adapter: this.name, vehicles, duration: Date.now() - start, fetchedAt: new Date() };
     } catch (error) {
-      console.error(`[Custom adapter: ${this.name}] Error:`, error);
+      logger.error(`[Custom adapter: ${this.name}] Error:`, error);
       return { adapter: this.name, vehicles: [], duration: Date.now() - start, error: String(error), fetchedAt: new Date() };
     }
   }

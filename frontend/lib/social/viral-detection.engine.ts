@@ -4,6 +4,7 @@
 // (views/hour), and fires alerts when a post exceeds the platform baseline
 // by 3×. Called by the analytics-sync cron or on demand.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { NotificationType } from "@prisma/client";
 
@@ -75,12 +76,12 @@ export async function checkViralSignals(): Promise<ViralAlert[]> {
     }
   }
 
-  console.log("[viral-detection] checked", posts.length, "posts, alerts:", alerts.length);
+  logger.info("[viral-detection] checked", posts.length, "posts, alerts:", alerts.length);
   return alerts;
 }
 
 export async function handleViralAlert(alert: ViralAlert): Promise<void> {
-  console.log("[viral] 🔥 viral signal:", alert);
+  logger.info("[viral] 🔥 viral signal:", alert);
 
   // Create a notification (best-effort — no required user fields so we use a system channel).
   await prisma.notification
@@ -92,7 +93,7 @@ export async function handleViralAlert(alert: ViralAlert): Promise<void> {
       },
     })
     .catch((err: unknown) =>
-      console.warn("[viral] notification create failed (non-fatal):", err instanceof Error ? err.message : err),
+      logger.warn("[viral] notification create failed (non-fatal):", err instanceof Error ? err.message : err),
     );
 
   if (alert.action === "spawn_variants") {
@@ -119,10 +120,10 @@ export async function handleViralAlert(alert: ViralAlert): Promise<void> {
           "@/lib/social/asset-recombination.engine"
         );
         const { variants } = await recombineViralAsset(originalPost);
-        console.log(`[viral] recombined into ${variants.length} variants`);
+        logger.info(`[viral] recombined into ${variants.length} variants`);
       }
     } catch (err) {
-      console.error("[viral] recombination failed:", err);
+      logger.error("[viral] recombination failed:", err);
     }
   }
 
@@ -133,6 +134,6 @@ export async function handleViralAlert(alert: ViralAlert): Promise<void> {
       data: { leadScore: { multiply: 2 } },
     })
     .catch((err: unknown) =>
-      console.warn("[viral] lead score boost failed (non-fatal):", err instanceof Error ? err.message : err),
+      logger.warn("[viral] lead score boost failed (non-fatal):", err instanceof Error ? err.message : err),
     );
 }

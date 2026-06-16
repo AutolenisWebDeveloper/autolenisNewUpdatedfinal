@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import 'server-only';
 import crypto from 'crypto';
 import { NextResponse, type NextRequest } from 'next/server';
@@ -77,7 +78,7 @@ export async function authorizeDispatch(
   });
   if (!decision.ok) {
     if (decision.reason === 'dispatch_not_configured') {
-      console.error(
+      logger.error(
         '[dispatch-auth] no usable dispatch credential configured for the presented header — refusing call',
       );
     }
@@ -140,7 +141,7 @@ export async function authorizeDispatch(
       data: { identifier: RATE_LIMIT_IDENTIFIER, endpoint },
     });
   } catch (err) {
-    console.error('[dispatch-auth] rate-limit check failed (allowing):', err);
+    logger.error('[dispatch-auth] rate-limit check failed (allowing):', err);
   }
 
   // DB-level idempotency. Insert sha256(key); 23505 ⇒ a prior call owns it.
@@ -199,7 +200,7 @@ export async function authorizeDispatch(
     }
     // Unexpected store error — fail closed with 500 rather than risk a
     // non-idempotent double-send.
-    console.error('[dispatch-auth] idempotency insert failed:', insertError);
+    logger.error('[dispatch-auth] idempotency insert failed:', insertError);
     return {
       ok: false,
       response: NextResponse.json(
@@ -226,6 +227,6 @@ export async function finalizeDispatch(
       .update({ execution_status: status, response_payload: result })
       .eq('key_hash', keyHash);
   } catch (err) {
-    console.error('[dispatch-auth] finalize failed:', err);
+    logger.error('[dispatch-auth] finalize failed:', err);
   }
 }

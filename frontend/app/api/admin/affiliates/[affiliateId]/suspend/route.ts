@@ -1,4 +1,5 @@
 // POST /api/admin/affiliates/[affiliateId]/suspend
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { z } from "zod";
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     if (affiliate?.user?.email) {
       const firstName = affiliate.user.email.split("@")[0];
       await sendAffiliateSuspendedEmail(affiliate.user.email, firstName, parsed.data.reason)
-        .catch(err => console.error("[affiliates/suspend] suspension email failed:", err));
+        .catch(err => logger.error("[affiliates/suspend] suspension email failed:", err));
     }
 
     return adminSuccess(result);

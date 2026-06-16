@@ -6,6 +6,7 @@
 // the recognized text here so the Groq reply, intent extraction, lead dispatch,
 // and live-transfer logic live in exactly one place.
 
+import { logger } from "@/lib/logger";
 import twilio from "twilio";
 import { twimlResponse, sanitizeForSpeech } from "@/lib/voice/twilio-verify";
 import {
@@ -248,7 +249,7 @@ async function extractCallData(history: ChatMessage[]): Promise<ExtractedCall | 
       complete: parsed.complete === true,
     };
   } catch (err) {
-    console.error("[voice/turn] extraction failed:", err);
+    logger.error("[voice/turn] extraction failed:", err);
     return null;
   }
 }
@@ -407,7 +408,7 @@ async function attemptTransfer(
   triggerReason: string,
 ): Promise<string | null> {
   if (!isTransferEnabled()) {
-    console.warn(
+    logger.warn(
       "[zura-p3] Live transfer disabled (ENABLE_LIVE_CALL_TRANSFER != 'true') — falling back to message-taking",
     );
     return null;
@@ -420,7 +421,7 @@ async function attemptTransfer(
   }
 
   if (callSid) updateConversation(callSid, { callReason: "transfer_request" });
-  console.log(`[zura-p3] Transfer triggered. ${triggerReason}`);
+  logger.info(`[zura-p3] Transfer triggered. ${triggerReason}`);
 
   return buildTransferTwiML(config);
 }
@@ -471,7 +472,7 @@ export async function handleVoiceTurn(input: VoiceTurnInput): Promise<string> {
     const result = await groqChat(messages, { maxTokens: 120, temperature: 0.85 });
     aiText = sanitizeForSpeech(result.content) || "I am sorry, could you say that again?";
   } catch (err) {
-    console.error("[voice/turn] Groq call failed:", err);
+    logger.error("[voice/turn] Groq call failed:", err);
     const twiml = new VoiceResponse();
     await speakWithFallback(
       twiml,
@@ -558,7 +559,7 @@ export async function handleVoiceTurn(input: VoiceTurnInput): Promise<string> {
         refreshed.vehicleRequest,
         refreshed.callerPhone,
         refreshed.inboundNumber,
-      ).catch((err) => console.error("[voice/turn] dispatch failed:", err));
+      ).catch((err) => logger.error("[voice/turn] dispatch failed:", err));
     }
 
     // Partial lead — a name plus the caller's phone confirms receipt.
@@ -577,7 +578,7 @@ export async function handleVoiceTurn(input: VoiceTurnInput): Promise<string> {
       callerPhone: refreshed.callerPhone,
       inboundNumber: refreshed.inboundNumber,
       messageDetails: refreshed.messageDetails ?? {},
-    }).catch((err) => console.error("[voice/turn] founder alert failed:", err));
+    }).catch((err) => logger.error("[voice/turn] founder alert failed:", err));
   }
 
   const twiml = new VoiceResponse();

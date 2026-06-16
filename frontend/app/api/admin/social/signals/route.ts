@@ -2,6 +2,7 @@
 //   GET  — list topic signals (?processed=true|false).
 //   POST — manually trigger a fresh signal scan.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
 
     return adminSuccess({ signals, total });
   } catch (err) {
-    console.error("[admin/social] signals query failed:", err);
+    logger.error("[admin/social] signals query failed:", err);
     return adminSuccess({ signals: [], total: 0 });
   }
 }

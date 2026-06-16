@@ -2,6 +2,7 @@
 // Takes a postId and generates platform-optimized versions for all target
 // platforms using the viral format library, trending intelligence, and Groq.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -103,7 +104,7 @@ Return ONLY valid JSON, no other text:
           : "100-10K+",
       };
     } catch (err) {
-      console.error("[viral-optimize] failed for platform:", platform, err);
+      logger.error("[viral-optimize] failed for platform:", platform, err);
       optimized[platform] = {
         hook: post.hook,
         caption: post.caption,

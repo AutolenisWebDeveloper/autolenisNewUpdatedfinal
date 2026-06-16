@@ -1,5 +1,6 @@
 "use client";
 
+import { logger } from "@/lib/logger";
 import { useState, useRef, useEffect } from "react";
 import { MessageCircle, X, Send, Loader2, Bot } from "lucide-react";
 import { isAiEnabled } from "@/lib/ai/kill-switch";
@@ -146,7 +147,7 @@ export default function ChatWidget({
         setStreaming(false);
 
       } catch (err) {
-        console.error("[ChatWidget public stream]", err);
+        logger.error("[ChatWidget public stream]", err);
         setMessages([
           ...newMessages,
           { role: "assistant", content: "Connection error. Please check your connection and try again." },

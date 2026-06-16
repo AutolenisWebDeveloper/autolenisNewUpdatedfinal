@@ -3,6 +3,7 @@
 // Returns posts (with video + franchise), total count, hasMore, and per-status
 // stats for the current filter set.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest) {
       stats,
     });
   } catch (err) {
-    console.error("[admin/social] posts query failed:", err);
+    logger.error("[admin/social] posts query failed:", err);
     return adminSuccess({ posts: [], total: 0, hasMore: false, page, stats: {} });
   }
 }

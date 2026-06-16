@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import {
   getAdminFromRequest,
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
     });
     return adminSuccess(result);
   } catch (err) {
-    console.error("[amips-p1-scores] route error:", err);
+    logger.error("[amips-p1-scores] route error:", err);
     return adminError("COMPUTE_FAILED", (err as Error).message, 500);
   }
 }

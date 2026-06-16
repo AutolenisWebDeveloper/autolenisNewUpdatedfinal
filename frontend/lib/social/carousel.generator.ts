@@ -8,6 +8,7 @@
 // Defensive throughout: a Groq/sharp/storage failure logs and returns whatever
 // slides succeeded (possibly an empty array) rather than throwing.
 
+import { logger } from "@/lib/logger";
 import "server-only";
 import sharp from "sharp";
 import type { ContentFranchise, SocialPost } from "@prisma/client";
@@ -142,7 +143,7 @@ export async function generateCarouselSlides(input: CarouselInput): Promise<stri
   try {
     bullets = await extractBullets(post.script);
   } catch (err) {
-    console.error("[carousel] bullet extraction failed:", err);
+    logger.error("[carousel] bullet extraction failed:", err);
     return [];
   }
   if (bullets.length === 0) return [];
@@ -155,7 +156,7 @@ export async function generateCarouselSlides(input: CarouselInput): Promise<stri
       const url = await uploadSlide(png, post.id, i + 1);
       urls.push(url);
     } catch (err) {
-      console.error(`[carousel] slide ${i + 1} failed (non-fatal):`, err);
+      logger.error(`[carousel] slide ${i + 1} failed (non-fatal):`, err);
     }
   }
   return urls;

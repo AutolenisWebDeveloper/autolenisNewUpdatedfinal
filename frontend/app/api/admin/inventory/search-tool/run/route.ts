@@ -1,6 +1,7 @@
 // POST /api/admin/inventory/search-tool/run
 // Queries MarketCheck (if key present) or internal DB. Logs to AdminInventorySearchRun.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
         }));
       }
     } catch (err) {
-      console.error("[search-tool/run] MarketCheck error:", err);
+      logger.error("[search-tool/run] MarketCheck error:", err);
       source = "db_fallback";
     }
   }

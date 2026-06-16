@@ -1,6 +1,7 @@
 // MOST CRITICAL cron — runs every 5 minutes
 // Closes expired auctions, triggers dealer invitation release, notifies buyers
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { closeExpiredAuctions, processAuctionClose } from "@/lib/services/auction/auction.service";
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
 
   for (const auction of closedAuctions) {
     await processAuctionClose(auction.id).catch(err =>
-      console.error(`[auction-close] post-close processing failed for ${auction.id}:`, err)
+      logger.error(`[auction-close] post-close processing failed for ${auction.id}:`, err)
     );
   }
 

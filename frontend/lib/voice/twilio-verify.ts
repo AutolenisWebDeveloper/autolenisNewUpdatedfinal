@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import twilio from "twilio";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -36,7 +37,7 @@ export async function parseTwilioRequest(
   if (!verified) {
     // Surfaces the most common failure cause: the URL Twilio signed does not
     // match `${NEXT_PUBLIC_APP_URL}${path}` (wrong host/scheme/trailing slash).
-    console.error("[twilio-verify] signature verification failed", {
+    logger.error("[twilio-verify] signature verification failed", {
       path: pathPart,
       expectedUrl: url,
       hasAuthToken: !!authToken,

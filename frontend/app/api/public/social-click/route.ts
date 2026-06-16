@@ -6,6 +6,7 @@
 // (CSRF is already skipped for /api/public/* in proxy.ts). Never errors —
 // click tracking must be silent and never affect the page.
 
+import { logger } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -72,11 +73,11 @@ export async function POST(request: Request) {
       })
       .catch(() => {});
 
-    console.log("[social-click] tracked click for post:", post.id, source);
+    logger.info("[social-click] tracked click for post:", post.id, source);
     return NextResponse.json({ tracked: true, postId: post.id });
   } catch (err) {
     // Never error — click tracking must be silent
-    console.error("[social-click] failed:", err);
+    logger.error("[social-click] failed:", err);
     return NextResponse.json({ tracked: false });
   }
 }

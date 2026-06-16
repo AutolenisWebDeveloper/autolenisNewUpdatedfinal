@@ -3,6 +3,7 @@
 // recommendations using Groq, comparing the post against platform benchmarks
 // and learned winning patterns.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -167,7 +168,7 @@ Provide your analysis in this exact JSON format:
       analysis,
     });
   } catch (err) {
-    console.error("[ai-analyze] failed:", err);
+    logger.error("[ai-analyze] failed:", err);
     return adminError("AI_ANALYSIS_FAILED", "AI analysis failed", 500);
   }
 }

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { reviseOffer } from "@/lib/services/offer/offer.service";
@@ -68,7 +69,7 @@ export async function PATCH(request: NextRequest, { params }: Props) {
       submittedAt: submittedAt.toISOString(),
       revisionWindowExpiry: revisionWindowExpiry.toISOString(),
       offerId: revised.id,
-    }).catch((err) => console.error("[dealer/offers/revise] email failed:", err));
+    }).catch((err) => logger.error("[dealer/offers/revise] email failed:", err));
   }
 
   return successResponse({ offer: revised });
