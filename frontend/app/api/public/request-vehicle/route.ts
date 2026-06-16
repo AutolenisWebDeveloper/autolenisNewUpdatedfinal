@@ -601,6 +601,9 @@ export async function POST(request: NextRequest) {
         },
         data: {
           vehicle_type: data.vehicleType,
+          make:         data.preferredMake ?? null,
+          model:        data.preferredModel ?? null,
+          financing_option: data.financingOption ?? null,
           budget:       data.budget,
           timeline:     data.timeline,
           campaign:     data.campaign ?? null,

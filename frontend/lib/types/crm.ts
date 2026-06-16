@@ -232,7 +232,10 @@ export type SegmentOperator =
   | 'contains' | 'not_contains'
   | 'gte' | 'lte'
   | 'is_true' | 'is_false'
-  | 'before' | 'after';
+  | 'before' | 'after'
+  // Array membership on the contacts.tags[] column (drives Vehicle/Finance
+  // interest segments).
+  | 'has_tag' | 'not_has_tag';
 
 export type SegmentField =
   | 'lifecycle_stage'
@@ -242,7 +245,14 @@ export type SegmentField =
   | 'source'
   | 'utm_source'
   | 'utm_campaign'
-  | 'created_at';
+  | 'created_at'
+  // Behavioral plane (migration 06) — drives the seeded Buyer segments
+  // (Cold/Warm/Hot/Ready To Buy) and score-threshold targeting.
+  | 'lead_score'
+  | 'lead_temperature'
+  // Interest tags (contacts.tags[]) — drives the Vehicle (SUV/Truck/EV/Luxury/
+  // Family) and Finance (Refinance/Trade-In/Financing/Lease) segments.
+  | 'tags';
 
 export interface SegmentRule {
   field: SegmentField;

@@ -7,6 +7,25 @@ import { ContactService } from '@/lib/services/contact.service';
 import type { ContactInput, WorkflowTriggerType } from '@/lib/types/crm';
 import { forwardToMake, type DomainEventEnvelope } from './make-webhook';
 import { resolveStageAdvance } from './lifecycle-advance';
+import { recordScoringAction } from '@/lib/services/crm/lead-action-scoring.service';
+import type { ScoringAction } from '@/lib/crm/scoring-actions';
+import { interestTagsForEvent } from '@/lib/crm/contact-interest-tags';
+
+// Layer 4 — map the domain events that correspond to a scored behavior onto the
+// spec's scoring actions. Events with no behavioral score (signups, reminders,
+// admin/dealer/affiliate lifecycle) are intentionally absent. Front-end-only
+// signals (landing_page_visit, article_read, offer_favorite) have no domain
+// event and are reported directly via POST /api/crm/dispatch/track.
+const EVENT_TO_SCORING_ACTION: Partial<Record<DomainEventType, ScoringAction>> = {
+  vehicle_request_submitted: 'vehicle_request',
+  saved_search_created: 'vehicle_search',
+  calculator_completed: 'calculator_use',
+  zura_conversation_captured: 'zura_conversation',
+  lead_magnet_downloaded: 'article_read',
+  offer_received: 'offer_view',
+  offer_selected: 'offer_accepted',
+  purchase_completed: 'deal_completed',
+};
 
 // ---------------------------------------------------------------------------
 // DOMAIN EVENT EMITTER (Step 2)
@@ -133,6 +152,47 @@ export async function emitDomainEvent(
     fired.timeline = true;
   } catch (err) {
     logger.error(`[emit] timeline write failed for '${event}' (${idempotencyKey})`, err);
+  }
+
+  // (3b) Lead scoring — accrue the action's points when this event maps to a
+  // scored behavior. Idempotency is bound to the event key so the same domain
+  // event scores exactly once across retries. Isolated + best-effort.
+  const scoringAction = EVENT_TO_SCORING_ACTION[event];
+  if (scoringAction) {
+    try {
+      await recordScoringAction(supabase, {
+        contactId: contact.id,
+        action: scoringAction,
+        source: `emit:${event}`,
+        idempotencyKey,
+      });
+    } catch (err) {
+      logger.error(`[emit] lead scoring failed for '${event}' (${idempotencyKey})`, err);
+    }
+  }
+
+  // (3c) Interest tags — project vehicle/finance interest onto the contact's
+  // tags array so the seeded Vehicle/Finance segments (migration 12) can target
+  // it. Merge-and-dedup; only writes when a genuinely new tag appears. Isolated.
+  try {
+    const newTags = interestTagsForEvent(event, input.data ?? {});
+    if (newTags.length) {
+      const current = Array.isArray(contact.tags) ? contact.tags : [];
+      const merged = Array.from(new Set([...current, ...newTags]));
+      if (merged.length !== current.length) {
+        const { error } = await supabase
+          .from('contacts')
+          .update({ tags: merged, updated_at: new Date().toISOString() })
+          .eq('id', contact.id);
+        if (error) {
+          logger.error(`[emit] interest-tag write failed for '${event}' (${idempotencyKey})`, error);
+        } else {
+          contact.tags = merged;
+        }
+      }
+    }
+  } catch (err) {
+    logger.error(`[emit] interest-tag error for '${event}' (${idempotencyKey})`, err);
   }
 
   // (4) Outbound webhook — non-blocking. Prefer Vercel after() so it runs after

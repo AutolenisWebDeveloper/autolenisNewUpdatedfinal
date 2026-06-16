@@ -14,7 +14,7 @@ import { writeCrmAuditLog, type CrmAuditActor } from './admin/crm-audit';
 // crash the count query (or worse, leak a column we don't intend to filter on).
 type FieldDef = {
   column: string;
-  type: 'text' | 'boolean' | 'timestamp';
+  type: 'text' | 'boolean' | 'timestamp' | 'number' | 'array';
   operators: readonly SegmentOperator[];
 };
 
@@ -59,7 +59,25 @@ const FIELD_DEFS: Record<SegmentField, FieldDef> = {
     type: 'timestamp',
     operators: ['before', 'after', 'gte', 'lte'],
   },
+  lead_score: {
+    column: 'lead_score',
+    type: 'number',
+    operators: ['eq', 'neq', 'gte', 'lte'],
+  },
+  lead_temperature: {
+    column: 'lead_temperature',
+    type: 'text',
+    operators: ['eq', 'neq'],
+  },
+  tags: {
+    column: 'tags',
+    type: 'array',
+    operators: ['has_tag', 'not_has_tag'],
+  },
 };
+
+// Mirrors the contacts_lead_temperature_chk CHECK (migration 06).
+const LEAD_TEMPERATURES = ['hot', 'warm', 'cold'];
 
 const LIFECYCLE_STAGES = [
   'lead', 'prequal_started', 'prequal_completed',
@@ -115,11 +133,27 @@ export function normalizeConditions(input: unknown): SegmentConditions {
       throw new Error(`RULE_${idx}_VALUE_REQUIRED`);
     }
 
+    // Numeric fields (lead_score) — coerce and store a real number so the
+    // PostgREST comparison is numeric, not lexicographic.
+    if (def.type === 'number') {
+      const num = Number(value);
+      if (Number.isNaN(num)) throw new Error(`RULE_${idx}_VALUE_INVALID_NUMBER`);
+      return { field, op, value: num };
+    }
+
+    // Array fields (tags) — a single tag string to test for membership.
+    if (def.type === 'array') {
+      return { field, op, value: String(value) };
+    }
+
     if (field === 'lifecycle_stage' && !LIFECYCLE_STAGES.includes(String(value))) {
       throw new Error(`RULE_${idx}_VALUE_INVALID_STAGE`);
     }
     if (field === 'source' && !SOURCES.includes(String(value))) {
       throw new Error(`RULE_${idx}_VALUE_INVALID_SOURCE`);
+    }
+    if (field === 'lead_temperature' && !LEAD_TEMPERATURES.includes(String(value))) {
+      throw new Error(`RULE_${idx}_VALUE_INVALID_TEMPERATURE`);
     }
 
     return { field, op, value: value as string | number | boolean };
@@ -141,6 +175,7 @@ type AnyBuilder = {
   not: (col: string, op: string, value: unknown) => AnyBuilder;
   or: (filter: string) => AnyBuilder;
   is: (col: string, value: unknown) => AnyBuilder;
+  contains: (col: string, value: unknown) => AnyBuilder;
   select: (cols: string, opts?: Record<string, unknown>) => AnyBuilder;
   limit: (n: number) => AnyBuilder;
 };
@@ -165,6 +200,9 @@ function applyAllMatchRule(query: AnyBuilder, rule: SegmentRule): AnyBuilder {
     case 'before':       return query.lte(col, rule.value);
     case 'is_true':      return query.eq(col, true);
     case 'is_false':     return query.eq(col, false);
+    // Array membership: tags @> {value}. not_has_tag negates the same op.
+    case 'has_tag':      return query.contains(col, [rule.value]);
+    case 'not_has_tag':  return query.not(col, 'cs', `{${rule.value}}`);
     default:             return query;
   }
 }
@@ -188,6 +226,8 @@ function buildOrFilter(rules: SegmentRule[]): string {
         case 'before':       return `${col}.lte.${rule.value}`;
         case 'is_true':      return `${col}.eq.true`;
         case 'is_false':     return `${col}.eq.false`;
+        case 'has_tag':      return `${col}.cs.{${rule.value}}`;
+        case 'not_has_tag':  return `not.${col}.cs.{${rule.value}}`;
         default:             return '';
       }
     })
