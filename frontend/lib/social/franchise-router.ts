@@ -5,6 +5,7 @@
 // Franchise records are loaded from the DB by slug so the router always
 // reflects live franchise config (platforms, active flag, review requirement).
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import type { ContentFranchise, TopicSignal } from "@prisma/client";
 import { AUTOMATION_MODE, AUTO_PUBLISH_FRANCHISES } from "@/lib/social/config";
@@ -80,20 +81,20 @@ export async function routeSignalToFranchises(
       where: { slug: { in: ["how_autolenis_works", "dealer_secret_daily"] }, active: true },
     });
     if (fallback) {
-      console.warn(
+      logger.warn(
         `[franchise-router] no mapped franchise for signalType=${signal.signalType}; falling back to ${fallback.slug}`,
       );
       const platforms =
         fallback.platforms.length > 0 ? fallback.platforms : DEFAULT_ROUTE.platforms;
       routes.push({ franchise: fallback, platforms, assetTypes });
     } else {
-      console.warn(
+      logger.warn(
         `[franchise-router] no franchises resolved for signalType=${signal.signalType} and no fallback franchise is active`,
       );
     }
   }
 
-  console.log(
+  logger.info(
     `[franchise-router] signalType=${signal.signalType} resolved ${routes.length} route(s):`,
     routes.map((r) => r.franchise.slug),
   );

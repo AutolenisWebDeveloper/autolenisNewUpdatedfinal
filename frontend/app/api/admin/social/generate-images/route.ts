@@ -10,6 +10,7 @@
 // the next batch call (prevents an infinite retry loop on a permanently-broken
 // post). Every failure logs its actual error message for diagnosis.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
     take: BATCH_SIZE,
   });
 
-  console.log(
+  logger.info(
     `[generate-images] found ${postsNeedingImages.length} posts`,
     `OPENAI_API_KEY: ${!!process.env.OPENAI_API_KEY}`,
   );
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest) {
   for (const post of postsNeedingImages) {
     const visualPrompt = post.visualPrompt ?? post.hook ?? "";
     try {
-      console.log(
+      logger.info(
         "[generate-images] generating for post:",
         post.id,
         post.platform,
@@ -103,7 +104,7 @@ export async function POST(request: NextRequest) {
         hookType: post.hookType,
       });
 
-      console.log(
+      logger.info(
         "[generate-images] dalle result:",
         post.id,
         "success:",
@@ -125,7 +126,7 @@ export async function POST(request: NextRequest) {
         storedImageUrl = await storeImageInSupabase(result.imageUrl, post.id);
         storagePath = `social-posts/${post.id}/image.jpg`;
       } catch (storeErr) {
-        console.error(
+        logger.error(
           "[generate-images] supabase store failed, using provider URL:",
           post.id,
           storeErr,
@@ -147,10 +148,10 @@ export async function POST(request: NextRequest) {
         },
       });
       generated += 1;
-      console.log("[generate-images] ✅ created:", post.id);
+      logger.info("[generate-images] ✅ created:", post.id);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error(
+      logger.error(
         "[generate-images] ❌ post failed:",
         post.id,
         "error:",
@@ -171,7 +172,7 @@ export async function POST(request: NextRequest) {
           },
         })
         .catch((dbErr) =>
-          console.error("[generate-images] db write failed:", post.id, dbErr),
+          logger.error("[generate-images] db write failed:", post.id, dbErr),
         );
       failed += 1;
       // ALWAYS continue to the next post.
@@ -183,7 +184,7 @@ export async function POST(request: NextRequest) {
     .count({ where: { status: "APPROVED", video: { is: null } } })
     .catch(() => -1);
 
-  console.log(
+  logger.info(
     `[generate-images] done: ${generated} generated,`,
     `${failed} failed, ${remaining} remaining`,
   );
@@ -197,7 +198,7 @@ export async function POST(request: NextRequest) {
         [CRON_AUTH_HEADER]: `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`,
       },
     }).catch((err) =>
-      console.error("[generate-images] video trigger failed:", err),
+      logger.error("[generate-images] video trigger failed:", err),
     );
   }
 

@@ -20,6 +20,7 @@
 // This path does NOT duplicate iPredict logic — it delegates to callIPredict()
 // from microbilt.service.ts and isPrequalValid() from prequal.service.ts.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { PreQualDecision, PreQualTier } from "@prisma/client";
 import { callIPredict } from "./microbilt.service";
@@ -431,7 +432,7 @@ export async function runAdminIPredictPrequalForBuyer(
   // Gate 2: Deceased indicator → manual review.
   else if (result.deceasedFlag) {
     finalDecision = PreQualDecision.MANUAL_REVIEW;
-    console.warn(`[admin-prequal] Deceased indicator for buyer ${buyerId} — manual review`);
+    logger.warn(`[admin-prequal] Deceased indicator for buyer ${buyerId} — manual review`);
   }
   // Gate 3: MLA covered borrower → manual review.
   else if (result.mlaCovered === true) {
@@ -449,7 +450,7 @@ export async function runAdminIPredictPrequalForBuyer(
   // Gate 4: Fraud warning → manual review.
   else if (result.fraudWarning && result.fraudWarning !== "N" && result.fraudWarning !== "") {
     finalDecision = PreQualDecision.MANUAL_REVIEW;
-    console.warn(`[admin-prequal] Fraud warning ${result.fraudWarning} for buyer ${buyerId}`);
+    logger.warn(`[admin-prequal] Fraud warning ${result.fraudWarning} for buyer ${buyerId}`);
   }
 
   // ── maxOtdAmountCents — two-gate minimum already applied by callIPredict ────
@@ -589,7 +590,7 @@ export async function runAdminIPredictPrequalForBuyer(
       });
       approvalEmailSent = true;
     } catch (err) {
-      console.error("[admin-prequal] Failed to send approval email:", err);
+      logger.error("[admin-prequal] Failed to send approval email:", err);
     }
 
     try {
@@ -611,7 +612,7 @@ export async function runAdminIPredictPrequalForBuyer(
         },
       });
     } catch (err) {
-      console.error("[admin-prequal] Failed to log approval compliance event:", err);
+      logger.error("[admin-prequal] Failed to log approval compliance event:", err);
     }
   }
 
@@ -641,7 +642,7 @@ export async function runAdminIPredictPrequalForBuyer(
       outcome = sendResult.outcome;
       adverseActionSent = sendResult.sent;
     } catch (err) {
-      console.error("[admin-prequal] Failed to send adverse action email:", err);
+      logger.error("[admin-prequal] Failed to send adverse action email:", err);
       adverseActionErrorMessage = err instanceof Error ? err.message : String(err);
     }
 
@@ -672,7 +673,7 @@ export async function runAdminIPredictPrequalForBuyer(
         },
       });
     } catch (err) {
-      console.error("[admin-prequal] Failed to log adverse action compliance event:", err);
+      logger.error("[admin-prequal] Failed to log adverse action compliance event:", err);
     }
   }
 
@@ -697,7 +698,7 @@ export async function runAdminIPredictPrequalForBuyer(
         decisionTimestamp: prequal.updatedAt.toISOString(),
       });
     } catch (err) {
-      console.error("[admin-prequal] Failed to send under-review email:", err);
+      logger.error("[admin-prequal] Failed to send under-review email:", err);
     }
     try {
       await prisma.complianceEvent.create({
@@ -715,7 +716,7 @@ export async function runAdminIPredictPrequalForBuyer(
         },
       });
     } catch (err) {
-      console.error("[admin-prequal] Failed to log under-review compliance event:", err);
+      logger.error("[admin-prequal] Failed to log under-review compliance event:", err);
     }
   }
 
@@ -730,7 +731,7 @@ export async function runAdminIPredictPrequalForBuyer(
         prequalApplicationId: prequal.id,
       });
     } catch (err) {
-      console.error("[admin-prequal] Failed to send admin alert email:", err);
+      logger.error("[admin-prequal] Failed to send admin alert email:", err);
     }
   }
 

@@ -2,6 +2,7 @@
 // Accepts multipart/form-data: file (PDF) + dealId (string).
 // Uploads to bucket "dealer-contracts" using service role client.
 // Returns { documentUrl, mimeType, sizeBytes }.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { createServiceSupabaseClient } from "@/lib/supabase";
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     .upload(path, buffer, { contentType: "application/pdf", upsert: false });
 
   if (uploadError) {
-    console.error("[dealer/contracts/upload-file]", uploadError);
+    logger.error("[dealer/contracts/upload-file]", uploadError);
     return errorResponse("STORAGE_ERROR", "File upload failed. Please try again.", 500);
   }
 

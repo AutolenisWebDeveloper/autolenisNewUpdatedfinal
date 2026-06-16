@@ -3,6 +3,7 @@
 // This unblocks auction creation for manual/administrative workflows.
 // AuditLog entry with override reason required.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -81,11 +82,11 @@ export async function POST(request: NextRequest, { params }: Props) {
       body: "Your Auction Access Deposit has been recorded. Your auction can now be launched.",
       actionUrl: "/buyer/auctions",
     },
-  }).catch((err) => console.error("[deposit/override] buyer notification failed:", err));
+  }).catch((err) => logger.error("[deposit/override] buyer notification failed:", err));
 
   if (buyer.user.email) {
     void sendDepositConfirmationEmail(buyer.user.email, buyer.firstName ?? "there", deposit.id)
-      .catch((err) => console.error("[deposit/override] confirmation email failed:", err));
+      .catch((err) => logger.error("[deposit/override] confirmation email failed:", err));
   }
 
   // Stage advances to deposit_paid in the CRM as well as Prisma (deposit row).

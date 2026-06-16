@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
@@ -91,7 +92,7 @@ export async function POST(request: NextRequest) {
             entityId: admin.id,
             metadata: { codesRemaining: remaining.length },
           },
-        }).catch(err => console.error("[verify-mfa] audit log error:", err));
+        }).catch(err => logger.error("[verify-mfa] audit log error:", err));
       }
     } else if (admin.totpEnabled && admin.totpSecret) {
       // totpSecret is stored AES-256-GCM encrypted — must decrypt before verifying
@@ -128,7 +129,7 @@ export async function POST(request: NextRequest) {
             locked: shouldLock,
           },
         },
-      }).catch(err => console.error("[verify-mfa] audit log error:", err));
+      }).catch(err => logger.error("[verify-mfa] audit log error:", err));
 
       if (shouldLock) {
         // Emit lockout event
@@ -141,7 +142,7 @@ export async function POST(request: NextRequest) {
             entityId: admin.id,
             metadata: { lockedUntil: lockedUntil?.toISOString(), durationMinutes: MFA_LOCKOUT_MINUTES },
           },
-        }).catch(err => console.error("[verify-mfa] audit log error:", err));
+        }).catch(err => logger.error("[verify-mfa] audit log error:", err));
 
         return NextResponse.json(
           {
@@ -192,7 +193,7 @@ export async function POST(request: NextRequest) {
         entityId: admin.id,
         metadata: { method: isRecoveryCode ? "recovery_code" : "totp" },
       },
-    }).catch(err => console.error("[verify-mfa] audit log error:", err));
+    }).catch(err => logger.error("[verify-mfa] audit log error:", err));
 
     const res = NextResponse.json({ success: true });
 
@@ -214,7 +215,7 @@ export async function POST(request: NextRequest) {
 
   } catch (err) {
     // Always return JSON — never let unhandled exceptions produce empty body
-    console.error("[verify-mfa] Error:", err);
+    logger.error("[verify-mfa] Error:", err);
     return NextResponse.json(
       { error: "An unexpected error occurred. Please sign in again." },
       { status: 500 }

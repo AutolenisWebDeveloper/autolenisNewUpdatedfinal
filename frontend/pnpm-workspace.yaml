@@ -32,3 +32,10 @@ onlyBuiltDependencies:
   - protobufjs
   - sharp
   - unrs-resolver
+
+# Dependency overrides — pnpm 11 reads these ONLY from this file (not
+# package.json#pnpm.overrides). Pins transitive deps to patched versions:
+#   postcss XSS (<8.5.10), ws uninitialized-memory disclosure (<8.20.1).
+overrides:
+  'postcss@<8.5.10': '>=8.5.10'
+  'ws@>=8.0.0 <8.20.1': '>=8.20.1'

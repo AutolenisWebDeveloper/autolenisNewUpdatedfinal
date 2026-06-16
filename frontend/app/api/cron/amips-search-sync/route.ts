@@ -4,6 +4,7 @@
 // week (GSC data lags 2–3 days, so we never query the in-progress week) into
 // search_intelligence, then re-prioritizes the content queue from real search
 // demand once Search Intelligence has matured.
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import {
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
   const search = await syncSearchIntelligence(siteUrl, weekOf);
   const reprioritized = await reprioritizeContentQueue();
 
-  console.log(
+  logger.info(
     `[amips-cron] search-sync — synced ${search.synced}, reprioritized ${reprioritized.reprioritized} (${reprioritized.mode})`,
   );
 

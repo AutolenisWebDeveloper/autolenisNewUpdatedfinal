@@ -1,5 +1,6 @@
 // POST /api/public/buyer-offer-review/[reviewToken]/question
 // Buyer asks a question about a specific dealer offer item; sends an email to admin.
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     dealershipName: item.submission.dealershipName,
     vehicleLabel,
     question: parsed.data.question,
-  }).catch((err) => console.error("[buyer-question] email failed:", err));
+  }).catch((err) => logger.error("[buyer-question] email failed:", err));
 
   return NextResponse.json({ success: true });
 }

@@ -2,6 +2,7 @@
 // Admin processes concierge fee refund via Stripe.
 // Marks deal feeStatus = REFUNDED. Buyer notified. AuditLog entry.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminWithRole, adminSuccess, adminError, getClientIp } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -57,10 +58,10 @@ export async function POST(request: NextRequest, { params }: Props) {
       const code = (stripeErr as { code?: string } | null)?.code;
       const msg = (stripeErr as { message?: string } | null)?.message ?? "Unknown Stripe error";
       if (code !== "charge_already_refunded") {
-        console.error("[concierge-fee/refund] Stripe refund failed:", { code, msg, dealId });
+        logger.error("[concierge-fee/refund] Stripe refund failed:", { code, msg, dealId });
         return adminError("STRIPE_REFUND_FAILED", `Stripe refund failed: ${msg}`, 502);
       }
-      console.warn("[concierge-fee/refund] charge already refunded out-of-band — syncing DB only:", { dealId });
+      logger.warn("[concierge-fee/refund] charge already refunded out-of-band — syncing DB only:", { dealId });
     }
   }
 

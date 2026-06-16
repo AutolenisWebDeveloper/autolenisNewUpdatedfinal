@@ -1,5 +1,6 @@
 "use server";
 
+import { logger } from "@/lib/logger";
 import { createServerSupabaseClient, createServiceSupabaseClient } from "@/lib/supabase";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
@@ -95,7 +96,7 @@ async function ensurePrismaUser(
           ...(termsAcceptedAt ? { termsAcceptedAt: new Date(termsAcceptedAt) } : {}),
           ...(termsVersion ? { termsVersion } : {}),
         },
-      }).catch(err => console.error("[ensurePrismaUser] guest buyer flip failed:", err));
+      }).catch(err => logger.error("[ensurePrismaUser] guest buyer flip failed:", err));
     }
     return upgraded;
   }
@@ -159,7 +160,7 @@ async function ensurePrismaUser(
           }),
         ]);
       }).catch(err =>
-        console.error("[ensurePrismaUser] guest transfer failed:", err)
+        logger.error("[ensurePrismaUser] guest transfer failed:", err)
       );
     }
   }
@@ -181,7 +182,7 @@ async function ensurePrismaUser(
           level: 1,
         },
       }).catch(err =>
-        console.error("[ensurePrismaUser] affiliate create failed:", err)
+        logger.error("[ensurePrismaUser] affiliate create failed:", err)
       );
     }
   }
@@ -199,7 +200,7 @@ async function recordAffiliateAttribution(userId: string, referralCode: string) 
     if (!affiliate) return;
 
     if (affiliate.userId === userId) {
-      console.warn(
+      logger.warn(
         `[recordAffiliateAttribution] Self-referral attempt blocked: ` +
         `affiliate ${affiliate.id} tried to refer themselves.`
       );
@@ -223,7 +224,7 @@ async function recordAffiliateAttribution(userId: string, referralCode: string) 
     );
     await attributeConversion(referralCode, userId);
   } catch (err) {
-    console.error("[recordAffiliateAttribution] failed to record attribution:", err);
+    logger.error("[recordAffiliateAttribution] failed to record attribution:", err);
     // Non-blocking — do not throw; buyer signup must not fail due to attribution error
   }
 }
@@ -291,7 +292,7 @@ export async function signUpAction(formData: FormData): Promise<AuthResult> {
     if (/already|exists|registered/i.test(error.message)) {
       return { error: "An account with this email already exists. Sign in instead →" };
     }
-    console.error("[signUpAction] generateLink failed:", {
+    logger.error("[signUpAction] generateLink failed:", {
       message: error.message,
       status: (error as { status?: number }).status,
       email: email.slice(0, 3) + "***",
@@ -300,7 +301,7 @@ export async function signUpAction(formData: FormData): Promise<AuthResult> {
   }
 
   if (!linkData?.properties?.action_link) {
-    console.error(
+    logger.error(
       "[signUpAction] generateLink returned no action_link — check SUPABASE_SERVICE_ROLE_KEY env var",
     );
     return { error: "Account creation failed. Please try again." };
@@ -313,7 +314,7 @@ export async function signUpAction(formData: FormData): Promise<AuthResult> {
     await sendWelcomeEmail({ to: email, firstName: firstName ?? email.split("@")[0], verificationUrl });
   } catch (e) {
     // Non-blocking — welcome email failure must never fail sign-up
-    console.error("[signUpAction] welcome email failed:", e);
+    logger.error("[signUpAction] welcome email failed:", e);
   }
 
   return { success: true, message: "Check your email to confirm your account." };
@@ -540,7 +541,7 @@ export async function acceptTermsAction(formData: FormData): Promise<void> {
     },
   });
   if (metadataError) {
-    console.error(
+    logger.error(
       "[acceptTermsAction] failed to sync user_metadata.termsAcceptedAt:",
       metadataError.message,
     );

@@ -1,5 +1,6 @@
 // POST /api/admin/vehicle-offers/[id]/reject-submission
 // Marks an individual DealerOfferSubmission as rejected and notifies the dealer.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     contactName: submission.contactName,
     buyerName: "AutoLenis",
     vehicleLabel: `${submission.vehicleOffer.vehicleYear} ${submission.vehicleOffer.vehicleMake} ${submission.vehicleOffer.vehicleModel} — Offer not selected`,
-  }).catch((err) => console.error("[reject-submission] dealer email failed:", err));
+  }).catch((err) => logger.error("[reject-submission] dealer email failed:", err));
 
   await createAuditLog(admin, request, {
     action: "VEHICLE_OFFER_SUBMISSION_REJECTED",

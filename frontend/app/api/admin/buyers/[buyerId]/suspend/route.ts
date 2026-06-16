@@ -4,6 +4,7 @@
 // Writes AuditLog: BUYER_SUSPENDED with previousState and newState
 // Requires reason (min 10 chars)
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       user_metadata: { isSuspended: true },
     });
   } catch (err) {
-    console.error("[buyer/suspend] Supabase metadata update failed:", err);
+    logger.error("[buyer/suspend] Supabase metadata update failed:", err);
   }
 
   const updated = await prisma.buyer.update({
@@ -62,13 +63,13 @@ export async function POST(request: NextRequest, { params }: Props) {
       title: "Your account has been suspended",
       body: `Your AutoLenis account has been suspended. Reason: ${reason}. Contact support@autolenis.com if you believe this is in error.`,
     },
-  }).catch((err) => console.error("[buyer/suspend] notification failed:", err));
+  }).catch((err) => logger.error("[buyer/suspend] notification failed:", err));
 
   // Revoke all active Supabase sessions for this buyer immediately
   try {
     await supabase.auth.admin.signOut(buyer.user.supabaseId, "global");
   } catch (err) {
-    console.error("[buyer/suspend] Supabase signOut failed:", err);
+    logger.error("[buyer/suspend] Supabase signOut failed:", err);
   }
 
   const ipAddress = request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip") ?? undefined;

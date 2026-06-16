@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 export async function getOnboardingStatus(affiliateId: string) {
@@ -50,7 +51,7 @@ export async function getOnboardingProfile(affiliateId: string) {
     ]);
     return { review, profile, taxProfile, paymentProfile, documents };
   } catch {
-    console.warn("[onboarding] onboarding tables not yet migrated — returning empty profile");
+    logger.warn("[onboarding] onboarding tables not yet migrated — returning empty profile");
     return { review: null, profile: null, taxProfile: null, paymentProfile: null, documents: [] as Awaited<ReturnType<typeof prisma.affiliateDocument.findMany>> };
   }
 }

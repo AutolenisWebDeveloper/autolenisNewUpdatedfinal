@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
@@ -137,7 +138,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     contactPhone:   invite.phone,
     otdPriceCents:  otdPriceCents,
     source:         "email_link",
-  }).catch((e) => console.error("[outside-dealer-offer] admin notification failed:", e));
+  }).catch((e) => logger.error("[outside-dealer-offer] admin notification failed:", e));
 
   return NextResponse.json({ success: true, data: { received: true, offerId: offer.id } });
 }

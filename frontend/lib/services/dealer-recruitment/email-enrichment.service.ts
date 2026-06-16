@@ -13,6 +13,7 @@
 // enriched within the last 30 days unless `force` is passed. This avoids a
 // redundant separate cache table keyed on the same natural key.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma"
 
 const GEMINI_API_URL =
@@ -221,7 +222,7 @@ async function callGeminiWithRetry(prompt: string): Promise<GeminiResponse> {
 
       // Exponential backoff: 8s, 16s, 32s
       const backoffMs = Math.min(8000 * Math.pow(2, attempt), 32000)
-      console.warn(
+      logger.warn(
         `[phase-4b1] Gemini retry ${attempt + 1}/${maxAttempts} after ${backoffMs}ms: ${message.substring(0, 120)}`,
       )
       await new Promise((resolve) => setTimeout(resolve, backoffMs))
@@ -254,7 +255,7 @@ export function parseEnrichment(data: GeminiResponse): ParsedEnrichment {
   }
 
   if (!content.trim()) {
-    console.warn("[phase-4b1] Gemini returned empty content")
+    logger.warn("[phase-4b1] Gemini returned empty content")
     return empty
   }
 
@@ -262,14 +263,14 @@ export function parseEnrichment(data: GeminiResponse): ParsedEnrichment {
   try {
     const jsonMatch = content.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
-      console.warn(
+      logger.warn(
         `[phase-4b1] No JSON in Gemini response: ${content.substring(0, 160)}`,
       )
       return empty
     }
     parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
   } catch (err) {
-    console.warn(
+    logger.warn(
       `[phase-4b1] JSON parse failed: ${err instanceof Error ? err.message : String(err)}`,
     )
     return empty
@@ -298,7 +299,7 @@ export function parseEnrichment(data: GeminiResponse): ParsedEnrichment {
       : null
 
   if (rawEmail && !email) {
-    console.warn(
+    logger.warn(
       `[phase-4b1] Dropped invalid/low-trust email "${rawEmail}" (confidence=${confidence})`,
     )
   }
@@ -427,7 +428,7 @@ export async function enrichDealerEmail(
       existing?.emailEnrichedAt &&
       Date.now() - existing.emailEnrichedAt.getTime() < ENRICHMENT_TTL_MS
     ) {
-      console.log(
+      logger.info(
         `[phase-4b1] Skipping ${input.dealerProspectId} — enriched ${existing.emailEnrichedAt.toISOString()} (<30d)`,
       )
       return emptyResult({ skipped: true })
@@ -443,7 +444,7 @@ export async function enrichDealerEmail(
   } catch (err) {
     // Stamp the attempt timestamp even on hard failure so we don't hammer a
     // persistently-failing dealer on every backfill run.
-    console.error(
+    logger.error(
       `[phase-4b1] Gemini enrichment failed for ${input.dealerProspectId}: ${err instanceof Error ? err.message : String(err)}`,
     )
     await prisma.dealerProspect
@@ -452,7 +453,7 @@ export async function enrichDealerEmail(
         data: { emailEnrichedAt: now, contactEnrichedAt: now },
       })
       .catch((updateErr) => {
-        console.error(
+        logger.error(
           `[phase-4b1] Failed to stamp enrichment timestamps for ${input.dealerProspectId}:`,
           updateErr,
         )
@@ -472,13 +473,13 @@ export async function enrichDealerEmail(
       data,
     })
   } catch (err) {
-    console.error(
+    logger.error(
       `[phase-4b1] Failed to persist enrichment for ${input.dealerProspectId}:`,
       err,
     )
   }
 
-  console.log(
+  logger.info(
     `[phase-4b1] Enriched ${input.dealerName} (${input.dealerProspectId}) → ` +
       `email=${parsed.email ?? "none"} [${source ?? "—"}], ` +
       `contact=${parsed.contactName ?? "none"} [${contactSource ?? "—"}]`,

@@ -3,6 +3,7 @@
 // All sends are idempotent — check EmailSendLog before every send
 // FROM_NAME and RESEND_API_KEY from env
 
+import { logger } from "@/lib/logger";
 import { Resend } from "resend";
 import { prisma } from "@/lib/prisma";
 import { PREMIUM_FEE_CENTS, PREMIUM_FEE_USD, COMMISSION_RATES, formatCentsAsUsd } from "@/lib/constants";
@@ -136,7 +137,7 @@ async function sendIdempotent(params: {
       where: { idempotencyKey: params.idempotencyKey },
     });
   } catch (err) {
-    console.error("[EMAIL] EmailSendLog check failed — proceeding with send:", err);
+    logger.error("[EMAIL] EmailSendLog check failed — proceeding with send:", err);
     // Non-blocking — allow send to proceed even if idempotency check fails
   }
   if (existing) {
@@ -150,14 +151,14 @@ async function sendIdempotent(params: {
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey || apiKey.includes("placeholder")) {
       // Dev: log email intent but don't send
-      console.warn(
+      logger.warn(
         `[EMAIL] RESEND_API_KEY not set or is placeholder — email skipped. To: ${params.to}`,
       );
       status = "DEV_SKIPPED";
     } else {
       const resend = getResend();
       if (!resend) {
-        console.error("[EMAIL] Resend client could not be initialized despite API key being set");
+        logger.error("[EMAIL] Resend client could not be initialized despite API key being set");
         status = "DEV_SKIPPED";
       } else {
         const result = await resend.emails.send({
@@ -171,7 +172,7 @@ async function sendIdempotent(params: {
         // response as FAILED so the audit trail records a real outage instead
         // of silently logging as SENT with no resendId.
         if (result.error || !result.data?.id) {
-          console.error(
+          logger.error(
             `[EMAIL] Resend dispatch failed for ${params.to}:`,
             result.error ?? "no id returned",
           );
@@ -182,7 +183,7 @@ async function sendIdempotent(params: {
       }
     }
   } catch (err) {
-    console.error(`Email send failed: ${err}`);
+    logger.error(`Email send failed: ${err}`);
     status = "FAILED";
   }
 
@@ -479,7 +480,7 @@ export async function sendAdminPrequalAlertEmail(params: {
 }) {
   const to = process.env.ADMIN_NOTIFICATION_EMAIL;
   if (!to) {
-    console.warn(
+    logger.warn(
       "[EMAIL] ADMIN_NOTIFICATION_EMAIL not set — admin prequal alert skipped",
     );
     return { sent: false };
@@ -513,7 +514,7 @@ export async function sendMarketIndexPublishedEmail(params: {
 }) {
   const to = process.env.ADMIN_NOTIFICATION_EMAIL;
   if (!to) {
-    console.warn("[EMAIL] ADMIN_NOTIFICATION_EMAIL not set — market index alert skipped");
+    logger.warn("[EMAIL] ADMIN_NOTIFICATION_EMAIL not set — market index alert skipped");
     return { sent: false as const };
   }
   const linkBlock = params.linkedInUrl

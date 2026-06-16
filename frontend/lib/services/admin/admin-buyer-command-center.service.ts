@@ -4,6 +4,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { DealStatus } from "@prisma/client";
+import { canTransition } from "@/lib/services/deal/deal.service";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -956,7 +957,10 @@ export async function moveBuyerWorkflowStage(
   adminEmail: string,
   dealId: string,
   targetStatus: DealStatus,
-  reason: string
+  reason: string,
+  // When false (the ad-hoc workflow/move tool), illegal stage jumps are rejected.
+  // Deliberate admin progressions (journey complete/complete-all) pass force=true.
+  force = false,
 ) {
   const deal = await prisma.deal.findFirst({
     where: {
@@ -968,6 +972,10 @@ export async function moveBuyerWorkflowStage(
     },
   });
   if (!deal) throw new Error("No active deal found for this buyer");
+
+  if (!force && deal.status !== targetStatus && !canTransition(deal.status, targetStatus)) {
+    throw new Error(`Cannot move deal from ${deal.status} to ${targetStatus}. This is not a valid next stage.`);
+  }
 
   const previousStatus = deal.status;
   await prisma.deal.update({

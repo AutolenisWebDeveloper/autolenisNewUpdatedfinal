@@ -345,6 +345,7 @@ export type WorkflowTriggerType =
   // attach a nurture scenario per source.
   | 'trade_in_submitted'
   | 'saved_search_created'
+  | 'saved_search_matched'
   | 'calculator_completed'
   | 'exit_intent_captured'
   | 'partial_lead_captured'

@@ -4,6 +4,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { PickupStatus } from "@prisma/client";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import QRCode from "qrcode";
 
 // Generate QR payload for vehicle pickup
@@ -44,8 +45,8 @@ export async function schedulePickup(dealId: string, scheduledAt: Date, location
     },
   });
 
-  // Advance deal status
-  await prisma.deal.update({ where: { id: dealId }, data: { status: "PICKUP_SCHEDULED" } });
+  // Advance deal status (admin-initiated scheduling — authoritative; records history)
+  await advanceDealStatus(dealId, "PICKUP_SCHEDULED", { actorRole: "ADMIN", force: true });
 
   // Notify buyer
   const deal = await prisma.deal.findUnique({ where: { id: dealId } });
@@ -95,7 +96,8 @@ export async function completePickup(dealId: string): Promise<void> {
     data: { status: PickupStatus.COMPLETED, completedAt: new Date() },
   });
 
-  await prisma.deal.update({ where: { id: dealId }, data: { status: "COMPLETED" } });
+  // Routes through the guarded seam — enforces the insurance gate before COMPLETED.
+  await advanceDealStatus(dealId, "COMPLETED", { actorRole: "SYSTEM" });
 
   const deal = await prisma.deal.findUnique({ where: { id: dealId } });
   if (deal) {

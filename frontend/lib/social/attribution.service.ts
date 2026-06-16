@@ -4,6 +4,7 @@
 // parameters captured on the request-vehicle intake flow. Creates a
 // RevenueAttribution record and increments the post's lead score.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 const SOCIAL_SOURCES = new Set(["facebook", "instagram", "tiktok", "youtube", "linkedin"]);
@@ -36,7 +37,7 @@ export async function captureUtmAttribution(input: UtmAttributionInput): Promise
   });
 
   if (!post) {
-    console.log("[attribution] no post found for utm_campaign:", input.utmCampaign, "utm_content:", input.utmContent);
+    logger.info("[attribution] no post found for utm_campaign:", input.utmCampaign, "utm_content:", input.utmContent);
     return;
   }
 
@@ -57,7 +58,7 @@ export async function captureUtmAttribution(input: UtmAttributionInput): Promise
       },
     });
   } catch (err) {
-    console.warn("[attribution] revenueAttribution.create failed (non-fatal):", err instanceof Error ? err.message : err);
+    logger.warn("[attribution] revenueAttribution.create failed (non-fatal):", err instanceof Error ? err.message : err);
   }
 
   // Update SocialPerformance — best-effort, row may not exist yet.
@@ -88,7 +89,7 @@ export async function captureUtmAttribution(input: UtmAttributionInput): Promise
     await captureCreatorRequest(input.utmCreator, post.id, post.platform, post.trackedUrl ?? null);
   }
 
-  console.log("[attribution] vehicle request attributed to post:", post.id);
+  logger.info("[attribution] vehicle request attributed to post:", post.id);
 }
 
 // Records a creator-driven vehicle request: increments (or creates) the
@@ -103,7 +104,7 @@ async function captureCreatorRequest(
   try {
     const creator = await prisma.creatorNetwork.findUnique({ where: { id: creatorId } });
     if (!creator) {
-      console.log("[attribution] utm_creator did not match a known creator:", creatorId);
+      logger.info("[attribution] utm_creator did not match a known creator:", creatorId);
       return;
     }
 
@@ -132,9 +133,9 @@ async function captureCreatorRequest(
       data: { totalRequests: { increment: 1 } },
     });
 
-    console.log("[attribution] creator request attributed:", creatorId, "post:", postId);
+    logger.info("[attribution] creator request attributed:", creatorId, "post:", postId);
   } catch (err) {
-    console.warn(
+    logger.warn(
       "[attribution] captureCreatorRequest failed (non-fatal):",
       err instanceof Error ? err.message : err,
     );
@@ -164,7 +165,7 @@ export async function captureDealAttribution(input: {
     });
 
     if (!attribution) {
-      console.log(
+      logger.info(
         "[attribution] no social attribution found for:",
         input.vehicleRequestId,
       );
@@ -228,13 +229,13 @@ export async function captureDealAttribution(input: {
       );
     }
 
-    console.log(
+    logger.info(
       "[attribution] 🎉 deal won attributed to post:",
       attribution.postId,
       `revenue: $${((input.totalRevenueCents ?? 0) / 100).toFixed(2)}`,
     );
   } catch (err) {
-    console.error(
+    logger.error(
       "[attribution] captureDealAttribution failed:",
       err instanceof Error ? err.message : err,
     );
@@ -286,13 +287,13 @@ async function creditCreatorDeal(
       data: { totalRevenue: { increment: revenueCents } },
     });
 
-    console.log(
+    logger.info(
       "[attribution] creator deal credited:",
       creatorId,
       `commission: $${(commissionCents / 100).toFixed(2)}`,
     );
   } catch (err) {
-    console.warn(
+    logger.warn(
       "[attribution] creditCreatorDeal failed (non-fatal):",
       err instanceof Error ? err.message : err,
     );

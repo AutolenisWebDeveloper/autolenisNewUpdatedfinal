@@ -3,6 +3,7 @@
 // Returns a URL to be included in the main request submission body.
 // Max file size: 10MB. Accepted: PDF, JPEG, PNG, WebP.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { createServiceSupabaseClient } from "@/lib/supabase";
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
-    console.error("[upload-letter] Supabase storage error:", error);
+    logger.error("[upload-letter] Supabase storage error:", error);
     return errorResponse("UPLOAD_FAILED", "Document upload failed. Please try again or contact support.", 500);
   }
 

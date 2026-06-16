@@ -1,4 +1,5 @@
 // lib/services/ai/ai-moderation.service.ts
+import { logger } from "@/lib/logger";
 import { isAiEnabled } from "@/lib/ai/kill-switch";
 
 export function moderateInput(text: string): { safe: boolean; reason?: string } {
@@ -11,5 +12,5 @@ export function moderateInput(text: string): { safe: boolean; reason?: string } 
 
 export function logAiKillSwitchEvent(enabled: boolean, reason?: string, adminId?: string) {
   // In production: log to AiKillSwitchLog table
-  console.log(`[AI Kill Switch] ${enabled ? "ENABLED" : "DISABLED"} by ${adminId ?? "system"}. Reason: ${reason ?? "none"}`);
+  logger.info(`[AI Kill Switch] ${enabled ? "ENABLED" : "DISABLED"} by ${adminId ?? "system"}. Reason: ${reason ?? "none"}`);
 }

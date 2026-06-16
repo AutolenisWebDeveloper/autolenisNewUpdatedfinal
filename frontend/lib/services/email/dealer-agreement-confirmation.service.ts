@@ -6,6 +6,7 @@
 // This runs inside after() (Next.js post-response work) so it MUST NOT throw —
 // on any failure it logs and returns { success: false }.
 
+import { logger } from "@/lib/logger";
 import { Resend } from "resend";
 
 const FROM = "AutoLenis Agreements <agreements@autolenis.com>";
@@ -93,7 +94,7 @@ export async function sendDealerAgreementConfirmation(
   try {
     const resend = getResend();
     if (!resend) {
-      console.warn(
+      logger.warn(
         `[dealer-agreement-confirmation] RESEND_API_KEY not set or placeholder — email skipped. To: ${params.email}`,
       );
       return { success: false };
@@ -107,7 +108,7 @@ export async function sendDealerAgreementConfirmation(
     });
 
     if (result.error || !result.data?.id) {
-      console.error(
+      logger.error(
         `[dealer-agreement-confirmation] Resend dispatch failed for ${params.email}:`,
         result.error ?? "no id returned",
       );
@@ -116,7 +117,7 @@ export async function sendDealerAgreementConfirmation(
 
     return { success: true, messageId: result.data.id };
   } catch (err) {
-    console.error("[dealer-agreement-confirmation] Send threw:", err);
+    logger.error("[dealer-agreement-confirmation] Send threw:", err);
     return { success: false };
   }
 }

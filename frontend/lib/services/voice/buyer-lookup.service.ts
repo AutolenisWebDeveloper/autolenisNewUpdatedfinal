@@ -8,6 +8,7 @@
 // call, so it must NEVER throw — any failure falls through to a "not found"
 // result and Zura proceeds with the standard new-caller flow.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 export interface BuyerLookupResult {
@@ -80,7 +81,7 @@ export async function lookupBuyerByPhone(
   try {
     const variants = phoneVariants(rawPhone);
     if (variants.length === 0) {
-      console.log(`[zura-phase2] Skipping lookup — unparseable phone: "${rawPhone}"`);
+      logger.info(`[zura-phase2] Skipping lookup — unparseable phone: "${rawPhone}"`);
       return NOT_FOUND;
     }
 
@@ -116,11 +117,11 @@ export async function lookupBuyerByPhone(
       }));
 
     if (!record) {
-      console.log(`[zura-phase2] No buyer match for ${variants[0]}`);
+      logger.info(`[zura-phase2] No buyer match for ${variants[0]}`);
       return NOT_FOUND;
     }
 
-    console.log(
+    logger.info(
       `[zura-phase2] Caller ${variants[0]} matched BuyerOpportunity ${record.id} ` +
         `(${record.firstName ?? "unknown"}, ${record.make ?? "—"} ${record.model ?? ""})`,
     );
@@ -142,7 +143,7 @@ export async function lookupBuyerByPhone(
     };
   } catch (err) {
     // Never crash the call on a lookup failure.
-    console.error(
+    logger.error(
       `[zura-phase2] lookupBuyerByPhone failed: ${err instanceof Error ? err.message : err}`,
     );
     return NOT_FOUND;

@@ -5,6 +5,7 @@
 // nullable; user_id is the dealer's User.id). All writes are best-effort —
 // audit logging must never block the underlying business operation.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { AdminActionType, Prisma } from "@prisma/client";
 
@@ -48,6 +49,6 @@ export async function writeDealerAudit(input: DealerAuditInput): Promise<void> {
       },
     });
   } catch (err) {
-    console.error("[dealer-audit] write failed:", err);
+    logger.error("[dealer-audit] write failed:", err);
   }
 }

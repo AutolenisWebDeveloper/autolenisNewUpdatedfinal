@@ -3,6 +3,7 @@
 
 "use client";
 
+import { logger } from "@/lib/logger";
 import { useEffect, useRef } from "react";
 import { MapPin } from "lucide-react";
 
@@ -64,7 +65,7 @@ export default function AdminCoverageMapPage() {
         `);
       });
     }).catch(err => {
-      console.error("Leaflet failed to load:", err);
+      logger.error("Leaflet failed to load:", err);
     });
   }, []);
 

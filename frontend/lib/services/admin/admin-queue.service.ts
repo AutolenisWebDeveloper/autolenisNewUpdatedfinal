@@ -1,4 +1,5 @@
 // lib/services/admin/admin-queue.service.ts
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 export type QueueType = "OFAC_ALERT" | "CONTRACT_FAIL" | "INSURANCE_EXCEPTION" | "ESIGN_EXCEPTION" | "PICKUP_EXCEPTION" | "PREQUAL_MANUAL" | "SUPPORT_TICKET" | "SYSTEM_ALERT";
@@ -47,7 +48,7 @@ export async function resolveQueueItem(queueType: QueueType, itemId: string, adm
           : words.has("CONFIRM") ? "DECLINED"
           : null;
         if (!decision) {
-          console.warn(`[queue] OFAC_ALERT resolve requires explicit "CLEAR" or "CONFIRM" in resolution for ${itemId}. Resolution: "${resolution}"`);
+          logger.warn(`[queue] OFAC_ALERT resolve requires explicit "CLEAR" or "CONFIRM" in resolution for ${itemId}. Resolution: "${resolution}"`);
           break;
         }
         await prisma.preQualification.update({ where: { id: itemId }, data: { decision } });
@@ -71,7 +72,7 @@ export async function resolveQueueItem(queueType: QueueType, itemId: string, adm
           : upperRes.includes("DECLINE") ? "DECLINED"
           : null;
         if (!decision) {
-          console.warn(`[admin-queue] PREQUAL_MANUAL resolve missing explicit decision for ${itemId}. Resolution: "${resolution}"`);
+          logger.warn(`[admin-queue] PREQUAL_MANUAL resolve missing explicit decision for ${itemId}. Resolution: "${resolution}"`);
           // Still log the resolution attempt below but do not change prequal status.
           break;
         }
@@ -89,7 +90,7 @@ export async function resolveQueueItem(queueType: QueueType, itemId: string, adm
     // Non-throwing — caller does not handle errors. Audit log is still written
     // below even if the DB update failed, so the resolution attempt is visible.
     // TODO: Surface this error to the admin API response.
-    console.error(`[admin-queue] resolveQueueItem failed for ${queueType}/${itemId}:`, err);
+    logger.error(`[admin-queue] resolveQueueItem failed for ${queueType}/${itemId}:`, err);
   }
 
   await prisma.adminAuditLog.create({

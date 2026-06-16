@@ -4,6 +4,7 @@
 // reward signal we don't encode explicitly, but the deterministic floor
 // keeps high-intent leads above the "warm" threshold even if Groq is down.
 
+import { logger } from "@/lib/logger";
 import {
   type ExtractedData,
   scoreLeadWithGroq,
@@ -77,7 +78,7 @@ export async function scoreLeadFromConversation(data: ExtractedData): Promise<{
       reasoning = ai.reasoning;
     }
   } catch (err) {
-    console.error("[scoreLeadFromConversation] groq failed", err);
+    logger.error("[scoreLeadFromConversation] groq failed", err);
   }
 
   const finalScore = Math.max(deterministic.score, aiScore);

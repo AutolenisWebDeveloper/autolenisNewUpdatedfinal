@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { createServerSupabaseClient } from "@/lib/supabase";
 import { NextRequest, NextResponse } from "next/server";
 import { ensurePrismaUser, recordAffiliateAttribution } from "@/lib/auth/actions";
@@ -154,7 +155,7 @@ async function syncBuyerContact(
       data: { buyer_id: buyer.id },
     });
   } catch (err) {
-    console.error("[auth/callback] CRM contact sync failed:", err);
+    logger.error("[auth/callback] CRM contact sync failed:", err);
   }
 }
 
@@ -194,6 +195,6 @@ async function trySendEmailVerified(supabaseId: string, email: string): Promise<
       },
     }).catch(() => {});
   } catch (e) {
-    console.error("[auth/callback] email-verified send failed:", e);
+    logger.error("[auth/callback] email-verified send failed:", e);
   }
 }

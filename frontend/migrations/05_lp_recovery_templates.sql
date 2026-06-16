@@ -62,13 +62,6 @@ VALUES
           </p>
         </td></tr>
       </table>
-      <!-- autolenis:footer:v1 -->
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="560" style="max-width:560px;margin-top:16px;">
-        <tr><td style="padding:0 16px;font-size:11px;color:#6b7280;line-height:1.5;text-align:center;">
-          <div><strong>AutoLenis</strong> · 1234 Main St, Suite 100, San Francisco CA 94105</div>
-          <div style="margin-top:4px;"><a href="{{unsubscribeUrl}}" style="color:#6b7280;text-decoration:underline;">Unsubscribe</a></div>
-        </td></tr>
-      </table>
     </td></tr>
   </table>
 </body></html>$html$,
@@ -78,11 +71,7 @@ Hi {{firstName}},
 
 You started a request on AutoLenis but did not finish. The form takes about 60 seconds to complete, and your vehicle type and budget are what tell us which verified dealers to invite to compete for your business.
 
-Complete my request: {{resumeUrl}}
-
-—
-AutoLenis · 1234 Main St, Suite 100, San Francisco CA 94105
-Unsubscribe: {{unsubscribeUrl}}$text$,
+Complete my request: {{resumeUrl}}$text$,
     ARRAY['firstName','resumeUrl','unsubscribeUrl']
   ),
   (
@@ -107,13 +96,6 @@ Unsubscribe: {{unsubscribeUrl}}$text$,
           </p>
         </td></tr>
       </table>
-      <!-- autolenis:footer:v1 -->
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="560" style="max-width:560px;margin-top:16px;">
-        <tr><td style="padding:0 16px;font-size:11px;color:#6b7280;line-height:1.5;text-align:center;">
-          <div><strong>AutoLenis</strong> · 1234 Main St, Suite 100, San Francisco CA 94105</div>
-          <div style="margin-top:4px;"><a href="{{unsubscribeUrl}}" style="color:#6b7280;text-decoration:underline;">Unsubscribe</a></div>
-        </td></tr>
-      </table>
     </td></tr>
   </table>
 </body></html>$html$,
@@ -123,11 +105,7 @@ Hi {{firstName}},
 
 Verified dealers in your area are on the platform — but no one can submit an offer until your request is complete. No dealer has seen your information yet. When you finish the form, up to 8 dealers compete in a 48-hour auction so you compare offers side-by-side.
 
-Open my auction: {{resumeUrl}}
-
-—
-AutoLenis · 1234 Main St, Suite 100, San Francisco CA 94105
-Unsubscribe: {{unsubscribeUrl}}$text$,
+Open my auction: {{resumeUrl}}$text$,
     ARRAY['firstName','resumeUrl','unsubscribeUrl']
   ),
   (
@@ -153,13 +131,6 @@ Unsubscribe: {{unsubscribeUrl}}$text$,
           <p style="margin:20px 0 0;font-size:13px;color:#6b7280;">If you would prefer we close your file, just reply STOP and we will remove your details.</p>
         </td></tr>
       </table>
-      <!-- autolenis:footer:v1 -->
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="560" style="max-width:560px;margin-top:16px;">
-        <tr><td style="padding:0 16px;font-size:11px;color:#6b7280;line-height:1.5;text-align:center;">
-          <div><strong>AutoLenis</strong> · 1234 Main St, Suite 100, San Francisco CA 94105</div>
-          <div style="margin-top:4px;"><a href="{{unsubscribeUrl}}" style="color:#6b7280;text-decoration:underline;">Unsubscribe</a></div>
-        </td></tr>
-      </table>
     </td></tr>
   </table>
 </body></html>$html$,
@@ -171,11 +142,7 @@ This is the last email we will send about your request. You have two options: co
 
 Complete my request: {{resumeUrl}}
 
-If you would prefer we close your file, just reply STOP and we will remove your details.
-
-—
-AutoLenis · 1234 Main St, Suite 100, San Francisco CA 94105
-Unsubscribe: {{unsubscribeUrl}}$text$,
+If you would prefer we close your file, just reply STOP and we will remove your details.$text$,
     ARRAY['firstName','resumeUrl','unsubscribeUrl']
   ),
   (
@@ -200,13 +167,6 @@ Unsubscribe: {{unsubscribeUrl}}$text$,
           </p>
         </td></tr>
       </table>
-      <!-- autolenis:footer:v1 -->
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="560" style="max-width:560px;margin-top:16px;">
-        <tr><td style="padding:0 16px;font-size:11px;color:#6b7280;line-height:1.5;text-align:center;">
-          <div><strong>AutoLenis</strong> · 1234 Main St, Suite 100, San Francisco CA 94105</div>
-          <div style="margin-top:4px;"><a href="{{unsubscribeUrl}}" style="color:#6b7280;text-decoration:underline;">Unsubscribe</a></div>
-        </td></tr>
-      </table>
     </td></tr>
   </table>
 </body></html>$html$,
@@ -216,11 +176,7 @@ Hi {{firstName}},
 
 You stopped by AutoLenis earlier. No commitment was made, no pressure here. If you are still searching for a vehicle, the platform lets dealers compete for your business so you never negotiate alone. Takes about 60 seconds to start.
 
-See how it works: {{returnUrl}}
-
-—
-AutoLenis · 1234 Main St, Suite 100, San Francisco CA 94105
-Unsubscribe: {{unsubscribeUrl}}$text$,
+See how it works: {{returnUrl}}$text$,
     ARRAY['firstName','returnUrl','unsubscribeUrl']
   )
 ON CONFLICT (template_key) DO NOTHING;

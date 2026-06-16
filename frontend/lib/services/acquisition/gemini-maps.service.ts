@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import type { DiscoveredDealer } from "./compound-search.service"
 
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
@@ -52,7 +53,7 @@ export async function discoverDealersViaGeminiMaps(params: {
 
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
-    console.error("[gemini-maps] GEMINI_API_KEY not configured")
+    logger.error("[gemini-maps] GEMINI_API_KEY not configured")
     return []
   }
 
@@ -93,7 +94,7 @@ export async function discoverDealersViaGeminiMaps(params: {
 
     if (!response.ok) {
       const errBody = await response.text()
-      console.error(
+      logger.error(
         `[gemini-maps] Gemini API failed: ${response.status}`,
         errBody.substring(0, 500)
       )
@@ -127,7 +128,7 @@ export async function discoverDealersViaGeminiMaps(params: {
         }
       }
     } catch (err) {
-      console.warn(
+      logger.warn(
         "[gemini-maps] Standard JSON parse failed, attempting salvage:",
         err instanceof Error ? err.message : String(err)
       )
@@ -156,13 +157,13 @@ export async function discoverDealersViaGeminiMaps(params: {
         }
 
         if (salvaged.length > 0) {
-          console.log(
+          logger.info(
             `[gemini-maps] Salvaged ${salvaged.length} complete dealer objects from truncated response`
           )
           dealers = salvaged
         }
       } catch (err) {
-        console.error(
+        logger.error(
           "[gemini-maps] Salvage parse failed:",
           err instanceof Error ? err.message : String(err)
         )
@@ -170,7 +171,7 @@ export async function discoverDealersViaGeminiMaps(params: {
     }
 
     if (dealers.length === 0) {
-      console.error(
+      logger.error(
         "[gemini-maps] No dealers parsed from response. First 300 chars:",
         content.substring(0, 300)
       )
@@ -213,23 +214,23 @@ export async function discoverDealersViaGeminiMaps(params: {
 
     // Diagnostic logging — keep in production for now so we can observe the
     // actual shape of Gemini's grounding metadata in real traffic.
-    console.log(
+    logger.info(
       "[gemini-maps] groundingChunks sample:",
       JSON.stringify(groundingChunks.slice(0, 2), null, 2)
     )
-    console.log(
+    logger.info(
       "[gemini-maps] groundingSupports sample:",
       JSON.stringify(groundingSupports.slice(0, 2), null, 2)
     )
-    console.log("[gemini-maps] placeIdToUrl size:", placeIdToUrl.size)
-    console.log("[gemini-maps] placeIdToScore size:", placeIdToScore.size)
-    console.log("[gemini-maps] First dealer placeId:", dealers[0]?.placeId)
+    logger.info("[gemini-maps] placeIdToUrl size:", placeIdToUrl.size)
+    logger.info("[gemini-maps] placeIdToScore size:", placeIdToScore.size)
+    logger.info("[gemini-maps] First dealer placeId:", dealers[0]?.placeId)
 
     const validatedDealers: DiscoveredDealer[] = []
 
     for (const d of dealers) {
       if (!d.name || d.name.length < 3) {
-        console.warn(`[gemini-maps] Dropped dealer with invalid name`)
+        logger.warn(`[gemini-maps] Dropped dealer with invalid name`)
         continue
       }
 
@@ -239,7 +240,7 @@ export async function discoverDealersViaGeminiMaps(params: {
 
       // Drop dealers with no verifiable data at all
       if (!hasPlaceId && !hasPhone && !hasAddress) {
-        console.warn(`[gemini-maps] Dropped dealer with no verifiable fields: ${d.name}`)
+        logger.warn(`[gemini-maps] Dropped dealer with no verifiable fields: ${d.name}`)
         continue
       }
 
@@ -287,14 +288,14 @@ export async function discoverDealersViaGeminiMaps(params: {
     // Update the log to show tier breakdown
     const tier1Count = validatedDealers.filter(d => d.sourceUrl !== null).length
     const tier2Count = validatedDealers.filter(d => d.sourceUrl === null).length
-    console.log(
+    logger.info(
       `[gemini-maps] Returned ${validatedDealers.length} dealers: ` +
       `${tier1Count} Maps-verified, ${tier2Count} structurally valid`
     )
     return validatedDealers
 
   } catch (err) {
-    console.error("[gemini-maps] Request failed:", err)
+    logger.error("[gemini-maps] Request failed:", err)
     return []
   }
 }
@@ -376,7 +377,7 @@ export async function enrichMarketViaGemini(params: {
 }): Promise<GroundedMarketEnrichment | null> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
-    console.error("[change-1] GEMINI_API_KEY not configured — cannot ground")
+    logger.error("[change-1] GEMINI_API_KEY not configured — cannot ground")
     return null
   }
 
@@ -436,7 +437,7 @@ localDealers: return up to 8 dealers within 50 miles. If no grounded data found,
 
     if (!response.ok) {
       const errBody = await response.text()
-      console.error(
+      logger.error(
         `[change-1] Gemini market enrichment failed: ${response.status}`,
         errBody.substring(0, 400)
       )
@@ -450,7 +451,7 @@ localDealers: return up to 8 dealers within 50 miles. If no grounded data found,
 
     const jsonMatch = content.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
-      console.error(
+      logger.error(
         "[change-1] No JSON in Gemini response. First 300 chars:",
         content.substring(0, 300)
       )
@@ -461,7 +462,7 @@ localDealers: return up to 8 dealers within 50 miles. If no grounded data found,
     try {
       raw = JSON.parse(jsonMatch[0]) as Record<string, unknown>
     } catch (err) {
-      console.error("[change-1] Gemini JSON parse failed:", err)
+      logger.error("[change-1] Gemini JSON parse failed:", err)
       return null
     }
 
@@ -519,17 +520,17 @@ localDealers: return up to 8 dealers within 50 miles. If no grounded data found,
     const dealersWithInventory = localDealers.filter(
       (d) => d.hasInventory === true
     ).length
-    console.log(
+    logger.info(
       `[change-1] Gemini Search grounding fired for ${params.make} ${params.model} in ${params.zip}`
     )
-    console.log(
+    logger.info(
       `[change-1] searchGrounded: ${searchGrounded}, localDealers: ${localDealers.length} (${dealersWithInventory} w/ inventory), ` +
         `msrpRange: ${msrpRange?.low ?? "?"}-${msrpRange?.high ?? "?"}, demand: ${demandLevel ?? "n/a"}`
     )
 
     return enrichment
   } catch (err) {
-    console.error("[change-1] Gemini market enrichment request failed:", err)
+    logger.error("[change-1] Gemini market enrichment request failed:", err)
     return null
   }
 }

@@ -7,6 +7,7 @@
 // which enforces the OFAC hard gate and the canonical operational-role policy.
 // For real provider runs, use /api/admin/buyers/[buyerId]/prequal/run-ipredict.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest, { params }: Props) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     if (msg === "Buyer not found") return adminError("NOT_FOUND", "Buyer not found", 404);
-    console.error("[admin/prequal GET]", err);
+    logger.error("[admin/prequal GET]", err);
     return adminError("SERVER_ERROR", "Failed to load prequal readiness", 500);
   }
 }

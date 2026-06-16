@@ -1,5 +1,6 @@
 // Vehicle offer dealer-invite expiry sweep — runs hourly.
 // Auto-marks dealer invitations whose expiresAt is in the past as "expired".
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -20,6 +21,6 @@ export async function GET(request: NextRequest) {
     data: { status: "expired" },
   });
 
-  console.log(`[vehicle-offer-expire] Expired ${result.count} dealer invitations`);
+  logger.info(`[vehicle-offer-expire] Expired ${result.count} dealer invitations`);
   return NextResponse.json({ success: true, expired: result.count });
 }

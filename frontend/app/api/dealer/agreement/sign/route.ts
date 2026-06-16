@@ -5,6 +5,7 @@
 // and the admin audit log atomically, then generates the certificate PDF and
 // confirmation email as non-blocking post-response work.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { after } from "next/server";
 import { createHash } from "crypto";
@@ -180,7 +181,7 @@ export async function POST(request: NextRequest) {
         },
       });
     } catch (err) {
-      console.error("[dealer/agreement/sign] post-sign work failed:", err);
+      logger.error("[dealer/agreement/sign] post-sign work failed:", err);
     }
   });
 

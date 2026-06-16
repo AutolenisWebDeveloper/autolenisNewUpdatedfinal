@@ -1,5 +1,6 @@
 // Cars.com adapter — independently failure-isolated
 
+import { logger } from "@/lib/logger";
 import type { IInventoryAdapter, NormalizedVehicle, AdapterRunResult, SearchParams } from "./IInventoryAdapter";
 
 export class CarsDotComAdapter implements IInventoryAdapter {
@@ -21,7 +22,7 @@ export class CarsDotComAdapter implements IInventoryAdapter {
       return { adapter: this.name, vehicles, duration: Date.now() - start, fetchedAt: new Date() };
 
     } catch (error) {
-      console.error(`[Cars.com adapter] Error:`, error);
+      logger.error(`[Cars.com adapter] Error:`, error);
       return { adapter: this.name, vehicles: [], duration: Date.now() - start, error: String(error), fetchedAt: new Date() };
     }
   }

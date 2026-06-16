@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { runInventorySync } from "@/lib/services/inventory/orchestrator";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("[cron/inventory-sync-full] Error:", err);
+    logger.error("[cron/inventory-sync-full] Error:", err);
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   }
 }

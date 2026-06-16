@@ -1,6 +1,7 @@
 // GET /api/admin/buyers/source-stats — Phase 5.5 source distribution analytics.
 // Aggregates BuyerOpportunity.source into channel + campaign breakdowns so the
 // admin UI can answer "which channel brings the most buyers?".
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    console.log(`[phase-5.5] source-stats: total=${total}, nullSource=${nullSourceCount}`);
+    logger.info(`[phase-5.5] source-stats: total=${total}, nullSource=${nullSourceCount}`);
 
     return adminSuccess({ total, byChannel, byCampaign, nullSourceCount });
   } catch (err) {

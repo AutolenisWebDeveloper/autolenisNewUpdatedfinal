@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import crypto from 'crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
@@ -6,7 +7,9 @@ import { inngest } from './client';
 import { SuppressionService } from '../services/suppression.service';
 import { TemplateService } from '../services/template.service';
 import { normalizePhone } from '../utils/phone';
-import type { TemplateVariable } from '../types/crm';
+import { prisma } from '../prisma';
+import { Prisma } from '@prisma/client';
+import type { TemplateVariable, ContactSource } from '../types/crm';
 
 function getSupabase(): SupabaseClient {
   return createClient(
@@ -631,12 +634,15 @@ export const workflowResumeFn = inngest.createFunction(
 );
 
 // ---------------------------------------------------------------------------
-// INACTIVITY SCANNER — emits buyer_inactive triggers for early-stage contacts
+// INACTIVITY SCANNER — emits buyer_inactive domain events for early-stage contacts
 // ---------------------------------------------------------------------------
-// Runs hourly; finds contacts in early stages whose updated_at is > 72h ago
-// and whose lifecycle hasn't already progressed. Emits a manual trigger event
-// per contact, capped at 500 per run to bound the per-tick cost. Workflows
-// listening for `buyer_inactive` then enroll the contact via the API.
+// Runs hourly; finds contacts in early stages whose updated_at is > 72h ago and
+// whose lifecycle hasn't already progressed, capped at 500 per run to bound the
+// per-tick cost. Each stale contact is pushed through the domain-event spine
+// (emitDomainEvent), which forwards to Make AND drives the legacy in-app engine
+// while CRM_INAPP_ENGINE_ENABLED is on — exactly like every other event. The
+// spine's lifecycle-advance moves the contact to 'inactive', so it falls out of
+// EARLY_STAGES and is never re-emitted on the next run.
 export const inactivityScannerFn = inngest.createFunction(
   { id: 'inactivity-scanner', name: 'Inactivity Scanner', retries: 1 },
   { cron: '0 * * * *' }, // hourly on the hour
@@ -648,7 +654,7 @@ export const inactivityScannerFn = inngest.createFunction(
     const stale = await step.run('find-stale-contacts', async () => {
       const { data } = await supabase
         .from('contacts')
-        .select('id')
+        .select('id, email, phone, first_name, last_name, source')
         .in('lifecycle_stage', EARLY_STAGES)
         .lt('updated_at', cutoff)
         .is('deleted_at', null)
@@ -659,25 +665,192 @@ export const inactivityScannerFn = inngest.createFunction(
 
     if (stale.length === 0) return { status: 'NO_STALE_CONTACTS' };
 
-    // Drive enrollment via the engine directly (rather than a fan-out event)
-    // because the per-contact unique constraint on workflow_enrollments
-    // already dedups — we don't need Inngest's idempotency layer on top.
-    await step.run('enroll-stale', async () => {
-      const { WorkflowEngine } = await import('../services/workflow.engine');
+    const result = await step.run('emit-buyer-inactive', async () => {
+      const { emitDomainEvent } = await import('../events/emit');
+      let emitted = 0;
       for (const row of stale) {
+        const email = (row.email as string | null) ?? null;
+        const phone = (row.phone as string | null) ?? null;
+        // emitDomainEvent resolves the contact by email→phone; a row with
+        // neither can't be re-resolved without minting a duplicate, and can't
+        // be messaged anyway, so skip it.
+        if (!email && !phone) continue;
         try {
-          await WorkflowEngine.triggerForEvent(supabase, 'buyer_inactive', row.id as string, {
-            source: 'inactivity_scanner',
-            scanned_at: new Date().toISOString(),
+          await emitDomainEvent('buyer_inactive', {
+            domainEntityId: row.id as string,
+            supabase,
+            contact: {
+              email,
+              phone,
+              firstName: (row.first_name as string | null) ?? undefined,
+              lastName: (row.last_name as string | null) ?? undefined,
+              // Ignored on update (existing contact); never overwrites the
+              // original source. Only used on the impossible insert path.
+              source: ((row.source as ContactSource | null) ?? 'import'),
+            },
+            data: { source: 'inactivity_scanner', scanned_at: new Date().toISOString() },
           });
+          emitted++;
         } catch (err) {
           // One contact's failure must not block the rest of the batch.
-          console.error('[inactivity-scanner] enroll failed', row.id, err);
+          logger.error('[inactivity-scanner] emit failed', row.id, err);
         }
       }
+      return { emitted };
     });
 
-    return { status: 'OK', scanned: stale.length };
+    return { status: 'OK', scanned: stale.length, emitted: result.emitted };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// SAVED SEARCH MATCHER — emits saved_search_matched when new inventory lands
+// ---------------------------------------------------------------------------
+// Every 6h, scan each saved search for inventory created since the search's
+// last match cursor (lastMatchAt, falling back to the search's createdAt).
+// When new matching items exist, push a saved_search_matched domain event
+// (forwarded to Make for the "matching vehicle available" alert) and advance
+// the per-search cursor so the same items never re-alert. Bounded to 500
+// searches per run; per-search failures are isolated.
+
+// Translate a saved search's free-form `filters` JSON into an InventoryItem
+// where-clause. Exported so the mapping is unit-testable. Only the keys the
+// buyer search UI writes are honored; unknown keys are ignored. Prices are
+// stored as dollars in the filter and compared against price_cents.
+export function buildInventoryWhereFromFilters(
+  filters: Record<string, unknown>,
+): Prisma.InventoryItemWhereInput {
+  const where: Prisma.InventoryItemWhereInput = {};
+  const str = (k: string): string | null => {
+    const v = filters[k];
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  };
+  const num = (k: string): number | null => {
+    const v = filters[k];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim() && Number.isFinite(Number(v))) return Number(v);
+    return null;
+  };
+
+  const make = str('make');
+  if (make) where.make = { equals: make, mode: 'insensitive' };
+  const model = str('model');
+  if (model) where.model = { equals: model, mode: 'insensitive' };
+
+  const yearMin = num('yearMin');
+  const yearMax = num('yearMax');
+  if (yearMin !== null || yearMax !== null) {
+    where.year = { ...(yearMin !== null ? { gte: yearMin } : {}), ...(yearMax !== null ? { lte: yearMax } : {}) };
+  }
+
+  const priceMin = num('priceMin');
+  const priceMax = num('priceMax');
+  if (priceMin !== null || priceMax !== null) {
+    where.priceCents = {
+      ...(priceMin !== null ? { gte: Math.round(priceMin * 100) } : {}),
+      ...(priceMax !== null ? { lte: Math.round(priceMax * 100) } : {}),
+    };
+  }
+
+  const mileageMax = num('mileageMax');
+  if (mileageMax !== null) where.mileage = { lte: mileageMax };
+
+  for (const k of ['condition', 'bodyType', 'transmission', 'drivetrain', 'fuelType'] as const) {
+    const v = str(k);
+    if (v) (where as Record<string, unknown>)[k] = { equals: v, mode: 'insensitive' };
+  }
+
+  return where;
+}
+
+export const savedSearchMatcherFn = inngest.createFunction(
+  { id: 'saved-search-matcher', name: 'Saved Search Matcher', retries: 1 },
+  { cron: '0 */6 * * *' },
+  async ({ step }) => {
+    const supabase = getSupabase();
+    const runAt = new Date();
+
+    const searches = await step.run('load-saved-searches', async () => {
+      return prisma.savedSearch.findMany({
+        take: 500,
+        orderBy: { lastMatchAt: { sort: 'asc', nulls: 'first' } },
+        include: { buyer: { include: { user: true } } },
+      });
+    });
+
+    if (searches.length === 0) return { status: 'NO_SAVED_SEARCHES' };
+
+    const result = await step.run('scan-and-emit', async () => {
+      const { emitDomainEvent } = await import('../events/emit');
+      let alerted = 0;
+      let scanned = 0;
+      for (const s of searches) {
+        scanned++;
+        const buyer = s.buyer;
+        const email = buyer?.user?.email ?? null;
+        const phone = buyer?.phone ?? null;
+        // No addressable identity → nothing to notify.
+        if (!email && !phone) continue;
+
+        try {
+          const filters = (s.filters ?? {}) as Record<string, unknown>;
+          const since = s.lastMatchAt ?? s.createdAt;
+          const where: Prisma.InventoryItemWhereInput = {
+            ...buildInventoryWhereFromFilters(filters),
+            isActive: true,
+            createdAt: { gt: since },
+          };
+
+          const matchCount = await prisma.inventoryItem.count({ where });
+          if (matchCount === 0) continue;
+
+          const sample = await prisma.inventoryItem.findMany({
+            where,
+            orderBy: { createdAt: 'desc' },
+            take: 3,
+            select: { id: true, year: true, make: true, model: true, priceCents: true },
+          });
+
+          await emitDomainEvent('saved_search_matched', {
+            // Vary the key per run so genuinely new matches over time each emit
+            // (the lastMatchAt cursor below prevents re-alerting the SAME items).
+            domainEntityId: `${s.id}:${runAt.toISOString()}`,
+            supabase,
+            contact: {
+              email,
+              phone,
+              firstName: buyer?.firstName ?? undefined,
+              lastName: buyer?.lastName ?? undefined,
+              source: 'saved_search',
+            },
+            data: {
+              saved_search_id: s.id,
+              buyer_id: s.buyerId,
+              name: s.name,
+              match_count: matchCount,
+              // `since` is already an ISO string — step.run serializes the
+              // loaded rows' Date fields to JSON before this closure sees them.
+              since,
+              sample,
+              zip: buyer?.zip ?? null,
+              state: buyer?.state ?? null,
+            },
+          });
+
+          await prisma.savedSearch.update({
+            where: { id: s.id },
+            data: { lastMatchAt: runAt, matchCount: { increment: matchCount } },
+          });
+          alerted++;
+        } catch (err) {
+          // One search's failure must not block the rest of the batch.
+          logger.error('[saved-search-matcher] scan failed', s.id, err);
+        }
+      }
+      return { scanned, alerted };
+    });
+
+    return { status: 'OK', ...result };
   },
 );
 
@@ -967,6 +1140,7 @@ export const inngestFunctions = [
   scheduledCampaignCronFn,
   workflowResumeFn,
   inactivityScannerFn,
+  savedSearchMatcherFn,
   analyticsRefreshFn,
   formAbandonmentFn,
   exitIntentFn,

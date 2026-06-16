@@ -4,6 +4,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { RiskTier } from "@prisma/client";
+import { logger } from "@/lib/logger";
 import { DEAL_RISK_TIERS } from "@/lib/constants";
 
 export interface RiskAssessment {
@@ -92,7 +93,7 @@ export async function computeDealRisk(dealId: string): Promise<RiskAssessment> {
       },
     }).catch(() => {});
 
-    console.log(`[deal-risk] ${tier} alert — deal ${deal.id}`);
+    logger.info(`[deal-risk] ${tier} alert — deal ${deal.id}`);
   }
 
   return { score, tier, factors };

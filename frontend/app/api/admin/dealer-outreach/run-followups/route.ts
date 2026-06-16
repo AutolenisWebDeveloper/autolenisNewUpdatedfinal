@@ -1,6 +1,7 @@
 // POST /api/admin/dealer-outreach/run-followups — Phase 4B-4.
 // Admin-triggered run of the follow-up sequence (same logic as the cron) so the
 // founder can fire it on demand without exposing CRON_SECRET to the browser.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server"
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api"
 import {
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const due = await findDealersDueForFollowup()
-    console.log(`[phase-4b4] Manual run. ${due.length} dealers due for follow-up.`)
+    logger.info(`[phase-4b4] Manual run. ${due.length} dealers due for follow-up.`)
 
     let sent = 0
     let failed = 0
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
         await new Promise((r) => setTimeout(r, 1000))
       } catch (err) {
         failed++
-        console.error(
+        logger.error(
           `[phase-4b4] Manual follow-up failed for ${dealer.id}: ${err instanceof Error ? err.message : String(err)}`,
         )
       }

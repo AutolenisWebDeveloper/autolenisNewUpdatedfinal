@@ -1,4 +1,5 @@
 // lib/services/affiliate/affiliate-payout.service.ts
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { PayoutStatus } from "@prisma/client";
 
@@ -55,6 +56,6 @@ export async function processPayouts(): Promise<number> {
   // TODO [POST-LAUNCH]: Integrate with payment processor (Stripe Payouts/Gusto/ACH).
   // Until integrated: admin manually marks payouts PAID via
   // POST /api/admin/affiliates/payouts/[payoutId]/mark-paid.
-  console.warn("[processPayouts] Payment processor not integrated. Payouts must be settled manually via admin dashboard.");
+  logger.warn("[processPayouts] Payment processor not integrated. Payouts must be settled manually via admin dashboard.");
   return 0;
 }

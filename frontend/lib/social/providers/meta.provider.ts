@@ -13,6 +13,7 @@
 // All methods are defensive: they log, never throw unhandled errors, return
 // typed results, and degrade gracefully when the token is unset.
 
+import { logger } from "@/lib/logger";
 import type {
   PublishingProvider,
   SchedulePostInput,
@@ -66,7 +67,7 @@ export class MetaProvider implements PublishingProvider {
     token: string,
   ): Promise<PublishResult> {
     const pageId = this.pageId();
-    console.log(`[publish:meta] facebook page=${pageId ? "set" : "missing"}`);
+    logger.info(`[publish:meta] facebook page=${pageId ? "set" : "missing"}`);
     if (!pageId) {
       return { success: false, error: "META_PAGE_ID not configured", provider: this.name };
     }
@@ -94,7 +95,7 @@ export class MetaProvider implements PublishingProvider {
       };
       if (!res.ok || data.error || !data.id) {
         const detail = data.error?.message ?? `HTTP ${res.status}`;
-        console.error(`[publish:meta] facebook feed failed: ${detail}`);
+        logger.error(`[publish:meta] facebook feed failed: ${detail}`);
         return { success: false, error: detail, provider: this.name };
       }
 
@@ -110,15 +111,15 @@ export class MetaProvider implements PublishingProvider {
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: commentParams,
         }).catch((err) =>
-          console.warn("[publish:meta] facebook link comment failed (non-fatal):", err),
+          logger.warn("[publish:meta] facebook link comment failed (non-fatal):", err),
         );
       }
 
-      console.log(`[publish:meta] facebook published id=${data.id}`);
+      logger.info(`[publish:meta] facebook published id=${data.id}`);
       return { success: true, platformPostId: data.id, provider: this.name };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[publish:meta] facebook failed: ${message}`);
+      logger.error(`[publish:meta] facebook failed: ${message}`);
       return { success: false, error: message, provider: this.name };
     }
   }
@@ -129,7 +130,7 @@ export class MetaProvider implements PublishingProvider {
     token: string,
   ): Promise<PublishResult> {
     const igAccountId = this.igAccountId();
-    console.log(`[publish:meta] instagram account=${igAccountId ? "set" : "missing"}`);
+    logger.info(`[publish:meta] instagram account=${igAccountId ? "set" : "missing"}`);
     if (!igAccountId) {
       return { success: false, error: "META_INSTAGRAM_ACCOUNT_ID not configured", provider: this.name };
     }
@@ -162,7 +163,7 @@ export class MetaProvider implements PublishingProvider {
       };
       if (!createRes.ok || createData.error || !createData.id) {
         const detail = createData.error?.message ?? `HTTP ${createRes.status}`;
-        console.error(`[publish:meta] instagram container failed: ${detail}`);
+        logger.error(`[publish:meta] instagram container failed: ${detail}`);
         return { success: false, error: detail, provider: this.name };
       }
       const containerId = createData.id;
@@ -209,15 +210,15 @@ export class MetaProvider implements PublishingProvider {
       };
       if (!publishRes.ok || publishData.error || !publishData.id) {
         const detail = publishData.error?.message ?? `HTTP ${publishRes.status}`;
-        console.error(`[publish:meta] instagram publish failed: ${detail}`);
+        logger.error(`[publish:meta] instagram publish failed: ${detail}`);
         return { success: false, error: detail, provider: this.name };
       }
 
-      console.log(`[publish:meta] instagram published id=${publishData.id}`);
+      logger.info(`[publish:meta] instagram published id=${publishData.id}`);
       return { success: true, platformPostId: publishData.id, provider: this.name };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[publish:meta] instagram failed: ${message}`);
+      logger.error(`[publish:meta] instagram failed: ${message}`);
       return { success: false, error: message, provider: this.name };
     }
   }
@@ -302,7 +303,7 @@ export class MetaProvider implements PublishingProvider {
 
       return { ...perPost, ...audience };
     } catch (err) {
-      console.error("[publish:meta] getAnalytics failed (non-fatal):", err);
+      logger.error("[publish:meta] getAnalytics failed (non-fatal):", err);
       return unknown;
     }
   }
@@ -335,7 +336,7 @@ export class MetaProvider implements PublishingProvider {
       error?: { message?: string };
     };
     if (!res.ok || data.error || !data.data) {
-      if (data.error) console.error(`[publish:meta] facebook insights: ${data.error.message}`);
+      if (data.error) logger.error(`[publish:meta] facebook insights: ${data.error.message}`);
       return unknown;
     }
     // A metric absent from the response is unavailable (null); a metric present
@@ -425,7 +426,7 @@ export class MetaProvider implements PublishingProvider {
       error?: { message?: string };
     };
     if (!res.ok || data.error || !data.data) {
-      if (data.error) console.error(`[publish:meta] instagram insights: ${data.error.message}`);
+      if (data.error) logger.error(`[publish:meta] instagram insights: ${data.error.message}`);
       return unknown;
     }
     const metric = (name: string): number | null => {
@@ -508,7 +509,7 @@ export class MetaProvider implements PublishingProvider {
 
       return out;
     } catch (err) {
-      console.error("[publish:meta] audience insights failed (non-fatal):", err);
+      logger.error("[publish:meta] audience insights failed (non-fatal):", err);
       return {};
     }
   }

@@ -3,6 +3,7 @@
 //        CreatorAttribution, plus network-level summary stats.
 // POST — create a new CreatorNetwork record (name + platform required).
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -77,7 +78,7 @@ export async function GET(request: NextRequest) {
 
     return adminSuccess({ creators: rows, stats });
   } catch (err) {
-    console.error("[admin/social] creators query failed:", err);
+    logger.error("[admin/social] creators query failed:", err);
     return adminSuccess(empty);
   }
 }
@@ -132,7 +133,7 @@ export async function POST(request: NextRequest) {
     });
     return adminSuccess({ creator });
   } catch (err) {
-    console.error("[admin/social] creator create failed:", err);
+    logger.error("[admin/social] creator create failed:", err);
     return adminError("SERVER_ERROR", "Failed to create creator", 500);
   }
 }
@@ -167,7 +168,7 @@ export async function PATCH(request: NextRequest) {
     const creator = await prisma.creatorNetwork.update({ where: { id }, data });
     return adminSuccess({ creator });
   } catch (err) {
-    console.error("[admin/social] creator update failed:", err);
+    logger.error("[admin/social] creator update failed:", err);
     return adminError("SERVER_ERROR", "Failed to update creator", 500);
   }
 }

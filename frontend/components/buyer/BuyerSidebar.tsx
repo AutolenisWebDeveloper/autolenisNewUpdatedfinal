@@ -1,5 +1,6 @@
 "use client";
 
+import { logger } from "@/lib/logger";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -123,7 +124,7 @@ export default function BuyerSidebar() {
     fetch("/api/buyer/notifications/unread-count")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.data?.count) setUnreadCount(d.data.count); })
-      .catch(err => { console.error("[BuyerSidebar] Failed to fetch unread count:", err); });
+      .catch(err => { logger.error("[BuyerSidebar] Failed to fetch unread count:", err); });
 
     function handleCleared() { setUnreadCount(0); }
     window.addEventListener(NOTIFICATION_CLEARED_EVENT, handleCleared);

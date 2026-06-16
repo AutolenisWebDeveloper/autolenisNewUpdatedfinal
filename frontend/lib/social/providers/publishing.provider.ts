@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 // AutoLenis Social Engine — Publishing provider contract.
 //
 // Provider-agnostic interface for scheduling/publishing social posts and
@@ -85,12 +86,12 @@ export class NoopPublishingProvider implements PublishingProvider {
   readonly name = "noop";
 
   async schedulePost(input: SchedulePostInput): Promise<PublishResult> {
-    console.log(`[publish:noop] disabled — would schedule post ${input.postId} on ${input.platform}`);
+    logger.info(`[publish:noop] disabled — would schedule post ${input.postId} on ${input.platform}`);
     return { success: false, error: "publishing disabled", provider: this.name };
   }
 
   async publishNow(input: PublishPostInput): Promise<PublishResult> {
-    console.log(`[publish:noop] disabled — would publish post ${input.postId} on ${input.platform}`);
+    logger.info(`[publish:noop] disabled — would publish post ${input.postId} on ${input.platform}`);
     return { success: false, error: "publishing disabled", provider: this.name };
   }
 

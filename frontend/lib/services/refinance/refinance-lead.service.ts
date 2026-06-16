@@ -6,6 +6,7 @@
 // rates/APR/approval likelihood, never embeds the partner application, and never
 // exposes an "approve/reject" action to admins.
 
+import { logger } from "@/lib/logger";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { RefinanceStatus, type RefinanceApplication } from "@prisma/client";
@@ -132,7 +133,7 @@ export async function submitRefinanceLead(input: RefinanceLeadInput): Promise<Re
       data: { lead_id: lead.id, qualified, status, state: input.state.toUpperCase() },
     });
   } catch (err) {
-    console.error("[refinance-lead] emit failed:", err);
+    logger.error("[refinance-lead] emit failed:", err);
   }
 
   return { leadId: lead.leadId, qualified, status };

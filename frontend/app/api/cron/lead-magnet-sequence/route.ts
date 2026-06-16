@@ -7,6 +7,7 @@
 // Per-step idempotency (per contact, per UTC day) lives in the sequence module,
 // so a double cron run is safe.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -84,7 +85,7 @@ export async function GET(request: NextRequest) {
         .maybeSingle();
       contactId = (data?.id as string | undefined) ?? null;
     } catch (err) {
-      console.error("[lead-magnet-sequence] contact lookup failed:", err);
+      logger.error("[lead-magnet-sequence] contact lookup failed:", err);
     }
     if (!contactId) {
       skipped++;
@@ -104,7 +105,7 @@ export async function GET(request: NextRequest) {
       if (res.status === "queued") queued++;
       else suppressed++;
     } catch (err) {
-      console.error("[lead-magnet-sequence] step send failed:", err);
+      logger.error("[lead-magnet-sequence] step send failed:", err);
       skipped++;
     }
   }

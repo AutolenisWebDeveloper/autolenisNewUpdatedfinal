@@ -7,6 +7,7 @@
 // - Stores employment fields (AutoLenis-internal only) and the EXACT FCRA
 //   consent text on PrequalConsent for legal audit.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { PreQualDecision, PreQualTier } from "@prisma/client";
 import {
@@ -178,7 +179,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
   // Gate 2: Deceased indicator → manual review.
   else if (result.deceasedFlag) {
     finalDecision = PreQualDecision.MANUAL_REVIEW;
-    console.warn(`[prequal] Deceased indicator for buyer ${buyer.id} — manual review`);
+    logger.warn(`[prequal] Deceased indicator for buyer ${buyer.id} — manual review`);
   }
   // Gate 3: MLA covered borrower → manual review (apply MLA disclosures).
   else if (result.mlaCovered === true) {
@@ -196,7 +197,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
   // Gate 4: Fraud warning → manual review.
   else if (result.fraudWarning && result.fraudWarning !== "N" && result.fraudWarning !== "") {
     finalDecision = PreQualDecision.MANUAL_REVIEW;
-    console.warn(`[prequal] Fraud warning ${result.fraudWarning} for buyer ${buyer.id}`);
+    logger.warn(`[prequal] Fraud warning ${result.fraudWarning} for buyer ${buyer.id}`);
   }
 
   // ── maxOtdAmountCents assignment ───────────────────────────────────────────
@@ -329,7 +330,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
       });
     }
   } catch (err) {
-    console.error("[prequal] CRM prequal_started emit failed:", err);
+    logger.error("[prequal] CRM prequal_started emit failed:", err);
   }
 
   // Send congratulations email and log compliance event for APPROVED decisions.
@@ -348,7 +349,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         expiryDate,
       });
     } catch (emailErr) {
-      console.error("[prequal] Failed to send approval email:", emailErr);
+      logger.error("[prequal] Failed to send approval email:", emailErr);
     }
 
     try {
@@ -367,7 +368,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         },
       });
     } catch (logErr) {
-      console.error("[prequal] Failed to log compliance event:", logErr);
+      logger.error("[prequal] Failed to log compliance event:", logErr);
     }
   }
 
@@ -401,7 +402,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
       });
       outcome = result.outcome;
     } catch (emailErr) {
-      console.error("[prequal] Failed to send adverse action email:", emailErr);
+      logger.error("[prequal] Failed to send adverse action email:", emailErr);
       adverseActionErrorMessage =
         emailErr instanceof Error ? emailErr.message : String(emailErr);
     }
@@ -430,7 +431,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         },
       });
     } catch (logErr) {
-      console.error("[prequal] Failed to log adverse action compliance event:", logErr);
+      logger.error("[prequal] Failed to log adverse action compliance event:", logErr);
     }
   }
 
@@ -450,7 +451,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         decisionTimestamp: prequal.updatedAt.toISOString(),
       });
     } catch (emailErr) {
-      console.error("[prequal] Failed to send under-review email:", emailErr);
+      logger.error("[prequal] Failed to send under-review email:", emailErr);
     }
     try {
       await prisma.complianceEvent.create({
@@ -466,7 +467,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         },
       });
     } catch (logErr) {
-      console.error("[prequal] Failed to log under-review compliance event:", logErr);
+      logger.error("[prequal] Failed to log under-review compliance event:", logErr);
     }
   }
 
@@ -484,7 +485,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         prequalApplicationId: prequal.id,
       });
     } catch (emailErr) {
-      console.error("[prequal] Failed to send admin alert email:", emailErr);
+      logger.error("[prequal] Failed to send admin alert email:", emailErr);
     }
   }
 

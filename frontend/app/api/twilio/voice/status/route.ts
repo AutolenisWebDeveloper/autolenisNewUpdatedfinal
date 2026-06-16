@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { parseTwilioRequest } from "@/lib/voice/twilio-verify";
 import {
@@ -47,7 +48,7 @@ async function sendInternalAlert(body: string): Promise<void> {
       html: `<pre style="font-family:ui-monospace,monospace;font-size:13px">${body}</pre>`,
     });
   } catch (err) {
-    console.error("[voice/status] internal alert failed:", err);
+    logger.error("[voice/status] internal alert failed:", err);
   }
 }
 
@@ -70,7 +71,7 @@ async function sendCallerThankYouEmail(email: string, firstName: string): Promis
         `AutoLenis Team\nsupport@autolenis.com\nMonday–Friday 9AM–6PM CT`,
     });
   } catch (err) {
-    console.error("[voice/status] caller email failed:", err);
+    logger.error("[voice/status] caller email failed:", err);
   }
 }
 
@@ -161,7 +162,7 @@ export async function POST(request: NextRequest) {
         });
       }
     } catch (err) {
-      console.error("[voice/status] CRM update failed:", err);
+      logger.error("[voice/status] CRM update failed:", err);
     }
 
     // FIX 3b — confirmation email when the caller left an address.
@@ -185,7 +186,7 @@ export async function POST(request: NextRequest) {
             conv.vehicleRequest!,
             conv.callerPhone || from,
             conv.inboundNumber,
-          ).catch((err) => console.error("[voice/status] late dispatch failed:", err));
+          ).catch((err) => logger.error("[voice/status] late dispatch failed:", err));
         }
       } else if (!conv.founderAlertSent) {
         updateConversation(callSid, { founderAlertSent: true });
@@ -194,7 +195,7 @@ export async function POST(request: NextRequest) {
           callerPhone: conv.callerPhone || from,
           inboundNumber: conv.inboundNumber,
           messageDetails: conv.messageDetails ?? {},
-        }).catch((err) => console.error("[voice/status] founder alert failed:", err));
+        }).catch((err) => logger.error("[voice/status] founder alert failed:", err));
       }
     }
 
@@ -218,7 +219,7 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     // Status callbacks must always return 200 — Twilio retries non-2xx and the
     // call has already ended, so there is nothing for the caller to recover.
-    console.error("Voice status error:", err);
+    logger.error("Voice status error:", err);
     return new Response("", { status: 200 });
   }
 }

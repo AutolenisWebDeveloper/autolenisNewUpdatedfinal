@@ -8,6 +8,7 @@
 // VehicleRequestEvent), and sends buyer + admin confirmation emails.
 //
 // All emails are best-effort and must never block the success response.
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -175,7 +176,7 @@ export async function POST(request: NextRequest) {
           note: "Buyer completed the step 2 vehicle-detail form.",
           payload: detailPayload,
         },
-      }).catch((err) => console.error("[request-vehicle/complete] event create failed:", err));
+      }).catch((err) => logger.error("[request-vehicle/complete] event create failed:", err));
     } else {
       // ── Fallback: no buyer account / no request on file ────────────────────
       // Persist the completion detail to the CRM contact timeline if a contact
@@ -199,7 +200,7 @@ export async function POST(request: NextRequest) {
           });
         }
       } catch (crmErr) {
-        console.error("[request-vehicle/complete] CRM fallback save failed:", crmErr);
+        logger.error("[request-vehicle/complete] CRM fallback save failed:", crmErr);
       }
     }
 
@@ -235,7 +236,7 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ success: true, accountFound: true });
   } catch (err) {
-    console.error("[request-vehicle/complete] failed:", err);
+    logger.error("[request-vehicle/complete] failed:", err);
     return NextResponse.json(
       { success: false, error: { code: "SERVER_ERROR", message: "Failed to complete request" } },
       { status: 500 },

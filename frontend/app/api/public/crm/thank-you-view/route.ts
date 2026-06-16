@@ -5,6 +5,7 @@
 // Returns success even when the contact lookup misses (race condition on
 // first load — the contact may not have committed yet when the redirect lands).
 
+import { logger } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { getServiceSupabase } from "@/lib/supabase-service";
 
@@ -43,7 +44,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[crm/thank-you-view]", err);
+    logger.error("[crm/thank-you-view]", err);
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 }

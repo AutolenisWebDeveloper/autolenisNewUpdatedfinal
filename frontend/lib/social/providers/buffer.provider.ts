@@ -8,6 +8,7 @@
 // errors, return typed results, and degrade gracefully when a channel id is
 // not configured.
 
+import { logger } from "@/lib/logger";
 import type {
   PublishingProvider,
   SchedulePostInput,
@@ -153,7 +154,7 @@ export class BufferProvider implements PublishingProvider {
     dueAtIso?: string,
   ): Promise<PublishResult> {
     const channelId = channelIdFor(input.platform);
-    console.log(
+    logger.info(
       `[publish:buffer] createPost platform=${input.platform} channel=${channelId ? "set" : "missing"} mode=${mode}${dueAtIso ? ` at=${dueAtIso}` : ""}`,
     );
 
@@ -210,18 +211,18 @@ export class BufferProvider implements PublishingProvider {
       }
       // MutationError variant carries a message but no post.
       if (result.message && !result.post) {
-        console.error(`[publish:buffer] MutationError: ${result.message}`);
+        logger.error(`[publish:buffer] MutationError: ${result.message}`);
         return { success: false, error: result.message, provider: this.name };
       }
       const platformPostId = result.post?.id;
       if (!platformPostId) {
         return { success: false, error: "Buffer response missing post id", provider: this.name };
       }
-      console.log(`[publish:buffer] created post id=${platformPostId} dueAt=${result.post?.dueAt ?? "?"}`);
+      logger.info(`[publish:buffer] created post id=${platformPostId} dueAt=${result.post?.dueAt ?? "?"}`);
       return { success: true, platformPostId, provider: this.name };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[publish:buffer] createPost failed: ${message}`);
+      logger.error(`[publish:buffer] createPost failed: ${message}`);
       return { success: false, error: message, provider: this.name };
     }
   }
@@ -237,7 +238,7 @@ export class BufferProvider implements PublishingProvider {
   }
 
   async getPostStatus(platformPostId: string): Promise<PostStatusResult> {
-    console.log(`[publish:buffer] getPostStatus id=${platformPostId}`);
+    logger.info(`[publish:buffer] getPostStatus id=${platformPostId}`);
     if (!process.env.BUFFER_API_KEY) {
       return { platformPostId, status: "unknown", error: "BUFFER_API_KEY not configured" };
     }
@@ -254,13 +255,13 @@ export class BufferProvider implements PublishingProvider {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[publish:buffer] getPostStatus failed: ${message}`);
+      logger.error(`[publish:buffer] getPostStatus failed: ${message}`);
       return { platformPostId, status: "unknown", error: message };
     }
   }
 
   async getAnalytics(platformPostId: string): Promise<PostAnalyticsResult> {
-    console.log(`[publish:buffer] getAnalytics id=${platformPostId}`);
+    logger.info(`[publish:buffer] getAnalytics id=${platformPostId}`);
     if (!process.env.BUFFER_API_KEY) {
       return { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0, error: "BUFFER_API_KEY not configured" };
     }
@@ -277,7 +278,7 @@ export class BufferProvider implements PublishingProvider {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[publish:buffer] getAnalytics failed: ${message}`);
+      logger.error(`[publish:buffer] getAnalytics failed: ${message}`);
       return { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0, error: message };
     }
   }

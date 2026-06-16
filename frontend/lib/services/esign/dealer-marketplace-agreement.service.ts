@@ -21,6 +21,7 @@ import {
   isDocuSignConfigured,
 } from "./docusign-auth.service";
 import { sendDealerAgreementPendingEmail } from "@/lib/services/email/resend.service";
+import { logger } from "@/lib/logger";
 
 export interface MarketplaceEnvelopeResult {
   envelopeId: string | null;
@@ -36,7 +37,7 @@ export async function sendDealerMarketplaceAgreement(params: {
   const { dealerId, email, name } = params;
 
   if (!isDocuSignConfigured()) {
-    console.warn("[dealer-marketplace] DocuSign not configured — skipping envelope send");
+    logger.warn("[dealer-marketplace] DocuSign not configured — skipping envelope send");
     return { envelopeId: null, error: null, skipped: true };
   }
 
@@ -51,7 +52,7 @@ export async function sendDealerMarketplaceAgreement(params: {
 
   const config = getDocuSignConfig();
   if (!config.dealerTemplateId) {
-    console.error("[dealer-marketplace] DOCUSIGN_DEALER_TEMPLATE_ID is empty");
+    logger.error("[dealer-marketplace] DOCUSIGN_DEALER_TEMPLATE_ID is empty");
     return { envelopeId: null, error: "Template not configured", skipped: false };
   }
 
@@ -60,7 +61,7 @@ export async function sendDealerMarketplaceAgreement(params: {
     token = await getDocuSignAccessToken();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[dealer-marketplace] JWT auth failed:", msg);
+    logger.error("[dealer-marketplace] JWT auth failed:", msg);
     return { envelopeId: null, error: `Authentication failed: ${msg}`, skipped: false };
   }
 
@@ -101,7 +102,7 @@ export async function sendDealerMarketplaceAgreement(params: {
     });
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
-      console.error(`[dealer-marketplace] envelope creation failed (${res.status}):`, errText);
+      logger.error(`[dealer-marketplace] envelope creation failed (${res.status}):`, errText);
       return { envelopeId: null, error: `DocuSign error ${res.status}`, skipped: false };
     }
     const data = (await res.json()) as { envelopeId?: string };
@@ -111,7 +112,7 @@ export async function sendDealerMarketplaceAgreement(params: {
     envelopeId = data.envelopeId;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[dealer-marketplace] envelope creation threw:", msg);
+    logger.error("[dealer-marketplace] envelope creation threw:", msg);
     return { envelopeId: null, error: `Network error: ${msg}`, skipped: false };
   }
 
@@ -134,7 +135,7 @@ export async function sendDealerMarketplaceAgreement(params: {
     contactName: name || dealerRow?.dealershipName || "Dealer",
     dealershipName: dealerRow?.dealershipName ?? "",
     signingUrl: `${appUrl}/dealer/onboarding`,
-  }).catch(err => console.error("[dealer-marketplace] pending email failed:", err));
+  }).catch(err => logger.error("[dealer-marketplace] pending email failed:", err));
 
   return { envelopeId, error: null, skipped: false };
 }

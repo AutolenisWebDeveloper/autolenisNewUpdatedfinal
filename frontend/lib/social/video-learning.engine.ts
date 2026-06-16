@@ -5,6 +5,7 @@
 // orchestrator reads these learnings back into the generation prompt so the
 // engine keeps steering toward what actually holds attention.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 export interface VideoLearnings {
@@ -82,7 +83,7 @@ export async function recordVideoLearning(
       });
     }
   } catch (err) {
-    console.error("[video-learning] record failed:", err);
+    logger.error("[video-learning] record failed:", err);
   }
 }
 

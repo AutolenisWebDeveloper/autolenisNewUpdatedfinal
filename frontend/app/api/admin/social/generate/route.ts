@@ -2,6 +2,7 @@
 // Manually generate a post for a specific signal + franchise + platform.
 // If platform is omitted, generates for every platform on the franchise.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -43,25 +44,25 @@ export async function POST(request: NextRequest) {
     const platforms = platform ? [platform] : franchise.platforms;
     const slots = computePostingSlots(franchise.postingSlots);
 
-    console.log("[social-generate] signal:", signalId, "franchise:", franchiseSlug, "platforms:", platforms);
+    logger.info("[social-generate] signal:", signalId, "franchise:", franchiseSlug, "platforms:", platforms);
 
     const created: string[] = [];
     const failed: string[] = [];
     for (let i = 0; i < platforms.length; i++) {
       const scheduledAt = slots[i % Math.max(slots.length, 1)] ?? computePostingSlots([12])[0];
       try {
-        console.log("[social-generate] calling orchestrator for platform:", platforms[i]);
+        logger.info("[social-generate] calling orchestrator for platform:", platforms[i]);
         const post = await generateAndQueuePost({ signal, franchise, platform: platforms[i], scheduledAt });
-        console.log("[social-generate] result: created post", post.id, "status", post.status);
+        logger.info("[social-generate] result: created post", post.id, "status", post.status);
         created.push(post.id);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`[social-generate] platform ${platforms[i]} failed:`, message);
+        logger.error(`[social-generate] platform ${platforms[i]} failed:`, message);
         failed.push(`${platforms[i]}: ${message}`);
       }
     }
 
-    console.log("[social-generate] done. created:", created.length, "failed:", failed.length);
+    logger.info("[social-generate] done. created:", created.length, "failed:", failed.length);
 
     await createAuditLog(admin, request, {
       action: "SOCIAL_POST_MANUAL_GENERATE",
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
       failed,
     });
   } catch (err) {
-    console.error("[social-generate] unhandled error:", err);
+    logger.error("[social-generate] unhandled error:", err);
     return adminError(
       "INTERNAL_ERROR",
       err instanceof Error ? err.message : "Unknown error",

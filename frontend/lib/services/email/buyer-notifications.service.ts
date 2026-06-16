@@ -17,6 +17,7 @@
 // Reuses the project's lazy-Resend pattern so `next build` never throws when the
 // API key isn't in scope. Sends are best-effort and never throw to the caller.
 
+import { logger } from "@/lib/logger";
 import { Resend } from "resend"
 
 const FROM_NAME = process.env.FROM_NAME ?? "AutoLenis"
@@ -50,7 +51,7 @@ async function sendBuyerEmail(params: {
 }): Promise<void> {
   const resend = getResend()
   if (!resend) {
-    console.warn(
+    logger.warn(
       `[buyer-notifications] RESEND_API_KEY not configured — email skipped. To: ${params.to}`,
     )
     return
@@ -64,17 +65,17 @@ async function sendBuyerEmail(params: {
       html: params.html,
     })
     if (result.error || !result.data?.id) {
-      console.error(
+      logger.error(
         `[buyer-notifications] Resend dispatch failed for ${params.to}:`,
         result.error ?? "no id returned",
       )
       return
     }
-    console.log(
+    logger.info(
       `[buyer-notifications] Email sent to ${params.to} (resend ${result.data.id})`,
     )
   } catch (err) {
-    console.error(
+    logger.error(
       `[buyer-notifications] Email send threw for ${params.to}:`,
       err,
     )

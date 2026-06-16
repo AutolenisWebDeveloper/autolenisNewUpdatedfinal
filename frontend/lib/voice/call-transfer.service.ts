@@ -7,6 +7,7 @@
 // transfers are disabled or no founder number is configured, callers fall
 // through to the existing Phase 1 message-taking flow and the call never breaks.
 
+import { logger } from "@/lib/logger";
 import twilio from "twilio";
 import { generateZuraSpeech } from "@/lib/voice/elevenlabs-tts.service";
 
@@ -47,7 +48,7 @@ export function getTransferConfig(): TransferConfig | null {
   const founderPhone =
     process.env.FOUNDER_PHONE_NUMBER || process.env.TWILIO_TRANSFER_NUMBER;
   if (!founderPhone) {
-    console.warn(
+    logger.warn(
       "[zura-p3] FOUNDER_PHONE_NUMBER not set — cannot transfer, falling back to message-taking",
     );
     return null;

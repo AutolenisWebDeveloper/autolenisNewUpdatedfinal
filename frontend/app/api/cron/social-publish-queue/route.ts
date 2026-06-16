@@ -2,6 +2,7 @@
 // Publishes due posts (APPROVED/SCHEDULED, scheduledAt reached) whose video is
 // ready or which have no video. Schedule: every 5 minutes.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -57,11 +58,11 @@ export async function GET(request: NextRequest) {
       published += 1;
     } catch (err) {
       failed += 1;
-      console.error(`[social-publish-queue] failed post ${post.id}:`, err instanceof Error ? err.message : err);
+      logger.error(`[social-publish-queue] failed post ${post.id}:`, err instanceof Error ? err.message : err);
     }
   }
 
   const summary = { considered: posts.length, published, failed, timestamp: now.toISOString() };
-  console.log("[social-publish-queue]", JSON.stringify(summary));
+  logger.info("[social-publish-queue]", JSON.stringify(summary));
   return NextResponse.json({ success: true, data: summary });
 }

@@ -14,6 +14,7 @@
 // This service NEVER throws — every failure is logged and degraded so a buyer's
 // intake response is never affected by outreach problems.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma"
 import { generateBuyerOpportunityEmail } from "@/lib/services/dealer-recruitment/email-template.service"
 import { sendDealerEmail } from "@/lib/services/dealer-recruitment/dealer-email-send.service"
@@ -111,7 +112,7 @@ export async function runPostIntakeOutreach(
     })
 
     if (!opportunity) {
-      console.warn(
+      logger.warn(
         `[post-intake-outreach] BuyerOpportunity ${buyerOpportunityId} not found`,
       )
       return { dealersContacted: 0 }
@@ -119,7 +120,7 @@ export async function runPostIntakeOutreach(
 
     // Vehicle-specific outreach requires at least a make.
     if (!opportunity.make) {
-      console.log(
+      logger.info(
         `[post-intake-outreach] Opportunity ${buyerOpportunityId} has no make — skipping outreach`,
       )
       return { dealersContacted: 0 }
@@ -168,7 +169,7 @@ export async function runPostIntakeOutreach(
     })
 
     if (prospects.length === 0) {
-      console.log(
+      logger.info(
         `[post-intake-outreach] No eligible dealers for buyer opportunity ${buyerOpportunityId}`,
       )
       return { dealersContacted: 0 }
@@ -222,12 +223,12 @@ export async function runPostIntakeOutreach(
         if (result.success) {
           dealersContacted += 1
         } else {
-          console.warn(
+          logger.warn(
             `[post-intake-outreach] Send to dealer ${prospect.id} failed: ${result.error}`,
           )
         }
       } catch (err) {
-        console.error(
+        logger.error(
           `[post-intake-outreach] Send threw for dealer ${prospect.id}:`,
           err,
         )
@@ -237,12 +238,12 @@ export async function runPostIntakeOutreach(
       await delay(SEND_DELAY_MS)
     }
 
-    console.log(
+    logger.info(
       `[post-intake-outreach] Contacted ${dealersContacted} dealers for buyer opportunity ${buyerOpportunityId}`,
     )
     return { dealersContacted }
   } catch (err) {
-    console.error(
+    logger.error(
       `[post-intake-outreach] Outreach failed for buyer opportunity ${buyerOpportunityId}:`,
       err,
     )

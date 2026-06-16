@@ -1,6 +1,7 @@
 // lib/services/admin/admin-affiliate-command-center.service.ts
 // Admin Affiliate Command Center — service layer for all affiliate admin operations
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { AffiliateStatus } from "@prisma/client";
 import { addSupportNote } from "@/lib/services/admin/admin-support.service";
@@ -903,7 +904,7 @@ export async function clawbackCommission(
       title: "Commission adjustment",
       body: `A commission of $${(original.amountCents / 100).toLocaleString()} has been clawed back. Reason: ${reason}`,
     },
-  }).catch((err) => console.error("[clawbackCommission] affiliate notification failed:", err));
+  }).catch((err) => logger.error("[clawbackCommission] affiliate notification failed:", err));
 
   return {
     clawedBack: true,

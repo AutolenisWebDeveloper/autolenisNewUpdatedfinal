@@ -8,6 +8,7 @@
 // All functions are defensive and non-throwing where they sit on a hot path
 // (a CRM/analytics hiccup must never break a public page load or a signup).
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import crypto from "crypto";
 
@@ -60,7 +61,7 @@ export async function trackClick(input: TrackClickInput): Promise<TrackClickResu
       select: { id: true },
     });
     if (!affiliate) {
-      console.warn(`[group-8] trackClick: no affiliate for code ${code}`);
+      logger.warn(`[group-8] trackClick: no affiliate for code ${code}`);
       return { tracked: false, reason: "unknown_code" };
     }
 
@@ -80,7 +81,7 @@ export async function trackClick(input: TrackClickInput): Promise<TrackClickResu
 
     return { tracked: true };
   } catch (err) {
-    console.error("[group-8] trackClick failed:", err);
+    logger.error("[group-8] trackClick failed:", err);
     return { tracked: false, reason: "error" };
   }
 }
@@ -116,7 +117,7 @@ export async function attributeConversion(
       });
     }
   } catch (err) {
-    console.error("[group-8] attributeConversion failed:", err);
+    logger.error("[group-8] attributeConversion failed:", err);
     // Non-blocking — signup must never fail because of click attribution.
   }
 }
@@ -148,7 +149,7 @@ export async function getReferralClickStats(affiliateId: string): Promise<Referr
 
     return { totalClicks, clicksThisMonth, convertedClicks, conversionRate };
   } catch (err) {
-    console.error("[group-8] getReferralClickStats failed:", err);
+    logger.error("[group-8] getReferralClickStats failed:", err);
     return { totalClicks: 0, clicksThisMonth: 0, convertedClicks: 0, conversionRate: 0 };
   }
 }

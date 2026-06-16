@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from 'next/server';
 import twilio from 'twilio';
 import { createClient } from '@supabase/supabase-js';
@@ -140,7 +141,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     return twimlResponse('<Response/>');
   } catch (err) {
-    console.error('[twilio.inbound] fatal', err);
+    logger.error('[twilio.inbound] fatal', err);
     return new NextResponse('Internal Webhook Failure', { status: 500 });
   }
 }

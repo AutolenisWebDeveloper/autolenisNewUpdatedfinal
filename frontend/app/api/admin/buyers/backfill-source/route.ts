@@ -3,6 +3,7 @@
 // context clues, then writes the inferred value. NEVER overwrites an existing
 // non-null source. Processes in batches of 50 to stay within the function
 // timeout.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
 
     const remaining = await prisma.buyerOpportunity.count({ where: { source: null } });
 
-    console.log(
+    logger.info(
       `[phase-5.5] backfill-source: updated=${updated}, remaining=${remaining}, rules=${JSON.stringify(ruleBreakdown)}`,
     );
 

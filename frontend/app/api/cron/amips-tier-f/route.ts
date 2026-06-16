@@ -6,6 +6,7 @@
 // first time the combo qualifies — unlocking the proprietary, transaction-backed
 // content moat. Page generation itself runs through the standard AMIPS generator
 // cron, which re-checks the 50-transaction gate before publishing.
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { runTierFThresholdMonitor } from "@/lib/amips/pipelines/tier-f-threshold.pipeline";
@@ -23,7 +24,7 @@ export async function GET(request: NextRequest) {
   }
 
   const result = await runTierFThresholdMonitor();
-  console.log(
+  logger.info(
     `[amips-cron] tier-f — over-threshold ${result.combosOverThreshold}, unlocked ${result.unlocked}, queued ${result.queueItemsSeeded}, aggregated ${result.aggregated}`,
   );
   return NextResponse.json({ success: true, data: result });

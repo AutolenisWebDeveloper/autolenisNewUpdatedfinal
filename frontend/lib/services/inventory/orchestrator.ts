@@ -9,6 +9,7 @@
 // Removed in 2026-04 audit: AutoTrader, Cars.com, CarGurus, TrueCar, Edmunds web-scrape stubs
 // (all returned [] pending production parsing implementation; dropped to keep healthScore honest).
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { InventoryLane } from "@prisma/client";
 import type { NormalizedVehicle, AdapterRunResult, SearchParams } from "./adapters/IInventoryAdapter";
@@ -232,7 +233,7 @@ export async function bootstrapInventory(): Promise<void> {
       radius: 50,
       maxResults: 20,
     }, "priority").catch(err => {
-      console.error(`Bootstrap failed for ${market.city}:`, err);
+      logger.error(`Bootstrap failed for ${market.city}:`, err);
     });
   }
 }

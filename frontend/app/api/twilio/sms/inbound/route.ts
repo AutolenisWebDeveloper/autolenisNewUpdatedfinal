@@ -10,6 +10,7 @@
 // verifyTwilioRequest against process.env.TWILIO_WEBHOOK_URL (the public
 // URL Twilio actually signed against).
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { twimlResponse, verifyTwilioRequest } from "@/lib/voice/twilio-verify";
 import { detectOptOutIntent } from "@/lib/ai/acquisition";
@@ -53,7 +54,7 @@ export async function POST(req: Request) {
     verifyTwilioRequest(authToken, signature, webhookUrl, params);
 
   if (!verified) {
-    console.error("[sms/inbound] signature verification failed", {
+    logger.error("[sms/inbound] signature verification failed", {
       hasAuthToken: !!authToken,
       hasWebhookUrl: !!webhookUrl,
       hasSignature: !!signature,

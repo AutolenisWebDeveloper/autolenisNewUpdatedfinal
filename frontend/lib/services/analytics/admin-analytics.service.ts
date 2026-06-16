@@ -9,6 +9,7 @@
 // for display with `formatCentsAsUsd` at the page layer. Never hardcode fee
 // amounts — read them from real payment records.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 // ---------------------------------------------------------------------------
@@ -75,7 +76,7 @@ export async function getBuyerPipelineStats(): Promise<BuyerPipelineStats> {
       conversionRate: pct(paidDeposits, total),
     };
   } catch (err) {
-    console.error("[group-6] getBuyerPipelineStats failed", err);
+    logger.error("[group-6] getBuyerPipelineStats failed", err);
     return EMPTY_BUYER;
   }
 }
@@ -165,7 +166,7 @@ export async function getDealerOutreachStats(): Promise<DealerOutreachStats> {
       },
     };
   } catch (err) {
-    console.error("[group-6] getDealerOutreachStats failed", err);
+    logger.error("[group-6] getDealerOutreachStats failed", err);
     return EMPTY_DEALER;
   }
 }
@@ -230,7 +231,7 @@ export async function getBuyerSourceStats(): Promise<BuyerSourceStats> {
       dailyTrend: [...trendMap.entries()].map(([date, count]) => ({ date, count })),
     };
   } catch (err) {
-    console.error("[group-6] getBuyerSourceStats failed", err);
+    logger.error("[group-6] getBuyerSourceStats failed", err);
     return EMPTY_SOURCE;
   }
 }
@@ -284,7 +285,7 @@ export async function getVoiceStats(): Promise<VoiceStats> {
 
     return { callsThisWeek, callsThisMonth, byIntent, messagesTaken, transfersAttempted };
   } catch (err) {
-    console.error("[group-6] getVoiceStats failed", err);
+    logger.error("[group-6] getVoiceStats failed", err);
     return EMPTY_VOICE;
   }
 }
@@ -377,7 +378,7 @@ export async function getRevenueStats(): Promise<RevenueStats> {
       activeDeals,
     };
   } catch (err) {
-    console.error("[group-6] getRevenueStats failed", err);
+    logger.error("[group-6] getRevenueStats failed", err);
     return EMPTY_REVENUE;
   }
 }

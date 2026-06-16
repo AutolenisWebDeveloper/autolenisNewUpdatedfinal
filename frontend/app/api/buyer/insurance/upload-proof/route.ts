@@ -9,6 +9,7 @@
 //   - Bucket name: "insurance-proofs"
 //   - Access: private (admins access via service role key; files are not publicly accessible)
 //   - RLS policy: authenticated buyers can INSERT their own files (path starts with their buyerId); service role can SELECT all
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { createServiceSupabaseClient } from "@/lib/supabase";
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
     .upload(path, buffer, { contentType: file.type, upsert: false });
 
   if (uploadError) {
-    console.error("[upload-proof] Supabase storage error:", uploadError);
+    logger.error("[upload-proof] Supabase storage error:", uploadError);
     return errorResponse(
       "UPLOAD_FAILED",
       "File upload failed. Please try again or contact support.",
@@ -103,7 +104,7 @@ export async function POST(request: NextRequest) {
       body:    "Your proof of insurance has been submitted and is under review. We'll notify you once it's verified.",
     },
   }).catch((err: unknown) => {
-    console.error("[upload-proof] buyer notification failed:", err);
+    logger.error("[upload-proof] buyer notification failed:", err);
   });
 
   return successResponse({ status: "EXTERNAL_UPLOADED", proofUrl }, 201);

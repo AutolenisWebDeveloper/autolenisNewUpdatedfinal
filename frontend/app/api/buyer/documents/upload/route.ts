@@ -2,6 +2,7 @@
 // Accepts multipart/form-data: file + docType
 // Uploads to Supabase Storage "buyer-documents" bucket
 // Creates a Document record via uploadDocument() service
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { createServiceSupabaseClient } from "@/lib/supabase";
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
     .upload(path, buffer, { contentType: file.type, upsert: false });
 
   if (uploadError) {
-    console.error("[doc-upload]", uploadError);
+    logger.error("[doc-upload]", uploadError);
     return errorResponse("STORAGE_ERROR", "File upload failed. Please try again.", 500);
   }
 

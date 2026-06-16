@@ -5,6 +5,7 @@
 // Does NOT expose the reset link in the API response — only confirms it was sent.
 // Requires reason (min 10 chars)
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   });
 
   if (error) {
-    console.error("[reset-password] Supabase generateLink failed:", error);
+    logger.error("[reset-password] Supabase generateLink failed:", error);
     return adminError("RESET_FAILED", "Failed to generate password reset link", 500);
   }
 

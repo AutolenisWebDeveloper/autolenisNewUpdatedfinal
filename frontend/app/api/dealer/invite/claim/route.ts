@@ -1,5 +1,6 @@
 // POST /api/dealer/invite/claim — validate invitation token, create User+Dealer, redirect to onboarding
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@supabase/supabase-js";
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     await supabase.auth.admin.deleteUser(supabaseUserId).catch(() => {});
-    console.error("[dealer/invite/claim] DB error:", err);
+    logger.error("[dealer/invite/claim] DB error:", err);
     return NextResponse.json({ error: "Database error" }, { status: 500 });
   }
 
@@ -108,7 +109,7 @@ export async function POST(request: NextRequest) {
     const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
     await sendDealerWelcomeEmail({ to: invitation.email, contactName: invitation.contactName, dealershipName: invitation.dealershipName, dashboardUrl: `${appUrl}/dealer/dashboard` });
   } catch (err) {
-    console.error("[dealer/invite/claim] Welcome email error:", err);
+    logger.error("[dealer/invite/claim] Welcome email error:", err);
   }
 
   // Sync into CRM contacts (non-fatal)
@@ -128,7 +129,7 @@ export async function POST(request: NextRequest) {
       await ContactService.linkContactIdentity(crmSupabase, contact.id, 'dealer', dealerId);
     }
   } catch (err) {
-    console.error("[dealer/invite/claim] CRM contact sync failed:", err);
+    logger.error("[dealer/invite/claim] CRM contact sync failed:", err);
   }
 
   const res = NextResponse.json({ success: true, redirect: "/dealer/onboarding" });

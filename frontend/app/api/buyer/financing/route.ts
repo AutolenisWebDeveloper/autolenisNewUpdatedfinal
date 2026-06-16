@@ -6,6 +6,7 @@ import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { FinancingPath, FinancingStatus } from "@prisma/client";
+import { advanceDealStatus, DealTransitionError } from "@/lib/services/deal/deal.service";
 import { z } from "zod";
 
 const schema = z.object({
@@ -80,10 +81,14 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  await prisma.deal.update({
-    where: { id: deal.id },
-    data: { financingPath, status: "FEE_PENDING" },
-  });
+  // Advance FINANCING_PENDING → FEE_PENDING through the guarded seam. If the deal
+  // is already past financing, persist the choice without regressing the status.
+  try {
+    await advanceDealStatus(deal.id, "FEE_PENDING", { actorRole: "BUYER", data: { financingPath } });
+  } catch (err) {
+    if (!(err instanceof DealTransitionError)) throw err;
+    await prisma.deal.update({ where: { id: deal.id }, data: { financingPath } });
+  }
 
   return successResponse({
     dealId: deal.id,

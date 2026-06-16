@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import {
   Filter,
   Send,
@@ -646,8 +647,7 @@ function HealthDot({ status }: { status: 'ok' | 'warning' | 'critical' }) {
 function TabError({ section, error }: { section: string; error: unknown }) {
   if (process.env.NODE_ENV !== 'production') {
     // Surface the cause in dev so the source of the failure is obvious.
-    // eslint-disable-next-line no-console
-    console.error(`[analytics:${section}]`, error);
+    logger.error(`[analytics:${section}]`, error);
   }
   const message =
     error instanceof Error ? error.message : 'Unknown error fetching analytics.';

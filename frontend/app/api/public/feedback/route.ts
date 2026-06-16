@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Resend } from "resend";
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
       ...(email ? { replyTo: email } : {}),
       subject: `[Feedback] ${category}`,
       text: `Platform feedback received.\n\nCategory: ${category}\n${name ? `Name: ${name}\n` : ""}${email ? `Email: ${email}\n` : ""}\nMessage:\n${message}`,
-    }).catch(err => console.error("[feedback] admin notification failed:", err));
+    }).catch(err => logger.error("[feedback] admin notification failed:", err));
 
     // 2. Confirmation to user only if they provided an email (non-blocking).
     if (email) {
@@ -63,10 +64,10 @@ export async function POST(request: NextRequest) {
         to: email,
         subject: "Thanks for your feedback — AutoLenis",
         text: `${name ? `Hi ${name},\n\n` : ""}We appreciate your feedback. It helps us make AutoLenis better.\n\n— The AutoLenis Team`,
-      }).catch(err => console.error("[feedback] user confirmation failed:", err));
+      }).catch(err => logger.error("[feedback] user confirmation failed:", err));
     }
   } else {
-    console.warn("[feedback] Resend client not configured — emails skipped");
+    logger.warn("[feedback] Resend client not configured — emails skipped");
   }
 
   // 3. Persist to DB for internal tracking.
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
       body: `${name ?? "Anonymous"}: ${message.slice(0, 500)}${message.length > 500 ? "…" : ""}`,
       metadata: { source: "public_feedback_form", name, email, category, message },
     },
-  }).catch(err => console.error("[feedback] DB log failed:", err));
+  }).catch(err => logger.error("[feedback] DB log failed:", err));
 
   return NextResponse.json({ success: true, data: { message: "Feedback received" } }, { status: 201 });
 }

@@ -9,6 +9,7 @@
 // every other source it returns early. Everything is wrapped in try/catch so it
 // never throws into its caller.
 
+import { logger } from "@/lib/logger";
 import { captureUtmAttribution } from "@/lib/social/attribution.service";
 
 const SOCIAL_PLATFORMS = new Set(["facebook", "instagram", "tiktok", "youtube", "linkedin"]);
@@ -51,9 +52,9 @@ export async function triggerSocialAttribution(
       utmAffiliate: input.utmAffiliate,
     });
 
-    console.log("[attribution-hook] social attribution captured");
+    logger.info("[attribution-hook] social attribution captured");
   } catch (err) {
-    console.error(
+    logger.error(
       "[attribution-hook] failed (non-fatal):",
       err instanceof Error ? err.message : err,
     );

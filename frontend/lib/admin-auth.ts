@@ -4,6 +4,7 @@
 // JWT uses `jose` library
 // MFA is REQUIRED for all admin roles — no skip path exists
 
+import { logger } from "@/lib/logger";
 import * as OTPAuth from "otpauth";
 import { SignJWT, jwtVerify } from "jose";
 import { randomBytes, createCipheriv, createDecipheriv, createHash } from "crypto";
@@ -67,7 +68,7 @@ function getTotpEncryptionKey(): Buffer {
   // New installations must set MFA_ENCRYPTION_KEY.
   const legacy = getPrequalKey();
   if (legacy) {
-    console.warn(
+    logger.warn(
       "[SECURITY] MFA_ENCRYPTION_KEY is not set; falling back to PREQUAL_ENCRYPTION_KEY. " +
         "Set MFA_ENCRYPTION_KEY in your environment for dedicated TOTP encryption."
     );
@@ -289,7 +290,7 @@ export async function recordMfaFailure(adminId: string, adminEmail: string): Pro
       entityId: adminId,
       metadata: { attemptNumber: newCount, lockedUntil },
     },
-  }).catch(err => console.error("[admin-mfa] audit log error:", err));
+  }).catch(err => logger.error("[admin-mfa] audit log error:", err));
 
   if (lockedUntil) {
     await prisma.adminAuditLog.create({
@@ -301,7 +302,7 @@ export async function recordMfaFailure(adminId: string, adminEmail: string): Pro
         entityId: adminId,
         metadata: { lockedUntil, attempts: newCount },
       },
-    }).catch(err => console.error("[admin-mfa] lockout audit log error:", err));
+    }).catch(err => logger.error("[admin-mfa] lockout audit log error:", err));
   }
 }
 

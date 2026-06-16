@@ -1,6 +1,7 @@
 // Edmunds adapter — independently failure-isolated
 // Edmunds has a public REST API (no key required for basic searches)
 
+import { logger } from "@/lib/logger";
 import type { IInventoryAdapter, NormalizedVehicle, AdapterRunResult, SearchParams } from "./IInventoryAdapter";
 import { buildSourceKey } from "./IInventoryAdapter";
 
@@ -40,7 +41,7 @@ export class EdmundsAdapter implements IInventoryAdapter {
 
       return { adapter: this.name, vehicles, duration: Date.now() - start, fetchedAt: new Date() };
     } catch (error) {
-      console.error(`[Edmunds adapter] Error:`, error);
+      logger.error(`[Edmunds adapter] Error:`, error);
       return { adapter: this.name, vehicles: [], duration: Date.now() - start, error: String(error), fetchedAt: new Date() };
     }
   }

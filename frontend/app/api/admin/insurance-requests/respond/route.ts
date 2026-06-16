@@ -3,6 +3,7 @@
 // Sets deal.insuranceStatus → QUOTE_RECEIVED
 // Creates a buyer notification with the quote amount and optional note
 // Writes an AdminAuditLog entry confirming the response
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
       body:  notificationBody,
     },
   }).catch((err: unknown) => {
-    console.error("[insurance-respond] buyer notification failed:", err);
+    logger.error("[insurance-respond] buyer notification failed:", err);
   });
 
   await createAuditLog(admin, request, {
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest) {
       respondedAt:  new Date().toISOString(),
     },
   }).catch((err: unknown) => {
-    console.error("[insurance-respond] audit log failed:", err);
+    logger.error("[insurance-respond] audit log failed:", err);
   });
 
   return adminSuccess({ status: "QUOTE_RECEIVED", premiumCents });

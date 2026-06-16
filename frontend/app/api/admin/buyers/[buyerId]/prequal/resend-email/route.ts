@@ -10,6 +10,7 @@
 // every resend dispatches even when the buyer's prequal hasn't changed and
 // the original send is preserved in EmailSendLog untouched.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import {
@@ -88,7 +89,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       });
     }
   } catch (err) {
-    console.error("[admin/prequal/resend-email] send failed:", err);
+    logger.error("[admin/prequal/resend-email] send failed:", err);
     return adminError("EMAIL_SEND_FAILED", "Failed to dispatch email", 500);
   }
 

@@ -6,6 +6,7 @@
 // (utm_creator + utm_affiliate), plus a personalized email body. Distribution
 // emails the package via the shared Resend rail.
 
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { buildUtmUrl } from "@/lib/social/config";
 
@@ -102,7 +103,7 @@ export async function distributeCreatorPackages(): Promise<void> {
   });
 
   if (creators.length === 0) {
-    console.log("[creator-dist] no active creators");
+    logger.info("[creator-dist] no active creators");
     return;
   }
 
@@ -123,15 +124,15 @@ export async function distributeCreatorPackages(): Promise<void> {
           emailBody: pkg.emailBody,
         });
       }
-      console.log(
+      logger.info(
         `[creator-dist] package ready for: ${creator.name}`,
         `${pkg.posts.length} posts`,
       );
       sent++;
     } catch (err) {
-      console.error("[creator-dist] failed for creator:", creator.id, err);
+      logger.error("[creator-dist] failed for creator:", creator.id, err);
     }
   }
 
-  console.log(`[creator-dist] distributed ${sent} packages`);
+  logger.info(`[creator-dist] distributed ${sent} packages`);
 }

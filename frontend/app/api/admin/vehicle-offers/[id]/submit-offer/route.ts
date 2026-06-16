@@ -2,6 +2,7 @@
 // Admin manually enters a dealer offer (registered or outside/unregistered)
 // on behalf of a dealer for a VehicleOffer. Creates a DealerOfferSubmission so
 // the offer appears in the admin detail view and can be sent to the buyer.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -121,7 +122,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       contactName,
       dealershipName,
       vehicleOfferLabel: vehicleLabel,
-    }).catch((err) => console.error("[submit-offer] dealer confirmation email failed:", err));
+    }).catch((err) => logger.error("[submit-offer] dealer confirmation email failed:", err));
   }
 
   await createAuditLog(admin, request, {

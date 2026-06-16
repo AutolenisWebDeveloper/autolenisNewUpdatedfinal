@@ -2,6 +2,7 @@
 // Read-only. Returns the combined KPI snapshot for the analytics dashboard.
 // Each underlying query degrades to a zero state internally, so a partial DB
 // failure still yields a well-formed response rather than a 500.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { getAdminAnalyticsSnapshot } from "@/lib/services/analytics/admin-analytics.service";
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("[group-6] analytics route failed", err);
+    logger.error("[group-6] analytics route failed", err);
     return adminError("ANALYTICS_FAILED", "Failed to load analytics", 500);
   }
 }

@@ -4,6 +4,7 @@
 // Note: rejection requires an explicit reason (unlike approval which has a default) because
 // the reason is included in the rejection email sent to the affiliate applicant.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       try {
         await sendAffiliateRejectionEmail(affiliate.user.email, firstName, parsed.data.reason);
       } catch (err) {
-        console.error("[affiliates/reject] rejection email failed", err);
+        logger.error("[affiliates/reject] rejection email failed", err);
       }
     }
 

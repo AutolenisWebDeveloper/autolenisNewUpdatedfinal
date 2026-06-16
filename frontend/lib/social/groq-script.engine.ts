@@ -6,6 +6,7 @@
 // fetch to the OpenAI-compatible chat-completions endpoint, retry on 429/503,
 // strict JSON output. Model is llama-3.3-70b-versatile (GROQ_SUMMARY).
 
+import { logger } from "@/lib/logger";
 import { GROQ_SUMMARY } from "@/lib/ai/acquisition";
 import type { ContentFranchise, TopicSignal } from "@prisma/client";
 import { getFunnelDestination, type PlatformConfig } from "@/lib/social/config";
@@ -80,7 +81,7 @@ async function callGroq(options: {
     }),
   });
 
-  console.log("[groq-script] response status:", res.status);
+  logger.info("[groq-script] response status:", res.status);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`);
@@ -89,7 +90,7 @@ async function callGroq(options: {
     choices?: Array<{ message?: { content?: string } }>;
   };
   const rawText = data.choices?.[0]?.message?.content ?? "";
-  console.log("[groq-script] raw response:", rawText?.slice(0, 200));
+  logger.info("[groq-script] raw response:", rawText?.slice(0, 200));
   return rawText;
 }
 
@@ -107,7 +108,7 @@ async function callGroqWithRetry(
       if (!message.includes("429") && !message.includes("503")) throw err;
       if (attempt === maxAttempts - 1) throw err;
       const backoffMs = Math.min(8000 * Math.pow(2, attempt), 32000);
-      console.warn(
+      logger.warn(
         `[social-groq] retry ${attempt + 1}/${maxAttempts} after ${backoffMs}ms: ${message.slice(0, 120)}`,
       );
       await new Promise((r) => setTimeout(r, backoffMs));
@@ -352,12 +353,12 @@ export async function generateSocialScript(
   input: SocialScriptInput,
 ): Promise<SocialScriptOutput> {
   const userPrompt = buildUserPrompt(input);
-  console.log("[groq-script] calling Groq for platform:", input.platform);
+  logger.info("[groq-script] calling Groq for platform:", input.platform);
   try {
     const raw = await callGroqWithRetry({ systemPrompt: SYSTEM_PROMPT, userPrompt });
     return parse(raw, input);
   } catch (firstErr) {
-    console.warn(
+    logger.warn(
       `[social-groq] first attempt failed for ${input.franchise.slug}/${input.platform}: ${
         firstErr instanceof Error ? firstErr.message : String(firstErr)
       }`,

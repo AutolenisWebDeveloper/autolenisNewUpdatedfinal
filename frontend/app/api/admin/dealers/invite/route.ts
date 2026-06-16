@@ -1,5 +1,6 @@
 // POST /api/admin/dealers/invite — create HMAC-signed dealer invitation
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -74,7 +75,7 @@ export async function POST(request: NextRequest) {
   try {
     await sendDealerInvitationEmail({ to: email, contactName, dealershipName, claimUrl: inviteUrl, expiresAt: expiresAt.toISOString() });
   } catch (err) {
-    console.error("[dealer/invite] Email error:", err);
+    logger.error("[dealer/invite] Email error:", err);
   }
 
   // Emit the dealer_invited domain event → Make.com orchestration (+ legacy
@@ -96,7 +97,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("[dealer/invite] emit failed:", err);
+    logger.error("[dealer/invite] emit failed:", err);
   }
 
   return NextResponse.json({

@@ -7,6 +7,7 @@
 // 6. Send Resend verification email with signup link
 // 7. Return { success: true } — no auto sign-in; user must verify email first
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
@@ -117,8 +118,7 @@ export async function POST(request: NextRequest) {
 
   if (createErr || !created?.user) {
     const msg = createErr?.message ?? "";
-    // eslint-disable-next-line no-console
-    console.error("[affiliate/register] Supabase admin createUser failed", { code: createErr?.code, msg });
+    logger.error("[affiliate/register] Supabase admin createUser failed", { code: createErr?.code, msg });
     if (/already|registered|exists|duplicate/i.test(msg)) {
       return errorResponse(
         "EMAIL_EXISTS",
@@ -146,8 +146,7 @@ export async function POST(request: NextRequest) {
       verificationLink = linkData.properties.action_link;
     }
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error("[affiliate/register] generateLink failed", err);
+    logger.error("[affiliate/register] generateLink failed", err);
   }
 
   // 5. Create Prisma User + Affiliate in a transaction
@@ -187,8 +186,7 @@ export async function POST(request: NextRequest) {
     try {
       await admin.auth.admin.deleteUser(supabaseUserId);
     } catch { /* best-effort cleanup */ }
-    // eslint-disable-next-line no-console
-    console.error("[affiliate/register] DB transaction failed", err);
+    logger.error("[affiliate/register] DB transaction failed", err);
     return errorResponse("SIGNUP_FAILED", "Something went wrong. Please try again.", 500);
   }
 
@@ -197,8 +195,7 @@ export async function POST(request: NextRequest) {
     await sendAffiliateVerificationEmail(normalizedEmail, firstName, referral, verificationLink);
   } catch (err) {
     // Non-fatal — user can still use "Resend" flow later
-    // eslint-disable-next-line no-console
-    console.error("[affiliate/register] Verification email failed", err);
+    logger.error("[affiliate/register] Verification email failed", err);
   }
 
   // 7. Sync into CRM contacts (non-fatal — signup completes even if this fails)
@@ -233,8 +230,7 @@ export async function POST(request: NextRequest) {
       data: { affiliate_id: affiliateId, referral_code: referral },
     });
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error("[affiliate/register] CRM contact sync failed", err);
+    logger.error("[affiliate/register] CRM contact sync failed", err);
   }
 
   return successResponse(

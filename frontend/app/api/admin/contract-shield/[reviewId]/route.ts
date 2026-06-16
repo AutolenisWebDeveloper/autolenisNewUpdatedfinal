@@ -2,11 +2,13 @@
 // Admin review actions on a Contract Shield scan: APPROVE | FLAG | REQUEST_REVISION.
 // reviewId is the ContractScan id. Every action is audit-logged and fires the
 // correct buyer/dealer notifications.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { createEnvelope } from "@/lib/services/esign/esign.service";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import {
   sendContractApprovedEmail,
   sendContractShieldAlertEmail,
@@ -69,16 +71,22 @@ export async function POST(request: NextRequest, { params }: Props) {
         where: { id: reviewId },
         data: { status: "PASS", changeLog: appendChangeLog(scan.changeLog, logEntry("APPROVED")) },
       });
-      await prisma.deal.update({
-        where: { id: deal.id },
-        data: { contractShieldStatus: "PASS", contractShieldScore: scan.score, status: "CONTRACT_APPROVED" },
+      // Contract Shield approval is the gate-setter for SIGNING. Route through the
+      // guarded seam (force, audit-logged below) so CONTRACT_APPROVED is recorded
+      // in DealStatusHistory alongside the shield status/score.
+      await advanceDealStatus(deal.id, "CONTRACT_APPROVED", {
+        actorId: admin.adminId,
+        actorRole: "ADMIN",
+        reason: reason ?? undefined,
+        force: true,
+        data: { contractShieldStatus: "PASS", contractShieldScore: scan.score },
       });
 
       // Trigger the DocuSign envelope to the buyer (mock-safe when DocuSign unconfigured).
       let envelopeId: string | null = null;
       if (buyerEmail) {
         const envelope = await createEnvelope(deal.id, buyerEmail, buyerName)
-          .catch(err => { console.error("[contract-shield] createEnvelope failed:", err); return null; });
+          .catch(err => { logger.error("[contract-shield] createEnvelope failed:", err); return null; });
         envelopeId = envelope?.envelopeId ?? null;
       }
 
@@ -93,7 +101,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       }).catch(() => {});
       if (buyerEmail) {
         await sendContractApprovedEmail({ to: buyerEmail, firstName: buyerFirstName, dealId: deal.id })
-          .catch(err => console.error("[contract-shield] buyer approved email failed:", err));
+          .catch(err => logger.error("[contract-shield] buyer approved email failed:", err));
       }
       if (dealer) {
         await prisma.notification.create({
@@ -140,13 +148,13 @@ export async function POST(request: NextRequest, { params }: Props) {
       }).catch(() => {});
       if (buyerEmail) {
         await sendContractShieldAlertEmail({ to: buyerEmail, firstName: buyerFirstName, dealId: deal.id, issueCount: flaggedIssues.length })
-          .catch(err => console.error("[contract-shield] buyer flag email failed:", err));
+          .catch(err => logger.error("[contract-shield] buyer flag email failed:", err));
       }
       if (dealerEmail) {
         await sendDealerContractIssuesEmail({
           to: dealerEmail, contactName: dealer?.dealershipName ?? "Dealer",
           vehicleRef, fixItems: flaggedIssues, contractUrl, dealId: deal.id,
-        }).catch(err => console.error("[contract-shield] dealer flag email failed:", err));
+        }).catch(err => logger.error("[contract-shield] dealer flag email failed:", err));
       }
       if (dealer) {
         await prisma.notification.create({
@@ -173,16 +181,19 @@ export async function POST(request: NextRequest, { params }: Props) {
         data: { status: "REVISION_REQUESTED", changeLog: appendChangeLog(scan.changeLog, logEntry("REVISION_REQUESTED")) },
       });
       // Send the deal back to the dealer for a corrected upload.
-      await prisma.deal.update({
-        where: { id: deal.id },
-        data: { contractShieldStatus: "REVISION_REQUESTED", status: "CONTRACT_PENDING" },
+      await advanceDealStatus(deal.id, "CONTRACT_PENDING", {
+        actorId: admin.adminId,
+        actorRole: "ADMIN",
+        reason: reason ?? undefined,
+        force: true,
+        data: { contractShieldStatus: "REVISION_REQUESTED" },
       });
 
       if (dealerEmail) {
         await sendDealerContractIssuesEmail({
           to: dealerEmail, contactName: dealer?.dealershipName ?? "Dealer",
           vehicleRef, fixItems: [reason], contractUrl, dealId: deal.id,
-        }).catch(err => console.error("[contract-shield] dealer revision email failed:", err));
+        }).catch(err => logger.error("[contract-shield] dealer revision email failed:", err));
       }
       if (dealer) {
         await prisma.notification.create({

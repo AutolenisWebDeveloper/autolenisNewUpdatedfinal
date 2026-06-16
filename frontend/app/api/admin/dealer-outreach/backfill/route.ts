@@ -4,6 +4,7 @@
 // Optional ?buyerOppId= filter. Capped at 20 per call to stay within the
 // serverless function timeout, with a 12s gap between drafts to respect the
 // free-tier TPM budget.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
       try {
         ok = await draftAndSaveScript(p.id);
       } catch (err) {
-        console.error(`[backfill] Script drafting threw for ${p.id}:`, err);
+        logger.error(`[backfill] Script drafting threw for ${p.id}:`, err);
         ok = false;
       }
 

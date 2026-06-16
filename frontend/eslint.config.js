@@ -24,6 +24,23 @@ const config = [
       "no-console": "off",
     },
   },
+  {
+    // lib/, app/, and components/ must route logging through lib/logger
+    // (structured, queryable). These trees are console-free as of the Phase 3
+    // migration; this ratchet prevents regressions. (scripts/ and config files
+    // may still use console.)
+    files: ["lib/**/*.ts", "lib/**/*.tsx", "app/**/*.ts", "app/**/*.tsx", "components/**/*.ts", "components/**/*.tsx"],
+    rules: {
+      "no-console": "warn",
+    },
+  },
+  {
+    // The logger itself is the console sink — it must use console.
+    files: ["lib/logger.ts"],
+    rules: {
+      "no-console": "off",
+    },
+  },
 ];
 
 export default config;

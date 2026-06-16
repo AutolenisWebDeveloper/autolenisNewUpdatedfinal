@@ -4,6 +4,7 @@
 // When DocuSign credentials are NOT configured, returns a graceful error — no silent mocks.
 
 import { getDocuSignConfig, isDocuSignConfigured, getDocuSignAccessToken } from "./docusign-auth.service";
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 interface EnvelopeResult {
@@ -16,7 +17,7 @@ interface EnvelopeResult {
 export async function createDealerEnvelopeFromTemplate(dealId: string): Promise<EnvelopeResult> {
   // Graceful degradation — never silently mock when this is checked
   if (!isDocuSignConfigured()) {
-    console.error("[docusign] credentials not configured — cannot create envelope");
+    logger.error("[docusign] credentials not configured — cannot create envelope");
     await prisma.eSignEnvelope.upsert({
       where:  { dealId },
       create: { dealId, status: "PENDING" },
@@ -60,7 +61,7 @@ export async function createDealerEnvelopeFromTemplate(dealId: string): Promise<
     token = await getDocuSignAccessToken();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[docusign] JWT auth failed:", msg);
+    logger.error("[docusign] JWT auth failed:", msg);
     return { envelopeId: null, signingUrl: null, error: `Authentication failed: ${msg}`, mock: false };
   }
 
@@ -103,7 +104,7 @@ export async function createDealerEnvelopeFromTemplate(dealId: string): Promise<
 
     if (!createRes.ok) {
       const errBody = await createRes.text().catch(() => "");
-      console.error(`[docusign] envelope creation failed (${createRes.status}):`, errBody);
+      logger.error(`[docusign] envelope creation failed (${createRes.status}):`, errBody);
       return { envelopeId: null, signingUrl: null, error: `DocuSign error ${createRes.status}`, mock: false };
     }
 
@@ -114,7 +115,7 @@ export async function createDealerEnvelopeFromTemplate(dealId: string): Promise<
     envelopeId = createData.envelopeId;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[docusign] envelope creation threw:", msg);
+    logger.error("[docusign] envelope creation threw:", msg);
     return { envelopeId: null, signingUrl: null, error: `Network error: ${msg}`, mock: false };
   }
 
@@ -145,7 +146,7 @@ export async function createDealerEnvelopeFromTemplate(dealId: string): Promise<
 
     if (!viewRes.ok) {
       const errBody = await viewRes.text().catch(() => "");
-      console.error(`[docusign] signing URL failed (${viewRes.status}):`, errBody);
+      logger.error(`[docusign] signing URL failed (${viewRes.status}):`, errBody);
       // Envelope was created — store the ID even if we can't get the signing URL
       await prisma.eSignEnvelope.upsert({
         where:  { dealId },
@@ -162,7 +163,7 @@ export async function createDealerEnvelopeFromTemplate(dealId: string): Promise<
     signingUrl = viewData.url;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[docusign] signing URL threw:", msg);
+    logger.error("[docusign] signing URL threw:", msg);
     return { envelopeId, signingUrl: null, error: `Network error: ${msg}`, mock: false };
   }
 

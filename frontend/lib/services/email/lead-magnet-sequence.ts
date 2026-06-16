@@ -12,6 +12,7 @@
 // worker enforces suppression, idempotency, and timeline logging. A scheduler
 // (api/cron/lead-magnet-sequence) calls the due step for each lead by age.
 
+import { logger } from "@/lib/logger";
 import { inngest } from "@/lib/inngest/client";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { SuppressionService } from "@/lib/services/suppression.service";
@@ -58,7 +59,7 @@ async function queueOrSkip(
 ): Promise<{ status: "queued" | "suppressed" }> {
   const supabase = getServiceSupabase();
   if (await SuppressionService.isEmailSuppressed(supabase, params.to)) {
-    console.log(`[lead-magnet] ${track} step ${step} suppressed for ${params.to}`);
+    logger.info(`[lead-magnet] ${track} step ${step} suppressed for ${params.to}`);
     return { status: "suppressed" };
   }
 

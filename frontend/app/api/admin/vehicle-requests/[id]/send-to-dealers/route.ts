@@ -2,6 +2,7 @@
 //
 // Creates per-dealer VehicleOfferDealerInvite rows for an existing VehicleOffer
 // and sends each invited dealer a personalized link to submit their offer.
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest, { params }: Params) {
         buyerTradeModel: offer.buyerTradeModel ?? undefined,
         buyerOpenToAlt: offer.buyerOpenToAlt,
         adminNotes: offer.adminNotes ?? undefined,
-      }).catch((err) => console.error(`[send-to-dealers] email failed for ${invite.dealerEmail}:`, err))
+      }).catch((err) => logger.error(`[send-to-dealers] email failed for ${invite.dealerEmail}:`, err))
     )
   );
 
@@ -109,7 +110,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   await prisma.vehicleOffer.update({
     where: { id: offer.id },
     data: { requestStatus: "sent_to_dealers" },
-  }).catch((err) => console.error("[send-to-dealers] offer status update failed:", err));
+  }).catch((err) => logger.error("[send-to-dealers] offer status update failed:", err));
 
   try {
     const notif = await prisma.notification.findUnique({ where: { id: requestId } });
@@ -121,7 +122,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       });
     }
   } catch (err) {
-    console.error("[send-to-dealers] notification status update failed:", err);
+    logger.error("[send-to-dealers] notification status update failed:", err);
   }
 
   await createAuditLog(admin, request, {

@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import 'server-only';
 import { after } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -66,7 +67,7 @@ export async function emitDomainEvent(
   try {
     contact = await ContactService.upsertContact(supabase, input.contact);
   } catch (err) {
-    console.error(`[emit] contact resolve failed for '${event}' (${idempotencyKey})`, err);
+    logger.error(`[emit] contact resolve failed for '${event}' (${idempotencyKey})`, err);
     return { contactId: null, idempotencyKey, fired };
   }
 
@@ -87,7 +88,7 @@ export async function emitDomainEvent(
         .update({ lifecycle_stage: advancedStage, updated_at: new Date().toISOString() })
         .eq('id', contact.id);
       if (error) {
-        console.error(`[emit] stage advance failed for '${event}' (${idempotencyKey})`, error);
+        logger.error(`[emit] stage advance failed for '${event}' (${idempotencyKey})`, error);
       } else {
         // Keep the in-memory contact (and thus the envelope below) consistent
         // with the persisted stage.
@@ -100,7 +101,7 @@ export async function emitDomainEvent(
       }
     }
   } catch (err) {
-    console.error(`[emit] stage advance error for '${event}' (${idempotencyKey})`, err);
+    logger.error(`[emit] stage advance error for '${event}' (${idempotencyKey})`, err);
   }
 
   // (2) Build the versioned envelope.
@@ -131,7 +132,7 @@ export async function emitDomainEvent(
     });
     fired.timeline = true;
   } catch (err) {
-    console.error(`[emit] timeline write failed for '${event}' (${idempotencyKey})`, err);
+    logger.error(`[emit] timeline write failed for '${event}' (${idempotencyKey})`, err);
   }
 
   // (4) Outbound webhook — non-blocking. Prefer Vercel after() so it runs after
@@ -145,12 +146,12 @@ export async function emitDomainEvent(
       fired.webhookScheduled = true;
     } catch {
       void forwardToMake(envelope).catch((err) =>
-        console.error(`[emit] detached make forward failed (${idempotencyKey})`, err),
+        logger.error(`[emit] detached make forward failed (${idempotencyKey})`, err),
       );
       fired.webhookScheduled = true;
     }
   } else {
-    console.warn(
+    logger.warn(
       `[emit] MAKE_WEBHOOK_URL unset — '${event}' (${idempotencyKey}) NOT forwarded to Make`,
     );
   }
@@ -169,7 +170,7 @@ export async function emitDomainEvent(
       );
       fired.inAppEngine = true;
     } catch (err) {
-      console.error(`[emit] in-app engine trigger failed for '${event}' (${idempotencyKey})`, err);
+      logger.error(`[emit] in-app engine trigger failed for '${event}' (${idempotencyKey})`, err);
     }
   }
 
@@ -178,7 +179,7 @@ export async function emitDomainEvent(
     fired.webhookScheduled ? 'make' : null,
     fired.inAppEngine ? 'inapp' : null,
   ].filter(Boolean);
-  console.info(
+  logger.info(
     `[emit] '${event}' contact=${contact.id} key=${idempotencyKey} ` +
       `paths=${paths.length ? paths.join('+') : 'none'} fired=${JSON.stringify(fired)}`,
   );

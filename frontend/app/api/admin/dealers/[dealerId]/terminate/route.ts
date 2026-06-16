@@ -1,4 +1,5 @@
 // POST /api/admin/dealers/[dealerId]/terminate
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { z } from "zod";
@@ -40,7 +41,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         to: dealer.user.email,
         contactName: dealer.dealershipName,
         dealershipName: dealer.dealershipName,
-      }).catch(err => console.error("[admin/dealers/terminate] terminate email failed:", err));
+      }).catch(err => logger.error("[admin/dealers/terminate] terminate email failed:", err));
     }
 
     return adminSuccess(result);

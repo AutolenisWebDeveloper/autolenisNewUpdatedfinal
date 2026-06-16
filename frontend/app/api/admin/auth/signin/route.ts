@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { signPreMfaToken, ADMIN_PREMFA_COOKIE } from "@/lib/admin-auth";
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
           entityId: user.admin.id,
           metadata: { reason: "MFA not enrolled — redirecting to setup" },
         },
-      }).catch(err => console.error("[signin] audit log error:", err));
+      }).catch(err => logger.error("[signin] audit log error:", err));
     }
 
     const redirectPath = user.admin.totpEnabled
@@ -73,7 +74,7 @@ export async function POST(request: NextRequest) {
 
     return res;
   } catch (err) {
-    console.error("[signin] unexpected error:", err);
+    logger.error("[signin] unexpected error:", err);
     return NextResponse.json({ error: "An unexpected error occurred. Please try again." }, { status: 500 });
   }
 }

@@ -17,6 +17,7 @@
 // that route upserts a brand-new prequal with OFAC gating. This route operates on an
 // existing prequal id and is what the new /admin/prequal/[id] page calls.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getAdminWithRole, adminSuccess, adminError } from "@/lib/auth/admin-api";
@@ -170,7 +171,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         expiryDate: new Date(Date.now() + APPROVAL_EMAIL_EXPIRY_MS),
       });
     } catch (err) {
-      console.error("[admin/prequal/decide] approval email failed:", err);
+      logger.error("[admin/prequal/decide] approval email failed:", err);
     }
   } else if (newDecision === PreQualDecision.DECLINED) {
     try {
@@ -182,7 +183,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         decisionTimestamp: updated.updatedAt.toISOString(),
       });
     } catch (err) {
-      console.error("[admin/prequal/decide] adverse-action email failed:", err);
+      logger.error("[admin/prequal/decide] adverse-action email failed:", err);
     }
   }
 

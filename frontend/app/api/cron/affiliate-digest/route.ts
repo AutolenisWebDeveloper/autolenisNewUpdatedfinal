@@ -1,6 +1,7 @@
 // /api/cron/affiliate-digest — Monday weekly digest
 // Cron schedule configured in vercel.json. Manually runnable via authenticated GET.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { runWeeklyDigestBatch } from "@/lib/services/affiliate/digest.service";
@@ -17,8 +18,7 @@ export async function GET(request: NextRequest) {
   }
 
   const summary = await runWeeklyDigestBatch(new Date());
-  // eslint-disable-next-line no-console
-  console.log("[cron/affiliate-digest]", summary);
+  logger.info("[cron/affiliate-digest]", summary);
   return NextResponse.json({
     success: true,
     data: {

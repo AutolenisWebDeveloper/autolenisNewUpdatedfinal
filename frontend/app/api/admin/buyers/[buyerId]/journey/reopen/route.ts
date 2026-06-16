@@ -5,6 +5,7 @@
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { z } from "zod";
 
 interface Props { params: Promise<{ buyerId: string }> }
@@ -76,9 +77,10 @@ export async function POST(request: NextRequest, { params }: Props) {
       case "fee":
         if (!deal) return adminError("NO_DEAL", "No active deal found", 400);
         previousState = { dealStatus: deal.status };
-        await prisma.deal.update({
-          where: { id: deal.id },
-          data: { feePaidAt: null, feeAmountCents: null, status: "FEE_PENDING" },
+        // Backward admin override — force the guarded transition (records history).
+        await advanceDealStatus(deal.id, "FEE_PENDING", {
+          actorId: admin.adminId, actorRole: "ADMIN", reason, force: true,
+          data: { feePaidAt: null, feeAmountCents: null },
         });
         newState = { feePaidAt: null, dealStatus: "FEE_PENDING" };
         break;
@@ -86,9 +88,9 @@ export async function POST(request: NextRequest, { params }: Props) {
       case "insurance":
         if (!deal) return adminError("NO_DEAL", "No active deal found", 400);
         previousState = { insuranceStatus: "VERIFIED" };
-        await prisma.deal.update({
-          where: { id: deal.id },
-          data: { insuranceStatus: "NOT_STARTED", status: "INSURANCE_PENDING" },
+        await advanceDealStatus(deal.id, "INSURANCE_PENDING", {
+          actorId: admin.adminId, actorRole: "ADMIN", reason, force: true,
+          data: { insuranceStatus: "NOT_STARTED" },
         });
         newState = { insuranceStatus: "NOT_STARTED" };
         break;
@@ -96,9 +98,9 @@ export async function POST(request: NextRequest, { params }: Props) {
       case "contract":
         if (!deal) return adminError("NO_DEAL", "No active deal found", 400);
         previousState = { contractShieldStatus: "PASS" };
-        await prisma.deal.update({
-          where: { id: deal.id },
-          data: { contractShieldStatus: null, status: "CONTRACT_PENDING" },
+        await advanceDealStatus(deal.id, "CONTRACT_PENDING", {
+          actorId: admin.adminId, actorRole: "ADMIN", reason, force: true,
+          data: { contractShieldStatus: null },
         });
         newState = { contractShieldStatus: null };
         break;
@@ -106,14 +108,18 @@ export async function POST(request: NextRequest, { params }: Props) {
       case "sign":
         if (!deal) return adminError("NO_DEAL", "No active deal found", 400);
         previousState = { dealStatus: deal.status };
-        await prisma.deal.update({ where: { id: deal.id }, data: { status: "SIGNING_PENDING" } });
+        await advanceDealStatus(deal.id, "SIGNING_PENDING", {
+          actorId: admin.adminId, actorRole: "ADMIN", reason, force: true,
+        });
         newState = { dealStatus: "SIGNING_PENDING" };
         break;
 
       case "pickup":
         if (!deal) return adminError("NO_DEAL", "No active deal found", 400);
         previousState = { dealStatus: "COMPLETED" };
-        await prisma.deal.update({ where: { id: deal.id }, data: { status: "PICKUP_SCHEDULED" } });
+        await advanceDealStatus(deal.id, "PICKUP_SCHEDULED", {
+          actorId: admin.adminId, actorRole: "ADMIN", reason, force: true,
+        });
         newState = { dealStatus: "PICKUP_SCHEDULED" };
         break;
 

@@ -12,6 +12,7 @@
 // set to transfer_request when the transfer was triggered), so no new DB model
 // is needed — keep it simple.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import twilio from "twilio";
 import { parseTwilioRequest, twimlResponse } from "@/lib/voice/twilio-verify";
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
   try {
     const { params, verified } = await parseTwilioRequest(request, PATH);
     if (!verified) {
-      console.error("[zura-p3] transfer-status: Twilio signature invalid — rejecting");
+      logger.error("[zura-p3] transfer-status: Twilio signature invalid — rejecting");
       return new Response("Unauthorized", { status: 401 });
     }
 
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     if (ANSWERED.has(dialStatus)) {
       // Founder answered and the bridged call has ended — wrap up cleanly.
-      console.log(`[zura-p3] Dial outcome: ${dialStatus} → live transfer connected (callSid ${callSid})`);
+      logger.info(`[zura-p3] Dial outcome: ${dialStatus} → live transfer connected (callSid ${callSid})`);
       const twiml = new VoiceResponse();
       twiml.hangup();
       return twimlResponse(twiml.toString());
@@ -49,12 +50,12 @@ export async function POST(request: NextRequest) {
 
     // busy / no-answer / failed / canceled → founder unavailable. Fall back to
     // message-taking so the hot lead is never dropped.
-    console.log(
+    logger.info(
       `[zura-p3] Dial outcome: ${dialStatus || "unknown"} → falling back to message-taking (callSid ${callSid})`,
     );
     return twimlResponse(await buildTransferFailedTwiML());
   } catch (err) {
-    console.error("[zura-p3] transfer-status error:", err);
+    logger.error("[zura-p3] transfer-status error:", err);
     // Always hand Twilio valid TwiML so the caller is never dropped abruptly.
     const twiml = new VoiceResponse();
     twiml.say(

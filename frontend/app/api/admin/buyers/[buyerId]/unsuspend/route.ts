@@ -4,6 +4,7 @@
 // Writes AuditLog: BUYER_UNSUSPENDED
 // Requires reason (min 10 chars)
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       user_metadata: { isSuspended: false },
     });
   } catch (err) {
-    console.error("[buyer/unsuspend] Supabase metadata update failed:", err);
+    logger.error("[buyer/unsuspend] Supabase metadata update failed:", err);
   }
 
   // Notify the buyer their access is restored — visible on next login.
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       body: "Your AutoLenis account access has been restored. Welcome back — you can resume where you left off.",
       actionUrl: "/buyer/dashboard",
     },
-  }).catch((err) => console.error("[buyer/unsuspend] notification failed:", err));
+  }).catch((err) => logger.error("[buyer/unsuspend] notification failed:", err));
 
   const ipAddress = request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip") ?? undefined;
 

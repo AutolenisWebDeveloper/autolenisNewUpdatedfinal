@@ -2,6 +2,7 @@
 // Issues a dealer_token cookie after Supabase credential verification.
 // Mirrors admin-auth.ts but without MFA — dealer auth is credential-only.
 
+import { logger } from "@/lib/logger";
 import { SignJWT, jwtVerify } from "jose";
 
 function getJwtSecret(): Uint8Array {
@@ -10,7 +11,7 @@ function getJwtSecret(): Uint8Array {
     if (process.env.NODE_ENV === "production") {
       throw new Error("JWT_SECRET is required in production");
     }
-    console.warn("[dealer-auth] JWT_SECRET not set — using insecure placeholder");
+    logger.warn("[dealer-auth] JWT_SECRET not set — using insecure placeholder");
     return new TextEncoder().encode("placeholder-must-set-jwt-secret-in-env");
   }
   return new TextEncoder().encode(secret);

@@ -1,5 +1,6 @@
 // POST /api/public/buyer-offer-review/[reviewToken]/respond — buyer accepts or
 // declines a single review item. On ACCEPTED, notify admin + dealer.
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     await prisma.vehicleOffer.update({
       where: { id: review.vehicleOfferId },
       data: { requestStatus: "buyer_interested" },
-    }).catch((err) => console.error("[respond] requestStatus update failed:", err));
+    }).catch((err) => logger.error("[respond] requestStatus update failed:", err));
   }
 
   return NextResponse.json({

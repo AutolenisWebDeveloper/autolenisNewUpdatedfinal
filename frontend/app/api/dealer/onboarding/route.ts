@@ -1,6 +1,7 @@
 // PATCH /api/dealer/onboarding — save onboarding step data, set ACTIVE on final step
 // GET   /api/dealer/onboarding — return current persisted onboarding values for hydration
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireDealerFromRequest } from "@/lib/auth/dealer-session";
 import { prisma } from "@/lib/prisma";
@@ -164,7 +165,7 @@ export async function PATCH(request: NextRequest) {
       email: updatedDealer.user?.email ?? "",
       name: updatedDealer.dealershipName ?? "Dealer",
     }).catch((err) => {
-      console.error("[dealer-onboarding/agreement] DocuSign send failed:", err);
+      logger.error("[dealer-onboarding/agreement] DocuSign send failed:", err);
     });
 
     return NextResponse.json({ success: true, nextStep: "COMPLETE", redirect: "/dealer/dashboard" });

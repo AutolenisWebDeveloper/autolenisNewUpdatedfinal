@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma"
 import {
   discoverDealersViaGeminiMaps,
@@ -42,7 +43,7 @@ async function getCached(cacheKey: string): Promise<unknown | null> {
     }
     return cached.result
   } catch (err) {
-    console.error("[compound-search] Cache lookup failed:", err)
+    logger.error("[compound-search] Cache lookup failed:", err)
     return null
   }
 }
@@ -81,7 +82,7 @@ async function setCached(
       },
     })
   } catch (err) {
-    console.error("[compound-search] Cache write failed:", err)
+    logger.error("[compound-search] Cache write failed:", err)
   }
 }
 
@@ -110,7 +111,7 @@ async function callCompound(
 ): Promise<CompoundResult | null> {
   const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) {
-    console.error("[compound-search] GROQ_API_KEY not configured")
+    logger.error("[compound-search] GROQ_API_KEY not configured")
     return null
   }
 
@@ -141,7 +142,7 @@ async function callCompound(
 
     if (!response.ok) {
       const errBody = await response.text()
-      console.error(`[compound-search] ${model} failed:`, response.status, errBody)
+      logger.error(`[compound-search] ${model} failed:`, response.status, errBody)
       return null
     }
 
@@ -161,7 +162,7 @@ async function callCompound(
       searchResults,
     }
   } catch (err) {
-    console.error("[compound-search] Request failed:", err)
+    logger.error("[compound-search] Request failed:", err)
     return null
   }
 }
@@ -218,11 +219,11 @@ export async function enrichMarketData(params: {
   // Check cache
   const cached = await getCached(cacheKey)
   if (cached) {
-    console.log("[compound-search] Market enrichment cache hit:", cacheKey)
+    logger.info("[compound-search] Market enrichment cache hit:", cacheKey)
     return cached as MarketEnrichment
   }
 
-  console.log("[compound-search] Market enrichment cache MISS:", cacheKey)
+  logger.info("[compound-search] Market enrichment cache MISS:", cacheKey)
 
   // Change 1 — try Gemini 2.5 Flash + Google Search grounding first. It returns
   // a superset of the legacy fields plus richer web-grounded market context.
@@ -238,18 +239,18 @@ export async function enrichMarketData(params: {
       )
       return grounded
     }
-    console.warn(
+    logger.warn(
       "[change-1] Gemini grounding unavailable — falling back to Groq Compound"
     )
   } catch (err) {
-    console.error(
+    logger.error(
       "[change-1] Gemini grounding threw — falling back to Groq Compound:",
       err
     )
   }
 
   // Fallback — Groq Compound web_search (the pre-Change-1 path).
-  console.log("[compound-search] Calling Groq Compound fallback:", cacheKey)
+  logger.info("[compound-search] Calling Groq Compound fallback:", cacheKey)
 
   const yearRange = params.yearMin && params.yearMax
     ? `${params.yearMin}-${params.yearMax}`
@@ -282,12 +283,12 @@ Return JSON with msrpEstimate, avgPaidPrice, typicalMarkup, goodDealTarget, and 
     // Extract JSON from content (compound sometimes wraps in markdown)
     const jsonMatch = result.content.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
-      console.error("[compound-search] No JSON in market enrichment response:", result.content.substring(0, 200))
+      logger.error("[compound-search] No JSON in market enrichment response:", result.content.substring(0, 200))
       return null
     }
     parsed = JSON.parse(jsonMatch[0])
   } catch (err) {
-    console.error("[compound-search] Market enrichment JSON parse failed:", err)
+    logger.error("[compound-search] Market enrichment JSON parse failed:", err)
     return null
   }
 
@@ -326,7 +327,7 @@ export async function getCachedMarketEnrichment(params: {
     if (!row) return null
     return row.result as unknown as MarketEnrichment
   } catch (err) {
-    console.error("[change-1] getCachedMarketEnrichment failed:", err)
+    logger.error("[change-1] getCachedMarketEnrichment failed:", err)
     return null
   }
 }
@@ -364,11 +365,11 @@ export async function discoverDealers(params: {
 
   const cached = await getCached(cacheKey)
   if (cached) {
-    console.log("[compound-search] Dealer discovery cache hit:", cacheKey)
+    logger.info("[compound-search] Dealer discovery cache hit:", cacheKey)
     return cached as DiscoveredDealer[]
   }
 
-  console.log("[compound-search] Dealer discovery cache MISS, delegating to Gemini Maps:", cacheKey)
+  logger.info("[compound-search] Dealer discovery cache MISS, delegating to Gemini Maps:", cacheKey)
 
   const dealers = await discoverDealersViaGeminiMaps({
     make: params.make,

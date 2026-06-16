@@ -6,6 +6,7 @@
 // CSRF for exactly this reason. The handler is intentionally forgiving — it
 // always returns 200 so a tracking hiccup never surfaces on the visitor's page.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { trackClick } from "@/lib/services/affiliate/referral.service";
 
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, tracked: result.tracked }, { status: 200 });
   } catch (err) {
-    console.error("[group-8] /api/public/referral/track failed:", err);
+    logger.error("[group-8] /api/public/referral/track failed:", err);
     // Never surface a tracking error to the visitor.
     return NextResponse.json({ ok: false, tracked: false }, { status: 200 });
   }

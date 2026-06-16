@@ -7,6 +7,7 @@
 // Auth: Vercel cron (x-vercel-cron header) OR a Bearer CRON_SECRET, matching
 // the convention used by the other /api/cron/* routes.
 
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server"
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants"
 import {
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
   }
 
   const due = await findDealersDueForFollowup()
-  console.log(`[phase-4b4] Cron fired. ${due.length} dealers due for follow-up.`)
+  logger.info(`[phase-4b4] Cron fired. ${due.length} dealers due for follow-up.`)
 
   let sent = 0
   let failed = 0
@@ -40,12 +41,12 @@ export async function GET(request: NextRequest) {
       await new Promise((r) => setTimeout(r, 1000))
     } catch (err) {
       failed++
-      console.error(
+      logger.error(
         `[phase-4b4] Follow-up failed for ${dealer.id}: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
   }
 
-  console.log(`[phase-4b4] Cron complete. sent=${sent} failed=${failed}`)
+  logger.info(`[phase-4b4] Cron complete. sent=${sent} failed=${failed}`)
   return NextResponse.json({ due: due.length, sent, failed })
 }

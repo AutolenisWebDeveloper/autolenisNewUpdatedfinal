@@ -3,6 +3,7 @@
 // MicroBilt's Connect-style callback delivers a shared secret in the
 // `x-microbilt-secret` header. We fail closed if the secret is unset so an
 // unconfigured webhook cannot accept forged status updates.
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
@@ -20,7 +21,7 @@ function timingSafeStringEqual(a: string, b: string): boolean {
 export async function POST(request: NextRequest) {
   const expected = process.env.MICROBILT_WEBHOOK_SECRET;
   if (!expected) {
-    console.error("[microbilt/webhook] MICROBILT_WEBHOOK_SECRET is not configured — rejecting request");
+    logger.error("[microbilt/webhook] MICROBILT_WEBHOOK_SECRET is not configured — rejecting request");
     return new NextResponse("Webhook not configured", { status: 503 });
   }
 
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ received: true });
   } catch (err) {
-    console.error("[microbilt/webhook] processing error:", err);
+    logger.error("[microbilt/webhook] processing error:", err);
     return new NextResponse("Processing error", { status: 500 });
   }
 }

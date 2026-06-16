@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX, FAITH_VERSE_ENABLED_PAGES, FAITH_VERSE_ROTATION_WEEKS } from "@/lib/constants";
@@ -81,7 +82,7 @@ export async function GET(request: NextRequest) {
 
       rotated.push(`${pageKey}: ${nextVerse.reference}`);
     } catch (err) {
-      console.error(`[faith-verse-rotation] Error for ${pageKey}:`, err);
+      logger.error(`[faith-verse-rotation] Error for ${pageKey}:`, err);
       skipped.push(pageKey);
     }
   }

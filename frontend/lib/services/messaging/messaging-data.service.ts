@@ -1,5 +1,6 @@
 // lib/services/messaging/messaging-data.service.ts — Feature 33 read queries
 // Prisma read queries for buyer-facing messaging pages.
+import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
 export type BuyerThreadSummary = {
@@ -87,7 +88,7 @@ export async function getBuyerMessageThread(
       where: { threadId_userId: { threadId, userId: buyerUserId } },
       data: { lastReadAt: new Date() },
     })
-    .catch((err) => console.error("[messaging-data] mark-read failed:", err));
+    .catch((err) => logger.error("[messaging-data] mark-read failed:", err));
 
   return {
     id: thread.id,

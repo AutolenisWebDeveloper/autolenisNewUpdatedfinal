@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 
@@ -132,7 +133,7 @@ export async function POST(req: Request) {
       crmContactId = contact.id;
     } catch (crmErr) {
       // A CRM hiccup must never fail the buyer's submission.
-      console.error("[lead-magnet] CRM upsert failed:", crmErr);
+      logger.error("[lead-magnet] CRM upsert failed:", crmErr);
     }
 
     // 2b) Per-source domain event (additive, non-blocking) — emits
@@ -170,7 +171,7 @@ export async function POST(req: Request) {
           },
         });
       } catch (emitErr) {
-        console.error("[lead-magnet] CRM emit failed:", emitErr);
+        logger.error("[lead-magnet] CRM emit failed:", emitErr);
       }
     }
 
@@ -187,7 +188,7 @@ export async function POST(req: Request) {
         sessionId,
       });
     } catch (emailErr) {
-      console.error("[lead-magnet] delivery email failed:", emailErr);
+      logger.error("[lead-magnet] delivery email failed:", emailErr);
     }
 
     return NextResponse.json({
@@ -196,7 +197,7 @@ export async function POST(req: Request) {
       accessPath,
     });
   } catch (err) {
-    console.error("[lead-magnet]", err);
+    logger.error("[lead-magnet]", err);
     return NextResponse.json(
       { success: false, error: "server_error" },
       { status: 500 },

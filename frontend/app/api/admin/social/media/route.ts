@@ -3,6 +3,7 @@
 // with their parent post. Supports platform / media-type / status filters for
 // the dashboard Media grid.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
 
     return adminSuccess({ media });
   } catch (err) {
-    console.error("[admin/social] media query failed:", err);
+    logger.error("[admin/social] media query failed:", err);
     return adminSuccess({ media: [] });
   }
 }

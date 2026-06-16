@@ -16,6 +16,7 @@
 // be added as a user on the Search Console property. If the key is absent the
 // pipeline no-ops with a warning so builds and local runs never block on it.
 
+import { logger } from "@/lib/logger";
 import { SignJWT, importPKCS8 } from "jose";
 import { prisma } from "@/lib/prisma";
 
@@ -46,18 +47,18 @@ interface GscRow {
 function loadServiceAccount(): ServiceAccountKey | null {
   const raw = process.env.GOOGLE_SEARCH_CONSOLE_KEY;
   if (!raw) {
-    console.warn("[amips-p3-search] GOOGLE_SEARCH_CONSOLE_KEY not set; skipping sync");
+    logger.warn("[amips-p3-search] GOOGLE_SEARCH_CONSOLE_KEY not set; skipping sync");
     return null;
   }
   try {
     const json = JSON.parse(Buffer.from(raw, "base64").toString("utf8")) as ServiceAccountKey;
     if (!json.client_email || !json.private_key) {
-      console.warn("[amips-p3-search] service-account key missing client_email/private_key");
+      logger.warn("[amips-p3-search] service-account key missing client_email/private_key");
       return null;
     }
     return json;
   } catch (err) {
-    console.warn("[amips-p3-search] could not parse GOOGLE_SEARCH_CONSOLE_KEY", err);
+    logger.warn("[amips-p3-search] could not parse GOOGLE_SEARCH_CONSOLE_KEY", err);
     return null;
   }
 }
@@ -87,13 +88,13 @@ async function getAccessToken(sa: ServiceAccountKey): Promise<string | null> {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
-      console.warn(`[amips-p3-search] token exchange failed: ${res.status}`);
+      logger.warn(`[amips-p3-search] token exchange failed: ${res.status}`);
       return null;
     }
     const body = (await res.json()) as { access_token?: string };
     return body.access_token ?? null;
   } catch (err) {
-    console.warn("[amips-p3-search] token exchange error", err);
+    logger.warn("[amips-p3-search] token exchange error", err);
     return null;
   }
 }
@@ -122,7 +123,7 @@ export async function syncSearchIntelligence(
   siteUrl: string,
   weekOf: Date,
 ): Promise<SearchSyncResult> {
-  console.log(`[amips-p3-search] starting sync for ${siteUrl}, week of ${isoDate(weekOf)}`);
+  logger.info(`[amips-p3-search] starting sync for ${siteUrl}, week of ${isoDate(weekOf)}`);
 
   const sa = loadServiceAccount();
   if (!sa) return { synced: 0 };
@@ -155,13 +156,13 @@ export async function syncSearchIntelligence(
       },
     );
     if (!res.ok) {
-      console.warn(`[amips-p3-search] search analytics query failed: ${res.status}`);
+      logger.warn(`[amips-p3-search] search analytics query failed: ${res.status}`);
       return { synced: 0 };
     }
     const body = (await res.json()) as { rows?: GscRow[] };
     rows = body.rows ?? [];
   } catch (err) {
-    console.warn("[amips-p3-search] search analytics fetch error", err);
+    logger.warn("[amips-p3-search] search analytics fetch error", err);
     return { synced: 0 };
   }
 
@@ -175,7 +176,7 @@ export async function syncSearchIntelligence(
   });
 
   if (candidates.length === 0) {
-    console.log("[amips-p3-search] no /intelligence/* rows returned");
+    logger.info("[amips-p3-search] no /intelligence/* rows returned");
     return { synced: 0 };
   }
 
@@ -232,11 +233,11 @@ export async function syncSearchIntelligence(
       });
       synced++;
     } catch (err) {
-      console.error(`[amips-p3-search] error syncing ${c.url}`, err);
+      logger.error(`[amips-p3-search] error syncing ${c.url}`, err);
     }
   }
 
-  console.log(`[amips-p3-search] done — synced ${synced}/${candidates.length} pages`);
+  logger.info(`[amips-p3-search] done — synced ${synced}/${candidates.length} pages`);
   return { synced };
 }
 

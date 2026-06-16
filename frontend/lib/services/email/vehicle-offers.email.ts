@@ -3,6 +3,7 @@
 // All sends are best-effort: callers should wrap in try/catch and log errors;
 // failures must never block the user-facing API response.
 
+import { logger } from "@/lib/logger";
 import { Resend } from "resend";
 
 const FROM_NAME = process.env.FROM_NAME ?? "AutoLenis";
@@ -20,13 +21,13 @@ function getResend(): Resend | null {
 async function sendRaw(to: string, subject: string, html: string): Promise<void> {
   const resend = getResend();
   if (!resend) {
-    console.warn(`[vehicle-offers email] Resend not configured — skipped: ${subject} -> ${to}`);
+    logger.warn(`[vehicle-offers email] Resend not configured — skipped: ${subject} -> ${to}`);
     return;
   }
   try {
     await resend.emails.send({ from: FROM, to, subject, html });
   } catch (err) {
-    console.error(`[vehicle-offers email] Send failed: ${subject} -> ${to}`, err);
+    logger.error(`[vehicle-offers email] Send failed: ${subject} -> ${to}`, err);
   }
 }
 

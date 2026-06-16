@@ -3,6 +3,7 @@
 // platform-optimized versions to every selected platform, with optional viral
 // rewriting and a configurable scheduling strategy.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
       const data = await res.json();
       optimizedVersions = data?.data?.optimizedVersions ?? {};
     } catch {
-      console.log("[publish-all] viral optimizer unavailable, using original");
+      logger.info("[publish-all] viral optimizer unavailable, using original");
     }
   }
 
@@ -168,7 +169,7 @@ export async function POST(request: NextRequest) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       failed.push({ platform, error: msg });
-      console.error("[publish-all] failed for platform:", platform, msg);
+      logger.error("[publish-all] failed for platform:", platform, msg);
     }
   }
 

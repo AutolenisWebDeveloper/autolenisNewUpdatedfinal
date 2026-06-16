@@ -4,6 +4,7 @@
 
 "use client";
 
+import { logger } from "@/lib/logger";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,7 @@ export default function FinancingPage() {
           setInitialPath(d.data.financingPath);
         }
       })
-      .catch((err: unknown) => { console.error("[financing] Failed to load current financing path:", err); })
+      .catch((err: unknown) => { logger.error("[financing] Failed to load current financing path:", err); })
       .finally(() => setLoadingInitial(false));
   }, []);
 
