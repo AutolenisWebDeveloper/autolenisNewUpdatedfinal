@@ -17,7 +17,7 @@ The genuine gaps cluster into **six concrete, well-specified items**. The single
 | 2 CRM System of Record | ~80% ✅ | No unified Prisma `Contact` (lives in Supabase); fragmented consent |
 | 3 Behavioral Tracking | ~70% 🟡 | Email open/click + SMS delivery webhooks; page-view/visit granularity |
 | **4 Lead Scoring** | **~40% 🟡** | **Action-based scoring not wired (9 of 10 spec signals)** |
-| 5 Segmentation | ~65% 🟡 | Spec's named segments not seeded |
+| 5 Segmentation | ~90% ✅ | Named segments (Buyer/Lifecycle/Vehicle/Finance) now seeded |
 | 6 Make.com Brain | ~90% ✅ | Inbound Make callback hardening; per-step retry/analytics |
 | 7 Email Campaigns | ~85% ✅ | Trade-In campaign; campaign scheduler cron |
 | 8 SMS Campaigns | ~80% ✅ | Twilio inbound (STOP/HELP) webhook; market-alert templates |
@@ -151,11 +151,19 @@ Ordered by value × spec-precision × independence. Each batch keeps `pnpm tsc -
 **Batch 2 — Named segments (Layer 5) ✅**
 - `lib/types/crm.ts` + `lib/services/segment.service.ts` — added `lead_score` (number) + `lead_temperature` (enum) to the segment field whitelist with validation; added `number` field type.
 - `components/admin/crm/SegmentBuilder.tsx` — surfaced both fields in the builder UI (number input + temperature enum).
-- `migrations/11_seed_named_segments.sql` — idempotent seed of Buyer (Cold/Warm/Hot/Ready To Buy) + Lifecycle (Lead/Auction Active/Offer Received/Customer) segments. **Deferred:** Vehicle + Finance segments — they need a contact-level interest field that doesn't yet exist on the `contacts` plane (lives on `BuyerOpportunity`).
+- `migrations/11_seed_named_segments.sql` — idempotent seed of Buyer (Cold/Warm/Hot/Ready To Buy) + Lifecycle (Lead/Auction Active/Offer Received/Customer) segments.
+
+**Batch 2b — Vehicle + Finance segments (Layer 5) ✅ (follow-up, previously deferred)**
+- `lib/crm/contact-interest-tags.ts` — pure classifier mapping domain events → `vehicle:*` / `finance:*` interest tags (SUV→suv+family, Truck, Van→family, EV from make/model, Luxury from make or budget≥$55k; refinance/trade-in/calculator/financing/lease).
+- `lib/events/emit.ts` — projects interest tags onto `contacts.tags[]` (merge + dedup, isolated).
+- `app/api/public/request-vehicle/route.ts` — emit payload enriched with make/model/financing_option so the classifier has data.
+- `lib/services/segment.service.ts` + `lib/types/crm.ts` — added `tags` field with `has_tag`/`not_has_tag` array-membership operators (PostgREST `cs`); `array` field type.
+- `components/admin/crm/SegmentBuilder.tsx` — "Interest tag" field with has_tag/not_has_tag.
+- `migrations/12_seed_vehicle_finance_segments.sql` — seeds all 5 Vehicle + 4 Finance segments. (Vehicle/Finance segmentation is **no longer deferred**; `finance:lease` populates only once a lease-path signal flows, but the segment + tag convention are live.)
 
 **Batch 3 — High-score → Priority-Outreach task (Layer 9) ✅**
 - In `lead-action-scoring.service.ts`: on the first crossing into hot, opens a deduped `crm_tasks` row (priority=urgent, source=`lead_scoring`, 4h SLA) + timeline event.
 
-**Validation (all green):** `pnpm typecheck` 0 errors · `pnpm lint` clean · `pnpm test` 38/38 · `pnpm test:crm` 54/54 (incl. 4 new scoring-action proofs) · `pnpm build` PASS.
+**Validation (all green):** `pnpm typecheck` 0 errors · `pnpm lint` clean · `pnpm test` 38/38 · `pnpm test:crm` 62/62 (incl. 4 scoring-action + 8 interest-tag proofs) · `pnpm build` PASS.
 
 **Deploy note:** migrations `10` + `11` are raw Supabase SQL (apply to prod ref `aieybibvewmvrubcpthm`), consistent with migrations `06`/`08`/`09`.

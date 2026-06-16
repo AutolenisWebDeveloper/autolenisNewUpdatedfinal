@@ -9,6 +9,7 @@ import { forwardToMake, type DomainEventEnvelope } from './make-webhook';
 import { resolveStageAdvance } from './lifecycle-advance';
 import { recordScoringAction } from '@/lib/services/crm/lead-action-scoring.service';
 import type { ScoringAction } from '@/lib/crm/scoring-actions';
+import { interestTagsForEvent } from '@/lib/crm/contact-interest-tags';
 
 // Layer 4 — map the domain events that correspond to a scored behavior onto the
 // spec's scoring actions. Events with no behavioral score (signups, reminders,
@@ -168,6 +169,30 @@ export async function emitDomainEvent(
     } catch (err) {
       logger.error(`[emit] lead scoring failed for '${event}' (${idempotencyKey})`, err);
     }
+  }
+
+  // (3c) Interest tags — project vehicle/finance interest onto the contact's
+  // tags array so the seeded Vehicle/Finance segments (migration 12) can target
+  // it. Merge-and-dedup; only writes when a genuinely new tag appears. Isolated.
+  try {
+    const newTags = interestTagsForEvent(event, input.data ?? {});
+    if (newTags.length) {
+      const current = Array.isArray(contact.tags) ? contact.tags : [];
+      const merged = Array.from(new Set([...current, ...newTags]));
+      if (merged.length !== current.length) {
+        const { error } = await supabase
+          .from('contacts')
+          .update({ tags: merged, updated_at: new Date().toISOString() })
+          .eq('id', contact.id);
+        if (error) {
+          logger.error(`[emit] interest-tag write failed for '${event}' (${idempotencyKey})`, error);
+        } else {
+          contact.tags = merged;
+        }
+      }
+    }
+  } catch (err) {
+    logger.error(`[emit] interest-tag error for '${event}' (${idempotencyKey})`, err);
   }
 
   // (4) Outbound webhook — non-blocking. Prefer Vercel after() so it runs after

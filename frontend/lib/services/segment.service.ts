@@ -14,7 +14,7 @@ import { writeCrmAuditLog, type CrmAuditActor } from './admin/crm-audit';
 // crash the count query (or worse, leak a column we don't intend to filter on).
 type FieldDef = {
   column: string;
-  type: 'text' | 'boolean' | 'timestamp' | 'number';
+  type: 'text' | 'boolean' | 'timestamp' | 'number' | 'array';
   operators: readonly SegmentOperator[];
 };
 
@@ -68,6 +68,11 @@ const FIELD_DEFS: Record<SegmentField, FieldDef> = {
     column: 'lead_temperature',
     type: 'text',
     operators: ['eq', 'neq'],
+  },
+  tags: {
+    column: 'tags',
+    type: 'array',
+    operators: ['has_tag', 'not_has_tag'],
   },
 };
 
@@ -136,6 +141,11 @@ export function normalizeConditions(input: unknown): SegmentConditions {
       return { field, op, value: num };
     }
 
+    // Array fields (tags) — a single tag string to test for membership.
+    if (def.type === 'array') {
+      return { field, op, value: String(value) };
+    }
+
     if (field === 'lifecycle_stage' && !LIFECYCLE_STAGES.includes(String(value))) {
       throw new Error(`RULE_${idx}_VALUE_INVALID_STAGE`);
     }
@@ -165,6 +175,7 @@ type AnyBuilder = {
   not: (col: string, op: string, value: unknown) => AnyBuilder;
   or: (filter: string) => AnyBuilder;
   is: (col: string, value: unknown) => AnyBuilder;
+  contains: (col: string, value: unknown) => AnyBuilder;
   select: (cols: string, opts?: Record<string, unknown>) => AnyBuilder;
   limit: (n: number) => AnyBuilder;
 };
@@ -189,6 +200,9 @@ function applyAllMatchRule(query: AnyBuilder, rule: SegmentRule): AnyBuilder {
     case 'before':       return query.lte(col, rule.value);
     case 'is_true':      return query.eq(col, true);
     case 'is_false':     return query.eq(col, false);
+    // Array membership: tags @> {value}. not_has_tag negates the same op.
+    case 'has_tag':      return query.contains(col, [rule.value]);
+    case 'not_has_tag':  return query.not(col, 'cs', `{${rule.value}}`);
     default:             return query;
   }
 }
@@ -212,6 +226,8 @@ function buildOrFilter(rules: SegmentRule[]): string {
         case 'before':       return `${col}.lte.${rule.value}`;
         case 'is_true':      return `${col}.eq.true`;
         case 'is_false':     return `${col}.eq.false`;
+        case 'has_tag':      return `${col}.cs.{${rule.value}}`;
+        case 'not_has_tag':  return `not.${col}.cs.{${rule.value}}`;
         default:             return '';
       }
     })

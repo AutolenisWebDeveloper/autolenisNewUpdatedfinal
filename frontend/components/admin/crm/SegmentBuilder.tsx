@@ -146,6 +146,15 @@ const FIELDS: FieldOption[] = [
       { value: 'neq', label: 'does not equal' },
     ],
   },
+  {
+    field: 'tags',
+    label: 'Interest tag',
+    type: 'text',
+    operators: [
+      { value: 'has_tag', label: 'has tag' },
+      { value: 'not_has_tag', label: 'does not have tag' },
+    ],
+  },
 ];
 
 const FIELD_BY_NAME: Record<SegmentField, FieldOption> = Object.fromEntries(
