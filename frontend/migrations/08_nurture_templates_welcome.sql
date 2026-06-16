@@ -52,7 +52,6 @@ VALUES
           </p>
         </td></tr>
       </table>
-      <!-- autolenis:footer:v1 -->
     </td></tr>
   </table>
 </body></html>$html$,
@@ -96,7 +95,6 @@ VALUES
           </p>
         </td></tr>
       </table>
-      <!-- autolenis:footer:v1 -->
     </td></tr>
   </table>
 </body></html>$html$,
@@ -140,7 +138,6 @@ VALUES
           </p>
         </td></tr>
       </table>
-      <!-- autolenis:footer:v1 -->
     </td></tr>
   </table>
 </body></html>$html$,
@@ -185,7 +182,6 @@ VALUES
           </p>
         </td></tr>
       </table>
-      <!-- autolenis:footer:v1 -->
     </td></tr>
   </table>
 </body></html>$html$,
@@ -229,7 +225,6 @@ VALUES
           </p>
         </td></tr>
       </table>
-      <!-- autolenis:footer:v1 -->
     </td></tr>
   </table>
 </body></html>$html$,
