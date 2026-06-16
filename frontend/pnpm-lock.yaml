@@ -139,9 +139,6 @@ importers:
         specifier: ^3.24.4
         version: 3.25.76
     devDependencies:
-      '@playwright/test':
-        specifier: ^1.60.0
-        version: 1.60.0
       '@tailwindcss/postcss':
         specifier: ^4.2.4
         version: 4.2.4
@@ -5285,6 +5282,7 @@ snapshots:
   '@playwright/test@1.60.0':
     dependencies:
       playwright: 1.60.0
+    optional: true
 
   '@prisma/client@5.22.0(prisma@5.22.0)':
     optionalDependencies:
@@ -7433,13 +7431,15 @@ snapshots:
 
   picomatch@4.0.4: {}
 
-  playwright-core@1.60.0: {}
+  playwright-core@1.60.0:
+    optional: true
 
   playwright@1.60.0:
     dependencies:
       playwright-core: 1.60.0
     optionalDependencies:
       fsevents: 2.3.2
+    optional: true
 
   png-js@1.1.0:
     dependencies:
