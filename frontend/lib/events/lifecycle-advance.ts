@@ -41,6 +41,10 @@ export const EVENT_TO_STAGE: Record<DomainEventType, LifecycleStage> = {
   affiliate_signup: 'lead',
   trade_in_submitted: 'lead',
   saved_search_created: 'lead',
+  // A saved-search match notifies an existing buyer that new inventory matched
+  // their criteria — it re-engages, it does not advance the funnel (forward-only
+  // keeps an active buyer where they are).
+  saved_search_matched: 'lead',
   calculator_completed: 'lead',
   exit_intent_captured: 'lead',
   partial_lead_captured: 'lead',
