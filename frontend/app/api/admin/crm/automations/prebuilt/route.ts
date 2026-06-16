@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import { PREBUILT_WORKFLOWS } from '@/lib/services/workflow.prebuilt';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+
   return NextResponse.json({
     data: PREBUILT_WORKFLOWS.map((p) => ({
       key: p.key,

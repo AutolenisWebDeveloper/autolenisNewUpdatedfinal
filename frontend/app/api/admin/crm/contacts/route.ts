@@ -20,6 +20,9 @@ const DEFAULT_PER_PAGE = 50;
 const MAX_PER_PAGE = 100;
 
 export async function GET(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+
   const url = new URL(req.url);
   const q = (url.searchParams.get('q') ?? '').trim();
   const stage = url.searchParams.get('stage');

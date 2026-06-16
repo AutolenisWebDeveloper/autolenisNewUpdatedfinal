@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import type { TimelineEvent, Contact } from '@/lib/types/crm';
 
@@ -10,6 +11,9 @@ const MAX_PER_PAGE = 100;
 type ContactJoin = Pick<Contact, 'id' | 'first_name' | 'last_name' | 'email' | 'phone'>;
 
 export async function GET(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+
   const url = new URL(req.url);
   const channel = url.searchParams.get('channel'); // 'email' | 'sms' | null
   const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1);

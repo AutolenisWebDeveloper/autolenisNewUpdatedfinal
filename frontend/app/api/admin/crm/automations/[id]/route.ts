@@ -11,6 +11,9 @@ interface RouteContext {
 }
 
 export async function GET(_req: Request, ctx: RouteContext) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+
   const { id } = await ctx.params;
   const supabase = getServiceSupabase();
   try {

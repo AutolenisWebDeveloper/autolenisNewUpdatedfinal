@@ -10,6 +10,9 @@ import type {
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+
   const url = new URL(req.url);
   const status = url.searchParams.get('status') as EmailTemplateStatus | null;
   const category = url.searchParams.get('category');

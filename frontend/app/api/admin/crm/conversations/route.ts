@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getAdminActor } from '@/lib/auth/admin-actor';
 import { getServiceSupabase } from '@/lib/supabase-service';
 
 export const dynamic = 'force-dynamic';
@@ -6,6 +7,9 @@ export const dynamic = 'force-dynamic';
 const VALID_STATUSES = ['open', 'assigned', 'escalated', 'resolved'] as const;
 
 export async function GET(req: Request) {
+  const actor = await getAdminActor();
+  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+
   const url = new URL(req.url);
   const statusParam = url.searchParams.get('status');
   const statuses = statusParam
