@@ -14,7 +14,7 @@ import { writeCrmAuditLog, type CrmAuditActor } from './admin/crm-audit';
 // crash the count query (or worse, leak a column we don't intend to filter on).
 type FieldDef = {
   column: string;
-  type: 'text' | 'boolean' | 'timestamp';
+  type: 'text' | 'boolean' | 'timestamp' | 'number';
   operators: readonly SegmentOperator[];
 };
 
@@ -59,7 +59,20 @@ const FIELD_DEFS: Record<SegmentField, FieldDef> = {
     type: 'timestamp',
     operators: ['before', 'after', 'gte', 'lte'],
   },
+  lead_score: {
+    column: 'lead_score',
+    type: 'number',
+    operators: ['eq', 'neq', 'gte', 'lte'],
+  },
+  lead_temperature: {
+    column: 'lead_temperature',
+    type: 'text',
+    operators: ['eq', 'neq'],
+  },
 };
+
+// Mirrors the contacts_lead_temperature_chk CHECK (migration 06).
+const LEAD_TEMPERATURES = ['hot', 'warm', 'cold'];
 
 const LIFECYCLE_STAGES = [
   'lead', 'prequal_started', 'prequal_completed',
@@ -115,11 +128,22 @@ export function normalizeConditions(input: unknown): SegmentConditions {
       throw new Error(`RULE_${idx}_VALUE_REQUIRED`);
     }
 
+    // Numeric fields (lead_score) — coerce and store a real number so the
+    // PostgREST comparison is numeric, not lexicographic.
+    if (def.type === 'number') {
+      const num = Number(value);
+      if (Number.isNaN(num)) throw new Error(`RULE_${idx}_VALUE_INVALID_NUMBER`);
+      return { field, op, value: num };
+    }
+
     if (field === 'lifecycle_stage' && !LIFECYCLE_STAGES.includes(String(value))) {
       throw new Error(`RULE_${idx}_VALUE_INVALID_STAGE`);
     }
     if (field === 'source' && !SOURCES.includes(String(value))) {
       throw new Error(`RULE_${idx}_VALUE_INVALID_SOURCE`);
+    }
+    if (field === 'lead_temperature' && !LEAD_TEMPERATURES.includes(String(value))) {
+      throw new Error(`RULE_${idx}_VALUE_INVALID_TEMPERATURE`);
     }
 
     return { field, op, value: value as string | number | boolean };

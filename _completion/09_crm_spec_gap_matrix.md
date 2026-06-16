@@ -136,3 +136,26 @@ Ordered by value × spec-precision × independence. Each batch keeps `pnpm tsc -
 **Batch 5 — Customer-success cadence (Layer 14).** Extend `post_purchase` workflow with Day 30 review, Day 60 referral, Day 365 replacement nodes + the missing templates.
 
 > Batches 1–3 form a coherent slice (score → segment → task) and are recommended to ship together first. 4 and 5 are independent follow-ons.
+
+---
+
+## BUILD LOG — Batches 1–3 shipped (2026-06-16)
+
+**Batch 1 — Action-based Lead Scoring (Layer 4) ✅**
+- `lib/crm/scoring-actions.ts` — pure action→points map (spec table verbatim), temperature thresholds, hot-crossing predicate.
+- `migrations/10_lead_scoring_events.sql` — append-only scoring ledger with partial-unique idempotency index.
+- `lib/services/crm/lead-action-scoring.service.ts` — additive accrual onto `contacts.lead_score`, mirrors to linked Buyer + `LeadScore` history + timeline; idempotent; isolated/best-effort.
+- `app/api/crm/dispatch/track/route.ts` — Make/internal dispatch endpoint (same auth/idempotency/finalize contract as `/score`).
+- `lib/events/emit.ts` — wired 8 domain events → scoring actions (vehicle_request +100, vehicle_search +10, calculator +20, zura +25, lead_magnet→article_read +5, offer_received→offer_view +50, offer_selected→offer_accepted +200, purchase_completed→deal_completed +500). Front-end-only signals (landing/article/favorite) are reported via the track endpoint.
+
+**Batch 2 — Named segments (Layer 5) ✅**
+- `lib/types/crm.ts` + `lib/services/segment.service.ts` — added `lead_score` (number) + `lead_temperature` (enum) to the segment field whitelist with validation; added `number` field type.
+- `components/admin/crm/SegmentBuilder.tsx` — surfaced both fields in the builder UI (number input + temperature enum).
+- `migrations/11_seed_named_segments.sql` — idempotent seed of Buyer (Cold/Warm/Hot/Ready To Buy) + Lifecycle (Lead/Auction Active/Offer Received/Customer) segments. **Deferred:** Vehicle + Finance segments — they need a contact-level interest field that doesn't yet exist on the `contacts` plane (lives on `BuyerOpportunity`).
+
+**Batch 3 — High-score → Priority-Outreach task (Layer 9) ✅**
+- In `lead-action-scoring.service.ts`: on the first crossing into hot, opens a deduped `crm_tasks` row (priority=urgent, source=`lead_scoring`, 4h SLA) + timeline event.
+
+**Validation (all green):** `pnpm typecheck` 0 errors · `pnpm lint` clean · `pnpm test` 38/38 · `pnpm test:crm` 54/54 (incl. 4 new scoring-action proofs) · `pnpm build` PASS.
+
+**Deploy note:** migrations `10` + `11` are raw Supabase SQL (apply to prod ref `aieybibvewmvrubcpthm`), consistent with migrations `06`/`08`/`09`.

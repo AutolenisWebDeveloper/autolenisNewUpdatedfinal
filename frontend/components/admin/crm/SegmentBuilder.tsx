@@ -26,7 +26,7 @@ import type {
 type FieldOption = {
   field: SegmentField;
   label: string;
-  type: 'text' | 'boolean' | 'timestamp' | 'enum';
+  type: 'text' | 'boolean' | 'timestamp' | 'enum' | 'number';
   operators: { value: SegmentOperator; label: string }[];
   options?: { value: string; label: string }[];
 };
@@ -119,6 +119,31 @@ const FIELDS: FieldOption[] = [
     operators: [
       { value: 'after', label: 'is after' },
       { value: 'before', label: 'is before' },
+    ],
+  },
+  {
+    field: 'lead_temperature',
+    label: 'Lead temperature',
+    type: 'enum',
+    operators: [
+      { value: 'eq', label: 'is' },
+      { value: 'neq', label: 'is not' },
+    ],
+    options: [
+      { value: 'hot', label: 'hot' },
+      { value: 'warm', label: 'warm' },
+      { value: 'cold', label: 'cold' },
+    ],
+  },
+  {
+    field: 'lead_score',
+    label: 'Lead score',
+    type: 'number',
+    operators: [
+      { value: 'gte', label: 'is at least' },
+      { value: 'lte', label: 'is at most' },
+      { value: 'eq', label: 'equals' },
+      { value: 'neq', label: 'does not equal' },
     ],
   },
 ];
@@ -433,6 +458,14 @@ export function SegmentBuilder(props: Props) {
                         value={(rule.value as string) ?? ''}
                         onChange={(e) => updateRule(idx, { value: e.target.value })}
                         className="col-span-4 bg-white border border-gray-200 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-gray-900 transition-colors"
+                      />
+                    ) : def.type === 'number' ? (
+                      <input
+                        type="number"
+                        value={(rule.value as number | string) ?? ''}
+                        onChange={(e) => updateRule(idx, { value: e.target.value })}
+                        placeholder="score"
+                        className="col-span-4 bg-white border border-gray-200 focus:border-blue-500 outline-none rounded px-2 py-1.5 text-xs text-gray-900 placeholder-gray-400 transition-colors"
                       />
                     ) : (
                       <input

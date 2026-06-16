@@ -242,7 +242,11 @@ export type SegmentField =
   | 'source'
   | 'utm_source'
   | 'utm_campaign'
-  | 'created_at';
+  | 'created_at'
+  // Behavioral plane (migration 06) — drives the seeded Buyer segments
+  // (Cold/Warm/Hot/Ready To Buy) and score-threshold targeting.
+  | 'lead_score'
+  | 'lead_temperature';
 
 export interface SegmentRule {
   field: SegmentField;
