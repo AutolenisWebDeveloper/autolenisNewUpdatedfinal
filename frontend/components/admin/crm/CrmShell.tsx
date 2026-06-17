@@ -12,6 +12,7 @@ import {
   FileText,
   Filter,
   ShieldOff,
+  ShieldCheck,
   Workflow,
   BarChart3,
   Activity,
@@ -75,6 +76,7 @@ const SECTIONS: NavSection[] = [
     title: 'Insights',
     items: [
       { href: '/admin/crm/analytics', label: 'Analytics',  icon: BarChart3 },
+      { href: '/admin/crm/coverage',  label: 'Coverage',   icon: ShieldCheck },
       { href: '/admin/operations',    label: 'Operations', icon: Activity },
     ],
   },
