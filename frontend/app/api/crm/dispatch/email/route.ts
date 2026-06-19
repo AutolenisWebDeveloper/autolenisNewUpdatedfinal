@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { authorizeDispatch, finalizeDispatch } from '@/lib/crm/dispatch-auth';
 import { resolveDispatchContact } from '@/lib/crm/resolve-contact';
 import { SuppressionService } from '@/lib/services/suppression.service';
-import { TemplateService } from '@/lib/services/template.service';
+import { TemplateService, physicalAddressConfigured } from '@/lib/services/template.service';
 import { sendCrmDispatchEmail } from '@/lib/services/email/resend.service';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 import { computeEffectiveEmailType } from '@/lib/crm/email-dispatch-policy';
@@ -57,6 +57,19 @@ export async function POST(request: NextRequest) {
   }
   if (contact?.do_not_contact) {
     return finalize({ status: 'no_consent', reason: 'do_not_contact', declaredType, effectiveType });
+  }
+
+  // CAN-SPAM hard gate: a marketing email legally requires a real physical
+  // mailing address. The footer falls back to a dev placeholder when
+  // AUTOLENIS_PHYSICAL_ADDRESS is unset; that fake address must NEVER ship, so
+  // block the marketing send outright rather than mail a non-compliant footer.
+  if (effectiveType === 'marketing' && !physicalAddressConfigured()) {
+    return finalize({
+      status: 'blocked',
+      reason: 'physical_address_unconfigured',
+      declaredType,
+      effectiveType,
+    });
   }
 
   // Suppression gate.

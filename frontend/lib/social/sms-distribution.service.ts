@@ -8,6 +8,8 @@
 
 import { logger } from "@/lib/logger";
 import { sendSms } from "@/lib/services/sms/twilio.service";
+import { getServiceSupabase } from "@/lib/supabase-service";
+import { gateMarketingSms } from "@/lib/crm/sms-gate";
 
 // SMS billing is per 160-char segment; warn (don't fail) past ~2 segments.
 const MAX_SMS_CHARS = 320;
@@ -17,9 +19,20 @@ export async function sendMarketAlertSMS(input: {
   firstName: string;
   make?: string;
   city?: string;
+  state?: string;
+  zip?: string;
   marketSignal: string;
   trackedUrl?: string;
 }): Promise<void> {
+  // TCPA marketing gate — consent + canonical suppression + quiet hours.
+  const gate = await gateMarketingSms(getServiceSupabase(), input.phoneNumber, {
+    state: input.state,
+    zip: input.zip,
+  });
+  if (!gate.allowed) {
+    logger.info(`[sms] market alert blocked: ${gate.reason}`);
+    return;
+  }
   let signal = input.marketSignal;
   // Truncate the signal first so the disclosure + link always survive.
   const overhead = `Hi ${input.firstName}! 📊 AutoLenis Alert: . ${
@@ -49,7 +62,19 @@ export async function sendAuctionUpdateSMS(input: {
   offerCount: number;
   hoursRemaining: number;
   auctionUrl: string;
+  state?: string;
+  zip?: string;
 }): Promise<void> {
+  // TCPA marketing gate — consent + canonical suppression + quiet hours.
+  const gate = await gateMarketingSms(getServiceSupabase(), input.phoneNumber, {
+    state: input.state,
+    zip: input.zip,
+  });
+  if (!gate.allowed) {
+    logger.info(`[sms] auction update blocked: ${gate.reason}`);
+    return;
+  }
+
   const message =
     `Hi ${input.firstName}! You have ${input.offerCount} dealer ` +
     `offer${input.offerCount !== 1 ? "s" : ""}. ` +

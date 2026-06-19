@@ -7,6 +7,7 @@ import { approveDealerByAdmin } from "@/lib/services/admin/admin-dealer-command-
 import { prisma } from "@/lib/prisma";
 import { sendDealerAccountApprovedEmail } from "@/lib/services/email/resend.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
+import { emitDomainEvent } from "@/lib/events/emit";
 
 interface Props { params: Promise<{ dealerId: string }> }
 
@@ -43,6 +44,20 @@ export async function POST(request: NextRequest, { params }: Props) {
       }).catch(err => logger.error("[admin/dealers/approve] account approved email failed:", err));
     }
     syncGhlTag(dealer?.user?.email, "dealer-approved");
+
+    // CRM spine: dealer verified/approved → timeline + Make (non-blocking, never
+    // throws). Forward no-ops until MAKE_WEBHOOK_URL is set.
+    if (dealer?.user?.email) {
+      await emitDomainEvent("dealer_verified", {
+        domainEntityId: dealerId,
+        contact: {
+          email: dealer.user.email,
+          firstName: dealer.dealershipName ?? undefined,
+          source: "dealer_signup",
+        },
+        data: { dealer_id: dealerId, dealership_name: dealer.dealershipName, approved_by: admin.email },
+      });
+    }
 
     return adminSuccess(result);
   } catch (err) {

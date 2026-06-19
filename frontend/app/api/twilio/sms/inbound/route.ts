@@ -14,11 +14,16 @@ import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { twimlResponse, verifyTwilioRequest } from "@/lib/voice/twilio-verify";
 import { detectOptOutIntent } from "@/lib/ai/acquisition";
+import { getServiceSupabase } from "@/lib/supabase-service";
+import { SuppressionService } from "@/lib/services/suppression.service";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const OPT_OUT_KEYWORDS = new Set(["STOP", "UNSUBSCRIBE", "CANCEL", "QUIT", "END"]);
+// Keyword sets unified with the canonical webhook (/api/webhooks/twilio/inbound)
+// so both inbound routes honor the same STOP/START vocabulary.
+const OPT_OUT_KEYWORDS = new Set(["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "QUIT", "END"]);
+const START_KEYWORDS = new Set(["START", "YES", "UNSTOP"]);
 
 function escapeXml(s: string): string {
   return s
@@ -70,40 +75,28 @@ export async function POST(req: Request) {
   }
 
   const upper = body.toUpperCase();
+  const supabase = getServiceSupabase();
 
   // ── START / re-subscribe ───────────────────────────────────────────────
-  if (upper === "START") {
-    await prisma.smsOptOut.deleteMany({ where: { phone: from } });
-    await prisma.buyer.updateMany({
-      where: { phone: from },
-      data: { optedOutSms: false },
-    });
-    return reply("You are re-subscribed to AutoLenis texts.");
+  // TCPA: START must NOT auto-re-enable sending. Delegate to the canonical
+  // handler, which preserves the suppression row (stamps restarted_at) and
+  // opens a manual-review task — consent must be re-verified before SMS resumes.
+  if (START_KEYWORDS.has(upper)) {
+    await SuppressionService.handleSmsStart(supabase, from);
+    return reply("AutoLenis received your opt-in request. An agent will verify your consent before SMS resumes.");
   }
 
   // ── Opt-out: keyword first, then safeguard model ───────────────────────
   let isOptOut = OPT_OUT_KEYWORDS.has(upper);
-  let reason: string;
-  if (isOptOut) {
-    reason = `keyword:${upper}`;
-  } else if (body.length > 0) {
-    const aiSaidOptOut = await detectOptOutIntent(body);
-    if (aiSaidOptOut) {
-      isOptOut = true;
-      reason = "ai_classified";
-    } else {
-      reason = "";
-    }
-  } else {
-    reason = "";
+  if (!isOptOut && body.length > 0) {
+    isOptOut = await detectOptOutIntent(body);
   }
 
   if (isOptOut) {
-    await prisma.smsOptOut.upsert({
-      where: { phone: from },
-      create: { phone: from, reason },
-      update: { reason },
-    });
+    // Write to the CANONICAL suppression store (sms_suppression) so every send
+    // path — CRM dispatch, Inngest, QStash, admin reply — honors the opt-out.
+    await SuppressionService.suppressSms(supabase, from, "stop");
+    // Keep the Buyer-plane flag in sync for buyer-facing logic that reads it.
     await prisma.buyer.updateMany({
       where: { phone: from },
       data: { optedOutSms: true },

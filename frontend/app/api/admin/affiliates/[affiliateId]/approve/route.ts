@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { approveAffiliateByAdmin } from "@/lib/services/admin/admin-affiliate-command-center.service";
 import { sendAffiliateActivationEmail } from "@/lib/services/email/resend.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
+import { emitDomainEvent } from "@/lib/events/emit";
 import { z } from "zod";
 
 interface Props { params: Promise<{ affiliateId: string }> }
@@ -49,6 +50,20 @@ export async function POST(request: NextRequest, { params }: Props) {
       }
     }
     syncGhlTag(affiliate?.user?.email, "affiliate-approved");
+
+    // CRM spine: affiliate approved/activated → timeline + Make (non-blocking,
+    // never throws). Forward no-ops until MAKE_WEBHOOK_URL is set.
+    if (affiliate?.user?.email) {
+      await emitDomainEvent("affiliate_approved", {
+        domainEntityId: affiliateId,
+        contact: {
+          email: affiliate.user.email,
+          firstName: affiliate.user.email.split("@")[0],
+          source: "affiliate_signup",
+        },
+        data: { affiliate_id: affiliateId, referral_code: result.referralCode, approved_by: admin.email },
+      });
+    }
 
     return adminSuccess(result);
   } catch (err) {

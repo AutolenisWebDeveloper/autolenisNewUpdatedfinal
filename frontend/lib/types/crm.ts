@@ -350,6 +350,14 @@ export type WorkflowTriggerType =
   | 'dealer_invited'
   | 'affiliate_signup'
   | 'buyer_inactive'
+  // Dealer + affiliate lifecycle events. Like other dealer/affiliate lifecycle
+  // signals these are NOT lead-scored (see EVENT_TO_SCORING_ACTION) — they emit a
+  // timeline row and forward to Make so a per-stage nurture scenario can attach.
+  | 'dealer_verified'
+  | 'dealer_activated'
+  | 'dealer_inactive'
+  | 'affiliate_approved'
+  | 'affiliate_commission'
   // Additive lead-capture events. Each maps 1:1 to a per-source domain event
   // (DomainEventType is derived from this union, so no drift) so Make can
   // attach a nurture scenario per source.

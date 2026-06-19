@@ -29,6 +29,10 @@
       "schedule": "0 9 * * 1"
     },
     {
+      "path": "/api/cron/dealer-inactive",
+      "schedule": "0 9 * * 1"
+    },
+    {
       "path": "/api/cron/contract-shield",
       "schedule": "0 * * * *"
     },
@@ -113,10 +117,6 @@
       "schedule": "0 14 * * 1-5"
     },
     {
-      "path": "/api/cron/lead-magnet-sequence",
-      "schedule": "0 15 * * *"
-    },
-    {
       "path": "/api/cron/amips-generate",
       "schedule": "0 6,14,22 * * *"
     },
@@ -163,10 +163,6 @@
     {
       "path": "/api/cron/social-market-index",
       "schedule": "0 12 * * 1"
-    },
-    {
-      "path": "/api/cron/social-lead-nurture",
-      "schedule": "0 15 * * *"
     }
   ]
 }

@@ -5,6 +5,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { emitDomainEvent } from "@/lib/events/emit";
+import { logger } from "@/lib/logger";
 
 // Walk affiliate tree up to 3 levels and create commissions (idempotent)
 export async function walkCommissionTree(
@@ -44,6 +46,36 @@ export async function walkCommissionTree(
         qualifyingEventId: key,
       },
     });
+
+    // CRM spine: affiliate earned a commission → timeline + Make (non-blocking,
+    // never throws; forward no-ops until MAKE_WEBHOOK_URL is set). Keyed on the
+    // commission's qualifying event so retries collapse. Best-effort: a lookup
+    // failure must never break commission creation in the payment path.
+    try {
+      const earner = await prisma.affiliate.findUnique({
+        where: { id: entry.affiliate.id },
+        include: { user: { select: { email: true } }, profile: { select: { firstName: true, lastName: true } } },
+      });
+      if (earner?.user?.email) {
+        await emitDomainEvent("affiliate_commission", {
+          domainEntityId: key,
+          contact: {
+            email: earner.user.email,
+            firstName: earner.profile?.firstName ?? undefined,
+            lastName: earner.profile?.lastName ?? undefined,
+            source: "affiliate_signup",
+          },
+          data: {
+            affiliate_id: entry.affiliate.id,
+            deal_id: dealId,
+            level: entry.level,
+            amount_cents: amountCents,
+          },
+        });
+      }
+    } catch (err) {
+      logger.error("[commission] affiliate_commission emit failed:", err);
+    }
   }
 }
 
