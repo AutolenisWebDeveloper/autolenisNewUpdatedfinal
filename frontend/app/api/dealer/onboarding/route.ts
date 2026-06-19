@@ -5,6 +5,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { requireDealerFromRequest } from "@/lib/auth/dealer-session";
 import { prisma } from "@/lib/prisma";
+import { emitDomainEvent } from "@/lib/events/emit";
 import { z } from "zod";
 
 export async function GET(request: NextRequest) {
@@ -167,6 +168,20 @@ export async function PATCH(request: NextRequest) {
     }).catch((err) => {
       logger.error("[dealer-onboarding/agreement] DocuSign send failed:", err);
     });
+
+    // CRM spine: dealer self-activated (onboarding complete) → timeline + Make
+    // (non-blocking, never throws). Forward no-ops until MAKE_WEBHOOK_URL is set.
+    if (updatedDealer.user?.email) {
+      await emitDomainEvent("dealer_activated", {
+        domainEntityId: updatedDealer.id,
+        contact: {
+          email: updatedDealer.user.email,
+          firstName: updatedDealer.dealershipName ?? undefined,
+          source: "dealer_signup",
+        },
+        data: { dealer_id: updatedDealer.id, dealership_name: updatedDealer.dealershipName },
+      });
+    }
 
     return NextResponse.json({ success: true, nextStep: "COMPLETE", redirect: "/dealer/dashboard" });
   }

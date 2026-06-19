@@ -21,6 +21,19 @@ import type {
 // back to start).
 const MAX_NODES_PER_RUN = 100;
 
+// Cutover kill-switch for the legacy in-app workflow engine. After the Make.com
+// cutover, Make owns all nurture dispatch; if this engine can still enroll or
+// advance, it double-sends against the Make Processor (illegal duplicate sends).
+// Default OFF — only the literal string 'true' enables it. This is the single
+// source of truth for the engine's enabled state, enforced at BOTH public
+// boundaries below (enrollContact + executeWorkflowFromNode) so that neither new
+// enrollments NOR in-flight resumes (Inngest delay nodes) can dispatch while the
+// flag is off. emit.ts performs the same check before invoking the engine to
+// avoid the dynamic import cost when disabled.
+export function isInAppEngineEnabled(): boolean {
+  return process.env.CRM_INAPP_ENGINE_ENABLED === 'true';
+}
+
 // Duration parser: supports 10m / 1h / 24h / 3d / 7d / Xs (admin custom).
 // Returns whole seconds. Throws on malformed input so misconfigured delay
 // nodes surface immediately instead of being silently coerced to 0s.
@@ -122,6 +135,9 @@ export class WorkflowEngine {
     contactId: string,
     triggerData: Record<string, unknown> = {},
   ): Promise<WorkflowEnrollment | null> {
+    // Cutover gate: with the engine disabled, Make is the sole nurture sender.
+    // Refuse to enroll so no contact can enter the in-app dispatch path.
+    if (!isInAppEngineEnabled()) return null;
     const workflow = await this.loadWorkflow(supabase, workflowId);
     if (!workflow) throw new Error('WORKFLOW_NOT_FOUND');
     if (workflow.status !== 'active') {
@@ -200,6 +216,9 @@ export class WorkflowEngine {
     enrollmentId: string,
     startNodeId: string,
   ): Promise<void> {
+    // Cutover gate: blocks advancement AND in-flight Inngest delay-node resumes,
+    // so a pre-existing enrollment cannot dispatch once the engine is disabled.
+    if (!isInAppEngineEnabled()) return;
     const enrollment = await this.loadEnrollment(supabase, enrollmentId);
     if (!enrollment) return;
     if (enrollment.status !== 'active') return;

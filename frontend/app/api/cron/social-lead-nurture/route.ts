@@ -23,6 +23,15 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  // Cutover gate: this cron dispatches nurture email via Resend OUTSIDE the
+  // Make-owned /api/crm/dispatch/* path. With Make as the sole nurture sender it
+  // must no-op, or it double-sends. Governed by the same master kill-switch as
+  // the in-app engine; the schedule is also removed from vercel.json so Vercel
+  // never invokes it. Re-enable only if reverting to legacy in-app nurture.
+  if (process.env.CRM_INAPP_ENGINE_ENABLED !== "true") {
+    return NextResponse.json({ success: true, skipped: "inapp_engine_disabled" });
+  }
+
   // Find leads that need the next nurture email.
   const leadsToNurture = await prisma.socialLead.findMany({
     where: {

@@ -1,0 +1,132 @@
+{
+  "_meta": {
+    "purpose": "Cadence rows for the Make.com Processor (data store 108892). One row per campaign step. The Processor, on enrollment, walks a campaign's steps in order, waiting offset_hours (measured from the enrollment/trigger time) before POSTing the step to https://www.autolenis.com/api/crm/dispatch/email. is_last=true ends the cadence. See processor_request_spec for the exact dispatch contract.",
+    "generated_for": "Supabase prod ref aieybibvewmvrubcpthm; every template_key below is verified present + active in email_templates.",
+    "channel_note": "All seeded templates are email. SMS steps are sent inline via /api/crm/dispatch/sms (body, not template_key); add SMS rows here only once SMS bodies are authored.",
+    "offset_semantics": "offset_hours is hours AFTER the enrollment/trigger event (delta from enrollment, not from the previous step). step 1 is typically offset 0 (immediate)."
+  },
+  "campaign_triggers": {
+    "welcome": "buyer_signup",
+    "vehicle_request": "vehicle_request_submitted",
+    "auction": "auction_started",
+    "offer": "offer_received",
+    "deal_formed": "offer_selected",
+    "deposit_confirmed": "deposit_paid",
+    "contract_signed": "docusign_signed",
+    "trade_in": "trade_in_submitted",
+    "refinance": "refinance_inquiry",
+    "financing": "manual (segment-enrolled; no dedicated financing domain event)",
+    "saved_search": "saved_search_created",
+    "calculator": "calculator_completed",
+    "lead_magnet": "lead_magnet_downloaded",
+    "zura": "zura_conversation_captured",
+    "prequalification": "prequal_started",
+    "winback": "buyer_inactive",
+    "post_purchase": "purchase_completed",
+    "dealer_onboarding": "dealer_verified / dealer_activated",
+    "dealer_reactivation": "dealer_inactive",
+    "affiliate_onboarding": "affiliate_approved / affiliate_signup",
+    "affiliate_growth": "affiliate_approved",
+    "affiliate_reactivation": "manual (segment-enrolled) / affiliate inactivity",
+    "lp_recovery": "partial_lead_captured",
+    "exit_intent": "exit_intent_captured"
+  },
+  "processor_request_spec": {
+    "method": "POST",
+    "url": "https://www.autolenis.com/api/crm/dispatch/email",
+    "headers": {
+      "content-type": "application/json",
+      "x-autolenis-signature": "hex( HMAC_SHA256(CRM_DISPATCH_SECRET, <exact raw request body bytes>) )",
+      "x-autolenis-timestamp": "<unix ms at send time>",
+      "x-idempotency-key": "<campaign>:<step>:<contactId> (stable per logical send; REQUIRED — 400 if absent)"
+    },
+    "body": {
+      "contactId": "<CRM contacts.id uuid from the inbound event envelope>",
+      "templateKey": "<template_key for this step>",
+      "type": "marketing",
+      "scenarioId": "<campaign>:<step>",
+      "vars": { "firstName": "<from contact>", "dashboardUrl": "https://www.autolenis.com/dashboard" }
+    },
+    "notes": [
+      "AutoLenis owns consent/suppression/quiet-hours/idempotency/audit — Make never sends email itself.",
+      "type:'marketing' forces the consent gate; transactional confirmations (vr_received, auction_live, deal_formed, deposit_confirmed, contract_signed) may use type:'transactional' ONLY if their template_key is on the dispatch allowlist (lib/crm/email-dispatch-policy.ts), otherwise they collapse to marketing.",
+      "Auth alternative for the no-code HTTP module: header x-dispatch-key: <CRM_DISPATCH_KEY> (static). HMAC (x-autolenis-signature) is preferred.",
+      "A marketing send is BLOCKED (status:'blocked', reason:'physical_address_unconfigured') unless AUTOLENIS_PHYSICAL_ADDRESS is set to a real address in Vercel — set it before go-live."
+    ]
+  },
+  "cadences": [
+    { "campaign": "welcome", "step": 1, "template_key": "welcome_d0", "channel": "email", "offset_hours": 0, "is_last": false },
+    { "campaign": "welcome", "step": 2, "template_key": "welcome_d1_how_it_works", "channel": "email", "offset_hours": 24, "is_last": false },
+    { "campaign": "welcome", "step": 3, "template_key": "welcome_d3_dealer_competition", "channel": "email", "offset_hours": 72, "is_last": false },
+    { "campaign": "welcome", "step": 4, "template_key": "welcome_d5_what_to_expect", "channel": "email", "offset_hours": 120, "is_last": false },
+    { "campaign": "welcome", "step": 5, "template_key": "welcome_d7_request", "channel": "email", "offset_hours": 168, "is_last": true },
+
+    { "campaign": "vehicle_request", "step": 1, "template_key": "vr_received", "channel": "email", "offset_hours": 0, "is_last": true },
+
+    { "campaign": "auction", "step": 1, "template_key": "auction_live", "channel": "email", "offset_hours": 0, "is_last": true },
+
+    { "campaign": "offer", "step": 1, "template_key": "offer_in", "channel": "email", "offset_hours": 0, "is_last": false },
+    { "campaign": "offer", "step": 2, "template_key": "offer_multiple", "channel": "email", "offset_hours": 24, "is_last": true },
+
+    { "campaign": "deal_formed", "step": 1, "template_key": "deal_formed", "channel": "email", "offset_hours": 0, "is_last": true },
+    { "campaign": "deposit_confirmed", "step": 1, "template_key": "deposit_confirmed", "channel": "email", "offset_hours": 0, "is_last": true },
+    { "campaign": "contract_signed", "step": 1, "template_key": "contract_signed", "channel": "email", "offset_hours": 0, "is_last": true },
+
+    { "campaign": "trade_in", "step": 1, "template_key": "trade_in_value", "channel": "email", "offset_hours": 0, "is_last": false },
+    { "campaign": "trade_in", "step": 2, "template_key": "trade_in_equity", "channel": "email", "offset_hours": 48, "is_last": false },
+    { "campaign": "trade_in", "step": 3, "template_key": "trade_in_upgrade", "channel": "email", "offset_hours": 120, "is_last": true },
+
+    { "campaign": "refinance", "step": 1, "template_key": "refi_review", "channel": "email", "offset_hours": 0, "is_last": false },
+    { "campaign": "refinance", "step": 2, "template_key": "refi_savings", "channel": "email", "offset_hours": 48, "is_last": false },
+    { "campaign": "refinance", "step": 3, "template_key": "refi_options", "channel": "email", "offset_hours": 120, "is_last": true },
+
+    { "campaign": "financing", "step": 1, "template_key": "fin_intro", "channel": "email", "offset_hours": 0, "is_last": false },
+    { "campaign": "financing", "step": 2, "template_key": "fin_options", "channel": "email", "offset_hours": 48, "is_last": false },
+    { "campaign": "financing", "step": 3, "template_key": "fin_secure", "channel": "email", "offset_hours": 120, "is_last": true },
+
+    { "campaign": "saved_search", "step": 1, "template_key": "saved_search_confirm", "channel": "email", "offset_hours": 0, "is_last": true },
+
+    { "campaign": "calculator", "step": 1, "template_key": "calc_followup", "channel": "email", "offset_hours": 1, "is_last": true },
+
+    { "campaign": "lead_magnet", "step": 1, "template_key": "magnet_deliver", "channel": "email", "offset_hours": 0, "is_last": false },
+    { "campaign": "lead_magnet", "step": 2, "template_key": "magnet_nurture", "channel": "email", "offset_hours": 72, "is_last": true },
+
+    { "campaign": "zura", "step": 1, "template_key": "zura_followup", "channel": "email", "offset_hours": 1, "is_last": true },
+
+    { "campaign": "prequalification", "step": 1, "template_key": "prequal_finish", "channel": "email", "offset_hours": 0, "is_last": false },
+    { "campaign": "prequalification", "step": 2, "template_key": "prequal_education", "channel": "email", "offset_hours": 48, "is_last": true },
+
+    { "campaign": "winback", "step": 1, "template_key": "winback_1", "channel": "email", "offset_hours": 0, "is_last": false },
+    { "campaign": "winback", "step": 2, "template_key": "winback_2", "channel": "email", "offset_hours": 72, "is_last": true },
+
+    { "campaign": "post_purchase", "step": 1, "template_key": "postclose_d7_survey", "channel": "email", "offset_hours": 168, "is_last": false },
+    { "campaign": "post_purchase", "step": 2, "template_key": "postclose_d30_review", "channel": "email", "offset_hours": 720, "is_last": false },
+    { "campaign": "post_purchase", "step": 3, "template_key": "postclose_d60_referral", "channel": "email", "offset_hours": 1440, "is_last": false },
+    { "campaign": "post_purchase", "step": 4, "template_key": "postclose_d180_upgrade", "channel": "email", "offset_hours": 4320, "is_last": false },
+    { "campaign": "post_purchase", "step": 5, "template_key": "postclose_d365_replacement", "channel": "email", "offset_hours": 8760, "is_last": true },
+
+    { "campaign": "dealer_onboarding", "step": 1, "template_key": "dealer_welcome", "channel": "email", "offset_hours": 0, "is_last": false },
+    { "campaign": "dealer_onboarding", "step": 2, "template_key": "dealer_profile", "channel": "email", "offset_hours": 24, "is_last": false },
+    { "campaign": "dealer_onboarding", "step": 3, "template_key": "dealer_auctions", "channel": "email", "offset_hours": 72, "is_last": false },
+    { "campaign": "dealer_onboarding", "step": 4, "template_key": "dealer_wins", "channel": "email", "offset_hours": 168, "is_last": true },
+
+    { "campaign": "dealer_reactivation", "step": 1, "template_key": "dealer_reactivation_1", "channel": "email", "offset_hours": 0, "is_last": false },
+    { "campaign": "dealer_reactivation", "step": 2, "template_key": "dealer_reactivation_2", "channel": "email", "offset_hours": 72, "is_last": true },
+
+    { "campaign": "affiliate_onboarding", "step": 1, "template_key": "aff_welcome", "channel": "email", "offset_hours": 0, "is_last": true },
+
+    { "campaign": "affiliate_growth", "step": 1, "template_key": "aff_first_lead", "channel": "email", "offset_hours": 24, "is_last": false },
+    { "campaign": "affiliate_growth", "step": 2, "template_key": "aff_traffic", "channel": "email", "offset_hours": 72, "is_last": false },
+    { "campaign": "affiliate_growth", "step": 3, "template_key": "aff_commissions", "channel": "email", "offset_hours": 168, "is_last": false },
+    { "campaign": "affiliate_growth", "step": 4, "template_key": "aff_scale", "channel": "email", "offset_hours": 336, "is_last": true },
+
+    { "campaign": "affiliate_reactivation", "step": 1, "template_key": "aff_reactivation_1", "channel": "email", "offset_hours": 0, "is_last": false },
+    { "campaign": "affiliate_reactivation", "step": 2, "template_key": "aff_reactivation_2", "channel": "email", "offset_hours": 72, "is_last": true },
+
+    { "campaign": "lp_recovery", "step": 1, "template_key": "abandonment_touch_1", "channel": "email", "offset_hours": 1, "is_last": false },
+    { "campaign": "lp_recovery", "step": 2, "template_key": "abandonment_touch_2", "channel": "email", "offset_hours": 24, "is_last": false },
+    { "campaign": "lp_recovery", "step": 3, "template_key": "abandonment_touch_3", "channel": "email", "offset_hours": 72, "is_last": true },
+
+    { "campaign": "exit_intent", "step": 1, "template_key": "exit_intent_recovery", "channel": "email", "offset_hours": 0, "is_last": true }
+  ]
+}

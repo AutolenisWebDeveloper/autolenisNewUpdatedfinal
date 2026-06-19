@@ -50,6 +50,14 @@ export const EVENT_TO_STAGE: Record<DomainEventType, LifecycleStage> = {
   partial_lead_captured: 'lead',
   lead_magnet_downloaded: 'lead',
   zura_conversation_captured: 'lead',
+  // Dealer + affiliate lifecycle events are NOT part of the buyer funnel. They
+  // map to the floor so they are exhaustive here but never move a contact's
+  // buyer lifecycle stage (forward-only makes 'lead' a no-op for any contact).
+  dealer_verified: 'lead',
+  dealer_activated: 'lead',
+  dealer_inactive: 'lead',
+  affiliate_approved: 'lead',
+  affiliate_commission: 'lead',
 
   // Active funnel.
   vehicle_request_submitted: 'prequal_started',

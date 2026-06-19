@@ -10,6 +10,9 @@
 
 import { logger } from "@/lib/logger";
 import twilio from "twilio";
+import { normalizePhone } from "@/lib/utils/phone";
+import { SuppressionService } from "@/lib/services/suppression.service";
+import { getServiceSupabase } from "@/lib/supabase-service";
 
 export class TwilioSendError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -151,6 +154,20 @@ ZIP: ${lead.zip}`;
 export async function sendHotLeadBuyerSms(lead: HotLeadData): Promise<void> {
   if (!lead.phone) {
     logger.warn("[twilio.sendHotLeadBuyerSms] no buyer phone — skipping");
+    return;
+  }
+
+  // TCPA: a STOP must be honored even on this transactional first-contact send.
+  // Check the canonical suppression store; fail closed on lookup error so a
+  // suppressed number can never be messaged.
+  try {
+    const normalized = normalizePhone(lead.phone) ?? lead.phone;
+    if (await SuppressionService.isSmsSuppressed(getServiceSupabase(), normalized)) {
+      logger.info("[twilio.sendHotLeadBuyerSms] recipient suppressed — skipping");
+      return;
+    }
+  } catch (err) {
+    logger.error("[twilio.sendHotLeadBuyerSms] suppression check failed — skipping:", err);
     return;
   }
 

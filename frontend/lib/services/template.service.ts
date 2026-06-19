@@ -23,9 +23,24 @@ const SUPPORTED_VARIABLES: readonly TemplateVariable[] = [
 
 // CAN-SPAM physical mailing address — must appear in every marketing email.
 // Update via env so legal can change the registered address without a deploy.
-const PHYSICAL_ADDRESS =
-  process.env.AUTOLENIS_PHYSICAL_ADDRESS ??
+// The placeholder is a DEV fallback ONLY. It must NEVER ship in a marketing
+// email: physicalAddressConfigured() below is a HARD gate enforced by the email
+// dispatch route, which fails any marketing send while the real address is unset.
+export const PLACEHOLDER_PHYSICAL_ADDRESS =
   '1234 Main St, Suite 100, San Francisco CA 94105';
+
+function resolvePhysicalAddress(): string {
+  const v = process.env.AUTOLENIS_PHYSICAL_ADDRESS?.trim();
+  return v && v.length > 0 ? v : PLACEHOLDER_PHYSICAL_ADDRESS;
+}
+
+// True only when a REAL CAN-SPAM physical address is configured — env set,
+// non-empty, and not the dev placeholder. Marketing email is hard-gated on this.
+export function physicalAddressConfigured(): boolean {
+  const v = process.env.AUTOLENIS_PHYSICAL_ADDRESS?.trim();
+  return !!v && v.length > 0 && v !== PLACEHOLDER_PHYSICAL_ADDRESS;
+}
+
 const BRAND_NAME = 'AutoLenis';
 const UNSUB_MARKER = '{{unsubscribeUrl}}';
 
@@ -41,7 +56,7 @@ function hasFooter(html: string): boolean {
 function buildFooterHtml(unsubscribeUrl: string): string {
   return [
     `<div style="margin-top:32px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:11px;color:#6b7280;line-height:1.5;text-align:center;" ${FOOTER_SIGNATURE}>`,
-    `  <div><strong>${BRAND_NAME}</strong> · ${PHYSICAL_ADDRESS}</div>`,
+    `  <div><strong>${BRAND_NAME}</strong> · ${resolvePhysicalAddress()}</div>`,
     `  <div style="margin-top:4px;">`,
     `    <a href="${unsubscribeUrl}" style="color:#6b7280;text-decoration:underline;">Unsubscribe</a>`,
     `  </div>`,
@@ -53,7 +68,7 @@ function buildFooterText(unsubscribeUrl: string): string {
   return [
     '',
     '—',
-    `${BRAND_NAME} · ${PHYSICAL_ADDRESS}`,
+    `${BRAND_NAME} · ${resolvePhysicalAddress()}`,
     `Unsubscribe: ${unsubscribeUrl}`,
   ].join('\n');
 }
