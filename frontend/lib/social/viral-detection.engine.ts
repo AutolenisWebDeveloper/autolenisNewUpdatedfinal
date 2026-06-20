@@ -127,13 +127,30 @@ export async function handleViralAlert(alert: ViralAlert): Promise<void> {
     }
   }
 
-  // Boost lead score × 2 for the viral post.
+  // Boost the viral post's lead score. The old `{ multiply: 2 }` was a no-op for
+  // exactly the early-viral posts this targets (leadScore defaults to 0, and
+  // 0 × 2 = 0). Use an additive bonus so the boost is always meaningful, and
+  // also apply it to the latest SocialPerformance row so the weekly optimizer —
+  // which aggregates WinningPattern from SocialPerformance.leadScore — durably
+  // reflects virality rather than having it clobbered on the next analytics sync.
+  const VIRAL_LEAD_BONUS = 100;
   await prisma.socialPost
     .update({
       where: { id: alert.postId },
-      data: { leadScore: { multiply: 2 } },
+      data: { leadScore: { increment: VIRAL_LEAD_BONUS } },
     })
     .catch((err: unknown) =>
       logger.warn("[viral] lead score boost failed (non-fatal):", err instanceof Error ? err.message : err),
     );
+
+  const latestPerf = await prisma.socialPerformance
+    .findFirst({ where: { postId: alert.postId }, orderBy: { recordedAt: "desc" }, select: { id: true } })
+    .catch(() => null);
+  if (latestPerf) {
+    await prisma.socialPerformance
+      .update({ where: { id: latestPerf.id }, data: { leadScore: { increment: VIRAL_LEAD_BONUS } } })
+      .catch((err: unknown) =>
+        logger.warn("[viral] performance boost failed (non-fatal):", err instanceof Error ? err.message : err),
+      );
+  }
 }

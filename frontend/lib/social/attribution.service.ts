@@ -51,23 +51,53 @@ export async function captureUtmAttribution(input: UtmAttributionInput): Promise
   }
 
   try {
-    await prisma.revenueAttribution.create({
-      data: {
+    // Promote the existing CLICK row for this post→request funnel rather than
+    // creating a disjoint REQUEST row. social-click records a CLICK with a null
+    // vehicleRequestId (no request exists yet); promoting it in place keeps the
+    // CLICK→REQUEST→DEAL_WON chain on a single row so captureDealAttribution
+    // (which matches on vehicleRequestId) can later close the loop. Without this,
+    // CLICK rows are orphaned forever and click→conversion is unmeasurable.
+    const existingClick = await prisma.revenueAttribution.findFirst({
+      where: {
         postId: post.id,
-        vehicleRequestId: input.vehicleRequestId,
-        utmSource: input.utmSource,
-        utmCampaign: input.utmCampaign,
-        utmContent: input.utmContent,
-        utmHook: input.utmHook,
-        utmPlatform: input.utmPlatform,
-        creatorId: input.utmCreator ?? null,
-        affiliateId: input.utmAffiliate ?? null,
-        attributionStatus: "REQUEST",
-        requestedAt: new Date(),
+        attributionStatus: "CLICK",
+        vehicleRequestId: null,
       },
+      orderBy: { clickedAt: "desc" },
     });
+
+    if (existingClick) {
+      await prisma.revenueAttribution.update({
+        where: { id: existingClick.id },
+        data: {
+          vehicleRequestId: input.vehicleRequestId,
+          utmHook: input.utmHook ?? existingClick.utmHook,
+          utmPlatform: input.utmPlatform ?? existingClick.utmPlatform,
+          creatorId: input.utmCreator ?? existingClick.creatorId,
+          affiliateId: input.utmAffiliate ?? existingClick.affiliateId,
+          attributionStatus: "REQUEST",
+          requestedAt: new Date(),
+        },
+      });
+    } else {
+      await prisma.revenueAttribution.create({
+        data: {
+          postId: post.id,
+          vehicleRequestId: input.vehicleRequestId,
+          utmSource: input.utmSource,
+          utmCampaign: input.utmCampaign,
+          utmContent: input.utmContent,
+          utmHook: input.utmHook,
+          utmPlatform: input.utmPlatform,
+          creatorId: input.utmCreator ?? null,
+          affiliateId: input.utmAffiliate ?? null,
+          attributionStatus: "REQUEST",
+          requestedAt: new Date(),
+        },
+      });
+    }
   } catch (err) {
-    logger.warn("[attribution] revenueAttribution.create failed (non-fatal):", err instanceof Error ? err.message : err);
+    logger.warn("[attribution] revenueAttribution upsert failed (non-fatal):", err instanceof Error ? err.message : err);
   }
 
   // Update SocialPerformance — best-effort, row may not exist yet.

@@ -16,6 +16,9 @@ interface ComposeBody {
   hashtags?: string[] | string;
   scheduledAt?: string;
   generateImage?: boolean;
+  // AI-generated per-beat video script (hook_0_3s, beats, cta, onScreenText,
+  // voiceover) from the compose drawer — persisted so it isn't lost on save.
+  videoScript?: Record<string, string> | null;
 }
 
 function contentTypeFor(platform: string): string {
@@ -36,12 +39,33 @@ export async function POST(request: NextRequest) {
     return adminError("VALIDATION_ERROR", "Request body must be valid JSON", 400);
   }
 
-  const { platform, hook, caption, hashtags, scheduledAt, generateImage } = body;
+  const { platform, hook, caption, hashtags, scheduledAt, generateImage, videoScript } = body;
   const franchiseSlug = body.franchiseSlug ?? "dealer_secret_daily";
 
   if (!platform || !hook || !caption) {
     return adminError("VALIDATION_ERROR", "platform, hook, and caption are required", 400);
   }
+
+  // Validate scheduledAt up front so an unparseable value is a clean 400 rather
+  // than an Invalid Date that Prisma rejects with a 500.
+  let scheduledAtDate: Date | null = null;
+  if (scheduledAt) {
+    const parsed = new Date(scheduledAt);
+    if (Number.isNaN(parsed.getTime())) {
+      return adminError("VALIDATION_ERROR", "scheduledAt is not a valid date", 400);
+    }
+    scheduledAtDate = parsed;
+  }
+
+  // Flatten the AI video script beats into the post's script/voiceover/on-screen
+  // columns so the reviewed script is persisted (was previously dropped).
+  const vs = videoScript ?? null;
+  const scriptText =
+    vs && Object.keys(vs).length > 0
+      ? [vs.hook_0_3s, vs.beat1_3_10s, vs.beat2_10_20s, vs.beat3_20_25s, vs.cta_25_30s]
+          .filter(Boolean)
+          .join("\n")
+      : caption;
 
   const franchise = await prisma.contentFranchise.findUnique({
     where: { slug: franchiseSlug },
@@ -69,13 +93,15 @@ export async function POST(request: NextRequest) {
       contentType: contentTypeFor(platform),
       hookType: "manual",
       hook,
-      script: caption,
+      script: scriptText,
       caption,
+      voiceoverText: vs?.voiceover ?? null,
+      onScreenText: vs?.onScreenText ?? null,
       hashtags: hashtagList,
       status: "APPROVED",
       automationMode: "MANUAL_REVIEW",
       requiresReview: false,
-      scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+      scheduledAt: scheduledAtDate,
       utmSource: platform,
       utmMedium: "social_manual",
       utmCampaign: `${franchiseSlug}_manual`,

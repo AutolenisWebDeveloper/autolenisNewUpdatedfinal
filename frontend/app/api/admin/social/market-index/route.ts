@@ -1,12 +1,14 @@
 // /api/admin/social/market-index
 // GET  — last published AutoLenis Market Index (for the dashboard tab).
-// POST — generate + publish a new Market Index now (admin "Generate Now").
+// POST — generate a new Market Index now. Body { publish?: boolean } (default
+//        true): publish:false generates a preview WITHOUT posting to LinkedIn;
+//        publish:true (or omitted) runs the full generate-and-publish pipeline.
 
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import { publishMarketIndex } from "@/lib/social/market-index.generator";
+import { publishMarketIndex, generateMarketIndex } from "@/lib/social/market-index.generator";
 
 export const maxDuration = 300;
 
@@ -67,9 +69,19 @@ export async function POST(request: NextRequest) {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
+  // Default to publish:true so the dashboard "Generate Now" (no body) keeps its
+  // generate-and-publish behavior, while the Intelligence page's explicit
+  // { publish: false } generates a preview without posting to LinkedIn.
+  const body = (await request.json().catch(() => ({}))) as { publish?: boolean };
+  const shouldPublish = body.publish !== false;
+
   try {
-    const result = await publishMarketIndex();
-    return adminSuccess(result);
+    if (shouldPublish) {
+      const result = await publishMarketIndex();
+      return adminSuccess(result);
+    }
+    const report = await generateMarketIndex();
+    return adminSuccess({ ...report, published: false });
   } catch (err) {
     logger.error("[admin/social] market-index POST failed:", err);
     return adminError("MARKET_INDEX_FAILED", "Market index generation failed", 500);

@@ -3,8 +3,8 @@
 // Generates 3 hook variants in parallel for the same franchise+signal so the
 // best-performing variant can be selected and promoted. In FULL_AUTO mode the
 // orchestrator calls generateHookVariants() and schedules all 3, staggered 5
-// minutes apart. selectWinningVariant() is called by the analytics sync cron
-// once enough CTR data is available.
+// minutes apart. The admin A/B route resolves a group via scoreAndResolveGroup()
+// once enough engagement data is available.
 
 import { logger } from "@/lib/logger";
 import type { ContentFranchise, TopicSignal } from "@prisma/client";
@@ -69,64 +69,6 @@ export async function generateHookVariants(input: {
   return variants;
 }
 
-export function selectWinningVariant(
-  variants: HookVariant[],
-  performances: { hookType: string; ctr: number }[],
-): HookVariant {
-  if (variants.length === 0) throw new Error("No variants to select from");
-  if (performances.length === 0) return variants[0];
-
-  const perfMap = new Map(performances.map((p) => [p.hookType, p.ctr]));
-  let best = variants[0];
-  let bestCtr = perfMap.get(best.hookType) ?? -1;
-
-  for (const v of variants.slice(1)) {
-    const ctr = perfMap.get(v.hookType) ?? -1;
-    if (ctr > bestCtr) { best = v; bestCtr = ctr; }
-  }
-
-  logger.info("[hook-ab] winning variant:", best.hookType, "ctr:", bestCtr);
-  return best;
-}
-
-// Persists an ABTestGroup and one ABTestVariant per hook variant. Variant rows
-// start with placeholder postIds (`pending_<i>`); callers that materialize
-// SocialPosts should update each variant's postId to the real post id. Returns
-// the created group id (postIds is populated by the caller once posts exist).
-export async function createABTestGroup(input: {
-  platform: string;
-  franchiseSlug: string;
-  signalId?: string;
-  variants: HookVariant[];
-}): Promise<{ groupId: string; postIds: string[] }> {
-  const group = await prisma.aBTestGroup.create({
-    data: {
-      name: `${input.franchiseSlug} ${input.platform} ${new Date().toISOString().split("T")[0]}`,
-      platform: input.platform,
-      franchiseSlug: input.franchiseSlug,
-      status: "RUNNING",
-    },
-  });
-
-  const postIds: string[] = [];
-  const labels = ["A", "B", "C"];
-
-  for (let i = 0; i < input.variants.length; i++) {
-    const variant = input.variants[i];
-    await prisma.aBTestVariant.create({
-      data: {
-        groupId: group.id,
-        postId: `pending_${i}`, // Updated when the post is created.
-        hookType: variant.hookType,
-        hook: variant.hook,
-        variantLabel: labels[i] ?? String(i + 1),
-      },
-    });
-  }
-
-  return { groupId: group.id, postIds };
-}
-
 // Scores every variant in a RUNNING group by conversion-weighted engagement,
 // marks the highest-scoring variant the winner, completes the group, skips the
 // losing variant posts, and records the winning hook type in HookPerformance.
@@ -154,6 +96,9 @@ export async function scoreAndResolveGroup(
     postId: string;
     score: number;
     hookType: string;
+    ctr: number;
+    leadScore: number;
+    vehicleRequests: number;
   }[] = [];
 
   for (const variant of group.posts) {
@@ -171,11 +116,17 @@ export async function scoreAndResolveGroup(
         (perf.vehicleRequests ?? 0) * 20
       : 0;
 
+    const reach = perf?.reach ?? perf?.impressions ?? 0;
+    const ctr = reach > 0 ? (perf?.linkClicks ?? 0) / reach : 0;
+
     scored.push({
       variantId: variant.id,
       postId: variant.postId,
       score,
       hookType: variant.hookType,
+      ctr,
+      leadScore: perf?.leadScore ?? 0,
+      vehicleRequests: perf?.vehicleRequests ?? 0,
     });
   }
 
@@ -217,8 +168,10 @@ export async function scoreAndResolveGroup(
     });
   }
 
-  // Record the winning hook type in HookPerformance so future generations can
-  // favor it.
+  // Record the winning hook type in HookPerformance with its real CTR / lead
+  // score so future generations can favor it. selectHookType (orchestrator)
+  // ranks HookPerformance by avgLeadScore/avgCtr, so persisting only a sample
+  // count would leave the winner unranked — populate the metrics too.
   await prisma.hookPerformance.upsert({
     where: {
       platform_hookType: {
@@ -227,12 +180,18 @@ export async function scoreAndResolveGroup(
       },
     },
     update: {
+      avgCtr: winner.ctr,
+      avgLeadScore: winner.leadScore,
+      avgVehicleRequests: winner.vehicleRequests,
       sampleSize: { increment: 1 },
       lastUpdated: new Date(),
     },
     create: {
       platform: group.platform,
       hookType: winner.hookType,
+      avgCtr: winner.ctr,
+      avgLeadScore: winner.leadScore,
+      avgVehicleRequests: winner.vehicleRequests,
       sampleSize: 1,
     },
   });

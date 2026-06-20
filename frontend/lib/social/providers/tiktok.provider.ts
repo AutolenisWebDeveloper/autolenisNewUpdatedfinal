@@ -12,6 +12,7 @@
 // typed results, and degrade gracefully when the token is unset.
 
 import { logger } from "@/lib/logger";
+import { providerFetch } from "@/lib/social/providers/http";
 import type {
   PublishingProvider,
   SchedulePostInput,
@@ -46,7 +47,7 @@ export class TikTokProvider implements PublishingProvider {
     }
 
     try {
-      const res = await fetch(`${BASE_URL}/post/publish/video/init/`, {
+      const res = await providerFetch(`${BASE_URL}/post/publish/video/init/`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -106,7 +107,7 @@ export class TikTokProvider implements PublishingProvider {
       return { platformPostId, status: "unknown", error: "TIKTOK_ACCESS_TOKEN not configured" };
     }
     try {
-      const res = await fetch(`${BASE_URL}/post/publish/status/fetch/`, {
+      const res = await providerFetch(`${BASE_URL}/post/publish/status/fetch/`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -149,7 +150,7 @@ export class TikTokProvider implements PublishingProvider {
     }
 
     try {
-      const res = await fetch(`${BASE_URL}/video/query/`, {
+      const res = await providerFetch(`${BASE_URL}/video/query/`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -269,7 +270,7 @@ export class TikTokProvider implements PublishingProvider {
         `${BUSINESS_BASE_URL}/business/video/list/?business_id=${encodeURIComponent(businessId)}` +
         `&filters=${encodeURIComponent(JSON.stringify({ video_ids: [videoId] }))}` +
         `&fields=${encodeURIComponent(JSON.stringify(fields))}`;
-      const res = await fetch(url, {
+      const res = await providerFetch(url, {
         method: "GET",
         headers: { "Access-Token": businessToken },
       });

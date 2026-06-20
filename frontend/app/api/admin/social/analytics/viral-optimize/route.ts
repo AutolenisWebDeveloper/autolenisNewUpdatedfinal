@@ -104,11 +104,14 @@ Return ONLY valid JSON, no other text:
         hashtags,
         viralFormat: topFormat?.name ?? "Standard",
         scheduledTime: result.scheduledTime ?? "Best time varies",
-        estimatedReach: platform === "tiktok" ? "1K-100K+"
-          : platform === "instagram" ? "500-50K+"
-          : platform === "facebook" ? "200-20K+"
-          : platform === "youtube" ? "300-30K+"
-          : "100-10K+",
+        // Typical organic reach band for the platform — an illustrative range,
+        // not a per-post prediction (labeled as such so it isn't presented as a
+        // computed forecast).
+        estimatedReach: platform === "tiktok" ? "1K–100K+ (typical)"
+          : platform === "instagram" ? "500–50K+ (typical)"
+          : platform === "facebook" ? "200–20K+ (typical)"
+          : platform === "youtube" ? "300–30K+ (typical)"
+          : "100–10K+ (typical)",
       };
     } catch (err) {
       logger.error("[viral-optimize] failed for platform:", platform, err);

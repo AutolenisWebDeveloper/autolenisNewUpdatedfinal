@@ -187,7 +187,11 @@ export async function POST(request: NextRequest) {
   return adminSuccess({
     created,
     failed,
-    total: created.length,
+    // total = attempted (created + failed); `created.length`/`failed.length`
+    // carry the per-outcome breakdown. Previously total reflected only
+    // successes, under-reporting attempts on partial failure.
+    total: created.length + failed.length,
+    succeeded: created.length,
     schedulingStrategy,
     viralOptimized:
       useViralOptimizer && Object.keys(optimizedVersions).length > 0,
