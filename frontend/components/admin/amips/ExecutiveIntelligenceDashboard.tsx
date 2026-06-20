@@ -10,15 +10,35 @@ import {
   Activity, TrendingUp, Sparkles, AlertTriangle, BarChart3, Lightbulb,
   Gauge, MapPinned, Car, Building2, FileText, Globe, ShieldCheck,
   ExternalLink, ChevronRight, Search, Target, Database,
+  ArrowUpRight, ArrowDownRight, Minus,
   type LucideIcon,
 } from "lucide-react";
 import AmipsSyncControls from "@/components/admin/amips/AmipsSyncControls";
+import AmipsExportMenu from "@/components/admin/amips/AmipsExportMenu";
+import ExecutiveSummaryCard from "@/components/admin/amips/ExecutiveSummaryCard";
 import type {
   ExecutiveIntelligence, MarketHealthIndex, Insight, InsightCategory,
   OpportunityMarket, VehicleSegment, ContentPerformance, RiskItem,
-  OperationsSnapshot,
+  OperationsSnapshot, TrendInfo,
 } from "@/lib/amips/intelligence/executive-intelligence";
 import type { IndexationDecision } from "@/lib/amips/indexation-gate";
+
+const metroHref = (metro: string) => `/admin/amips/metro/${encodeURIComponent(metro)}`;
+const vehicleHref = (make: string, model: string) =>
+  `/admin/amips/vehicle/${encodeURIComponent(make)}/${encodeURIComponent(model)}`;
+
+function TrendBadge({ trend }: { trend?: TrendInfo }) {
+  if (!trend) return null;
+  const Icon = trend.dir === "up" ? ArrowUpRight : trend.dir === "down" ? ArrowDownRight : Minus;
+  const color =
+    trend.dir === "up" ? "text-[#059669]" : trend.dir === "down" ? "text-[#DC2626]" : "text-[#94A3B8]";
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-[10px] font-semibold ${color}`}>
+      <Icon size={11} />
+      {trend.label}
+    </span>
+  );
+}
 
 function fmtUsd(cents: number): string {
   const d = cents / 100;
@@ -87,7 +107,7 @@ function HealthRing({ score, tone }: { score: number; tone: MarketHealthIndex["t
   );
 }
 
-function MarketHealthCard({ health }: { health: MarketHealthIndex }) {
+function MarketHealthCard({ health, trend }: { health: MarketHealthIndex; trend?: TrendInfo }) {
   const tone = HEALTH_TONE[health.tone];
   return (
     <div className="bg-white border border-[#E2E8F0] rounded-2xl p-6 shadow-sm">
@@ -95,9 +115,12 @@ function MarketHealthCard({ health }: { health: MarketHealthIndex }) {
       <div className="flex flex-col sm:flex-row items-center gap-6">
         <HealthRing score={health.score} tone={health.tone} />
         <div className="flex-1 min-w-0 w-full">
-          <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${tone.chip}`}>
-            {health.grade}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${tone.chip}`}>
+              {health.grade}
+            </span>
+            <TrendBadge trend={trend} />
+          </div>
           <p className="text-xs text-[#94A3B8] mt-2 leading-snug">
             Weighted composite of buyer leverage, coverage, market depth, indexation,
             freshness, and publishing velocity — every input traces to live data.
@@ -172,8 +195,10 @@ function OpportunityTable({ rows }: { rows: OpportunityMarket[] }) {
               <tr key={`${m.metro}-${m.state}`} className="hover:bg-[#F8FAFF] transition-colors">
                 <td className="px-4 py-3 font-mono text-xs text-[#94A3B8]">{i + 1}</td>
                 <td className="px-4 py-3">
-                  <p className="font-semibold text-[#0F172A] leading-tight">{m.metro}</p>
-                  <p className="text-[10px] text-[#94A3B8]">{m.state}</p>
+                  <Link href={metroHref(m.metro)} className="group/link">
+                    <p className="font-semibold text-[#0F172A] leading-tight group-hover/link:text-[#0B5FD1] transition-colors">{m.metro}</p>
+                    <p className="text-[10px] text-[#94A3B8]">{m.state}</p>
+                  </Link>
                 </td>
                 <td className="px-4 py-3 w-40">
                   <div className="flex items-center gap-2">
@@ -259,11 +284,15 @@ function VehicleSegments({ segments }: { segments: VehicleSegment[] }) {
       {segments.map((s) => {
         const strong = s.avgBuyerAdvantage >= 6;
         return (
-          <div key={`${s.make}-${s.model}`} className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-sm">
+          <Link
+            key={`${s.make}-${s.model}`}
+            href={vehicleHref(s.make, s.model)}
+            className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-sm hover:border-[#BFDBFE] hover:shadow-md hover:shadow-[#0B5FD1]/5 transition-all group"
+          >
             <div className="flex items-start justify-between">
               <div className="min-w-0">
                 <p className="text-[10px] text-[#94A3B8] font-medium uppercase tracking-wide">{s.make}</p>
-                <p className="text-sm font-bold text-[#0F172A] truncate">{s.model}</p>
+                <p className="text-sm font-bold text-[#0F172A] truncate group-hover:text-[#0B5FD1] transition-colors">{s.model}</p>
               </div>
               <span className={`shrink-0 text-lg font-bold font-mono ${strong ? "text-[#059669]" : "text-[#0F172A]"}`}>
                 {s.avgBuyerAdvantage.toFixed(1)}
@@ -274,7 +303,7 @@ function VehicleSegments({ segments }: { segments: VehicleSegment[] }) {
             </div>
             <p className="text-[11px] font-medium text-[#475569] mt-2">{s.outlook}</p>
             <p className="text-[10px] text-[#94A3B8] mt-0.5">{s.metros} metro{s.metros === 1 ? "" : "s"} · {fmtNum(s.dealers)} dealers</p>
-          </div>
+          </Link>
         );
       })}
     </div>
@@ -456,26 +485,30 @@ export default function ExecutiveIntelligenceDashboard({ data }: { data: Executi
             Real-time market health, opportunity, and content intelligence across {data.coverage.universe} metros.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-[11px] text-[#94A3B8] font-medium">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          <span className="hidden lg:inline-flex items-center gap-1.5 px-2 py-2 text-[11px] text-[#94A3B8] font-medium">
             <Activity size={11} /> As of {generated}
           </span>
+          <AmipsExportMenu />
           <Link href="/intelligence"
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] rounded-xl text-xs font-semibold text-[#475569] hover:border-[#BFDBFE] hover:text-[#0B5FD1] transition-all shadow-sm">
-            <ExternalLink size={12} /> Public Intelligence
+            <ExternalLink size={12} /> Public
           </Link>
         </div>
       </header>
 
       {/* National Market Overview */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
-        <div className="lg:col-span-1"><MarketHealthCard health={data.health} /></div>
+        <div className="lg:col-span-1"><MarketHealthCard health={data.health} trend={data.healthTrend} /></div>
         <div className="lg:col-span-2 grid grid-cols-2 gap-4 content-start">
           {data.headline.length > 0 ? data.headline.map((m) => (
             <div key={m.key} className="bg-white border border-[#E2E8F0] rounded-2xl p-5 shadow-sm">
               <p className="text-[10px] text-[#94A3B8] font-medium uppercase tracking-wide">{m.label}</p>
               <p className="text-3xl font-bold font-mono text-[#0F172A] tracking-tight mt-2 leading-none">{m.value}</p>
-              <p className="text-[11px] text-[#94A3B8] mt-2">{m.caption}</p>
+              <div className="flex items-center justify-between mt-2 gap-2">
+                <p className="text-[11px] text-[#94A3B8]">{m.caption}</p>
+                <TrendBadge trend={m.trend} />
+              </div>
             </div>
           )) : (
             <div className="col-span-2 flex items-center justify-center rounded-2xl border border-dashed border-[#CBD5E1] bg-white p-8 text-center">
@@ -487,6 +520,11 @@ export default function ExecutiveIntelligenceDashboard({ data }: { data: Executi
             </div>
           )}
         </div>
+      </section>
+
+      {/* AI Executive Briefing (on-demand LLM narrative) */}
+      <section className="mb-7">
+        <ExecutiveSummaryCard />
       </section>
 
       {/* AI Insights Feed */}
