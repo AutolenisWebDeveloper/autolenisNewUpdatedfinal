@@ -24,7 +24,7 @@ entry |
 ## Tech Stack
 ```text
 Next.js 16 App Router, TypeScript strict mode
-Prisma 5 ORM — 136 models, 70 enums
+Prisma 5 ORM — 203 models, 80 enums
 Supabase PostgreSQL, Auth, Storage
 Stripe Payments, embedded checkout, webhooks
 DocuSign E-signature
@@ -41,11 +41,11 @@ Metric Count
 Pages / Routes 301
 API Routes 125+
 Service Files 106
-Prisma Models136
-Prisma Enums 70
+Prisma Models203
+Prisma Enums 80
 Cron Routes 19
 NKJV Faith Verses 471
-Migrations Applied 7
+Migrations Applied 60
 ⸻
 Buyer Journey
 Signup → Onboarding → Prequalification

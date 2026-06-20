@@ -462,3 +462,6 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# Schema drift audit — regenerable artifact (see frontend/prisma/MIGRATIONS.md)
+frontend/scripts/drift_check.sql
