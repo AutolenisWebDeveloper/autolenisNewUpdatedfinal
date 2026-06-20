@@ -68,34 +68,35 @@ export default async function FeePage() {
   const buyer = await requireBuyer();
   const isPremium = buyer.plan === "PREMIUM";
 
-  // Fetch the most recent deal for this buyer.
-  const deal = await prisma.deal.findFirst({
-    where: { buyerId: buyer.id },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      status: true,
-      feePaidAt: true,
-      feeAmountCents: true,
-      feeRefundedAt: true,
-      feeRefundedAmountCents: true,
-      stripeFeePIId: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
-
-  // Fetch the most recent paid deposit for this buyer.
-  const deposit = await prisma.deposit.findFirst({
-    where: { buyerId: buyer.id, status: "PAID" },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      amountCents: true,
-      status: true,
-      createdAt: true,
-    },
-  });
+  // The most recent deal and the most recent paid deposit are independent —
+  // fetch them concurrently.
+  const [deal, deposit] = await Promise.all([
+    prisma.deal.findFirst({
+      where: { buyerId: buyer.id },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        status: true,
+        feePaidAt: true,
+        feeAmountCents: true,
+        feeRefundedAt: true,
+        feeRefundedAmountCents: true,
+        stripeFeePIId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+    prisma.deposit.findFirst({
+      where: { buyerId: buyer.id, status: "PAID" },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        amountCents: true,
+        status: true,
+        createdAt: true,
+      },
+    }),
+  ]);
 
   // Also try to load a ServiceFeePayment for the current deal.
   // findUnique returns null when no record exists (no error to catch).

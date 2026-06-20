@@ -14,26 +14,28 @@ export const dynamic = "force-dynamic";
 
 export default async function ReferralPage() {
   const buyer = await requireBuyer();
-  const affiliate = await prisma.affiliate.findFirst({ where: { userId: buyer.userId } });
-  const milestones = await prisma.referralMilestone.findMany({
-    where: { buyerId: buyer.id },
-    orderBy: { createdAt: "asc" },
-  });
+  // affiliate + milestones are independent — fetch concurrently.
+  const [affiliate, milestones] = await Promise.all([
+    prisma.affiliate.findFirst({ where: { userId: buyer.userId } }),
+    prisma.referralMilestone.findMany({
+      where: { buyerId: buyer.id },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
 
-  // Count buyers referred via this affiliate's referral code
-  const referralCount = affiliate
-    ? await prisma.affiliateReferral.count({
-        where: { affiliateId: affiliate.id },
-      })
-    : 0;
-
-  // Sum approved commissions for this affiliate
-  const earnedResult = affiliate
-    ? await prisma.commission.aggregate({
-        where: { affiliateId: affiliate.id, status: "APPROVED" },
-        _sum: { amountCents: true },
-      })
-    : null;
+  // Referral count + approved-commission sum both depend on the affiliate, so
+  // they form a second concurrent wave (run together, not one after the other).
+  const [referralCount, earnedResult] = affiliate
+    ? await Promise.all([
+        // Count buyers referred via this affiliate's referral code
+        prisma.affiliateReferral.count({ where: { affiliateId: affiliate.id } }),
+        // Sum approved commissions for this affiliate
+        prisma.commission.aggregate({
+          where: { affiliateId: affiliate.id, status: "APPROVED" },
+          _sum: { amountCents: true },
+        }),
+      ])
+    : [0, null];
 
   const totalEarnedCents = earnedResult?._sum?.amountCents ?? 0;
 

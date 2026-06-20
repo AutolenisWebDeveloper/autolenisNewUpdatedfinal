@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import PlanUpgradeCard, { type DepositStatus } from "@/components/buyer/PlanUpgradeCard";
 import ProactiveNudgesPanel, { type BuyerNudge } from "@/components/buyer/ProactiveNudgesPanel";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { MapPin } from "lucide-react";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -13,89 +14,66 @@ export default async function BuyerDashboard() {
   const buyer = await requireBuyer();
   const prequal = buyer?.preQualification ?? null;
   const firstName = buyer?.firstName ?? "there";
-  const prequalApproved =
-    !!prequal && prequal.decision === "APPROVED" && prequal.expiresAt > new Date();
+  // Use the shared validity helper so the dashboard's prequal gating can never
+  // drift from the rest of the platform (layout, journey-status API, etc.).
+  const prequalApproved = isPrequalValid(prequal);
 
-  // ── Deposit status ────────────────────────────────────────────────────────
-  let depositStatus: DepositStatus = "NOT_PAID";
-  try {
-    const latestDeposit = await prisma.deposit.findFirst({
-      where: { buyerId: buyer.id },
-      orderBy: { createdAt: "desc" },
-      select: { status: true },
-    });
-    depositStatus =
-      latestDeposit?.status === "PAID" ? "PAID" :
-      latestDeposit?.status === "PENDING" ? "PENDING" : "NOT_PAID";
-  } catch {
-    depositStatus = "NOT_PAID";
-  }
-
-  // ── Feature 11 KPI data — shortlist count ────────────────────────────────
-  let shortlistCount = 0;
-  if (prequalApproved) {
-    try {
-      const shortlist = await prisma.shortlist.findUnique({
+  // ── Dashboard data — fetched concurrently ─────────────────────────────────
+  // These queries are mutually independent, so we run them in parallel instead
+  // of serially (8 round-trips → 1 round-trip of wall-clock latency). Each
+  // query degrades to a safe fallback so a single failure never blanks the
+  // dashboard — preserving the previous per-query non-fatal behaviour.
+  const [
+    latestDeposit,
+    shortlist,
+    activeAuction,
+    activeDeal,
+    latestAuction,
+    latestDeal,
+    unreadCount,
+    activeDealerCount,
+  ] = await Promise.all([
+    prisma.deposit
+      .findFirst({ where: { buyerId: buyer.id }, orderBy: { createdAt: "desc" }, select: { status: true } })
+      .catch(() => null),
+    prequalApproved
+      ? prisma.shortlist
+          .findUnique({ where: { buyerId: buyer.id }, select: { _count: { select: { items: true } } } })
+          .catch(() => null)
+      : Promise.resolve(null),
+    prisma.auction
+      .findFirst({
+        where: { buyerId: buyer.id, status: { in: ["ACTIVE", "PENDING"] } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, status: true, endsAt: true, _count: { select: { offers: { where: { status: "SUBMITTED" } } } } },
+      })
+      .catch(() => null),
+    prisma.deal
+      .findFirst({
+        where: { buyerId: buyer.id, status: { notIn: ["COMPLETED", "CANCELLED", "REFUNDED"] } },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, status: true },
+      })
+      .catch(() => null),
+    prisma.auction
+      .findFirst({
         where: { buyerId: buyer.id },
-        select: { _count: { select: { items: true } } },
-      });
-      shortlistCount = shortlist?._count.items ?? 0;
-    } catch { /* non-fatal */ }
-  }
+        orderBy: { createdAt: "desc" },
+        select: { id: true, status: true, endsAt: true, _count: { select: { offers: true } } },
+      })
+      .catch(() => null),
+    prisma.deal
+      .findFirst({ where: { buyerId: buyer.id }, orderBy: { createdAt: "desc" }, select: { id: true, status: true } })
+      .catch(() => null),
+    prisma.notification.count({ where: { buyerId: buyer.id, readAt: null } }).catch(() => 0),
+    prisma.dealer.count({ where: { status: "ACTIVE" } }).catch(() => 0),
+  ]);
 
-  // ── Feature 11 KPI data — active auction ─────────────────────────────────
-  let activeAuction: { id: string; status: string; endsAt: Date | null; _count: { offers: number } } | null = null;
-  try {
-    activeAuction = await prisma.auction.findFirst({
-      where: { buyerId: buyer.id, status: { in: ["ACTIVE", "PENDING"] } },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, status: true, endsAt: true, _count: { select: { offers: { where: { status: "SUBMITTED" } } } } },
-    });
-  } catch { /* non-fatal */ }
+  const depositStatus: DepositStatus =
+    latestDeposit?.status === "PAID" ? "PAID" :
+    latestDeposit?.status === "PENDING" ? "PENDING" : "NOT_PAID";
 
-  // ── Feature 11 KPI data — active deal ────────────────────────────────────
-  let activeDeal: { id: string; status: string } | null = null;
-  try {
-    activeDeal = await prisma.deal.findFirst({
-      where: { buyerId: buyer.id, status: { notIn: ["COMPLETED", "CANCELLED", "REFUNDED"] } },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, status: true },
-    });
-  } catch { /* non-fatal */ }
-
-  // ── Latest auction (for KPI / next-step display) ──────────────────────────
-  let latestAuction: { id: string; status: string; endsAt: Date | null; _count: { offers: number } } | null = null;
-  try {
-    latestAuction = await prisma.auction.findFirst({
-      where: { buyerId: buyer.id },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, status: true, endsAt: true, _count: { select: { offers: true } } },
-    });
-  } catch { /* non-fatal */ }
-
-  // ── Latest deal (for KPI / next-step display) ────────────────────────────
-  let latestDeal: { id: string; status: string } | null = null;
-  try {
-    latestDeal = await prisma.deal.findFirst({
-      where: { buyerId: buyer.id },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, status: true },
-    });
-  } catch { /* non-fatal */ }
-
-  // ── Unread notification count ─────────────────────────────────────────────
-  let unreadCount = 0;
-  try {
-    unreadCount = await prisma.notification.count({
-      where: { buyerId: buyer.id, readAt: null },
-    });
-  } catch { /* non-fatal */ }
-
-  // ── Active dealer count (for no-dealer-in-area banner) ───────────────────
-  let activeDealerCount = 0;
-  try {
-    activeDealerCount = await prisma.dealer.count({ where: { status: "ACTIVE" } });
-  } catch { /* non-fatal */ }
+  const shortlistCount = shortlist?._count.items ?? 0;
 
   // If prequal is approved, onboarding is implicitly complete
   const onboardingComplete = buyer.onboardingComplete === true || prequalApproved;
