@@ -4091,6 +4091,32 @@ model AmipsMarketScore {
   @@map("amips_market_scores")
 }
 
+// AMIPS Phase 5 — Intelligence Snapshots.
+// A periodic point-in-time capture of the executive-intelligence rollup so the
+// Market Intelligence Center can show genuine trends (day-over-day / week-over-
+// week deltas) instead of static figures. Written daily by the snapshot cron;
+// the full computed payload is stored as JSON alongside trended scalar columns.
+model AmipsIntelligenceSnapshot {
+  id                  String   @id @default(cuid())
+  capturedAt          DateTime @default(now()) @map("captured_at")
+  healthScore         Int      @map("health_score")
+  metrosCovered       Int      @map("metros_covered")
+  metrosScored        Int      @map("metros_scored")
+  avgBuyerLeverage    Float    @map("avg_buyer_leverage")
+  activePages         Int      @map("active_pages")
+  published30d        Int      @map("published_30d")
+  impressions         Int      @default(0)
+  clicks              Int      @default(0)
+  leads               Int      @default(0)
+  revenueRunRateCents Int      @default(0) @map("revenue_run_rate_cents")
+  indexationRate      Float    @default(0) @map("indexation_rate")
+  payloadJson         String   @map("payload_json") @db.Text
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@index([capturedAt])
+  @@map("amips_intelligence_snapshots")
+}
+
 // =====================================================
 // Social Intelligence & Media Engine (Session 1)
 // Full-automation content/video/publishing/attribution pipeline.

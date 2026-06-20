@@ -81,11 +81,18 @@ export interface MarketHealthIndex {
   components: HealthComponent[];
 }
 
+export interface TrendInfo {
+  dir: Trend;
+  /** Short human label, e.g. "+3 vs Jun 19". */
+  label: string;
+}
+
 export interface HeadlineMetric {
   key: string;
   label: string;
   value: string;
   caption: string;
+  trend?: TrendInfo;
 }
 
 export interface OpportunityMarket {
@@ -171,6 +178,10 @@ export interface ExecutiveIntelligence {
   risks: RiskItem[];
   coverage: { metrosCovered: number; metrosScored: number; universe: number };
   operations: OperationsSnapshot;
+  /** Health-score change since the most recent snapshot, if one exists. */
+  healthTrend?: TrendInfo;
+  /** ISO date of the baseline snapshot used for all trend deltas. */
+  trendSince?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -672,7 +683,7 @@ async function loadInner(): Promise<ExecutiveIntelligence> {
     },
   ];
 
-  return {
+  const payload: ExecutiveIntelligence = {
     generatedAt: new Date().toISOString(),
     hasData: totalRecords > 0 || content.activePages > 0,
     health,
@@ -698,6 +709,93 @@ async function loadInner(): Promise<ExecutiveIntelligence> {
       indexationGates,
     },
   };
+
+  // Attach trend deltas against the most recent snapshot. Isolated in its own
+  // try/catch because the snapshot table may not exist until the Phase 5
+  // migration is applied — a missing table must never break the dashboard.
+  await attachTrends(payload, { avgLeverage });
+
+  return payload;
+}
+
+// ---------------------------------------------------------------------------
+// Trends — compare live metrics against the most recent stored snapshot.
+// ---------------------------------------------------------------------------
+
+function trendLabel(delta: number, since: string, opts: { fmt?: (n: number) => string } = {}): TrendInfo {
+  const dir: Trend = delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+  const mag = opts.fmt ? opts.fmt(Math.abs(delta)) : `${Math.abs(delta)}`;
+  const sign = delta > 0 ? "+" : delta < 0 ? "−" : "±";
+  return { dir, label: `${sign}${mag} vs ${since}` };
+}
+
+async function attachTrends(
+  payload: ExecutiveIntelligence,
+  ctx: { avgLeverage: number },
+): Promise<void> {
+  let prev: {
+    capturedAt: Date; healthScore: number; metrosScored: number;
+    avgBuyerLeverage: number; revenueRunRateCents: number; published30d: number;
+  } | null = null;
+  try {
+    prev = await prisma.amipsIntelligenceSnapshot.findFirst({
+      orderBy: { capturedAt: "desc" },
+      select: {
+        capturedAt: true, healthScore: true, metrosScored: true,
+        avgBuyerLeverage: true, revenueRunRateCents: true, published30d: true,
+      },
+    });
+  } catch {
+    return; // table not migrated yet — skip trends silently
+  }
+  if (!prev) return;
+
+  const since = prev.capturedAt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  payload.trendSince = prev.capturedAt.toISOString().slice(0, 10);
+  payload.healthTrend = trendLabel(payload.health.score - prev.healthScore, since);
+
+  const setTrend = (key: string, delta: number, fmt?: (n: number) => string) => {
+    const m = payload.headline.find((h) => h.key === key);
+    if (m) m.trend = trendLabel(delta, since, { fmt });
+  };
+  setTrend("active-markets", payload.coverage.metrosScored - prev.metrosScored);
+  setTrend("buyer-leverage", round(ctx.avgLeverage - prev.avgBuyerLeverage, 1), (n) => n.toFixed(1));
+  setTrend("revenue", payload.content.revenueRunRateCents - prev.revenueRunRateCents, usd);
+  setTrend("velocity", payload.content.published30d - prev.published30d);
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot capture (written by the daily amips-snapshot cron).
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the current intelligence and persist a snapshot row for trending.
+ * Returns the captured scalar metrics. Throws if the snapshot table does not
+ * exist yet (the caller — a cron — reports the failure).
+ */
+export async function captureIntelligenceSnapshot(): Promise<{ id: string; healthScore: number }> {
+  const intel = await loadExecutiveIntelligence();
+  const leverageComp = intel.health.components.find((c) => c.key === "buyerLeverage");
+  const avgBuyerLeverage = round((leverageComp?.value ?? 0) / 10, 1);
+
+  const row = await prisma.amipsIntelligenceSnapshot.create({
+    data: {
+      healthScore: intel.health.score,
+      metrosCovered: intel.coverage.metrosCovered,
+      metrosScored: intel.coverage.metrosScored,
+      avgBuyerLeverage,
+      activePages: intel.content.activePages,
+      published30d: intel.content.published30d,
+      impressions: intel.content.impressions,
+      clicks: intel.content.clicks,
+      leads: intel.content.leads,
+      revenueRunRateCents: intel.content.revenueRunRateCents,
+      indexationRate: intel.content.indexationRate,
+      payloadJson: JSON.stringify(intel),
+    },
+    select: { id: true, healthScore: true },
+  });
+  return row;
 }
 
 /** Cents → compact USD string. */
@@ -706,4 +804,195 @@ function usd(cents: number): string {
   if (dollars >= 1_000_000) return `$${(dollars / 1_000_000).toFixed(1)}M`;
   if (dollars >= 1_000) return `$${(dollars / 1_000).toFixed(1)}K`;
   return `$${dollars.toFixed(0)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Drill-down profiles — full intelligence for a single metro or vehicle.
+// ---------------------------------------------------------------------------
+
+export interface ProfilePage {
+  slug: string;
+  title: string;
+  lifecycleStatus: string;
+  impressions: number;
+  clicks: number;
+  leads: number;
+}
+
+export interface MetroProfile {
+  metro: string;
+  state: string;
+  population: number | null;
+  demandScore: number | null;
+  competitionScore: number | null;
+  inventoryScore: number | null;
+  buyerLeverage: number | null;
+  seasonalNote: string | null;
+  dealers: number;
+  topBrands: Array<{ brand: string; count: number }>;
+  opportunityScore: number;
+  opportunityDriver: string;
+  vehicles: Array<{ make: string; model: string; advantage: number; dealers: number }>;
+  pages: ProfilePage[];
+  lastUpdated: string | null;
+}
+
+export interface VehicleProfile {
+  make: string;
+  model: string;
+  avgAdvantage: number;
+  metrosCount: number;
+  bestMetro: { metro: string; advantage: number } | null;
+  worstMetro: { metro: string; advantage: number } | null;
+  msrpRange: { low: number; high: number } | null; // cents
+  negotiationDifficulty: string | null;
+  activeIncentives: string | null;
+  byMetro: Array<{ metro: string; state: string; advantage: number; dealers: number }>;
+  pages: ProfilePage[];
+}
+
+/** Full intelligence profile for one metro. Returns null if unknown/empty. */
+export async function loadMetroProfile(metro: string): Promise<MetroProfile | null> {
+  try {
+    const def = getMetroDefs().find((d) => d.metro === metro);
+    const [market, scores, pages, dealers, allMarkets] = await Promise.all([
+      prisma.marketIntelligence.findFirst({ where: { metroName: metro } }),
+      prisma.amipsMarketScore.findMany({
+        where: { metro },
+        orderBy: { overallBuyerAdvantage: "desc" },
+        select: { make: true, model: true, overallBuyerAdvantage: true, dealerCount: true },
+      }),
+      prisma.amipsPage.findMany({
+        where: { metro },
+        orderBy: { impressions: "desc" },
+        take: 25,
+        select: { slug: true, title: true, lifecycleStatus: true, impressions: true, clicks: true, leadsGenerated: true },
+      }),
+      def
+        ? prisma.dealerIntelligence.findMany({
+            where: { latitude: { not: null }, longitude: { not: null } },
+            select: { brand: true, latitude: true, longitude: true },
+          })
+        : Promise.resolve([]),
+      prisma.marketIntelligence.findMany({ select: { population: true } }),
+    ]);
+
+    if (!market && scores.length === 0 && pages.length === 0) return null;
+
+    // Dealer count + brand mix within the metro membership radius.
+    let dealerCount = 0;
+    const brandCounts = new Map<string, number>();
+    if (def) {
+      for (const d of dealers) {
+        if (d.latitude == null || d.longitude == null) continue;
+        if (haversineMiles(def.center, { lat: d.latitude, lng: d.longitude }) <= METRO_MEMBERSHIP_RADIUS_MILES) {
+          dealerCount++;
+          brandCounts.set(d.brand, (brandCounts.get(d.brand) ?? 0) + 1);
+        }
+      }
+    }
+    const topBrands = [...brandCounts.entries()]
+      .map(([brand, count]) => ({ brand, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+
+    const maxPopulation = Math.max(0, ...allMarkets.map((m) => m.population ?? 0));
+    const { score, driver } = computeOpportunityScore({
+      demandScore: market?.vehicleDemandScore ?? null,
+      buyerLeverage: market?.buyerLeverageScore ?? null,
+      population: market?.population ?? null,
+      maxPopulation,
+      dealers: dealerCount,
+      pages: pages.length,
+    });
+
+    return {
+      metro,
+      state: def?.state ?? market?.state ?? "",
+      population: market?.population ?? null,
+      demandScore: market?.vehicleDemandScore ?? null,
+      competitionScore: market?.competitionScore ?? null,
+      inventoryScore: market?.inventoryScore ?? null,
+      buyerLeverage: market?.buyerLeverageScore ?? null,
+      seasonalNote: market?.seasonalNotes ?? null,
+      dealers: dealerCount,
+      topBrands,
+      opportunityScore: score,
+      opportunityDriver: driver,
+      vehicles: scores.map((s) => ({
+        make: s.make, model: s.model,
+        advantage: round(s.overallBuyerAdvantage, 1), dealers: s.dealerCount,
+      })),
+      pages: pages.map((p) => ({
+        slug: p.slug, title: p.title, lifecycleStatus: p.lifecycleStatus,
+        impressions: p.impressions, clicks: p.clicks, leads: p.leadsGenerated,
+      })),
+      lastUpdated: market?.lastUpdated.toISOString().slice(0, 10) ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Full intelligence profile for one make/model. Returns null if unknown. */
+export async function loadVehicleProfile(make: string, model: string): Promise<VehicleProfile | null> {
+  try {
+    const [scores, vehicleRows, pages] = await Promise.all([
+      prisma.amipsMarketScore.findMany({
+        where: { make, model },
+        orderBy: { overallBuyerAdvantage: "desc" },
+        select: { metro: true, state: true, overallBuyerAdvantage: true, dealerCount: true },
+      }),
+      prisma.vehicleIntelligence.findMany({
+        where: { make, model },
+        select: { msrpCents: true, negotiationDifficulty: true, activeIncentives: true },
+      }),
+      prisma.amipsPage.findMany({
+        where: { make, model },
+        orderBy: { impressions: "desc" },
+        take: 25,
+        select: { slug: true, title: true, lifecycleStatus: true, impressions: true, clicks: true, leadsGenerated: true },
+      }),
+    ]);
+
+    if (scores.length === 0 && vehicleRows.length === 0 && pages.length === 0) return null;
+
+    const advantages = scores.map((s) => s.overallBuyerAdvantage);
+    const avgAdvantage = advantages.length
+      ? round(advantages.reduce((a, b) => a + b, 0) / advantages.length, 1)
+      : 0;
+    const best = scores[0]
+      ? { metro: scores[0].metro, advantage: round(scores[0].overallBuyerAdvantage, 1) }
+      : null;
+    const worst = scores.length > 1
+      ? { metro: scores[scores.length - 1].metro, advantage: round(scores[scores.length - 1].overallBuyerAdvantage, 1) }
+      : null;
+
+    const msrps = vehicleRows.map((v) => v.msrpCents).filter((n) => n > 0);
+    const msrpRange = msrps.length
+      ? { low: Math.min(...msrps), high: Math.max(...msrps) }
+      : null;
+
+    return {
+      make,
+      model,
+      avgAdvantage,
+      metrosCount: scores.length,
+      bestMetro: best,
+      worstMetro: worst,
+      msrpRange,
+      negotiationDifficulty: vehicleRows.find((v) => v.negotiationDifficulty)?.negotiationDifficulty ?? null,
+      activeIncentives: vehicleRows.find((v) => v.activeIncentives)?.activeIncentives ?? null,
+      byMetro: scores.map((s) => ({
+        metro: s.metro, state: s.state,
+        advantage: round(s.overallBuyerAdvantage, 1), dealers: s.dealerCount,
+      })),
+      pages: pages.map((p) => ({
+        slug: p.slug, title: p.title, lifecycleStatus: p.lifecycleStatus,
+        impressions: p.impressions, clicks: p.clicks, leads: p.leadsGenerated,
+      })),
+    };
+  } catch {
+    return null;
+  }
 }
