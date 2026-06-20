@@ -53,7 +53,7 @@ export async function sendMarketAlertSMS(input: {
     logger.warn("[sms] message too long — truncating");
   }
 
-  await sendSms(input.phoneNumber, message);
+  await sendSms(gate.phone, message);
 }
 
 export async function sendAuctionUpdateSMS(input: {
@@ -81,5 +81,5 @@ export async function sendAuctionUpdateSMS(input: {
     `Auction closes in ${input.hoursRemaining}h. ` +
     `Compare: ${input.auctionUrl} | Reply STOP to opt out.`;
 
-  await sendSms(input.phoneNumber, message);
+  await sendSms(gate.phone, message);
 }

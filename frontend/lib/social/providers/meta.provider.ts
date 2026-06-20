@@ -175,6 +175,7 @@ export class MetaProvider implements PublishingProvider {
         await new Promise((r) => setTimeout(r, 3000));
         const statusRes = await fetch(
           `${GRAPH_BASE}/${containerId}?fields=status_code&access_token=${token}`,
+          { signal: AbortSignal.timeout(10000) },
         );
         const statusData = (await statusRes.json().catch(() => ({}))) as {
           status_code?: string;

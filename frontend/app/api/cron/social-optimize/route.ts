@@ -87,23 +87,27 @@ export async function GET(request: NextRequest) {
   }
 
   // Rebuild WinningPattern from scratch (no unique key — weekly full recompute).
-  await prisma.winningPattern.deleteMany({});
-  if (patterns.size > 0) {
-    await prisma.winningPattern.createMany({
-      data: Array.from(patterns.values()).map((p) => ({
-        platform: p.platform,
-        franchiseSlug: p.franchiseSlug,
-        hookType: p.hookType,
-        dayOfWeek: p.dayOfWeek,
-        hour: p.hour,
-        avgCtr: avg(p.ctr),
-        avgLeadScore: avg(p.leadScore),
-        avgVehicleRequests: avg(p.vehicleRequests),
-        avgRevenue: avg(p.revenue),
-        sampleSize: p.leadScore.length,
-      })),
-    });
-  }
+  // Delete + recreate must be atomic: a crash/timeout between the two writes
+  // would otherwise leave the table empty and degrade generation hook-selection
+  // until the next weekly run. $transaction makes the swap all-or-nothing.
+  const newPatterns = Array.from(patterns.values()).map((p) => ({
+    platform: p.platform,
+    franchiseSlug: p.franchiseSlug,
+    hookType: p.hookType,
+    dayOfWeek: p.dayOfWeek,
+    hour: p.hour,
+    avgCtr: avg(p.ctr),
+    avgLeadScore: avg(p.leadScore),
+    avgVehicleRequests: avg(p.vehicleRequests),
+    avgRevenue: avg(p.revenue),
+    sampleSize: p.leadScore.length,
+  }));
+  await prisma.$transaction([
+    prisma.winningPattern.deleteMany({}),
+    ...(newPatterns.length > 0
+      ? [prisma.winningPattern.createMany({ data: newPatterns })]
+      : []),
+  ]);
 
   // Upsert HookPerformance (unique on platform+hookType).
   for (const h of hooks.values()) {

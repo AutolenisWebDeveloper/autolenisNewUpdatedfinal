@@ -5,7 +5,7 @@
 
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import type { Prisma, SocialVideoStatus } from "@prisma/client";
 
@@ -15,10 +15,10 @@ const VALID_STATUS: SocialVideoStatus[] = [
 
 export async function GET(request: NextRequest) {
   const admin = await getAdminFromRequest(request);
-  if (!admin) {
-    // Mirror the posts route: degrade gracefully rather than 500 the dashboard.
-    return adminSuccess({ media: [] });
-  }
+  // An unauthenticated request is a 401 — not an empty result. Only a DB/query
+  // failure degrades to an empty list (handled in the catch below), matching the
+  // posts route which also returns 401 here.
+  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
   const { searchParams } = new URL(request.url);
   const platform = searchParams.get("platform") ?? undefined;

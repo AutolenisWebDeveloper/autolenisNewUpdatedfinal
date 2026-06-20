@@ -18,6 +18,18 @@ export async function POST(
   const existing = await prisma.socialPost.findUnique({ where: { id: postId } });
   if (!existing) return adminError("NOT_FOUND", "Post not found", 404);
 
+  // Guard against re-queuing a post that is already in-flight or live. Without
+  // this, resetting a PUBLISHING/PUBLISHED post back to APPROVED would have the
+  // publish-queue cron publish it a second time. Use the repost action to
+  // intentionally re-publish a PUBLISHED post.
+  if (existing.status === "PUBLISHING" || existing.status === "PUBLISHED") {
+    return adminError(
+      "INVALID_STATE",
+      `Post is already ${existing.status.toLowerCase()}; use repost to publish again`,
+      409,
+    );
+  }
+
   const post = await prisma.socialPost.update({
     where: { id: postId },
     data: {

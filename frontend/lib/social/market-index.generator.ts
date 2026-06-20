@@ -121,9 +121,14 @@ export async function generateMarketIndex(): Promise<MarketIndexReport> {
     model: v.model,
     msrp: Math.round(v.msrpCents / 100),
     fairMarketLow: Math.round(v.fairMarketLowCents / 100),
+    // Clamp at 0: bad data where fairMarketLow exceeds MSRP would otherwise
+    // surface as a negative "% below MSRP" in the published report.
     discountPct:
       v.msrpCents > 0
-        ? Math.round(((v.msrpCents - v.fairMarketLowCents) / v.msrpCents) * 1000) / 10
+        ? Math.max(
+            0,
+            Math.round(((v.msrpCents - v.fairMarketLowCents) / v.msrpCents) * 1000) / 10,
+          )
         : 0,
   }));
 

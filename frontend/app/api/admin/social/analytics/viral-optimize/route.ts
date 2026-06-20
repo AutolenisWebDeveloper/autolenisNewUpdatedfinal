@@ -87,6 +87,13 @@ Return ONLY valid JSON, no other text:
           }),
         },
       );
+      // A non-2xx Groq response must not be parsed as an empty object and
+      // returned as a successful "optimization" that silently echoes the
+      // original content — surface it to the catch fallback below.
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`Groq ${res.status}: ${body.slice(0, 200)}`);
+      }
       const data = await res.json();
       const raw = data?.choices?.[0]?.message?.content ?? "{}";
       const result = JSON.parse(raw.replace(/```json|```/g, "").trim());

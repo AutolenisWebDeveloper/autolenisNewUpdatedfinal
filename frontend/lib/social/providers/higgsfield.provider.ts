@@ -68,6 +68,7 @@ async function higgsfieldRequest(args: {
       withPolling: args.withPolling ?? false,
       webhook: args.webhook ?? undefined,
     }),
+    signal: AbortSignal.timeout(30000),
   });
 
   if (!res.ok) {
@@ -188,6 +189,7 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
       const res = await fetch(statusUrl, {
         method: "GET",
         headers: { Authorization: getAuthHeader() },
+        signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => "");

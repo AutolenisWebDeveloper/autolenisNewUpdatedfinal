@@ -108,10 +108,17 @@ export async function getVideoLearnings(
     avgCompletion: Math.round((p.avgCompletionRate ?? 0) * 100),
   }));
 
-  const worst = patterns
-    .slice(-2)
-    .map((p) => p.hookType!)
-    .filter(Boolean);
+  // Only surface "worst" hooks when there are enough patterns that the bottom
+  // two cannot overlap the top three (best = indices 0-2). With fewer than 5
+  // patterns slice(-2) would re-list a "best" hook as "worst", producing a
+  // self-contradictory insight ("X gets 80% completion vs … for X").
+  const worst =
+    patterns.length >= 5
+      ? patterns
+          .slice(-2)
+          .map((p) => p.hookType!)
+          .filter(Boolean)
+      : [];
 
   const insights: string[] = [];
   if (best[0] && worst[0]) {

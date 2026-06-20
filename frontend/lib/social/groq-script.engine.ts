@@ -84,7 +84,15 @@ async function callGroq(options: {
   logger.info("[groq-script] response status:", res.status);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`);
+    // Attach the HTTP status so the retry layer can decide on the status code
+    // itself rather than substring-matching the (attacker/model-influenced)
+    // response body, which would otherwise retry a 400/500 whose body merely
+    // contains "429".
+    const error = new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`) as Error & {
+      status?: number;
+    };
+    error.status = res.status;
+    throw error;
   }
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -105,7 +113,10 @@ async function callGroqWithRetry(
     } catch (err) {
       lastError = err;
       const message = err instanceof Error ? err.message : String(err);
-      if (!message.includes("429") && !message.includes("503")) throw err;
+      // Retry only on rate-limit (429) or server errors (5xx) by status code.
+      const status = (err as { status?: number })?.status;
+      const retryable = status === 429 || (typeof status === "number" && status >= 500);
+      if (!retryable) throw err;
       if (attempt === maxAttempts - 1) throw err;
       const backoffMs = Math.min(8000 * Math.pow(2, attempt), 32000);
       logger.warn(

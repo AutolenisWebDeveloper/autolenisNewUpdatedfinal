@@ -81,12 +81,31 @@ Return ONLY valid JSON array, no other text:
       }),
     });
 
-    const data = (await res.json()) as {
+    // Surface upstream failures (auth/quota/5xx) instead of silently parsing an
+    // error body as "[]" and reporting a successful empty scan.
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      logger.error(
+        `[competitor-monitor] Groq request failed: ${res.status} ${body.slice(0, 300)}`,
+      );
+      return [];
+    }
+
+    const data = (await res.json().catch(() => ({}))) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
     const raw = data?.choices?.[0]?.message?.content ?? "[]";
     const cleaned = raw.replace(/```json|```/g, "").trim();
-    const insights = JSON.parse(cleaned) as Omit<CompetitorInsight, "weekOf">[];
+    let insights: Omit<CompetitorInsight, "weekOf">[];
+    try {
+      insights = JSON.parse(cleaned) as Omit<CompetitorInsight, "weekOf">[];
+    } catch (parseErr) {
+      logger.error(
+        "[competitor-monitor] failed to parse Groq JSON:",
+        parseErr instanceof Error ? parseErr.message : parseErr,
+      );
+      return [];
+    }
 
     if (!Array.isArray(insights)) return [];
 

@@ -129,6 +129,8 @@ export async function createRunwayVideoTask(input: {
         ratio,
         duration: 5,
       }),
+      // Bound the call so a hung upstream cannot block the cron worker.
+      signal: AbortSignal.timeout(20000),
     });
 
     if (!res.ok) {
@@ -167,6 +169,7 @@ export async function pollRunwayTask(taskId: string): Promise<RunwayVideoResult>
     try {
       const res = await fetch(`${RUNWAY_BASE}/v1/tasks/${taskId}`, {
         headers: getRunwayHeaders(),
+        signal: AbortSignal.timeout(15000),
       });
 
       if (!res.ok) {

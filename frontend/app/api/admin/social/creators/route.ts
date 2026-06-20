@@ -22,13 +22,26 @@ export async function GET(request: NextRequest) {
     stats: { total: 0, active: 0, totalClicks: 0, revenueAttributedCents: 0 },
   };
 
+  // Bound the list so it never becomes an unbounded full-table scan as the
+  // network grows. Network-level stats below are computed from aggregates so
+  // they stay accurate regardless of the page returned.
+  const { searchParams } = new URL(request.url);
+  const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 100, 1), 200);
+  const offset = Math.max(Number(searchParams.get("offset")) || 0, 0);
+
   try {
-    const [creators, attributionGroups] = await Promise.all([
-      prisma.creatorNetwork.findMany({ orderBy: { createdAt: "desc" } }),
+    const [creators, attributionGroups, total, active] = await Promise.all([
+      prisma.creatorNetwork.findMany({
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+      }),
       prisma.creatorAttribution.groupBy({
         by: ["creatorId"],
         _sum: { clicks: true, vehicleRequests: true, revenueGenerated: true },
       }),
+      prisma.creatorNetwork.count(),
+      prisma.creatorNetwork.count({ where: { status: "ACTIVE" } }),
     ]);
 
     const byCreator = new Map(
@@ -69,14 +82,23 @@ export async function GET(request: NextRequest) {
       };
     });
 
+    // Network-level totals are derived from global aggregates (not just the
+    // current page) so they remain correct under pagination.
     const stats = {
-      total: creators.length,
-      active: creators.filter((c) => c.status === "ACTIVE").length,
-      totalClicks: rows.reduce((sum, r) => sum + r.clicks, 0),
-      revenueAttributedCents: rows.reduce((sum, r) => sum + r.revenueCents, 0),
+      total,
+      active,
+      totalClicks: attributionGroups.reduce((sum, g) => sum + (g._sum.clicks ?? 0), 0),
+      revenueAttributedCents: attributionGroups.reduce(
+        (sum, g) => sum + (g._sum.revenueGenerated ?? 0),
+        0,
+      ),
     };
 
-    return adminSuccess({ creators: rows, stats });
+    return adminSuccess({
+      creators: rows,
+      stats,
+      pagination: { limit, offset, total, hasMore: offset + creators.length < total },
+    });
   } catch (err) {
     logger.error("[admin/social] creators query failed:", err);
     return adminSuccess(empty);

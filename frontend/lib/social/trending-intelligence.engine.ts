@@ -146,11 +146,26 @@ async function fetchGoogleTrends(apiKey: string): Promise<string[]> {
     );
     if (!res.ok) return [];
     const data = await res.json();
-    const trends: string[] = data?.trendingSearches ?? data?.data ?? data ?? [];
+    const trends: unknown[] = data?.trendingSearches ?? data?.data ?? data ?? [];
+    // The RapidAPI hottrends payload may return plain strings OR objects (e.g.
+    // { title }, { query }, { name }). Coerce each item to its title string so
+    // downstream consumers never receive "[object Object]" (which would silently
+    // fail the automotive filter and empty this feed).
+    const toTitle = (t: unknown): string => {
+      if (typeof t === "string") return t;
+      if (t && typeof t === "object") {
+        const o = t as Record<string, unknown>;
+        const v = o.title ?? o.query ?? o.name ?? o.keyword ?? o.term;
+        if (typeof v === "string") return v;
+      }
+      return "";
+    };
     // Filter for automotive.
     return (Array.isArray(trends) ? trends : [])
-      .filter((t: string) =>
-        AUTOMOTIVE_KEYWORDS.some((kw) => String(t).toLowerCase().includes(kw)),
+      .map(toTitle)
+      .filter((t) => t.length > 0)
+      .filter((t) =>
+        AUTOMOTIVE_KEYWORDS.some((kw) => t.toLowerCase().includes(kw)),
       )
       .slice(0, 5);
   } catch {

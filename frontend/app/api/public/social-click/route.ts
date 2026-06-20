@@ -31,6 +31,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ tracked: false });
     }
 
+    // Require a post-identifying UTM. Without this, an absent campaign+content
+    // collapses the lookup to "most recent PUBLISHED post" and would attribute a
+    // forged/empty click to an unrelated post, polluting attribution data.
+    if (!body.utmCampaign && !body.utmContent) {
+      return NextResponse.json({ tracked: false, reason: "missing_utm" });
+    }
+
     // Find the social post this click came from
     const post = await prisma.socialPost
       .findFirst({
