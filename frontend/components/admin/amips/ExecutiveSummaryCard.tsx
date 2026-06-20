@@ -34,10 +34,33 @@ export default function ExecutiveSummaryCard() {
     setState("loading");
     setError("");
     try {
-      const res = await fetch("/api/admin/amips/executive-summary", { method: "POST" });
-      const json = (await res.json()) as SummaryResponse | ErrorResponse;
+      const res = await fetch("/api/admin/amips/executive-summary", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+
+      // Parse defensively: the response can be an HTML error page (e.g. a
+      // gateway timeout) which would otherwise blow up JSON.parse with an
+      // opaque "Unexpected token '<'".
+      const raw = await res.text();
+      let json: SummaryResponse | ErrorResponse | null = null;
+      try {
+        json = JSON.parse(raw) as SummaryResponse | ErrorResponse;
+      } catch {
+        json = null;
+      }
+
+      if (!json) {
+        setError(
+          res.status === 504 || res.status === 502
+            ? "The AI service took too long to respond. Please try again."
+            : `The server returned an unexpected response (HTTP ${res.status}). Please try again.`,
+        );
+        setState("error");
+        return;
+      }
       if (!res.ok || !("success" in json)) {
-        setError("error" in json ? json.error.message : `HTTP ${res.status}`);
+        setError("error" in json ? json.error.message : `Request failed (HTTP ${res.status}).`);
         setState("error");
         return;
       }
