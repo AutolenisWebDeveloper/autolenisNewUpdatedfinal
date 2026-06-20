@@ -1,11 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import {
+  Building2, MapPinned, Gauge, Loader2, CheckCircle2, XCircle, Play,
+  type LucideIcon,
+} from "lucide-react";
 
 interface Control {
   label: string;
   endpoint: string;
   description: string;
+  icon: LucideIcon;
 }
 
 const CONTROLS: Control[] = [
@@ -13,16 +18,19 @@ const CONTROLS: Control[] = [
     label: "Sync Dealer Intelligence",
     endpoint: "/api/admin/amips/sync-dealer-intelligence",
     description: "Populate dealer_intelligence from the Gemini Maps cache + recompute density.",
+    icon: Building2,
   },
   {
     label: "Sync Market Intelligence",
     endpoint: "/api/admin/amips/sync-market-intelligence",
     description: "Populate the top 25 metros (Census population + dealer-derived scores).",
+    icon: MapPinned,
   },
   {
     label: "Compute Market Scores",
     endpoint: "/api/admin/amips/compute-market-scores",
     description: "Pre-compute Market Scores for every make/model x metro combination.",
+    icon: Gauge,
   },
 ];
 
@@ -56,31 +64,58 @@ export default function AmipsSyncControls() {
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-3">
       {CONTROLS.map((c) => {
         const rs = state[c.endpoint] ?? { status: "idle" };
         const running = rs.status === "running";
         return (
           <div
             key={c.endpoint}
-            className="rounded-xl border border-slate-200 bg-white p-4"
+            className="flex flex-col rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm transition-all hover:border-[#BFDBFE] hover:shadow-md hover:shadow-[#0B5FD1]/5"
             data-testid={`amips-control-${c.endpoint}`}
           >
-            <p className="text-sm font-semibold text-slate-900">{c.label}</p>
-            <p className="mt-1 text-xs text-slate-500">{c.description}</p>
+            <div className="flex items-start justify-between mb-3">
+              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center">
+                <c.icon size={15} className="text-[#0B5FD1]" />
+              </div>
+              {running && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#0B5FD1]">
+                  <Loader2 size={11} className="animate-spin" />
+                  Running
+                </span>
+              )}
+            </div>
+            <p className="text-sm font-bold text-[#0F172A]">{c.label}</p>
+            <p className="mt-1 text-xs text-[#94A3B8] leading-snug flex-1">{c.description}</p>
             <button
               type="button"
               onClick={() => run(c)}
               disabled={running}
-              className="mt-3 inline-flex items-center rounded-lg bg-[#0B5FD1] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+              className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#0B5FD1] px-3 py-2 text-xs font-semibold text-white shadow-md shadow-[#0B5FD1]/20 transition-colors hover:bg-[#0A4DB8] disabled:opacity-50 disabled:shadow-none"
             >
-              {running ? "Running…" : "Run"}
+              {running ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" />
+                  Running…
+                </>
+              ) : (
+                <>
+                  <Play size={12} />
+                  Run Sync
+                </>
+              )}
             </button>
             {rs.status === "done" && (
-              <p className="mt-2 text-xs font-medium text-emerald-600">✓ {rs.message}</p>
+              <p className="mt-3 flex items-start gap-1.5 text-[11px] font-medium text-[#059669]">
+                <CheckCircle2 size={13} className="shrink-0 mt-0.5" />
+                <span className="break-words">{rs.message}</span>
+              </p>
             )}
             {rs.status === "error" && (
-              <p className="mt-2 text-xs font-medium text-red-600">✗ {rs.message}</p>
+              <p className="mt-3 flex items-start gap-1.5 text-[11px] font-medium text-[#DC2626]">
+                <XCircle size={13} className="shrink-0 mt-0.5" />
+                <span className="break-words">{rs.message}</span>
+              </p>
             )}
           </div>
         );
