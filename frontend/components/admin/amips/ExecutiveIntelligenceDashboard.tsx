@@ -149,8 +149,8 @@ function MarketHealthCard({ health, trend }: { health: MarketHealthIndex; trend?
 
 function InsightCard({ insight }: { insight: Insight }) {
   const c = CATEGORY[insight.category];
-  return (
-    <div className={`bg-white border ${c.ring} rounded-2xl p-4 shadow-sm flex flex-col`}>
+  const inner = (
+    <>
       <div className="flex items-center justify-between mb-2">
         <span className={`inline-flex items-center gap-1.5 rounded-lg ${c.bg} px-2 py-1 text-[10px] font-bold ${c.color}`}>
           <c.icon size={11} />
@@ -164,9 +164,21 @@ function InsightCard({ insight }: { insight: Insight }) {
       <p className="text-xs text-[#64748B] mt-1.5 leading-relaxed flex-1">{insight.detail}</p>
       <p className={`mt-3 inline-flex items-center gap-1 text-[11px] font-semibold ${c.color}`}>
         {insight.action}
-        <ChevronRight size={12} />
+        <ChevronRight size={12} className="group-hover/insight:translate-x-0.5 transition-transform" />
       </p>
-    </div>
+    </>
+  );
+
+  if (!insight.href) {
+    return <div className={`bg-white border ${c.ring} rounded-2xl p-4 shadow-sm flex flex-col`}>{inner}</div>;
+  }
+  return (
+    <Link
+      href={insight.href}
+      className={`group/insight bg-white border ${c.ring} rounded-2xl p-4 shadow-sm flex flex-col hover:shadow-md hover:shadow-[#0B5FD1]/5 hover:-translate-y-0.5 transition-all`}
+    >
+      {inner}
+    </Link>
   );
 }
 
@@ -498,7 +510,7 @@ export default function ExecutiveIntelligenceDashboard({ data }: { data: Executi
       </header>
 
       {/* National Market Overview */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
+      <section id="market-health" className="scroll-mt-6 grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
         <div className="lg:col-span-1"><MarketHealthCard health={data.health} trend={data.healthTrend} /></div>
         <div className="lg:col-span-2 grid grid-cols-2 gap-4 content-start">
           {data.headline.length > 0 ? data.headline.map((m) => (
@@ -566,12 +578,12 @@ export default function ExecutiveIntelligenceDashboard({ data }: { data: Executi
       </section>
 
       {/* Content Performance */}
-      <section className="mb-7">
+      <section id="content" className="scroll-mt-6 mb-7">
         <ContentPerformancePanel content={data.content} />
       </section>
 
       {/* Operations (demoted) */}
-      <section>
+      <section id="operations" className="scroll-mt-6">
         <SectionLabel icon={Globe} right={
           <span className="inline-flex items-center gap-1 text-[10px] text-[#94A3B8] font-medium">
             <Search size={10} /> Pipeline & data operations

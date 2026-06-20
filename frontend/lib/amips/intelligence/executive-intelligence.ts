@@ -145,6 +145,8 @@ export interface Insight {
   detail: string;
   metric?: string;
   action: string;
+  /** Destination for the insight CTA — a drill-down route or an in-page anchor. */
+  href?: string;
 }
 
 export interface RiskItem {
@@ -265,6 +267,11 @@ function segmentOutlook(avg: number, metros: number): string {
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
 const pct = (num: number, den: number) => (den > 0 ? num / den : 0);
 
+// Drill-down / anchor destinations for the insight CTAs.
+const metroPath = (m: string) => `/admin/amips/metro/${encodeURIComponent(m)}`;
+const vehiclePath = (mk: string, md: string) =>
+  `/admin/amips/vehicle/${encodeURIComponent(mk)}/${encodeURIComponent(md)}`;
+
 function emptyIntelligence(): ExecutiveIntelligence {
   const components: HealthComponent[] = (
     Object.keys(HEALTH_WEIGHTS) as Array<keyof typeof HEALTH_WEIGHTS>
@@ -288,6 +295,7 @@ function emptyIntelligence(): ExecutiveIntelligence {
         detail:
           "No AMIPS intelligence records are populated yet. Run the dealer, market, and score syncs to begin generating market intelligence.",
         action: "Run syncs in Operations",
+        href: "#operations",
       },
     ],
     opportunities: [],
@@ -607,6 +615,7 @@ async function loadInner(): Promise<ExecutiveIntelligence> {
     detail: `Driven by ${[...components].sort((a, b) => b.value * b.weight - a.value * a.weight)[0].label.toLowerCase()}. ${markets.length} of ${METRO_UNIVERSE} metros are scored with an average buyer leverage of ${avgLeverage.toFixed(1)}/10.`,
     metric: `${health.score}/100`,
     action: "Open health breakdown",
+    href: "#market-health",
   });
   const topOpp = opportunities.find((o) => o.opportunityScore > 0);
   if (topOpp)
@@ -615,7 +624,8 @@ async function loadInner(): Promise<ExecutiveIntelligence> {
       title: `${topOpp.metro} is the top expansion opportunity`,
       detail: `Opportunity score ${topOpp.opportunityScore}/100, led by ${topOpp.driver.toLowerCase()}. ${topOpp.dealers} dealers and ${topOpp.pages} published pages today${topOpp.population ? ` against ${(topOpp.population / 1_000_000).toFixed(1)}M residents` : ""}.`,
       metric: `${topOpp.opportunityScore}/100`,
-      action: "View opportunity markets",
+      action: `Open ${topOpp.metro} profile`,
+      href: metroPath(topOpp.metro),
     });
   if (segments[0])
     insights.push({
@@ -623,7 +633,8 @@ async function loadInner(): Promise<ExecutiveIntelligence> {
       title: `${segments[0].make} ${segments[0].model} leads buyer advantage`,
       detail: `Averaging ${segments[0].avgBuyerAdvantage.toFixed(1)}/10 across ${segments[0].metros} metro${segments[0].metros === 1 ? "" : "s"} — ${segments[0].outlook.toLowerCase()}.`,
       metric: `${segments[0].avgBuyerAdvantage.toFixed(1)}/10`,
-      action: "View vehicle intelligence",
+      action: `Open ${segments[0].make} ${segments[0].model} profile`,
+      href: vehiclePath(segments[0].make, segments[0].model),
     });
   if (submittedTotal > 0)
     insights.push({
@@ -632,6 +643,7 @@ async function loadInner(): Promise<ExecutiveIntelligence> {
       detail: `${indexedTotal} of ${submittedTotal} published URLs are indexed. The gate recommends "${indexationDecision}" for generation volume.`,
       metric: `${Math.round(indexationRate * 100)}%`,
       action: "Review indexation gate",
+      href: "#operations",
     });
   if (content.revenueAttributionCents > 0)
     insights.push({
@@ -640,6 +652,7 @@ async function loadInner(): Promise<ExecutiveIntelligence> {
       detail: `${content.leads.toLocaleString("en-US")} leads generated to date, with an annualised run-rate of ${usd(content.revenueRunRateCents)} based on the trailing four weeks.`,
       metric: usd(content.revenueRunRateCents),
       action: "View content performance",
+      href: "#content",
     });
   const contentGapMetro = opportunities.find(
     (o) => (o.buyerLeverage ?? 0) >= 6 && o.pages < CONTENT_TARGET_PAGES,
@@ -649,14 +662,16 @@ async function loadInner(): Promise<ExecutiveIntelligence> {
       id: "content-gap", category: "opportunity",
       title: `${contentGapMetro.metro} is under-published for its buyer advantage`,
       detail: `Buyer leverage is ${(contentGapMetro.buyerLeverage ?? 0).toFixed(1)}/10 but only ${contentGapMetro.pages} page(s) are live — a high-conviction content expansion target.`,
-      action: "Queue content",
+      action: `Open ${contentGapMetro.metro} profile`,
+      href: metroPath(contentGapMetro.metro),
     });
   if (txnCount > 0)
     insights.push({
       id: "txn", category: "performance",
       title: `${txnCount.toLocaleString("en-US")} verified transactions feeding Tier F intelligence`,
       detail: "Real marketplace transactions are accumulating toward the 50-deal threshold that unlocks proprietary Tier F content.",
-      action: "View marketplace intelligence",
+      action: "View content performance",
+      href: "#content",
     });
 
   // --- Headline metrics ---
