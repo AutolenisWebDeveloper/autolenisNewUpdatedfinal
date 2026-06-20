@@ -27,6 +27,15 @@ export async function captureUtmAttribution(input: UtmAttributionInput): Promise
   const source = input.utmSource?.toLowerCase() ?? "";
   if (!SOCIAL_SOURCES.has(source)) return;
 
+  // Require at least one post-identifying UTM. Without this guard, when both
+  // utm_campaign and utm_content are absent the where-clause collapses to just
+  // `{ status: PUBLISHED }` and findFirst returns the most-recent published post
+  // — silently mis-attributing the request to an unrelated post.
+  if (!input.utmCampaign && !input.utmContent) {
+    logger.info("[attribution] no utm_campaign/utm_content — skipping attribution");
+    return;
+  }
+
   const post = await prisma.socialPost.findFirst({
     where: {
       utmCampaign: input.utmCampaign ?? undefined,

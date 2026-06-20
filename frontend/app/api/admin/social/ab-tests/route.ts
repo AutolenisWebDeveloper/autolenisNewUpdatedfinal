@@ -125,67 +125,89 @@ export async function POST(request: NextRequest) {
   const contentType = CONTENT_TYPE[platform] ?? "social_post";
   const funnelDestination = getFunnelDestination(franchise.slug);
 
-  const group = await prisma.aBTestGroup.create({
-    data: {
-      name: `${franchise.slug} ${platform} ${new Date().toISOString().split("T")[0]}`,
-      platform,
-      franchiseSlug: franchise.slug,
-      status: "RUNNING",
-    },
-  });
-
   const labels = ["A", "B", "C"];
   const now = new Date();
-  const postIds: string[] = [];
 
-  for (let i = 0; i < variants.length; i++) {
-    const variant = variants[i];
-    const scheduledAt = new Date(now.getTime() + i * 5 * 60 * 1000); // 5-min stagger
-    const trackedUrl = buildUtmUrl({
-      path: funnelDestination,
-      platform,
-      franchise: franchise.slug,
-      hookType: variant.hookType,
-      contentType,
+  // The group, its variant posts, and the variant rows must be created
+  // all-or-nothing. Done as separate awaits, a mid-loop failure would orphan the
+  // group (no variants) or leave posts without their variant linkage. An
+  // interactive transaction makes the whole set atomic. (The signal + hook
+  // generation above stay outside the transaction because generation is a slow
+  // external Groq call that must not hold a DB transaction open.)
+  let group: Awaited<ReturnType<typeof prisma.aBTestGroup.create>>;
+  let postIds: string[];
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const createdGroup = await tx.aBTestGroup.create({
+        data: {
+          name: `${franchise.slug} ${platform} ${new Date().toISOString().split("T")[0]}`,
+          platform,
+          franchiseSlug: franchise.slug,
+          status: "RUNNING",
+        },
+      });
+
+      const ids: string[] = [];
+      for (let i = 0; i < variants.length; i++) {
+        const variant = variants[i];
+        const scheduledAt = new Date(now.getTime() + i * 5 * 60 * 1000); // 5-min stagger
+        const trackedUrl = buildUtmUrl({
+          path: funnelDestination,
+          platform,
+          franchise: franchise.slug,
+          hookType: variant.hookType,
+          contentType,
+        });
+
+        const post = await tx.socialPost.create({
+          data: {
+            franchiseId: franchise.id,
+            signalId: signal.id,
+            platform,
+            contentType,
+            hookType: variant.hookType,
+            hook: variant.hook,
+            script: variant.caption,
+            caption: variant.caption,
+            hashtags: variant.hashtags,
+            ctaText: variant.ctaText,
+            funnelDestination,
+            status: "APPROVED",
+            automationMode: "AB_TEST",
+            requiresReview: false,
+            scheduledAt,
+            utmSource: platform,
+            utmMedium: "social_ab",
+            utmCampaign: `${franchise.slug}_ab`,
+            utmHook: variant.hookType,
+            utmPlatform: platform,
+            trackedUrl,
+          },
+        });
+
+        await tx.aBTestVariant.create({
+          data: {
+            groupId: createdGroup.id,
+            postId: post.id,
+            hookType: variant.hookType,
+            hook: variant.hook,
+            variantLabel: labels[i] ?? String(i + 1),
+          },
+        });
+
+        ids.push(post.id);
+      }
+
+      return { createdGroup, ids };
     });
-
-    const post = await prisma.socialPost.create({
-      data: {
-        franchiseId: franchise.id,
-        signalId: signal.id,
-        platform,
-        contentType,
-        hookType: variant.hookType,
-        hook: variant.hook,
-        script: variant.caption,
-        caption: variant.caption,
-        hashtags: variant.hashtags,
-        ctaText: variant.ctaText,
-        funnelDestination,
-        status: "APPROVED",
-        automationMode: "AB_TEST",
-        requiresReview: false,
-        scheduledAt,
-        utmSource: platform,
-        utmMedium: "social_ab",
-        utmCampaign: `${franchise.slug}_ab`,
-        utmHook: variant.hookType,
-        utmPlatform: platform,
-        trackedUrl,
-      },
-    });
-
-    await prisma.aBTestVariant.create({
-      data: {
-        groupId: group.id,
-        postId: post.id,
-        hookType: variant.hookType,
-        hook: variant.hook,
-        variantLabel: labels[i] ?? String(i + 1),
-      },
-    });
-
-    postIds.push(post.id);
+    group = result.createdGroup;
+    postIds = result.ids;
+  } catch (err) {
+    logger.error(
+      "[ab-tests] failed to create A/B test group:",
+      err instanceof Error ? err.message : err,
+    );
+    return adminError("CREATE_FAILED", "Failed to create A/B test", 500);
   }
 
   return adminSuccess({

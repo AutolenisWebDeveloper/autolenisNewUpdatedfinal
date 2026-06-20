@@ -4,6 +4,7 @@
 
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
+import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { captureUtmAttribution } from "@/lib/social/attribution.service";
 import { z } from "zod";
 
@@ -27,11 +28,24 @@ const schema = z.object({
 
 export async function POST(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization") ?? "";
-    if (!auth.endsWith(secret)) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-    }
+  // Fail closed: a missing secret must deny (500), never expose this internal
+  // attribution writer publicly. Match the strict full-string Bearer compare
+  // used by every cron route rather than a permissive endsWith().
+  if (!secret) {
+    logger.error("[social-attribution] CRON_SECRET not configured — denying");
+    return NextResponse.json(
+      { success: false, error: "Server misconfigured" },
+      { status: 500 },
+    );
+  }
+  // Accept the standard `Authorization: Bearer <secret>` form, or a bare secret
+  // for the external intake caller. Use exact equality — never endsWith(), which
+  // a token like "<anything><secret>" would satisfy.
+  const auth = request.headers.get(CRON_AUTH_HEADER);
+  const isAuthorized =
+    auth === `${CRON_AUTH_PREFIX}${secret}` || auth === secret;
+  if (!isAuthorized) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
   let body: unknown;

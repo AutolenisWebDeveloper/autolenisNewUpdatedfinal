@@ -9,6 +9,7 @@ import { logger } from "@/lib/logger";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { buildViralHashtags } from "@/lib/social/hashtag-builder";
+import { AUTO_PUBLISH_FRANCHISES } from "@/lib/social/config";
 import { getOrFetchTrendingData } from "@/lib/social/trending-intelligence.engine";
 
 // A published post with its franchise relation — the shape both functions share.
@@ -60,19 +61,13 @@ export async function recyclePost(
     const now = new Date();
     const scheduledAt = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000); // 2 days out
 
-    // Determine status based on franchise review requirement.
+    // Determine status based on franchise review requirement. Use the single
+    // canonical allowlist from config — a divergent local copy here previously
+    // let two extra franchises (dealer_growth, market_stats_dealer) auto-publish
+    // recycled content without review, a compliance gap.
     const franchise = post.franchise?.slug ?? "";
-    const AUTO_PUBLISH = [
-      "dealer_secret_daily",
-      "city_market_alert",
-      "dealer_fee_breakdown",
-      "how_autolenis_works",
-      "dealer_growth",
-      "market_stats_dealer",
-    ];
-    const status = AUTO_PUBLISH.includes(franchise)
-      ? "APPROVED"
-      : "PENDING_REVIEW";
+    const isAutoPublish = AUTO_PUBLISH_FRANCHISES.includes(franchise);
+    const status = isAutoPublish ? "APPROVED" : "PENDING_REVIEW";
 
     const recycled = await prisma.socialPost.create({
       data: {
@@ -95,11 +90,13 @@ export async function recyclePost(
         metro: post.metro,
         funnelDestination: post.funnelDestination,
         complianceNotes: post.complianceNotes,
-        requiresReview: !AUTO_PUBLISH.includes(franchise),
+        requiresReview: !isAutoPublish,
         automationMode: "HYBRID_AUTO",
         status,
         scheduledAt,
-        franchiseId: null, // Will be linked via slug lookup if needed
+        // Preserve the franchise linkage from the source post so recycled posts
+        // remain indexable by franchise (previously orphaned with null).
+        franchiseId: post.franchiseId,
         utmSource: post.platform,
         utmMedium: "social_recycled",
         utmCampaign: `${franchise}_recycled`,

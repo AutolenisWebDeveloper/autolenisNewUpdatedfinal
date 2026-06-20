@@ -498,6 +498,24 @@ function scheduleVisualGeneration(post: SocialPost): void {
 export async function publishApprovedPost(post: SocialPost): Promise<void> {
   const provider = getPublishingProvider(post.platform);
 
+  // Atomically claim the post before doing any provider work. The publish-queue
+  // cron runs every 5 minutes but a single run can take up to maxDuration (300s),
+  // so a slow run may still be in flight when the next starts — both selecting
+  // the same APPROVED/SCHEDULED row. updateMany with a status precondition is the
+  // claim: exactly one caller flips the row to PUBLISHING (count === 1); any
+  // other concurrent caller sees count === 0 and bails, preventing a
+  // double-publish to the live platform.
+  const claim = await prisma.socialPost.updateMany({
+    where: { id: post.id, status: { in: ["APPROVED", "SCHEDULED"] } },
+    data: { status: "PUBLISHING", publishingProvider: provider.name },
+  });
+  if (claim.count === 0) {
+    logger.info(
+      `[orchestrator] post ${post.id} already claimed or not publishable — skipping`,
+    );
+    return;
+  }
+
   // Resolve the best available media for this post: a ready video wins, else the
   // generated still image (stored as the video thumbnail, or on the most recent
   // completed text-to-image generation record).
@@ -528,10 +546,7 @@ export async function publishApprovedPost(post: SocialPost): Promise<void> {
   const mediaUrl = videoUrl ?? thumbnailUrl;
   const isVideo = Boolean(videoUrl);
 
-  await prisma.socialPost.update({
-    where: { id: post.id },
-    data: { status: "PUBLISHING", publishingProvider: provider.name },
-  });
+  // Status already flipped to PUBLISHING by the atomic claim above.
 
   const now = Date.now();
   const scheduledAt = post.scheduledAt ?? new Date();

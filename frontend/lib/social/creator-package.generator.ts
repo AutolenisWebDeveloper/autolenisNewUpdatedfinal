@@ -32,11 +32,14 @@ export async function generateCreatorPackage(creator: {
   commissionRate: number | null;
   affiliateId: string | null;
 }): Promise<CreatorPackage> {
-  // Find top 3 posts from last 7 days for creator's platform
+  // Find top 3 published posts from last 7 days for creator's platform. Only
+  // PUBLISHED posts qualify: APPROVED posts have a null publishedAt and so could
+  // never satisfy the publishedAt filter — listing them in the status filter was
+  // dead and misleading.
   const topPosts = await prisma.socialPost.findMany({
     where: {
       platform: creator.platform,
-      status: { in: ["PUBLISHED", "APPROVED"] },
+      status: "PUBLISHED",
       publishedAt: {
         gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
       },

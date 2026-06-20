@@ -45,13 +45,21 @@ export async function buildRetargetingAudience(): Promise<void> {
   let audienceId: string | null = null;
 
   try {
-    // Search for existing audience
+    // Search for existing audience. The access token is sent via the
+    // Authorization header (not the query string) so it never lands in
+    // upstream proxy/CDN access logs.
     const searchRes = await fetch(
-      `https://graph.facebook.com/v18.0/${adAccountId}/customaudiences` +
-        `?fields=id,name&access_token=${token}`,
-      { method: "GET" },
+      `https://graph.facebook.com/v18.0/${adAccountId}/customaudiences?fields=id,name`,
+      { method: "GET", headers: { Authorization: `Bearer ${token}` } },
     );
-    const searchData = (await searchRes.json()) as {
+    if (!searchRes.ok) {
+      const body = await searchRes.text().catch(() => "");
+      logger.error(
+        `[retargeting] audience search failed: ${searchRes.status} ${body.slice(0, 300)}`,
+      );
+      return;
+    }
+    const searchData = (await searchRes.json().catch(() => ({}))) as {
       data?: { id: string; name: string }[];
     };
     const existing = searchData.data?.find((a) => a.name === audienceName);
@@ -63,9 +71,11 @@ export async function buildRetargetingAudience(): Promise<void> {
         `https://graph.facebook.com/v18.0/${adAccountId}/customaudiences`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({
-            access_token: token,
             name: audienceName,
             subtype: "CUSTOM",
             description: "Social leads who did not convert",
@@ -73,7 +83,14 @@ export async function buildRetargetingAudience(): Promise<void> {
           }),
         },
       );
-      const createData = (await createRes.json()) as { id?: string };
+      if (!createRes.ok) {
+        const body = await createRes.text().catch(() => "");
+        logger.error(
+          `[retargeting] audience create failed: ${createRes.status} ${body.slice(0, 300)}`,
+        );
+        return;
+      }
+      const createData = (await createRes.json().catch(() => ({}))) as { id?: string };
       audienceId = createData.id ?? null;
     }
   } catch (err) {
@@ -89,18 +106,29 @@ export async function buildRetargetingAudience(): Promise<void> {
   for (let i = 0; i < hashedEmails.length; i += batchSize) {
     const batch = hashedEmails.slice(i, i + batchSize);
     try {
-      await fetch(`https://graph.facebook.com/v18.0/${audienceId}/users`, {
+      const uploadRes = await fetch(`https://graph.facebook.com/v18.0/${audienceId}/users`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
-          access_token: token,
           payload: {
             schema: ["EMAIL_SHA256"],
             data: batch,
           },
         }),
       });
-      uploaded += batch.length;
+      // Only count rows Meta actually accepted — a non-2xx response must not be
+      // reported as an upload.
+      if (uploadRes.ok) {
+        uploaded += batch.length;
+      } else {
+        const body = await uploadRes.text().catch(() => "");
+        logger.error(
+          `[retargeting] batch upload failed: ${uploadRes.status} ${body.slice(0, 300)}`,
+        );
+      }
     } catch (err) {
       logger.error("[retargeting] batch upload failed:", err);
     }

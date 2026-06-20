@@ -154,6 +154,14 @@ Provide your analysis in this exact JSON format:
       },
     );
 
+    // Surface upstream failures (auth/quota/5xx) as an error rather than
+    // parsing the error body into an empty "{}" analysis returned as success.
+    if (!groqRes.ok) {
+      const body = await groqRes.text().catch(() => "");
+      logger.error(`[ai-analyze] Groq ${groqRes.status}: ${body.slice(0, 300)}`);
+      return adminError("AI_ANALYSIS_FAILED", "AI analysis upstream failed", 502);
+    }
+
     const groqData = await groqRes.json();
     const raw = groqData?.choices?.[0]?.message?.content ?? "{}";
     const cleaned = raw.replace(/```json|```/g, "").trim();

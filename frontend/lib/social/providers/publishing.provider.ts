@@ -77,7 +77,11 @@ export interface PublishingProvider {
   schedulePost(input: SchedulePostInput): Promise<PublishResult>;
   publishNow(input: PublishPostInput): Promise<PublishResult>;
   getPostStatus(platformPostId: string): Promise<PostStatusResult>;
-  getAnalytics(platformPostId: string): Promise<PostAnalyticsResult>;
+  // `platform` is an optional routing hint (e.g. "facebook" | "instagram") for
+  // providers like Meta that serve multiple surfaces from one provider instance.
+  // Callers should pass the post's platform so analytics hit the right surface
+  // without relying on out-of-band instance state.
+  getAnalytics(platformPostId: string, platform?: string): Promise<PostAnalyticsResult>;
 }
 
 // No-op provider — logs but never calls an external API. Selected when

@@ -59,7 +59,11 @@ export async function GET(request: NextRequest) {
       // Provider is resolved per-platform so LinkedIn posts use the LinkedIn
       // provider and everything else uses Buffer.
       const provider = getPublishingProvider(post.platform);
-      const a = await provider.getAnalytics(post.platformPostId);
+      // Pass the post's platform so multi-surface providers (Meta:
+      // facebook/instagram) route to the correct Graph surface. Without this
+      // hint, a Facebook post id lacking an underscore is misrouted to the
+      // Instagram surface and returns wrong/empty metrics.
+      const a = await provider.getAnalytics(post.platformPostId, post.platform);
       // Persist null (not 0) for metrics the provider could not supply, so an
       // unknown is distinguishable from a confirmed zero downstream.
       const metrics = {
