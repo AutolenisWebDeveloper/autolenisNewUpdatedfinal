@@ -149,6 +149,7 @@ export default function VehicleGallery({ images, title, has360 = false }: Vehicl
               <button
                 onClick={e => { e.stopPropagation(); prev(); }}
                 data-testid="gallery-prev-btn"
+                aria-label="Previous photo"
                 className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition-colors"
               >
                 <ChevronLeft size={20} />
@@ -156,6 +157,7 @@ export default function VehicleGallery({ images, title, has360 = false }: Vehicl
               <button
                 onClick={e => { e.stopPropagation(); next(); }}
                 data-testid="gallery-next-btn"
+                aria-label="Next photo"
                 className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center transition-colors"
               >
                 <ChevronRight size={20} />
@@ -199,6 +201,7 @@ export default function VehicleGallery({ images, title, has360 = false }: Vehicl
           <button
             className="absolute top-4 right-4 text-white p-2 hover:bg-white/10 rounded-full"
             data-testid="lightbox-close"
+            aria-label="Close photo viewer"
             onClick={e => { e.stopPropagation(); setLightbox(false); }}
           >✕</button>
           {safe.length > 1 && (
@@ -206,11 +209,13 @@ export default function VehicleGallery({ images, title, has360 = false }: Vehicl
               <button
                 className="absolute left-4 top-1/2 -translate-y-1/2 text-white p-2 hover:bg-white/10 rounded-full"
                 data-testid="lightbox-prev"
+                aria-label="Previous photo"
                 onClick={e => { e.stopPropagation(); prev(); }}
               ><ChevronLeft size={28} /></button>
               <button
                 className="absolute right-4 top-1/2 -translate-y-1/2 text-white p-2 hover:bg-white/10 rounded-full"
                 data-testid="lightbox-next"
+                aria-label="Next photo"
                 onClick={e => { e.stopPropagation(); next(); }}
               ><ChevronRight size={28} /></button>
             </>

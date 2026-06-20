@@ -113,6 +113,16 @@ export default async function BuyerDashboard() {
     nextStepLabel = null;
   }
 
+  // A completed purchase is the terminal journey state. It overrides the
+  // cascade above, which keys off activeDeal/activeAuction (both null once the
+  // deal is COMPLETED) and would otherwise mislabel the step.
+  const purchaseComplete = latestDeal?.status === "COMPLETED";
+  if (purchaseComplete) {
+    stepNum = 14;
+    stepLabel = "Purchase Complete";
+    nextStepLabel = null;
+  }
+
   const buyerPlan: "STANDARD" | "PREMIUM" =
     buyer.plan === "PREMIUM" ? "PREMIUM" : "STANDARD";
 
@@ -336,7 +346,7 @@ export default async function BuyerDashboard() {
               )}
             </div>
           </div>
-        ) : latestDeal ? (
+        ) : activeDeal ? (
           <div
             className="bg-white border border-[#E5E7EB] rounded-2xl p-6 shadow-sm"
             data-testid="kpi-deal-status"
@@ -345,13 +355,29 @@ export default async function BuyerDashboard() {
               Deal Status
             </p>
             <p className="text-lg font-bold text-[#111827]">
-              {latestDeal.status.replace(/_/g, " ")}
+              {activeDeal.status.replace(/_/g, " ")}
             </p>
             <a
               href="/buyer/deal"
               className="inline-flex items-center gap-1 mt-3 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8]"
             >
               View deal details →
+            </a>
+          </div>
+        ) : purchaseComplete ? (
+          <div
+            className="bg-white border border-[#E5E7EB] rounded-2xl p-6 shadow-sm"
+            data-testid="kpi-deal-complete"
+          >
+            <p className="text-xs font-semibold text-[#6B7280] uppercase tracking-wider mb-3">
+              Purchase Complete
+            </p>
+            <p className="text-lg font-bold text-[#10B981]">All done 🎉</p>
+            <a
+              href="/buyer/deal"
+              className="inline-flex items-center gap-1 mt-3 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8]"
+            >
+              View deal summary →
             </a>
           </div>
         ) : prequalApproved ? (
@@ -479,17 +505,32 @@ export default async function BuyerDashboard() {
             </div>
           )}
 
-          {/* F: Deal in progress */}
-          {latestDeal && (
+          {/* F: Deal in progress — active (non-terminal) deals only */}
+          {activeDeal && (
             <div>
               <h2 className="text-lg font-bold text-[#111827] mb-2">Continue your deal</h2>
               <p className="text-sm text-[#4B5563] leading-relaxed mb-4">
-                Your deal is in progress. Current stage: <strong>{latestDeal.status.replace(/_/g, " ")}</strong>
+                Your deal is in progress. Current stage: <strong>{activeDeal.status.replace(/_/g, " ")}</strong>
               </p>
               <a href="/buyer/deal"
                 className="inline-flex items-center gap-2 px-6 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
                 data-testid="next-step-deal">
                 Continue deal →
+              </a>
+            </div>
+          )}
+
+          {/* G: Purchase complete — terminal celebratory state */}
+          {!activeDeal && purchaseComplete && (
+            <div>
+              <h2 className="text-lg font-bold text-[#111827] mb-2">Your purchase is complete 🎉</h2>
+              <p className="text-sm text-[#4B5563] leading-relaxed mb-4">
+                Congratulations on your new vehicle. You can review your final paperwork and receipt anytime.
+              </p>
+              <a href="/buyer/deal"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+                data-testid="next-step-complete">
+                View deal summary →
               </a>
             </div>
           )}

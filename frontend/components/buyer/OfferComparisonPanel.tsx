@@ -55,12 +55,23 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
     fetch(`/api/buyer/auctions/${auctionId}/best-price?months=${termMonths}`)
       .then(r => r.json())
-      .then((d: { success: boolean; data: { offers: RankedOffer[] } }) => {
-        if (d.success) setOffers(d.data.offers);
-        setLoading(false);
+      .then((d: { success: boolean; data?: { offers?: RankedOffer[] } }) => {
+        if (cancelled) return;
+        if (d.success) setOffers(d.data?.offers ?? []);
+        else setError("We couldn't load your offers. Please refresh to try again.");
+      })
+      .catch(() => {
+        if (!cancelled) setError("We couldn't load your offers. Please check your connection and refresh.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
+    return () => { cancelled = true; };
   }, [auctionId, termMonths]);
 
   async function selectOffer(offerId: string) {

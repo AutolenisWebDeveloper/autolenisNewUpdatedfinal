@@ -71,21 +71,30 @@ export default function TradeInPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const res = await fetch("/api/buyer/trade-in", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        vin: form.vin || undefined, year: parseInt(form.year), make: form.make, model: form.model,
-        trim: form.trim || undefined, mileage: form.mileage ? parseInt(form.mileage) : undefined,
-        condition: form.condition.toUpperCase(),
-        loanStatus: form.loanStatus || undefined,
-        loanBalanceCents: form.loanBalance ? Math.round(parseFloat(form.loanBalance) * 100) : undefined,
-        notes: form.notes || undefined,
-      }),
-    });
-    setLoading(false);
-    if (res.ok) setSubmitted(true);
-    else { const d = await res.json() as { error?: { message?: string } }; setError(d.error?.message ?? "Submission failed"); }
+    try {
+      const res = await fetch("/api/buyer/trade-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          vin: form.vin || undefined, year: parseInt(form.year), make: form.make, model: form.model,
+          trim: form.trim || undefined, mileage: form.mileage ? parseInt(form.mileage) : undefined,
+          condition: form.condition.toUpperCase(),
+          loanStatus: form.loanStatus || undefined,
+          loanBalanceCents: form.loanBalance ? Math.round(parseFloat(form.loanBalance) * 100) : undefined,
+          notes: form.notes || undefined,
+        }),
+      });
+      if (res.ok) {
+        setSubmitted(true);
+      } else {
+        const d = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        setError(d?.error?.message ?? "Submission failed");
+      }
+    } catch {
+      setError("Network error. Please check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (loadingExisting) {
