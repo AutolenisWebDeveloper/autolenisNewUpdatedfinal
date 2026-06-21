@@ -94,12 +94,14 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
     );
   }
 
-  // ── Terms-acceptance gate ──────────────────────────────────────────────────
-  // Previously enforced by the edge proxy (now dormant). Enforced here instead,
-  // at the layer that actually runs. The buyer layout only renders for /buyer/*,
-  // so no path check is needed; /auth/accept-terms is outside this route group,
-  // so there is no redirect loop. Mirrors requiresTermsAcceptance(): redirect
-  // when terms were never accepted, or were accepted under an older version.
+  // ── Terms-acceptance gate (defense-in-depth) ───────────────────────────────
+  // The Next.js 16 edge middleware (proxy.ts) also gates terms from
+  // user_metadata at the edge; this is a server-side backstop that reads the
+  // Prisma source of truth, so it still holds if the edge value is missing or
+  // stale. The buyer layout only renders for /buyer/*, so no path check is
+  // needed; /auth/accept-terms is outside this route group, so there is no
+  // redirect loop. Mirrors requiresTermsAcceptance(): redirect when terms were
+  // never accepted, or were accepted under an older version.
   if (!isAdminPreview) {
     const currentTermsVersion = process.env.CURRENT_TERMS_VERSION ?? "2026-01-01";
     const needsTerms =
