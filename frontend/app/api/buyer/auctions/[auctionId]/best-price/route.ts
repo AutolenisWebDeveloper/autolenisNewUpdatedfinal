@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { rankOffers, selectTopOffers } from "@/lib/services/offer/best-price.service";
 
 interface Props { params: Promise<{ auctionId: string }> }
 
@@ -38,6 +39,14 @@ export async function GET(request: NextRequest, { params }: Props) {
   // Dealer identity NEVER exposed until buyer selects deal
   const DEFAULT_APR_RATE = 7; // percent, used when offer has no APR rate
   const sorted = [...offers].sort((a, b) => a.otdPriceCents - b.otdPriceCents);
+
+  // "Best Overall Value" must come from the weighted Best Price engine
+  // (price + monthly + fees + junk-fees), NOT a positional median. Fall back to
+  // the cheapest offer if the engine is unavailable so the card is never worse
+  // than Best Cash.
+  const ranked = await rankOffers(auctionId, termMonths).catch(() => []);
+  const bestOverallId = selectTopOffers(ranked).bestOverall?.offerId;
+  const overallOffer = (bestOverallId && offers.find(o => o.id === bestOverallId)) || sorted[0];
 
   const calculateMonthly = (priceCents: number, apr: number, months: number): number => {
     const r = apr / 12 / 100;
@@ -100,17 +109,17 @@ export async function GET(request: NextRequest, { params }: Props) {
       };
     })() : null,
     {
-      offerId: sorted[Math.floor(sorted.length / 2)].id,
+      offerId: overallOffer.id,
       rankType: "BEST_OVERALL",
       rankLabel: "Best Overall Value",
-      otdPriceCents: sorted[Math.floor(sorted.length / 2)].otdPriceCents,
+      otdPriceCents: overallOffer.otdPriceCents,
       monthlyPayment: undefined,
       junkFeesCents: 0,
-      dealerTier: sorted[Math.floor(sorted.length / 2)].dealer.tier,
+      dealerTier: overallOffer.dealer.tier,
       rankingExplanation: "Highest overall AutoLenis score, balancing price, fees, and reliability.",
-      aprFlag: sorted[Math.floor(sorted.length / 2)].aprFlag,
-      aprRate: sorted[Math.floor(sorted.length / 2)].aprRate,
-      ...offerExtras(sorted[Math.floor(sorted.length / 2)]),
+      aprFlag: overallOffer.aprFlag,
+      aprRate: overallOffer.aprRate,
+      ...offerExtras(overallOffer),
     },
   ];
   const rankedOffers = rankedRaw.filter(

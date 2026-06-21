@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import Stripe from "stripe";
 import { getStripe } from "@/lib/stripe";
-import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import {
   sendDepositConfirmationEmail,
   sendAuctionActivatedEmail,
@@ -224,7 +224,8 @@ export async function POST(request: NextRequest) {
           // change is recorded in DealStatusHistory.
           const feeDeal = await prisma.deal.findFirst({ where: whereClause });
           if (feeDeal) {
-            const feeData = { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS, stripeFeePIId: pi.id };
+            // Net of the $99 deposit credit — the amount actually captured.
+            const feeData = { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_REMAINING_CENTS, stripeFeePIId: pi.id };
             if (feeDeal.status === "FEE_PENDING") {
               await advanceDealStatus(feeDeal.id, "FEE_PAID", { actorRole: "SYSTEM", force: true, data: feeData });
               await advanceDealStatus(feeDeal.id, "INSURANCE_PENDING", { actorRole: "SYSTEM", force: true });

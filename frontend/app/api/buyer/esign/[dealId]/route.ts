@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { logger } from "@/lib/logger";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { createDealerEnvelopeFromTemplate } from "@/lib/services/esign/envelope-template.service";
@@ -60,25 +61,30 @@ export async function POST(request: NextRequest, { params }: Props) {
     );
   }
 
-  const result = await createDealerEnvelopeFromTemplate(dealId);
-
-  if (result.error && !result.envelopeId) {
-    return errorResponse("DOCUSIGN_ERROR", result.error, 503);
-  }
-
   try {
-    await advanceDealStatus(dealId, "SIGNING_PENDING", { actorRole: "BUYER" });
-  } catch (err) {
-    if (err instanceof DealTransitionError) {
-      return errorResponse("CONTRACT_NOT_APPROVED", "Signing is not available from the current deal state.", 409);
-    }
-    throw err;
-  }
+    const result = await createDealerEnvelopeFromTemplate(dealId);
 
-  return successResponse({
-    envelopeId: result.envelopeId,
-    signingUrl:  result.signingUrl,
-    error:       result.error,
-    mock:        false,
-  });
+    if (result.error && !result.envelopeId) {
+      return errorResponse("DOCUSIGN_ERROR", result.error, 503);
+    }
+
+    try {
+      await advanceDealStatus(dealId, "SIGNING_PENDING", { actorRole: "BUYER" });
+    } catch (err) {
+      if (err instanceof DealTransitionError) {
+        return errorResponse("CONTRACT_NOT_APPROVED", "Signing is not available from the current deal state.", 409);
+      }
+      throw err;
+    }
+
+    return successResponse({
+      envelopeId: result.envelopeId,
+      signingUrl:  result.signingUrl,
+      error:       result.error,
+      mock:        false,
+    });
+  } catch (err) {
+    logger.error("[buyer/esign] failed to create signing envelope:", err);
+    return errorResponse("INTERNAL_ERROR", "We couldn't start the signing process. Please try again.", 500);
+  }
 }

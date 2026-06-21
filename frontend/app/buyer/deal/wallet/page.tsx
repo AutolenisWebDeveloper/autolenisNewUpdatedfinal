@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "Wallet", robots: { index: false, fol
 
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import { PREMIUM_FEE_CENTS, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { PREMIUM_FEE_REMAINING_CENTS, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { Wallet } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +49,9 @@ function WalletBreakdown({ deal }: {
   const items = [
     { label: "Vehicle out-the-door price", amount: otdPriceCents, positive: false },
     { label: "Auction Access Fee paid", amount: DEPOSIT_AMOUNT_CENTS, positive: true },
-    { label: "Service fee", amount: deal.feePaidAt ? deal.feeAmountCents ?? PREMIUM_FEE_CENTS : 0, positive: false },
+    // Service fee shown GROSS (= net charge + $99 deposit credit) so the credit
+    // line below explains the net. feeAmountCents itself is the net charge.
+    { label: "Service fee", amount: deal.feePaidAt ? (deal.feeAmountCents ?? PREMIUM_FEE_REMAINING_CENTS) + DEPOSIT_AMOUNT_CENTS : 0, positive: false },
     { label: "Net Auction Access Fee credit", amount: deal.feePaidAt ? DEPOSIT_AMOUNT_CENTS : 0, positive: true },
   ];
 
@@ -67,7 +69,7 @@ function WalletBreakdown({ deal }: {
       <div className="flex items-center justify-between bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl px-4 py-4 mt-4" data-testid="wallet-total">
         <span className="font-semibold text-slate-800">Total vehicle cost</span>
         <span className="font-bold text-[#0B5FD1] text-lg">
-          ${((otdPriceCents + (deal.feeAmountCents ?? 0) - DEPOSIT_AMOUNT_CENTS) / 100).toLocaleString()}
+          ${((otdPriceCents + (deal.feePaidAt ? deal.feeAmountCents ?? 0 : 0)) / 100).toLocaleString()}
         </span>
       </div>
     </div>

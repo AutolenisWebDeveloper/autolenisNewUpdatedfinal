@@ -35,23 +35,29 @@ export default async function ShortlistPage() {
     inventoryItems.map((v: InventoryItem) => [v.id, v]),
   );
 
-  const vehicles = items.map((item: ShortlistItem) => {
-    const inv = inventoryMap.get(item.inventoryItemId)!;
-    return {
-      itemId: item.id,
-      inventoryItemId: item.inventoryItemId,
-      year: inv.year,
-      make: inv.make,
-      model: inv.model,
-      trim: inv.trim ?? null,
-      mileage: inv.mileage ?? null,
-      priceCents: inv.priceCents,
-      lane: inv.lane,
-      bodyType: inv.bodyType ?? null,
-      images: inv.images as string[],
-      readinessState: item.readinessState,
-    };
-  });
+  const vehicles = items
+    .map((item: ShortlistItem) => {
+      // inventoryItemId is a plain string with no FK, so the referenced
+      // InventoryItem may have been deleted. Skip orphans instead of crashing
+      // the whole shortlist page on an undefined dereference.
+      const inv = inventoryMap.get(item.inventoryItemId);
+      if (!inv) return null;
+      return {
+        itemId: item.id,
+        inventoryItemId: item.inventoryItemId,
+        year: inv.year,
+        make: inv.make,
+        model: inv.model,
+        trim: inv.trim ?? null,
+        mileage: inv.mileage ?? null,
+        priceCents: inv.priceCents,
+        lane: inv.lane,
+        bodyType: inv.bodyType ?? null,
+        images: inv.images as string[],
+        readinessState: item.readinessState,
+      };
+    })
+    .filter((v): v is NonNullable<typeof v> => v !== null);
 
   return (
     <ShortlistClient

@@ -35,12 +35,13 @@ export async function POST(request: NextRequest) {
   }
 
   if (otdAmountCents > prequal.maxOtdAmountCents) {
-    return new Response(
-      JSON.stringify({
-        error: "BUDGET_EXCEEDED",
-        maxOtdAmountCents: prequal.maxOtdAmountCents,
-      }),
-      { status: 422, headers: { "Content-Type": "application/json" } },
+    // Server-side backstop (the client blocks this first). Use the standard
+    // error envelope so every buyer route returns a consistent { error: { code,
+    // message } } shape.
+    return errorResponse(
+      "BUDGET_EXCEEDED",
+      `Out-the-door amount exceeds your approved budget of $${(prequal.maxOtdAmountCents / 100).toLocaleString()}.`,
+      422,
     );
   }
 

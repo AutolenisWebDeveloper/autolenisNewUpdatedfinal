@@ -21,26 +21,51 @@ export async function POST(request: NextRequest, { params }: Props) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
-  const { offerId } = await request.json() as { offerId: string };
+  let body: { offerId?: string };
+  try {
+    body = (await request.json()) as { offerId?: string };
+  } catch {
+    return errorResponse("BAD_REQUEST", "Invalid JSON body", 400);
+  }
+  const offerId = body?.offerId;
+  if (!offerId || typeof offerId !== "string") {
+    return errorResponse("VALIDATION_ERROR", "offerId is required", 400);
+  }
 
   const auction = await prisma.auction.findFirst({ where: { id: auctionId, buyerId: buyer.id } });
   if (!auction) return errorResponse("NOT_FOUND", "Auction not found", 404);
+  if (auction.status === "CANCELLED") {
+    return errorResponse("AUCTION_CANCELLED", "This auction has been cancelled.", 409);
+  }
+
+  // Anti-double-deal guard: a buyer may select only one offer per auction. Once
+  // any offer is ACCEPTED a deal already exists, so reject further selections —
+  // without this, POSTing a different offerId on an already-closed auction would
+  // create a SECOND competing deal (Deal.offerId is unique, so only re-selecting
+  // the SAME offer was previously blocked).
+  const alreadyAccepted = await prisma.offer.findFirst({
+    where: { auctionId, status: "ACCEPTED" },
+    select: { id: true },
+  });
+  if (alreadyAccepted) {
+    return errorResponse("ALREADY_SELECTED", "You have already selected an offer for this auction.", 409);
+  }
 
   const offer = await prisma.offer.findFirst({
     where: { id: offerId, auctionId, status: "SUBMITTED" },
   });
   if (!offer) return errorResponse("NOT_FOUND", "Offer not found", 404);
 
-  const deal = await prisma.deal.create({
-    data: {
-      buyerId: buyer.id,
-      offerId: offer.id,
-      status: "FINANCING_PENDING",
-    },
+  // Commit the selection atomically: a deal can never exist without the chosen
+  // offer being ACCEPTED and the auction CLOSED.
+  const deal = await prisma.$transaction(async (tx) => {
+    const created = await tx.deal.create({
+      data: { buyerId: buyer.id, offerId: offer.id, status: "FINANCING_PENDING" },
+    });
+    await tx.offer.update({ where: { id: offer.id }, data: { status: "ACCEPTED" } });
+    await tx.auction.update({ where: { id: auctionId }, data: { status: "CLOSED", closedAt: new Date() } });
+    return created;
   });
-
-  await prisma.offer.update({ where: { id: offer.id }, data: { status: "ACCEPTED" } });
-  await prisma.auction.update({ where: { id: auctionId }, data: { status: "CLOSED", closedAt: new Date() } });
 
   await prisma.notification.create({
     data: { buyerId: buyer.id, title: "Deal created!", body: "You selected your best deal. Continue to financing.", type: "DEAL_SELECTED" },
@@ -77,7 +102,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     // so prefer the real external contact captured on the offer itself.
     const dealerEmail = offerRow.externalDealerEmail ?? offerRow.dealer?.user?.email;
     if (!dealerEmail) continue;
-    const dealershipName = offerRow.externalDealerName ?? offerRow.dealer.dealershipName;
+    const dealershipName = offerRow.externalDealerName ?? offerRow.dealer?.dealershipName ?? "Dealer";
     if (offerRow.id === offer.id) {
       await sendDealerOfferWonEmail({
         to: dealerEmail,

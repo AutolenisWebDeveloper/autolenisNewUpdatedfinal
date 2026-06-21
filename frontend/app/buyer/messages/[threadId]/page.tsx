@@ -28,7 +28,7 @@ export default async function ThreadPage({
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="thread-page">
       <div className="flex items-center gap-3 mb-6">
-        <Link href="/buyer/messages" className="text-slate-400 hover:text-slate-700" data-testid="back-to-messages">
+        <Link href="/buyer/messages" className="text-slate-400 hover:text-slate-700" data-testid="back-to-messages" aria-label="Back to messages">
           <ArrowLeft size={18} />
         </Link>
         <MessageSquare size={20} className="text-[#0B5FD1]" />

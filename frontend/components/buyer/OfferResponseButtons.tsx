@@ -26,6 +26,12 @@ export default function OfferResponseButtons({ offerId, requestId }: Props) {
           body:    JSON.stringify({ response: action, offerId }),
         }
       );
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null) as { error?: { message?: string } } | null;
+        setErr(errData?.error?.message ?? "We couldn't submit your response. Please try again.");
+        setActing(null);
+        return;
+      }
       const data = await res.json() as {
         status:    string;
         redirect?: string | null;

@@ -160,7 +160,7 @@ export async function submitOffer(input: OfferInput) {
       body: `You now have ${offerCount} offer${offerCount !== 1 ? "s" : ""} in your auction.`,
       type: "OFFER_RECEIVED",
     },
-  }).catch(() => {});
+  }).catch((err) => logger.error("[offer.service] buyer new-offer notification failed:", err));
 
   // First-offer buyer email — fires once, when the offer count goes 0 → 1 for
   // this auction. Non-blocking via after() so a notification failure never
