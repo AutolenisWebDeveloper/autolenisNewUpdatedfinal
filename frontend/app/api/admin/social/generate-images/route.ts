@@ -16,7 +16,7 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { generateDalleImage } from "@/lib/social/providers/dalle.provider";
-import { storeImageInSupabase } from "@/lib/social/image-generation.service";
+import { storeImageInSupabase, storeImageB64InSupabase } from "@/lib/social/image-generation.service";
 
 export const maxDuration = 60;
 
@@ -113,24 +113,33 @@ export async function POST(request: NextRequest) {
         result.error,
       );
 
-      if (!result.success || !result.imageUrl) {
-        throw new Error(result.error ?? "Unknown DALL-E error");
+      if (!result.success || (!result.imageUrl && !result.imageB64)) {
+        throw new Error(result.error ?? "Unknown image generation error");
       }
 
-      // DALL-E URLs expire (~1h) — store the image in Supabase for a stable URL.
-      // Fall back to the provider URL if storage fails so the post still has an
-      // image rather than failing outright.
-      let storedImageUrl = result.imageUrl;
+      // gpt-image-1 returns base64; dall-e-* return a temporary URL (~1h). Either
+      // way, persist to Supabase for a stable URL. For URL results, fall back to
+      // the provider URL if storage fails so the post still has an image.
+      let storedImageUrl = result.imageUrl ?? "";
       let storagePath: string | null = null;
       try {
-        storedImageUrl = await storeImageInSupabase(result.imageUrl, post.id);
-        storagePath = `social-posts/${post.id}/image.jpg`;
+        if (result.imageB64) {
+          storedImageUrl = await storeImageB64InSupabase(result.imageB64, post.id);
+          storagePath = `social-posts/${post.id}/image.png`;
+        } else {
+          storedImageUrl = await storeImageInSupabase(result.imageUrl!, post.id);
+          storagePath = `social-posts/${post.id}/image.jpg`;
+        }
       } catch (storeErr) {
         logger.error(
-          "[generate-images] supabase store failed, using provider URL:",
+          "[generate-images] supabase store failed:",
           post.id,
           storeErr,
         );
+        if (!result.imageUrl) {
+          // base64 with no hosting fallback — skip rather than store an unusable image.
+          throw new Error("image storage failed for base64 image");
+        }
       }
 
       await prisma.socialVideo.create({
