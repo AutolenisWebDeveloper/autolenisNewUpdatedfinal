@@ -136,6 +136,12 @@ Return ONLY valid JSON, no markdown, no other text:
       }),
     });
 
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => "");
+      logger.error(`[ai-generate] Groq ${res.status}: ${errBody.slice(0, 300)}`);
+      return adminError("AI_GENERATION_FAILED", "AI generation upstream failed", 502);
+    }
+
     const data = await res.json();
     const raw = data?.choices?.[0]?.message?.content ?? "{}";
     const cleaned = raw.replace(/```json|```/g, "").trim();
@@ -153,9 +159,24 @@ Return ONLY valid JSON, no markdown, no other text:
       complianceNotes: null,
     });
 
+    // Resolve a real optimal posting instant from the learned PostingWindow so
+    // the compose drawer's "Use AI recommendation" can schedule to an actual
+    // timestamp (the free-text scheduleSuggestion is descriptive only).
+    const { getOptimalSlot } = await import(
+      "@/lib/social/social-post.orchestrator"
+    );
+    const recommendedSchedule = await getOptimalSlot(
+      platform,
+      new Date().getUTCDay(),
+      0,
+    ).catch(() => null);
+
     return adminSuccess({
       ...generated,
       qualityScore: quality,
+      recommendedScheduleIso: recommendedSchedule
+        ? recommendedSchedule.toISOString()
+        : null,
       platform,
       franchiseSlug,
     });

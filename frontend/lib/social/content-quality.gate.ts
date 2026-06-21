@@ -108,9 +108,15 @@ export function scorePostQuality(post: {
   };
   const patterns = platformCTAs[post.platform] ?? [];
   const hasPlatformCTA = patterns.some((p) => p.test(ctaText));
+  // A generic call-to-action phrase earns partial credit. Previously any text
+  // longer than 5 chars scored 15 — and since ctaText falls back to the full
+  // caption, virtually every post got the floor regardless of CTA quality. Now
+  // an actual CTA action phrase is required, so a caption with no CTA scores 0.
+  const GENERIC_CTA =
+    /\b(save (this|it)|share (this|with)|comment|tag (someone|a)|link in bio|dm (us|me)|message us|click|tap (the|here)|swipe|sign up|get (your|a|started)|request (a|your)|learn more|find out|check out|subscribe|follow|join|book|reserve|claim|don'?t miss|act now|today only|see (how|why))\b/;
   if (hasPlatformCTA) {
     ctaClarity = 25;
-  } else if (ctaText.length > 5) {
+  } else if (GENERIC_CTA.test(ctaText)) {
     ctaClarity = 15;
     reasons.push(`CTA present but not optimized for ${post.platform}`);
   } else {

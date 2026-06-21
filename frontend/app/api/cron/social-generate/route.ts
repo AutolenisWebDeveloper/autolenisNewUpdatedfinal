@@ -10,7 +10,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
-import { generateAndQueuePost } from "@/lib/social/social-post.orchestrator";
+import { generateAndQueuePost, getOptimalSlot } from "@/lib/social/social-post.orchestrator";
 import { DAILY_POST_TARGETS } from "@/lib/social/config";
 import { generateDailySignals } from "@/lib/social/daily-signal.generator";
 
@@ -98,14 +98,16 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
-      // Base posting instant from the platform's slot hour (CT), rolled to
-      // tomorrow if the slot has already passed today. The orchestrator applies
-      // its own cross-platform publish stagger on top, so we don't re-add it here.
-      const scheduledAt = new Date();
-      scheduledAt.setHours(signal.scheduledHour, 0, 0, 0);
-      if (scheduledAt <= new Date()) {
-        scheduledAt.setDate(scheduledAt.getDate() + 1);
-      }
+      // Base posting instant from the learned PostingWindow for this platform +
+      // today (CT-correct via getOptimalSlot). slotIndex spreads the platform's
+      // posts across its optimized slots as the per-platform count grows. The
+      // orchestrator applies its own cross-platform publish stagger on top.
+      const slotIndex = updatedCounts[signal.platform] ?? 0;
+      const scheduledAt = await getOptimalSlot(
+        signal.platform,
+        new Date().getUTCDay(),
+        slotIndex,
+      );
 
       // Persist a real TopicSignal so the orchestrator + downstream attribution
       // have a concrete source record to hang the post and derivative off.
@@ -146,7 +148,7 @@ export async function GET(request: NextRequest) {
       logger.info(
         `[social-generate] ✅ ${signal.platform} post created:`,
         `${signal.franchiseSlug} (${signal.contentCategory})`,
-        `slot hour: ${signal.scheduledHour}`,
+        `scheduled: ${scheduledAt.toISOString()}`,
       );
     } catch (err) {
       logger.error(

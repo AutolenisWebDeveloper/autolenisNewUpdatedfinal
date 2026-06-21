@@ -9,6 +9,7 @@ import {
 } from "@/lib/services/email/resend.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { recordMarketplaceFromAuction } from "@/lib/amips/pipelines/marketplace-intelligence.recorder";
+import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -151,7 +152,8 @@ export async function POST(request: NextRequest, { params }: Props) {
       await captureDealAttribution({
         dealId: deal.id,
         vehicleRequestId: vehicleRequest.id,
-        totalRevenueCents: 9900, // $99 deposit
+        depositAmountCents: DEPOSIT_AMOUNT_CENTS,
+        totalRevenueCents: DEPOSIT_AMOUNT_CENTS, // $99 Auction Access Deposit
       });
     } catch (err) {
       logger.error("[select-offer] attribution failed:", err);

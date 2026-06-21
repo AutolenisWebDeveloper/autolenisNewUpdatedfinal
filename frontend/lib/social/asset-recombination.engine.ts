@@ -129,6 +129,12 @@ export async function recombineViralAsset(post: {
       if (variant) {
         variants.push({ id: variant.id });
         strategies.push(`Strategy D: geo expansion → ${differentMetro}`);
+      } else {
+        // Queueing failed — remove the just-created geo signal so it isn't left
+        // orphaned (assetsGenerated:false) to be re-picked by a later scan.
+        await prisma.topicSignal
+          .delete({ where: { id: geoSignal.id } })
+          .catch(() => undefined);
       }
     } catch (err) {
       logger.error("[recombine] Strategy D failed:", err);

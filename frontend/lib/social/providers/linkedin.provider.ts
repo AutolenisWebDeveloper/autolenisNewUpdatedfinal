@@ -14,6 +14,7 @@
 // best-effort results. All methods log and never throw unhandled errors.
 
 import { logger } from "@/lib/logger";
+import { providerFetch } from "@/lib/social/providers/http";
 import type {
   PublishingProvider,
   SchedulePostInput,
@@ -42,7 +43,7 @@ export class LinkedInProvider implements PublishingProvider {
   // when the lookup fails so the caller can fall back to Buffer.
   private async getMemberSub(token: string): Promise<string | undefined> {
     try {
-      const res = await fetch(LINKEDIN_USERINFO_URL, {
+      const res = await providerFetch(LINKEDIN_USERINFO_URL, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -100,7 +101,7 @@ export class LinkedInProvider implements PublishingProvider {
     };
 
     try {
-      const res = await fetch(LINKEDIN_UGC_URL, {
+      const res = await providerFetch(LINKEDIN_UGC_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -190,7 +191,7 @@ export class LinkedInProvider implements PublishingProvider {
 
     try {
       const urn = encodeURIComponent(`urn:li:share:${shareId}`);
-      const res = await fetch(`https://api.linkedin.com/v2/socialActions/${urn}`, {
+      const res = await providerFetch(`https://api.linkedin.com/v2/socialActions/${urn}`, {
         headers: {
           Authorization: `Bearer ${token}`,
           "LinkedIn-Version": LINKEDIN_VERSION,

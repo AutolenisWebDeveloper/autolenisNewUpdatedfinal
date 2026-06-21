@@ -14,6 +14,7 @@
 // typed results, and degrade gracefully when config is missing.
 
 import { logger } from "@/lib/logger";
+import { providerFetch } from "@/lib/social/providers/http";
 import type {
   PublishingProvider,
   SchedulePostInput,
@@ -68,7 +69,7 @@ export class YouTubeProvider implements PublishingProvider {
     }
 
     try {
-      const res = await fetch(
+      const res = await providerFetch(
         `${YOUTUBE_DATA_API}?part=statistics,contentDetails&id=${videoId}&key=${apiKey}`,
       );
       const data = (await res.json().catch(() => ({}))) as {
@@ -143,7 +144,7 @@ export class YouTubeProvider implements PublishingProvider {
       const url =
         `${YOUTUBE_ANALYTICS_API}?ids=channel==MINE&startDate=2024-01-01&endDate=${today}` +
         `&metrics=${metrics}&filters=video==${videoId}`;
-      const res = await fetch(url, {
+      const res = await providerFetch(url, {
         headers: { Authorization: `Bearer ${oauthToken}` },
       });
       const data = (await res.json().catch(() => ({}))) as {

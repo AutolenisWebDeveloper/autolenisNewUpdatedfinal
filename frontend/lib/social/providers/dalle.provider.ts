@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger";
+import { providerFetch } from "@/lib/social/providers/http";
 // AutoLenis Social Engine — DALL-E 3 image provider (OpenAI Images API).
 //
 // Primary still-image provider for social posts. Given a post's visual prompt
@@ -103,7 +104,7 @@ export async function generateDalleImage(input: {
   const size = LANDSCAPE_PLATFORMS.has(platform) ? "1792x1024" : "1024x1792";
 
   try {
-    const response = await fetch("https://api.openai.com/v1/images/generations", {
+    const response = await providerFetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,

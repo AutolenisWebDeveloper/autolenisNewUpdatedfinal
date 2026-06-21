@@ -30,6 +30,7 @@ import { getVideoLearnings } from "@/lib/social/video-learning.engine";
 import { getOrFetchTrendingData } from "@/lib/social/trending-intelligence.engine";
 import { getPublishingProvider } from "@/lib/social/providers/publishing.factory";
 import { scorePostQuality } from "@/lib/social/content-quality.gate";
+import { computePostingSlots } from "@/lib/social/scheduling";
 
 // Cross-platform publish stagger. The same content rolls out platform by
 // platform (TikTok first, LinkedIn last) so one idea seeds discovery on the
@@ -45,6 +46,11 @@ const PLATFORM_PUBLISH_DELAY_MS: Record<string, number> = {
 // Resolves the next optimal posting instant for a platform/day from the learned
 // PostingWindow (slot hours in CT), rolling forward to tomorrow if the slot has
 // already passed today. Falls back to sensible defaults when no window exists.
+//
+// Slot hours are Central Time; conversion to the correct absolute UTC instant is
+// delegated to computePostingSlots/ctSlotToDate (DST-aware). The previous
+// implementation used Date.setHours(), which interprets the hour in the *server*
+// timezone (UTC on Vercel) — scheduling every post hours off its intended CT slot.
 export async function getOptimalSlot(
   platform: string,
   dayOfWeek: number,
@@ -56,16 +62,19 @@ export async function getOptimalSlot(
     })
     .catch(() => null);
 
+  // Include the optional 4th/5th learned slots when present so high-volume days
+  // distribute across all optimized windows rather than just three.
   const hours = [
     window?.slot1Hour ?? 7,
     window?.slot2Hour ?? 12,
     window?.slot3Hour ?? 19,
+    ...(window?.slot4Hour != null ? [window.slot4Hour] : []),
+    ...(window?.slot5Hour != null ? [window.slot5Hour] : []),
   ];
-  const hour = hours[slotIndex % 3];
-  const slot = new Date();
-  slot.setHours(hour, 0, 0, 0);
-  if (slot <= new Date()) slot.setDate(slot.getDate() + 1);
-  return slot;
+  const hourCt = hours[slotIndex % hours.length];
+  // CT-correct instant for today, rolled to the same CT hour tomorrow if today's
+  // slot has already passed (handled inside computePostingSlots).
+  return computePostingSlots([hourCt])[0];
 }
 
 // Per-platform content + derivative type used when materializing a post.
@@ -81,18 +90,52 @@ function assetFor(platform: string) {
   return PLATFORM_ASSET[platform.toLowerCase()] ?? { contentType: "social_post", derivativeType: "social_post" };
 }
 
-// Picks the best-performing hook type for this platform+franchise from learned
-// winning patterns, falling back to the franchise's preferred hook list.
+// Picks the best-performing hook type for this platform+franchise, consulting
+// two learned signals before falling back to the franchise's preferred list:
+//   1. WinningPattern — franchise-specific lead-score aggregates (richest).
+//   2. HookPerformance — platform-level winners promoted by the A/B resolver
+//      (ab-test-resolver). Constrained to the franchise's permitted hooks so the
+//      A/B winner actually steers generation. (Previously HookPerformance was
+//      written by the resolver but never read here, so the A/B → generation loop
+//      was open.)
 async function selectHookType(
   franchise: ContentFranchise,
   platform: string,
 ): Promise<string> {
-  const pattern = await prisma.winningPattern.findFirst({
-    where: { platform, franchiseSlug: franchise.slug, hookType: { not: null } },
-    orderBy: [{ avgLeadScore: "desc" }, { sampleSize: "desc" }],
-    select: { hookType: true },
-  });
-  return pattern?.hookType ?? franchise.hookTypes[0] ?? "curiosity";
+  // Aggregate WinningPattern across its day/hour buckets per hook type. Two
+  // writers populate this table at different granularities (recordVideoLearning
+  // writes franchise-level rows with null day/hour; social-optimize writes
+  // per-(day,hour) buckets), so a single findFirst would pick one arbitrary
+  // bucket — possibly a tiny-sample outlier. Grouping by hookType and ranking by
+  // mean lead score is robust to that fragmentation.
+  const grouped = await prisma.winningPattern
+    .groupBy({
+      by: ["hookType"],
+      where: { platform, franchiseSlug: franchise.slug, hookType: { not: null } },
+      _avg: { avgLeadScore: true },
+      _sum: { sampleSize: true },
+    })
+    .catch(() => [] as Array<{ hookType: string | null; _avg: { avgLeadScore: number | null } }>);
+  if (grouped.length > 0) {
+    const best = [...grouped].sort(
+      (a, b) => (b._avg.avgLeadScore ?? 0) - (a._avg.avgLeadScore ?? 0),
+    )[0];
+    if (best?.hookType) return best.hookType;
+  }
+
+  const allowed = franchise.hookTypes ?? [];
+  if (allowed.length > 0) {
+    const hp = await prisma.hookPerformance
+      .findFirst({
+        where: { platform, hookType: { in: allowed }, sampleSize: { gte: 3 } },
+        orderBy: [{ avgLeadScore: "desc" }, { avgCtr: "desc" }],
+        select: { hookType: true },
+      })
+      .catch(() => null);
+    if (hp?.hookType) return hp.hookType;
+  }
+
+  return allowed[0] ?? "curiosity";
 }
 
 // Resolves the SocialPost status given mode + review requirement.

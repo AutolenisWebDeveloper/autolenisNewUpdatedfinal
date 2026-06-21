@@ -1234,6 +1234,7 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
         created: { platform: string; scheduledAt: string }[];
         failed: { platform: string; error: string }[];
         total: number;
+        succeeded: number;
       }>("/api/admin/social/publish-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1245,8 +1246,13 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
         }),
       });
 
-      if (res.total > 0) {
-        showToast(`✅ Published to ${res.total} platforms!`);
+      const succeeded = res.succeeded ?? res.created?.length ?? 0;
+      const failedCount = res.failed?.length ?? 0;
+      if (succeeded > 0) {
+        showToast(
+          `✅ Published to ${succeeded} platform${succeeded === 1 ? "" : "s"}!` +
+            (failedCount > 0 ? ` (${failedCount} failed)` : ""),
+        );
       } else {
         showToast("Publishing failed — check logs");
       }
@@ -2776,6 +2782,9 @@ function ComposeDrawer({
   const [scheduledAt, setScheduledAt] = useState(defaultScheduleAt());
   const [useRecommendedTime, setUseRecommendedTime] = useState(true);
   const [recommendedTime, setRecommendedTime] = useState("");
+  // Real optimal posting instant (ISO) from the learned PostingWindow, returned
+  // by ai-generate. Used to actually schedule when "Use AI recommendation" is on.
+  const [recommendedIso, setRecommendedIso] = useState("");
 
   // ── AI generation state ────────────────────────────────────────────────
   const [generating, setGenerating] = useState(false);
@@ -2890,6 +2899,7 @@ function ComposeDrawer({
         videoScript?: Record<string, string>;
         imageBrief: string;
         scheduleSuggestion: string;
+        recommendedScheduleIso?: string | null;
         qualityScore: {
           total: number;
           hookStrength: number;
@@ -2920,9 +2930,10 @@ function ComposeDrawer({
       setQualityScore(res.qualityScore);
       setComplianceOk((res.qualityScore?.compliance ?? 0) > 0);
 
-      if (useRecommendedTime && res.scheduleSuggestion) {
+      if (res.scheduleSuggestion) {
         setRecommendedTime(res.scheduleSuggestion);
       }
+      setRecommendedIso(res.recommendedScheduleIso ?? "");
 
       // Auto-generate image preview
       if (res.imageBrief) {
@@ -3005,8 +3016,11 @@ function ComposeDrawer({
             hook,
             caption,
             hashtags: hashtags.split(",").map((h) => h.trim()).filter(Boolean),
+            // When "Use AI recommendation" is on, schedule to the real optimal
+            // instant from the learned PostingWindow (recommendedIso); fall back
+            // to the default only when no recommendation was returned.
             scheduledAt: useRecommendedTime
-              ? new Date(defaultScheduleAt()).toISOString()
+              ? new Date(recommendedIso || defaultScheduleAt()).toISOString()
               : new Date(scheduledAt).toISOString(),
             generateImage: true,
             videoScript,
@@ -3477,6 +3491,40 @@ function PostDrawer({
   const [newScheduledAt, setNewScheduledAt] = useState(
     post.scheduledAt ? new Date(post.scheduledAt).toISOString().slice(0, 16) : "",
   );
+  // Latest performance snapshot for the Clicks/Engagement cells. The list passes
+  // a post without its performance relation, so fetch the full record (which
+  // includes performance) when the drawer opens a PUBLISHED post.
+  const [latestPerf, setLatestPerf] = useState<{
+    linkClicks: number | null;
+    likes: number | null;
+    comments: number | null;
+    shares: number | null;
+  } | null>(null);
+  useEffect(() => {
+    if (post.status !== "PUBLISHED") return;
+    let active = true;
+    void fetchJson<{
+      post: {
+        performance?: Array<{
+          linkClicks: number | null;
+          likes: number | null;
+          comments: number | null;
+          shares: number | null;
+        }>;
+      };
+    }>(`/api/admin/social/posts/${post.id}`)
+      .then((r) => {
+        if (active) setLatestPerf(r.post.performance?.[0] ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [post.id, post.status]);
+
+  const engagementTotal = latestPerf
+    ? (latestPerf.likes ?? 0) + (latestPerf.comments ?? 0) + (latestPerf.shares ?? 0)
+    : null;
 
   const patch = async (body: Record<string, unknown>, msg: string) => {
     setSaving(true);
@@ -3734,10 +3782,10 @@ function PostDrawer({
                 <Eye size={14} className="mx-auto text-[#64748B]" /><p className="text-sm font-bold mt-1">{post.leadScore}</p><p className="text-[9px] text-[#94A3B8]">Lead Score</p>
               </div>
               <div className="p-3 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] text-center">
-                <MousePointerClick size={14} className="mx-auto text-[#64748B]" /><p className="text-sm font-bold mt-1">—</p><p className="text-[9px] text-[#94A3B8]">Clicks</p>
+                <MousePointerClick size={14} className="mx-auto text-[#64748B]" /><p className="text-sm font-bold mt-1">{latestPerf?.linkClicks ?? "—"}</p><p className="text-[9px] text-[#94A3B8]">Clicks</p>
               </div>
               <div className="p-3 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] text-center">
-                <ThumbsUp size={14} className="mx-auto text-[#64748B]" /><p className="text-sm font-bold mt-1">—</p><p className="text-[9px] text-[#94A3B8]">Engagement</p>
+                <ThumbsUp size={14} className="mx-auto text-[#64748B]" /><p className="text-sm font-bold mt-1">{engagementTotal ?? "—"}</p><p className="text-[9px] text-[#94A3B8]">Engagement</p>
               </div>
             </div>
           )}

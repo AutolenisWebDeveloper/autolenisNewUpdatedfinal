@@ -9,6 +9,7 @@
 // not configured.
 
 import { logger } from "@/lib/logger";
+import { providerFetch } from "@/lib/social/providers/http";
 import type {
   PublishingProvider,
   SchedulePostInput,
@@ -49,7 +50,7 @@ async function bufferGraphQL(
   variables?: Record<string, unknown>,
 ): Promise<unknown> {
   const apiKey = process.env.BUFFER_API_KEY ?? "";
-  const res = await fetch(BUFFER_GRAPHQL_URL, {
+  const res = await providerFetch(BUFFER_GRAPHQL_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,

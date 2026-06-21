@@ -12,6 +12,7 @@
 // creation or publishing.
 
 import { logger } from "@/lib/logger";
+import { providerFetch } from "@/lib/social/providers/http";
 import "server-only";
 import type { SocialPost } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -82,7 +83,7 @@ async function pollImage(
 // public URL. Throws on failure so the caller can log the stage. Exported so the
 // video-queue cron can reuse it when a text-to-image job completes out-of-band.
 export async function storeImageInSupabase(imageUrl: string, postId: string): Promise<string> {
-  const res = await fetch(imageUrl);
+  const res = await providerFetch(imageUrl);
   if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
   const contentType = res.headers.get("content-type") ?? "image/jpeg";
   const buffer = Buffer.from(await res.arrayBuffer());
