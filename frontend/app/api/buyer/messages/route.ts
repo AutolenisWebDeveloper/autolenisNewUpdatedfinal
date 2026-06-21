@@ -5,6 +5,7 @@ import { NextRequest } from "next/server";
 import { getRequestBuyer } from "@/lib/auth/api";
 import { successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { sendMessage } from "@/lib/services/messaging/messaging.service";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -58,19 +59,34 @@ export async function POST(request: NextRequest) {
     });
     if (!participant) return errorResponse("FORBIDDEN", "Not a participant in this thread", 403);
 
-    const thread = await prisma.messageThread.findUnique({ where: { id: threadId } });
+    const thread = await prisma.messageThread.findUnique({
+      where: { id: threadId },
+      include: { participants: { select: { role: true } } },
+    });
     if (!thread) return errorResponse("NOT_FOUND", "Thread not found", 404);
     if (thread.status === "CLOSED") return errorResponse("THREAD_CLOSED", "Thread is closed", 400);
 
-    const [message] = await prisma.$transaction([
-      prisma.message.create({
-        data: { threadId, senderId: buyer.userId, content },
-      }),
-      prisma.messageThread.update({
-        where: { id: threadId },
-        data: { lastMessageAt: new Date() },
-      }),
-    ]);
+    // Anti-circumvention (System 20) applies only to buyer↔dealer threads, where
+    // sharing contact info / external payment is disintermediation. Buyer↔support
+    // (admin) threads are NOT redacted — buyers must be able to give the team
+    // their phone/email.
+    const hasDealer = thread.participants.some((p) => p.role === "DEALER");
+
+    let message;
+    if (hasDealer) {
+      message = await sendMessage(threadId, buyer.userId, content);
+    } else {
+      const [m] = await prisma.$transaction([
+        prisma.message.create({
+          data: { threadId, senderId: buyer.userId, content },
+        }),
+        prisma.messageThread.update({
+          where: { id: threadId },
+          data: { lastMessageAt: new Date() },
+        }),
+      ]);
+      message = m;
+    }
 
     return successResponse({ message }, 201);
   }

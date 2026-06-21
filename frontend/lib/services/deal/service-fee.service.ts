@@ -1,7 +1,7 @@
 // lib/services/deal/service-fee.service.ts — System 6
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
-import { PREMIUM_FEE_CENTS, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { PREMIUM_FEE_CENTS, DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 
 export async function createFeePaymentIntent(dealId: string, buyerId: string) {
@@ -34,7 +34,11 @@ export async function recordFeePayment(dealId: string, paymentIntentId: string) 
   await advanceDealStatus(dealId, "FEE_PAID", {
     actorRole: "SYSTEM",
     force: true,
-    data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_CENTS, stripeFeePIId: paymentIntentId },
+    // feeAmountCents = amount actually charged for the fee (net of the $99
+    // deposit credit). ServiceFeePayment above retains the gross/credit/net
+    // breakdown; the deal ledger field is the captured charge so revenue
+    // reports (which sum deposits + fees) never double-count the deposit.
+    data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_REMAINING_CENTS, stripeFeePIId: paymentIntentId },
   });
   await advanceDealStatus(dealId, "INSURANCE_PENDING", { actorRole: "SYSTEM", force: true });
   return payment;

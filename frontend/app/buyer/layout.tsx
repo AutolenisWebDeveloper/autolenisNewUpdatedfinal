@@ -94,6 +94,20 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
     );
   }
 
+  // ── Terms-acceptance gate ──────────────────────────────────────────────────
+  // Previously enforced by the edge proxy (now dormant). Enforced here instead,
+  // at the layer that actually runs. The buyer layout only renders for /buyer/*,
+  // so no path check is needed; /auth/accept-terms is outside this route group,
+  // so there is no redirect loop. Mirrors requiresTermsAcceptance(): redirect
+  // when terms were never accepted, or were accepted under an older version.
+  if (!isAdminPreview) {
+    const currentTermsVersion = process.env.CURRENT_TERMS_VERSION ?? "2026-01-01";
+    const needsTerms =
+      !buyer.termsAcceptedAt ||
+      (buyer.termsVersion != null && buyer.termsVersion !== currentTermsVersion);
+    if (needsTerms) redirect("/auth/accept-terms");
+  }
+
   // Journey progression:
   //   Step 1 — ACCOUNT:    always complete after signup
   //   Step 2 — ONBOARDING: complete when buyer.onboardingComplete === true

@@ -122,7 +122,7 @@ export default async function FeePage() {
     deal?.status === "FEE_PAID" ||
     POST_FEE_STATUSES.has(deal?.status ?? "");
   const feeAmountPaidCents =
-    deal?.feeAmountCents ?? serviceFeePayment?.amountCents ?? 0;
+    deal?.feeAmountCents ?? serviceFeePayment?.netAmountCents ?? 0;
   const feePaidAt = deal?.feePaidAt ?? serviceFeePayment?.paidAt ?? null;
 
   const isPreFeeStage = deal ? PRE_FEE_STATUSES.has(deal.status) : false;
