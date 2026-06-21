@@ -79,17 +79,14 @@ async function pollImage(
   }
 }
 
-// Downloads an image and uploads it to the Supabase storage bucket, returning a
-// public URL. Throws on failure so the caller can log the stage. Exported so the
-// video-queue cron can reuse it when a text-to-image job completes out-of-band.
-export async function storeImageInSupabase(imageUrl: string, postId: string): Promise<string> {
-  const res = await providerFetch(imageUrl);
-  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
-  const contentType = res.headers.get("content-type") ?? "image/jpeg";
-  const buffer = Buffer.from(await res.arrayBuffer());
-
+// Uploads a raw image buffer to the social-media-assets bucket and returns a
+// stable public URL. Shared by the URL-download and base64 paths.
+export async function uploadImageBufferToSupabase(
+  buffer: Buffer,
+  path: string,
+  contentType = "image/png",
+): Promise<string> {
   const supabase = getServiceSupabase();
-  const path = `social-posts/${postId}/image.jpg`;
   const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, buffer, {
     contentType,
     upsert: true,
@@ -101,7 +98,77 @@ export async function storeImageInSupabase(imageUrl: string, postId: string): Pr
   return data.publicUrl;
 }
 
+// Downloads an image and uploads it to the Supabase storage bucket, returning a
+// public URL. Throws on failure so the caller can log the stage. Exported so the
+// video-queue cron can reuse it when a text-to-image job completes out-of-band.
+export async function storeImageInSupabase(imageUrl: string, postId: string): Promise<string> {
+  const res = await providerFetch(imageUrl);
+  if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
+  const contentType = res.headers.get("content-type") ?? "image/jpeg";
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return uploadImageBufferToSupabase(buffer, `social-posts/${postId}/image.jpg`, contentType);
+}
+
+// Stores a base64-encoded image (gpt-image-1 returns b64 rather than a URL) in
+// Supabase and returns a stable public URL.
+export async function storeImageB64InSupabase(b64: string, postId: string): Promise<string> {
+  const buffer = Buffer.from(b64, "base64");
+  return uploadImageBufferToSupabase(buffer, `social-posts/${postId}/image.png`, "image/png");
+}
+
 const DALLE_PROVIDER = "dalle3";
+
+// Attaches an already-hosted image URL to a post as a VIDEO_READY SocialVideo so
+// the post can publish immediately (no video render). Shared by the manual
+// upload, compose, and bulk-create paths. `provider` distinguishes the source
+// (e.g. "manual_upload", "dalle3"). Idempotent via upsert.
+export async function attachImageUrlToPost(
+  postId: string,
+  imageUrl: string,
+  opts: { provider?: string; storagePath?: string; durationSeconds?: number } = {},
+): Promise<void> {
+  const provider = opts.provider ?? "manual_upload";
+  await prisma.socialVideo.upsert({
+    where: { postId },
+    create: {
+      postId,
+      provider,
+      status: "VIDEO_READY",
+      thumbnailUrl: imageUrl,
+      videoUrl: null,
+      durationSeconds: opts.durationSeconds ?? 15,
+      storageBucket: STORAGE_BUCKET,
+      storagePath: opts.storagePath ?? null,
+      generatedAt: new Date(),
+    },
+    update: {
+      provider,
+      status: "VIDEO_READY",
+      thumbnailUrl: imageUrl,
+      storageBucket: STORAGE_BUCKET,
+      ...(opts.storagePath ? { storagePath: opts.storagePath } : {}),
+      generatedAt: new Date(),
+    },
+  });
+}
+
+// Uploads a user-provided image file buffer to Supabase under the post's path
+// and attaches it as the post's VIDEO_READY image. Returns the public URL.
+export async function uploadAndAttachPostImage(
+  postId: string,
+  buffer: Buffer,
+  contentType: string,
+): Promise<string> {
+  const ext = contentType.includes("png")
+    ? "png"
+    : contentType.includes("webp")
+      ? "webp"
+      : "jpg";
+  const storagePath = `social-posts/${postId}/upload.${ext}`;
+  const url = await uploadImageBufferToSupabase(buffer, storagePath, contentType);
+  await attachImageUrlToPost(postId, url, { provider: "manual_upload", storagePath });
+  return url;
+}
 
 // Generates a branded still image for a post via DALL-E 3 and attaches it to the
 // post's SocialVideo record. This is the primary media path: it produces an
@@ -139,18 +206,27 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
     hookType: post.hookType,
   });
 
-  if (!result.success || !result.imageUrl) {
+  if (!result.success || (!result.imageUrl && !result.imageB64)) {
     logger.error("[image-gen:dalle] generation failed for post:", post.id, result.error);
     return EMPTY;
   }
 
-  // DALL-E URLs expire (~1h) — store the image in Supabase for a stable URL.
+  // Persist to Supabase for a stable URL. gpt-image-1 returns base64 (no URL);
+  // dall-e-* return a temporary URL (~1h) that must be re-hosted.
   let storedImageUrl: string;
   try {
-    storedImageUrl = await storeImageInSupabase(result.imageUrl, post.id);
+    storedImageUrl = result.imageB64
+      ? await storeImageB64InSupabase(result.imageB64, post.id)
+      : await storeImageInSupabase(result.imageUrl!, post.id);
   } catch (err) {
-    logger.error("[image-gen:dalle] supabase store failed, using provider URL:", err);
-    storedImageUrl = result.imageUrl;
+    if (result.imageUrl) {
+      logger.error("[image-gen:dalle] supabase store failed, using provider URL:", err);
+      storedImageUrl = result.imageUrl;
+    } else {
+      // base64 with no hosting fallback — can't publish without a stable URL.
+      logger.error("[image-gen:dalle] supabase store failed for base64 image:", err);
+      return EMPTY;
+    }
   }
 
   // Surface the image on the SocialVideo record as VIDEO_READY. The publishing

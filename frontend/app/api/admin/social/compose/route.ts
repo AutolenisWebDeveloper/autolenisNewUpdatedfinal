@@ -3,6 +3,7 @@
 // MANUAL post (no review required) with a UTM-tracked funnel URL, then
 // optionally kicks off AI image generation for the new post.
 
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -16,6 +17,9 @@ interface ComposeBody {
   hashtags?: string[] | string;
   scheduledAt?: string;
   generateImage?: boolean;
+  // A user-uploaded or AI-preview image URL to attach to the post (so it can
+  // publish without an async render). Takes precedence over generateImage.
+  imageUrl?: string;
   // AI-generated per-beat video script (hook_0_3s, beats, cta, onScreenText,
   // voiceover) from the compose drawer — persisted so it isn't lost on save.
   videoScript?: Record<string, string> | null;
@@ -119,8 +123,19 @@ export async function POST(request: NextRequest) {
     metadata: { platform, franchiseSlug, generateImage: Boolean(generateImage) },
   });
 
-  // Fire-and-forget image generation for the new post.
-  if (generateImage && process.env.OPENAI_API_KEY) {
+  // Attach a provided image (manual upload or AI preview) directly so the post is
+  // immediately publishable. This takes precedence over AI generation.
+  if (body.imageUrl) {
+    try {
+      const { attachImageUrlToPost } = await import(
+        "@/lib/social/image-generation.service"
+      );
+      await attachImageUrlToPost(post.id, body.imageUrl, { provider: "compose_upload" });
+    } catch (err) {
+      logger.error("[compose] attach image failed (non-fatal):", err);
+    }
+  } else if (generateImage && process.env.OPENAI_API_KEY) {
+    // Fire-and-forget AI image generation for the new post.
     const base = process.env.NEXT_PUBLIC_APP_URL;
     if (base) {
       void fetch(`${base}/api/admin/social/generate-images`, {
