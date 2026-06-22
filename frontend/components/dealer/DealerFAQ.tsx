@@ -29,7 +29,7 @@ export default function DealerFAQ({ items }: { items: DealerFaqItem[] }) {
                 onClick={() => setOpenIndex(isOpen ? -1 : i)}
                 className="flex w-full items-center justify-between gap-5 rounded-lg px-1 py-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B5FD1] focus-visible:ring-offset-2"
               >
-                <span className="font-display text-lg font-bold text-[#0A1A2F]">{item.q}</span>
+                <span className="text-lg font-bold text-[#0A1A2F]">{item.q}</span>
                 <span
                   className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#EAF2FE] text-[#0B5FD1]"
                   aria-hidden="true"

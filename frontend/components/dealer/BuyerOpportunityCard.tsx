@@ -46,7 +46,7 @@ export default function BuyerOpportunityCard({
           <Users className="h-5 w-5 text-white" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="font-display text-[15px] font-extrabold leading-tight text-[#0A1A2F]">
+          <p className="text-[15px] font-extrabold leading-tight text-[#0A1A2F]">
             New Buyer Opportunity
           </p>
           <p className="text-xs font-semibold text-[#0B5FD1]">Just received</p>
@@ -59,13 +59,13 @@ export default function BuyerOpportunityCard({
 
       {/* Vehicle + budget */}
       <div className="px-5 pt-4">
-        <h3 className="font-display text-xl font-extrabold leading-tight text-[#0A1A2F]">
+        <h3 className="text-xl font-extrabold leading-tight text-[#0A1A2F]">
           {year} {makeModel}
         </h3>
         <p className="mt-0.5 text-sm font-medium text-[#56657C]">{trim}</p>
         <div className="mt-3 border-t border-slate-100 pt-3">
           <p className="text-sm font-medium text-[#56657C]">Budget Range</p>
-          <p className="font-display text-xl font-extrabold text-[#0B5FD1]">{budgetRange}</p>
+          <p className="text-xl font-extrabold text-[#0B5FD1]">{budgetRange}</p>
         </div>
       </div>
 
@@ -100,7 +100,7 @@ export default function BuyerOpportunityCard({
 
       {/* CTA */}
       <div className="px-5 pb-5">
-        <span className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0B5FD1] px-4 py-3.5 font-display text-[15px] font-bold text-white shadow-[0_10px_24px_rgba(11,95,209,0.28)]">
+        <span className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0B5FD1] px-4 py-3.5 text-[15px] font-bold text-white shadow-[0_10px_24px_rgba(11,95,209,0.28)]">
           Submit Your Best Offer
           <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
         </span>
