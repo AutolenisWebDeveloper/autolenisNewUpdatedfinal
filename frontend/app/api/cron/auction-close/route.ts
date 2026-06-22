@@ -24,10 +24,19 @@ export async function GET(request: NextRequest) {
   const now = new Date();
   const count = await closeExpiredAuctions();
 
-  // Release auction load and notify buyers/dealers for all just-closed auctions
+  // F-001 — reconciler. Process EVERY CLOSED auction whose post-close side
+  // effects never completed (post_close_processed_at IS NULL), not just those
+  // closed in a trailing 6-minute window. A missed or slow cron tick — or a
+  // mid-run failure — therefore self-heals on the next pass instead of
+  // permanently dropping the buyer's win/no-offer notice and the zero-offer
+  // auto-refund. processAuctionClose claims each auction atomically and is
+  // idempotent, so reprocessing is safe. Bounded per run to respect the
+  // function timeout; any remainder is picked up next tick.
   const closedAuctions = await prisma.auction.findMany({
-    where: { status: "CLOSED", closedAt: { gte: new Date(now.getTime() - 6 * 60000) } }, // Last 6 minutes
+    where: { status: "CLOSED", postCloseProcessedAt: null },
     select: { id: true },
+    orderBy: { closedAt: "asc" },
+    take: 100,
   });
 
   for (const auction of closedAuctions) {
