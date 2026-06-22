@@ -81,11 +81,19 @@ export async function extendAuction(auctionId: string, hours: number, extendedBy
   });
 }
 
+// F-001 — a post-close claim is "won" only when exactly one auction row flipped
+// from post_close_processed_at NULL → now(). A count of 0 means the auction was
+// already processed (or a concurrent run owns it), so this invocation must skip.
+// Extracted as a pure function so the idempotency contract is unit-testable.
+export function postCloseClaimWon(updatedCount: number): boolean {
+  return updatedCount === 1;
+}
+
 // Post-close processing for a single auction: release dealer load, rank
 // offers, and notify the buyer (plus invited dealers when there is no winner).
 // Shared by the auction-close cron and the admin manual-close action so the
-// two paths never diverge. Safe to call more than once — the buyer/dealer
-// emails are idempotency-keyed in resend.service.
+// two paths never diverge. Safe to call more than once — claimed atomically
+// (F-001) and the buyer/dealer emails are idempotency-keyed in resend.service.
 export async function processAuctionClose(auctionId: string): Promise<{ offers: number }> {
   const auction = await prisma.auction.findUnique({
     where: { id: auctionId },
@@ -93,6 +101,20 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
   });
   if (!auction) return { offers: 0 };
 
+  // F-001 — atomic claim. Only the invocation that flips post_close_processed_at
+  // from NULL wins; concurrent or duplicate invocations (overlapping cron ticks,
+  // an admin manual close racing the cron) no-op. This is the idempotency guard
+  // that lets the cron safely reprocess any CLOSED-but-unprocessed auction
+  // without double-notifying or double-refunding.
+  const claim = await prisma.auction.updateMany({
+    where: { id: auctionId, postCloseProcessedAt: null },
+    data: { postCloseProcessedAt: new Date() },
+  });
+  if (!postCloseClaimWon(claim.count)) {
+    return { offers: auction._count.offers };
+  }
+
+  try {
   await releaseAuctionLoad(auctionId);
 
   if (auction._count.offers > 0) {
@@ -235,6 +257,20 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
   }
 
   return { offers: auction._count.offers };
+  } catch (err) {
+    // Release the claim so the reconciler retries on the next pass. The only
+    // money-moving step (zero-offer refund) is independently guarded by the
+    // deposit's REFUNDED status, and the buyer/dealer emails are
+    // idempotency-keyed in resend.service, so a retry cannot double-anything.
+    await prisma.auction
+      .updateMany({ where: { id: auctionId }, data: { postCloseProcessedAt: null } })
+      .catch(() => {});
+    logger.error(
+      `[processAuctionClose] side effects failed for ${auctionId} — claim released for retry:`,
+      err,
+    );
+    throw err;
+  }
 }
 
 // Close all expired auctions — called by auction-close cron

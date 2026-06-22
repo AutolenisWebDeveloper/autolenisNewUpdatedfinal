@@ -404,6 +404,12 @@ model Auction {
   startedAt         DateTime?           @map("started_at")
   endsAt            DateTime?           @map("ends_at")
   closedAt          DateTime?           @map("closed_at")
+  // F-001 — durable marker for the auction-close reconciler. Set (atomically)
+  // once post-close side effects (load release, ranking, buyer notice,
+  // zero-offer auto-refund) complete. The cron processes any CLOSED auction
+  // where this is NULL, so a missed/slow tick self-heals instead of silently
+  // dropping the buyer's win/no-offer notice.
+  postCloseProcessedAt DateTime?        @map("post_close_processed_at")
   extendedAt        DateTime?           @map("extended_at")
   extendedBy        String?             @map("extended_by")
   extendReason      String?             @map("extend_reason")
