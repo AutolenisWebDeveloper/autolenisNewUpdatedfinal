@@ -29,9 +29,29 @@ export async function POST(request: NextRequest, { params }: Props) {
   const parsed = schema.safeParse(body);
   if (!parsed.success) return adminError("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
 
-  await prisma.commission.update({
-    where: { id: commissionId },
-    data: { status: "PAID", paidAt: new Date() },
+  // F-002/F-003 — single settlement rail. Record a REAL AffiliatePayout(PAID)
+  // and flip the commission to PAID + link it (payoutId) in ONE transaction, so
+  // status, paidAt, and the money-out record can never diverge. PAID is set
+  // only here, on an actual recorded settlement — never speculatively at
+  // request time (the old self-serve rail did, and is now disabled).
+  const settledAt = new Date();
+  await prisma.$transaction(async (tx) => {
+    const payout = await tx.affiliatePayout.create({
+      data: {
+        affiliateId: commission.affiliateId,
+        amountCents: commission.amountCents,
+        status: "PAID",
+        method: parsed.data.paymentMethod,
+        reference: parsed.data.paymentReference,
+        periodStart: commission.createdAt,
+        periodEnd: settledAt,
+        processedAt: settledAt,
+      },
+    });
+    await tx.commission.update({
+      where: { id: commissionId },
+      data: { status: "PAID", paidAt: settledAt, payoutId: payout.id },
+    });
   });
 
   await prisma.adminAuditLog.create({
