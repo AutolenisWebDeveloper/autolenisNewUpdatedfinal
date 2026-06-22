@@ -31,7 +31,7 @@ export default function HeroBuyerCard({ className = "" }: { className?: string }
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#0B5FD1]">
           <Users className="h-[18px] w-[18px] text-white" aria-hidden="true" />
         </span>
-        <span className="text-base font-bold text-[#0A1A2F]">New Buyer Opportunity</span>
+        <span className="text-base font-bold text-[#111827]">New Buyer Opportunity</span>
       </div>
 
       {/* Body */}
@@ -49,10 +49,10 @@ export default function HeroBuyerCard({ className = "" }: { className?: string }
             />
           </div>
           <div>
-            <p className="text-base font-bold leading-tight text-[#0A1A2F]">2024 Toyota RAV4 XLE</p>
-            <p className="text-[13px] font-medium text-[#64748B]">AWD • SUV</p>
+            <p className="text-base font-bold leading-tight text-[#111827]">2024 Toyota RAV4 XLE</p>
+            <p className="text-[13px] font-medium text-[#4B5563]">AWD • SUV</p>
           </div>
-          <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-[#EAF1FE] px-3 py-1.5 text-xs font-bold text-[#0B5FD1]">
+          <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-[#EEF4FF] px-3 py-1.5 text-xs font-bold text-[#0B5FD1]">
             <Star className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
             High Intent Buyer
           </span>
@@ -63,16 +63,16 @@ export default function HeroBuyerCard({ className = "" }: { className?: string }
           <dl className="flex flex-col gap-2.5">
             {ROWS.map((r) => (
               <div key={r.label} className="flex items-center justify-between gap-3">
-                <dt className="flex items-center gap-2 text-[13px] text-[#64748B]">
+                <dt className="flex items-center gap-2 text-[13px] text-[#4B5563]">
                   <r.icon className="h-4 w-4 shrink-0 text-[#0B5FD1]" aria-hidden="true" />
                   {r.label}
                 </dt>
-                <dd className="text-right text-[13px] font-semibold text-[#0A1A2F]">{r.value}</dd>
+                <dd className="text-right text-[13px] font-semibold text-[#111827]">{r.value}</dd>
               </div>
             ))}
           </dl>
 
-          <span className={cn(buttonVariants({ variant: "default", size: "lg" }), "w-full rounded-xl hover:bg-[#0A4DB8]")}>
+          <span className={cn(buttonVariants({ variant: "default", size: "lg" }), "w-full rounded-md hover:bg-[#1A6FE0]")}>
             Submit Your Best Offer
             <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
           </span>

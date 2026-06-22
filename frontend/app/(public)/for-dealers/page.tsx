@@ -16,7 +16,9 @@ import {
   Bell,
   Send,
   CheckCircle2,
-  Star,
+  ShieldCheck,
+  Tag,
+  BadgeDollarSign,
   LayoutGrid,
   Boxes,
   FileText,
@@ -39,14 +41,14 @@ const APPLY_HREF = "/dealer-application";
 const CONTAINER = "mx-auto max-w-7xl px-6 md:px-12";
 
 // Brand-blue surfaces. NAVY = canonical dark surface for bands/panels.
-const NAVY = "#0A2350";
+const NAVY = "#0A0F1A";
 
-// className overrides applied to the shared <Button> (keeps brand-blue hover
-// instead of the component's default, and the site's rounded-xl radius).
-const CTA_PRIMARY = "rounded-xl shadow-lg shadow-[#0B5FD1]/25 hover:bg-[#0A4DB8]";
-const CTA_OUTLINE = "rounded-xl";
-const CTA_ON_DARK =
-  "rounded-xl bg-white text-[#0B5FD1] shadow-lg hover:bg-[#EAF1FE] focus-visible:ring-white focus-visible:ring-offset-[#0A2350]";
+// className overrides on the shared <Button> to match the homepage CTAs
+// (rounded-md, brand-blue with #1A6FE0 hover, soft shadow).
+const CTA_PRIMARY = "rounded-md shadow-md shadow-[#0B5FD1]/25 hover:bg-[#1A6FE0]";
+const CTA_OUTLINE = "rounded-md";
+const CTA_ON_BLUE =
+  "rounded-md bg-white text-[#0B5FD1] shadow-md hover:bg-[#EEF4FF] focus-visible:ring-white focus-visible:ring-offset-[#0B5FD1]";
 
 const TRUST_CHECKS = [
   "No Dealer Fees",
@@ -112,6 +114,24 @@ const ECON_AUTOLENIS = [
 
 const FINAL_CHIPS = ["Independent dealers welcome", "Franchise dealers eligible", "Nationwide", "Free to join"];
 
+const CREDIBILITY = [
+  {
+    icon: ShieldCheck,
+    title: "Verified Buyers, Not Cold Leads",
+    body: "Every opportunity comes from a buyer who's completed soft-pull prequalification and signaled real intent. No tire-kickers, no leads resold to ten dealers.",
+  },
+  {
+    icon: Tag,
+    title: "You Control Your Pricing",
+    body: "Submit one clean, structured out-the-door offer. No haggling, no pressure, no platform dictating your margin.",
+  },
+  {
+    icon: BadgeDollarSign,
+    title: "Zero Fees, Ever",
+    body: "No lead fees, no subscription, no setup, no success fees. Your only investment is time — and only when a real buyer is on the table.",
+  },
+];
+
 const FAQS: DealerFaqItem[] = [
   {
     q: "What does AutoLenis cost dealers?",
@@ -148,11 +168,11 @@ const EYEBROW = "text-xs font-bold uppercase tracking-[0.16em] text-[#0B5FD1]";
 
 export default function ForDealersPage() {
   return (
-    <div className="bg-white text-[#0A1A2F]">
+    <div className="bg-white text-[#111827]">
       {/* ── COST RIBBON ─────────────────────────────────────────────── */}
-      <div className="bg-gradient-to-r from-[#0A1E3F] to-[#143b8f] text-white">
+      <div className="bg-[#0A0F1A] text-white">
         <div className={`${CONTAINER} flex items-center justify-center gap-x-2 py-2.5 text-center text-[13px] font-semibold sm:text-sm`}>
-          <span className="font-bold text-[#7FB0FF]">No Dealer Fees.</span>
+          <span className="font-bold text-[#4DA3FF]">No Dealer Fees.</span>
           <span className="text-white/90">
             No Monthly Costs. No Subscription. Just Qualified Buyers Ready to Purchase.
           </span>
@@ -195,11 +215,11 @@ export default function ForDealersPage() {
                 <span className="inline-block h-0.5 w-6 bg-[#0B5FD1]" aria-hidden="true" />
                 For Dealers
               </p>
-              <h1 className="text-[32px] font-bold leading-[1.08] tracking-tight text-[#0F172A] sm:text-5xl lg:text-[60px] lg:leading-[1.04]">
+              <h1 className="text-[32px] font-bold leading-[1.08] tracking-tight text-[#111827] sm:text-5xl lg:text-[60px] lg:leading-[1.04]">
                 Get Qualified Car Buyers{" "}
                 <span className="text-[#0B5FD1]">Delivered Directly To Your Dealership</span>
               </h1>
-              <p className="mt-6 max-w-xl text-base leading-relaxed text-[#475569] sm:text-lg">
+              <p className="mt-6 max-w-xl text-base leading-relaxed text-[#4B5563] sm:text-lg">
                 AutoLenis connects verified, purchase-ready buyers with participating dealers
                 through a private marketplace designed to increase sales and reduce customer
                 acquisition costs.
@@ -271,7 +291,7 @@ export default function ForDealersPage() {
               </span>
               <div>
                 <h2 className="text-base font-bold">{b.title}</h2>
-                <p className="mt-1 text-sm leading-snug text-[#C7D2E5]">{b.body}</p>
+                <p className="mt-1 text-sm leading-snug text-white/70">{b.body}</p>
               </div>
             </div>
           ))}
@@ -284,13 +304,13 @@ export default function ForDealersPage() {
           <div>
             <p className={`mb-4 ${EYEBROW}`}>The Lead-Gen Problem</p>
             <h2 className={H2}>Stop Paying For Leads That Never Buy</h2>
-            <p className="mt-5 max-w-md text-base leading-relaxed text-[#56657C] sm:text-lg">
+            <p className="mt-5 max-w-md text-base leading-relaxed text-[#4B5563] sm:text-lg">
               Most dealerships spend thousands every month on platforms that sell the same
               leads to everyone — and many of those leads never purchase.
             </p>
           </div>
 
-          <div className="rounded-2xl border border-[#E7ECF5] bg-[#F6F8FC] p-5 sm:p-8">
+          <div className="rounded-2xl border border-[#E7ECF5] bg-[#F8F9FB] p-5 sm:p-8">
             <p className="mb-4 text-xs font-bold uppercase tracking-[0.1em] text-[#8693A8]">
               Where the budget goes today
             </p>
@@ -309,10 +329,10 @@ export default function ForDealersPage() {
               ))}
             </div>
 
-            <div className="mt-5 rounded-2xl bg-[#0A1E3F] p-6 text-white">
+            <div className="mt-5 rounded-2xl bg-[#0A0F1A] p-6 text-white">
               <p className="text-[15px] font-semibold leading-relaxed">
                 AutoLenis delivers buyers actively shopping for a vehicle —{" "}
-                <span className="text-[#7FB0FF]">not cold lists, not shared leads.</span>
+                <span className="text-[#4DA3FF]">not cold lists, not shared leads.</span>
               </p>
               <div className="mt-5 grid grid-cols-3 gap-3 border-t border-white/15 pt-5">
                 {[
@@ -321,8 +341,8 @@ export default function ForDealersPage() {
                   { stat: "High", label: "Buyer intent" },
                 ].map((s) => (
                   <div key={s.label}>
-                    <p className="text-2xl font-bold text-[#7FB0FF]">{s.stat}</p>
-                    <p className="mt-1 text-xs font-medium text-[#B7C5E0]">{s.label}</p>
+                    <p className="text-2xl font-bold text-[#4DA3FF]">{s.stat}</p>
+                    <p className="mt-1 text-xs font-medium text-white/70">{s.label}</p>
                   </div>
                 ))}
               </div>
@@ -332,7 +352,7 @@ export default function ForDealersPage() {
       </section>
 
       {/* ── SECTION 3: WHY DEALERS JOIN ─────────────────────────────── */}
-      <section id="why" className="scroll-mt-24 bg-[#F4F7FC]">
+      <section id="why" className="scroll-mt-24 bg-[#F8F9FB]">
         <div className={`${CONTAINER} py-20 md:py-24`}>
           <div className="mx-auto mb-14 max-w-2xl text-center">
             <p className={`mb-4 ${EYEBROW}`}>Why Dealers Join</p>
@@ -344,7 +364,7 @@ export default function ForDealersPage() {
                 key={card.title}
                 className={
                   card.highlight
-                    ? "relative rounded-2xl bg-[#0A1E3F] p-8 shadow-[0_14px_34px_rgba(10,35,80,0.22)]"
+                    ? "relative rounded-2xl bg-[#0A0F1A] p-8 shadow-[0_14px_34px_rgba(10,35,80,0.22)]"
                     : "rounded-2xl border border-[#E7ECF5] bg-white p-8 shadow-[0_2px_10px_rgba(10,35,80,0.04)]"
                 }
               >
@@ -355,13 +375,13 @@ export default function ForDealersPage() {
                 )}
                 <span
                   className={`mb-5 flex h-[52px] w-[52px] items-center justify-center rounded-[13px] ${
-                    card.highlight ? "bg-white/10" : "bg-[#EAF2FE]"
+                    card.highlight ? "bg-white/10" : "bg-[#EEF4FF]"
                   }`}
                 >
-                  <card.icon className={`h-6 w-6 ${card.highlight ? "text-[#7FB0FF]" : "text-[#0B5FD1]"}`} aria-hidden="true" />
+                  <card.icon className={`h-6 w-6 ${card.highlight ? "text-[#4DA3FF]" : "text-[#0B5FD1]"}`} aria-hidden="true" />
                 </span>
-                <h3 className={`text-xl font-bold ${card.highlight ? "text-white" : "text-[#0A1A2F]"}`}>{card.title}</h3>
-                <p className={`mt-2.5 text-[15px] leading-relaxed ${card.highlight ? "text-[#B7C5E0]" : "text-[#56657C]"}`}>
+                <h3 className={`text-xl font-bold ${card.highlight ? "text-white" : "text-[#111827]"}`}>{card.title}</h3>
+                <p className={`mt-2.5 text-[15px] leading-relaxed ${card.highlight ? "text-white/70" : "text-[#4B5563]"}`}>
                   {card.body}
                 </p>
               </div>
@@ -383,20 +403,20 @@ export default function ForDealersPage() {
                 key={step.num}
                 className={
                   step.highlight
-                    ? "rounded-2xl bg-[#0A1E3F] p-7 shadow-[0_14px_34px_rgba(10,35,80,0.22)]"
-                    : "rounded-2xl border border-[#E7ECF5] bg-[#F4F7FC] p-7"
+                    ? "rounded-2xl bg-[#0A0F1A] p-7 shadow-[0_14px_34px_rgba(10,35,80,0.22)]"
+                    : "rounded-2xl border border-[#E7ECF5] bg-[#F8F9FB] p-7"
                 }
               >
                 <div className="mb-5 flex items-center justify-between">
-                  <span className={`text-[54px] font-bold leading-none tracking-tight ${step.highlight ? "text-[#7FB0FF]/30" : "text-[#D7E2F6]"}`}>
+                  <span className={`text-[54px] font-bold leading-none tracking-tight ${step.highlight ? "text-[#4DA3FF]/30" : "text-[#D7E2F6]"}`}>
                     {step.num}
                   </span>
                   <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0B5FD1]">
                     <step.icon className="h-[22px] w-[22px] text-white" aria-hidden="true" />
                   </span>
                 </div>
-                <h3 className={`text-lg font-bold ${step.highlight ? "text-white" : "text-[#0A1A2F]"}`}>{step.title}</h3>
-                <p className={`mt-2 text-sm leading-relaxed ${step.highlight ? "text-[#B7C5E0]" : "text-[#56657C]"}`}>{step.body}</p>
+                <h3 className={`text-lg font-bold ${step.highlight ? "text-white" : "text-[#111827]"}`}>{step.title}</h3>
+                <p className={`mt-2 text-sm leading-relaxed ${step.highlight ? "text-white/70" : "text-[#4B5563]"}`}>{step.body}</p>
               </li>
             ))}
           </ol>
@@ -404,17 +424,17 @@ export default function ForDealersPage() {
       </section>
 
       {/* ── SECTION 5: MARKETPLACE DASHBOARD ────────────────────────── */}
-      <section className="bg-gradient-to-b from-[#0A1E3F] to-[#0B294F] text-white">
+      <section className="bg-[#0A0F1A] text-white">
         <div className={`${CONTAINER} py-20 md:py-24`}>
           <div className="mx-auto mb-12 max-w-3xl text-center">
-            <p className="mb-4 text-xs font-bold uppercase tracking-[0.16em] text-[#7FB0FF]">The AutoLenis Dealer Marketplace</p>
+            <p className="mb-4 text-xs font-bold uppercase tracking-[0.16em] text-[#4DA3FF]">The AutoLenis Dealer Marketplace</p>
             <h2 className={H2}>Exclusive Buyer Opportunities, In One Place</h2>
-            <p className="mt-4 text-base leading-relaxed text-[#B7C5E0] sm:text-lg">
+            <p className="mt-4 text-base leading-relaxed text-white/70 sm:text-lg">
               Every opportunity comes pre-loaded with the details you need to make your best offer — fast.
             </p>
           </div>
 
-          <div className="mx-auto max-w-5xl overflow-hidden rounded-2xl bg-white text-[#0A1A2F] shadow-[0_40px_90px_rgba(0,0,0,0.4)]">
+          <div className="mx-auto max-w-5xl overflow-hidden rounded-2xl bg-white text-[#111827] shadow-[0_40px_90px_rgba(0,0,0,0.4)]">
             <div className="flex items-center gap-2 border-b border-[#E7ECF5] bg-[#F3F5F9] px-4 py-3.5">
               <span className="h-3 w-3 rounded-full bg-[#FF5F57]" aria-hidden="true" />
               <span className="h-3 w-3 rounded-full bg-[#FEBC2E]" aria-hidden="true" />
@@ -430,7 +450,7 @@ export default function ForDealersPage() {
                   <span
                     key={item.label}
                     className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold ${
-                      item.active ? "bg-[#EAF2FE] text-[#0B5FD1]" : "text-[#56657C]"
+                      item.active ? "bg-[#EEF4FF] text-[#0B5FD1]" : "text-[#4B5563]"
                     }`}
                   >
                     <item.icon className="h-[18px] w-[18px]" aria-hidden="true" />
@@ -453,21 +473,21 @@ export default function ForDealersPage() {
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className={`text-[15px] font-bold ${row.active ? "text-[#0A1A2F]" : "text-[#3C485C]"}`}>{row.vehicle}</span>
+                        <span className={`text-[15px] font-bold ${row.active ? "text-[#111827]" : "text-[#3C485C]"}`}>{row.vehicle}</span>
                         {row.active && <span className="h-2 w-2 rounded-full bg-[#0B5FD1]" aria-hidden="true" />}
                       </div>
                       <p className="mt-1 text-[12.5px] font-semibold text-[#7A879B]">
                         {row.location} · {row.budget}
                       </p>
                       {row.active && (
-                        <span className="mt-2 inline-block rounded-full bg-[#EAF2FE] px-2.5 py-1 text-[11px] font-bold text-[#0B5FD1]">High Intent</span>
+                        <span className="mt-2 inline-block rounded-full bg-[#EEF4FF] px-2.5 py-1 text-[11px] font-bold text-[#0B5FD1]">High Intent</span>
                       )}
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="bg-[#F6F8FC] p-5">
+              <div className="bg-[#F8F9FB] p-5">
                 <BuyerOpportunityCard
                   opportunity={{
                     year: "2024",
@@ -490,7 +510,7 @@ export default function ForDealersPage() {
           <div className="mx-auto mb-14 max-w-2xl text-center">
             <p className={`mb-4 ${EYEBROW}`}>The Economics</p>
             <h2 className={H2}>A Smarter Way To Spend Your Acquisition Budget</h2>
-            <p className="mt-4 text-base leading-relaxed text-[#56657C] sm:text-lg">
+            <p className="mt-4 text-base leading-relaxed text-[#4B5563] sm:text-lg">
               See how AutoLenis compares to the traditional lead model dealers pay for every month.
             </p>
           </div>
@@ -510,8 +530,8 @@ export default function ForDealersPage() {
               </ul>
             </div>
 
-            <div className="relative overflow-hidden rounded-2xl bg-[linear-gradient(160deg,#0B5FD1,#0A1E3F)] p-7 shadow-[0_24px_54px_rgba(10,35,80,0.32)] sm:p-8">
-              <span className="absolute right-6 top-6 rounded-full bg-[#7FE3A8] px-3 py-1 text-xs font-bold text-[#0A1E3F]">RECOMMENDED</span>
+            <div className="relative overflow-hidden rounded-2xl bg-[#0B5FD1] p-7 shadow-[0_24px_54px_rgba(10,35,80,0.32)] sm:p-8">
+              <span className="absolute right-6 top-6 rounded-full bg-[#7FE3A8] px-3 py-1 text-xs font-bold text-[#0A0F1A]">RECOMMENDED</span>
               <h3 className="mb-6 text-xl font-bold text-white">AutoLenis</h3>
               <ul className="flex flex-col gap-4">
                 {ECON_AUTOLENIS.map((item) => (
@@ -523,7 +543,7 @@ export default function ForDealersPage() {
                   </li>
                 ))}
               </ul>
-              <Button asChild size="lg" className={`mt-8 ${CTA_ON_DARK} w-full sm:w-auto`}>
+              <Button asChild size="lg" className={`mt-8 ${CTA_ON_BLUE} w-full sm:w-auto`}>
                 <Link href={APPLY_HREF}>
                   Become a Dealer Partner
                   <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
@@ -534,42 +554,42 @@ export default function ForDealersPage() {
         </div>
       </section>
 
-      {/* ── SECTION 7: TESTIMONIALS (COMING SOON) ───────────────────── */}
-      <section className="bg-[#F4F7FC]">
+      {/* ── SECTION 7: WHY DEALERS PARTNER (CREDIBILITY BAND) ────────── */}
+      <section className="bg-[#F8F9FB]">
         <div className={`${CONTAINER} py-20 md:py-24`}>
-          <div className="mx-auto mb-12 max-w-2xl text-center">
-            <p className={`mb-4 ${EYEBROW}`}>Dealer Success Stories</p>
-            <h2 className={H2}>Coming Soon</h2>
-            <p className="mt-4 text-base leading-relaxed text-[#56657C] sm:text-lg">
-              We&apos;re onboarding our founding dealer partners now. Real results from real
-              dealerships will appear here as the network grows.
+          <div className="mx-auto mb-14 max-w-2xl text-center">
+            <p className={`mb-4 ${EYEBROW}`}>Why Dealers Partner With AutoLenis</p>
+            <h2 className={H2}>Built Around Serious Buyers — And Dealers Who Want Them</h2>
+            <p className="mt-4 text-base leading-relaxed text-[#4B5563] sm:text-lg">
+              AutoLenis is actively onboarding dealer partners and matching them to verified,
+              pre-qualified buyers in their markets. Every opportunity is structured, transparent,
+              and fee-free — so you compete on your terms, never in a race to the bottom.
             </p>
           </div>
+
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="rounded-2xl border border-dashed border-[#C9D6EC] bg-white p-8 text-center" aria-hidden="true">
-                <div className="mb-5 flex justify-center gap-1 text-[#D7E2F6]">
-                  {[0, 1, 2, 3, 4].map((s) => (
-                    <Star key={s} className="h-4 w-4 fill-current" />
-                  ))}
+            {CREDIBILITY.map((card) => (
+              <div
+                key={card.title}
+                className="rounded-2xl border border-[#E5E7EB] bg-white p-8 transition-all hover:border-[#0B5FD1]/40 hover:shadow-md"
+              >
+                <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-[#EEF4FF]">
+                  <card.icon className="h-6 w-6 text-[#0B5FD1]" aria-hidden="true" />
                 </div>
-                <div className="mx-auto mb-2.5 h-2.5 rounded bg-[#EDF1F8]" />
-                <div className="mx-auto mb-2.5 h-2.5 rounded bg-[#EDF1F8]" />
-                <div className="mx-auto mb-6 h-2.5 w-[70%] rounded bg-[#EDF1F8]" />
-                <div className="flex items-center justify-center gap-3">
-                  <span className="h-10 w-10 rounded-full bg-[#E3EAF5]" />
-                  <div className="text-left">
-                    <p className="text-sm font-bold text-[#0B5FD1]">Your Story Here</p>
-                    <p className="text-xs text-[#8693A8]">Founding Dealer Partner</p>
-                  </div>
-                </div>
+                <h3 className="text-lg font-bold text-[#111827]">{card.title}</h3>
+                <p className="mt-2.5 text-[15px] leading-relaxed text-[#4B5563]">{card.body}</p>
               </div>
             ))}
           </div>
-          <div className="mt-12 text-center">
-            <Button asChild size="lg" className={`${CTA_PRIMARY} w-full sm:w-auto`}>
+
+          <div className="mx-auto mt-12 max-w-2xl text-center">
+            <p className="text-[15px] font-medium leading-relaxed text-[#4B5563]">
+              Founding dealer partners get priority access to buyer opportunities in their market
+              as the network expands.
+            </p>
+            <Button asChild size="lg" className={`mt-6 ${CTA_PRIMARY} w-full sm:w-auto`}>
               <Link href={APPLY_HREF}>
-                Be one of our first partners
+                Become a Dealer Partner
                 <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
               </Link>
             </Button>
@@ -589,24 +609,24 @@ export default function ForDealersPage() {
       </section>
 
       {/* ── FINAL CTA BAND ──────────────────────────────────────────── */}
-      <section id="apply" className="scroll-mt-24 bg-[linear-gradient(160deg,#0B5FD1,#0A1E3F)] text-white">
+      <section id="apply" className="scroll-mt-24 bg-[#111111] text-white">
         <div className="mx-auto max-w-4xl px-6 py-20 text-center md:px-12 md:py-24">
           <h2 className="text-[28px] font-bold leading-[1.12] tracking-tight sm:text-4xl lg:text-[44px]">
             No Dealer Fees. No Monthly Costs. No Subscription.
             <br className="hidden sm:block" /> Just Qualified Buyers Ready To Purchase.
           </h2>
-          <p className="mx-auto mt-5 max-w-xl text-base font-medium text-[#CFDBF2] sm:text-lg">
+          <p className="mx-auto mt-5 max-w-xl text-base font-medium text-white/70 sm:text-lg">
             Join the AutoLenis dealer network and start receiving verified, purchase-ready buyers in your market.
           </p>
           <div className="mt-9 flex justify-center">
-            <Button asChild size="lg" className={`${CTA_ON_DARK} w-full sm:w-auto`}>
+            <Button asChild size="lg" className={`${CTA_PRIMARY} w-full sm:w-auto`}>
               <Link href={APPLY_HREF} data-testid="dealer-apply-footer-cta">
                 Become a Dealer Partner
                 <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
               </Link>
             </Button>
           </div>
-          <ul className="mt-9 flex flex-wrap justify-center gap-x-7 gap-y-3 text-sm font-semibold text-[#CFDBF2] sm:text-[15px]">
+          <ul className="mt-9 flex flex-wrap justify-center gap-x-7 gap-y-3 text-sm font-semibold text-white/70 sm:text-[15px]">
             {FINAL_CHIPS.map((chip) => (
               <li key={chip} className="flex items-center gap-2">
                 <Check className="h-[18px] w-[18px] text-[#7FE3A8]" strokeWidth={2.5} aria-hidden="true" />
@@ -618,7 +638,7 @@ export default function ForDealersPage() {
       </section>
 
       {/* ── FAITH MODULE (site-wide convention) ─────────────────────── */}
-      <section className="bg-[#0A1E3F] pb-16">
+      <section className="bg-[#0A0F1A] pb-16">
         <div className="mx-auto max-w-2xl px-6 text-center">
           <FaithVerseModule pageKey="dealers" />
         </div>
