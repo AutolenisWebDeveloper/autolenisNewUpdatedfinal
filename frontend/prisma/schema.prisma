@@ -658,6 +658,10 @@ model Commission {
   dealId            String           @map("deal_id")
   level             Int
   rate              Float
+  // F-004 — the actual fee (in cents) this commission was computed against,
+  // persisted for per-deal auditability. amountCents = round(basisCents * rate).
+  // Nullable for rows created before this field existed.
+  basisCents        Int?             @map("basis_cents")
   amountCents       Int              @map("amount_cents")
   status            CommissionStatus @default(PENDING)
   qualifyingEventId String           @unique @map("qualifying_event_id")
