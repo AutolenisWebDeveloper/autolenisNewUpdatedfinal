@@ -31,7 +31,9 @@
     "node": ">=18.18"
   },
   "dependencies": {
+    "@fontsource/inter": "5.2.8",
     "@fontsource/jetbrains-mono": "5.2.8",
+    "@fontsource/plus-jakarta-sans": "5.2.8",
     "@fontsource/space-grotesk": "5.2.10",
     "@hookform/resolvers": "^5.0.1",
     "@prisma/client": "^5.22.0",

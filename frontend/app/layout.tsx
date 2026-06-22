@@ -34,6 +34,30 @@ const jetbrainsMono = localFont({
   ],
 });
 
+// Additive (For Dealers redesign): display + body faces, self-hosted via
+// @fontsource to keep the build network-free. Exposed as CSS variables and
+// consumed by the `font-display` / `font-body` Tailwind tokens in globals.css.
+const plusJakartaSans = localFont({
+  variable: "--font-jakarta",
+  display: "swap",
+  src: [
+    { path: "../node_modules/@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "../node_modules/@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-600-normal.woff2", weight: "600", style: "normal" },
+    { path: "../node_modules/@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-700-normal.woff2", weight: "700", style: "normal" },
+    { path: "../node_modules/@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-800-normal.woff2", weight: "800", style: "normal" },
+  ],
+});
+const inter = localFont({
+  variable: "--font-inter",
+  display: "swap",
+  src: [
+    { path: "../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "../node_modules/@fontsource/inter/files/inter-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "../node_modules/@fontsource/inter/files/inter-latin-600-normal.woff2", weight: "600", style: "normal" },
+    { path: "../node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2", weight: "700", style: "normal" },
+  ],
+});
+
 export const metadata: Metadata = {
   title: {
     default: "AutoLenis — The Car Buying Experience You Deserve",
@@ -63,7 +87,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} font-[family-name:var(--font-heading)] antialiased`}>
+      <body className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} ${plusJakartaSans.variable} ${inter.variable} font-[family-name:var(--font-heading)] antialiased`}>
         {/* Connected entity graph — sitewide knowledge-graph backbone */}
         <JsonLd id="ld-entity-graph" data={entityGraphSchema} />
         {/* Phase C0 — sitewide Organization schema (national content engine) */}
