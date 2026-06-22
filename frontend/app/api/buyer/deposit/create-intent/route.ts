@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
     // self-stops once the deposit is PAID, so re-creating an intent is safe.
     const buyerContact = await prisma.buyer.findUnique({
       where: { id: buyer.id },
-      select: { firstName: true, user: { select: { email: true } } },
+      select: { firstName: true, lastName: true, phone: true, user: { select: { email: true } } },
     });
     if (buyerContact?.user?.email) {
       dispatch({
@@ -137,6 +137,34 @@ export async function POST(request: NextRequest) {
         },
         delaySeconds: 86400,
       }).catch(() => {});
+    }
+
+    // F-037 — emit the deposit_pending domain event. It was defined in the
+    // WorkflowTriggerType union but never fired, so the prebuilt 1h→24h→72h
+    // abandoned-deposit nurture (workflow.prebuilt.ts) was dead. Emitting it
+    // here (deposit intent created, not yet paid) revives that recovery
+    // sequence. Tail call: never throws, never affects the payment response.
+    if (buyerContact) {
+      try {
+        const { emitDomainEvent } = await import("@/lib/events/emit");
+        await emitDomainEvent("deposit_pending", {
+          domainEntityId: buyer.id,
+          contact: {
+            email: buyerContact.user?.email ?? null,
+            phone: buyerContact.phone,
+            firstName: buyerContact.firstName,
+            lastName: buyerContact.lastName,
+            source: "buyer_signup",
+          },
+          data: {
+            buyer_id: buyer.id,
+            amount_cents: DEPOSIT_AMOUNT_CENTS,
+            deposit_url: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/deposit`,
+          },
+        });
+      } catch (err) {
+        logger.error("[deposit/create-intent] deposit_pending emit failed:", err);
+      }
     }
 
     return successResponse({ clientSecret: paymentIntent.client_secret });
