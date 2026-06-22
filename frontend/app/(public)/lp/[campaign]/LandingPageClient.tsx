@@ -61,7 +61,7 @@ const TESTIMONIALS: Testimonial[] = [
     vehicle: "2024 Toyota Highlander",
     saved: null,
     quote:
-      "AutoLenis saved me over $3,000. The process was so easy and there was zero pressure.",
+      "The process was so easy and there was zero pressure — dealers competed for my business instead of the other way around.",
     stars: 5,
     initial: "S",
     color: "from-pink-400 to-rose-500",
@@ -892,10 +892,10 @@ export default function LandingPageClient({
         <section className="bg-white border-y border-slate-200 py-6">
           <div className="max-w-5xl mx-auto px-5 grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
-              { icon: <DollarSign size={18} />, number: "$2,300+",   label: "Average Buyer Savings"     },
-              { icon: <Users size={18} />,      number: "500+",      label: "Verified Dealer Partners"  },
-              { icon: <Car size={18} />,        number: "10,000+",   label: "Vehicles Requested"        },
-              { icon: <Star size={18} />,       number: "4.9 / 5",   label: "Buyer Satisfaction"        },
+              { icon: <DollarSign size={18} />, number: "$99",       label: "Refundable to Start"       },
+              { icon: <Users size={18} />,      number: "8",         label: "Dealers Compete per Auction" },
+              { icon: <Car size={18} />,        number: "48 hrs",    label: "Private Auction Window"    },
+              { icon: <Star size={18} />,       number: "0",         label: "Impact to Your Credit"     },
             ].map((s) => (
               <div key={s.label} className="flex items-center justify-center gap-3">
                 <div className="w-11 h-11 rounded-xl bg-blue-50 flex items-center justify-center text-[#0B5FD1] shrink-0">

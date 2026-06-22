@@ -506,9 +506,10 @@ export default function ForBuyersPage() {
               </summary>
               <p className="px-6 pb-5 text-sm text-[#4B5563] leading-relaxed">
                 The $99 deposit is refundable if you don&apos;t select any offer. If you do
-                buy, the $99 is credited toward the $499 Service Fee. Buyers who use
-                AutoLenis save an average of $2,300 — meaning the service typically
-                pays for itself many times over.
+                buy, the $99 is credited toward the $499 Service Fee. Because dealers
+                compete privately for your business, the auction is designed to surface
+                their most competitive pricing — actual savings vary by vehicle, market,
+                and dealer participation, and are not guaranteed.
               </p>
             </details>
 

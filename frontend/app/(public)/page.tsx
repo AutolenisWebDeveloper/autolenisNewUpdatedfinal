@@ -180,7 +180,7 @@ function HomePageBody() {
                   {/* Card header */}
                   <div className="bg-[#F8F9FB] border-b border-[#E5E7EB] px-5 py-4 flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide">Your Auction</p>
+                      <p className="text-xs font-semibold text-[#6B7280] uppercase tracking-wide">Your Auction · Illustrative example</p>
                       <p className="text-sm font-bold text-[#111827]">2024 Toyota Camry XSE</p>
                     </div>
                     <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
