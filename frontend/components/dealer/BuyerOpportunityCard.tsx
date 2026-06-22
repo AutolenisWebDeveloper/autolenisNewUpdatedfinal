@@ -46,7 +46,7 @@ export default function BuyerOpportunityCard({
           <Users className="h-5 w-5 text-white" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[15px] font-extrabold leading-tight text-[#0A1A2F]">
+          <p className="text-[15px] font-extrabold leading-tight text-[#111827]">
             New Buyer Opportunity
           </p>
           <p className="text-xs font-semibold text-[#0B5FD1]">Just received</p>
@@ -59,12 +59,12 @@ export default function BuyerOpportunityCard({
 
       {/* Vehicle + budget */}
       <div className="px-5 pt-4">
-        <h3 className="text-xl font-extrabold leading-tight text-[#0A1A2F]">
+        <h3 className="text-xl font-extrabold leading-tight text-[#111827]">
           {year} {makeModel}
         </h3>
-        <p className="mt-0.5 text-sm font-medium text-[#56657C]">{trim}</p>
+        <p className="mt-0.5 text-sm font-medium text-[#4B5563]">{trim}</p>
         <div className="mt-3 border-t border-slate-100 pt-3">
-          <p className="text-sm font-medium text-[#56657C]">Budget Range</p>
+          <p className="text-sm font-medium text-[#4B5563]">Budget Range</p>
           <p className="text-xl font-extrabold text-[#0B5FD1]">{budgetRange}</p>
         </div>
       </div>
@@ -72,13 +72,13 @@ export default function BuyerOpportunityCard({
       {/* Detail rows */}
       <dl className="px-5 py-3 text-sm">
         <Row icon={<MapPin className="h-[18px] w-[18px]" aria-hidden="true" />} label="Location">
-          <span className="font-semibold text-[#0A1A2F]">{location}</span>
+          <span className="font-semibold text-[#111827]">{location}</span>
         </Row>
         <Row icon={<RefreshCw className="h-[18px] w-[18px]" aria-hidden="true" />} label="Trade-In">
-          <span className="font-semibold text-[#0A1A2F]">{tradeIn}</span>
+          <span className="font-semibold text-[#111827]">{tradeIn}</span>
         </Row>
         <Row icon={<DollarSign className="h-[18px] w-[18px]" aria-hidden="true" />} label="Financing">
-          <span className="font-semibold text-[#0A1A2F]">{financing}</span>
+          <span className="font-semibold text-[#111827]">{financing}</span>
         </Row>
         <Row
           icon={<ShieldCheck className="h-[18px] w-[18px]" aria-hidden="true" />}
@@ -90,7 +90,7 @@ export default function BuyerOpportunityCard({
       </dl>
 
       {/* Verify strip */}
-      <div className="mx-5 mb-4 flex items-center gap-3 rounded-xl bg-[#EAF2FE] px-4 py-3">
+      <div className="mx-5 mb-4 flex items-center gap-3 rounded-xl bg-[#EEF4FF] px-4 py-3">
         <ShieldCheck className="h-5 w-5 shrink-0 text-[#0B5FD1]" aria-hidden="true" />
         <p className="text-[13px] leading-tight">
           <span className="font-bold text-[#0B5FD1]">Pre-Qualified Buyer</span>
@@ -126,8 +126,8 @@ function Row({
         last ? "" : "border-b border-slate-100"
       }`}
     >
-      <dt className="flex items-center gap-2.5 text-[#56657C]">
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#EAF2FE] text-[#0B5FD1]">
+      <dt className="flex items-center gap-2.5 text-[#4B5563]">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#EEF4FF] text-[#0B5FD1]">
           {icon}
         </span>
         {label}

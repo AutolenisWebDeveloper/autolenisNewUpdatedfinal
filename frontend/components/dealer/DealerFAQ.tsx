@@ -29,9 +29,9 @@ export default function DealerFAQ({ items }: { items: DealerFaqItem[] }) {
                 onClick={() => setOpenIndex(isOpen ? -1 : i)}
                 className="flex w-full items-center justify-between gap-5 rounded-lg px-1 py-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B5FD1] focus-visible:ring-offset-2"
               >
-                <span className="text-lg font-bold text-[#0A1A2F]">{item.q}</span>
+                <span className="text-lg font-bold text-[#111827]">{item.q}</span>
                 <span
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#EAF2FE] text-[#0B5FD1]"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#EEF4FF] text-[#0B5FD1]"
                   aria-hidden="true"
                 >
                   {isOpen ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
@@ -45,7 +45,7 @@ export default function DealerFAQ({ items }: { items: DealerFaqItem[] }) {
               hidden={!isOpen}
               className="pr-11"
             >
-              <p className="px-1 pb-6 text-[15px] leading-relaxed text-[#56657C]">{item.a}</p>
+              <p className="px-1 pb-6 text-[15px] leading-relaxed text-[#4B5563]">{item.a}</p>
             </div>
           </div>
         );
