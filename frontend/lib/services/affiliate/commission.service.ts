@@ -7,14 +7,25 @@ import { prisma } from "@/lib/prisma";
 import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
 import { emitDomainEvent } from "@/lib/events/emit";
 import { logger } from "@/lib/logger";
+import { computeCommissionCents } from "@/lib/services/affiliate/commission-math";
 
-// Walk affiliate tree up to 3 levels and create commissions (idempotent)
+// Re-export so existing importers (and tests) can reach the pure helper.
+export { computeCommissionCents };
+
+// Walk affiliate tree up to 3 levels and create commissions (idempotent).
+// feeBasisCents is the actual fee the buyer paid (from the Stripe PaymentIntent);
+// commissions are a percentage of THAT, not of a hardcoded $499 constant (F-004).
 export async function walkCommissionTree(
   dealId: string,
   buyerAffiliateId: string | null | undefined,
-  qualifyingEventId: string
+  qualifyingEventId: string,
+  feeBasisCents: number = PREMIUM_FEE_CENTS,
 ): Promise<void> {
   if (!buyerAffiliateId) return;
+
+  // Defend against a missing/zero basis: fall back to the configured premium
+  // fee so a metadata gap never silently zeroes out earned commissions.
+  const basisCents = feeBasisCents > 0 ? feeBasisCents : PREMIUM_FEE_CENTS;
 
   const affiliate = await prisma.affiliate.findUnique({
     where: { id: buyerAffiliateId },
@@ -34,13 +45,14 @@ export async function walkCommissionTree(
     const existing = await prisma.commission.findUnique({ where: { qualifyingEventId: key } });
     if (existing) continue;
 
-    const amountCents = Math.round(PREMIUM_FEE_CENTS * entry.rate);
+    const amountCents = computeCommissionCents(basisCents, entry.rate);
     await prisma.commission.create({
       data: {
         affiliateId: entry.affiliate.id,
         dealId,
         level: entry.level,
         rate: entry.rate,
+        basisCents,
         amountCents,
         status: "PENDING",
         qualifyingEventId: key,

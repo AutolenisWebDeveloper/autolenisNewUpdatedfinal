@@ -278,7 +278,11 @@ export async function POST(request: NextRequest) {
                   select: { affiliateId: true },
                 });
                 if (referral) {
-                  await walkCommissionTree(metaDealId, referral.affiliateId, pi.id);
+                  // F-004 — base commissions on the actual fee paid (this PI),
+                  // not a hardcoded constant. amount_received is the captured
+                  // amount in cents; fall back to amount if unset.
+                  const feeBasisCents = pi.amount_received || pi.amount || 0;
+                  await walkCommissionTree(metaDealId, referral.affiliateId, pi.id, feeBasisCents);
                 }
               }
             }
