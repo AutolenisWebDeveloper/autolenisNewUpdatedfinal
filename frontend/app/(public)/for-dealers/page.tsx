@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
 import BuyerOpportunityCard from "@/components/dealer/BuyerOpportunityCard";
+import HeroBuyerCard from "@/components/dealer/HeroBuyerCard";
 import DealerFAQ, { type DealerFaqItem } from "@/components/dealer/DealerFAQ";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
 
@@ -177,7 +178,7 @@ export default function ForDealersPage() {
               acquisition costs.
             </p>
 
-            <ul className="mt-8 grid max-w-xl grid-cols-1 gap-x-7 gap-y-3 sm:grid-cols-2">
+            <ul className="mt-8 grid max-w-xl grid-cols-1 gap-x-7 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
               {TRUST_CHECKS.map((label) => (
                 <li key={label} className="flex items-center gap-2.5 text-[15px] font-semibold">
                   <CheckCircle2 className="h-5 w-5 shrink-0 text-[#0B5FD1]" aria-hidden="true" />
@@ -197,7 +198,7 @@ export default function ForDealersPage() {
             </div>
           </div>
 
-          {/* Photo + floating buyer-opportunity card (compact image asset) */}
+          {/* Photo + wide buyer-opportunity card overlay (per approved mockup) */}
           <div className="relative">
             <div className="overflow-hidden rounded-2xl shadow-[0_30px_70px_rgba(10,35,80,0.22)]">
               <Image
@@ -206,22 +207,15 @@ export default function ForDealersPage() {
                 width={1200}
                 height={1059}
                 priority
-                sizes="(max-width: 1024px) 100vw, 524px"
-                className="h-[300px] w-full object-cover sm:h-[440px] lg:h-[580px]"
-                style={{ objectPosition: "72% center" }}
+                sizes="(max-width: 1024px) 100vw, 560px"
+                className="h-[320px] w-full object-cover object-center sm:h-[420px] lg:h-[560px]"
               />
             </div>
 
-            {/* Card: static (mobile/tablet, in flow) → absolute lower-left (desktop). */}
-            <div className="relative z-[2] mx-auto -mt-10 w-[min(360px,92%)] sm:mx-0 sm:-mt-14 sm:ml-4 sm:w-[min(320px,88%)] lg:absolute lg:bottom-9 lg:left-[-24px] lg:mt-0 lg:w-[300px]">
-              <Image
-                src="/images/dealers/buyer-card.webp"
-                alt="Verified, pre-qualified buyer opportunity for a 2024 BMW X5 in Houston, Texas — budget $55,000 to $65,000"
-                width={640}
-                height={764}
-                sizes="(max-width: 640px) 360px, (max-width: 1024px) 320px, 300px"
-                className="w-full rounded-2xl shadow-[0_24px_50px_rgba(10,35,80,0.28)] motion-safe:lg:animate-dealer-float"
-              />
+            {/* Card: static & in-flow below the photo (mobile/tablet) → absolute
+                bottom-right overlay on desktop. Stacks internally on mobile. */}
+            <div className="relative z-[2] -mt-10 w-full sm:-mt-12 lg:absolute lg:bottom-6 lg:right-0 lg:mt-0 lg:w-[500px]">
+              <HeroBuyerCard className="motion-safe:lg:animate-dealer-float" />
             </div>
           </div>
         </div>
