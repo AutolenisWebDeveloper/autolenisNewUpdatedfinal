@@ -127,6 +127,8 @@ declare namespace NodeJS {
     TWILIO_FROM_NUMBER?: string;
     TWILIO_PHONE_NUMBER?: string;
     TWILIO_TRANSFER_NUMBER?: string; // legacy live-agent transfer number (Phase 3 fallback)
+    TWILIO_WEBHOOK_URL?: string;     // exact public URL the inbound SMS webhook is configured against (signature base)
+    TWILIO_VERIFY_ALT_HOST?: string; // F-013: "true" also accepts the www<->apex sibling host in voice signature verification (default OFF)
 
     // Zura Phase 3 — live call transfer to the founder. FOUNDER_PHONE_NUMBER is
     // the founder's cell that hot leads are bridged to via Twilio <Dial>; it is
