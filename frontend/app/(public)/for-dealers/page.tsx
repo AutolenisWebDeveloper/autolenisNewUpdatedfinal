@@ -7,7 +7,7 @@ import {
   X,
   Users,
   TrendingUp,
-  PiggyBank,
+  BarChart3,
   MapPin,
   DollarSign,
   RefreshCw,
@@ -23,6 +23,7 @@ import {
   Truck,
   Settings,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
 import BuyerOpportunityCard from "@/components/dealer/BuyerOpportunityCard";
 import HeroBuyerCard from "@/components/dealer/HeroBuyerCard";
@@ -37,13 +38,15 @@ const APPLY_HREF = "/dealer-application";
 // Shared site container + section rhythm (matches how-it-works / pricing).
 const CONTAINER = "mx-auto max-w-7xl px-6 md:px-12";
 
-// Site CTA styles (match how-it-works "Get Prequalified" buttons).
-const BTN_PRIMARY =
-  "inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[#0B5FD1] px-7 text-sm font-semibold text-white shadow-lg shadow-[#0B5FD1]/25 transition-colors hover:bg-[#0A4DB8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B5FD1] focus-visible:ring-offset-2";
-const BTN_SECONDARY =
-  "inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-[#0B5FD1] px-7 text-sm font-semibold text-[#0B5FD1] transition-colors hover:bg-[#EFF6FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B5FD1] focus-visible:ring-offset-2";
-const BTN_ON_DARK =
-  "inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-white px-7 text-sm font-semibold text-[#0B5FD1] shadow-lg transition-colors hover:bg-[#EFF6FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A1E3F]";
+// Brand-blue surfaces. NAVY = canonical dark surface for bands/panels.
+const NAVY = "#0A2350";
+
+// className overrides applied to the shared <Button> (keeps brand-blue hover
+// instead of the component's default, and the site's rounded-xl radius).
+const CTA_PRIMARY = "rounded-xl shadow-lg shadow-[#0B5FD1]/25 hover:bg-[#0A4DB8]";
+const CTA_OUTLINE = "rounded-xl";
+const CTA_ON_DARK =
+  "rounded-xl bg-white text-[#0B5FD1] shadow-lg hover:bg-[#EAF1FE] focus-visible:ring-white focus-visible:ring-offset-[#0A2350]";
 
 const TRUST_CHECKS = [
   "No Dealer Fees",
@@ -55,8 +58,8 @@ const TRUST_CHECKS = [
 
 const BENEFITS = [
   { icon: Users, title: "Purchase-Ready Buyers", body: "Connect with verified buyers ready to make a purchase." },
-  { icon: TrendingUp, title: "Increase Sales", body: "Win more deals and close more business." },
-  { icon: PiggyBank, title: "Lower Costs", body: "Reduce your customer acquisition expenses." },
+  { icon: DollarSign, title: "Increase Sales", body: "Win more deals and close more business." },
+  { icon: BarChart3, title: "Lower Costs", body: "Reduce your customer acquisition expenses." },
   { icon: MapPin, title: "Nationwide Opportunities", body: "Reach buyers in more markets across the U.S." },
 ];
 
@@ -156,74 +159,106 @@ export default function ForDealersPage() {
         </div>
       </div>
 
-      {/* ── HERO ────────────────────────────────────────────────────── */}
+      {/* ── HERO (full-bleed photo + wide buyer card) ───────────────── */}
       <section
         id="top"
         data-testid="for-dealers-hero"
-        className="relative overflow-hidden bg-[radial-gradient(120%_100%_at_0%_0%,#F4F8FF_0%,#ffffff_55%)]"
+        className="relative z-10 overflow-x-clip bg-white"
       >
-        <div className={`${CONTAINER} grid grid-cols-1 items-center gap-10 py-16 md:py-24 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14`}>
-          <div>
-            <p className={`mb-5 inline-flex items-center gap-2 ${EYEBROW}`}>
-              <span className="inline-block h-0.5 w-6 bg-[#0B5FD1]" aria-hidden="true" />
-              For Dealers
-            </p>
-            <h1 className="text-[32px] font-bold leading-[1.08] tracking-tight sm:text-5xl lg:text-[60px] lg:leading-[1.04]">
-              Get Qualified Car Buyers{" "}
-              <span className="text-[#0B5FD1]">Delivered Directly To Your Dealership</span>
-            </h1>
-            <p className="mt-6 max-w-xl text-base leading-relaxed text-[#56657C] sm:text-lg">
-              AutoLenis connects verified, purchase-ready buyers with participating dealers
-              through a private marketplace designed to increase sales and reduce customer
-              acquisition costs.
-            </p>
+        {/* Desktop full-bleed photo bleeding off the right, melting into white */}
+        <div className="absolute inset-y-0 right-0 hidden w-[58vw] lg:block">
+          <Image
+            src="/images/dealers/dealer-hero.webp"
+            alt="Smiling dealership manager standing with arms crossed in front of their dealership, with a blue SUV and a YOUR DEALERSHIP sign behind them"
+            fill
+            priority
+            sizes="58vw"
+            className="object-cover"
+            style={{ objectPosition: "62% center" }}
+          />
+          {/* White fade so the photo's left edge melts into the copy column */}
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(to right,#ffffff 0%, rgba(255,255,255,0.85) 7%, rgba(255,255,255,0) 26%)",
+            }}
+            aria-hidden="true"
+          />
+        </div>
 
-            <ul className="mt-8 grid max-w-xl grid-cols-1 gap-x-7 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-              {TRUST_CHECKS.map((label) => (
-                <li key={label} className="flex items-center gap-2.5 text-[15px] font-semibold">
-                  <CheckCircle2 className="h-5 w-5 shrink-0 text-[#0B5FD1]" aria-hidden="true" />
-                  {label}
-                </li>
-              ))}
-            </ul>
+        <div className={`${CONTAINER} relative`}>
+          {/* COPY */}
+          <div className="relative z-[2] py-14 md:py-20 lg:flex lg:min-h-[680px] lg:max-w-[54%] lg:flex-col lg:justify-center lg:py-28">
+            <div>
+              <p className={`mb-5 inline-flex items-center gap-2 ${EYEBROW}`}>
+                <span className="inline-block h-0.5 w-6 bg-[#0B5FD1]" aria-hidden="true" />
+                For Dealers
+              </p>
+              <h1 className="text-[32px] font-bold leading-[1.08] tracking-tight text-[#0F172A] sm:text-5xl lg:text-[60px] lg:leading-[1.04]">
+                Get Qualified Car Buyers{" "}
+                <span className="text-[#0B5FD1]">Delivered Directly To Your Dealership</span>
+              </h1>
+              <p className="mt-6 max-w-xl text-base leading-relaxed text-[#475569] sm:text-lg">
+                AutoLenis connects verified, purchase-ready buyers with participating dealers
+                through a private marketplace designed to increase sales and reduce customer
+                acquisition costs.
+              </p>
 
-            <div className="mt-9 flex flex-col gap-3.5 sm:flex-row sm:flex-wrap sm:items-center">
-              <Link href={APPLY_HREF} data-testid="for-dealers-apply-cta" className={`${BTN_PRIMARY} w-full sm:w-auto`}>
-                Become a Dealer Partner
-                <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
-              </Link>
-              <Link href="#how" className={`${BTN_SECONDARY} w-full sm:w-auto`}>
-                Learn More
-              </Link>
+              <ul className="mt-8 grid max-w-xl grid-cols-1 gap-x-7 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                {TRUST_CHECKS.map((label) => (
+                  <li key={label} className="flex items-center gap-2.5 text-[15px] font-semibold">
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-[#0B5FD1]" aria-hidden="true" />
+                    {label}
+                  </li>
+                ))}
+              </ul>
+
+              <div className="mt-9 flex flex-col gap-3.5 sm:flex-row sm:flex-wrap sm:items-center">
+                <Button asChild size="lg" className={`${CTA_PRIMARY} w-full sm:w-auto`}>
+                  <Link href={APPLY_HREF} data-testid="for-dealers-apply-cta">
+                    Become a Dealer Partner
+                    <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
+                  </Link>
+                </Button>
+                <Button asChild variant="secondary" size="lg" className={`${CTA_OUTLINE} w-full sm:w-auto`}>
+                  <Link href="#how">
+                    Learn More
+                    <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
+                  </Link>
+                </Button>
+              </div>
             </div>
           </div>
 
-          {/* Photo + wide buyer-opportunity card overlay (per approved mockup) */}
-          <div className="relative">
-            <div className="overflow-hidden rounded-2xl shadow-[0_30px_70px_rgba(10,35,80,0.22)]">
+          {/* Mobile / tablet: banner photo + card in normal flow (no desktop bleed) */}
+          <div className="pb-6 lg:hidden">
+            <div className="overflow-hidden rounded-2xl shadow-[0_24px_50px_rgba(10,35,80,0.18)]">
               <Image
                 src="/images/dealers/dealer-hero.webp"
                 alt="Smiling dealership manager standing with arms crossed in front of their dealership, with a blue SUV and a YOUR DEALERSHIP sign behind them"
                 width={1200}
                 height={1059}
-                priority
-                sizes="(max-width: 1024px) 100vw, 560px"
-                className="h-[320px] w-full object-cover object-center sm:h-[420px] lg:h-[560px]"
+                sizes="100vw"
+                className="h-[300px] w-full object-cover sm:h-[420px]"
+                style={{ objectPosition: "62% center" }}
               />
             </div>
-
-            {/* Card: static & in-flow below the photo (mobile/tablet) → absolute
-                bottom-right overlay on desktop. Stacks internally on mobile. */}
-            <div className="relative z-[2] -mt-10 w-full sm:-mt-12 lg:absolute lg:bottom-6 lg:right-0 lg:mt-0 lg:w-[500px]">
-              <HeroBuyerCard className="motion-safe:lg:animate-dealer-float" />
+            <div className="relative z-[2] mx-auto -mt-8 w-[min(420px,92%)] sm:w-[min(580px,92%)]">
+              <HeroBuyerCard />
             </div>
+          </div>
+
+          {/* Desktop: wide card overlay, bottom-right, overlapping the navy band */}
+          <div className="absolute bottom-[-24px] right-0 z-[3] hidden w-[440px] lg:block xl:w-[560px]">
+            <HeroBuyerCard className="motion-safe:animate-dealer-float" />
           </div>
         </div>
       </section>
 
-      {/* ── DARK BENEFITS STRIP ─────────────────────────────────────── */}
-      <section className="bg-gradient-to-r from-[#0A1E3F] to-[#0E2C63] text-white">
-        <div className={`${CONTAINER} grid grid-cols-1 gap-8 py-10 sm:grid-cols-2 lg:grid-cols-4 lg:gap-0`}>
+      {/* ── NAVY VALUE BAND ─────────────────────────────────────────── */}
+      <section className="relative z-0 text-white" style={{ backgroundColor: NAVY }}>
+        <div className={`${CONTAINER} grid grid-cols-1 gap-8 py-12 sm:grid-cols-2 lg:grid-cols-4 lg:gap-0 lg:pt-12`}>
           {BENEFITS.map((b, i) => (
             <div
               key={b.title}
@@ -231,12 +266,12 @@ export default function ForDealersPage() {
                 i !== BENEFITS.length - 1 ? "lg:border-r lg:border-white/15" : "lg:pr-0"
               }`}
             >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#0B5FD1]">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#0B5FD1]">
                 <b.icon className="h-[22px] w-[22px] text-white" aria-hidden="true" />
               </span>
               <div>
                 <h2 className="text-base font-bold">{b.title}</h2>
-                <p className="mt-1 text-sm leading-snug text-[#B7C5E0]">{b.body}</p>
+                <p className="mt-1 text-sm leading-snug text-[#C7D2E5]">{b.body}</p>
               </div>
             </div>
           ))}
@@ -488,10 +523,12 @@ export default function ForDealersPage() {
                   </li>
                 ))}
               </ul>
-              <Link href={APPLY_HREF} className={`mt-8 ${BTN_ON_DARK} w-full sm:w-auto`}>
-                Become a Dealer Partner
-                <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
-              </Link>
+              <Button asChild size="lg" className={`mt-8 ${CTA_ON_DARK} w-full sm:w-auto`}>
+                <Link href={APPLY_HREF}>
+                  Become a Dealer Partner
+                  <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
+                </Link>
+              </Button>
             </div>
           </div>
         </div>
@@ -530,10 +567,12 @@ export default function ForDealersPage() {
             ))}
           </div>
           <div className="mt-12 text-center">
-            <Link href={APPLY_HREF} className={`${BTN_PRIMARY} w-full sm:w-auto`}>
-              Be one of our first partners
-              <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
-            </Link>
+            <Button asChild size="lg" className={`${CTA_PRIMARY} w-full sm:w-auto`}>
+              <Link href={APPLY_HREF}>
+                Be one of our first partners
+                <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
+              </Link>
+            </Button>
           </div>
         </div>
       </section>
@@ -560,10 +599,12 @@ export default function ForDealersPage() {
             Join the AutoLenis dealer network and start receiving verified, purchase-ready buyers in your market.
           </p>
           <div className="mt-9 flex justify-center">
-            <Link href={APPLY_HREF} data-testid="dealer-apply-footer-cta" className={`${BTN_ON_DARK} w-full sm:w-auto`}>
-              Become a Dealer Partner
-              <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
-            </Link>
+            <Button asChild size="lg" className={`${CTA_ON_DARK} w-full sm:w-auto`}>
+              <Link href={APPLY_HREF} data-testid="dealer-apply-footer-cta">
+                Become a Dealer Partner
+                <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
+              </Link>
+            </Button>
           </div>
           <ul className="mt-9 flex flex-wrap justify-center gap-x-7 gap-y-3 text-sm font-semibold text-[#CFDBF2] sm:text-[15px]">
             {FINAL_CHIPS.map((chip) => (
