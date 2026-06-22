@@ -217,6 +217,9 @@ export default function LandingPageClient({
   const [vehicleType, setVehicleType] = useState<typeof VEHICLE_TYPES[number] | "">("");
   const [budget, setBudget] = useState<typeof BUDGET_RANGES[number] | "">("");
   const [timeline, setTimeline] = useState<typeof TIMELINES[number] | "">("");
+  // TCPA: explicit, opt-in SMS consent. Defaults OFF (unchecked) — a typed phone
+  // number is NOT consent. Only an affirmative check sets consent_sms downstream.
+  const [smsConsentChecked, setSmsConsentChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -373,7 +376,7 @@ export default function LandingPageClient({
         email,
         phone,
         zip,
-        smsConsent:   !!phone,
+        smsConsent:   !!phone && smsConsentChecked,
         campaign,
         utm_source:   utm.utm_source,
         utm_medium:   utm.utm_medium,
@@ -435,7 +438,7 @@ export default function LandingPageClient({
       source_url:   utm.source_url,
       campaign:     utm.campaign,
       consent_email: true,
-      consent_sms:   !!phone,
+      consent_sms:   !!phone && smsConsentChecked,
     };
 
     try {
@@ -754,6 +757,26 @@ export default function LandingPageClient({
                           placeholder="(555) 555-5555"
                         />
                       </Field>
+                      {phone.trim() !== "" && (
+                        <label className="flex items-start gap-2.5 text-xs text-[#4B5563] leading-snug cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={smsConsentChecked}
+                            onChange={(e) => setSmsConsentChecked(e.target.checked)}
+                            className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-[#0B5FD1] focus:ring-[#0B5FD1]"
+                            data-testid="lp-sms-consent"
+                          />
+                          <span>
+                            I agree to receive recurring automated marketing and account text
+                            messages (e.g. auction updates) from AutoLenis at the number provided.
+                            Consent is not a condition of purchase. Msg &amp; data rates may apply.
+                            Reply STOP to opt out, HELP for help. See our{" "}
+                            <a href="/privacy" className="underline" target="_blank" rel="noopener noreferrer">Privacy Policy</a>{" "}
+                            and{" "}
+                            <a href="/terms" className="underline" target="_blank" rel="noopener noreferrer">Terms</a>.
+                          </span>
+                        </label>
+                      )}
                       <Field label="ZIP code" required>
                         <input
                           type="text"
