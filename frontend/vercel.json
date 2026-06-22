@@ -9,6 +9,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/dlq-drain",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron/content-publisher",
       "schedule": "*/5 * * * *"
     },
