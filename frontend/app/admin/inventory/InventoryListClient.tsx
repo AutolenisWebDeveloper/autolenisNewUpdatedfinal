@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   Package, Plus, Upload, Search, Filter, Edit2, Trash2,
-  Power, Loader2, CheckCircle2, X, Eye
+  Power, Loader2, CheckCircle2, X, Eye, ArrowRightLeft
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -32,6 +32,8 @@ const SOURCE_OPTIONS = [
   { value: "marketcheck", label: "MarketCheck" },
 ];
 const LANE_OPTIONS = ["", "LANE_1", "LANE_2", "LANE_3"];
+const MOVE_LANE_OPTIONS = ["LANE_1", "LANE_2", "LANE_3"];
+const laneLabel = (lane: string) => lane.replace("_", " ");
 const STATUS_OPTIONS = [
   { value: "", label: "All" },
   { value: "active", label: "Active" },
@@ -47,6 +49,7 @@ export default function InventoryListClient({ initialItems }: { initialItems: It
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [movingLane, setMovingLane] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; label: string } | null>(null);
 
@@ -121,6 +124,45 @@ export default function InventoryListClient({ initialItems }: { initialItems: It
     } finally {
       setBusyId(null);
       setConfirmDelete(null);
+    }
+  }
+
+  async function bulkMoveLane(lane: string) {
+    if (selected.size === 0 || !MOVE_LANE_OPTIONS.includes(lane)) return;
+    const ids = Array.from(selected);
+    // Optimistic snapshot so we can roll back on failure.
+    const prevLanes = new Map(items.filter(it => selected.has(it.id)).map(it => [it.id, it.lane]));
+    setMovingLane(lane);
+    // Optimistic UI update for instant feedback.
+    setItems(prev => prev.map(it => selected.has(it.id) ? { ...it, lane } : it));
+    try {
+      const res = await fetch(`/api/admin/inventory/bulk-lane`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, lane }),
+      });
+      const data = await res.json() as {
+        success?: boolean;
+        data?: { moved: number; unchanged: number; notFound: number };
+        error?: { message?: string };
+      };
+      if (!res.ok || !data.success) {
+        // Roll back optimistic change.
+        setItems(prev => prev.map(it => prevLanes.has(it.id) ? { ...it, lane: prevLanes.get(it.id)! } : it));
+        showToast(data.error?.message ?? "Failed to move vehicles", "error");
+        return;
+      }
+      const { moved, unchanged, notFound } = data.data!;
+      const parts = [`${moved} moved to ${laneLabel(lane)}`];
+      if (unchanged > 0) parts.push(`${unchanged} already there`);
+      if (notFound > 0) parts.push(`${notFound} not found`);
+      setSelected(new Set());
+      showToast(parts.join(", "), notFound > 0 ? "error" : "success");
+    } catch {
+      setItems(prev => prev.map(it => prevLanes.has(it.id) ? { ...it, lane: prevLanes.get(it.id)! } : it));
+      showToast("Network error", "error");
+    } finally {
+      setMovingLane(null);
     }
   }
 
@@ -252,16 +294,33 @@ export default function InventoryListClient({ initialItems }: { initialItems: It
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
-        <div className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl p-3 mb-3 flex items-center justify-between" data-testid="bulk-action-bar">
+        <div className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl p-3 mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" data-testid="bulk-action-bar">
           <span className="text-sm font-semibold text-[#0B5FD1]">{selected.size} selected</span>
-          <div className="flex items-center gap-2">
-            <button onClick={() => bulkAction("activate")} disabled={bulkBusy} data-testid="bulk-activate-btn" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 rounded text-xs font-semibold">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Bulk move to lane */}
+            <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded px-2 py-1" data-testid="bulk-move-lane">
+              <ArrowRightLeft size={12} className="text-slate-400 shrink-0" />
+              <label htmlFor="bulk-lane-select" className="text-xs font-semibold text-slate-600 hidden sm:inline">Move to</label>
+              <select
+                id="bulk-lane-select"
+                data-testid="bulk-move-lane-select"
+                value=""
+                disabled={bulkBusy || movingLane !== null}
+                onChange={e => { if (e.target.value) bulkMoveLane(e.target.value); }}
+                className="bg-transparent text-xs font-semibold text-slate-700 focus:outline-none disabled:opacity-50 cursor-pointer"
+              >
+                <option value="">Select lane…</option>
+                {MOVE_LANE_OPTIONS.map(l => <option key={l} value={l}>{laneLabel(l)}</option>)}
+              </select>
+              {movingLane && <Loader2 size={12} className="animate-spin text-[#0B5FD1]" data-testid="bulk-move-lane-spinner" />}
+            </div>
+            <button onClick={() => bulkAction("activate")} disabled={bulkBusy || movingLane !== null} data-testid="bulk-activate-btn" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 rounded text-xs font-semibold disabled:opacity-50">
               <CheckCircle2 size={12} /> Activate
             </button>
-            <button onClick={() => bulkAction("deactivate")} disabled={bulkBusy} data-testid="bulk-deactivate-btn" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 rounded text-xs font-semibold">
+            <button onClick={() => bulkAction("deactivate")} disabled={bulkBusy || movingLane !== null} data-testid="bulk-deactivate-btn" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 rounded text-xs font-semibold disabled:opacity-50">
               <Power size={12} /> Deactivate
             </button>
-            <button onClick={() => bulkAction("delete")} disabled={bulkBusy} data-testid="bulk-delete-btn" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-semibold">
+            <button onClick={() => bulkAction("delete")} disabled={bulkBusy || movingLane !== null} data-testid="bulk-delete-btn" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-semibold disabled:opacity-50">
               {bulkBusy ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Delete
             </button>
             <button onClick={() => setSelected(new Set())} data-testid="bulk-clear-btn" className="text-slate-500 hover:text-slate-900 px-2 py-1.5"><X size={14} /></button>
