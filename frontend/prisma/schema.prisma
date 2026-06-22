@@ -3451,6 +3451,15 @@ model DealerProspect {
   sequencePausedAt      DateTime? @map("sequence_paused_at")
   sequencePauseReason   String?   @map("sequence_pause_reason")
 
+  // F-010 — one-click recruitment claim. A high-entropy token is minted when a
+  // prospect is contacted; the outreach email links to it so a responding
+  // dealer self-converts into a (pre-filled) DealerApplication instead of
+  // re-entering everything on the public form. convertedApplicationId marks the
+  // prospect ONBOARDED and makes the claim idempotent.
+  claimToken             String?   @unique @map("claim_token")
+  claimTokenExpiresAt    DateTime? @map("claim_token_expires_at")
+  convertedApplicationId String?   @map("converted_application_id")
+
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
