@@ -662,10 +662,17 @@ model Commission {
   status            CommissionStatus @default(PENDING)
   qualifyingEventId String           @unique @map("qualifying_event_id")
   paidAt            DateTime?        @map("paid_at")
+  // F-002/F-003 — link to the settlement that actually paid this commission.
+  // Set ONLY when an admin records a real payout via the mark-paid rail; the
+  // status flips to PAID in the same transaction. The previously orphaned
+  // self-serve requestPayout rail is disabled.
+  payoutId          String?          @map("payout_id")
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
   affiliate         Affiliate        @relation(fields: [affiliateId], references: [id])
+  payout            AffiliatePayout? @relation(fields: [payoutId], references: [id])
 
+  @@index([payoutId])
   @@map("commissions")
 }
 
@@ -2112,6 +2119,8 @@ model AffiliatePayout {
   requestedAt   DateTime     @default(now()) @map("requested_at")
   processedAt   DateTime?    @map("processed_at")
   failureReason String?      @map("failure_reason")
+  // F-002/F-003 — the commissions settled by this payout.
+  commissions   Commission[]
   @@map("affiliate_payouts")
 }
 
