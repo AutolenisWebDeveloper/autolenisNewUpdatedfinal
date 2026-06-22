@@ -71,9 +71,9 @@ export default function AboutPage() {
                   </div>
                   <div className="grid grid-cols-3 w-full gap-4 pt-4 border-t border-[#F3F4F6]">
                     {[
-                      { v: "312+", l: "Verified Dealers" },
-                      { v: "$2,300", l: "Avg Savings" },
-                      { v: "1,847", l: "Deals Done" },
+                      { v: "$99", l: "Refundable Start" },
+                      { v: "48 hrs", l: "Auction Window" },
+                      { v: "0", l: "Credit Impact" },
                     ].map((s) => (
                       <div key={s.l} className="flex flex-col items-center">
                         <p className="text-xl font-bold text-[#0B5FD1]">{s.v}</p>
