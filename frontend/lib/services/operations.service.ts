@@ -314,6 +314,83 @@ export class OperationsService {
     return { retried: true };
   }
 
+  // F-035 — automated DLQ drainer. Re-emits eligible dead-letter rows without a
+  // human clicking Retry, bounded so a poison job cannot hot-loop:
+  //   • only rows older than `minAgeMs` (transient blips get a chance to clear),
+  //   • only rows under `maxAutoRetries` (else left for manual review),
+  //   • a per-run batch cap.
+  // QStash-origin rows (event_name "qstash:<path>") are re-published through
+  // QStash; everything else is re-emitted through Inngest. The attempt counter
+  // is incremented BEFORE re-emit (claim), so a crash mid-drain can never cause
+  // an unbounded loop. The underlying jobs are themselves idempotency-guarded.
+  async autoDrainDeadLetterJobs(opts?: {
+    maxAutoRetries?: number;
+    minAgeMs?: number;
+    batch?: number;
+  }): Promise<{ scanned: number; reemitted: number; skipped: number; failed: number }> {
+    const maxAutoRetries = opts?.maxAutoRetries ?? 3;
+    const minAgeMs = opts?.minAgeMs ?? 10 * 60_000;
+    const batch = opts?.batch ?? 25;
+    const cutoff = new Date(Date.now() - minAgeMs).toISOString();
+
+    const { data } = await this.supabase
+      .from('jobs_dead_letter')
+      .select('id,job_id,event_name,payload,auto_retry_count')
+      .lt('auto_retry_count', maxAutoRetries)
+      .lt('failed_at', cutoff)
+      .order('failed_at', { ascending: true })
+      .limit(batch);
+
+    const rows = (data ?? []) as Array<{
+      id: string;
+      job_id: string;
+      event_name: string;
+      payload: Record<string, unknown> | null;
+      auto_retry_count: number;
+    }>;
+
+    let reemitted = 0;
+    let failed = 0;
+    for (const row of rows) {
+      // Claim: bump the counter first so a re-emit that itself re-dead-letters
+      // (or a mid-loop crash) cannot retry this row beyond the cap.
+      const { data: claimed } = await this.supabase
+        .from('jobs_dead_letter')
+        .update({ auto_retry_count: row.auto_retry_count + 1 })
+        .eq('id', row.id)
+        .eq('auto_retry_count', row.auto_retry_count)
+        .select('id');
+      if (!claimed || claimed.length === 0) continue; // another run claimed it
+
+      try {
+        const payload = (row.payload ?? {}) as Record<string, unknown>;
+        if (row.event_name.startsWith('qstash:')) {
+          // Re-publish the original QStash job. Payload carries { path, body, ... }.
+          const { dispatch } = await import('@/lib/qstash/dispatch');
+          await dispatch({
+            path: String(payload.path ?? ''),
+            body: (payload.body ?? {}) as Record<string, unknown>,
+          });
+        } else {
+          await inngest.send({ name: row.event_name, data: payload });
+        }
+        // Success — remove the row.
+        await this.supabase.from('jobs_dead_letter').delete().eq('id', row.id);
+        reemitted += 1;
+      } catch {
+        // Leave the row (counter already incremented) for the next pass / manual review.
+        failed += 1;
+      }
+    }
+
+    return {
+      scanned: rows.length,
+      reemitted,
+      skipped: rows.length - reemitted - failed,
+      failed,
+    };
+  }
+
   // ────────────────────────────────────────────────────────────────────────
   // FAILED WORKFLOW ENROLLMENTS
   // ────────────────────────────────────────────────────────────────────────
