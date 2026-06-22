@@ -12,7 +12,8 @@ import {
   sendFounderMessageAlert,
 } from "@/lib/voice/dispatch-request";
 import { dispatch } from "@/lib/qstash/dispatch";
-import { sendSms, isValidUsPhone } from "@/lib/services/sms/twilio.service";
+import { isValidUsPhone } from "@/lib/services/sms/twilio.service";
+import { sendTransactionalSmsIfAllowed } from "@/lib/voice/transactional-sms";
 import { normalizePhone } from "@/lib/utils/phone";
 
 export const runtime = "nodejs";
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
     if (callSid && conv && callerPhone && !conv.partialLeadDispatched) {
       updateConversation(callSid, { partialLeadDispatched: true });
       if (isValidUsPhone(callerPhone)) {
-        await sendSms(
+        await sendTransactionalSmsIfAllowed(
           callerPhone,
           "Hi! Thanks for calling AutoLenis. A team member will follow up with you shortly. Questions? Visit autolenis.com Reply STOP to opt out.",
         );
