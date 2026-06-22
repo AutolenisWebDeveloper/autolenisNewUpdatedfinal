@@ -2,7 +2,6 @@ import { logger } from "@/lib/logger";
 import 'server-only';
 import twilio from 'twilio';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { prisma } from '@/lib/prisma';
 import { normalizePhone } from '@/lib/utils/phone';
 import { SuppressionService } from '@/lib/services/suppression.service';
 import { isRecipientInQuietHours } from '@/lib/crm/recipient-timezone';
@@ -78,13 +77,15 @@ export async function sendCrmSms(params: {
     return { status: 'no_consent', reason: 'TCPA_CONSENT_REQUIRED' };
   }
 
-  // Suppression — CRM plane (sms_suppression) AND the Prisma SmsOptOut table.
+  // Suppression — the canonical store is `sms_suppression` (written by the
+  // inbound STOP handlers). The Prisma `SmsOptOut` table was read here but has
+  // NO writer anywhere, so the check was dead and created false assurance of a
+  // second plane (F-014). Removed — `sms_suppression` is the single source of
+  // truth that every send path consults.
   try {
     if (await SuppressionService.isSmsSuppressed(supabase, phone)) {
       return { status: 'suppressed', reason: 'sms_suppression' };
     }
-    const optOut = await prisma.smsOptOut.findUnique({ where: { phone } });
-    if (optOut) return { status: 'suppressed', reason: 'sms_opt_out' };
   } catch (err) {
     logger.error('[crm-sms] suppression lookup failed — failing closed:', err);
     return { status: 'failed', reason: 'suppression_check_error' };

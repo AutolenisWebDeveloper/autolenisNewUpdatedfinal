@@ -32,7 +32,8 @@ import { ZURA_VOICE_PROMPT } from "@/lib/ai/zura-voice";
 import type { BuyerLookupResult } from "@/lib/services/voice/buyer-lookup.service";
 import { groqChat, type ChatMessage } from "@/lib/ai/groq-client";
 import { dispatch } from "@/lib/qstash/dispatch";
-import { sendSms, isValidUsPhone } from "@/lib/services/sms/twilio.service";
+import { isValidUsPhone } from "@/lib/services/sms/twilio.service";
+import { sendTransactionalSmsIfAllowed } from "@/lib/voice/transactional-sms";
 
 const HISTORY_LIMIT = 10;
 const TRANSFER_KEYWORDS = ["human", "person", "agent", "someone", "transfer", "real person"];
@@ -378,7 +379,7 @@ function maybeCapturePartialLead(
 
   const firstName = req?.firstName?.trim() || "there";
   if (isValidUsPhone(callerPhone)) {
-    sendSms(
+    sendTransactionalSmsIfAllowed(
       callerPhone,
       `Hi ${firstName}! Thanks for calling AutoLenis. We received your information and a team member will follow up shortly. Ready to start your dealer auction? Visit autolenis.com Reply STOP to opt out.`,
     ).catch(() => {});
