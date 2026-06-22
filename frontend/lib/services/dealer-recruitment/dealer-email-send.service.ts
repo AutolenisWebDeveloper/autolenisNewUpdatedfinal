@@ -17,6 +17,7 @@ import {
   generateEmailTemplate,
   type EmailTemplate,
 } from "./email-template.service"
+import { issueProspectClaimToken, buildClaimUrl } from "./prospect-claim.service"
 
 export type OutreachType = "initial" | "followup_1" | "followup_2"
 
@@ -257,6 +258,23 @@ export async function sendDealerEmail(
       },
       { dealerEmail: prospect.email },
     )
+  }
+
+  // 4b. F-010 — append a one-click claim CTA so a responding prospect converts
+  // into a pre-filled application instead of re-entering everything on the
+  // public form. Best-effort: a token-mint failure must never block the send.
+  try {
+    const claimToken = await issueProspectClaimToken(prospect.id)
+    if (claimToken) {
+      const claimUrl = buildClaimUrl(claimToken)
+      template = {
+        ...template,
+        bodyText: `${template.bodyText}\n\nReady to compete for ready-to-buy local buyers? Claim your dealership in under a minute — we've pre-filled your details:\n${claimUrl}`,
+        body: `${template.body}<p style="margin:16px 0"><a href="${claimUrl}" style="display:inline-block;background:#0B5FD1;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600">Claim your dealership →</a></p>`,
+      }
+    }
+  } catch (err) {
+    logger.error("[phase-4b3] claim CTA injection failed (non-fatal):", err)
   }
 
   // 5. Create the log row (queued) before dispatch.
