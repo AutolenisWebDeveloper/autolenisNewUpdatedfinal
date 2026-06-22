@@ -10,6 +10,10 @@ import {
   sendDealerApplicationAdminNotification,
 } from "@/lib/services/email/resend.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
+import {
+  evaluateDealerApplicationAutoApproval,
+  autoApprovalAnnotation,
+} from "@/lib/services/dealer-recruitment/auto-approval";
 
 const schema = z.object({
   dealershipName: z.string().min(1),
@@ -42,10 +46,23 @@ export async function POST(request: NextRequest) {
 
   const data = parsed.data;
 
+  // F-011 — objective auto-approval triage. Anonymous public applications are
+  // NOT auto-approved (no Maps verification + no captcha yet, F-010/F-022); we
+  // annotate the record so an admin can fast-clear low-risk applications and
+  // focus scrutiny on the rest. The pure rule + annotation are tested.
+  const autoReview = evaluateDealerApplicationAutoApproval({
+    dealershipName: data.dealershipName,
+    licenseNumber: data.licenseNumber,
+    state: data.state,
+    zip: data.zip,
+    verifiedPlaceId: false,
+  });
+
   // Merge streetAddress into notes if provided (legacy /dealer/apply form sends it)
   const mergedNotes = [
     data.streetAddress ? `Address: ${data.streetAddress}` : "",
     data.notes ?? "",
+    autoApprovalAnnotation(autoReview),
   ].filter(Boolean).join("\n") || null;
 
   // Check for duplicate pending/approved application from same email
