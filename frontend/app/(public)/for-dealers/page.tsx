@@ -163,8 +163,8 @@ const FAQS: DealerFaqItem[] = [
   },
 ];
 
-const H2 = "text-3xl font-bold leading-tight tracking-tight sm:text-4xl lg:text-[42px]";
-const EYEBROW = "text-xs font-bold uppercase tracking-[0.16em] text-[#0B5FD1]";
+const H2 = "text-3xl font-bold tracking-tight sm:text-4xl";
+const EYEBROW = "text-xs font-bold uppercase tracking-[0.15em] text-[#0B5FD1]";
 
 export default function ForDealersPage() {
   return (
@@ -300,7 +300,7 @@ export default function ForDealersPage() {
 
       {/* ── SECTION 2: STOP PAYING FOR LEADS ────────────────────────── */}
       <section className="bg-white">
-        <div className={`${CONTAINER} grid grid-cols-1 items-center gap-10 py-20 md:py-24 lg:grid-cols-2 lg:gap-16`}>
+        <div className={`${CONTAINER} grid grid-cols-1 items-center gap-10 py-20 md:py-28 lg:grid-cols-2 lg:gap-16`}>
           <div>
             <p className={`mb-4 ${EYEBROW}`}>The Lead-Gen Problem</p>
             <h2 className={H2}>Stop Paying For Leads That Never Buy</h2>
@@ -310,7 +310,7 @@ export default function ForDealersPage() {
             </p>
           </div>
 
-          <div className="rounded-2xl border border-[#E7ECF5] bg-[#F8F9FB] p-5 sm:p-8">
+          <div className="rounded-2xl border border-[#E5E7EB] bg-[#F8F9FB] p-5 sm:p-8">
             <p className="mb-4 text-xs font-bold uppercase tracking-[0.1em] text-[#8693A8]">
               Where the budget goes today
             </p>
@@ -353,7 +353,7 @@ export default function ForDealersPage() {
 
       {/* ── SECTION 3: WHY DEALERS JOIN ─────────────────────────────── */}
       <section id="why" className="scroll-mt-24 bg-[#F8F9FB]">
-        <div className={`${CONTAINER} py-20 md:py-24`}>
+        <div className={`${CONTAINER} py-20 md:py-28`}>
           <div className="mx-auto mb-14 max-w-2xl text-center">
             <p className={`mb-4 ${EYEBROW}`}>Why Dealers Join</p>
             <h2 className={H2}>Built To Help You Sell More Cars</h2>
@@ -365,7 +365,7 @@ export default function ForDealersPage() {
                 className={
                   card.highlight
                     ? "relative rounded-2xl bg-[#0A0F1A] p-8 shadow-[0_14px_34px_rgba(10,35,80,0.22)]"
-                    : "rounded-2xl border border-[#E7ECF5] bg-white p-8 shadow-[0_2px_10px_rgba(10,35,80,0.04)]"
+                    : "rounded-2xl border border-[#E5E7EB] bg-white p-8 shadow-[0_2px_10px_rgba(10,35,80,0.04)]"
                 }
               >
                 {card.highlight && (
@@ -392,7 +392,7 @@ export default function ForDealersPage() {
 
       {/* ── SECTION 4: HOW IT WORKS ─────────────────────────────────── */}
       <section id="how" className="scroll-mt-24 bg-white">
-        <div className={`${CONTAINER} py-20 md:py-24`}>
+        <div className={`${CONTAINER} py-20 md:py-28`}>
           <div className="mx-auto mb-14 max-w-2xl text-center">
             <p className={`mb-4 ${EYEBROW}`}>How Dealer Participation Works</p>
             <h2 className={H2}>Four Steps To More Sales</h2>
@@ -404,7 +404,7 @@ export default function ForDealersPage() {
                 className={
                   step.highlight
                     ? "rounded-2xl bg-[#0A0F1A] p-7 shadow-[0_14px_34px_rgba(10,35,80,0.22)]"
-                    : "rounded-2xl border border-[#E7ECF5] bg-[#F8F9FB] p-7"
+                    : "rounded-2xl border border-[#E5E7EB] bg-[#F8F9FB] p-7"
                 }
               >
                 <div className="mb-5 flex items-center justify-between">
@@ -425,9 +425,9 @@ export default function ForDealersPage() {
 
       {/* ── SECTION 5: MARKETPLACE DASHBOARD ────────────────────────── */}
       <section className="bg-[#0A0F1A] text-white">
-        <div className={`${CONTAINER} py-20 md:py-24`}>
+        <div className={`${CONTAINER} py-20 md:py-28`}>
           <div className="mx-auto mb-12 max-w-3xl text-center">
-            <p className="mb-4 text-xs font-bold uppercase tracking-[0.16em] text-[#4DA3FF]">The AutoLenis Dealer Marketplace</p>
+            <p className="mb-4 text-xs font-bold uppercase tracking-[0.15em] text-[#4DA3FF]">The AutoLenis Dealer Marketplace</p>
             <h2 className={H2}>Exclusive Buyer Opportunities, In One Place</h2>
             <p className="mt-4 text-base leading-relaxed text-white/70 sm:text-lg">
               Every opportunity comes pre-loaded with the details you need to make your best offer — fast.
@@ -435,7 +435,7 @@ export default function ForDealersPage() {
           </div>
 
           <div className="mx-auto max-w-5xl overflow-hidden rounded-2xl bg-white text-[#111827] shadow-[0_40px_90px_rgba(0,0,0,0.4)]">
-            <div className="flex items-center gap-2 border-b border-[#E7ECF5] bg-[#F3F5F9] px-4 py-3.5">
+            <div className="flex items-center gap-2 border-b border-[#E5E7EB] bg-[#F3F5F9] px-4 py-3.5">
               <span className="h-3 w-3 rounded-full bg-[#FF5F57]" aria-hidden="true" />
               <span className="h-3 w-3 rounded-full bg-[#FEBC2E]" aria-hidden="true" />
               <span className="h-3 w-3 rounded-full bg-[#28C840]" aria-hidden="true" />
@@ -506,7 +506,7 @@ export default function ForDealersPage() {
 
       {/* ── SECTION 6: THE ECONOMICS ────────────────────────────────── */}
       <section id="economics" className="scroll-mt-24 bg-white">
-        <div className={`${CONTAINER} py-20 md:py-24`}>
+        <div className={`${CONTAINER} py-20 md:py-28`}>
           <div className="mx-auto mb-14 max-w-2xl text-center">
             <p className={`mb-4 ${EYEBROW}`}>The Economics</p>
             <h2 className={H2}>A Smarter Way To Spend Your Acquisition Budget</h2>
@@ -516,7 +516,7 @@ export default function ForDealersPage() {
           </div>
 
           <div className="mx-auto grid max-w-4xl grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
-            <div className="rounded-2xl border border-[#E7ECF5] bg-[#F7F8FA] p-7 sm:p-8">
+            <div className="rounded-2xl border border-[#E5E7EB] bg-[#F7F8FA] p-7 sm:p-8">
               <h3 className="mb-6 text-xl font-bold text-[#3C485C]">Traditional Lead Sources</h3>
               <ul className="flex flex-col gap-4">
                 {ECON_TRADITIONAL.map((item) => (
@@ -556,7 +556,7 @@ export default function ForDealersPage() {
 
       {/* ── SECTION 7: WHY DEALERS PARTNER (CREDIBILITY BAND) ────────── */}
       <section className="bg-[#F8F9FB]">
-        <div className={`${CONTAINER} py-20 md:py-24`}>
+        <div className={`${CONTAINER} py-20 md:py-28`}>
           <div className="mx-auto mb-14 max-w-2xl text-center">
             <p className={`mb-4 ${EYEBROW}`}>Why Dealers Partner With AutoLenis</p>
             <h2 className={H2}>Built Around Serious Buyers — And Dealers Who Want Them</h2>
@@ -599,7 +599,7 @@ export default function ForDealersPage() {
 
       {/* ── SECTION 8: FAQ ──────────────────────────────────────────── */}
       <section id="faq" className="scroll-mt-24 bg-white">
-        <div className="mx-auto max-w-3xl px-6 py-20 md:px-12 md:py-24">
+        <div className="mx-auto max-w-3xl px-6 py-20 md:px-12 md:py-28">
           <div className="mx-auto mb-12 text-center">
             <p className={`mb-4 ${EYEBROW}`}>Frequently Asked Questions</p>
             <h2 className={H2}>Everything Dealers Ask</h2>
@@ -610,7 +610,7 @@ export default function ForDealersPage() {
 
       {/* ── FINAL CTA BAND ──────────────────────────────────────────── */}
       <section id="apply" className="scroll-mt-24 bg-[#111111] text-white">
-        <div className="mx-auto max-w-4xl px-6 py-20 text-center md:px-12 md:py-24">
+        <div className="mx-auto max-w-4xl px-6 py-20 text-center md:px-12 md:py-28">
           <h2 className="text-[28px] font-bold leading-[1.12] tracking-tight sm:text-4xl lg:text-[44px]">
             No Dealer Fees. No Monthly Costs. No Subscription.
             <br className="hidden sm:block" /> Just Qualified Buyers Ready To Purchase.
