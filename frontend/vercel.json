@@ -9,6 +9,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/deposit-activation-reconcile",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/dlq-drain",
       "schedule": "*/15 * * * *"
     },
