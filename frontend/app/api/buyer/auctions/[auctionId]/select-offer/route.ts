@@ -21,9 +21,9 @@ export async function POST(request: NextRequest, { params }: Props) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
-  let body: { offerId?: string };
+  let body: { offerId?: string; forceEarly?: boolean };
   try {
-    body = (await request.json()) as { offerId?: string };
+    body = (await request.json()) as { offerId?: string; forceEarly?: boolean };
   } catch {
     return errorResponse("BAD_REQUEST", "Invalid JSON body", 400);
   }
@@ -36,6 +36,24 @@ export async function POST(request: NextRequest, { params }: Props) {
   if (!auction) return errorResponse("NOT_FOUND", "Auction not found", 404);
   if (auction.status === "CANCELLED") {
     return errorResponse("AUCTION_CANCELLED", "This auction has been cancelled.", 409);
+  }
+
+  // F-007 — do not let a buyer silently end the 48h auction early. While the
+  // auction is still live (ACTIVE + endsAt in the future) competing dealers may
+  // still submit or improve offers, so accepting now cuts off the competition
+  // that produces the best price. Block unless the buyer makes an explicit,
+  // disclosed choice to accept early (forceEarly), which is audit-logged below.
+  const acceptingEarly =
+    auction.status === "ACTIVE" &&
+    !!auction.endsAt &&
+    auction.endsAt.getTime() > Date.now();
+  if (acceptingEarly && body?.forceEarly !== true) {
+    return errorResponse(
+      "AUCTION_LIVE",
+      "Your 48-hour auction is still live — dealers may still submit or improve their offers. " +
+        "Wait for it to close, or choose to accept this offer now and end the auction early.",
+      409,
+    );
   }
 
   // Anti-double-deal guard: a buyer may select only one offer per auction. Once
@@ -66,6 +84,20 @@ export async function POST(request: NextRequest, { params }: Props) {
     await tx.auction.update({ where: { id: auctionId }, data: { status: "CLOSED", closedAt: new Date() } });
     return created;
   });
+
+  // F-007 — audit the explicit early-accept (buyer ended the auction before its
+  // endsAt). Non-blocking; the selection has already committed.
+  if (acceptingEarly) {
+    await prisma.auditLog.create({
+      data: {
+        action: "AUCTION_CLOSED",
+        entityType: "auction",
+        entityId: auctionId,
+        reason: "Buyer accepted an offer before the 48h auction window ended (forceEarly).",
+        metadata: { buyerId: buyer.id, offerId: offer.id, dealId: deal.id, earlyAccept: true },
+      },
+    }).catch((e) => logger.error("[select-offer] early-accept audit log failed:", e));
+  }
 
   await prisma.notification.create({
     data: { buyerId: buyer.id, title: "Deal created!", body: "You selected your best deal. Continue to financing.", type: "DEAL_SELECTED" },
