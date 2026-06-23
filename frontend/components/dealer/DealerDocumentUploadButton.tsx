@@ -6,11 +6,28 @@ import { Upload } from "lucide-react";
 
 type UploadState = "idle" | "uploading" | "done" | "error";
 
-export default function DealerDocumentUploadButton() {
+interface DealOption {
+  id: string;
+  label: string;
+}
+
+// Document categories a dealer uploads against a deal. Values map to the
+// Prisma DocumentType enum; the API validates and falls back to OTHER.
+const DOC_TYPES: { value: string; label: string }[] = [
+  { value: "SALES_CONTRACT", label: "Sales Contract / Buyer Order" },
+  { value: "FINANCE_AGREEMENT", label: "Finance Agreement" },
+  { value: "INSURANCE_PROOF", label: "Proof of Insurance" },
+  { value: "TRADE_IN_TITLE", label: "Trade-in Title" },
+  { value: "OTHER", label: "Other" },
+];
+
+export default function DealerDocumentUploadButton({ deals = [] }: { deals?: DealOption[] }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [state, setState] = useState<UploadState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [dealId, setDealId] = useState<string>("");
+  const [docType, setDocType] = useState<string>("OTHER");
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -31,6 +48,8 @@ export default function DealerDocumentUploadButton() {
     try {
       const form = new FormData();
       form.append("file", file);
+      form.append("type", docType);
+      if (dealId) form.append("dealId", dealId);
 
       const res = await fetch("/api/dealer/documents/upload", {
         method: "POST",
@@ -46,7 +65,6 @@ export default function DealerDocumentUploadButton() {
 
       setState("done");
       router.refresh();
-      // Reset after a moment so the button can be used again
       resetTimerRef.current = setTimeout(() => {
         setState("idle");
         if (fileRef.current) fileRef.current.value = "";
@@ -59,23 +77,54 @@ export default function DealerDocumentUploadButton() {
   }
 
   return (
-    <div data-testid="dealer-doc-upload-button">
+    <div className="flex flex-col items-end gap-1.5" data-testid="dealer-doc-upload-button">
       {error && (
-        <p className="text-xs text-red-600 mb-1" data-testid="dealer-doc-upload-error">
+        <p className="text-xs text-red-600" data-testid="dealer-doc-upload-error">
           {error}
         </p>
       )}
 
-      <button
-        type="button"
-        onClick={() => fileRef.current?.click()}
-        disabled={state === "uploading"}
-        className="flex items-center gap-1.5 text-sm bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 font-medium px-3 py-1.5 rounded-lg transition-colors"
-        data-testid="dealer-upload-doc-btn"
-      >
-        <Upload size={14} />
-        {state === "uploading" ? "Uploading..." : state === "done" ? "Uploaded!" : "Upload"}
-      </button>
+      <div className="flex items-center gap-2">
+        <select
+          value={docType}
+          onChange={(e) => setDocType(e.target.value)}
+          disabled={state === "uploading"}
+          className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 bg-white disabled:opacity-50"
+          data-testid="dealer-doc-type-select"
+          aria-label="Document type"
+        >
+          {DOC_TYPES.map((t) => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
+
+        {deals.length > 0 && (
+          <select
+            value={dealId}
+            onChange={(e) => setDealId(e.target.value)}
+            disabled={state === "uploading"}
+            className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 bg-white max-w-[16rem] disabled:opacity-50"
+            data-testid="dealer-doc-deal-select"
+            aria-label="Associate with deal"
+          >
+            <option value="">No deal (general)</option>
+            {deals.map((d) => (
+              <option key={d.id} value={d.id}>{d.label}</option>
+            ))}
+          </select>
+        )}
+
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={state === "uploading"}
+          className="flex items-center gap-1.5 text-sm bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 font-medium px-3 py-1.5 rounded-lg transition-colors"
+          data-testid="dealer-upload-doc-btn"
+        >
+          <Upload size={14} />
+          {state === "uploading" ? "Uploading..." : state === "done" ? "Uploaded!" : "Upload"}
+        </button>
+      </div>
 
       <input
         ref={fileRef}

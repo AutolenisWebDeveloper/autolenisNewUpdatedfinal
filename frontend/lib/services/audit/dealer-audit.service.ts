@@ -13,6 +13,7 @@ export type DealerAuditAction =
   | "DEALER_OFFER_SUBMITTED"
   | "DEALER_OFFER_REVISED"
   | "DEALER_DOCUMENT_UPLOADED"
+  | "DEALER_DEAL_DOCUMENT_LINKED"
   | "DEALER_CONTRACT_SIGNED";
 
 interface DealerAuditInput {

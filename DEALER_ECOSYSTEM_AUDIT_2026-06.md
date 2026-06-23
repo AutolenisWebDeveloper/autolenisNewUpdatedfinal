@@ -116,8 +116,53 @@ churn.)
 
 ---
 
+## Document-to-deal association mechanism (added)
+
+**Problem:** The `Document` model already carried `dealId` / `buyerId` /
+`dealerId` / `type` columns, but the dealer documents-upload route never
+populated them — every dealer-uploaded document was orphaned from its deal,
+untyped (`OTHER`), and unsearchable by deal/buyer.
+
+**Implemented** (`lib/services/dealer/deal-document-link.service.ts` +
+`app/api/dealer/documents/upload/route.ts` + documents UI):
+
+- **Verified association, never guessed.** A document is linked to a deal only
+  after `resolveOwnedDealAssociation()` confirms the deal's accepted offer
+  belongs to the authenticated dealer (`offer.dealerId`). A `dealId` that does
+  not resolve to an owned deal is rejected (`403`/`404`) — orphaned and
+  cross-dealer associations are impossible.
+- **Multi-identifier cross-validation.** Optional client-supplied **Buyer ID**,
+  **VIN**, and **Transaction ID** are checked against the deal's authoritative
+  values (buyer = `Deal.buyerId`, transaction = `Deal.stripeFeePIId`, VIN =
+  the deal's auction-vehicle inventory VINs). A correct deal id paired with the
+  wrong buyer/vehicle/transaction is rejected (`409 *_MISMATCH`) rather than
+  mis-filed. VIN/transaction checks are skipped when the deal has no known
+  value, never blocking legitimately.
+- **Duplicate prevention.** An identical re-upload (same deal + dealer + type +
+  name + size) returns the existing record idempotently and removes the
+  redundant storage object — no duplicate `Document` rows from double-click /
+  retry. (Zero-migration: dedup uses existing columns; a content-hash column is
+  a future hardening.)
+- **Full traceability + audit.** The link is persisted as `Document.dealId` +
+  `buyerId` + `dealerId` + `type` (searchable via the existing
+  `getDealDocuments` / `getDocumentsByDeal`), and every link writes a
+  `DEALER_DEAL_DOCUMENT_LINKED` audit record capturing dealId, buyerId,
+  transactionId, and VINs.
+- **Orphan-safe storage.** The deal is validated *before* the file is written to
+  the bucket, and any rejected/deduped upload removes its storage object, so the
+  bucket mirrors the document records.
+- **UX.** The documents page now offers a document-type selector and an optional
+  deal selector (the dealer's own deals), and each row shows its type + linked
+  deal. Uploading with "No deal (general)" preserves the prior dealer-scoped
+  behavior.
+
+The pre-existing contract-upload path (`ContractVersion`) was already deal-linked
+and gained dealer-ownership validation in the security fixes above.
+
 ## Verification
 
 - `npx tsc --noEmit` — passes (0 errors).
 - `npx eslint` on all changed files — passes.
 - `npx tsx --test lib/services/dealer-recruitment/__tests__/*.test.ts` — 14/14 pass.
+- `npx tsx --test lib/services/dealer/__tests__/deal-document-link.test.ts` — 8/8 pass
+  (identifier cross-validation + VIN normalization contract).
