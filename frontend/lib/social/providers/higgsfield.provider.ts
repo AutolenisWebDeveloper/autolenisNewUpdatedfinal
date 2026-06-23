@@ -26,8 +26,15 @@ import type {
 
 const WEBHOOK_URL = "https://www.autolenis.com/api/webhooks/higgsfield";
 
+// True when Higgsfield credentials are configured. Higgsfield is the exclusive
+// image-generation provider, so every image path gates on this rather than on
+// any OpenAI key.
+export function hasHiggsfieldCredentials(): boolean {
+  return Boolean(process.env.HF_CREDENTIALS || process.env.HIGGSFIELD_API_KEY);
+}
+
 // HTTP Basic from "key_id:key_secret", else Bearer from HIGGSFIELD_API_KEY.
-function getAuthHeader(): string {
+export function getAuthHeader(): string {
   const creds = process.env.HF_CREDENTIALS;
   if (creds) {
     const encoded = Buffer.from(creds).toString("base64");
@@ -38,11 +45,11 @@ function getAuthHeader(): string {
   throw new Error("No Higgsfield credentials configured");
 }
 
-function baseUrl(): string {
+export function baseUrl(): string {
   return (process.env.HIGGSFIELD_BASE_URL ?? "https://platform.higgsfield.ai").replace(/\/$/, "");
 }
 
-function webhookConfig(): { url: string; secret: string } | undefined {
+export function webhookConfig(): { url: string; secret: string } | undefined {
   const secret = process.env.HIGGSFIELD_WEBHOOK_SECRET;
   if (!secret) return undefined;
   return { url: WEBHOOK_URL, secret };
@@ -50,7 +57,7 @@ function webhookConfig(): { url: string; secret: string } | undefined {
 
 // Core request wrapper — POSTs { input, withPolling, webhook } to an endpoint
 // and returns the parsed HiggsfieldResponse.
-async function higgsfieldRequest(args: {
+export async function higgsfieldRequest(args: {
   endpoint: string;
   input: Record<string, unknown>;
   withPolling?: boolean;

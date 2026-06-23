@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { generateAndQueuePost, getOptimalSlot } from "@/lib/social/social-post.orchestrator";
 import { DAILY_POST_TARGETS } from "@/lib/social/config";
 import { generateDailySignals } from "@/lib/social/daily-signal.generator";
+import { hasHiggsfieldCredentials } from "@/lib/social/providers/higgsfield.provider";
 
 // Up to 5 minutes — Groq calls dominate the runtime.
 export const maxDuration = 300;
@@ -163,7 +164,7 @@ export async function GET(request: NextRequest) {
 
   // 5. Trigger image generation for the new posts. Fire-and-forget — a slow or
   //    failed image pass must never affect the generation response.
-  if (process.env.OPENAI_API_KEY && created > 0) {
+  if (hasHiggsfieldCredentials() && created > 0) {
     fetch(
       `${process.env.NEXT_PUBLIC_APP_URL}/api/admin/social/generate-images`,
       {

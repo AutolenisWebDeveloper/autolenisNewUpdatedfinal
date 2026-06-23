@@ -1,15 +1,13 @@
 // POST /api/admin/social/compose/generate-preview-image
-// Generates an image from an imageBrief via the configured OpenAI image model
-// (OPENAI_IMAGE_MODEL, default gpt-image-1) and returns a stable hosted URL so
-// the ComposeDrawer can preview it inline before the post is created.
+// Generates an image from an imageBrief via Higgsfield (the exclusive image
+// provider) and returns a stable hosted URL so the ComposeDrawer can preview it
+// inline before the post is created.
 
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
-import { generateDalleImage } from "@/lib/social/providers/dalle.provider";
-import {
-  storeImageB64InSupabase,
-  storeImageInSupabase,
-} from "@/lib/social/image-generation.service";
+import { generateHiggsfieldImage } from "@/lib/social/providers/higgsfield-image.provider";
+import { hasHiggsfieldCredentials } from "@/lib/social/providers/higgsfield.provider";
+import { storeImageInSupabase } from "@/lib/social/image-generation.service";
 
 interface PreviewImageBody {
   imageBrief?: string;
@@ -26,17 +24,17 @@ export async function POST(request: NextRequest) {
     .catch(() => ({}));
   if (!imageBrief) return adminError("VALIDATION_ERROR", "imageBrief required", 400);
 
-  if (!process.env.OPENAI_API_KEY) {
-    return adminError("CONFIG_ERROR", "OPENAI_API_KEY not configured", 500);
+  if (!hasHiggsfieldCredentials()) {
+    return adminError("CONFIG_ERROR", "Higgsfield credentials not configured", 500);
   }
 
-  const result = await generateDalleImage({
+  const result = await generateHiggsfieldImage({
     visualPrompt: imageBrief,
     franchise: franchiseSlug ?? "",
     platform: platform ?? "instagram",
   });
 
-  if (!result.success || (!result.imageUrl && !result.imageB64)) {
+  if (!result.success || !result.imageUrl) {
     return adminError(
       "IMAGE_GENERATION_FAILED",
       result.error ?? "Image generation failed",
@@ -44,13 +42,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Re-host to Supabase so the preview URL is stable (dall-e URLs expire; gpt
-  // returns base64). Keyed by a transient compose id since no post exists yet.
+  // Re-host to Supabase so the preview URL is stable (Higgsfield delivery URLs
+  // are temporary). Keyed by a transient compose id since no post exists yet.
   const previewId = `compose-preview/${admin.adminId}-${Date.now()}`;
   try {
-    const imageUrl = result.imageB64
-      ? await storeImageB64InSupabase(result.imageB64, previewId)
-      : await storeImageInSupabase(result.imageUrl!, previewId);
+    const imageUrl = await storeImageInSupabase(result.imageUrl, previewId);
     return adminSuccess({ imageUrl, platform, model: result.model });
   } catch (err) {
     // If storage is unavailable but the model returned a URL, fall back to it.

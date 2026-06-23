@@ -1,5 +1,5 @@
 // POST /api/admin/social/generate-images
-// One-shot admin endpoint to batch-generate DALL-E 3 images for APPROVED posts
+// One-shot admin endpoint to batch-generate Higgsfield images for APPROVED posts
 // that still have no SocialVideo record (no media). Each post gets a branded
 // still image attached and its SocialVideo marked VIDEO_READY so the publishing
 // queue can pick it up. Processes a bounded batch per call to stay within the
@@ -15,15 +15,16 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
-import { generateDalleImage } from "@/lib/social/providers/dalle.provider";
-import { storeImageInSupabase, storeImageB64InSupabase } from "@/lib/social/image-generation.service";
+import { generateHiggsfieldImage } from "@/lib/social/providers/higgsfield-image.provider";
+import { hasHiggsfieldCredentials } from "@/lib/social/providers/higgsfield.provider";
+import { storeImageInSupabase } from "@/lib/social/image-generation.service";
 
 export const maxDuration = 60;
 
-// DALL-E 3 standard tier allows ~5 images/min. With a batch of 5 and ~2s per API
-// call we stay well under the cap, so no inter-request delay is needed.
+// Bounded batch keeps each call within the serverless time budget; each
+// Higgsfield image is generated and polled synchronously.
 const BATCH_SIZE = 5;
-const DALLE_PROVIDER = "dalle3";
+const IMAGE_PROVIDER = "higgsfield";
 const STORAGE_BUCKET = "social-media-assets";
 
 export async function POST(request: NextRequest) {
@@ -40,14 +41,14 @@ export async function POST(request: NextRequest) {
     if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
   }
 
-  // Check OPENAI_API_KEY first — bail out cleanly with a clear, machine-readable
-  // signal rather than failing every post in the batch.
-  if (!process.env.OPENAI_API_KEY) {
+  // Check Higgsfield credentials first — bail out cleanly with a clear,
+  // machine-readable signal rather than failing every post in the batch.
+  if (!hasHiggsfieldCredentials()) {
     return adminSuccess({
       processed: 0,
       generated: 0,
       failed: 0,
-      error: "OPENAI_API_KEY not configured in Vercel environment variables",
+      error: "Higgsfield credentials (HF_CREDENTIALS) not configured in Vercel environment variables",
       apiKeyConfigured: false,
     });
   }
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest) {
 
   logger.info(
     `[generate-images] found ${postsNeedingImages.length} posts`,
-    `OPENAI_API_KEY: ${!!process.env.OPENAI_API_KEY}`,
+    `higgsfield configured: ${hasHiggsfieldCredentials()}`,
   );
 
   if (postsNeedingImages.length === 0) {
@@ -95,7 +96,7 @@ export async function POST(request: NextRequest) {
         post.franchise?.slug,
       );
 
-      const result = await generateDalleImage({
+      const result = await generateHiggsfieldImage({
         visualPrompt,
         franchise: post.franchise?.slug ?? "",
         platform: post.platform,
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest) {
       });
 
       logger.info(
-        "[generate-images] dalle result:",
+        "[generate-images] higgsfield result:",
         post.id,
         "success:",
         result.success,
@@ -113,39 +114,30 @@ export async function POST(request: NextRequest) {
         result.error,
       );
 
-      if (!result.success || (!result.imageUrl && !result.imageB64)) {
+      if (!result.success || !result.imageUrl) {
         throw new Error(result.error ?? "Unknown image generation error");
       }
 
-      // gpt-image-1 returns base64; dall-e-* return a temporary URL (~1h). Either
-      // way, persist to Supabase for a stable URL. For URL results, fall back to
-      // the provider URL if storage fails so the post still has an image.
-      let storedImageUrl = result.imageUrl ?? "";
+      // Higgsfield returns a temporary delivery URL. Re-host to Supabase for a
+      // stable URL; fall back to the provider URL if storage fails so the post
+      // still has an image.
+      let storedImageUrl = result.imageUrl;
       let storagePath: string | null = null;
       try {
-        if (result.imageB64) {
-          storedImageUrl = await storeImageB64InSupabase(result.imageB64, post.id);
-          storagePath = `social-posts/${post.id}/image.png`;
-        } else {
-          storedImageUrl = await storeImageInSupabase(result.imageUrl!, post.id);
-          storagePath = `social-posts/${post.id}/image.jpg`;
-        }
+        storedImageUrl = await storeImageInSupabase(result.imageUrl, post.id);
+        storagePath = `social-posts/${post.id}/image.jpg`;
       } catch (storeErr) {
         logger.error(
           "[generate-images] supabase store failed:",
           post.id,
           storeErr,
         );
-        if (!result.imageUrl) {
-          // base64 with no hosting fallback — skip rather than store an unusable image.
-          throw new Error("image storage failed for base64 image");
-        }
       }
 
       await prisma.socialVideo.create({
         data: {
           postId: post.id,
-          provider: DALLE_PROVIDER,
+          provider: IMAGE_PROVIDER,
           status: "VIDEO_READY",
           thumbnailUrl: storedImageUrl,
           videoUrl: null,
@@ -173,7 +165,7 @@ export async function POST(request: NextRequest) {
         .create({
           data: {
             postId: post.id,
-            provider: DALLE_PROVIDER,
+            provider: IMAGE_PROVIDER,
             status: "VIDEO_FAILED",
             errorMessage: errorMessage.slice(0, 500),
             visualPrompt,

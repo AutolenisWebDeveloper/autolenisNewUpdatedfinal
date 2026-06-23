@@ -178,6 +178,9 @@ declare namespace NodeJS {
     HF_CREDENTIALS?: string;
     // Production platform host, e.g. https://platform.higgsfield.ai
     HIGGSFIELD_BASE_URL?: string;
+    // Higgsfield text-to-image endpoint (exclusive image provider). Defaults to
+    // "flux-pro/kontext/max/text-to-image" when unset.
+    HIGGSFIELD_IMAGE_ENDPOINT?: string;
     HIGGSFIELD_WEBHOOK_SECRET?: string;     // verifies media-completion callbacks
     // Fallback Bearer token when HF_CREDENTIALS is not set.
     HIGGSFIELD_API_KEY?: string;

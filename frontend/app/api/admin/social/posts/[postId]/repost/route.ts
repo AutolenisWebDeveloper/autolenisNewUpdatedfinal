@@ -6,6 +6,7 @@
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { hasHiggsfieldCredentials } from "@/lib/social/providers/higgsfield.provider";
 
 export async function POST(
   request: NextRequest,
@@ -88,7 +89,7 @@ export async function POST(
   });
 
   // Trigger image generation for the new post (fire and forget).
-  if (process.env.OPENAI_API_KEY) {
+  if (hasHiggsfieldCredentials()) {
     fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/admin/social/generate-images`, {
       method: "POST",
       headers: {

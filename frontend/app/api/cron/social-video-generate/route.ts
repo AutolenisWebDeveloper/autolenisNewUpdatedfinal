@@ -1,6 +1,6 @@
 // Social Engine — Cron: Runway Gen-4 Turbo Video Generation.
-// Finds Tier 1 posts (TikTok / Instagram / YouTube) that already have a DALL-E
-// still (SocialVideo VIDEO_READY with a thumbnailUrl but no videoUrl) and
+// Finds Tier 1 posts (TikTok / Instagram / YouTube) that already have a
+// Higgsfield still (SocialVideo VIDEO_READY with a thumbnailUrl but no videoUrl) and
 // animates the still into a 5-second video via Runway Gen-4 Turbo. The resolved
 // video is stored in Supabase for a stable URL and written back onto the
 // SocialVideo (status stays VIDEO_READY, now carrying videoUrl), which the
@@ -93,11 +93,11 @@ export async function GET(request: NextRequest) {
 
   const remaining = Math.min(DAILY_VIDEO_LIMIT - todayVideoCount, MAX_PER_RUN);
 
-  // Posts that have a DALL-E image but no video yet — Tier 1 platforms only,
+  // Posts that have a Higgsfield image but no video yet — Tier 1 platforms only,
   // image ready (VIDEO_READY) and parent post still APPROVED.
   const postsNeedingVideo = await prisma.socialVideo.findMany({
     where: {
-      thumbnailUrl: { not: null }, // has DALL-E image
+      thumbnailUrl: { not: null }, // has Higgsfield image
       videoUrl: null, // no video yet
       status: "VIDEO_READY", // image is ready
       post: {
