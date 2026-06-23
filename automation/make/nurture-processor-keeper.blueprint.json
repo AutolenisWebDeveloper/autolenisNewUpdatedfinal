@@ -1,0 +1,215 @@
+{
+	"flow": [
+		{
+			"id": 1,
+			"mapper": {
+				"sort": [
+					{
+						"key": "due_at",
+						"order": 1
+					}
+				],
+				"limit": 50,
+				"filter": [
+					[
+						{
+							"a": "status",
+							"b": "active",
+							"o": "text:equal"
+						},
+						{
+							"a": "due_at",
+							"b": "{{now}}",
+							"o": "date:less"
+						}
+					]
+				]
+			},
+			"module": "datastore:SearchRecord",
+			"version": 1,
+			"metadata": {
+				"designer": {
+					"x": 137,
+					"y": 341
+				}
+			},
+			"parameters": {
+				"datastore": 108287
+			}
+		},
+		{
+			"id": 2,
+			"mapper": {
+				"key": "{{1.campaign}}:{{1.next_step}}",
+				"returnWrapped": false
+			},
+			"module": "datastore:GetRecord",
+			"version": 1,
+			"metadata": {
+				"designer": {
+					"x": -277,
+					"y": 235
+				}
+			},
+			"parameters": {
+				"datastore": 108892
+			}
+		},
+		{
+			"id": 3,
+			"mapper": {
+				"url": "https://www.autolenis.com/api/crm/dispatch/email",
+				"data": "{\"contactId\":\"{{1.contact_id}}\",\"templateKey\":\"{{2.template_key}}\",\"type\":\"marketing\",\"scenarioId\":\"{{1.campaign}}:{{1.next_step}}\"}",
+				"gzip": true,
+				"method": "post",
+				"headers": [
+					{
+						"name": "x-dispatch-key",
+						"value": "__REPLACE_WITH_CRM_DISPATCH_KEY__"
+					},
+					{
+						"name": "x-idempotency-key",
+						"value": "{{1.key}}:{{1.next_step}}"
+					},
+					{
+						"name": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"useMtls": false,
+				"bodyType": "raw",
+				"contentType": "application/json",
+				"serializeUrl": false,
+				"shareCookies": false,
+				"parseResponse": true,
+				"followRedirect": true,
+				"useQuerystring": false,
+				"followAllRedirects": false,
+				"rejectUnauthorized": true
+			},
+			"module": "http:ActionSendData",
+			"version": 3,
+			"metadata": {
+				"designer": {
+					"x": 139,
+					"y": -318
+				}
+			},
+			"parameters": {
+				"handleErrors": false
+			}
+		},
+		{
+			"id": 4,
+			"mapper": null,
+			"module": "builtin:BasicRouter",
+			"routes": [
+				{
+					"flow": [
+						{
+							"id": 5,
+							"filter": {
+								"name": "last",
+								"conditions": [
+									[
+										{
+											"a": "{{2.is_last}}",
+											"b": true,
+											"o": "boolean:equal"
+										}
+									]
+								]
+							},
+							"mapper": {
+								"key": "{{1.key}}",
+								"data": {
+									"status": "completed"
+								},
+								"upsert": false,
+								"overwriteArrays": false
+							},
+							"module": "datastore:UpdateRecord",
+							"version": 1,
+							"metadata": {
+								"designer": {
+									"x": 436,
+									"y": -161
+								}
+							},
+							"parameters": {
+								"datastore": 108287
+							}
+						}
+					]
+				},
+				{
+					"flow": [
+						{
+							"id": 6,
+							"filter": {
+								"name": "advance",
+								"conditions": [
+									[
+										{
+											"a": "{{2.is_last}}",
+											"b": true,
+											"o": "boolean:notequal"
+										}
+									]
+								]
+							},
+							"mapper": {
+								"key": "{{1.key}}",
+								"data": {
+									"due_at": "{{addHours(now; 2.offset_hours)}}",
+									"next_step": "{{1.next_step + 1}}"
+								},
+								"upsert": false,
+								"overwriteArrays": false
+							},
+							"module": "datastore:UpdateRecord",
+							"version": 1,
+							"metadata": {
+								"designer": {
+									"x": -288,
+									"y": -108
+								}
+							},
+							"parameters": {
+								"datastore": 108287
+							}
+						}
+					]
+				}
+			],
+			"version": 1,
+			"metadata": {
+				"designer": {
+					"x": 327,
+					"y": 233
+				}
+			}
+		}
+	],
+	"name": "AutoLenis Nurture Processor KEEPER",
+	"metadata": {
+		"instant": false,
+		"version": 1,
+		"designer": {
+			"orphans": []
+		},
+		"scenario": {
+			"slots": null,
+			"maxErrors": 3,
+			"autoCommit": true
+		}
+	},
+	"scheduling": {
+		"type": "indefinitely",
+		"interval": 900
+	},
+	"interface": {
+		"input": [],
+		"output": []
+	}
+}
