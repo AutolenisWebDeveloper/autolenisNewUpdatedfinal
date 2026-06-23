@@ -1,7 +1,7 @@
 // POST /api/admin/dealers/[dealerId]/reactivate
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { getAdminWithRole, adminSuccess, adminError, OPERATIONAL_ROLES } from "@/lib/auth/admin-api";
 import { z } from "zod";
 import { reactivateDealerByAdmin } from "@/lib/services/admin/admin-dealer-command-center.service";
 import { prisma } from "@/lib/prisma";
@@ -15,8 +15,8 @@ const schema = z.object({
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { dealerId } = await params;
-  const admin = await getAdminFromRequest(request);
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  const admin = await getAdminWithRole(request, OPERATIONAL_ROLES);
+  if (!admin) return adminError("FORBIDDEN", "Operational admin role required to reactivate a dealer.", 403);
 
   let body: unknown;
   try { body = await request.json(); } catch { return adminError("VALIDATION_ERROR", "Invalid JSON", 400); }

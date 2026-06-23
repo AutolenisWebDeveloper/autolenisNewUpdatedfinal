@@ -6,6 +6,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { createServiceSupabaseClient } from "@/lib/supabase";
+import { assertDealerOwnsDeal, DealOwnershipError } from "@/lib/services/dealer/dealer-contract.service";
 
 const MAX_BYTES = 20 * 1024 * 1024; // 20 MB
 const BUCKET = "dealer-contracts";
@@ -26,6 +27,14 @@ export async function POST(request: NextRequest) {
 
   if (!file) return errorResponse("VALIDATION_ERROR", "File is required", 400);
   if (!dealId) return errorResponse("VALIDATION_ERROR", "dealId is required", 400);
+
+  // Only allow uploading against a deal this dealer actually won.
+  try {
+    await assertDealerOwnsDeal(dealId, dealer.id);
+  } catch (err) {
+    if (err instanceof DealOwnershipError) return errorResponse("FORBIDDEN", err.message, 403);
+    throw err;
+  }
 
   if (file.type !== "application/pdf") {
     return errorResponse("VALIDATION_ERROR", "Only PDF files are accepted", 400);

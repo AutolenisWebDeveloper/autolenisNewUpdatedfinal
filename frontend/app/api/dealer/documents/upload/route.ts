@@ -8,6 +8,15 @@ import { createServiceSupabaseClient } from "@/lib/supabase";
 import { DocumentType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { writeDealerAudit } from "@/lib/services/audit/dealer-audit.service";
+import { linkDealDocument, DealDocumentError } from "@/lib/services/dealer/deal-document-link.service";
+
+/** Resolve a client-supplied document-type string to a valid enum member. */
+function parseDocumentType(raw: string | null): DocumentType {
+  if (raw && (Object.values(DocumentType) as string[]).includes(raw)) {
+    return raw as DocumentType;
+  }
+  return DocumentType.OTHER;
+}
 
 const MAX_BYTES = 20 * 1024 * 1024; // 20 MB
 const BUCKET = "dealer-documents";
@@ -45,6 +54,29 @@ export async function POST(request: NextRequest) {
     return errorResponse("VALIDATION_ERROR", "File must be under 20 MB", 400);
   }
 
+  // Optional deal-association fields. When dealId is present the document is
+  // linked to that deal through the validated linker (ownership + identifier
+  // cross-checks + dedup). When absent it remains a dealer-scoped document.
+  const dealId = (form.get("dealId") as string | null)?.trim() || null;
+  const docType = parseDocumentType(form.get("type") as string | null);
+  const expectedVin = (form.get("vin") as string | null)?.trim() || null;
+  const expectedBuyerId = (form.get("buyerId") as string | null)?.trim() || null;
+  const expectedTransactionId = (form.get("transactionId") as string | null)?.trim() || null;
+
+  // Fail fast on an invalid/non-owned deal BEFORE consuming storage, so a
+  // rejected association never leaves an orphaned object in the bucket.
+  if (dealId) {
+    try {
+      const { resolveOwnedDealAssociation } = await import(
+        "@/lib/services/dealer/deal-document-link.service"
+      );
+      await resolveOwnedDealAssociation(dealId, dealer.id);
+    } catch (err) {
+      if (err instanceof DealDocumentError) return errorResponse(err.code, err.message, err.status);
+      throw err;
+    }
+  }
+
   const supabase = createServiceSupabaseClient();
   const ext = MIME_TO_EXT[file.type] ?? "bin";
   const path = `${dealer.id}/${crypto.randomUUID()}.${ext}`;
@@ -63,10 +95,49 @@ export async function POST(request: NextRequest) {
     data: { publicUrl },
   } = supabase.storage.from(BUCKET).getPublicUrl(path);
 
+  // Deal-linked path: validated association + idempotent dedup + audit.
+  if (dealId) {
+    try {
+      const { document, deduped, resolved } = await linkDealDocument({
+        dealerId: dealer.id,
+        dealerUserId: dealer.userId,
+        dealId,
+        type: docType,
+        name: file.name,
+        url: publicUrl,
+        mimeType: file.type,
+        sizeBytes: file.size,
+        expectedVin,
+        expectedBuyerId,
+        expectedTransactionId,
+      });
+      // A deduped re-upload leaves the freshly uploaded object unreferenced —
+      // remove it so storage mirrors the (single) document record.
+      if (deduped) {
+        await supabase.storage.from(BUCKET).remove([path]).catch(() => {});
+      }
+      return successResponse({
+        documentId: document.id,
+        name: document.name,
+        type: document.type,
+        dealId: resolved.dealId,
+        buyerId: resolved.buyerId,
+        deduped,
+      });
+    } catch (err) {
+      if (err instanceof DealDocumentError) {
+        await supabase.storage.from(BUCKET).remove([path]).catch(() => {});
+        return errorResponse(err.code, err.message, err.status);
+      }
+      throw err;
+    }
+  }
+
+  // Unlinked dealer-scoped document (compliance records, general uploads).
   const doc = await prisma.document.create({
     data: {
       dealerId:  dealer.id,
-      type:      DocumentType.OTHER,
+      type:      docType,
       name:      file.name,
       url:       publicUrl,
       mimeType:  file.type,
@@ -77,6 +148,7 @@ export async function POST(request: NextRequest) {
   await writeDealerAudit({
     action: "DEALER_DOCUMENT_UPLOADED",
     dealerId: dealer.id,
+    dealerUserId: dealer.userId,
     entityType: "Document",
     entityId: doc.id,
     metadata: {
