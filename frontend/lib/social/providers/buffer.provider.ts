@@ -99,6 +99,33 @@ const CREATE_POST_MUTATION = `
   }
 `;
 
+// Verifies the API key by resolving the authenticated account's organizations.
+const ACCOUNT_QUERY = `
+  query GetAccount {
+    account {
+      organizations {
+        id
+        name
+      }
+    }
+  }
+`;
+
+// Lists the channels (connected social profiles) for an organization. The
+// organizationId is inlined (it comes from Buffer's own account response, so it
+// is trusted) to avoid depending on the exact name of the input variable type.
+function channelsQuery(organizationId: string): string {
+  return `
+    query GetChannels {
+      channels(input: { organizationId: ${JSON.stringify(organizationId)} }) {
+        id
+        name
+        service
+      }
+    }
+  `;
+}
+
 const GET_POST_QUERY = `
   query GetPost($id: String!) {
     post(id: $id) {
@@ -282,5 +309,118 @@ export class BufferProvider implements PublishingProvider {
       logger.error(`[publish:buffer] getAnalytics failed: ${message}`);
       return { likes: 0, comments: 0, shares: 0, clicks: 0, reach: 0, error: message };
     }
+  }
+}
+
+// ── Live connection verification ─────────────────────────────────────────────
+// Used by the admin "Test Buffer Connection" action. Unlike the env-presence
+// check in /api/admin/social/connections, this makes a real authenticated call:
+// it validates the API key (account → organizations), lists the connected
+// channels, and cross-references each configured BUFFER_PROFILE_* id against the
+// real channels so a stale/wrong id surfaces as "not matched".
+
+export interface BufferChannel {
+  id: string;
+  name: string;
+  service: string;
+}
+
+export interface BufferConfiguredChannel {
+  platform: string;
+  profileId: string; // configured BUFFER_PROFILE_* value ("" when unset)
+  present: boolean; // env var set
+  matched: boolean; // configured id exists among real channels
+  channelName?: string; // name of the matched real channel
+}
+
+export interface BufferVerifyResult {
+  enabled: boolean; // ENABLE_BUFFER_PUBLISHING
+  apiKeyPresent: boolean;
+  apiKeyValid: boolean;
+  organizations: { id: string; name: string }[];
+  channels: BufferChannel[];
+  configured: BufferConfiguredChannel[];
+  error?: string;
+}
+
+interface AccountQueryResult {
+  account?: { organizations?: { id?: string; name?: string }[] };
+}
+interface ChannelsQueryResult {
+  channels?: { id?: string; name?: string; service?: string }[];
+}
+
+export async function verifyBufferConnection(): Promise<BufferVerifyResult> {
+  const enabled = process.env.ENABLE_BUFFER_PUBLISHING === "true";
+  const apiKeyPresent = Boolean(process.env.BUFFER_API_KEY && process.env.BUFFER_API_KEY.trim());
+
+  const idMap = channelIdMap();
+  const buildConfigured = (channels: BufferChannel[]): BufferConfiguredChannel[] =>
+    Object.entries(idMap).map(([platform, profileId]) => {
+      const match = profileId ? channels.find((c) => c.id === profileId) : undefined;
+      return {
+        platform,
+        profileId,
+        present: Boolean(profileId),
+        matched: Boolean(match),
+        channelName: match?.name,
+      };
+    });
+
+  if (!apiKeyPresent) {
+    return {
+      enabled,
+      apiKeyPresent: false,
+      apiKeyValid: false,
+      organizations: [],
+      channels: [],
+      configured: buildConfigured([]),
+      error: "BUFFER_API_KEY not configured",
+    };
+  }
+
+  try {
+    const acct = (await bufferGraphQL(ACCOUNT_QUERY)) as AccountQueryResult;
+    const organizations = (acct?.account?.organizations ?? [])
+      .filter((o): o is { id: string; name?: string } => Boolean(o?.id))
+      .map((o) => ({ id: o.id, name: o.name ?? "" }));
+
+    // Aggregate channels across every organization the token can see so a
+    // profile id under any org still matches.
+    const channels: BufferChannel[] = [];
+    for (const org of organizations) {
+      try {
+        const data = (await bufferGraphQL(channelsQuery(org.id))) as ChannelsQueryResult;
+        for (const c of data?.channels ?? []) {
+          if (c?.id) channels.push({ id: c.id, name: c.name ?? "", service: c.service ?? "" });
+        }
+      } catch (err) {
+        logger.error(
+          `[publish:buffer] verify channels failed for org ${org.id}:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
+    return {
+      enabled,
+      apiKeyPresent: true,
+      apiKeyValid: true,
+      organizations,
+      channels,
+      configured: buildConfigured(channels),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error(`[publish:buffer] verifyConnection failed: ${message}`);
+    return {
+      enabled,
+      apiKeyPresent: true,
+      apiKeyValid: false,
+      organizations: [],
+      channels: [],
+      configured: buildConfigured([]),
+      error: message,
+    };
   }
 }
