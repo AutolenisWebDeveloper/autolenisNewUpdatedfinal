@@ -40,9 +40,6 @@ const APPLY_HREF = "/dealer-application";
 // Shared site container + section rhythm (matches how-it-works / pricing).
 const CONTAINER = "mx-auto max-w-7xl px-6 md:px-12";
 
-// Brand-blue surfaces. NAVY = canonical dark surface for bands/panels.
-const NAVY = "#0A0F1A";
-
 // className overrides on the shared <Button> to match the homepage CTAs
 // (rounded-md, brand-blue with #1A6FE0 hover, soft shadow).
 const CTA_PRIMARY = "rounded-md shadow-md shadow-[#0B5FD1]/25 hover:bg-[#1A6FE0]";
@@ -276,17 +273,17 @@ export default function ForDealersPage() {
         </div>
       </section>
 
-      {/* ── NAVY VALUE BAND ─────────────────────────────────────────── */}
-      <section className="relative z-0 text-white" style={{ backgroundColor: NAVY }}>
+      {/* ── BLUE VALUE BAND ─────────────────────────────────────────── */}
+      <section className="relative z-0 text-white" style={{ backgroundColor: "#0B5FD1" }}>
         <div className={`${CONTAINER} grid grid-cols-1 gap-8 py-12 sm:grid-cols-2 lg:grid-cols-4 lg:gap-0 lg:pt-12`}>
           {BENEFITS.map((b, i) => (
             <div
               key={b.title}
               className={`flex items-start gap-3.5 lg:px-7 ${i === 0 ? "lg:pl-0" : ""} ${
-                i !== BENEFITS.length - 1 ? "lg:border-r lg:border-white/15" : "lg:pr-0"
+                i !== BENEFITS.length - 1 ? "lg:border-r lg:border-white/25" : "lg:pr-0"
               }`}
             >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#0B5FD1]">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/15">
                 <b.icon className="h-[22px] w-[22px] text-white" aria-hidden="true" />
               </span>
               <div>
@@ -329,20 +326,20 @@ export default function ForDealersPage() {
               ))}
             </div>
 
-            <div className="mt-5 rounded-2xl bg-[#0A0F1A] p-6 text-white">
+            <div className="mt-5 rounded-2xl bg-[#0B5FD1] p-6 text-white">
               <p className="text-[15px] font-semibold leading-relaxed">
                 AutoLenis delivers buyers actively shopping for a vehicle —{" "}
-                <span className="text-[#4DA3FF]">not cold lists, not shared leads.</span>
+                <span className="text-[#C9DEFF]">not cold lists, not shared leads.</span>
               </p>
-              <div className="mt-5 grid grid-cols-3 gap-3 border-t border-white/15 pt-5">
+              <div className="mt-5 grid grid-cols-3 gap-3 border-t border-white/25 pt-5">
                 {[
                   { stat: "0", label: "Lead fees" },
                   { stat: "1:1", label: "Direct opportunities" },
                   { stat: "High", label: "Buyer intent" },
                 ].map((s) => (
                   <div key={s.label}>
-                    <p className="text-2xl font-bold text-[#4DA3FF]">{s.stat}</p>
-                    <p className="mt-1 text-xs font-medium text-white/70">{s.label}</p>
+                    <p className="text-2xl font-bold text-white">{s.stat}</p>
+                    <p className="mt-1 text-xs font-medium text-white/80">{s.label}</p>
                   </div>
                 ))}
               </div>
@@ -364,24 +361,24 @@ export default function ForDealersPage() {
                 key={card.title}
                 className={
                   card.highlight
-                    ? "relative rounded-2xl bg-[#0A0F1A] p-8 shadow-[0_14px_34px_rgba(10,35,80,0.22)]"
+                    ? "relative rounded-2xl bg-[#0B5FD1] p-8 shadow-[0_14px_34px_rgba(10,35,80,0.22)]"
                     : "rounded-2xl border border-[#E5E7EB] bg-white p-8 shadow-[0_2px_10px_rgba(10,35,80,0.04)]"
                 }
               >
                 {card.highlight && (
-                  <span className="absolute right-5 top-5 rounded-full bg-[#0B5FD1] px-2.5 py-1 text-[11px] font-bold tracking-wide text-white">
+                  <span className="absolute right-5 top-5 rounded-full bg-white px-2.5 py-1 text-[11px] font-bold tracking-wide text-[#0B5FD1]">
                     $0
                   </span>
                 )}
                 <span
                   className={`mb-5 flex h-[52px] w-[52px] items-center justify-center rounded-[13px] ${
-                    card.highlight ? "bg-white/10" : "bg-[#EEF4FF]"
+                    card.highlight ? "bg-white/15" : "bg-[#EEF4FF]"
                   }`}
                 >
-                  <card.icon className={`h-6 w-6 ${card.highlight ? "text-[#4DA3FF]" : "text-[#0B5FD1]"}`} aria-hidden="true" />
+                  <card.icon className={`h-6 w-6 ${card.highlight ? "text-white" : "text-[#0B5FD1]"}`} aria-hidden="true" />
                 </span>
                 <h3 className={`text-xl font-bold ${card.highlight ? "text-white" : "text-[#111827]"}`}>{card.title}</h3>
-                <p className={`mt-2.5 text-[15px] leading-relaxed ${card.highlight ? "text-white/70" : "text-[#4B5563]"}`}>
+                <p className={`mt-2.5 text-[15px] leading-relaxed ${card.highlight ? "text-white/85" : "text-[#4B5563]"}`}>
                   {card.body}
                 </p>
               </div>
@@ -403,20 +400,20 @@ export default function ForDealersPage() {
                 key={step.num}
                 className={
                   step.highlight
-                    ? "rounded-2xl bg-[#0A0F1A] p-7 shadow-[0_14px_34px_rgba(10,35,80,0.22)]"
+                    ? "rounded-2xl bg-[#0B5FD1] p-7 shadow-[0_14px_34px_rgba(10,35,80,0.22)]"
                     : "rounded-2xl border border-[#E5E7EB] bg-[#F8F9FB] p-7"
                 }
               >
                 <div className="mb-5 flex items-center justify-between">
-                  <span className={`text-[54px] font-bold leading-none tracking-tight ${step.highlight ? "text-[#4DA3FF]/30" : "text-[#D7E2F6]"}`}>
+                  <span className={`text-[54px] font-bold leading-none tracking-tight ${step.highlight ? "text-white/30" : "text-[#D7E2F6]"}`}>
                     {step.num}
                   </span>
-                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0B5FD1]">
+                  <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${step.highlight ? "bg-white/15" : "bg-[#0B5FD1]"}`}>
                     <step.icon className="h-[22px] w-[22px] text-white" aria-hidden="true" />
                   </span>
                 </div>
                 <h3 className={`text-lg font-bold ${step.highlight ? "text-white" : "text-[#111827]"}`}>{step.title}</h3>
-                <p className={`mt-2 text-sm leading-relaxed ${step.highlight ? "text-white/70" : "text-[#4B5563]"}`}>{step.body}</p>
+                <p className={`mt-2 text-sm leading-relaxed ${step.highlight ? "text-white/85" : "text-[#4B5563]"}`}>{step.body}</p>
               </li>
             ))}
           </ol>
