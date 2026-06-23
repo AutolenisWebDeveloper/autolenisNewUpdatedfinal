@@ -116,7 +116,7 @@ Return ONLY valid JSON, no markdown, no other text:
   },`
       : ""
   }
-  "imageBrief": "detailed DALL-E image generation prompt: describe the perfect ${platform}-optimized visual for this content. Include: main subject, lighting, mood, color palette (AutoLenis blue #0B5FD1 accents), composition, ${
+  "imageBrief": "detailed image generation prompt: describe the perfect ${platform}-optimized visual for this content. Include: main subject, lighting, mood, color palette (AutoLenis blue #0B5FD1 accents), composition, ${
     isVertical ? "VERTICAL 9:16 format" : "HORIZONTAL 16:9 format"
   }. No text overlays. Photorealistic. High quality.",
   "scheduleSuggestion": "best day and time to post this on ${platform} for maximum reach"

@@ -10,15 +10,16 @@ import { prisma } from "@/lib/prisma";
 import { getVideoProvider } from "@/lib/social/providers/video-generation.factory";
 import {
   storeImageInSupabase,
-  generateDallePostImage,
+  generateHiggsfieldPostImage,
 } from "@/lib/social/image-generation.service";
-import { ENABLE_AUTO_PUBLISH, ENABLE_VIDEO } from "@/lib/social/config";
+import { hasHiggsfieldCredentials } from "@/lib/social/providers/higgsfield.provider";
+import { ENABLE_AUTO_PUBLISH } from "@/lib/social/config";
 
 export const maxDuration = 300;
 
 const MAX_PER_RUN = 5;
-// DALL-E backfill is rate-limited (5 img/min on the standard tier) and each call
-// is synchronous, so keep the per-run batch small to stay within maxDuration.
+// Image backfill is synchronous (generate + poll per post), so keep the per-run
+// batch small to stay within maxDuration.
 const MAX_IMAGE_BACKFILL = 5;
 const POLL_STALE_MS = 5 * 60_000;
 
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
   // ─── Trigger Runway video generation early ─────────────────────────────────
   // Fire before the main polling/backfill loops so a timeout later in this
   // handler cannot prevent video generation from being triggered. Tier 1 posts
-  // (TikTok / Instagram / YouTube) with a DALL-E still get animated into a short
+  // (TikTok / Instagram / YouTube) with a Higgsfield still get animated into a short
   // video. Fire-and-forget — the dedicated cron enforces its own daily cap +
   // Tier 1 filter and polls Runway synchronously, so it must not block this run.
   // (vercel.json is at the 40-cron cap, so this is wired into the existing
@@ -137,19 +138,17 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ─── DALL-E 3 image backfill ───────────────────────────────────────────────
+  // ─── Higgsfield image backfill ─────────────────────────────────────────────
   // Primary media path: generate a branded still image for APPROVED posts that
-  // still have no SocialVideo record. DALL-E 3 is preferred when OPENAI_API_KEY
-  // is set; otherwise Higgsfield handles generation via the orchestrator/jobs
-  // above. With neither configured there is nothing to do.
-  const useOpenAI = !!process.env.OPENAI_API_KEY;
-  const useHiggsfield = !!process.env.HF_CREDENTIALS && ENABLE_VIDEO;
+  // still have no SocialVideo record. Higgsfield is the exclusive image
+  // provider; with no Higgsfield credentials there is nothing to do.
+  const useHiggsfield = hasHiggsfieldCredentials();
   let imagesGenerated = 0;
   let imagesFailed = 0;
 
-  if (!useOpenAI && !useHiggsfield) {
-    logger.info("[video-queue] no image/video provider configured — skipping backfill");
-  } else if (useOpenAI) {
+  if (!useHiggsfield) {
+    logger.info("[video-queue] no image provider configured — skipping backfill");
+  } else {
     const postsNeedingImages = await prisma.socialPost.findMany({
       where: { status: "APPROVED", video: { is: null } },
       orderBy: { createdAt: "asc" },
@@ -158,14 +157,14 @@ export async function GET(request: NextRequest) {
 
     for (const post of postsNeedingImages) {
       try {
-        const visuals = await generateDallePostImage(post);
+        const visuals = await generateHiggsfieldPostImage(post);
         if (visuals.imageUrl) {
           imagesGenerated += 1;
-          logger.info("[video-queue] DALL-E image generated for post:", post.id);
+          logger.info("[video-queue] Higgsfield image generated for post:", post.id);
         } else {
           imagesFailed += 1;
           logger.error(
-            "[video-queue] DALL-E backfill failed for post:",
+            "[video-queue] Higgsfield backfill failed for post:",
             post.id,
             "— creating VIDEO_FAILED to prevent infinite retry",
           );
@@ -180,10 +179,10 @@ export async function GET(request: NextRequest) {
               .create({
                 data: {
                   postId: post.id,
-                  provider: "dalle3",
+                  provider: "higgsfield",
                   status: "VIDEO_FAILED",
                   errorMessage:
-                    "DALL-E generation returned empty — check OPENAI_API_KEY and account credits",
+                    "Higgsfield generation returned empty — check HF_CREDENTIALS and account credits",
                   visualPrompt: post.visualPrompt ?? post.hook ?? "",
                   generatedAt: new Date(),
                 },
@@ -201,7 +200,7 @@ export async function GET(request: NextRequest) {
         imagesFailed += 1;
         const errorMsg = err instanceof Error ? err.message : String(err);
         logger.error(
-          "[video-queue] DALL-E backfill error for post:",
+          "[video-queue] Higgsfield backfill error for post:",
           post.id,
           errorMsg,
         );
@@ -214,7 +213,7 @@ export async function GET(request: NextRequest) {
             .create({
               data: {
                 postId: post.id,
-                provider: "dalle3",
+                provider: "higgsfield",
                 status: "VIDEO_FAILED",
                 errorMessage: errorMsg.slice(0, 500),
                 visualPrompt: post.visualPrompt ?? post.hook ?? "",

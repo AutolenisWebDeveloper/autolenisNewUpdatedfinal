@@ -18,8 +18,11 @@ import type { SocialPost } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { ENABLE_VIDEO } from "@/lib/social/config";
 import { getServiceSupabase } from "@/lib/supabase-service";
-import { HiggsfieldProvider } from "@/lib/social/providers/higgsfield.provider";
-import { generateDalleImage } from "@/lib/social/providers/dalle.provider";
+import {
+  HiggsfieldProvider,
+  hasHiggsfieldCredentials,
+} from "@/lib/social/providers/higgsfield.provider";
+import { generateHiggsfieldImage } from "@/lib/social/providers/higgsfield-image.provider";
 import {
   generateVisualPrompt,
   type VisualPromptOutput,
@@ -109,19 +112,12 @@ export async function storeImageInSupabase(imageUrl: string, postId: string): Pr
   return uploadImageBufferToSupabase(buffer, `social-posts/${postId}/image.jpg`, contentType);
 }
 
-// Stores a base64-encoded image (gpt-image-1 returns b64 rather than a URL) in
-// Supabase and returns a stable public URL.
-export async function storeImageB64InSupabase(b64: string, postId: string): Promise<string> {
-  const buffer = Buffer.from(b64, "base64");
-  return uploadImageBufferToSupabase(buffer, `social-posts/${postId}/image.png`, "image/png");
-}
-
-const DALLE_PROVIDER = "dalle3";
+const IMAGE_PROVIDER = "higgsfield";
 
 // Attaches an already-hosted image URL to a post as a VIDEO_READY SocialVideo so
 // the post can publish immediately (no video render). Shared by the manual
 // upload, compose, and bulk-create paths. `provider` distinguishes the source
-// (e.g. "manual_upload", "dalle3"). Idempotent via upsert.
+// (e.g. "manual_upload", "higgsfield"). Idempotent via upsert.
 export async function attachImageUrlToPost(
   postId: string,
   imageUrl: string,
@@ -170,12 +166,13 @@ export async function uploadAndAttachPostImage(
   return url;
 }
 
-// Generates a branded still image for a post via DALL-E 3 and attaches it to the
-// post's SocialVideo record. This is the primary media path: it produces an
-// image synchronously (no async video render) which is enough to publish, and
-// marks the SocialVideo VIDEO_READY so the publishing queue picks the post up
-// immediately. Defensive — a failure returns EMPTY and never throws.
-export async function generateDallePostImage(post: SocialPost): Promise<PostVisuals> {
+// Generates a branded still image for a post via Higgsfield (the exclusive image
+// provider) and attaches it to the post's SocialVideo record. This is the
+// primary media path: it produces an image synchronously (no async video render)
+// which is enough to publish, and marks the SocialVideo VIDEO_READY so the
+// publishing queue picks the post up immediately. Defensive — a failure returns
+// EMPTY and never throws.
+export async function generateHiggsfieldPostImage(post: SocialPost): Promise<PostVisuals> {
   // Idempotency — reuse an existing stored image rather than paying for a new one.
   const existing = await prisma.socialVideo
     .findUnique({
@@ -184,7 +181,7 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
     })
     .catch(() => null);
   if (existing?.thumbnailUrl) {
-    logger.info("[image-gen:dalle] visuals already exist for post:", post.id, "— skipping");
+    logger.info("[image-gen:higgsfield] visuals already exist for post:", post.id, "— skipping");
     return {
       imageUrl: existing.thumbnailUrl,
       videoUrl: existing.videoUrl ?? null,
@@ -197,7 +194,7 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
   // Prefer a previously-generated visual prompt, else the post's hook/script.
   const visualPrompt = post.visualPrompt ?? post.hook ?? post.script;
 
-  const result = await generateDalleImage({
+  const result = await generateHiggsfieldImage({
     visualPrompt,
     franchise: franchiseSlug,
     platform: post.platform,
@@ -206,27 +203,18 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
     hookType: post.hookType,
   });
 
-  if (!result.success || (!result.imageUrl && !result.imageB64)) {
-    logger.error("[image-gen:dalle] generation failed for post:", post.id, result.error);
+  if (!result.success || !result.imageUrl) {
+    logger.error("[image-gen:higgsfield] generation failed for post:", post.id, result.error);
     return EMPTY;
   }
 
-  // Persist to Supabase for a stable URL. gpt-image-1 returns base64 (no URL);
-  // dall-e-* return a temporary URL (~1h) that must be re-hosted.
+  // Re-host to Supabase for a stable URL (Higgsfield delivery URLs are temporary).
   let storedImageUrl: string;
   try {
-    storedImageUrl = result.imageB64
-      ? await storeImageB64InSupabase(result.imageB64, post.id)
-      : await storeImageInSupabase(result.imageUrl!, post.id);
+    storedImageUrl = await storeImageInSupabase(result.imageUrl, post.id);
   } catch (err) {
-    if (result.imageUrl) {
-      logger.error("[image-gen:dalle] supabase store failed, using provider URL:", err);
-      storedImageUrl = result.imageUrl;
-    } else {
-      // base64 with no hosting fallback — can't publish without a stable URL.
-      logger.error("[image-gen:dalle] supabase store failed for base64 image:", err);
-      return EMPTY;
-    }
+    logger.error("[image-gen:higgsfield] supabase store failed, using provider URL:", err);
+    storedImageUrl = result.imageUrl;
   }
 
   // Surface the image on the SocialVideo record as VIDEO_READY. The publishing
@@ -237,7 +225,7 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
       where: { postId: post.id },
       create: {
         postId: post.id,
-        provider: DALLE_PROVIDER,
+        provider: IMAGE_PROVIDER,
         status: "VIDEO_READY",
         visualPrompt,
         durationSeconds: post.durationSeconds ?? 15,
@@ -248,7 +236,7 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
         generatedAt: new Date(),
       },
       update: {
-        provider: DALLE_PROVIDER,
+        provider: IMAGE_PROVIDER,
         status: "VIDEO_READY",
         thumbnailUrl: storedImageUrl,
         storageBucket: STORAGE_BUCKET,
@@ -257,7 +245,7 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
       },
     });
   } catch (err) {
-    logger.error("[image-gen:dalle] socialVideo upsert failed:", err);
+    logger.error("[image-gen:higgsfield] socialVideo upsert failed:", err);
     return EMPTY;
   }
 
@@ -268,10 +256,10 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
       data: { visualPrompt },
     });
   } catch (err) {
-    logger.error("[image-gen:dalle] post update failed (non-fatal):", err);
+    logger.error("[image-gen:higgsfield] post update failed (non-fatal):", err);
   }
 
-  logger.info("[image-gen:dalle] image attached to post:", post.id);
+  logger.info("[image-gen:higgsfield] image attached to post:", post.id);
   return {
     imageUrl: storedImageUrl,
     videoUrl: null,
@@ -284,15 +272,16 @@ export async function generateDallePostImage(post: SocialPost): Promise<PostVisu
 // immediately so the post can publish with an image while the video renders in
 // the background; the video URL is resolved later by the video-queue cron.
 export async function generatePostVisuals(post: SocialPost): Promise<PostVisuals> {
-  // DALL-E 3 is the primary still-image provider. When OPENAI_API_KEY is set it
-  // generates the post's image synchronously (no async video render), which is
-  // enough to unblock publishing. The legacy provider path below is the fallback.
-  if (process.env.OPENAI_API_KEY) {
-    return generateDallePostImage(post);
+  // Higgsfield is the exclusive still-image provider. It generates the post's
+  // image synchronously (no async video render), which is enough to unblock
+  // publishing. Video animation (when enabled) is handled separately by Runway
+  // via the dedicated video-generation cron.
+  if (hasHiggsfieldCredentials()) {
+    return generateHiggsfieldPostImage(post);
   }
 
   // Idempotency guard — if this post already has a stored image (thumbnail),
-  // don't regenerate (saves legacy provider cost on re-invocation, e.g. at approval).
+  // don't regenerate (saves provider cost on re-invocation, e.g. at approval).
   const existing = await prisma.socialVideo
     .findUnique({
       where: { postId: post.id },

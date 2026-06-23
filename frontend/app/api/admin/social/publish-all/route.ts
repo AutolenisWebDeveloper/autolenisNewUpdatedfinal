@@ -7,6 +7,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { hasHiggsfieldCredentials } from "@/lib/social/providers/higgsfield.provider";
 
 interface PublishAllBody {
   sourcePostId: string;
@@ -174,7 +175,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Trigger image generation for all new posts.
-  if (process.env.OPENAI_API_KEY && created.length > 0) {
+  if (hasHiggsfieldCredentials() && created.length > 0) {
     fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/admin/social/generate-images`, {
       method: "POST",
       headers: {

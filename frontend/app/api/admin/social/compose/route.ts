@@ -8,6 +8,7 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { buildUtmUrl } from "@/lib/social/config";
+import { hasHiggsfieldCredentials } from "@/lib/social/providers/higgsfield.provider";
 
 interface ComposeBody {
   platform?: string;
@@ -134,7 +135,7 @@ export async function POST(request: NextRequest) {
     } catch (err) {
       logger.error("[compose] attach image failed (non-fatal):", err);
     }
-  } else if (generateImage && process.env.OPENAI_API_KEY) {
+  } else if (generateImage && hasHiggsfieldCredentials()) {
     // Fire-and-forget AI image generation for the new post.
     const base = process.env.NEXT_PUBLIC_APP_URL;
     if (base) {

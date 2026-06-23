@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger";
 // AutoLenis Social Engine — Runway ML Gen-4 Turbo image-to-video provider.
 //
-// Second stage of the Tier 1 visual pipeline: DALL-E 3 generates a branded
+// Second stage of the Tier 1 visual pipeline: Higgsfield generates a branded
 // still, Runway Gen-4 Turbo animates it into a 5-second video, and Buffer
 // publishes the result to TikTok / Instagram / YouTube. Facebook + LinkedIn
 // stay on static images and never reach this provider.
@@ -39,7 +39,7 @@ const PLATFORM_RATIO: Record<string, string> = {
   linkedin: "1280:720", // landscape
 };
 
-// Motion prompts per franchise — describe the motion only; the DALL-E still
+// Motion prompts per franchise — describe the motion only; the Higgsfield still
 // already establishes the scene, subject, and brand styling.
 const FRANCHISE_MOTION: Record<string, string> = {
   dealer_secret_daily:
