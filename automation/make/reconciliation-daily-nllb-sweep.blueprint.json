@@ -1,0 +1,67 @@
+{
+	"flow": [
+		{
+			"id": 1,
+			"mapper": {
+				"url": "https://www.autolenis.com/api/crm/reconcile/run",
+				"data": "{\"job\":\"reconcile\",\"dry_run\":false}",
+				"gzip": true,
+				"method": "post",
+				"headers": [
+					{
+						"name": "X-Dispatch-Key",
+						"value": "REPLACE_WITH_CRM_DISPATCH_KEY"
+					},
+					{
+						"name": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"useMtls": false,
+				"bodyType": "raw",
+				"contentType": "application/json",
+				"serializeUrl": false,
+				"shareCookies": false,
+				"parseResponse": true,
+				"followRedirect": true,
+				"useQuerystring": false,
+				"followAllRedirects": false,
+				"rejectUnauthorized": true
+			},
+			"module": "http:ActionSendData",
+			"version": 3,
+			"metadata": {
+				"designer": {
+					"x": 0,
+					"y": 0
+				}
+			},
+			"parameters": {
+				"handleErrors": false,
+				"useNewZLibDeCompress": true
+			}
+		}
+	],
+	"name": "AutoLenis Reconciliation — Daily NLLB Sweep (inject key + toggle ON to activate)",
+	"metadata": {
+		"instant": false,
+		"version": 1,
+		"designer": {
+			"orphans": []
+		},
+		"scenario": {
+			"maxErrors": 3,
+			"autoCommit": true,
+			"roundtrips": 1,
+			"sequential": false
+		}
+	},
+	"scheduling": {
+		"type": "indefinitely",
+		"interval": 86400
+	},
+	"interface": {
+		"input": [],
+		"output": []
+	}
+}
