@@ -924,16 +924,26 @@ function QueueTab({
   }, [showToast]);
   useEffect(() => { void load(); }, [load]);
 
+  const [publishingId, setPublishingId] = useState<string | null>(null);
   const publishNow = async (p: Post) => {
+    if (!window.confirm(`Publish this post to ${p.platform} now?`)) return;
+    setPublishingId(p.id);
     try {
-      await fetchJson(`/api/admin/social/posts/${p.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "reschedule", scheduledAt: new Date().toISOString() }),
-      });
-      showToast("Moved to front of queue — will publish on next run");
+      const res = await fetchJson<{ published?: boolean; scheduled?: boolean; message?: string }>(
+        `/api/admin/social/posts/${p.id}/publish`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ direct: true }),
+        },
+      );
+      showToast(res.message ?? (res.published ? `Published to ${p.platform}` : "Done"));
       await load(); onChanged();
-    } catch (err) { showToast(err instanceof Error ? err.message : "Publish failed"); }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Publish failed");
+    } finally {
+      setPublishingId(null);
+    }
   };
 
   return (
@@ -961,7 +971,7 @@ function QueueTab({
                 <td className="px-4 py-2"><StatusBadge status={p.status} /></td>
                 <td className="px-4 py-2">
                   <div className="flex items-center justify-end gap-2">
-                    <button data-testid={`publish-now-${p.id}`} onClick={() => publishNow(p)} className="text-[#0B5FD1] font-semibold hover:underline">Publish Now</button>
+                    <button data-testid={`publish-now-${p.id}`} onClick={() => publishNow(p)} disabled={publishingId === p.id} className="text-[#0B5FD1] font-semibold hover:underline disabled:opacity-50">{publishingId === p.id ? "Publishing…" : "Publish Now"}</button>
                     <button onClick={() => onOpenPost(p)} className="text-[#64748B] font-semibold hover:underline">View Post</button>
                   </div>
                 </td>
@@ -1132,6 +1142,16 @@ type OptimizedVersions = Record<string, {
 
 const ANALYTICS_PLATFORMS = ["tiktok", "instagram", "facebook", "youtube", "linkedin"];
 
+// Status views for the optimization tab. "live" merges everything currently on
+// (or going onto) a platform so the admin can view all current posts at once;
+// the rest scope to a single status.
+const ANALYTICS_STATUS_FILTERS: { key: string; label: string; statuses: string[] }[] = [
+  { key: "live", label: "All Current", statuses: ["PUBLISHED", "SCHEDULED", "PUBLISHING"] },
+  { key: "published", label: "Published", statuses: ["PUBLISHED"] },
+  { key: "scheduled", label: "Scheduled", statuses: ["SCHEDULED"] },
+  { key: "failed", label: "Failed", statuses: ["FAILED"] },
+];
+
 function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(false);
@@ -1142,6 +1162,7 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
   const [optimizing, setOptimizing] = useState(false);
   const [optimized, setOptimized] = useState<OptimizedVersions | null>(null);
   const [platformFilter, setPlatformFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("live");
   const [publishingAll, setPublishingAll] = useState(false);
   const [publishStrategy, setPublishStrategy] =
     useState<"immediate" | "staggered">("staggered");
@@ -1149,17 +1170,36 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
   const loadPosts = useCallback(async () => {
     setLoading(true);
     try {
-      const url = platformFilter === "all"
-        ? "/api/admin/social/posts?status=PUBLISHED&limit=50"
-        : `/api/admin/social/posts?status=PUBLISHED&platform=${platformFilter}&limit=50`;
-      const data = await fetchJson<{ posts: Post[] }>(url);
-      setPosts([...data.posts].sort((a, b) => b.leadScore - a.leadScore));
+      const view =
+        ANALYTICS_STATUS_FILTERS.find((s) => s.key === statusFilter) ??
+        ANALYTICS_STATUS_FILTERS[0];
+      const platformQs =
+        platformFilter === "all" ? "" : `&platform=${platformFilter}`;
+      // The posts API filters by a single status, so fetch each status in the
+      // selected view and merge. Most views are a single status.
+      const results = await Promise.all(
+        view.statuses.map((status) =>
+          fetchJson<{ posts: Post[] }>(
+            `/api/admin/social/posts?status=${status}&limit=50${platformQs}`,
+          ).catch(() => ({ posts: [] as Post[] })),
+        ),
+      );
+      const merged = results.flatMap((r) => r.posts);
+      // Published first (richest for optimization), then by lead score.
+      merged.sort((a, b) => {
+        if (a.status !== b.status) {
+          if (a.status === "PUBLISHED") return -1;
+          if (b.status === "PUBLISHED") return 1;
+        }
+        return b.leadScore - a.leadScore;
+      });
+      setPosts(merged);
     } catch {
       showToast("Failed to load posts");
     } finally {
       setLoading(false);
     }
-  }, [platformFilter, showToast]);
+  }, [platformFilter, statusFilter, showToast]);
 
   useEffect(() => { void loadPosts(); }, [loadPosts]);
 
@@ -1302,6 +1342,23 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
         </button>
       </div>
 
+      {/* Status filter — view current posts across platforms by lifecycle. */}
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {ANALYTICS_STATUS_FILTERS.map((s) => (
+          <button
+            key={s.key}
+            onClick={() => setStatusFilter(s.key)}
+            className={`text-xs px-3 py-1 rounded-full border whitespace-nowrap ${
+              statusFilter === s.key
+                ? "bg-[#0F172A] text-white border-[#0F172A]"
+                : "bg-white text-slate-600 border-[#E2E8F0]"
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
       {/* Platform filter */}
       <div className="flex gap-2 overflow-x-auto pb-1">
         {["all", ...ANALYTICS_PLATFORMS].map((p) => (
@@ -1323,15 +1380,15 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
         {/* Posts list */}
         <div className="space-y-2">
           <p className="text-xs text-slate-500">
-            {posts.length} published posts — click to analyze
+            {posts.length} {posts.length === 1 ? "post" : "posts"} — click to analyze &amp; optimize
           </p>
           {loading ? (
             <p className="text-xs text-slate-400">Loading...</p>
           ) : posts.length === 0 ? (
             <div className="bg-white rounded-xl border border-[#E2E8F0] p-6 text-center">
-              <p className="text-sm text-slate-500">No published posts yet</p>
+              <p className="text-sm text-slate-500">No posts in this view</p>
               <p className="text-xs text-slate-400 mt-1">
-                Posts appear here after they are published
+                Try a different status or platform filter, or publish a post first
               </p>
             </div>
           ) : (
@@ -1352,6 +1409,7 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
                         <span className="text-xs font-medium capitalize text-[#0B5FD1] bg-[#EFF6FF] px-1.5 py-0.5 rounded">
                           {post.platform}
                         </span>
+                        <StatusBadge status={post.status} />
                         <span className="text-xs text-slate-400 truncate">
                           {post.franchise?.name ?? "—"}
                         </span>
@@ -3973,14 +4031,27 @@ function PostDrawer({
     }
   };
 
+  const [publishing, setPublishing] = useState(false);
   const handlePublishNow = async () => {
-    if (!window.confirm("Publish this post immediately?")) return;
+    if (!window.confirm(`Publish this post to ${post.platform} immediately?`)) return;
+    setPublishing(true);
     try {
-      await fetchJson(`/api/admin/social/posts/${post.id}/publish`, { method: "POST" });
-      showToast("Post queued for immediate publishing");
+      const res = await fetchJson<{ published?: boolean; message?: string }>(
+        `/api/admin/social/posts/${post.id}/publish`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ direct: true }),
+        },
+      );
+      showToast(res.message ?? (res.published ? `Published to ${post.platform}` : "Done"));
       onChanged();
       onClose();
-    } catch (err) { showToast(err instanceof Error ? err.message : "Publish failed"); }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Publish failed");
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const handleGenerateVideo = async () => {
@@ -4222,8 +4293,8 @@ function PostDrawer({
             <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleUploadImage(f); e.target.value = ""; }} />
           </label>
-          <button disabled={saving} data-testid="drawer-publish-now" onClick={handlePublishNow}
-            className="bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50">Publish Now</button>
+          <button disabled={saving || publishing} data-testid="drawer-publish-now" onClick={handlePublishNow}
+            className="bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{publishing ? "Publishing…" : "Publish Now"}</button>
           <button onClick={onClose} className="ml-auto text-[#64748B] text-xs font-semibold px-3 py-2">Close</button>
         </div>
       </div>
