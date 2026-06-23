@@ -145,6 +145,12 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (data.step === "AGREEMENT") {
+    // Idempotent: if onboarding is already complete, do not re-stamp the
+    // consent timestamp or re-fire the DocuSign envelope / activation event.
+    if (dealer.onboardingStep === "COMPLETE") {
+      return NextResponse.json({ success: true, nextStep: "COMPLETE", redirect: "/dealer/dashboard" });
+    }
+
     const updatedDealer = await prisma.dealer.update({
       where: { id: dealer.id },
       data: {

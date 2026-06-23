@@ -110,7 +110,7 @@
     },
     {
       "path": "/api/cron/dealer-scorecard-snapshot",
-      "schedule": "0 3 * * *"
+      "schedule": "0 3 * * 1"
     },
     {
       "path": "/api/cron/morning-briefing",

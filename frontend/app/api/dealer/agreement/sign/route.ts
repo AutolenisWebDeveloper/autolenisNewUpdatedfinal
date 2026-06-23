@@ -28,6 +28,24 @@ const bodySchema = z.object({
   consentedToElectronic: z.literal(true),
 });
 
+// Idempotent completion: mark onboarding complete without re-creating the
+// signature. Uses the original signature timestamp for agreedToTermsAt so the
+// audit trail never disagrees with the signature record.
+async function markAlreadySigned(dealerId: string, signedAt: Date) {
+  const dealer = await prisma.dealer.findUnique({
+    where: { id: dealerId },
+    select: { agreedToTermsAt: true },
+  });
+  await prisma.dealer.update({
+    where: { id: dealerId },
+    data: {
+      onboardingStep: "COMPLETE",
+      agreedToTermsAt: dealer?.agreedToTermsAt ?? signedAt,
+    },
+  });
+  return successResponse({ alreadySigned: true });
+}
+
 export async function POST(request: NextRequest) {
   // 1. Auth
   const dealer = await getRequestDealer(request);
@@ -67,19 +85,15 @@ export async function POST(request: NextRequest) {
   const signerName = dealer.dealershipName;
   const signerEmail = dealer.user?.email ?? "";
 
-  // 4. Idempotency check
+  // 4. Idempotency check. dealerId is @unique on DealerAgreementSignature, so a
+  // concurrent double-submit is also caught by the P2002 handler around the
+  // create() below — this fast-path just avoids the wasted write in the common
+  // case where the dealer already signed.
   const existing = await prisma.dealerAgreementSignature.findUnique({
     where: { dealerId: dealer.id },
   });
   if (existing) {
-    await prisma.dealer.update({
-      where: { id: dealer.id },
-      data: {
-        onboardingStep: "COMPLETE",
-        agreedToTermsAt: dealer.agreedToTermsAt ?? new Date(),
-      },
-    });
-    return successResponse({ alreadySigned: true });
+    return markAlreadySigned(dealer.id, existing.signedAt);
   }
 
   // 5. Attribution capture
@@ -94,7 +108,9 @@ export async function POST(request: NextRequest) {
   const agreementHash = createHash("sha256").update(DEALER_AGREEMENT_TEXT).digest("hex");
 
   // 7. Atomic transaction — signature, onboarding completion, audit log
-  const signature = await prisma.$transaction(async (tx) => {
+  let signature: Awaited<ReturnType<typeof prisma.dealerAgreementSignature.create>>;
+  try {
+    signature = await prisma.$transaction(async (tx) => {
     const sig = await tx.dealerAgreementSignature.create({
       data: {
         dealerId: dealer.id,
@@ -137,7 +153,18 @@ export async function POST(request: NextRequest) {
     });
 
     return sig;
-  });
+    });
+  } catch (err) {
+    // Concurrent double-submit lost the unique-constraint race — treat the
+    // winner's signature as authoritative and complete idempotently.
+    if (typeof err === "object" && err !== null && (err as { code?: string }).code === "P2002") {
+      const winner = await prisma.dealerAgreementSignature.findUnique({
+        where: { dealerId: dealer.id },
+      });
+      if (winner) return markAlreadySigned(dealer.id, winner.signedAt);
+    }
+    throw err;
+  }
 
   // 8. Non-blocking post-sign work — certificate + confirmation email.
   after(async () => {
