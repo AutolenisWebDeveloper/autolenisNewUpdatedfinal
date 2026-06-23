@@ -39,6 +39,21 @@ interface ProviderConnections {
   runway: { connected: boolean };
   automationMode: string;
 }
+interface BufferTestResult {
+  enabled: boolean;
+  apiKeyPresent: boolean;
+  apiKeyValid: boolean;
+  organizations: { id: string; name: string }[];
+  channels: { id: string; name: string; service: string }[];
+  configured: {
+    platform: string;
+    profileId: string;
+    present: boolean;
+    matched: boolean;
+    channelName?: string;
+  }[];
+  error?: string;
+}
 interface MarketIndexLast {
   title: string | null;
   summary: string | null;
@@ -2480,6 +2495,8 @@ function SettingsTab({
 }) {
   const [mode, setMode] = useState<AutomationMode>(automationMode);
   const [connections, setConnections] = useState<ProviderConnections | null>(null);
+  const [bufferTest, setBufferTest] = useState<BufferTestResult | null>(null);
+  const [testingBuffer, setTestingBuffer] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -2488,6 +2505,27 @@ function SettingsTab({
       .catch((err) => showToast(err instanceof Error ? err.message : "Failed to load connections"));
     return () => { cancelled = true; };
   }, [showToast]);
+
+  const testBuffer = async () => {
+    setTestingBuffer(true);
+    setBufferTest(null);
+    try {
+      const res = await fetchJson<BufferTestResult>(
+        "/api/admin/social/connections/buffer-test",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      );
+      setBufferTest(res);
+      showToast(
+        res.apiKeyValid
+          ? `Buffer OK — ${res.channels.length} channel${res.channels.length === 1 ? "" : "s"} reachable`
+          : res.error ?? "Buffer test failed",
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Buffer test failed");
+    } finally {
+      setTestingBuffer(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -2566,6 +2604,75 @@ function SettingsTab({
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Live Buffer verification — confirms the API key works and that each
+            configured BUFFER_PROFILE_* id maps to a real channel. */}
+        <div className="mt-5 border-t border-[#E2E8F0] pt-4">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <h3 className="text-xs font-bold text-[#0F172A]">Buffer Setup Check</h3>
+              <p className="text-[10px] text-[#94A3B8]">
+                Verifies the API key live and matches your channel ids against Buffer.
+              </p>
+            </div>
+            <button
+              data-testid="buffer-test"
+              onClick={testBuffer}
+              disabled={testingBuffer}
+              className="text-xs bg-[#0B5FD1] text-white px-3 py-1.5 rounded-lg hover:bg-[#0a54bc] disabled:opacity-50"
+            >
+              {testingBuffer ? "Testing…" : "Test Buffer Connection"}
+            </button>
+          </div>
+
+          {bufferTest && (
+            <div className="space-y-2" data-testid="buffer-test-result">
+              <div className="flex flex-wrap gap-2 text-[10px] font-bold">
+                <span className={`px-2 py-0.5 rounded-full ${bufferTest.enabled ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                  Publishing {bufferTest.enabled ? "enabled" : "disabled (set ENABLE_BUFFER_PUBLISHING=true)"}
+                </span>
+                <span className={`px-2 py-0.5 rounded-full ${bufferTest.apiKeyPresent ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+                  API key {bufferTest.apiKeyPresent ? "present" : "missing"}
+                </span>
+                <span className={`px-2 py-0.5 rounded-full ${bufferTest.apiKeyValid ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+                  API key {bufferTest.apiKeyValid ? "valid" : "invalid"}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                  {bufferTest.channels.length} channel{bufferTest.channels.length === 1 ? "" : "s"} reachable
+                </span>
+              </div>
+
+              {bufferTest.error && (
+                <p className="text-[10px] text-red-600">{bufferTest.error}</p>
+              )}
+
+              {bufferTest.apiKeyValid && (
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+                  {bufferTest.configured.map((c) => {
+                    const ok = c.present && c.matched;
+                    const tone = ok
+                      ? "border-emerald-200 bg-emerald-50"
+                      : c.present
+                        ? "border-red-200 bg-red-50"
+                        : "border-[#E2E8F0]";
+                    return (
+                      <div key={c.platform} className={`p-2 rounded-xl border ${tone}`}>
+                        <p className="text-[10px] font-semibold capitalize text-[#0F172A]">{c.platform}</p>
+                        <p className={`text-[10px] font-bold ${ok ? "text-emerald-600" : c.present ? "text-red-600" : "text-[#94A3B8]"}`}>
+                          {!c.present
+                            ? "No channel id set"
+                            : c.matched
+                              ? `✅ ${c.channelName || "matched"}`
+                              : "⚠ id not found in Buffer"}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
