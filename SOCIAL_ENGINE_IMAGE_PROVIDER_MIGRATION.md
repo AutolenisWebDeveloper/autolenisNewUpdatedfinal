@@ -25,7 +25,7 @@ repointed at Higgsfield.
 |---|---|---|
 | Provider | `lib/social/providers/dalle.provider.ts` | **Deleted** (OpenAI Images API, `gpt-image-1`/`dall-e-*`). |
 | Provider | `lib/social/providers/higgsfield-image.provider.ts` | **New** `generateHiggsfieldImage()` — branded prompt builder + Higgsfield text-to-image with inline/poll resolution. Mirrors the old provider's contract (returns a hosted URL). |
-| Provider helpers | `lib/social/providers/higgsfield.provider.ts` | Exported shared internals (`getAuthHeader`, `baseUrl`, `higgsfieldRequest`, `webhookConfig`) and added `hasHiggsfieldCredentials()`. |
+| Provider helpers | `lib/social/providers/higgsfield.provider.ts` | Exported shared internals (`getAuthHeaders`, `baseUrl`, `higgsfieldRequest`, `webhookConfig`) and added `hasHiggsfieldCredentials()`. |
 | Service | `lib/social/image-generation.service.ts` | `generateDallePostImage` → `generateHiggsfieldPostImage`; provider tag `dalle3` → `higgsfield`; removed `OPENAI_API_KEY` routing and the base64/`gpt-image-1` helper; `generatePostVisuals` now gates on `hasHiggsfieldCredentials()`. |
 | Admin route | `app/api/admin/social/generate-images/route.ts` | Batch generation now uses Higgsfield; credential gate + DB provider tag updated; base64 path removed. |
 | Admin route | `app/api/admin/social/compose/generate-preview-image/route.ts` | Preview generation now uses Higgsfield; gate updated. |

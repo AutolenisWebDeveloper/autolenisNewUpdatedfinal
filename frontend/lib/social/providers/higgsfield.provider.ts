@@ -5,9 +5,11 @@
 // AiMediaGeneration table (keyed by the provider request_id) so webhooks and the
 // polling cron can reconcile against a single source of truth.
 //
-// Auth: HF_CREDENTIALS ("key_id:key_secret") → HTTP Basic, with a
-// HIGGSFIELD_API_KEY Bearer fallback. Base URL is env-driven and defaults to
-// the production platform host.
+// Auth: Higgsfield authenticates every request with two custom headers —
+// `hf-api-key` and `hf-secret` (NOT HTTP Basic or a Bearer token). Credentials
+// come from HF_CREDENTIALS ("key_id:key_secret"), or from the split
+// HIGGSFIELD_API_KEY / HIGGSFIELD_API_SECRET pair. Base URL is env-driven and
+// defaults to the production platform host.
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
@@ -33,15 +35,38 @@ export function hasHiggsfieldCredentials(): boolean {
   return Boolean(process.env.HF_CREDENTIALS || process.env.HIGGSFIELD_API_KEY);
 }
 
-// HTTP Basic from "key_id:key_secret", else Bearer from HIGGSFIELD_API_KEY.
-export function getAuthHeader(): string {
-  const creds = process.env.HF_CREDENTIALS;
-  if (creds) {
-    const encoded = Buffer.from(creds).toString("base64");
-    return `Basic ${encoded}`;
+// Builds the Higgsfield auth headers (`hf-api-key` + `hf-secret`). The api
+// key/secret pair is read from the combined HF_CREDENTIALS ("key_id:key_secret")
+// or from the split HIGGSFIELD_API_KEY / HIGGSFIELD_API_SECRET env vars. A bare
+// HIGGSFIELD_API_KEY that itself contains a colon is treated as combined.
+export function getAuthHeaders(): Record<string, string> {
+  const combined = process.env.HF_CREDENTIALS?.trim() || undefined;
+  if (combined) {
+    const idx = combined.indexOf(":");
+    if (idx > 0) {
+      return {
+        "hf-api-key": combined.slice(0, idx),
+        "hf-secret": combined.slice(idx + 1),
+      };
+    }
   }
-  const key = process.env.HIGGSFIELD_API_KEY;
-  if (key) return `Bearer ${key}`;
+
+  const apiKey = process.env.HIGGSFIELD_API_KEY?.trim();
+  const apiSecret = process.env.HIGGSFIELD_API_SECRET?.trim();
+  if (apiKey && apiSecret) {
+    return { "hf-api-key": apiKey, "hf-secret": apiSecret };
+  }
+  // Allow HIGGSFIELD_API_KEY to hold a combined "key:secret" value.
+  if (apiKey) {
+    const idx = apiKey.indexOf(":");
+    if (idx > 0) {
+      return {
+        "hf-api-key": apiKey.slice(0, idx),
+        "hf-secret": apiKey.slice(idx + 1),
+      };
+    }
+  }
+
   throw new Error("No Higgsfield credentials configured");
 }
 
@@ -67,7 +92,7 @@ export async function higgsfieldRequest(args: {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      Authorization: getAuthHeader(),
+      ...getAuthHeaders(),
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -195,7 +220,7 @@ export class HiggsfieldProvider implements VideoGenerationProvider {
 
       const res = await fetch(statusUrl, {
         method: "GET",
-        headers: { Authorization: getAuthHeader() },
+        headers: { ...getAuthHeaders() },
         signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) {
