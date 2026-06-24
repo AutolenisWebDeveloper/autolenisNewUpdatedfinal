@@ -11,7 +11,7 @@
 import { logger } from "@/lib/logger";
 import {
   baseUrl,
-  getAuthHeader,
+  getAuthHeaders,
   hasHiggsfieldCredentials,
   higgsfieldRequest,
   webhookConfig,
@@ -100,7 +100,7 @@ async function pollForImage(
   for (;;) {
     const res = await fetch(statusUrl, {
       method: "GET",
-      headers: { Authorization: getAuthHeader() },
+      headers: { ...getAuthHeaders() },
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {

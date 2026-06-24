@@ -174,7 +174,8 @@ declare namespace NodeJS {
     // Higgsfield — AI video generation provider. Endpoints are env-driven so the
     // exact API surface can change without a code deploy. The engine no-ops when
     // HIGGSFIELD_API_KEY is unset (NoopVideoProvider).
-    // Production auth: "key_id:key_secret" used as HTTP Basic. Preferred.
+    // Production auth: combined "key_id:key_secret" sent as the hf-api-key /
+    // hf-secret request headers. Preferred.
     HF_CREDENTIALS?: string;
     // Production platform host, e.g. https://platform.higgsfield.ai
     HIGGSFIELD_BASE_URL?: string;
@@ -182,8 +183,11 @@ declare namespace NodeJS {
     // "flux-pro/kontext/max/text-to-image" when unset.
     HIGGSFIELD_IMAGE_ENDPOINT?: string;
     HIGGSFIELD_WEBHOOK_SECRET?: string;     // verifies media-completion callbacks
-    // Fallback Bearer token when HF_CREDENTIALS is not set.
+    // Split-credential alternative to HF_CREDENTIALS. Sent as the hf-api-key /
+    // hf-secret headers. HIGGSFIELD_API_KEY may also hold a combined
+    // "key:secret" value, in which case HIGGSFIELD_API_SECRET is optional.
     HIGGSFIELD_API_KEY?: string;
+    HIGGSFIELD_API_SECRET?: string;
     HIGGSFIELD_API_BASE_URL?: string;       // legacy — e.g. https://api.higgsfield.ai
     HIGGSFIELD_SUBMIT_ENDPOINT?: string;    // legacy — kept for compatibility
     HIGGSFIELD_STATUS_ENDPOINT?: string;    // legacy — kept for compatibility
