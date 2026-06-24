@@ -2,8 +2,9 @@
 // Closes the gap F-001 did NOT cover: F-001 reconciles auction *close*; this
 // reconciles auction *activation*. Sweeps stranded paid deposits (no auction /
 // PENDING / ACTIVE-with-zero-invitations) by STATE and converges each to a
-// populated ACTIVE auction or an automatic refund. Idempotent + serialized, so
-// a missed/slow tick self-heals and overlapping runs never double-act.
+// populated ACTIVE auction or a terminal CLOSED auction. The $99 deposit is a
+// non-refundable access fee and is never auto-refunded. Idempotent + serialized,
+// so a missed/slow tick self-heals and overlapping runs never double-act.
 
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";

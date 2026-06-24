@@ -55,7 +55,7 @@ export default function DeclineAuctionButton({ auctionId }: { auctionId: string 
       {open && (
         <div className="px-5 py-4 bg-white space-y-4">
           <p className="text-xs text-[#4B5563] leading-relaxed">
-            Not happy with the offers? You can pass on this auction and receive a full refund of your $99 deposit.
+            Not happy with the offers? You can pass on this auction and submit a refund request for your $99 deposit. Refund requests are reviewed and processed manually by our team.
           </p>
           <div>
             <label className="block text-xs font-medium text-[#374151] mb-1.5">Reason (optional)</label>
@@ -89,7 +89,7 @@ export default function DeclineAuctionButton({ auctionId }: { auctionId: string 
             </button>
           </div>
           <p className="text-xs text-[#9CA3AF]">
-            Refund of $99 will be processed within 3–5 business days.
+            The $99 deposit is not refunded automatically. Your request will be reviewed by our team.
           </p>
         </div>
       )}

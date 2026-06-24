@@ -3,10 +3,10 @@
 //
 // Locks the pure activation decision (classifyActivation) that drives the
 // reconciler: a confirmed $99 always converges to a populated ACTIVE auction or
-// an automatic refund, and the same input is decided the same way regardless of
-// how many times the reconciler runs (the double-run safety property — combined
-// with the per-deposit idempotency guard, equal decisions on equal state mean
-// no double-invite / no double-refund).
+// a terminal CLOSED auction (the deposit is NEVER auto-refunded), and the same
+// input is decided the same way regardless of how many times the reconciler runs
+// (the double-run safety property — combined with the per-deposit idempotency
+// guard, equal decisions on equal state mean no double-invite / no double-close).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -20,7 +20,7 @@ const base: ActivationState = {
   invitationCount: 0,
   offerCount: 0,
   auctionAgeMinutes: 0,
-  noDealerRefundGraceMinutes: 120,
+  noDealerCloseGraceMinutes: 120,
 };
 
 test("unpaid or refunded deposits are skipped", () => {
@@ -54,7 +54,7 @@ test("ACTIVE auction with zero invitations within grace → invite (re-attempt t
   );
 });
 
-test("ACTIVE auction with zero invitations past the no-dealer grace → refund", () => {
+test("ACTIVE auction with zero invitations past the no-dealer grace → close (no refund; deposit retained)", () => {
   assert.equal(
     classifyActivation({
       ...base,
@@ -64,7 +64,7 @@ test("ACTIVE auction with zero invitations past the no-dealer grace → refund",
       offerCount: 0,
       auctionAgeMinutes: 121,
     }),
-    "refund",
+    "close",
   );
 });
 
@@ -75,13 +75,13 @@ test("ACTIVE auction that already has invitations is OK — never re-invited (lo
       hasAuction: true,
       auctionStatus: "ACTIVE",
       invitationCount: 8,
-      auctionAgeMinutes: 200, // even past the grace, populated = OK, never refunded
+      auctionAgeMinutes: 200, // even past the grace, populated = OK, never closed for no-dealers
     }),
     "ok",
   );
 });
 
-test("ACTIVE auction with offers but (somehow) zero invitations is OK — never refunded once bidding exists", () => {
+test("ACTIVE auction with offers but (somehow) zero invitations is OK — never closed for no-dealers once bidding exists", () => {
   assert.equal(
     classifyActivation({
       ...base,
@@ -112,7 +112,7 @@ test("double-run safety: identical state yields an identical decision (no diverg
   assert.equal(classifyActivation(populated), "ok");
   assert.equal(classifyActivation(populated), "ok");
 
-  const refunding: ActivationState = {
+  const closing: ActivationState = {
     ...base,
     hasAuction: true,
     auctionStatus: "ACTIVE",
@@ -120,16 +120,17 @@ test("double-run safety: identical state yields an identical decision (no diverg
     offerCount: 0,
     auctionAgeMinutes: 200,
   };
-  // First pass triggers refund (closes the auction). Once CLOSED, the deposit's
-  // state on the next pass classifies as 'skip' — never a second refund.
-  assert.equal(classifyActivation(refunding), "refund");
-  assert.equal(classifyActivation({ ...refunding, auctionStatus: "CLOSED" }), "skip");
+  // First pass closes the no-dealer auction (NO refund — deposit retained). Once
+  // CLOSED, the deposit's state on the next pass classifies as 'skip' — never
+  // re-closed, and never refunded.
+  assert.equal(classifyActivation(closing), "close");
+  assert.equal(classifyActivation({ ...closing, auctionStatus: "CLOSED" }), "skip");
 });
 
 test("convergence: every PAID-deposit state resolves to a non-stuck action", () => {
   // Enumerate the reachable states and assert none returns an actionless dead-end.
   const terminalOrProgress = new Set([
-    "ok", "skip", "create_auction", "launch", "invite", "refund",
+    "ok", "skip", "create_auction", "launch", "invite", "close",
   ]);
   for (const auctionStatus of [undefined, "PENDING", "ACTIVE", "CLOSED", "CANCELLED"]) {
     const a = classifyActivation({

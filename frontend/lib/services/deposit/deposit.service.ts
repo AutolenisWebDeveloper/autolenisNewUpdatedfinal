@@ -63,6 +63,11 @@ export async function handleDepositPaid(paymentIntentId: string): Promise<void> 
   });
 }
 
+// Issues a real Stripe refund for a deposit. POLICY: the $99 Auction Access
+// Deposit is never refunded automatically — refunds must be manually requested
+// by the buyer and manually processed by an admin. Do NOT call this from any
+// cron, webhook, or automated workflow; wire it only behind admin-authenticated
+// manual refund actions.
 export async function refundDeposit(depositId: string, reason: string): Promise<void> {
   const deposit = await prisma.deposit.findUnique({ where: { id: depositId } });
   if (!deposit?.stripePaymentIntentId) throw new Error("Deposit not found or no payment");

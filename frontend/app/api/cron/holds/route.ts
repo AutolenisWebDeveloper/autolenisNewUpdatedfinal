@@ -1,9 +1,13 @@
-// holds — release deposits for expired auctions with no offers
-import { logger } from "@/lib/logger";
+// holds — deposit-hold reconciliation for closed auctions.
+//
+// IMPORTANT: This cron NO LONGER issues automatic refunds. The $99 Auction
+// Access Deposit is a non-refundable access fee and is retained even when an
+// auction closes with no dealer offers. Refunds, if ever warranted, are issued
+// deliberately by an admin through the manual refund tools — never automatically
+// here. This endpoint is retained as a no-op reconciler so any external cron
+// schedule pointing at it stays valid without moving money.
 import { NextRequest, NextResponse } from "next/server";
-import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
-import { prisma } from "@/lib/prisma";
-import { refundDeposit } from "@/lib/services/deposit/deposit.service";
+import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get(CRON_AUTH_HEADER);
@@ -13,19 +17,9 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  // Find closed auctions with no offers and paid deposit not yet refunded
-  const auctionsNoOffers = await prisma.auction.findMany({
-    where: { status: "CLOSED" },
-    include: { deposit: true, _count: { select: { offers: { where: { status: "SUBMITTED" } } } } },
+  // No automatic refunds are initiated. Deposits remain charged.
+  return NextResponse.json({
+    success: true,
+    data: { released: 0, autoRefundsDisabled: true, timestamp: new Date().toISOString() },
   });
-
-  let released = 0;
-  for (const auction of auctionsNoOffers) {
-    if (auction._count.offers === 0 && auction.deposit?.status === "PAID") {
-      await refundDeposit(auction.deposit.id, "No offers received").catch(err => logger.error("Refund error:", err));
-      released++;
-    }
-  }
-
-  return NextResponse.json({ success: true, data: { released, timestamp: new Date().toISOString() } });
 }
