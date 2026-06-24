@@ -105,7 +105,7 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
   // from NULL wins; concurrent or duplicate invocations (overlapping cron ticks,
   // an admin manual close racing the cron) no-op. This is the idempotency guard
   // that lets the cron safely reprocess any CLOSED-but-unprocessed auction
-  // without double-notifying or double-refunding.
+  // without double-notifying.
   const claim = await prisma.auction.updateMany({
     where: { id: auctionId, postCloseProcessedAt: null },
     data: { postCloseProcessedAt: new Date() },
@@ -145,96 +145,16 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
       ).catch(err => logger.error(`[processAuctionClose] buyer email failed for ${auctionId}:`, err));
     }
   } else {
-    // AUTO-REFUND — zero-offer auction close. The buyer is promised a refund
-    // when no dealers bid; issue it automatically instead of relying on manual
-    // admin action. Best-effort: a failure here raises an admin alert below.
-    try {
-      const depositForRefund = await prisma.deposit.findUnique({
-        where: { id: auction.depositId },
-        select: {
-          id: true,
-          status: true,
-          stripePaymentIntentId: true,
-          amountCents: true,
-          buyer: {
-            select: {
-              firstName: true,
-              user: { select: { email: true } },
-            },
-          },
-        },
-      }).catch(() => null);
-
-      if (
-        depositForRefund &&
-        depositForRefund.stripePaymentIntentId &&
-        depositForRefund.status !== "REFUNDED"
-      ) {
-        const { getStripe } = await import("@/lib/stripe");
-        const stripe = getStripe();
-
-        const refund = await stripe.refunds.create({
-          payment_intent: depositForRefund.stripePaymentIntentId,
-          reason: "requested_by_customer",
-          metadata: {
-            auctionId,
-            reason: "zero_offers",
-            autoRefund: "true",
-          },
-        });
-
-        await prisma.deposit.update({
-          where: { id: depositForRefund.id },
-          data: { status: "REFUNDED", refundedAt: new Date() },
-        });
-
-        logger.info(
-          `[processAuctionClose] auto-refund issued — ` +
-          `deposit ${depositForRefund.id}, auction ${auctionId}`
-        );
-
-        // Send refund confirmation email — best effort.
-        if (depositForRefund.buyer?.user?.email) {
-          const { sendRefundConfirmationEmail } = await import(
-            "@/lib/services/email/resend.service"
-          );
-          await sendRefundConfirmationEmail({
-            to: depositForRefund.buyer.user.email,
-            firstName: depositForRefund.buyer.firstName ?? "there",
-            amountCents: depositForRefund.amountCents,
-            reason:
-              "No dealer offers were received for your auction. " +
-              "Your full deposit has been refunded.",
-            refundId: refund.id,
-          }).catch((err: unknown) =>
-            logger.error(
-              "[processAuctionClose] refund email failed:", err
-            )
-          );
-        }
-      }
-    } catch (refundErr) {
-      // Auto-refund failed — raise an admin alert for manual action.
-      logger.error(
-        `[processAuctionClose] AUTO-REFUND FAILED auction ${auctionId}:`,
-        refundErr
-      );
-      await prisma.notification.create({
-        data: {
-          type: "SYSTEM_ALERT",
-          title: `MANUAL REFUND REQUIRED — Auction ${auctionId.slice(0, 8)}`,
-          body:
-            `Auto-refund failed for auction ${auctionId}. ` +
-            `Check Stripe and issue the deposit refund manually.`,
-        },
-      }).catch(() => {});
-    }
-
+    // NO AUTO-REFUND. The $99 Auction Access Deposit is a non-refundable
+    // access fee and is retained when an auction closes with no
+    // dealer offers. The platform never initiates a refund automatically at
+    // auction close; any refund must be issued deliberately by an admin via the
+    // manual refund tools. Only buyer-facing/dealer notifications are emitted here.
     await prisma.notification.create({
       data: {
         buyerId: auction.buyerId,
         title: "Auction closed — no offers received",
-        body: `Your ${DEPOSIT_AMOUNT_USD} deposit will be refunded within 3 business days. You may request a specific vehicle.`,
+        body: `Your ${DEPOSIT_AMOUNT_USD} Auction Access Deposit secured your private auction and is non-refundable. You may start a new request or request a specific vehicle.`,
         type: "DEAL_STAGE_CHANGED",
       },
     }).catch(() => {});
@@ -258,10 +178,10 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
 
   return { offers: auction._count.offers };
   } catch (err) {
-    // Release the claim so the reconciler retries on the next pass. The only
-    // money-moving step (zero-offer refund) is independently guarded by the
-    // deposit's REFUNDED status, and the buyer/dealer emails are
-    // idempotency-keyed in resend.service, so a retry cannot double-anything.
+    // Release the claim so the reconciler retries on the next pass. Post-close
+    // processing moves no money (the deposit is never auto-refunded), and the
+    // buyer/dealer emails are idempotency-keyed in resend.service, so a retry
+    // cannot double-anything.
     await prisma.auction
       .updateMany({ where: { id: auctionId }, data: { postCloseProcessedAt: null } })
       .catch(() => {});

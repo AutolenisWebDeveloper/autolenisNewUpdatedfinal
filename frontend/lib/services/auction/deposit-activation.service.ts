@@ -30,17 +30,18 @@ export type { ActivationAction, ActivationState };
 //   • auction ACTIVE but zero invitations (invite failed → no dealers can bid).
 //
 // INVARIANT: a confirmed $99 always converges to a populated ACTIVE auction OR
-// an automatic refund — never stuck. This reconciler sweeps by STATE (not a
+// a terminal CLOSED auction — never stuck. The $99 deposit is a non-refundable
+// access fee and is NEVER auto-refunded. This reconciler sweeps by STATE (not a
 // rolling time window, the F-001 anti-pattern it replaces) and re-attempts
 // activation. A genuinely no-dealer auction is CLOSED so the merged F-001
-// processAuctionClose issues the zero-offer auto-refund + notification — reused,
-// not rebuilt. Launching a PENDING auction also sets endsAt, so even a market
-// with no dealers self-refunds at auction close via F-001.
+// processAuctionClose emits the buyer/dealer no-offer notifications (no refund) —
+// reused, not rebuilt. Launching a PENDING auction also sets endsAt, so even a
+// market with no dealers self-closes at auction end via F-001.
 //
 // Idempotency (G5): per-deposit work is serialized with the shared
 // idempotency_keys guard (lib/inngest/idempotency.ts), so two overlapping cron
 // runs never double-invite (which would double-increment dealer load) or
-// double-refund. Dealers are (re)invited ONLY when zero invitations exist;
+// double-close. Dealers are (re)invited ONLY when zero invitations exist;
 // inviteDealersToAuction upserts invitations by (auctionId, dealerId) but
 // increments load unconditionally, so the zero-invitation guard is load-safe.
 
@@ -48,8 +49,9 @@ export type { ActivationAction, ActivationState };
 // launch/invite finish first.
 const ACTIVATION_GRACE_MINUTES = 5;
 // If an ACTIVE auction still has zero invitations after this long, no dealers
-// are coming — converge to a refund (close → F-001 refunds the zero-offer deposit).
-const NO_DEALER_REFUND_GRACE_MINUTES = 120;
+// are coming — converge to a terminal CLOSED state. The deposit is NOT refunded;
+// closing simply emits the no-offer notifications via F-001's processAuctionClose.
+const NO_DEALER_CLOSE_GRACE_MINUTES = 120;
 
 interface LoadedState {
   state: ActivationState;
@@ -88,7 +90,7 @@ async function loadState(depositId: string): Promise<LoadedState | null> {
       invitationCount: a?._count.invitations ?? 0,
       offerCount: a?._count.offers ?? 0,
       auctionAgeMinutes: ageMin,
-      noDealerRefundGraceMinutes: NO_DEALER_REFUND_GRACE_MINUTES,
+      noDealerCloseGraceMinutes: NO_DEALER_CLOSE_GRACE_MINUTES,
     },
   };
 }
@@ -101,7 +103,7 @@ export type ActivationOutcome =
   | 'launched'      // auction launched
   | 'invited'       // dealers invited
   | 'awaiting_dealers' // ACTIVE, invite found no eligible dealers yet (will retry / F-001 closes at endsAt)
-  | 'refund_triggered'; // closed for no dealers → F-001 will refund
+  | 'closed_no_dealers'; // closed for no dealers (deposit retained — never auto-refunded)
 
 // Converge ONE deposit's activation. Idempotent + serialized via the shared
 // idempotency guard; safe to call repeatedly.
@@ -144,17 +146,19 @@ export async function reconcileDepositActivation(depositId: string): Promise<Act
         // Re-read once more so a 0-result invite past the grace can converge to refund.
         continue;
       }
-      if (action === 'refund' && loaded.auctionId) {
-        // No dealers after the grace — converge to refund by closing the
-        // ACTIVE auction; F-001's processAuctionClose issues the zero-offer
-        // refund + notification. Atomic: only closes if still ACTIVE.
+      if (action === 'close' && loaded.auctionId) {
+        // No dealers after the grace — converge to a terminal CLOSED state by
+        // closing the ACTIVE auction; F-001's processAuctionClose emits the
+        // no-offer notifications. NO refund is issued — the $99 deposit is a
+        // non-refundable access fee and is retained. Atomic: only closes if
+        // still ACTIVE.
         const closed = await prisma.auction.updateMany({
           where: { id: loaded.auctionId, status: 'ACTIVE' },
           data: { status: 'CLOSED', closedAt: new Date() },
         });
         if (closed.count === 1) {
-          logger.warn(`[deposit-activation] no dealers after grace — closed auction ${loaded.auctionId} for refund (deposit ${depositId})`);
-          return 'refund_triggered';
+          logger.warn(`[deposit-activation] no dealers after grace — closed auction ${loaded.auctionId} (deposit ${depositId} retained, no refund)`);
+          return 'closed_no_dealers';
         }
         return 'skip';
       }
