@@ -46,6 +46,16 @@
   - File size limit: 5MB
   - pdfkit installed: pnpm add pdfkit && pnpm add -D @types/pdfkit
 
+- [ ] `social-media-assets` bucket — create via `pnpm setup:storage` or
+      `prisma/migrations/manual_supabase_sql/social_media_assets_bucket.sql`
+  - Access: public (post images/videos served directly)
+  - RLS: public SELECT; service role INSERT (Social Engine uploads via service role key)
+  - File size limit: 50MB
+  - Allowed MIME types: image/jpeg, image/png, image/webp, video/mp4, video/quicktime
+  - Used by: the Social Engine "Upload Image", AI image generation, and video
+    re-hosting paths (lib/social/image-generation.service.ts). Missing bucket →
+    "supabase upload failed: Bucket not found".
+
 ### Stripe (one-time per environment)
 - [ ] Webhook endpoint registered at: `https://autolenis.com/api/webhooks/stripe`
 - [ ] Webhook events enabled: payment_intent.succeeded, checkout.session.completed,
