@@ -25,6 +25,19 @@ export async function POST(request: NextRequest, { params }: Props) {
   });
   if (!deal) return adminError("NOT_FOUND", "Deal not found", 404);
 
+  // Contract Shield hard gate — parity with the buyer path
+  // (app/api/buyer/esign/[dealId]/route.ts). An envelope may only be created once
+  // the deal has passed Contract Shield review (CONTRACT_APPROVED), or is already
+  // in SIGNING_PENDING (re-send). Admin auth alone is NOT sufficient to bypass the
+  // compliance gate.
+  if (deal.status !== "CONTRACT_APPROVED" && deal.status !== "SIGNING_PENDING") {
+    return adminError(
+      "CONTRACT_NOT_APPROVED",
+      "This contract has not been approved yet. Signing becomes available after Contract Shield review passes.",
+      409,
+    );
+  }
+
   const signerEmail = deal.buyer.user.email;
   const signerName = `${deal.buyer.firstName} ${deal.buyer.lastName}`;
 
