@@ -15,14 +15,19 @@ const schema = z.object({
   content: z.string().min(1).max(2000),
 }).refine((d) => d.threadId || d.dealId, { message: "threadId or dealId is required" });
 
-async function findOrCreateThread(dealerUserId: string, dealId: string): Promise<string> {
+async function findOrCreateThread(dealerId: string, dealerUserId: string, dealId: string): Promise<string> {
   const existing = await prisma.messageThread.findFirst({
     where: { dealId, participants: { some: { userId: dealerUserId } } },
   });
   if (existing) return existing.id;
 
-  const deal = await prisma.deal.findUnique({
-    where: { id: dealId },
+  // IDOR guard: a dealer may only open a thread on a deal they own. Ownership
+  // flows through the offer relation (Deal.offer.dealerId). Scoping here means a
+  // dealId belonging to another dealer's offer resolves to null → DEAL_NOT_FOUND
+  // → 404, never leaking that the deal exists. findFirst (not findUnique) is
+  // required because the where-clause filters on the offer relation.
+  const deal = await prisma.deal.findFirst({
+    where: { id: dealId, offer: { dealerId } },
     include: { buyer: { include: { user: true } } },
   });
   if (!deal) throw new Error("DEAL_NOT_FOUND");
@@ -56,7 +61,7 @@ export async function POST(request: NextRequest) {
 
   if (!threadId) {
     try {
-      threadId = await findOrCreateThread(dealer.userId, parsed.data.dealId!);
+      threadId = await findOrCreateThread(dealer.id, dealer.userId, parsed.data.dealId!);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "THREAD_ERROR";
       return errorResponse(msg === "DEAL_NOT_FOUND" ? "DEAL_NOT_FOUND" : "THREAD_ERROR",
