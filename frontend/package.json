@@ -2,6 +2,7 @@
   "name": "autolenis",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "next dev --port 3000",
     "start": "next start --port 3000",
