@@ -8,10 +8,17 @@ import { createServerClient } from "@supabase/ssr";
 import type { User } from "@supabase/supabase-js";
 import { jwtVerify } from "jose";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? "placeholder-must-set-jwt-secret-in-env"
+// Per-system JWT secrets. Each prefers its dedicated secret and falls back to
+// the shared JWT_SECRET — mirroring lib/admin-auth.ts and lib/dealer-auth.ts
+// exactly so the edge validators agree with the signers. Until ops sets the
+// dedicated secrets, both resolve to JWT_SECRET (no behavioural change).
+const SHARED_JWT_SECRET = process.env.JWT_SECRET ?? "placeholder-must-set-jwt-secret-in-env";
+const ADMIN_JWT_SECRET = new TextEncoder().encode(
+  process.env.ADMIN_JWT_SECRET ?? SHARED_JWT_SECRET
 );
-const ADMIN_JWT_SECRET = JWT_SECRET;
+const DEALER_JWT_SECRET = new TextEncoder().encode(
+  process.env.DEALER_JWT_SECRET ?? SHARED_JWT_SECRET
+);
 const ADMIN_JWT_ISSUER = "autolenis-admin";
 const ADMIN_TOKEN_COOKIE = "admin_token";
 const DEALER_TOKEN_COOKIE = "dealer_token";
@@ -36,7 +43,7 @@ async function hasValidDealerSession(request: NextRequest): Promise<boolean> {
   const token = request.cookies.get(DEALER_TOKEN_COOKIE)?.value;
   if (!token) return false;
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET, { issuer: DEALER_JWT_ISSUER });
+    const { payload } = await jwtVerify(token, DEALER_JWT_SECRET, { issuer: DEALER_JWT_ISSUER });
     return payload.role === "DEALER";
   } catch {
     return false;
@@ -490,12 +497,15 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     // A valid admin_preview_token cookie lets an admin view the buyer portal
     // without a buyer Supabase session. The buyer layout verifies the token
     // again and loads buyer data by the token's buyerId.
-    // jwtVerify and JWT_SECRET are already imported at the top of this file.
+    // The admin_preview_token is its own short-lived token family signed with
+    // the shared JWT_SECRET (see app/api/admin/buyers/[buyerId]/preview-token
+    // and app/buyer/layout.tsx) — NOT the admin/dealer session secret — so it
+    // must verify against SHARED_JWT_SECRET to stay consistent with its signer.
     if (pathname.startsWith("/buyer/")) {
       const previewToken = request.cookies.get("admin_preview_token")?.value;
       if (previewToken) {
         try {
-          await jwtVerify(previewToken, JWT_SECRET);
+          await jwtVerify(previewToken, new TextEncoder().encode(SHARED_JWT_SECRET));
           // Token is valid — let the request reach the buyer layout
           return response;
         } catch {

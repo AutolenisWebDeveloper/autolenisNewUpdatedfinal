@@ -6,12 +6,16 @@ import { logger } from "@/lib/logger";
 import { SignJWT, jwtVerify } from "jose";
 
 function getJwtSecret(): Uint8Array {
-  const secret = process.env.JWT_SECRET;
+  // Prefer a dedicated dealer signing secret so dealer and admin tokens are
+  // cryptographically isolated. Falls back to the shared JWT_SECRET so existing
+  // deployments/sessions keep working until ops sets DEALER_JWT_SECRET.
+  // proxy.ts mirrors this exact precedence.
+  const secret = process.env.DEALER_JWT_SECRET ?? process.env.JWT_SECRET;
   if (!secret) {
     if (process.env.NODE_ENV === "production") {
-      throw new Error("JWT_SECRET is required in production");
+      throw new Error("DEALER_JWT_SECRET (or JWT_SECRET) is required in production");
     }
-    logger.warn("[dealer-auth] JWT_SECRET not set — using insecure placeholder");
+    logger.warn("[dealer-auth] DEALER_JWT_SECRET/JWT_SECRET not set — using insecure placeholder");
     return new TextEncoder().encode("placeholder-must-set-jwt-secret-in-env");
   }
   return new TextEncoder().encode(secret);

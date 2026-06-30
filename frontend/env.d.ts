@@ -74,6 +74,13 @@ declare namespace NodeJS {
 
     // Security secrets
     JWT_SECRET: string;
+    // Optional per-system signing secrets. When set, they cryptographically
+    // isolate admin and dealer session tokens from each other; each falls back
+    // to JWT_SECRET when unset (see lib/admin-auth.ts, lib/dealer-auth.ts,
+    // proxy.ts). Rotating a dedicated secret invalidates only that system's
+    // live sessions (admin TTL 24h, dealer 7–30d) — set them, then re-login.
+    ADMIN_JWT_SECRET?: string;
+    DEALER_JWT_SECRET?: string;
     CSRF_SECRET: string;
     EMAIL_UNSUBSCRIBE_SECRET: string;
     PREQUAL_ENCRYPTION_KEY: string; // 64-char hex = 32-byte AES-256-GCM key
