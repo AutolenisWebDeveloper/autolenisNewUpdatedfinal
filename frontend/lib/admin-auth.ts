@@ -19,9 +19,13 @@ import { AdminRole } from "@prisma/client";
 let _adminJwtSecret: Uint8Array | null = null;
 function getAdminJwtSecret(): Uint8Array {
   if (_adminJwtSecret) return _adminJwtSecret;
-  const secret = process.env.JWT_SECRET;
+  // Prefer a dedicated admin signing secret so a leak of the dealer secret
+  // cannot forge admin sessions (and vice versa). Falls back to the shared
+  // JWT_SECRET so existing deployments/sessions keep working until ops sets
+  // ADMIN_JWT_SECRET. proxy.ts mirrors this exact precedence.
+  const secret = process.env.ADMIN_JWT_SECRET ?? process.env.JWT_SECRET;
   if (!secret) {
-    throw new Error("JWT_SECRET environment variable is not set");
+    throw new Error("ADMIN_JWT_SECRET (or JWT_SECRET) environment variable is not set");
   }
   _adminJwtSecret = new TextEncoder().encode(secret);
   return _adminJwtSecret;
