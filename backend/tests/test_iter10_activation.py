@@ -17,9 +17,17 @@ import psycopg2
 import psycopg2.extras
 import jwt as pyjwt
 
-BASE_URL = "https://e2e-sandbox-check.preview.emergentagent.com"
-JWT_SECRET = "n/RJQrixx/9AHa8jLNT9e9+ohekjkxPhiK1hxGkq4hzJeSu5IQB985n00ZsIyHjiESSCkTYcTYRFNmf8KkUYrg=="
-DB_URL = "postgres://postgres.aieybibvewmvrubcpthm:blzQPltGIIgQmI6m@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require"
+# Secrets come from the environment — never hardcoded. Set AUTOLENIS_JWT_SECRET
+# and AUTOLENIS_DB_URL before running; the module skips cleanly if they are absent.
+BASE_URL = os.environ.get("AUTOLENIS_E2E_BASE_URL", "https://e2e-sandbox-check.preview.emergentagent.com")
+JWT_SECRET = os.environ.get("AUTOLENIS_JWT_SECRET", "")
+DB_URL = os.environ.get("AUTOLENIS_DB_URL", "")
+if not (JWT_SECRET and DB_URL):
+    pytest.skip(
+        "AUTOLENIS_JWT_SECRET and AUTOLENIS_DB_URL must be set in the environment "
+        "to run this suite",
+        allow_module_level=True,
+    )
 ADMIN_ID = "7cf35008-9f43-43a5-97b1-5297374ed642"
 ADMIN_EMAIL = "admin@autolenis.com"
 

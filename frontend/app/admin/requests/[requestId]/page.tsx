@@ -3,6 +3,7 @@
 
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
+import { createSignedDocumentUrl } from "@/lib/services/documents/storage-links";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { ClipboardList, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
@@ -50,6 +51,12 @@ export default async function AdminRequestDetailPage({ params }: Props) {
   const { text: notesText, meta } = parseRequestNotes(req.notes);
 
   const fin = req.financing;
+
+  // The pre-approval letter lives in a private bucket. Sign it at read time
+  // (this page is admin-authorized via requireAdmin). Never persist the URL.
+  const preApprovalLetterSignedUrl = fin?.preApprovalLetterUrl
+    ? await createSignedDocumentUrl("prequal-letters", fin.preApprovalLetterUrl)
+    : null;
 
   // Approval expiry warning (within 14 days)
   let expiryDaysLeft: number | null = null;
@@ -174,9 +181,9 @@ export default async function AdminRequestDetailPage({ params }: Props) {
                     </div>
                   ))}
                 </dl>
-                {fin.preApprovalLetterUrl && (
+                {preApprovalLetterSignedUrl && (
                   <div className="mt-3 border-t border-slate-100 pt-3">
-                    <a href={fin.preApprovalLetterUrl} target="_blank" rel="noopener noreferrer"
+                    <a href={preApprovalLetterSignedUrl} target="_blank" rel="noopener noreferrer"
                       className="text-xs text-[#0B5FD1] hover:underline" data-testid="pre-approval-letter-link">
                       View pre-approval letter →
                     </a>

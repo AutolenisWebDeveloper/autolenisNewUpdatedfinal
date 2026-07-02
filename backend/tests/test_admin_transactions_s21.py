@@ -29,7 +29,14 @@ for line in open("/app/frontend/.env.local").read().splitlines():
 if not BASE_URL:
     BASE_URL = "https://e2e-sandbox-check.preview.emergentagent.com"
 
-DB_URL = "postgresql://postgres.aieybibvewmvrubcpthm:blzQPltGIIgQmI6m@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require"
+# Secret comes from the environment — never hardcoded. Set AUTOLENIS_DB_URL
+# before running; the module skips cleanly if it is absent.
+DB_URL = os.environ.get("AUTOLENIS_DB_URL", "")
+if not DB_URL:
+    pytest.skip(
+        "AUTOLENIS_DB_URL must be set in the environment to run this suite",
+        allow_module_level=True,
+    )
 
 # Seed IDs
 BUYER_ID        = "8b4c38db-71ce-4f89-8a0d-f06aeb7de6e1"

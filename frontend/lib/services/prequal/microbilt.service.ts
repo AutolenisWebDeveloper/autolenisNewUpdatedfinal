@@ -16,10 +16,27 @@ import {
   type IncomeGateResult,
 } from "./income-gate";
 
-const ENCRYPTION_KEY = Buffer.from(
-  process.env.PREQUAL_ENCRYPTION_KEY ?? "0".repeat(64),
-  "hex"
-);
+// AES-256-GCM key for encrypting consumer-report rawResponse at rest.
+// Fail-fast: there is NO default. A missing or malformed key must never
+// silently degrade to a known/guessable key (which would make "encrypted"
+// reports trivially decryptable). Validated lazily on first use — never at
+// import time — so `next build` static analysis is not broken by a throw.
+// Mirrors the check in scripts/decrypt-prequal-error.ts (64-char hex).
+let cachedEncryptionKey: Buffer | null = null;
+
+function getEncryptionKey(): Buffer {
+  if (cachedEncryptionKey) return cachedEncryptionKey;
+  const keyHex = process.env.PREQUAL_ENCRYPTION_KEY;
+  if (!keyHex || !/^[0-9a-fA-F]{64}$/.test(keyHex)) {
+    throw new Error(
+      "PREQUAL_ENCRYPTION_KEY is missing or not a 64-character hex string " +
+        "(required 32-byte AES-256-GCM key). Refusing to encrypt prequal data " +
+        "with an insecure fallback key."
+    );
+  }
+  cachedEncryptionKey = Buffer.from(keyHex, "hex");
+  return cachedEncryptionKey;
+}
 
 // ─── iPredict Advantage URL resolvers (iPredict_6.yaml spec) ────────────────────
 // Production:  https://api.microbilt.com/iPredict  · POST /GetReport
@@ -77,7 +94,7 @@ export function getMicroBiltConfigStatus() {
 // AES-256-GCM encryption for rawResponse
 function encryptRawResponse(text: string): string {
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", ENCRYPTION_KEY, iv);
+  const cipher = createCipheriv("aes-256-gcm", getEncryptionKey(), iv);
   const encrypted = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, tag, encrypted]).toString("base64");

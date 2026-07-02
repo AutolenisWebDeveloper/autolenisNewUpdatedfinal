@@ -1,4 +1,34 @@
-# Getting Started with Create React App
+# AutoLenis — frontend
+
+> Package manager: **pnpm only** (never npm/yarn). Run all commands from `frontend/`.
+
+## Environment variables
+
+Copy [`.env.example`](./.env.example) to `.env.local` and fill in real values.
+`.env.local` is gitignored and must never be committed. `.env.example` lists
+variable **names** only (no secrets).
+
+## Database URLs
+
+Prisma is configured with two Postgres connection strings (see
+`prisma/schema.prisma` → `datasource db`). Both must be set:
+
+- **`DATABASE_URL`** — the **pooled** connection (Supabase pooler / PgBouncer in
+  transaction mode). Used by the application at runtime, where many short-lived
+  serverless connections need a pooler.
+- **`DIRECT_URL`** — a **direct**, non-pooled connection to the database. Used by
+  `prisma migrate`, `prisma db push`, and `prisma validate`. Schema/DDL work and
+  advisory locks do not function correctly through a transaction-mode pooler, so
+  Prisma routes migrations over `DIRECT_URL`.
+
+If `DIRECT_URL` is unset, `prisma validate` and `prisma migrate` fail with
+`Environment variable not found: DIRECT_URL`. In Supabase, both strings are in
+Project Settings → Database: use the **Connection pooler** string for
+`DATABASE_URL` and the **direct connection** string for `DIRECT_URL`.
+
+---
+
+## Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 

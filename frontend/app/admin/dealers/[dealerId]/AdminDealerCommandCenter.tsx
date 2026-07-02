@@ -14,6 +14,28 @@ import type {
   DealerActionAvailability,
 } from "@/lib/services/admin/admin-dealer-command-center.service";
 
+// Dealer documents live in a private Supabase bucket. Fetch a short-lived
+// signed URL from the authorized admin route at click time, then open it — the
+// raw storage path is never sent to the browser.
+async function openSignedDealerDocument(documentId: string) {
+  const win = window.open("", "_blank", "noopener,noreferrer");
+  try {
+    const res = await fetch(`/api/admin/dealers/documents/${documentId}/signed-url`);
+    const json = (await res.json()) as { data?: { signedUrl?: string }; error?: { message?: string } };
+    const signedUrl = json?.data?.signedUrl;
+    if (!res.ok || !signedUrl) {
+      if (win) win.close();
+      alert(json?.error?.message ?? "Unable to open document. Please try again.");
+      return;
+    }
+    if (win) win.location.href = signedUrl;
+    else window.location.href = signedUrl;
+  } catch {
+    if (win) win.close();
+    alert("Unable to open document. Please try again.");
+  }
+}
+
 // ─── Contract Scan Fix Item type ─────────────────────────────────────────────
 // ContractScan.fixList is a JSON array of rule violations from Contract Shield.
 // Each item may contain a description, rule name, severity, and other fields.
@@ -147,7 +169,6 @@ type DealerDetail = {
     id: string;
     type: string;
     name: string;
-    url: string;
     mimeType: string | null;
     sizeBytes: number | null;
     isVerified: boolean;
@@ -1186,7 +1207,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
                 </div>
                 {documents.map((doc) => (
                   <div key={doc.id} className="grid lg:grid-cols-[2fr_1fr_0.8fr_0.8fr_1fr_1fr_0.8fr] gap-2 px-5 py-3.5 border-b border-slate-50 hover:bg-slate-50/70 transition-colors">
-                    <a href={doc.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-purple-700 hover:underline truncate">{doc.name}</a>
+                    <button type="button" onClick={() => openSignedDealerDocument(doc.id)} className="text-left text-sm font-medium text-purple-700 hover:underline truncate">{doc.name}</button>
                     <span className="text-xs text-slate-600">{doc.type.replace(/_/g, " ")}</span>
                     <span className="text-xs text-slate-500">{doc.mimeType ?? "—"}</span>
                     <span className="text-xs text-slate-500">{doc.sizeBytes ? Math.round(doc.sizeBytes / 1024) + " KB" : "—"}</span>
