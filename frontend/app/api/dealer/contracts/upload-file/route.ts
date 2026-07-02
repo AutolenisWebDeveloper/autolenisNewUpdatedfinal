@@ -56,12 +56,10 @@ export async function POST(request: NextRequest) {
     return errorResponse("STORAGE_ERROR", "File upload failed. Please try again.", 500);
   }
 
-  const {
-    data: { publicUrl: documentUrl },
-  } = supabase.storage.from(BUCKET).getPublicUrl(path);
-
+  // The bucket is private; return the bare storage path (persisted on the
+  // ContractVersion and signed at read time). Never a public URL.
   return successResponse({
-    documentUrl,
+    documentUrl: path,
     mimeType: "application/pdf",
     sizeBytes: file.size,
   });

@@ -17,6 +17,10 @@
 .env.development.local
 .env.test.local
 .env.production.local
+# .env.example carries variable NAMES only (no secrets) and MUST stay tracked.
+# A trailing `.env.*` rule in the repo-root .gitignore would otherwise ignore it;
+# this negation wins because a nested .gitignore overrides parent patterns.
+!.env.example
 
 npm-debug.log*
 yarn-debug.log*

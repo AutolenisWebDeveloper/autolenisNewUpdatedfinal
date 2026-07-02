@@ -22,11 +22,29 @@ import psycopg2.extras
 import jwt as pyjwt
 
 # ─── Config ────────────────────────────────────────────────────────────────────
-BASE_URL = "https://e2e-sandbox-check.preview.emergentagent.com"
-JWT_SECRET = "n/RJQrixx/9AHa8jLNT9e9+ohekjkxPhiK1hxGkq4hzJeSu5IQB985n00ZsIyHjiESSCkTYcTYRFNmf8KkUYrg=="
-DB_URL = "postgres://postgres.aieybibvewmvrubcpthm:blzQPltGIIgQmI6m@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require"
-SUPABASE_URL = "https://aieybibvewmvrubcpthm.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFpZXliaWJ2ZXdtdnJ1YmNwdGhtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjkwMDg1OCwiZXhwIjoyMDkyNDc2ODU4fQ.skkNSCs8dJ9zJnQv5WQDU96Vj3KwJxmIEnJTJPjgAV8"
+# Secrets are read from the environment — never hardcoded. Provide them via the
+# shell / CI secret store before running this suite, e.g.:
+#   export AUTOLENIS_E2E_BASE_URL=...           # target deployment
+#   export AUTOLENIS_JWT_SECRET=...             # admin/dealer JWT signing secret
+#   export AUTOLENIS_DB_URL=...                 # pooled Postgres connection string
+#   export SUPABASE_URL=...
+#   export SUPABASE_SERVICE_ROLE_KEY=...
+# When any required secret is missing the whole module is skipped (see below) so
+# the test degrades cleanly instead of failing or leaking a committed credential.
+BASE_URL = os.environ.get("AUTOLENIS_E2E_BASE_URL", "https://e2e-sandbox-check.preview.emergentagent.com")
+JWT_SECRET = os.environ.get("AUTOLENIS_JWT_SECRET", "")
+DB_URL = os.environ.get("AUTOLENIS_DB_URL", "")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+# Degrade cleanly: skip the entire module (rather than error) when the secrets
+# needed to forge JWTs / reach the DB are not configured in this environment.
+if not (JWT_SECRET and DB_URL and SUPABASE_SERVICE_ROLE_KEY):
+    pytest.skip(
+        "AUTOLENIS_JWT_SECRET, AUTOLENIS_DB_URL, and SUPABASE_SERVICE_ROLE_KEY "
+        "must be set in the environment to run this suite",
+        allow_module_level=True,
+    )
 
 ADMIN_ID = "7cf35008-9f43-43a5-97b1-5297374ed642"
 ADMIN_EMAIL = "admin@autolenis.com"

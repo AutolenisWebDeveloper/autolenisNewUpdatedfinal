@@ -13,7 +13,7 @@ const ALLOWED_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "im
 // Bucket must be created in Supabase Storage before use.
 // Required configuration:
 //   - Bucket name: "prequal-letters"
-//   - Access: public (so uploaded URLs are accessible to admins)
+//   - Access: PRIVATE. Admins read via short-lived signed URLs (service role).
 //   - RLS policy: authenticated buyers can INSERT; only service role can SELECT
 const BUCKET = "prequal-letters";
 
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
     return errorResponse("UPLOAD_FAILED", "Document upload failed. Please try again or contact support.", 500);
   }
 
-  const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
-
-  return successResponse({ url: urlData.publicUrl }, 201);
+  // The bucket is private; return the bare storage path (persisted with the
+  // request and signed at read time by an authorized admin route). Never a public URL.
+  return successResponse({ url: path }, 201);
 }

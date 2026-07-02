@@ -168,7 +168,9 @@ async function uploadPreApproval(file: File): Promise<string | null> {
       logger.error("[request-vehicle] supabase upload error:", upErr);
       return null;
     }
-    return supabase.storage.from("prequal-letters").getPublicUrl(path).data.publicUrl;
+    // Private bucket: persist the bare storage path, signed at read time by an
+    // authorized admin route. Never a public URL.
+    return path;
   } catch (err) {
     logger.error("[request-vehicle] upload exception:", err);
     return null;

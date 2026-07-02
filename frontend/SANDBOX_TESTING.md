@@ -182,7 +182,7 @@ These three gates **remain open**. Each requires human action and must NOT be tr
 - Owner: User (Stripe Dashboard → Developers → Webhooks)
 - Action: Add endpoint `https://www.autolenis.com/api/webhooks/stripe` with events: `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.dispute.created`, `customer.subscription.*`.
 - After creation, Stripe shows a `whsec_…` secret. Replace `STRIPE_WEBHOOK_SECRET` in Vercel production env.
-- Sandbox value `whsec_Qo2fDrBhcZMNd3juHSSEelZZOYlYSfYk` must NOT be promoted.
+- The sandbox value (`whsec_<from Stripe dashboard>`) must NOT be promoted to production.
 
 ### Gate 3 — Promote DocuSign + MicroBilt credentials
 - Owner: User

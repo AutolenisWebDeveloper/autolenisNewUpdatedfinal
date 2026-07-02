@@ -91,9 +91,8 @@ export async function POST(request: NextRequest) {
     return errorResponse("STORAGE_ERROR", "File upload failed. Please try again.", 500);
   }
 
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  // The bucket is private; persist the bare storage path (never a public URL).
+  // Reads are served via short-lived signed URLs from an authorized route.
 
   // Deal-linked path: validated association + idempotent dedup + audit.
   if (dealId) {
@@ -104,7 +103,7 @@ export async function POST(request: NextRequest) {
         dealId,
         type: docType,
         name: file.name,
-        url: publicUrl,
+        url: path,
         mimeType: file.type,
         sizeBytes: file.size,
         expectedVin,
@@ -139,7 +138,7 @@ export async function POST(request: NextRequest) {
       dealerId:  dealer.id,
       type:      docType,
       name:      file.name,
-      url:       publicUrl,
+      url:       path,
       mimeType:  file.type,
       sizeBytes: file.size,
     },

@@ -504,7 +504,8 @@ export async function getAdminDealerDetailData(dealerId: string) {
       id: doc.id,
       type: doc.type,
       name: doc.name,
-      url: doc.url,
+      // Raw storage path is intentionally NOT exposed to the client. The UI
+      // requests a short-lived signed URL from the authorized signed-url route.
       mimeType: doc.mimeType ?? null,
       sizeBytes: doc.sizeBytes ?? null,
       isVerified: doc.isVerified,
