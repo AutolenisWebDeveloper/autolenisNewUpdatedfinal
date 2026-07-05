@@ -71,15 +71,15 @@ export function AdminDetailSkeleton() {
 
 export function AdminDashboardSkeleton() {
   return (
-    <div className="p-6 md:p-8 max-w-7xl animate-pulse" data-testid="admin-loading-skeleton">
+    <div className="w-full mx-auto max-w-[1400px] p-6 md:p-8 animate-pulse" data-testid="admin-loading-skeleton">
       <div className="mb-8 space-y-3">
         <Bar className="h-7 w-64" />
         <Bar className="h-4 w-80 bg-slate-100" />
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-8">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-            <Bar className="h-4 w-4" />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="bg-white border border-slate-200/80 rounded-2xl p-5 space-y-3">
+            <Bar className="h-9 w-9 rounded-xl" />
             <Bar className="h-6 w-16" />
             <Bar className="h-3 w-20 bg-slate-100" />
           </div>

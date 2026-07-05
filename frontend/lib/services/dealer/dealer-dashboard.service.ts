@@ -39,6 +39,8 @@ export interface DealerDashboardData {
   pendingPickupsCount: number;
   /** Offer win rate (%) over the last 90 days. */
   winRatePct: number;
+  /** Number of offers submitted in the last 90 days (win-rate denominator). */
+  offersLast90dCount: number;
   /** Unread notification count. */
   unreadNotificationCount: number;
   /** Most recent 5 offers. */
@@ -168,6 +170,7 @@ export async function getDealerDashboardData(dealerId: string): Promise<DealerDa
     dealsInProgressCount,
     pendingPickupsCount,
     winRatePct,
+    offersLast90dCount: submittedOfferCount,
     unreadNotificationCount,
     recentOffers,
     recentDeals,
