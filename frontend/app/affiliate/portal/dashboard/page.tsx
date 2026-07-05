@@ -3,9 +3,15 @@ import { getCommissionSummary, getNetworkSize } from "@/lib/services/affiliate/c
 import { getReferralClickStats } from "@/lib/services/affiliate/referral.service";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
+import PageContainer from "@/components/dashboard/PageContainer";
+import PageHeader from "@/components/dashboard/PageHeader";
+import StatCard from "@/components/dashboard/StatCard";
+import Panel from "@/components/dashboard/Panel";
+import EmptyState from "@/components/dashboard/EmptyState";
+import { FIGURE } from "@/components/dashboard/tokens";
 import {
-  DollarSign, Users, ArrowRight, Clock, XCircle, AlertTriangle,
-  TrendingUp, Calculator, Landmark, FileCheck, Share2,
+  DollarSign, Users, Clock, XCircle, AlertTriangle,
+  TrendingUp, Calculator, Landmark, FileCheck, Share2, Inbox,
 } from "lucide-react";
 import Link from "next/link";
 import ReferralCodeCard from "@/components/affiliate/ReferralCodeCard";
@@ -19,7 +25,7 @@ export default async function AffiliateDashboardPage() {
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const [summary, network, recentCommissions, thisMonth, clickStats] = await Promise.all([
+  const [summary, network, recentCommissions, thisMonth, clickStats, profile] = await Promise.all([
     getCommissionSummary(affiliate.id),
     getNetworkSize(affiliate.id),
     prisma.commission.findMany({
@@ -33,16 +39,23 @@ export default async function AffiliateDashboardPage() {
       _count: true,
     }),
     getReferralClickStats(affiliate.id),
+    prisma.affiliateProfile
+      .findUnique({ where: { affiliateId: affiliate.id }, select: { firstName: true } })
+      .catch(() => null),
   ]);
 
   const referralLink = `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/auth/signup?ref=${affiliate.referralCode}`;
-  // Clean up email prefix: take the first segment before "." or "_", strip trailing digits,
-  // then capitalise. e.g. "mark.ist678" → "Mark", "jane_doe@..." → "Jane".
+
+  // Prefer the real onboarding profile name; fall back to a cleaned email
+  // prefix (first segment before "." or "_", trailing digits stripped) —
+  // e.g. "mark.ist678" → "Mark".
   const rawPrefix = affiliate.user.email.split("@")[0];
   const firstSegment = rawPrefix.split(/[._]/)[0].replace(/\d+$/, "");
-  const firstName = firstSegment
+  const emailDerivedName = firstSegment
     ? firstSegment.charAt(0).toUpperCase() + firstSegment.slice(1).toLowerCase()
     : rawPrefix;
+  const firstName = profile?.firstName?.trim() || emailDerivedName;
+
   const isActive = affiliate.status === "ACTIVE";
   const isPending = affiliate.status === "PENDING";
   const isRejected = affiliate.status === "REJECTED";
@@ -61,29 +74,28 @@ export default async function AffiliateDashboardPage() {
   const L1_PER_DEAL = PREMIUM_FEE_CENTS * COMMISSION_RATES.LEVEL_1;
 
   return (
-    <div className="p-6 md:p-8 max-w-5xl" data-testid="affiliate-dashboard">
-      {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center gap-2.5 flex-wrap mb-1">
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            {greeting}, {firstName}
-          </h1>
+    <PageContainer testId="affiliate-dashboard">
+      <PageHeader
+        eyebrow={
           <div className="flex items-center gap-1.5">
-            <span className="text-sm text-slate-500 font-medium">L{affiliate.level} Affiliate</span>
+            <span className="text-xs text-slate-500 font-semibold">L{affiliate.level} Affiliate</span>
             <span className="text-slate-300">·</span>
             <Badge variant={
               affiliate.status === "ACTIVE" ? "green" :
               affiliate.status === "PENDING" ? "amber" : "destructive"
             } className="text-xs">{affiliate.status}</Badge>
           </div>
-        </div>
-        <p className="text-sm text-slate-500">Your affiliate performance at a glance</p>
-      </div>
+        }
+        title={<>{greeting}, {firstName}</>}
+        subtitle="Your affiliate performance at a glance"
+      />
 
       {/* Status banners */}
       {isPending && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-6 flex items-start gap-4" data-testid="status-banner-pending">
-          <Clock size={20} className="text-amber-600 shrink-0 mt-0.5" />
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 mb-6 flex items-start gap-4" data-testid="status-banner-pending">
+          <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+            <Clock size={17} className="text-amber-600" />
+          </div>
           <div>
             <p className="font-semibold text-amber-900 mb-0.5">Application under review</p>
             <p className="text-sm text-amber-800">
@@ -94,8 +106,10 @@ export default async function AffiliateDashboardPage() {
       )}
 
       {isRejected && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-5 mb-6 flex items-start gap-4" data-testid="status-banner-rejected">
-          <XCircle size={20} className="text-red-600 shrink-0 mt-0.5" />
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-5 mb-6 flex items-start gap-4" data-testid="status-banner-rejected">
+          <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+            <XCircle size={17} className="text-red-600" />
+          </div>
           <div>
             <p className="font-semibold text-red-900 mb-0.5">Application not approved</p>
             <p className="text-sm text-red-800">
@@ -107,8 +121,10 @@ export default async function AffiliateDashboardPage() {
       )}
 
       {isSuspended && (
-        <div className="bg-slate-100 border border-slate-300 rounded-xl p-5 mb-6 flex items-start gap-4" data-testid="status-banner-suspended">
-          <AlertTriangle size={20} className="text-slate-600 shrink-0 mt-0.5" />
+        <div className="bg-slate-100 border border-slate-300 rounded-2xl p-5 mb-6 flex items-start gap-4" data-testid="status-banner-suspended">
+          <div className="w-9 h-9 rounded-xl bg-slate-200 flex items-center justify-center shrink-0">
+            <AlertTriangle size={17} className="text-slate-600" />
+          </div>
           <div>
             <p className="font-semibold text-slate-900 mb-0.5">Account suspended</p>
             <p className="text-sm text-slate-700">Your affiliate account is currently suspended. Please contact support for more information.</p>
@@ -118,65 +134,42 @@ export default async function AffiliateDashboardPage() {
 
       {/* KPI cards — 4 horizontal */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6" data-testid="kpi-cards">
-        {[
-          {
-            label: "Total Earned",
-            value: `$${(summary.totalCents / 100).toLocaleString()}`,
-            sub: "all-time",
-            icon: DollarSign,
-            color: "text-green-600",
-            bg: "bg-green-50",
-            href: "/affiliate/portal/earnings",
-            testid: "kpi-total-earned",
-          },
-          {
-            label: "This Month",
-            value: `$${(thisMonthCents / 100).toLocaleString()}`,
-            sub: `${thisMonthCount} commission${thisMonthCount !== 1 ? "s" : ""}`,
-            icon: TrendingUp,
-            color: "text-[#0B5FD1]",
-            bg: "bg-[#0B5FD1]/10",
-            href: "/affiliate/portal/earnings",
-            testid: "kpi-this-month",
-          },
-          {
-            label: "Pending",
-            value: `$${(summary.pendingCents / 100).toLocaleString()}`,
-            sub: "awaiting payout",
-            icon: Clock,
-            color: "text-amber-600",
-            bg: "bg-amber-50",
-            href: "/affiliate/portal/finance",
-            testid: "kpi-pending",
-          },
-          {
-            label: "Network Size",
-            value: String(networkTotal),
-            sub: `${network.l1} direct · ${network.l2} L2 · ${network.l3} L3`,
-            icon: Users,
-            color: "text-blue-600",
-            bg: "bg-blue-50",
-            href: "/affiliate/portal/network",
-            testid: "kpi-network",
-          },
-        ].map((stat) => (
-          <Link
-            key={stat.label}
-            href={stat.href}
-            data-testid={stat.testid}
-            className="bg-white border border-slate-200 rounded-xl p-4 hover:border-[#0B5FD1]/30 hover:shadow-sm transition-all group"
-          >
-            <div className="flex items-center justify-between mb-2.5">
-              <div className={`p-1.5 rounded-lg ${stat.bg}`}>
-                <stat.icon size={15} className={stat.color} />
-              </div>
-              <ArrowRight size={12} className="text-slate-300 group-hover:text-[#0B5FD1] transition-colors" />
-            </div>
-            <p className="text-xl font-bold text-slate-900">{stat.value}</p>
-            <p className="text-xs text-slate-500 mt-0.5 font-medium">{stat.label}</p>
-            <p className="text-xs text-slate-400 mt-0.5">{stat.sub}</p>
-          </Link>
-        ))}
+        <StatCard
+          label="Total Earned"
+          value={`$${(summary.totalCents / 100).toLocaleString()}`}
+          sub="all-time"
+          icon={DollarSign}
+          tone="success"
+          href="/affiliate/portal/earnings"
+          testId="kpi-total-earned"
+        />
+        <StatCard
+          label="This Month"
+          value={`$${(thisMonthCents / 100).toLocaleString()}`}
+          sub={`${thisMonthCount} commission${thisMonthCount !== 1 ? "s" : ""}`}
+          icon={TrendingUp}
+          tone="brand"
+          href="/affiliate/portal/earnings"
+          testId="kpi-this-month"
+        />
+        <StatCard
+          label="Pending"
+          value={`$${(summary.pendingCents / 100).toLocaleString()}`}
+          sub="awaiting payout"
+          icon={Clock}
+          tone="warning"
+          href="/affiliate/portal/finance"
+          testId="kpi-pending"
+        />
+        <StatCard
+          label="Network Size"
+          value={String(networkTotal)}
+          sub={`${network.l1} direct · ${network.l2} L2 · ${network.l3} L3`}
+          icon={Users}
+          tone="indigo"
+          href="/affiliate/portal/network"
+          testId="kpi-network"
+        />
       </div>
 
       {/* Two-column body */}
@@ -185,73 +178,74 @@ export default async function AffiliateDashboardPage() {
           {/* LEFT: Referral code + this month performance */}
           <div className="space-y-4">
             <ReferralCodeCard referralCode={affiliate.referralCode} referralLink={referralLink} />
-            <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">This Month</p>
-              <dl className="space-y-2">
+            <Panel title="This Month">
+              <dl className="space-y-2.5">
                 <div className="flex items-center justify-between">
                   <dt className="text-sm text-slate-500">Commissions earned</dt>
-                  <dd className="text-sm font-semibold text-slate-900">${(thisMonthCents / 100).toFixed(2)}</dd>
+                  <dd className={`text-sm ${FIGURE}`}>${(thisMonthCents / 100).toFixed(2)}</dd>
                 </div>
                 <div className="flex items-center justify-between">
                   <dt className="text-sm text-slate-500">Deals converted</dt>
-                  <dd className="text-sm font-semibold text-slate-900" data-testid="this-month-count">{thisMonthCount}</dd>
+                  <dd className={`text-sm ${FIGURE}`} data-testid="this-month-count">{thisMonthCount}</dd>
                 </div>
                 <div className="flex items-center justify-between">
                   <dt className="text-sm text-slate-500">Est. per deal (L1)</dt>
-                  <dd className="text-sm font-semibold text-slate-900">${(L1_PER_DEAL / 100).toFixed(2)}</dd>
+                  <dd className={`text-sm ${FIGURE}`}>${(L1_PER_DEAL / 100).toFixed(2)}</dd>
                 </div>
               </dl>
-            </div>
+            </Panel>
 
             {/* Group 8 (8A) — referral link click funnel */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="referral-click-funnel">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Referral Link Activity</p>
-              <dl className="space-y-2">
+            <Panel title="Referral Link Activity" testId="referral-click-funnel">
+              <dl className="space-y-2.5">
                 <div className="flex items-center justify-between">
                   <dt className="text-sm text-slate-500">Link clicks (all-time)</dt>
-                  <dd className="text-sm font-semibold text-slate-900" data-testid="referral-total-clicks">{clickStats.totalClicks}</dd>
+                  <dd className={`text-sm ${FIGURE}`} data-testid="referral-total-clicks">{clickStats.totalClicks}</dd>
                 </div>
                 <div className="flex items-center justify-between">
                   <dt className="text-sm text-slate-500">Clicks this month</dt>
-                  <dd className="text-sm font-semibold text-slate-900" data-testid="referral-clicks-month">{clickStats.clicksThisMonth}</dd>
+                  <dd className={`text-sm ${FIGURE}`} data-testid="referral-clicks-month">{clickStats.clicksThisMonth}</dd>
                 </div>
                 <div className="flex items-center justify-between">
                   <dt className="text-sm text-slate-500">Converted to signups</dt>
-                  <dd className="text-sm font-semibold text-slate-900" data-testid="referral-converted-clicks">{clickStats.convertedClicks}</dd>
+                  <dd className={`text-sm ${FIGURE}`} data-testid="referral-converted-clicks">{clickStats.convertedClicks}</dd>
                 </div>
                 <div className="flex items-center justify-between">
                   <dt className="text-sm text-slate-500">Conversion rate</dt>
-                  <dd className="text-sm font-semibold text-slate-900" data-testid="referral-conversion-rate">{clickStats.conversionRate}%</dd>
+                  <dd className={`text-sm ${FIGURE}`} data-testid="referral-conversion-rate">{clickStats.conversionRate}%</dd>
                 </div>
               </dl>
-            </div>
+            </Panel>
           </div>
 
           {/* RIGHT: Recent commissions */}
-          <div className="bg-white border border-slate-200 rounded-xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Recent Commissions</p>
-              <Link href="/affiliate/portal/earnings" className="text-xs text-[#0B5FD1] hover:underline font-medium" data-testid="view-all-earnings-link">
-                View all →
-              </Link>
-            </div>
+          <Panel
+            title="Recent Commissions"
+            action={{ label: "View all →", href: "/affiliate/portal/earnings", testId: "view-all-earnings-link" }}
+            flush
+          >
             {recentCommissions.length === 0 ? (
-              <p className="text-sm text-slate-400 py-6 text-center">No commissions yet. Start referring!</p>
+              <EmptyState
+                icon={Inbox}
+                title="No commissions yet"
+                body="Share your referral link — commissions land here as your referrals convert."
+                action={{ label: "Open referral hub", href: "/affiliate/portal/referral-hub" }}
+              />
             ) : (
-              <div className="space-y-2">
+              <div className="divide-y divide-slate-100">
                 {recentCommissions.map((c) => (
-                  <div key={c.id} data-testid={`commission-item-${c.id}`} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+                  <div key={c.id} data-testid={`commission-item-${c.id}`} className="flex items-center justify-between px-5 py-3">
                     <div className="flex items-center gap-2.5">
                       <Badge variant={c.status === "PAID" ? "green" : c.status === "APPROVED" ? "blue" : "secondary"} className="text-[10px]">{c.status}</Badge>
                       <span className="text-xs text-slate-500">Level {c.level}</span>
-                      <span className="text-xs text-slate-400">{new Date(c.createdAt).toLocaleDateString()}</span>
+                      <span className="text-xs text-slate-400 font-mono">{new Date(c.createdAt).toLocaleDateString()}</span>
                     </div>
-                    <span className="font-semibold text-slate-900 text-sm">${(c.amountCents / 100).toFixed(2)}</span>
+                    <span className={`text-sm ${FIGURE}`}>${(c.amountCents / 100).toFixed(2)}</span>
                   </div>
                 ))}
               </div>
             )}
-          </div>
+          </Panel>
         </div>
       )}
 
@@ -268,9 +262,9 @@ export default async function AffiliateDashboardPage() {
               key={a.label}
               href={a.href}
               data-testid={`quick-action-${a.label.toLowerCase().replace(/\s+/g, "-")}`}
-              className="flex flex-col items-center gap-2 bg-white border border-slate-200 rounded-xl p-4 hover:border-[#0B5FD1]/40 hover:shadow-sm transition-all text-center"
+              className="flex flex-col items-center gap-2 bg-white border border-slate-200/80 rounded-2xl p-4 hover:border-[#0B5FD1]/30 hover:shadow-sm transition-all text-center group"
             >
-              <div className="p-2 bg-[#0B5FD1]/10 rounded-lg">
+              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center group-hover:bg-[#DBEAFE]/60 transition-colors">
                 <a.icon size={16} className="text-[#0B5FD1]" />
               </div>
               <span className="text-xs font-semibold text-slate-700">{a.label}</span>
@@ -278,6 +272,6 @@ export default async function AffiliateDashboardPage() {
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }
