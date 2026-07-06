@@ -6,8 +6,13 @@ import { logger } from "@/lib/logger";
 
 // POST /api/buyer/plan/upgrade
 // Upgrades an authenticated Standard buyer to Premium.
-// Idempotent: returns success if already Premium. No charge happens here —
-// the $499 Premium concierge fee is collected at the deal-payment stage.
+// Idempotent: returns success if already Premium.
+//
+// INTENTIONALLY FREE AT THIS STAGE (owner decision, 2026-07): the no-charge
+// upgrade is an acquisition lever — the $499 Premium concierge fee is
+// monetized at deal close (deal-payment stage), not here. Do not add a charge
+// to this endpoint without a product decision. The from→to audit metadata
+// below doubles as the upgrade-funnel telemetry.
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
@@ -41,8 +46,17 @@ export async function POST(request: NextRequest) {
         action: "STATUS_CHANGE",
         entityType: "buyer",
         entityId: buyer.id,
-        reason: "Self-service plan upgrade STANDARD → PREMIUM (fee collected at deal payment).",
-        metadata: { from: "STANDARD", to: "PREMIUM", selfService: true },
+        reason: "Self-service plan upgrade STANDARD → PREMIUM (no charge at this stage; fee collected at deal payment).",
+        // TODO(RBAC/Phase 4): add a PLAN_UPGRADED member to AdminActionType in
+        // the first phase where a schema migration is acceptable; STATUS_CHANGE
+        // is the closest existing enum value.
+        metadata: {
+          fromPlan: buyer.plan,
+          toPlan: "PREMIUM",
+          actor: "buyer",
+          actorId: buyer.id,
+          source: "self_service",
+        },
       },
     }),
     prisma.buyerActivityEvent.create({
@@ -50,7 +64,12 @@ export async function POST(request: NextRequest) {
         buyerId: buyer.id,
         eventType: "PLAN_UPGRADED",
         title: "Upgraded to Premium plan",
-        metadata: { from: "STANDARD", to: "PREMIUM", selfService: true },
+        metadata: {
+          fromPlan: buyer.plan,
+          toPlan: "PREMIUM",
+          actor: "buyer",
+          source: "self_service",
+        },
       },
     }),
   ]).catch((e) => logger.error("[plan-upgrade] audit logging failed:", e));
