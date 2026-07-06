@@ -35,6 +35,51 @@
      and `font-body` utilities with graceful system fallbacks. */
   --font-display: var(--font-jakarta), "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-body: var(--font-inter), "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* ==========================================================================
+     AutoLenis UI design tokens (`--al-*`) — Phase 2 shared design system.
+     ADDITIVE: new names only; no existing token or utility is changed, so this
+     block has zero visual effect until a component opts in. Values are the
+     canonical roles from docs/design-system/AUTOLENIS_UI_SPEC.md §1.1.
+     Registered in @theme so both utilities (`bg-al-primary`, `text-al-danger`,
+     `rounded-al-lg`, `shadow-al-1`) and CSS vars (`var(--color-al-primary)`)
+     are available. Light-mode launch values; dark-mode swap lives with the
+     promoted CRM kit and is out of launch scope.
+     ========================================================================== */
+  --color-al-primary: #0b5fd1;
+  --color-al-primary-hover: #0a4db8;
+  --color-al-primary-subtle: #eff6ff;
+  --color-al-primary-fg: #ffffff;
+
+  --color-al-success: #15803d;
+  --color-al-success-subtle: #f0fdf4;
+  --color-al-success-fg: #065f46;
+  --color-al-warning: #b45309;
+  --color-al-warning-subtle: #fffbeb;
+  --color-al-warning-fg: #92400e;
+  --color-al-danger: #b91c1c;
+  --color-al-danger-subtle: #fef2f2;
+  --color-al-danger-fg: #991b1b;
+  --color-al-info: #0369a1;
+  --color-al-accent: #643293;
+
+  --color-al-bg: #f8fafc;
+  --color-al-surface: #ffffff;
+  --color-al-surface-raised: #ffffff;
+  --color-al-border: #e2e8f0;
+  --color-al-border-strong: #cbd5e1;
+  --color-al-text: #0f172a;
+  --color-al-text-muted: #475569;
+  --color-al-text-subtle: #64748b;
+  --color-al-focus: #0b5fd1;
+
+  --radius-al-sm: 6px;
+  --radius-al-md: 8px;
+  --radius-al-lg: 12px;
+
+  --shadow-al-1: 0 1px 2px rgb(15 23 42 / 0.06);
+  --shadow-al-2: 0 4px 12px rgb(15 23 42 / 0.10);
+  --shadow-al-3: 0 12px 32px rgb(15 23 42 / 0.18);
 }
 
 :root {

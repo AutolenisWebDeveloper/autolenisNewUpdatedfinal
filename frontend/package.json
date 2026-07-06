@@ -17,6 +17,7 @@
     "test:security": "tsx --test --experimental-test-module-mocks lib/security/__tests__/*.test.ts",
     "test:webhooks": "tsx --test --experimental-test-module-mocks app/api/webhooks/__tests__/*.test.ts",
     "test:payments": "tsx --test lib/payments/__tests__/*.test.ts",
+    "test:format": "tsx --test lib/__tests__/format.test.ts",
     "test:seo": "tsx --test lib/seo/__tests__/*.test.ts",
     "test:crm": "tsx --tsconfig lib/crm/__tests__/tsconfig.test.json --test lib/crm/__tests__/*.test.ts",
     "test:visual": "playwright test --config playwright.visual.config.ts",
