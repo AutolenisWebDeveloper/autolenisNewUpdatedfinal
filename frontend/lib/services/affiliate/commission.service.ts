@@ -93,25 +93,28 @@ export async function walkCommissionTree(
 
 // Commission summary for an affiliate
 export async function getCommissionSummary(affiliateId: string) {
-  const [paid, approved, pendingReview, total] = await Promise.all([
+  const [paid, approved, pendingReview] = await Promise.all([
     prisma.commission.aggregate({ where: { affiliateId, status: "PAID" }, _sum: { amountCents: true } }),
     prisma.commission.aggregate({ where: { affiliateId, status: "APPROVED" }, _sum: { amountCents: true } }),
     prisma.commission.aggregate({ where: { affiliateId, status: "PENDING" }, _sum: { amountCents: true } }),
-    prisma.commission.aggregate({ where: { affiliateId }, _sum: { amountCents: true } }),
   ]);
 
+  const paidCents = paid._sum.amountCents ?? 0;
   const approvedCents = approved._sum.amountCents ?? 0;
   const pendingReviewCents = pendingReview._sum.amountCents ?? 0;
 
   return {
-    paidCents: paid._sum.amountCents ?? 0,
+    paidCents,
     // approvedCents: admin-approved commissions ready to be requested as a payout
     approvedCents,
     // pendingCents: combined APPROVED + PENDING — used for dashboard/earnings "awaiting payout" display
     pendingCents: approvedCents + pendingReviewCents,
     // pendingReviewCents: commissions awaiting admin approval (not yet payable)
     pendingReviewCents,
-    totalCents: total._sum.amountCents ?? 0,
+    // totalCents: lifetime earned excluding REVERSED (clawed-back) commissions,
+    // matching the per-level breakdown and the leaderboard ranking basis.
+    // Pending amounts are reported separately via pendingCents.
+    totalCents: paidCents + approvedCents + pendingReviewCents,
   };
 }
 

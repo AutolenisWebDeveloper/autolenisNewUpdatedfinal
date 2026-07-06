@@ -101,7 +101,11 @@ export async function sendWeeklyDigestForAffiliate(affiliateId: string, now: Dat
     where: { affiliateId },
     select: { amountCents: true, status: true },
   });
-  const totalCentsLifetime = allCommissions.reduce((s, c) => s + c.amountCents, 0);
+  // Lifetime earned excludes REVERSED (clawed-back) commissions, matching
+  // getCommissionSummary and the portal's per-level breakdown.
+  const totalCentsLifetime = allCommissions
+    .filter((c) => c.status !== "REVERSED")
+    .reduce((s, c) => s + c.amountCents, 0);
   const pendingCentsLifetime = allCommissions.filter((c) => c.status === "PENDING" || c.status === "APPROVED").reduce((s, c) => s + c.amountCents, 0);
 
   // 4. Skip if truly no activity (avoids empty-digest noise)
