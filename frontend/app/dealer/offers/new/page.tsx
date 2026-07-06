@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const INPUT_CLASS =
   "w-full border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30";
@@ -30,32 +31,21 @@ export default function NewOfferPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/dealer/offers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          auctionId,
-          otdPriceCents: otdNum ? Math.round(otdNum * 100) : undefined,
-          vehiclePriceCents: vehiclePrice ? Math.round(parseFloat(vehiclePrice) * 100) : undefined,
-          taxCents: tax ? Math.round(parseFloat(tax) * 100) : undefined,
-          feesCents: fees ? Math.round(parseFloat(fees) * 100) : undefined,
-          includesFinancing,
-          aprRate: aprRate ? parseFloat(aprRate) : undefined,
-          termMonths: termMonths ? parseInt(termMonths, 10) : undefined,
-          downPaymentCents: downPayment
-            ? Math.round(parseFloat(downPayment) * 100)
-            : undefined,
-          comments: comments || undefined,
-        }),
+      await api.post("/api/dealer/offers", {
+        auctionId,
+        otdPriceCents: otdNum ? Math.round(otdNum * 100) : undefined,
+        vehiclePriceCents: vehiclePrice ? Math.round(parseFloat(vehiclePrice) * 100) : undefined,
+        taxCents: tax ? Math.round(parseFloat(tax) * 100) : undefined,
+        feesCents: fees ? Math.round(parseFloat(fees) * 100) : undefined,
+        includesFinancing,
+        aprRate: aprRate ? parseFloat(aprRate) : undefined,
+        termMonths: termMonths ? parseInt(termMonths, 10) : undefined,
+        downPaymentCents: downPayment ? Math.round(parseFloat(downPayment) * 100) : undefined,
+        comments: comments || undefined,
       });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: { message?: string } };
-        setError(data.error?.message ?? "Something went wrong");
-        return;
-      }
       router.push("/dealer/offers");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Something went wrong"));
     } finally {
       setLoading(false);
     }

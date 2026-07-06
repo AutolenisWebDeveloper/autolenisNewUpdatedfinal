@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   offerId:   string;
@@ -18,31 +19,17 @@ export default function OfferResponseButtons({ offerId, requestId }: Props) {
     setActing(action);
     setErr(null);
     try {
-      const res = await fetch(
+      const { redirect } = await api.post<{ status: string; redirect?: string | null; message?: string }>(
         `/api/buyer/requests/${requestId}/offer/respond`,
-        {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({ response: action, offerId }),
-        }
+        { response: action, offerId },
       );
-      if (!res.ok) {
-        const errData = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        setErr(errData?.error?.message ?? "We couldn't submit your response. Please try again.");
-        setActing(null);
-        return;
-      }
-      // The buyer API wraps payloads in { success, data } (successResponse).
-      const body = await res.json() as {
-        data?: { status: string; redirect?: string | null; message?: string };
-      };
-      if (body.data?.redirect) {
-        router.push(body.data.redirect);
+      if (redirect) {
+        router.push(redirect);
       } else {
         router.refresh();
       }
-    } catch {
-      setErr("Something went wrong. Please try again.");
+    } catch (err) {
+      setErr(apiErrorMessage(err, "We couldn't submit your response. Please try again."));
       setActing(null);
     }
   }

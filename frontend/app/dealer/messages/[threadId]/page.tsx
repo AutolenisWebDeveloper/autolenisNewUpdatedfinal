@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Message {
   id: string;
@@ -26,16 +27,10 @@ export default function MessageThreadPage() {
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch(`/api/dealer/messages/threads/${threadId}`);
-        if (!res.ok) {
-          setError("Failed to load messages.");
-          return;
-        }
-        // The dealer API wraps payloads in { success, data } (successResponse).
-        const data = (await res.json()) as { data?: { messages?: Message[] } };
-        setMessages(data.data?.messages ?? []);
-      } catch {
-        setError("Network error. Please try again.");
+        const { messages } = await api.get<{ messages: Message[] }>(`/api/dealer/messages/threads/${threadId}`);
+        setMessages(messages ?? []);
+      } catch (err) {
+        setError(apiErrorMessage(err, "Failed to load messages."));
       } finally {
         setLoading(false);
       }
@@ -53,23 +48,14 @@ export default function MessageThreadPage() {
     setSending(true);
     setError(null);
     try {
-      const res = await fetch(`/api/dealer/messages/threads/${threadId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: compose }),
-      });
-      if (!res.ok) {
-        setError("Failed to send message.");
-        return;
-      }
-      const data = (await res.json()) as { data?: { message?: Message } };
-      const sent = data.data?.message;
-      if (sent) {
-        setMessages((prev) => [...prev, sent]);
-      }
+      const { message } = await api.post<{ message: Message }>(
+        `/api/dealer/messages/threads/${threadId}`,
+        { content: compose },
+      );
+      if (message) setMessages((prev) => [...prev, message]);
       setCompose("");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to send message."));
     } finally {
       setSending(false);
     }
