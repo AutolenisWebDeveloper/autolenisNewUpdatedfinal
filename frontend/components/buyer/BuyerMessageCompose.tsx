@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Send, MessageSquare } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // Feature 33 — Buyer starts a new support message thread
 export default function BuyerMessageCompose() {
@@ -19,25 +20,13 @@ export default function BuyerMessageCompose() {
     setError(null);
 
     try {
-      const res = await fetch("/api/buyer/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: content.trim() }),
-      });
-      const json = (await res.json()) as {
-        success?: boolean;
-        data?: { thread?: { id: string } };
-        error?: { message: string };
-      };
-      if (!res.ok || !json.success) {
-        setError(json.error?.message ?? "Failed to send message. Please try again.");
-        return;
-      }
+      await api.post<{ thread?: { id: string } }>("/api/buyer/messages", { content: content.trim() });
       setContent("");
       setOpen(false);
       router.refresh();
-    } catch {
-      setError("An unexpected error occurred. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to send message. Please try again."));
+      return;
     } finally {
       setSubmitting(false);
     }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Settings as SettingsIcon, Bell, MessageCircle, Megaphone, Gavel, FileText, Lock, Trash2, Mail, Smartphone } from "lucide-react";
+import { api, apiErrorMessage, ApiError } from "@/lib/api/client";
 
 interface Preferences {
   emailNotifications: boolean;
@@ -29,21 +30,11 @@ export default function SettingsClient({ initial, email }: { initial: Preference
     try {
       // smsNotifications is Coming Soon — never include in PATCH body
       const { smsNotifications: _sms, ...payload } = next;
-      const res = await fetch("/api/buyer/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setError(data.error?.message ?? "Couldn't save. Please retry.");
-        setPrefs(initial);
-        return;
-      }
+      await api.patch("/api/buyer/settings", payload);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch {
-      setError("Network error. Please retry.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Couldn't save. Please retry."));
       setPrefs(initial);
     } finally {
       setSaving(false);
@@ -61,27 +52,19 @@ export default function SettingsClient({ initial, email }: { initial: Preference
     setError(null);
     setDeleteError(null);
     try {
-      const res = await fetch("/api/buyer/account", { method: "DELETE" });
-      const data = await res.json() as {
-        success: boolean;
-        error?: { code?: string; message?: string }
-      };
-      if (!data.success) {
-        if (data.error?.code === "ACTIVE_DEAL") {
-          setDeleteError(
-            "You have an active deal in progress. Complete or cancel it before deleting your account."
-          );
-        } else {
-          setDeleteError(
-            data.error?.message ?? "Account deletion failed. Please contact support."
-          );
-        }
-        return;
-      }
+      await api.del("/api/buyer/account");
       // Account deleted — sign out + redirect to home
       window.location.href = "/";
-    } catch {
-      setDeleteError("Network error. Please retry.");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "ACTIVE_DEAL") {
+        setDeleteError(
+          "You have an active deal in progress. Complete or cancel it before deleting your account."
+        );
+      } else {
+        setDeleteError(
+          apiErrorMessage(err, "Account deletion failed. Please contact support.")
+        );
+      }
     } finally {
       setDeleting(false);
     }

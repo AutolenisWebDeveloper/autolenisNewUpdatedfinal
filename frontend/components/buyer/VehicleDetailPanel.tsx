@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight, CheckCircle2, AlertTriangle, TrendingUp, Heart } from "lucide-react";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface VehicleDetailPanelProps {
   vehicleId: string;
@@ -30,17 +31,13 @@ export default function VehicleDetailPanel({
     if (!isAuthenticated) return;
     setAdding(true);
     setError(null);
-    const res = await fetch("/api/buyer/shortlist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ inventoryItemId: vehicleId }),
-    });
-    setAdding(false);
-    if (res.ok) {
+    try {
+      await api.post("/api/buyer/shortlist", { inventoryItemId: vehicleId });
       setAdded(true);
-    } else {
-      const d = await res.json() as { error?: { message?: string } };
-      setError(d.error?.message ?? "Unable to add to shortlist");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Unable to add to shortlist"));
+    } finally {
+      setAdding(false);
     }
   }
 

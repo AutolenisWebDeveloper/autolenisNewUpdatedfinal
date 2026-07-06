@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Pencil, Check, X } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Profile {
   firstName: string;
@@ -31,30 +32,22 @@ export default function ProfileEditor({ initial }: { initial: Profile }) {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/buyer/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          firstName: form.firstName,
-          lastName: form.lastName,
-          phone: form.phone,
-          address: form.address,
-          city: form.city,
-          state: form.state,
-          zip: form.zip,
-        }),
+      await api.patch("/api/buyer/profile", {
+        firstName: form.firstName,
+        lastName: form.lastName,
+        phone: form.phone,
+        address: form.address,
+        city: form.city,
+        state: form.state,
+        zip: form.zip,
       });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setError(data.error?.message ?? "Couldn't save. Please retry.");
-        return;
-      }
       setEditing(false);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       startTransition(() => router.refresh());
-    } catch {
-      setError("Network error. Please retry.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Couldn't save. Please retry."));
+      return;
     } finally {
       setSaving(false);
     }

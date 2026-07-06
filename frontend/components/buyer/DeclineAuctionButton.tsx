@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { XCircle, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const DECLINE_REASONS = [
   "Offers were too high",
@@ -22,20 +23,11 @@ export default function DeclineAuctionButton({ auctionId }: { auctionId: string 
     setLoading(true);
     setError(null);
     try {
-      const res  = await fetch(`/api/buyer/auctions/${auctionId}/decline`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ reason }),
-      });
-      const data = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!data.success) {
-        setError(data.error?.message ?? "Failed to close auction. Please try again.");
-      } else {
-        router.push("/buyer/auctions");
-        router.refresh();
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      await api.post(`/api/buyer/auctions/${auctionId}/decline`, { reason });
+      router.push("/buyer/auctions");
+      router.refresh();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to close auction. Please try again."));
     } finally {
       setLoading(false);
     }

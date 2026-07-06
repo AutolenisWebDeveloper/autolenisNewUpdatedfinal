@@ -8,6 +8,7 @@ import { useState, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Sparkles, X, Loader2 } from "lucide-react";
+import { api } from "@/lib/api/client";
 
 interface NLSearchInputProps {
   onFiltersApplied: (params: Record<string, string>, interpretation: string) => void;
@@ -27,27 +28,14 @@ export default function NLSearchInput({ onFiltersApplied, onClear, placeholder =
     setAiError(false);
 
     try {
-      const res = await fetch("/api/buyer/search/interpret", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q }),
-      });
-
-      const data = await res.json() as {
-        success: boolean;
-        data: { interpretation: string; params: Record<string, string>; confidence: string } | null
-      };
-
-      if (res.ok && data.success && data.data) {
-        setActiveInterpretation(data.data.interpretation);
-        onFiltersApplied(data.data.params, data.data.interpretation);
-      } else {
-        // AI unavailable — fall back to plain text search
-        setAiError(true);
-        onFiltersApplied({ q }, q);
-        setActiveInterpretation(q);
-      }
+      const data = await api.post<{ interpretation: string; params: Record<string, string>; confidence: string }>(
+        "/api/buyer/search/interpret",
+        { query: q },
+      );
+      setActiveInterpretation(data.interpretation);
+      onFiltersApplied(data.params, data.interpretation);
     } catch {
+      // AI unavailable — fall back to plain text search
       setAiError(true);
       onFiltersApplied({ q }, q);
       setActiveInterpretation(q);

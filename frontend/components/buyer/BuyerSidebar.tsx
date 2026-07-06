@@ -13,6 +13,7 @@ import {
   Bookmark, Activity, Share2, Receipt,
 } from "lucide-react";
 import { NOTIFICATION_CLEARED_EVENT } from "@/lib/events/notifications";
+import { api } from "@/lib/api/client";
 
 const NAV_GROUPS = [
   {
@@ -121,9 +122,8 @@ export default function BuyerSidebar() {
   // Real-time unread count updates are out of scope; badge accuracy on navigation
   // is sufficient for this feature. Do not add a setInterval here.
   useEffect(() => {
-    fetch("/api/buyer/notifications/unread-count")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.data?.count) setUnreadCount(d.data.count); })
+    api.get<{ count: number }>("/api/buyer/notifications/unread-count")
+      .then(data => { if (data?.count) setUnreadCount(data.count); })
       .catch(err => { logger.error("[BuyerSidebar] Failed to fetch unread count:", err); });
 
     function handleCleared() { setUnreadCount(0); }

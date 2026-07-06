@@ -9,6 +9,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ALL_MAKES } from "@/components/public/InventorySearchClient";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const BODY_TYPES = ["SUV", "Sedan", "Truck", "Van", "Coupe", "Convertible", "Wagon", "Hatchback"];
 const TRANSMISSIONS = ["Automatic", "Manual", "CVT"];
@@ -174,17 +175,12 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
     try {
       const params = new URLSearchParams(sp.toString());
       params.set("limit", "48");
-      const res  = await fetch(`/api/buyer/search?${params.toString()}`);
-      const data = await res.json() as { success: boolean; data: SearchResult; error?: { message?: string } };
-      if (data.success) {
-        setVehicles(data.data.vehicles);
-        setTotalShown(data.data.count);
-        setHasLocalDealerInventory(data.data.hasLocalDealerInventory ?? null);
-      } else {
-        setSearchError(data.error?.message ?? "We couldn't load search results. Please try again.");
-      }
-    } catch {
-      setSearchError("We couldn't load search results. Please check your connection and try again.");
+      const data = await api.get<SearchResult>(`/api/buyer/search?${params.toString()}`);
+      setVehicles(data.vehicles);
+      setTotalShown(data.count);
+      setHasLocalDealerInventory(data.hasLocalDealerInventory ?? null);
+    } catch (err) {
+      setSearchError(apiErrorMessage(err, "We couldn't load search results. Please check your connection and try again."));
     } finally {
       setLoading(false);
     }
@@ -194,13 +190,10 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
 
   // ── load shortlist on mount ───────────────────────────────────────────────
   useEffect(() => {
-    fetch("/api/buyer/shortlist")
-      .then(r => r.json())
-      .then((d: { success: boolean; data: { items: { inventoryItemId: string }[]; count: number } }) => {
-        if (d.success) {
-          setShortlisted(new Set(d.data.items.map(i => i.inventoryItemId)));
-          setShortlistCount(d.data.count);
-        }
+    api.get<{ items: { inventoryItemId: string }[]; count: number }>("/api/buyer/shortlist")
+      .then(data => {
+        setShortlisted(new Set(data.items.map(i => i.inventoryItemId)));
+        setShortlistCount(data.count);
       })
       .catch(() => undefined);
   }, []);

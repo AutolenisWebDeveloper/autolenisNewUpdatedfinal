@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { PenLine, Loader2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   dealId: string;
@@ -19,25 +20,17 @@ export default function ESignLaunchButton({ dealId, signingUrl }: Props) {  cons
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/buyer/esign/${dealId}`, { method: "POST" });
-      const data = await res.json() as {
-        success: boolean;
-        data?: { signingUrl?: string };
-        error?: { message: string };
-      };
-      if (!data.success) {
-        setError(data.error?.message ?? "Failed to create signing session");
-        return;
-      }
-      const newUrl = data.data?.signingUrl;
+      const data = await api.post<{ signingUrl?: string }>(`/api/buyer/esign/${dealId}`);
+      const newUrl = data?.signingUrl;
       if (newUrl && newUrl.startsWith("https://")) {
         setUrl(newUrl);
         window.open(newUrl, "_blank", "noopener,noreferrer");
       } else {
         setError("Signing session unavailable. Please try again or contact support.");
       }
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to create signing session"));
+      return;
     } finally {
       setLoading(false);
     }

@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { CheckCircle2, Upload } from "lucide-react";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 export default function ExternalPrequalPage() {
   const [submitted, setSubmitted] = useState(false);
@@ -21,22 +22,13 @@ export default function ExternalPrequalPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/buyer/prequal/external", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          lenderName: form.lenderName,
-          approvedAmountCents: Math.round(parseFloat(form.approvedAmount) * 100),
-          apr: parseFloat(form.apr),
-          termMonths: parseInt(form.termMonths, 10),
-          expiresAt: form.expiryDate || undefined,
-        }),
+      await api.post("/api/buyer/prequal/external", {
+        lenderName: form.lenderName,
+        approvedAmountCents: Math.round(parseFloat(form.approvedAmount) * 100),
+        apr: parseFloat(form.apr),
+        termMonths: parseInt(form.termMonths, 10),
+        expiresAt: form.expiryDate || undefined,
       });
-      const data = await res.json() as { success: boolean; error?: { message: string } };
-      if (!data.success) {
-        setError(data.error?.message ?? "Submission failed. Please try again.");
-        return;
-      }
       if (docFile) {
         setDocUploading(true);
         try {
@@ -52,8 +44,8 @@ export default function ExternalPrequalPage() {
         }
       }
       setSubmitted(true);
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Submission failed. Please try again."));
     } finally {
       setLoading(false);
     }

@@ -7,6 +7,7 @@ import {
   Check, ChevronLeft, Loader2, ArrowRight, X, ShieldCheck,
   RefreshCw, Clock, Upload,
 } from "lucide-react";
+import { api } from "@/lib/api/client";
 
 // ─── Types & Constants ──────────────────────────────────────────────────────────
 
@@ -227,10 +228,8 @@ export default function NewRequestPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/buyer/profile");
-        if (!res.ok) return;
-        const data = await res.json() as { data?: { zip?: string } };
-        const z = data?.data?.zip;
+        const data = await api.get<{ zip?: string }>("/api/buyer/profile");
+        const z = data?.zip;
         if (!cancelled && z && /^\d{5}$/.test(z)) {
           // Functional update so we never clobber a ZIP already hydrated from
           // the URL (Adjust-Request flow) or restored from sessionStorage.

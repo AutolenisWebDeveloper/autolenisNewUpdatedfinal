@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Calendar, MapPin, Loader2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 export default function PickupScheduleForm({ dealId }: { dealId: string }) {
   const router = useRouter();
@@ -20,19 +21,10 @@ export default function PickupScheduleForm({ dealId }: { dealId: string }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/buyer/pickup/${dealId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scheduledAt, location, notes: notes.trim() || undefined }),
-      });
-      const data = await res.json() as { success: boolean; error?: { message: string } };
-      if (!data.success) {
-        setError(data.error?.message ?? "Scheduling failed. Please try again.");
-      } else {
-        router.refresh();
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      await api.post(`/api/buyer/pickup/${dealId}`, { scheduledAt, location, notes: notes.trim() || undefined });
+      router.refresh();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Scheduling failed. Please try again."));
     } finally {
       setLoading(false);
     }

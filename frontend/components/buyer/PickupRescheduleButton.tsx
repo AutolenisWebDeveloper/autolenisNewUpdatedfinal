@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Calendar, Loader2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   dealId:      string;
@@ -31,20 +32,11 @@ export default function PickupRescheduleButton({ dealId, currentDate, location }
     setLoading(true);
     setError(null);
     try {
-      const res  = await fetch(`/api/buyer/pickup/${dealId}`, {
-        method:  "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ scheduledAt: newDate, location: newLoc.trim(), reason: reason.trim() || undefined }),
-      });
-      const data = await res.json() as { success: boolean; error?: { message: string } };
-      if (!data.success) {
-        setError(data.error?.message ?? "Reschedule failed. Please try again.");
-      } else {
-        setOpen(false);
-        router.refresh();
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      await api.patch(`/api/buyer/pickup/${dealId}`, { scheduledAt: newDate, location: newLoc.trim(), reason: reason.trim() || undefined });
+      setOpen(false);
+      router.refresh();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Reschedule failed. Please try again."));
     } finally {
       setLoading(false);
     }

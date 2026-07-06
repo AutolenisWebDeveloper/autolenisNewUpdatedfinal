@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Send } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   threadId: string;
@@ -22,23 +23,12 @@ export default function BuyerMessageReply({ threadId }: Props) {
     setError(null);
 
     try {
-      const res = await fetch("/api/buyer/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: content.trim(), threadId }),
-      });
-      const json = (await res.json()) as {
-        success?: boolean;
-        error?: { message: string };
-      };
-      if (!res.ok || !json.success) {
-        setError(json.error?.message ?? "Failed to send message. Please try again.");
-        return;
-      }
+      await api.post("/api/buyer/messages", { content: content.trim(), threadId });
       setContent("");
       router.refresh();
-    } catch {
-      setError("An unexpected error occurred. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to send message. Please try again."));
+      return;
     } finally {
       setSubmitting(false);
     }

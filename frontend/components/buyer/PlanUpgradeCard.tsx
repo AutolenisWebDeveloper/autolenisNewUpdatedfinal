@@ -5,6 +5,7 @@ import { Crown, CheckCircle2, Clock, AlertCircle, ArrowUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PREMIUM_FEE_REMAINING_CENTS, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 export type DepositStatus = "NOT_PAID" | "PENDING" | "PAID";
 
@@ -26,18 +27,10 @@ export default function PlanUpgradeCard({ plan, depositStatus, planUpgradedAt }:
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/buyer/plan/upgrade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const json = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok) {
-        setError(json.error?.message ?? "Upgrade failed. Please try again.");
-      } else {
-        setUpgraded(true);
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      await api.post("/api/buyer/plan/upgrade");
+      setUpgraded(true);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Upgrade failed. Please try again."));
     } finally {
       setLoading(false);
     }

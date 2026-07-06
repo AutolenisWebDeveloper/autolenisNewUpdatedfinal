@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const MIN_DRIVER_AGE_YEARS = 16;
 const MIN_DRIVER_AGE_MS    = MIN_DRIVER_AGE_YEARS * 365.25 * 24 * 3600 * 1000;
@@ -44,28 +45,18 @@ export default function InsuranceQuoteForm({ dealId, inventoryItemId, vehicle }:
     setError(null);
 
     try {
-      const res = await fetch("/api/buyer/insurance/request-quote", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dealId,
-          inventoryItemId,
-          coverageType,
-          currentInsurer: currentInsurer.trim() || null,
-          driverDob:      driverDob || null,
-          additionalInfo: additionalInfo.trim() || null,
-        }),
+      await api.post("/api/buyer/insurance/request-quote", {
+        dealId,
+        inventoryItemId,
+        coverageType,
+        currentInsurer: currentInsurer.trim() || null,
+        driverDob:      driverDob || null,
+        additionalInfo: additionalInfo.trim() || null,
       });
-      const data = await res.json() as { success: boolean; error?: { message: string } };
-
-      if (!data.success) {
-        setError(data.error?.message ?? "Submission failed. Please try again.");
-      } else {
-        setSuccess(true);
-        router.refresh();
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      setSuccess(true);
+      router.refresh();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Submission failed. Please try again."));
     } finally {
       setLoading(false);
     }

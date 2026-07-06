@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, ArrowRight, Star, AlertTriangle, Clock, HelpCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface OtdBreakdown {
   vehiclePriceCents: number;
@@ -58,12 +59,10 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/buyer/auctions/${auctionId}/best-price?months=${termMonths}`)
-      .then(r => r.json())
-      .then((d: { success: boolean; data?: { offers?: RankedOffer[] } }) => {
+    api.get<{ offers?: RankedOffer[] }>(`/api/buyer/auctions/${auctionId}/best-price?months=${termMonths}`)
+      .then(data => {
         if (cancelled) return;
-        if (d.success) setOffers(d.data?.offers ?? []);
-        else setError("We couldn't load your offers. Please refresh to try again.");
+        setOffers(data?.offers ?? []);
       })
       .catch(() => {
         if (!cancelled) setError("We couldn't load your offers. Please check your connection and refresh.");
@@ -77,25 +76,14 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
   async function selectOffer(offerId: string) {
     setError(null);
     try {
-      const res = await fetch(`/api/buyer/auctions/${auctionId}/select-offer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offerId }),
-      });
-      if (res.ok) {
-        router.push("/buyer/deal");
-        return;
-      }
-      setConfirming(null);
       // Surface the API's explanation (e.g. AUCTION_LIVE: the 48h auction is
       // still running) instead of a generic failure.
-      const data = (await res.json().catch(() => null)) as
-        | { error?: { message?: string } }
-        | null;
-      setError(data?.error?.message ?? "Failed to select offer. Please try again.");
-    } catch {
+      await api.post(`/api/buyer/auctions/${auctionId}/select-offer`, { offerId });
+      router.push("/buyer/deal");
+      return;
+    } catch (err) {
       setConfirming(null);
-      setError("Network error. Please check your connection and try again.");
+      setError(apiErrorMessage(err, "Failed to select offer. Please try again."));
     }
   }
 

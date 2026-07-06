@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { CheckCircle2, Car } from "lucide-react";
 import TradeInValuationWidget from "@/components/buyer/TradeInValuationWidget";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const CONDITIONS = ["Excellent — like new, no mechanical issues", "Good — minor wear, fully functional", "Fair — visible wear, some issues", "Poor — significant issues"];
 const LOAN_STATUSES = ["Paid off — no loan", "Have a loan — positive equity", "Have a loan — negative equity (underwater)", "Unsure"];
@@ -42,11 +43,10 @@ export default function TradeInPage() {
   // Check for existing trade-in submission on mount
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/buyer/trade-in")
-      .then((r) => r.json())
-      .then((d: { success?: boolean; data?: { tradeIns?: ExistingTradeIn[] } }) => {
+    api.get<{ tradeIns?: ExistingTradeIn[] }>("/api/buyer/trade-in")
+      .then(data => {
         if (cancelled) return;
-        const latest = d.data?.tradeIns?.[0];
+        const latest = data?.tradeIns?.[0];
         if (latest) setExistingTradeIn(latest);
       })
       .catch(() => { /* non-fatal — buyer can still submit */ })
@@ -72,26 +72,17 @@ export default function TradeInPage() {
     setError(null);
     setLoading(true);
     try {
-      const res = await fetch("/api/buyer/trade-in", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vin: form.vin || undefined, year: parseInt(form.year), make: form.make, model: form.model,
-          trim: form.trim || undefined, mileage: form.mileage ? parseInt(form.mileage) : undefined,
-          condition: form.condition.toUpperCase(),
-          loanStatus: form.loanStatus || undefined,
-          loanBalanceCents: form.loanBalance ? Math.round(parseFloat(form.loanBalance) * 100) : undefined,
-          notes: form.notes || undefined,
-        }),
+      await api.post("/api/buyer/trade-in", {
+        vin: form.vin || undefined, year: parseInt(form.year), make: form.make, model: form.model,
+        trim: form.trim || undefined, mileage: form.mileage ? parseInt(form.mileage) : undefined,
+        condition: form.condition.toUpperCase(),
+        loanStatus: form.loanStatus || undefined,
+        loanBalanceCents: form.loanBalance ? Math.round(parseFloat(form.loanBalance) * 100) : undefined,
+        notes: form.notes || undefined,
       });
-      if (res.ok) {
-        setSubmitted(true);
-      } else {
-        const d = await res.json().catch(() => null) as { error?: { message?: string } } | null;
-        setError(d?.error?.message ?? "Submission failed");
-      }
-    } catch {
-      setError("Network error. Please check your connection and try again.");
+      setSubmitted(true);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Submission failed"));
     } finally {
       setLoading(false);
     }

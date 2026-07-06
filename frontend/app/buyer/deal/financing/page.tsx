@@ -9,6 +9,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, CheckCircle2, CreditCard } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const FINANCING_PATHS = [
   { id: "DEALER", label: "Dealer Financing", desc: "Finance through the dealer — rate included in your offer. Quick approval, may include APR options." },
@@ -25,12 +26,11 @@ export default function FinancingPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/buyer/deal/financing")
-      .then(r => r.json())
-      .then((d: { success: boolean; data?: { financingPath?: string } }) => {
-        if (d.success && d.data?.financingPath) {
-          setSelected(d.data.financingPath);
-          setInitialPath(d.data.financingPath);
+    api.get<{ financingPath?: string }>("/api/buyer/deal/financing")
+      .then(data => {
+        if (data?.financingPath) {
+          setSelected(data.financingPath);
+          setInitialPath(data.financingPath);
         }
       })
       .catch((err: unknown) => { logger.error("[financing] Failed to load current financing path:", err); })
@@ -42,19 +42,10 @@ export default function FinancingPage() {
     setLoading(true);
     setSaveError(null);
     try {
-      const res = await fetch("/api/buyer/deal/financing", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ financingPath: selected }),
-      });
-      if (res.ok) {
-        setSaved(true);
-      } else {
-        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-        setSaveError(body.error?.message ?? "We couldn't save your financing choice. Please try again.");
-      }
-    } catch {
-      setSaveError("Network error — please check your connection and try again.");
+      await api.patch("/api/buyer/deal/financing", { financingPath: selected });
+      setSaved(true);
+    } catch (err) {
+      setSaveError(apiErrorMessage(err, "We couldn't save your financing choice. Please try again."));
     } finally {
       setLoading(false);
     }

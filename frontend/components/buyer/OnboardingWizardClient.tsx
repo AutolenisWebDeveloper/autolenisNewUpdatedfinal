@@ -16,6 +16,7 @@ import { useState, useMemo, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Car, Truck, Bus, Zap, MoreHorizontal, CheckCircle2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // ─── Onboarding Progress Indicator ──────────────────────────────────────────
 // Shows the buyer's position in the 3-step pre-journey:
@@ -141,51 +142,27 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
     try {
       // 1. Persist name + phone if newly entered
       if (!phoneAlreadySet && phone.trim() || !nameAlreadySet) {
-        const profileRes = await fetch("/api/buyer/profile", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            firstName: firstName.trim() || initial.firstName,
-            lastName: lastName.trim() || initial.lastName,
-            ...(!phoneAlreadySet && phone.trim() ? { phone: phone.trim() } : {}),
-          }),
+        await api.patch("/api/buyer/profile", {
+          firstName: firstName.trim() || initial.firstName,
+          lastName: lastName.trim() || initial.lastName,
+          ...(!phoneAlreadySet && phone.trim() ? { phone: phone.trim() } : {}),
         });
-        if (!profileRes.ok) {
-          const data = (await profileRes.json().catch(() => ({}))) as { error?: { message?: string } };
-          throw new Error(data.error?.message ?? "Could not save your profile");
-        }
       }
 
       // 2. Persist preferences (vehicle type + new/used + email notifications)
-      const prefsRes = await fetch("/api/buyer/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          emailNotifications,
-          vehicleTypePreference: vehicleType,
-          newOrUsedPreference: newOrUsed,
-        }),
+      await api.patch("/api/buyer/settings", {
+        emailNotifications,
+        vehicleTypePreference: vehicleType,
+        newOrUsedPreference: newOrUsed,
       });
-      if (!prefsRes.ok) {
-        const data = (await prefsRes.json().catch(() => ({}))) as { error?: { message?: string } };
-        throw new Error(data.error?.message ?? "Could not save your preferences");
-      }
 
       // 3. Mark onboarding complete (no FCRA / MicroBilt call)
-      const completeRes = await fetch("/api/buyer/onboarding/complete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accepted: true }),
-      });
-      if (!completeRes.ok) {
-        const data = (await completeRes.json().catch(() => ({}))) as { error?: { message?: string } };
-        throw new Error(data.error?.message ?? "Could not complete onboarding");
-      }
+      await api.post("/api/buyer/onboarding/complete", { accepted: true });
 
       // 4. Route to pre-qualification — onboarding ≠ prequal
       router.push("/buyer/prequal");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setError(apiErrorMessage(err, "Something went wrong. Please try again."));
       setSubmitting(false);
     }
   }
