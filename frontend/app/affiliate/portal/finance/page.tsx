@@ -67,7 +67,7 @@ export default async function AffiliateFinancePage() {
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="affiliate-finance-page">
       <div className="flex items-center gap-3 mb-6">
-        <Landmark size={22} className="text-[#0B5FD1]" />
+        <Landmark size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Finance Hub</h1>
       </div>
 
@@ -79,7 +79,7 @@ export default async function AffiliateFinancePage() {
             { label: "Total Earned", value: `$${(summary.totalCents / 100).toLocaleString()}`, icon: DollarSign, color: "text-green-600" },
             { label: "Total Paid", value: `$${(summary.paidCents / 100).toLocaleString()}`, icon: CheckCircle2, color: "text-blue-600" },
             { label: "Approved (payable)", value: `$${(summary.approvedCents / 100).toLocaleString()}`, icon: Clock, color: "text-amber-600" },
-            { label: "Next Payout", value: nextPayoutFormatted, icon: Landmark, color: "text-[#0B5FD1]" },
+            { label: "Next Payout", value: nextPayoutFormatted, icon: Landmark, color: "text-al-primary" },
           ].map(stat => (
             <div key={stat.label} className="text-center">
               <stat.icon size={18} className={`${stat.color} mx-auto mb-1`} />

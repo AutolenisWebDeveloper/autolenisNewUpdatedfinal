@@ -45,7 +45,7 @@ export default function DocumentViewButton({ documentId }: { documentId: string 
         disabled={loading}
         aria-label="View document"
         data-testid={`view-doc-${documentId}`}
-        className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8] disabled:opacity-50 transition-colors"
+        className="inline-flex items-center gap-1.5 text-xs font-semibold text-al-primary hover:text-al-primary-hover disabled:opacity-50 transition-colors"
       >
         {loading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
         View

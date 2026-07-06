@@ -162,7 +162,7 @@ Join the AutoLenis affiliate program: ${enrollUrl}`;
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="income-calculator-page">
       <div className="flex items-center gap-3 mb-6">
-        <DollarSign size={22} className="text-[#0B5FD1]" />
+        <DollarSign size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Income Planner</h1>
       </div>
       <p className="text-sm text-slate-500 mb-8">
@@ -213,14 +213,14 @@ Join the AutoLenis affiliate program: ${enrollUrl}`;
             <div key={row.label}>
               <p className="text-2xl font-bold text-slate-900">{row.count}</p>
               <p className="text-xs text-slate-500">{row.label}</p>
-              <p className="text-xs text-[#0B5FD1] mt-0.5">${row.perDeal.toFixed(2)} each</p>
+              <p className="text-xs text-al-primary mt-0.5">${row.perDeal.toFixed(2)} each</p>
             </div>
           ))}
         </div>
       </div>
 
       {/* Projection card */}
-      <div className="bg-[#0B5FD1] text-white rounded-2xl p-8 mb-5" data-testid="projection-card">
+      <div className="bg-al-primary text-white rounded-2xl p-8 mb-5" data-testid="projection-card">
         <p className="text-xs text-white/60 uppercase tracking-widest mb-4">Monthly Projection</p>
         <div className="space-y-3 mb-6">
           {[

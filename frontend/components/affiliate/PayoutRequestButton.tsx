@@ -58,7 +58,7 @@ export default function PayoutRequestButton({ canRequest, missing = [] }: Props)
         data-testid="payout-request-btn"
         className={`w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all ${
           canRequest
-            ? "bg-white text-[#0A4DB8] hover:bg-[#F8F9FB] shadow-sm"
+            ? "bg-white text-al-primary-hover hover:bg-[#F8F9FB] shadow-sm"
             : "bg-white/20 text-white/40 cursor-not-allowed"
         }`}
       >

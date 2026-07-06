@@ -36,7 +36,7 @@ export default function WeeklyDigestToggle({ enabled, affiliateId }: { enabled: 
         onClick={toggle}
         aria-label={on ? "Disable weekly digest" : "Enable weekly digest"}
         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
-          on ? "bg-[#0B5FD1]" : "bg-slate-200"
+          on ? "bg-al-primary" : "bg-slate-200"
         }`}
       >
         <span

@@ -66,7 +66,7 @@ export default function AffiliateSettingsPage() {
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="affiliate-settings-page">
       <div className="flex items-center gap-3 mb-6">
-        <Settings size={22} className="text-[#0B5FD1]" />
+        <Settings size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Notification Preferences</h1>
       </div>
 
@@ -89,7 +89,7 @@ export default function AffiliateSettingsPage() {
                   aria-checked={prefs[row.key]}
                   onClick={() => toggle(row.key)}
                   data-testid={`pref-toggle-${row.key}`}
-                  className={`relative w-10 h-5.5 rounded-full transition-colors shrink-0 ${prefs[row.key] ? "bg-[#0B5FD1]" : "bg-slate-200"}`}
+                  className={`relative w-10 h-5.5 rounded-full transition-colors shrink-0 ${prefs[row.key] ? "bg-al-primary" : "bg-slate-200"}`}
                   style={{ width: 40, height: 22 }}
                 >
                   <span

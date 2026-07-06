@@ -44,7 +44,7 @@ export default async function AffiliateDocumentsPage() {
     return (
       <div className="p-6 md:p-8 max-w-2xl" data-testid="affiliate-documents-page">
         <div className="flex items-center gap-3 mb-6">
-          <FileCheck size={22} className="text-[#0B5FD1]" />
+          <FileCheck size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Documents</h1>
         </div>
         <div
@@ -63,7 +63,7 @@ export default async function AffiliateDocumentsPage() {
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="affiliate-documents-page">
       <div className="flex items-center gap-3 mb-6">
-        <FileCheck size={22} className="text-[#0B5FD1]" />
+        <FileCheck size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Documents</h1>
       </div>
       <p className="text-sm text-slate-500 mb-8">

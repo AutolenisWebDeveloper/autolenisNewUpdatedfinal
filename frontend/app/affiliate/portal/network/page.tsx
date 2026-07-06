@@ -40,7 +40,7 @@ export default async function AffiliateNetworkPage() {
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="affiliate-network-page">
       <div className="flex items-center gap-3 mb-6">
-        <GitBranch size={22} className="text-[#0B5FD1]" />
+        <GitBranch size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">My Referral Network</h1>
       </div>
 
@@ -54,7 +54,7 @@ export default async function AffiliateNetworkPage() {
           <div key={t.level} data-testid={`network-tier-${t.level.toLowerCase().split(" ")[0]}`}
             className="bg-white border border-slate-200 rounded-xl p-5 text-center">
             <Badge variant="secondary" className="mb-2">{t.pct}</Badge>
-            <p className="text-3xl font-bold text-[#0B5FD1]">{t.count}</p>
+            <p className="text-3xl font-bold text-al-primary">{t.count}</p>
             <p className="text-xs text-slate-500 mt-0.5">{t.level} members</p>
             <p className="text-xs text-green-600 mt-1">${(t.earnsPer / 100).toFixed(2)}/deal</p>
           </div>
@@ -71,7 +71,7 @@ export default async function AffiliateNetworkPage() {
       ) : (
         <div className="space-y-3" data-testid="network-tree">
           {/* Root node — you */}
-          <div className="flex items-center gap-3 bg-[#0B5FD1] text-white rounded-xl px-5 py-4" data-testid="network-root-node">
+          <div className="flex items-center gap-3 bg-al-primary text-white rounded-xl px-5 py-4" data-testid="network-root-node">
             <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
               <User size={16} />
             </div>
@@ -83,10 +83,10 @@ export default async function AffiliateNetworkPage() {
 
           {/* L1 nodes */}
           {l1Members.map((l1, i) => (
-            <div key={l1.id} className="ml-8 border-l-2 border-[#0B5FD1]/20 pl-5 space-y-2" data-testid={`l1-member-${i}`}>
+            <div key={l1.id} className="ml-8 border-l-2 border-al-primary/20 pl-5 space-y-2" data-testid={`l1-member-${i}`}>
               <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3">
-                <div className="w-7 h-7 rounded-full bg-[#0B5FD1]/10 flex items-center justify-center">
-                  <User size={13} className="text-[#0B5FD1]" />
+                <div className="w-7 h-7 rounded-full bg-al-primary/10 flex items-center justify-center">
+                  <User size={13} className="text-al-primary" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-slate-800">{maskEmail(l1.user.email)}</p>

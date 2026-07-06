@@ -125,7 +125,7 @@ function CopyButton({ text, testId }: { text: string; testId: string }) {
       type="button"
       onClick={handleCopy}
       data-testid={testId}
-      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#0B5FD1]/10 text-[#0B5FD1] hover:bg-[#0B5FD1]/20 transition-colors shrink-0"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-al-primary/10 text-al-primary hover:bg-al-primary/20 transition-colors shrink-0"
     >
       {copied ? <Check size={12} /> : <Copy size={12} />}
       {copied ? "Copied!" : "Copy"}
@@ -168,8 +168,8 @@ export default function MarketingKit({ referralCode, referralLink }: Props) {
                         data-testid={`resource-toggle-${t.id}`}
                         className="flex flex-1 items-center gap-3 py-2 text-left"
                       >
-                        <div className="p-1.5 bg-[#0B5FD1]/8 rounded-lg">
-                          <t.icon size={14} className="text-[#0B5FD1]" />
+                        <div className="p-1.5 bg-al-primary/8 rounded-lg">
+                          <t.icon size={14} className="text-al-primary" />
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-slate-800">{t.title}</p>

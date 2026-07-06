@@ -110,7 +110,7 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="referral-hub-page">
       <div className="flex items-center gap-3 mb-2">
-        <Share2 size={22} className="text-[#0B5FD1]" />
+        <Share2 size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Referral Hub</h1>
       </div>
       <p className="text-sm text-slate-500 mb-8">
@@ -124,7 +124,7 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
       )}
 
       {/* Referral code + link card */}
-      <div className="bg-gradient-to-br from-[#0B5FD1] to-[#0A4DB8] rounded-xl p-6 text-white mb-6 relative overflow-hidden"
+      <div className="bg-gradient-to-br from-al-primary to-al-primary-hover rounded-xl p-6 text-white mb-6 relative overflow-hidden"
         data-testid="referral-link-card">
         <div className="absolute top-0 right-0 w-56 h-56 bg-white/5 rounded-full -translate-y-28 translate-x-28 pointer-events-none" />
         <div className="relative">
@@ -209,7 +209,7 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
                   className="flex flex-1 items-center gap-3 py-2 text-left"
                   data-testid={`template-toggle-${t.id}`}
                 >
-                  <t.icon size={16} className="text-[#0B5FD1] shrink-0" />
+                  <t.icon size={16} className="text-al-primary shrink-0" />
                   <span className="flex-1 text-sm font-medium text-slate-700">{t.label}</span>
                 </button>
                 <CopyButton text={t.text} label="Copy" testId={`copy-template-${t.id}-btn`} />
