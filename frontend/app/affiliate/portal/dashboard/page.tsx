@@ -3,12 +3,12 @@ import { getCommissionSummary, getNetworkSize } from "@/lib/services/affiliate/c
 import { getReferralClickStats } from "@/lib/services/affiliate/referral.service";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
-import PageContainer from "@/components/dashboard/PageContainer";
-import PageHeader from "@/components/dashboard/PageHeader";
-import StatCard from "@/components/dashboard/StatCard";
-import Panel from "@/components/dashboard/Panel";
-import EmptyState from "@/components/dashboard/EmptyState";
-import { FIGURE } from "@/components/dashboard/tokens";
+import PageContainer from "@/components/ui/patterns/PageContainer";
+import PageHeader from "@/components/ui/patterns/PageHeader";
+import StatCard from "@/components/ui/patterns/StatCard";
+import Panel from "@/components/ui/patterns/Panel";
+import EmptyState from "@/components/ui/patterns/EmptyState";
+import { FIGURE } from "@/components/ui/patterns/tokens";
 import {
   DollarSign, Users, Clock, XCircle, AlertTriangle,
   TrendingUp, Calculator, Landmark, FileCheck, Share2, Inbox,

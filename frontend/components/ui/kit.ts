@@ -11,4 +11,9 @@
 // while giving buyer/dealer/affiliate a stable shared entry point. The physical
 // file relocation is a later, mechanical follow-up; the import surface is what
 // matters for adoption.
+//
+// TIER BOUNDARY (owner ruling): this file is the PRIMITIVES tier. Page-scaffold
+// compositions (PageContainer, PageHeader, StatCard, Panel, EmptyState) live in
+// the PATTERNS tier at components/ui/patterns — import from there, never from
+// a per-dashboard copy. No third family is sanctioned.
 export * from "@/components/admin/crm/ui";

@@ -3,12 +3,12 @@ import { requireDealer } from "@/lib/auth/dealer-session";
 import { getDealerDashboardData } from "@/lib/services/dealer/dealer-dashboard.service";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import PageContainer from "@/components/dashboard/PageContainer";
-import PageHeader from "@/components/dashboard/PageHeader";
-import StatCard from "@/components/dashboard/StatCard";
-import Panel from "@/components/dashboard/Panel";
-import EmptyState from "@/components/dashboard/EmptyState";
-import { CARD, FIGURE } from "@/components/dashboard/tokens";
+import PageContainer from "@/components/ui/patterns/PageContainer";
+import PageHeader from "@/components/ui/patterns/PageHeader";
+import StatCard from "@/components/ui/patterns/StatCard";
+import Panel from "@/components/ui/patterns/Panel";
+import EmptyState from "@/components/ui/patterns/EmptyState";
+import { CARD, FIGURE } from "@/components/ui/patterns/tokens";
 import {
   Gavel, Package, TrendingUp, ArrowRight, Star, Handshake,
   Truck, Lightbulb, CheckCircle2, Inbox, FileText,

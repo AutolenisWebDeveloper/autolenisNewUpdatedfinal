@@ -2,12 +2,12 @@ import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_ROLE_LABELS } from "@/lib/admin-auth";
 import Link from "next/link";
-import PageContainer from "@/components/dashboard/PageContainer";
-import PageHeader from "@/components/dashboard/PageHeader";
-import StatCard from "@/components/dashboard/StatCard";
-import Panel from "@/components/dashboard/Panel";
-import EmptyState from "@/components/dashboard/EmptyState";
-import { CARD, EYEBROW } from "@/components/dashboard/tokens";
+import PageContainer from "@/components/ui/patterns/PageContainer";
+import PageHeader from "@/components/ui/patterns/PageHeader";
+import StatCard from "@/components/ui/patterns/StatCard";
+import Panel from "@/components/ui/patterns/Panel";
+import EmptyState from "@/components/ui/patterns/EmptyState";
+import { CARD, EYEBROW } from "@/components/ui/patterns/tokens";
 import {
   AlertOctagon, Users, Gavel, FileText, TrendingUp, Activity,
   DollarSign, Shield, Share2, PenLine, Brain, Building2,

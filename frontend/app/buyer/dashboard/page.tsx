@@ -6,9 +6,9 @@ import PlanUpgradeCard, { type DepositStatus } from "@/components/buyer/PlanUpgr
 import ProactiveNudgesPanel, { type BuyerNudge } from "@/components/buyer/ProactiveNudgesPanel";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
-import PageContainer from "@/components/dashboard/PageContainer";
-import PageHeader from "@/components/dashboard/PageHeader";
-import { CARD, EYEBROW, FIGURE } from "@/components/dashboard/tokens";
+import PageContainer from "@/components/ui/patterns/PageContainer";
+import PageHeader from "@/components/ui/patterns/PageHeader";
+import { CARD, EYEBROW, FIGURE } from "@/components/ui/patterns/tokens";
 import {
   MapPin, Wallet, Search, Heart, ClipboardList, Bell, MessageSquare,
   Gavel, CheckCircle2, ArrowRight, FileText, Sparkles,
