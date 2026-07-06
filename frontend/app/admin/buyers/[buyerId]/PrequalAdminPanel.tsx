@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
+import { api, apiErrorMessage } from "@/lib/api/client";
 import {
   CheckCircle2,
   XCircle,
@@ -346,15 +347,9 @@ export function PrequalAdminPanel({
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/prequal/history`);
-      const json = await res.json() as {
-        success?: boolean;
-        data?: { complianceEvents: ComplianceEventEntry[]; adminAuditLogs: AdminAuditEntry[] };
-      };
-      if (json.success && json.data) {
-        setComplianceEvents(json.data.complianceEvents);
-        setAdminAuditLogs(json.data.adminAuditLogs);
-      }
+      const data = await api.get<{ complianceEvents: ComplianceEventEntry[]; adminAuditLogs: AdminAuditEntry[] }>(`/api/admin/buyers/${buyerId}/prequal/history`);
+      setComplianceEvents(data.complianceEvents);
+      setAdminAuditLogs(data.adminAuditLogs);
     } catch {
       // Non-fatal — surface as empty list
     }
@@ -371,24 +366,15 @@ export function PrequalAdminPanel({
     setResendStatus(null);
     setResending(kind);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/prequal/resend-email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind }),
+      await api.post(`/api/admin/buyers/${buyerId}/prequal/resend-email`, { kind });
+      setResendStatus({
+        kind: "ok",
+        message: kind === "APPROVED" ? "Approval email re-sent." : "Adverse-action email re-sent.",
       });
-      const json = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok || !json.success) {
-        setResendStatus({ kind: "error", message: json.error?.message ?? "Failed to send email" });
-      } else {
-        setResendStatus({
-          kind: "ok",
-          message: kind === "APPROVED" ? "Approval email re-sent." : "Adverse-action email re-sent.",
-        });
-        // Refresh history so the new audit entry shows up
-        await loadHistory();
-      }
-    } catch {
-      setResendStatus({ kind: "error", message: "Network error. Please try again." });
+      // Refresh history so the new audit entry shows up
+      await loadHistory();
+    } catch (err) {
+      setResendStatus({ kind: "error", message: apiErrorMessage(err, "Failed to send email") });
     }
     setResending(null);
   }, [buyerId, loadHistory]);
@@ -397,20 +383,14 @@ export function PrequalAdminPanel({
   const refreshPanelData = useCallback(async () => {
     setRefreshing(true);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/prequal`);
-      const json = await res.json() as {
-        success?: boolean;
-        data?: {
-          existingPrequal: ExistingPrequal | null;
-          hasConsent: boolean;
-          consentAcceptedAt: string | null;
-        };
-      };
-      if (json.success && json.data) {
-        setCurrentPrequal(json.data.existingPrequal);
-        setHasConsent(json.data.hasConsent);
-        setConsentAcceptedAt(json.data.consentAcceptedAt);
-      }
+      const data = await api.get<{
+        existingPrequal: ExistingPrequal | null;
+        hasConsent: boolean;
+        consentAcceptedAt: string | null;
+      }>(`/api/admin/buyers/${buyerId}/prequal`);
+      setCurrentPrequal(data.existingPrequal);
+      setHasConsent(data.hasConsent);
+      setConsentAcceptedAt(data.consentAcceptedAt);
     } catch { /* ignore */ }
     setRefreshing(false);
   }, [buyerId]);
@@ -456,44 +436,26 @@ export function PrequalAdminPanel({
     setFormError(null);
 
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/prequal/run-ipredict`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          firstName:    ipForm.firstName.trim(),
-          lastName:     ipForm.lastName.trim(),
-          dateOfBirth:  ipForm.dateOfBirth.trim(),
-          address:      ipForm.address.trim(),
-          city:         ipForm.city.trim(),
-          state:        ipForm.state.trim().toUpperCase(),
-          zip:          ipForm.zip.trim(),
-          employmentStatus:   ipForm.employmentStatus.trim() || undefined,
-          employerName:       ipForm.employerName.trim() || undefined,
-          monthlyIncomeUsd:   ipForm.monthlyIncomeUsd ? parseFloat(ipForm.monthlyIncomeUsd) : undefined,
-          lengthOfEmployment: ipForm.lengthOfEmployment.trim() || undefined,
-          consentSource:        ipForm.consentSource,
-          consentTimestamp:     new Date(ipForm.consentTimestamp).toISOString(),
-          authorizationSummary: ipForm.authorizationSummary.trim(),
-          authorizationReference: ipForm.authorizationReference.trim() || undefined,
-          adminCertification:   true,
-          reason:               ipForm.reason.trim(),
-        }),
+      const result = await api.post<IPredictRunResult>(`/api/admin/buyers/${buyerId}/prequal/run-ipredict`, {
+        firstName:    ipForm.firstName.trim(),
+        lastName:     ipForm.lastName.trim(),
+        dateOfBirth:  ipForm.dateOfBirth.trim(),
+        address:      ipForm.address.trim(),
+        city:         ipForm.city.trim(),
+        state:        ipForm.state.trim().toUpperCase(),
+        zip:          ipForm.zip.trim(),
+        employmentStatus:   ipForm.employmentStatus.trim() || undefined,
+        employerName:       ipForm.employerName.trim() || undefined,
+        monthlyIncomeUsd:   ipForm.monthlyIncomeUsd ? parseFloat(ipForm.monthlyIncomeUsd) : undefined,
+        lengthOfEmployment: ipForm.lengthOfEmployment.trim() || undefined,
+        consentSource:        ipForm.consentSource,
+        consentTimestamp:     new Date(ipForm.consentTimestamp).toISOString(),
+        authorizationSummary: ipForm.authorizationSummary.trim(),
+        authorizationReference: ipForm.authorizationReference.trim() || undefined,
+        adminCertification:   true,
+        reason:               ipForm.reason.trim(),
       });
 
-      const json = await res.json() as {
-        success?: boolean;
-        data?: IPredictRunResult;
-        error?: { code: string; message: string };
-      };
-
-      if (!res.ok || !json.success || !json.data) {
-        const msg = json.error?.message ?? "Failed to run iPredict";
-        setState({ view: "ipredict_form" });
-        setFormError(msg);
-        return;
-      }
-
-      const result = json.data;
       if (result.prequal) {
         setCurrentPrequal({
           id: result.prequal.id,
@@ -514,9 +476,9 @@ export function PrequalAdminPanel({
       }
 
       setState({ view: "ipredict_result", result });
-    } catch {
+    } catch (err) {
       setState({ view: "ipredict_form" });
-      setFormError("Network error. Please try again.");
+      setFormError(apiErrorMessage(err, "Failed to run iPredict"));
     }
   }
 
@@ -531,32 +493,15 @@ export function PrequalAdminPanel({
     setState({ view: "override_running" });
 
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/prequal/manual-override`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          decision:          ovForm.decision,
-          tier:              ovForm.tier || undefined,
-          maxOtdAmountCents: amount,
-          reason:            ovForm.reason.trim(),
-          checkOfacAlert:    ovForm.checkOfacAlert,
-        }),
+      const data = await api.post<{ prequal: OverrideResult["prequal"] }>(`/api/admin/buyers/${buyerId}/prequal/manual-override`, {
+        decision:          ovForm.decision,
+        tier:              ovForm.tier || undefined,
+        maxOtdAmountCents: amount,
+        reason:            ovForm.reason.trim(),
+        checkOfacAlert:    ovForm.checkOfacAlert,
       });
 
-      const json = await res.json() as {
-        success?: boolean;
-        data?: { prequal: OverrideResult["prequal"] };
-        error?: { code: string; message: string };
-      };
-
-      if (!res.ok || !json.success || !json.data) {
-        const msg = json.error?.message ?? "Override failed";
-        setState({ view: "override_form" });
-        setFormError(msg);
-        return;
-      }
-
-      const { prequal } = json.data;
+      const { prequal } = data;
       setCurrentPrequal({
         id: prequal.id,
         decision: prequal.decision,
@@ -572,9 +517,9 @@ export function PrequalAdminPanel({
       });
 
       setState({ view: "override_result", result: { prequal } });
-    } catch {
+    } catch (err) {
       setState({ view: "override_form" });
-      setFormError("Network error. Please try again.");
+      setFormError(apiErrorMessage(err, "Override failed"));
     }
   }
 

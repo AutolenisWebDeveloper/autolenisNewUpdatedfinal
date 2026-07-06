@@ -13,6 +13,7 @@ import {
 import type {
   DealerActionAvailability,
 } from "@/lib/services/admin/admin-dealer-command-center.service";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // Dealer documents live in a private Supabase bucket. Fetch a short-lived
 // signed URL from the authorized admin route at click time, then open it — the
@@ -315,16 +316,10 @@ function TierOverrideModal({ dealerName, currentTier, dealerId, onClose, onSucce
     if (reason.trim().length < 10) { setError("Reason must be at least 10 characters"); return; }
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/dealers/${dealerId}/tier`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier, reason }),
-      });
-      const data = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok) { setError(data.error?.message ?? "Tier update failed"); return; }
+      await api.post(`/api/admin/dealers/${dealerId}/tier`, { tier, reason });
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Request failed");
+      setError(apiErrorMessage(err, "Tier update failed"));
     } finally {
       setLoading(false);
     }
@@ -383,7 +378,7 @@ function ConfirmModal({
     if (requireReason && !reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
     try { await onConfirm(reason); }
-    catch (err) { setError(err instanceof Error ? err.message : "Action failed"); }
+    catch (err) { setError(apiErrorMessage(err, "Action failed")); }
     finally { setLoading(false); }
   }
 
@@ -430,14 +425,14 @@ function AddNoteModal({ dealerId, onClose, onSuccess }: {
     e.preventDefault();
     if (!content.trim()) { setError("Note content is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/dealers/" + dealerId + "/note", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: content.trim(), type }),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
-    setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Failed to add note"); return; }
-    onSuccess();
+    try {
+      await api.post("/api/admin/dealers/" + dealerId + "/note", { content: content.trim(), type });
+      onSuccess();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to add note"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -494,14 +489,14 @@ function EditProfileModal({ dealer, onClose, onSuccess }: {
     e.preventDefault();
     if (!form.reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/dealers/" + dealer.id, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
-    setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Update failed"); return; }
-    onSuccess();
+    try {
+      await api.patch("/api/admin/dealers/" + dealer.id, form);
+      onSuccess();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Update failed"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -582,12 +577,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
   };
 
   async function doAction(endpoint: string, body: Record<string, string>, successMsg: string) {
-    const res = await fetch("/api/admin/dealers/" + dealer.id + "/" + endpoint, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const d = await res.json() as { success?: boolean; data?: unknown; error?: { message: string } };
-    if (!res.ok) throw new Error(d.error?.message ?? "Action failed");
+    await api.post("/api/admin/dealers/" + dealer.id + "/" + endpoint, body);
     handleSuccess(successMsg);
   }
 

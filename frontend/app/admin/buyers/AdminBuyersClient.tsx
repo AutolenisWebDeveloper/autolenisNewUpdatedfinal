@@ -11,6 +11,7 @@ import {
   Archive, ArchiveRestore, Lock, Unlock, Trash2,
 } from "lucide-react";
 import type { AdminBuyerKpis } from "@/lib/services/admin/admin-buyer-command-center.service";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface BuyerRow {
   id: string;
@@ -211,19 +212,10 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
     setError(null);
     try {
       const qs = new URLSearchParams(params).toString();
-      const res = await fetch("/api/admin/buyers?" + qs);
-      if (!res.ok) {
-        let errMsg = "Failed to load buyers";
-        try {
-          const errData = await res.json() as { error?: { message: string } };
-          if (errData.error?.message) errMsg = errData.error.message;
-        } catch { /* ignore parse errors */ }
-        throw new Error(errMsg);
-      }
-      const data = await res.json() as { data?: { buyers: BuyerRow[]; total: number } };
-      if (data.data) { setBuyers(data.data.buyers); setTotal(data.data.total); }
+      const data = await api.get<{ buyers: BuyerRow[]; total: number }>("/api/admin/buyers?" + qs);
+      setBuyers(data.buyers); setTotal(data.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load buyers");
+      setError(apiErrorMessage(err, "Failed to load buyers"));
     } finally {
       setLoading(false);
     }
@@ -290,12 +282,12 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
         disable: `${actionModal.buyerName} access disabled`,
         reactivate: `${actionModal.buyerName} access reactivated`,
       };
-      const res = await fetch(endpointMap[actionModal.type], {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bodyMap[actionModal.type]),
-      });
-      if (res.ok) { showToast(successMap[actionModal.type]); applyFilters(); }
-      else { const d = await res.json() as { error?: { message: string } }; showToast(d.error?.message ?? "Action failed", "error"); }
+      try {
+        await api.post(endpointMap[actionModal.type], bodyMap[actionModal.type]);
+        showToast(successMap[actionModal.type]); applyFilters();
+      } catch (err) {
+        showToast(apiErrorMessage(err, "Action failed"), "error");
+      }
     } finally {
       setActionLoading(false);
       setActionModal(null);

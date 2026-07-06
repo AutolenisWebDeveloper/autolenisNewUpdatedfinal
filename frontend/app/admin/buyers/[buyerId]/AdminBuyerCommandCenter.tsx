@@ -21,6 +21,7 @@ import {
 import type {
   BuyerActionAvailability,
 } from "@/lib/services/admin/admin-buyer-command-center.service";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -205,7 +206,7 @@ function ConfirmModal({
     if (requireReason && !reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
     try { await onConfirm(reason); }
-    catch (err) { setError(err instanceof Error ? err.message : "Action failed"); }
+    catch (err) { setError(apiErrorMessage(err, "Action failed")); }
     finally { setLoading(false); }
   }
 
@@ -256,14 +257,14 @@ function EditProfileModal({ buyer, onClose, onSuccess }: {
     e.preventDefault();
     if (!form.reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/buyers/" + buyer.id, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
-    setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Update failed"); return; }
-    onSuccess();
+    try {
+      await api.patch("/api/admin/buyers/" + buyer.id, form);
+      onSuccess();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Update failed"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -333,14 +334,14 @@ function AddNoteModal({ buyerId, onClose, onSuccess }: {
     e.preventDefault();
     if (!content.trim()) { setError("Note content is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/buyers/" + buyerId + "/note", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: content.trim(), type }),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
-    setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Failed to add note"); return; }
-    onSuccess();
+    try {
+      await api.post("/api/admin/buyers/" + buyerId + "/note", { content: content.trim(), type });
+      onSuccess();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to add note"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -386,14 +387,14 @@ function MoveWorkflowModal({ buyerId, dealId, currentStatus, onClose, onSuccess 
     if (!targetStatus) { setError("Select a target stage"); return; }
     if (!reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/buyers/" + buyerId + "/workflow/move", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dealId, targetStatus, reason }),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
-    setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Stage move failed"); return; }
-    onSuccess();
+    try {
+      await api.post("/api/admin/buyers/" + buyerId + "/workflow/move", { dealId, targetStatus, reason });
+      onSuccess();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Stage move failed"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -449,11 +450,9 @@ function DeleteConfirmModal({
   async function checkEligibility() {
     setChecking(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/delete-eligibility`);
-      const d = await res.json() as { data?: { eligible: boolean; hardDeleteSafe: boolean; blockers: string[] }; error?: { message: string } };
-      if (!res.ok) throw new Error(d.error?.message ?? "Check failed");
-      setEligibility(d.data!);
-    } catch (err) { setError(err instanceof Error ? err.message : "Check failed"); }
+      const data = await api.get<{ eligible: boolean; hardDeleteSafe: boolean; blockers: string[] }>(`/api/admin/buyers/${buyerId}/delete-eligibility`);
+      setEligibility(data);
+    } catch (err) { setError(apiErrorMessage(err, "Check failed")); }
     finally { setChecking(false); }
   }
 
@@ -464,15 +463,10 @@ function DeleteConfirmModal({
     if (!eligibility?.hardDeleteSafe) { setError("Hard delete not allowed — use Privacy Purge instead"); return; }
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}`, {
-        method: "DELETE", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason, confirmation }),
-      });
-      const d = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok) throw new Error(d.error?.message ?? "Delete failed");
+      await api.del(`/api/admin/buyers/${buyerId}`, { json: { reason, confirmation } });
       onSuccess();
       setTimeout(onRedirect, 1500);
-    } catch (err) { setError(err instanceof Error ? err.message : "Delete failed"); }
+    } catch (err) { setError(apiErrorMessage(err, "Delete failed")); }
     finally { setLoading(false); }
   }
 
@@ -585,14 +579,9 @@ function PrivacyPurgeModal({
     if (!reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/privacy-purge`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason, confirmation }),
-      });
-      const d = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok) throw new Error(d.error?.message ?? "Purge failed");
+      await api.post(`/api/admin/buyers/${buyerId}/privacy-purge`, { reason, confirmation });
       onSuccess();
-    } catch (err) { setError(err instanceof Error ? err.message : "Purge failed"); }
+    } catch (err) { setError(apiErrorMessage(err, "Purge failed")); }
     finally { setLoading(false); }
   }
 
@@ -840,12 +829,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
   };
 
   async function doAction(endpoint: string, body: Record<string, string>, successMsg: string) {
-    const res = await fetch("/api/admin/buyers/" + buyer.id + "/" + endpoint, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const d = await res.json() as { success?: boolean; data?: unknown; error?: { message: string } };
-    if (!res.ok) throw new Error(d.error?.message ?? "Action failed");
+    await api.post("/api/admin/buyers/" + buyer.id + "/" + endpoint, body);
     handleSuccess(successMsg);
   }
 

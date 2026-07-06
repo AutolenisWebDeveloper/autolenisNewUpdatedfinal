@@ -12,6 +12,7 @@ import type {
   StageStatus,
 } from "@/lib/services/admin/buyer-journey-admin.service";
 import { openBuyerPageAsAdmin } from "@/lib/admin/preview";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props { buyerId: string }
 
@@ -60,16 +61,10 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
   const load = useCallback(async () => {
     setLoading(true); setFetchError(null);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/journey`);
-      const json = await res.json() as {
-        success: boolean;
-        data?: { journey: AdminBuyerJourney };
-        error?: { message: string };
-      };
-      if (!json.success) { setFetchError(json.error?.message ?? "Failed to load"); return; }
-      setJourney(json.data?.journey ?? null);
+      const data = await api.get<{ journey: AdminBuyerJourney }>(`/api/admin/buyers/${buyerId}/journey`);
+      setJourney(data.journey ?? null);
     } catch (err) {
-      setFetchError(err instanceof Error ? err.message : "Network error");
+      setFetchError(apiErrorMessage(err, "Failed to load"));
     } finally { setLoading(false); }
   }, [buyerId]);
 
@@ -90,15 +85,13 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
   async function callApi(url: string, body: object): Promise<boolean> {
     setBusy(true); setActionErr(null); setActionOk(null);
     try {
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const json = await res.json() as { success: boolean; data?: { unlockedCount?: number; lockedCount?: number; succeeded?: number; total?: number }; error?: { message: string } };
-      if (!json.success) { setActionErr(json.error?.message ?? "Failed"); return false; }
-      const count = json.data?.unlockedCount ?? json.data?.lockedCount ?? json.data?.succeeded ?? 0;
-      const total = json.data?.total;
+      const data = await api.post<{ unlockedCount?: number; lockedCount?: number; succeeded?: number; total?: number }>(url, body);
+      const count = data.unlockedCount ?? data.lockedCount ?? data.succeeded ?? 0;
+      const total = data.total;
       setActionOk(total ? `${count}/${total} stages updated.` : `${count} stage${count === 1 ? "" : "s"} updated.`);
       setSelected(new Set()); setUnlockNote("");
       await load(); return true;
-    } catch (err) { setActionErr(err instanceof Error ? err.message : "Network error"); return false; }
+    } catch (err) { setActionErr(apiErrorMessage(err, "Failed")); return false; }
     finally { setBusy(false); }
   }
 
@@ -194,19 +187,14 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
               )) return;
               setBusy(true); setActionErr(null); setActionOk(null);
               try {
-                const res = await fetch(`/api/admin/buyers/${buyerId}/journey/complete-all`, {
-                  method: "POST", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ note: unlockNote }),
-                });
-                const json = await res.json() as { success: boolean; data?: { succeeded: number; total: number; results: Array<{ stageId: string; success: boolean; error?: string }> }; error?: { message: string } };
-                if (!json.success) { setActionErr(json.error?.message ?? "Failed"); return; }
-                const { succeeded, total, results } = json.data!;
+                const data = await api.post<{ succeeded: number; total: number; results: Array<{ stageId: string; success: boolean; error?: string }> }>(`/api/admin/buyers/${buyerId}/journey/complete-all`, { note: unlockNote });
+                const { succeeded, total, results } = data;
                 const failed = results.filter(r => !r.success);
                 setActionOk(failed.length > 0
                   ? `${succeeded}/${total} completed. Failed: ${failed.map(f => f.stageId).join(", ")}`
                   : `All ${succeeded} stages completed successfully.`);
                 await load();
-              } catch (err) { setActionErr(err instanceof Error ? err.message : "Network error"); }
+              } catch (err) { setActionErr(apiErrorMessage(err, "Failed")); }
               finally { setBusy(false); }
             }} disabled={busy}
               className="text-xs font-bold bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 flex items-center gap-1.5 disabled:opacity-40"
@@ -463,18 +451,12 @@ function MarkCompleteModal({
   async function submit() {
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/journey/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          stageId, note: note || undefined,
-          ...(stageId === "prequal" ? { maxOtdAmountCents: maxOtd * 100 } : {}),
-        }),
+      await api.post(`/api/admin/buyers/${buyerId}/journey/complete`, {
+        stageId, note: note || undefined,
+        ...(stageId === "prequal" ? { maxOtdAmountCents: maxOtd * 100 } : {}),
       });
-      const data = await res.json() as { success: boolean; error?: { message: string } };
-      if (!data.success) { setError(data.error?.message ?? "Failed"); return; }
       onSuccess(stageLabel);
-    } catch (err) { setError(err instanceof Error ? err.message : "Network error"); }
+    } catch (err) { setError(apiErrorMessage(err, "Failed")); }
     finally { setLoading(false); }
   }
 
@@ -556,16 +538,10 @@ function NoteInline({
     if (!content.trim()) return;
     setSaving(true); setErr(null);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/journey/note`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stageId, content }),
-      });
-      const json = await res.json() as { success: boolean; error?: { message: string } };
-      if (!json.success) { setErr(json.error?.message ?? "Failed"); return; }
+      await api.post(`/api/admin/buyers/${buyerId}/journey/note`, { stageId, content });
       setContent("");
       onAdded();
-    } catch { setErr("Network error"); }
+    } catch (err) { setErr(apiErrorMessage(err, "Failed")); }
     finally { setSaving(false); }
   }
 
@@ -617,14 +593,9 @@ function SimpleModal({
       const body: Record<string, unknown> = { stageId };
       if (reason) body.reason = reason;
       if (showMessage && message) body.message = message;
-      const res = await fetch(
-        `/api/admin/buyers/${buyerId}/journey/${apiPath}`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
-      );
-      const json = await res.json() as { success: boolean; error?: { message: string } };
-      if (!json.success) { setErr(json.error?.message ?? "Action failed"); return; }
+      await api.post(`/api/admin/buyers/${buyerId}/journey/${apiPath}`, body);
       onSuccess(`Stage "${stageId}" ${title.toLowerCase()}d.`);
-    } catch (e) { setErr(e instanceof Error ? e.message : "Network error"); }
+    } catch (e) { setErr(apiErrorMessage(e, "Action failed")); }
     finally { setLoading(false); }
   }
 
