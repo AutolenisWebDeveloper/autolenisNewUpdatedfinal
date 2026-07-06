@@ -15,6 +15,8 @@ import {
   DEPOSIT_AMOUNT_USD,
 } from "@/lib/constants";
 
+import { limitPaymentIntent } from "@/lib/security/rate-limit";
+
 const schema = z.object({
   dealId: z.string().min(1),
   reason: z.string().min(1),
@@ -23,6 +25,10 @@ const schema = z.object({
 export async function POST(request: NextRequest) {
   const admin = await getAdminWithRole(request, ["SUPER_ADMIN", "FINANCE_ADMIN"]);
   if (!admin) return adminError("FORBIDDEN", "Insufficient permissions", 403);
+
+  // Throttle intent creation per admin account; fails CLOSED on store outage.
+  const rl = await limitPaymentIntent(`fee:admin:${admin.adminId}`, { tokens: 30, window: "1 h" });
+  if (!rl.ok) return adminError("RATE_LIMITED", rl.message, rl.status);
 
   let body: unknown;
   try { body = await request.json(); } catch { return adminError("VALIDATION_ERROR", "Invalid JSON", 400); }

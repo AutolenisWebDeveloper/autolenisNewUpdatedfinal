@@ -167,7 +167,20 @@ declare namespace NodeJS {
     // Optional
     REDIS_URL?: string;
     DEV_EMAIL_TO?: string; // Must NOT be set in production
+
+    // Error monitoring (Phase 0.5) — SDK is a no-op when unset
     SENTRY_DSN?: string;
+    NEXT_PUBLIC_SENTRY_DSN?: string;
+    SENTRY_ENVIRONMENT?: string;
+    NEXT_PUBLIC_SENTRY_ENVIRONMENT?: string;
+    SENTRY_TRACES_SAMPLE_RATE?: string;
+
+    // Durable rate limiting (Phase 0.5) — Upstash Redis REST, or Vercel KV
+    // aliases. Unset = limiters pass through (error-logged in production).
+    UPSTASH_REDIS_REST_URL?: string;
+    UPSTASH_REDIS_REST_TOKEN?: string;
+    KV_REST_API_URL?: string;
+    KV_REST_API_TOKEN?: string;
 
     // Phase 1 — Announcement Banner (optional; banner hidden if not set)
     NEXT_PUBLIC_ANNOUNCEMENT_MESSAGE?: string;

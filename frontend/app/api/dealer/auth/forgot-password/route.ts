@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { sendDealerPasswordResetEmail } from "@/lib/services/email/resend.service";
+import { limitAuthAttempt, clientIpKey } from "@/lib/security/rate-limit";
 
 const schema = z.object({ email: z.string().email() });
 
@@ -12,6 +13,13 @@ export async function POST(request: Request) {
     if (!parsed.success) return NextResponse.json({ success: true });
 
     const { email } = parsed.data;
+
+    // Throttle reset-email sends per IP + target address (email-bombing
+    // guard). Fails OPEN; the enumeration-safe success shape is preserved.
+    for (const key of [`reset:dealer:ip:${clientIpKey(request.headers)}`, `reset:dealer:email:${email.toLowerCase()}`]) {
+      const rl = await limitAuthAttempt(key, { tokens: 5, window: "10 m" });
+      if (!rl.ok) return NextResponse.json({ success: true });
+    }
 
     // Always return success — never reveal whether account exists
     const user = await prisma.user.findFirst({ where: { email: email.toLowerCase().trim(), role: "DEALER" } });

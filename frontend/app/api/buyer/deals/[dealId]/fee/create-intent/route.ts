@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { limitPaymentIntent, clientIpKey } from "@/lib/security/rate-limit";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -8,6 +9,13 @@ export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
+
+  // Card-testing guard: throttle intent creation per buyer and per source IP.
+  // Fails CLOSED on limiter-store outage (see lib/security/rate-limit.ts).
+  for (const key of [`fee:buyer:${buyer.id}`, `fee:ip:${clientIpKey(request.headers)}`]) {
+    const rl = await limitPaymentIntent(key);
+    if (!rl.ok) return errorResponse("RATE_LIMITED", rl.message, rl.status);
+  }
   const deal = await prisma.deal.findFirst({ where: { id: dealId, buyerId: buyer.id } });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
   // Guard against duplicate charges: if the concierge fee has already been
