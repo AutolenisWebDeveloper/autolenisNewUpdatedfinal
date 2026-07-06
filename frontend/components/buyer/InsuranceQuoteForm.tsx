@@ -18,11 +18,14 @@ interface VehicleInfo {
 }
 
 interface Props {
-  dealId:  string;
+  dealId: string;
+  // ID of the exact vehicle rendered in the summary below — the submission is
+  // bound to it server-side so the recorded vehicle always matches the display.
+  inventoryItemId: string | null;
   vehicle: VehicleInfo | null;
 }
 
-export default function InsuranceQuoteForm({ dealId, vehicle }: Props) {
+export default function InsuranceQuoteForm({ dealId, inventoryItemId, vehicle }: Props) {
   const router = useRouter();
 
   const [expanded,        setExpanded]       = useState(false);
@@ -46,6 +49,7 @@ export default function InsuranceQuoteForm({ dealId, vehicle }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           dealId,
+          inventoryItemId,
           coverageType,
           currentInsurer: currentInsurer.trim() || null,
           driverDob:      driverDob || null,

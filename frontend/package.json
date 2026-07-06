@@ -12,6 +12,7 @@
     "test": "tsx --test lib/services/prequal/__tests__/*.test.ts lib/services/dealer-recruitment/__tests__/*.test.ts lib/services/deal/__tests__/*.test.ts lib/services/auction/__tests__/*.test.ts lib/services/affiliate/__tests__/*.test.ts lib/social/__tests__/*.test.ts components/admin/crm/__tests__/*.test.ts",
     "test:content": "tsx --test lib/content/__tests__/*.test.ts lib/services/content/__tests__/*.test.ts",
     "test:admin-content": "tsx --test --experimental-test-module-mocks app/api/admin/content/__tests__/*.test.ts",
+    "test:buyer-insurance": "tsx --test --experimental-test-module-mocks app/api/buyer/insurance/__tests__/*.test.ts",
     "test:seo": "tsx --test lib/seo/__tests__/*.test.ts",
     "test:crm": "tsx --tsconfig lib/crm/__tests__/tsconfig.test.json --test lib/crm/__tests__/*.test.ts",
     "postinstall": "prisma generate",
