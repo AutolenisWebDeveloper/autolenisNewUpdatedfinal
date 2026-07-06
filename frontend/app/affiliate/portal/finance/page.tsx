@@ -88,7 +88,9 @@ export default async function AffiliateFinancePage() {
             </div>
           ))}
         </div>
-        <p className="text-xs text-slate-400 mt-4">Minimum payout: $25</p>
+        <p className="text-xs text-slate-400 mt-4">
+          Minimum payout: $25 · Totals reflect settled commissions; reversed commissions are excluded.
+        </p>
       </div>
 
       {/* Section 2: Payout Method */}

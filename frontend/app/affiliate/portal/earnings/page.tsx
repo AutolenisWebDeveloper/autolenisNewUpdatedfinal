@@ -51,6 +51,9 @@ export default async function AffiliateEarningsPage() {
           </div>
         ))}
       </div>
+      <p className="text-xs text-slate-400 -mt-6 mb-8" data-testid="earnings-basis-note">
+        Totals reflect settled commissions; reversed commissions are excluded.
+      </p>
 
       {/* Level breakdown with horizontal bars */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-8" data-testid="earnings-level-breakdown">
