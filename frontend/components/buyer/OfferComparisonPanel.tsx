@@ -76,16 +76,26 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
 
   async function selectOffer(offerId: string) {
     setError(null);
-    const res = await fetch(`/api/buyer/auctions/${auctionId}/select-offer`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ offerId }),
-    });
-    if (res.ok) {
-      router.push("/buyer/deal");
-    } else {
+    try {
+      const res = await fetch(`/api/buyer/auctions/${auctionId}/select-offer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offerId }),
+      });
+      if (res.ok) {
+        router.push("/buyer/deal");
+        return;
+      }
       setConfirming(null);
-      setError("Failed to select offer. Please try again.");
+      // Surface the API's explanation (e.g. AUCTION_LIVE: the 48h auction is
+      // still running) instead of a generic failure.
+      const data = (await res.json().catch(() => null)) as
+        | { error?: { message?: string } }
+        | null;
+      setError(data?.error?.message ?? "Failed to select offer. Please try again.");
+    } catch {
+      setConfirming(null);
+      setError("Network error. Please check your connection and try again.");
     }
   }
 
