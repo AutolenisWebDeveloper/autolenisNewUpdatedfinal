@@ -159,13 +159,14 @@ body {
 
 /* ===========================================================================
    AutoLenis CRM design tokens (#2) — consumed by components/admin/crm/ui/*.
-   Scoped to `.crm-root` so the global `.dark` contract is untouched. Dark mode
-   flips these VARIABLES (`.crm-root[data-theme="dark"]`), never component code.
+   Phase 2: the kit is promoted platform-wide, so the light VARIABLE
+   DEFINITIONS live at :root (available to any dashboard, not just .crm-root).
+   The kit's calm background/foreground APPLICATION stays scoped to .crm-root
+   (see below) so promoting the kit does not restyle other surfaces. Dark mode
+   still flips these variables only under `.crm-root[data-theme="dark"]`.
    Flat / dense / calm: 0.5px borders, focus rings only, no shadows/gradients.
    =========================================================================== */
-.crm-root {
-  color-scheme: light;
-
+:root, .crm-root {
   /* geometry */
   --crm-radius-sm: 4px;
   --crm-radius-md: 6px;
@@ -208,7 +209,12 @@ body {
 
   /* focus ring */
   --crm-ring: #0b5fd1;
+}
 
+/* Background/foreground application is scoped to .crm-root ONLY, so promoting
+   the kit's variables to :root does not change the look of other dashboards. */
+.crm-root {
+  color-scheme: light;
   background-color: var(--crm-bg-secondary);
   color: var(--crm-text-primary);
 }
