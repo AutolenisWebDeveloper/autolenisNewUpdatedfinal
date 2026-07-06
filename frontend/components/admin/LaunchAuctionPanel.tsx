@@ -5,6 +5,7 @@ import {
   Gavel, Search, Loader2, CheckCircle2, AlertCircle, X, Clock, ExternalLink,
   ChevronDown, ChevronRight, Plus, Trash2, Car,
 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface ActiveDealer {
   id: string;
@@ -99,34 +100,24 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
     let cancelled = false;
     setShortlistLoading(true);
     setShortlistError(null);
-    fetch(`/api/admin/buyers/${buyerId}/shortlist`)
-      .then(async r => {
-        const json = await r.json() as {
-          success?: boolean;
-          data?: {
-            shortlist?: {
-              items: Array<{
-                inventoryItemId: string;
-                inventoryItem: {
-                  id: string;
-                  year: number;
-                  make: string;
-                  model: string;
-                  trim: string | null;
-                  mileage: number | null;
-                } | null;
-              }>;
-            } | null;
-          };
-          error?: { message: string };
-        };
+    api.get<{
+      shortlist?: {
+        items: Array<{
+          inventoryItemId: string;
+          inventoryItem: {
+            id: string;
+            year: number;
+            make: string;
+            model: string;
+            trim: string | null;
+            mileage: number | null;
+          } | null;
+        }>;
+      } | null;
+    }>(`/api/admin/buyers/${buyerId}/shortlist`)
+      .then(data => {
         if (cancelled) return;
-        if (!json.success) {
-          setShortlistError(json.error?.message ?? "Failed to load shortlist");
-          setShortlist([]);
-          return;
-        }
-        const items = json.data?.shortlist?.items ?? [];
+        const items = data.shortlist?.items ?? [];
         setShortlist(items.map(i => ({
           inventoryItemId: i.inventoryItemId,
           year:    i.inventoryItem?.year    ?? 0,
@@ -138,7 +129,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
       })
       .catch(err => {
         if (cancelled) return;
-        setShortlistError(err instanceof Error ? err.message : "Network error");
+        setShortlistError(apiErrorMessage(err, "Failed to load shortlist"));
         setShortlist([]);
       })
       .finally(() => { if (!cancelled) setShortlistLoading(false); });
@@ -179,24 +170,14 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
     setLoadingDealers(true);
     setDealerError(null);
     const url = `/api/admin/dealers/active${query ? `?q=${encodeURIComponent(query)}` : ""}`;
-    fetch(url)
-      .then(async r => {
-        const json = await r.json() as {
-          success?: boolean;
-          data?: { dealers: ActiveDealer[] };
-          error?: { message: string };
-        };
+    api.get<{ dealers: ActiveDealer[] }>(url)
+      .then(data => {
         if (cancelled) return;
-        if (!json.success) {
-          setDealerError(json.error?.message ?? "Failed to load dealers");
-          setDealers([]);
-        } else {
-          setDealers(json.data?.dealers ?? []);
-        }
+        setDealers(data.dealers ?? []);
       })
       .catch(err => {
         if (cancelled) return;
-        setDealerError(err instanceof Error ? err.message : "Network error");
+        setDealerError(apiErrorMessage(err, "Failed to load dealers"));
         setDealers([]);
       })
       .finally(() => { if (!cancelled) setLoadingDealers(false); });
@@ -284,37 +265,27 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/launch-auction`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await api.post<{ auctionId: string; dealerCount: number; outsideDealerCount?: number; vehicleCount?: number; endsAt: string | null }>(
+        `/api/admin/buyers/${buyerId}/launch-auction`,
+        {
           dealerIds: Array.from(selectedIds),
           reason: reason.trim(),
           hours: effectiveHours,
           notes: notes.trim() || undefined,
           outsideDealers: outsidePayload.length > 0 ? outsidePayload : undefined,
           vehicles:       vehiclesPayload.length > 0 ? vehiclesPayload : undefined,
-        }),
-      });
-      const json = await res.json() as {
-        success?: boolean;
-        data?: { auctionId: string; dealerCount: number; outsideDealerCount?: number; vehicleCount?: number; endsAt: string | null };
-        error?: { message: string };
-      };
-      if (!json.success || !json.data) {
-        setSubmitError(json.error?.message ?? "Launch failed");
-        return;
-      }
+        },
+      );
       setResult({
-        auctionId: json.data.auctionId,
-        dealerCount: json.data.dealerCount,
-        outsideDealerCount: json.data.outsideDealerCount ?? 0,
-        vehicleCount: json.data.vehicleCount ?? 0,
-        endsAt: json.data.endsAt,
+        auctionId: data.auctionId,
+        dealerCount: data.dealerCount,
+        outsideDealerCount: data.outsideDealerCount ?? 0,
+        vehicleCount: data.vehicleCount ?? 0,
+        endsAt: data.endsAt,
       });
-      onLaunched?.(json.data.auctionId);
+      onLaunched?.(data.auctionId);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Network error");
+      setSubmitError(apiErrorMessage(err, "Launch failed"));
     } finally {
       setSubmitting(false);
     }

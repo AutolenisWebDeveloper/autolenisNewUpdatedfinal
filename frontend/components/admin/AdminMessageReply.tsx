@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Send } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   threadId: string;
@@ -22,23 +23,11 @@ export default function AdminMessageReply({ threadId }: Props) {
     setError(null);
 
     try {
-      const res = await fetch(`/api/admin/messages/${threadId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: content.trim() }),
-      });
-      const json = (await res.json()) as {
-        success?: boolean;
-        error?: { message: string };
-      };
-      if (!res.ok || !json.success) {
-        setError(json.error?.message ?? "Failed to send reply. Please try again.");
-        return;
-      }
+      await api.post(`/api/admin/messages/${threadId}`, { content: content.trim() });
       setContent("");
       router.refresh();
-    } catch {
-      setError("An unexpected error occurred. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to send reply. Please try again."));
     } finally {
       setSubmitting(false);
     }

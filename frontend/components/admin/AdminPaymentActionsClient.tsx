@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { X, CheckCircle2, AlertTriangle } from "lucide-react";
+import { api } from "@/lib/api/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -135,15 +136,7 @@ export default function AdminPaymentActionsClient(props: Props) {
   }
 
   async function callApi(url: string, body: Record<string, unknown>): Promise<void> {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data?.error?.message ?? `Request failed (${res.status})`);
-    }
+    await api.post(url, body);
   }
 
   // ── Deposit actions ──────────────────────────────────────────────────────
@@ -152,15 +145,7 @@ export default function AdminPaymentActionsClient(props: Props) {
     const { depositId, buyerId, buyerEmail } = props;
 
     async function sendDepositLink(reason: string) {
-      const res = await fetch("/api/admin/payments/deposit/send-link", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ buyerId, reason }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error?.message ?? `Request failed (${res.status})`);
-      }
+      await api.post("/api/admin/payments/deposit/send-link", { buyerId, reason });
       showToast(`Payment link sent to ${buyerEmail}`);
     }
 
@@ -273,15 +258,7 @@ export default function AdminPaymentActionsClient(props: Props) {
   const { dealId, buyerEmail } = props;
 
   async function sendFeeLink(reason: string) {
-    const res = await fetch("/api/admin/payments/concierge-fee/send-link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dealId, reason }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data?.error?.message ?? `Request failed (${res.status})`);
-    }
+    await api.post("/api/admin/payments/concierge-fee/send-link", { dealId, reason });
     showToast(`Payment link sent to ${buyerEmail}`);
   }
 

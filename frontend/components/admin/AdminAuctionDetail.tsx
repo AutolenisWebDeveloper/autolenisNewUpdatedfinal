@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CheckCircle2, AlertTriangle, Loader2, Gavel, Users, Clock, TrendingUp } from "lucide-react";
 import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Offer { id: string; otdPriceCents: number; vehiclePriceCents: number; taxCents: number; feesCents: number; junkFeesCents: number; includesFinancing: boolean; aprRate: number | null; termMonths: number | null; status: string; version: number; aprFlag: string | null; dealer: { id: string; dealershipName: string; tier: string; city: string | null; state: string | null; user: { email: string } } }
 interface Invitation { id: string; dealer: { id: string; dealershipName: string; tier: string }; sentAt: string; respondedAt: string | null }
@@ -54,15 +55,14 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
   async function doAction(action: string, extra: Record<string, unknown> = {}) {
     if (!reason.trim()) { setFeedback({ message: "Reason is required", isError: true }); return; }
     setLoading(true); setFeedback(null);
-    const res = await fetch(`/api/admin/auctions/${auction.id}/action`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, reason, ...extra }),
-    });
-    const d = await res.json() as { success?: boolean; error?: { message: string } };
-    setLoading(false);
-    if (res.ok) { setFeedback({ message: `${action} completed`, isError: false }); setReason(""); }
-    else setFeedback({ message: d.error?.message ?? "Action failed", isError: true });
+    try {
+      await api.post(`/api/admin/auctions/${auction.id}/action`, { action, reason, ...extra });
+      setFeedback({ message: `${action} completed`, isError: false }); setReason("");
+    } catch (err) {
+      setFeedback({ message: apiErrorMessage(err, "Action failed"), isError: true });
+    } finally {
+      setLoading(false);
+    }
   }
 
   const bestPrice = computeBestPrice(auction.offers);

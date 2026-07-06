@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, Clock, AlertTriangle, Loader2, StickyNote } from "lucide-react";
 import AdminPaymentActionsClient from "@/components/admin/AdminPaymentActionsClient";
 import { PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const TABS = ["Overview", "Billing", "Insurance", "E-Sign", "Pickup", "Refunds", "Notes"] as const;
 type Tab = typeof TABS[number];
@@ -46,10 +47,9 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
   const loadNotes = useCallback(async () => {
     setNotesLoading(true);
     try {
-      const res = await fetch(`/api/admin/deals/${deal.id}/notes`);
-      const data = await res.json() as { success?: boolean; data?: { notes: DealNote[] } };
-      if (data.success && data.data?.notes) {
-        setNotes([...data.data.notes].reverse()); // show oldest first
+      const data = await api.get<{ notes: DealNote[] }>(`/api/admin/deals/${deal.id}/notes`);
+      if (data.notes) {
+        setNotes([...data.notes].reverse()); // show oldest first
       }
     } catch { /* ignore */ }
     finally { setNotesLoading(false); }
@@ -69,15 +69,9 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
     setLoading(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/admin/deals/${deal.id}/action`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, reason: actionReason, ...extra }),
-      });
-      const data = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok) setFeedback({ message: data.error?.message ?? "Action failed", isError: true });
-      else { setFeedback({ message: `Action '${action}' completed`, isError: false }); setActionReason(""); }
-    } catch { setFeedback({ message: "Request failed", isError: true }); }
+      await api.post(`/api/admin/deals/${deal.id}/action`, { action, reason: actionReason, ...extra });
+      setFeedback({ message: `Action '${action}' completed`, isError: false }); setActionReason("");
+    } catch (err) { setFeedback({ message: apiErrorMessage(err, "Action failed"), isError: true }); }
     finally { setLoading(false); }
   }
 
@@ -336,26 +330,15 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
                   setNoteSubmitting(true);
                   setNoteFeedback(null);
                   try {
-                    const res = await fetch(`/api/admin/deals/${deal.id}/notes`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ content }),
-                    });
-                    const data = await res.json() as { success?: boolean; data?: { note: DealNote }; error?: { message: string } };
-                    if (!res.ok || !data.success) {
-                      // Rollback
-                      setNotes(prev => prev.filter(n => n.id !== tempNote.id));
-                      setNoteContent(content);
-                      setNoteFeedback({ message: data.error?.message ?? "Failed to add note", isError: true });
-                    } else if (data.data?.note) {
-                      // Replace temp note with real note
-                      setNotes(prev => prev.map(n => n.id === tempNote.id ? data.data!.note : n));
-                      setNoteFeedback({ message: "Note added", isError: false });
-                    }
-                  } catch {
+                    const data = await api.post<{ note: DealNote }>(`/api/admin/deals/${deal.id}/notes`, { content });
+                    // Replace temp note with real note
+                    setNotes(prev => prev.map(n => n.id === tempNote.id ? data.note : n));
+                    setNoteFeedback({ message: "Note added", isError: false });
+                  } catch (err) {
+                    // Rollback
                     setNotes(prev => prev.filter(n => n.id !== tempNote.id));
                     setNoteContent(content);
-                    setNoteFeedback({ message: "Network error — note not saved", isError: true });
+                    setNoteFeedback({ message: apiErrorMessage(err, "Failed to add note"), isError: true });
                   } finally {
                     setNoteSubmitting(false);
                   }

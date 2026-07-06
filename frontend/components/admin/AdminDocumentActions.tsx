@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, Check, X, Loader2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   documentId: string;
@@ -23,12 +24,10 @@ export default function AdminDocumentActions({ documentId, status }: Props) {
     setViewLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/affiliates/documents/${documentId}/signed-url`);
-      const json = await res.json();
-      if (!res.ok) { setError(json?.error?.message ?? "Failed to load document."); return; }
-      window.open(json.data.signedUrl, "_blank", "noopener,noreferrer");
-    } catch {
-      setError("Failed to load document.");
+      const data = await api.get<{ signedUrl: string }>(`/api/admin/affiliates/documents/${documentId}/signed-url`);
+      window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to load document."));
     } finally {
       setViewLoading(false);
     }
@@ -38,16 +37,10 @@ export default function AdminDocumentActions({ documentId, status }: Props) {
     setApproveLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/affiliates/documents/${documentId}/review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "APPROVED", reason: "Reviewed and approved" }),
-      });
-      const json = await res.json();
-      if (!res.ok) { setError(json?.error?.message ?? "Approve failed."); return; }
+      await api.post(`/api/admin/affiliates/documents/${documentId}/review`, { status: "APPROVED", reason: "Reviewed and approved" });
       router.refresh();
-    } catch {
-      setError("Approve failed.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Approve failed."));
     } finally {
       setApproveLoading(false);
     }
@@ -58,18 +51,12 @@ export default function AdminDocumentActions({ documentId, status }: Props) {
     setRejectLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/affiliates/documents/${documentId}/review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "REJECTED", reason: rejectReason.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok) { setError(json?.error?.message ?? "Reject failed."); return; }
+      await api.post(`/api/admin/affiliates/documents/${documentId}/review`, { status: "REJECTED", reason: rejectReason.trim() });
       setShowRejectModal(false);
       setRejectReason("");
       router.refresh();
-    } catch {
-      setError("Reject failed.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Reject failed."));
     } finally {
       setRejectLoading(false);
     }

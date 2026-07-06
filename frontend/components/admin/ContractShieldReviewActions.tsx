@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, Flag, RotateCcw, AlertTriangle, Loader2, X } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 type ReviewAction = "APPROVE" | "FLAG" | "REQUEST_REVISION";
 
@@ -56,19 +57,11 @@ export default function ContractShieldReviewActions({ reviewId }: { reviewId: st
 
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/contract-shield/${reviewId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: open, reason: reason.trim() || undefined, issues }),
-      });
-      const data = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok || !data.success) {
-        setError(data.error?.message ?? "Action failed."); setLoading(false); return;
-      }
+      await api.post(`/api/admin/contract-shield/${reviewId}`, { action: open, reason: reason.trim() || undefined, issues });
       reset();
       router.refresh();
-    } catch {
-      setError("Network error — please try again."); setLoading(false);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Action failed.")); setLoading(false);
     }
   }
 

@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Eye, FileText, Archive } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 type StatusValue = "DRAFT" | "REVIEW_NEEDED" | "PUBLISHED" | "ARCHIVED";
 
@@ -38,18 +39,10 @@ export default function ArticleStatusActions({ articleId, status }: Props) {
     setPending(next);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/content/${articleId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: next }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error?.message ?? "Failed to update status");
-      }
+      await api.patch(`/api/admin/content/${articleId}`, { status: next });
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update status");
+      setError(apiErrorMessage(err, "Failed to update status"));
     } finally {
       setPending(null);
     }

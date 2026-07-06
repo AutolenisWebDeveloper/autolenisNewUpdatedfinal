@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, AlertTriangle } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   submissionId: string;
@@ -28,18 +29,12 @@ export function AdminPreApprovalActions({ submissionId, status }: Props) {
     if (!modal) return;
     setLoading(modal.action); setError(null);
     try {
-      const res = await fetch(`/api/admin/external-preapprovals/${submissionId}/${modal.action}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: reason.trim() }),
-      });
-      const data = await res.json() as { success?: boolean; error?: { message?: string } };
-      if (!res.ok) throw new Error(data?.error?.message ?? "Request failed");
+      await api.post(`/api/admin/external-preapprovals/${submissionId}/${modal.action}`, { reason: reason.trim() });
       setModal(null); setReason("");
       showToast(modal.action === "approve" ? "Pre-approval approved" : "Pre-approval rejected", "success");
       router.refresh();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed";
+      const msg = apiErrorMessage(e, "Request failed");
       setError(msg); showToast(msg, "error");
     } finally { setLoading(null); }
   }
