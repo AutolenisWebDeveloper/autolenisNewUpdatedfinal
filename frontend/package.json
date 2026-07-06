@@ -47,7 +47,7 @@
     "@fontsource/space-grotesk": "5.2.10",
     "@hookform/resolvers": "^5.0.1",
     "@prisma/client": "^5.22.0",
-    "@radix-ui/react-dialog": "^1.1.18",
+    "@radix-ui/react-dialog": "1.1.18",
     "@sentry/nextjs": "^10.63.0",
     "@stripe/react-stripe-js": "^6.2.0",
     "@stripe/stripe-js": "^9.3.0",
