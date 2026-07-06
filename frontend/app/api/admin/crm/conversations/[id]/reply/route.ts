@@ -20,7 +20,7 @@ export async function POST(
   }
 
   const isInternalNote = !!body.is_internal_note;
-  const actor = await requirePermissionActor("comms.bulk_send");
+  const actor = await requirePermissionActor("comms.reply");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const adminId = actor.adminId;
   const supabase = getServiceSupabase();

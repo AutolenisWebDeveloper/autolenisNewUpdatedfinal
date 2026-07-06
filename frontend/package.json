@@ -20,6 +20,7 @@
     "test:format": "tsx --test lib/__tests__/format.test.ts",
     "test:api-client": "tsx --test lib/api/__tests__/client.test.ts",
     "test:buyer-journey": "tsx --test lib/services/buyer/__tests__/journey.test.ts",
+    "test:crm-audit": "tsx --test lib/services/admin/__tests__/crm-audit.test.ts",
     "test:seo": "tsx --test lib/seo/__tests__/*.test.ts",
     "test:crm": "tsx --tsconfig lib/crm/__tests__/tsconfig.test.json --test lib/crm/__tests__/*.test.ts",
     "test:visual": "playwright test --config playwright.visual.config.ts",

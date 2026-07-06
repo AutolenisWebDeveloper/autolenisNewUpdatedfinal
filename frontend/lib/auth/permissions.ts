@@ -34,6 +34,9 @@ const ALL: AdminRole[] = ["SUPER_ADMIN", "OPERATIONS_ADMIN", "COMPLIANCE_ADMIN",
 const SUPER: AdminRole[] = ["SUPER_ADMIN"];
 const MONEY: AdminRole[] = ["SUPER_ADMIN", "FINANCE_ADMIN"];
 const OPS: AdminRole[] = ["SUPER_ADMIN", "OPERATIONS_ADMIN"];
+// Support-inclusive outbound reply: support can reply without holding bulk
+// campaign authority (policy 1 — SUPPORT_ADMIN acts, doesn't blast).
+const SUPPORT_REPLY: AdminRole[] = ["SUPER_ADMIN", "OPERATIONS_ADMIN", "SUPPORT_ADMIN"];
 
 // Destructive-priority domains first (owner ruling: money + destructive gate
 // FIRST). Read-tier and remaining domains are appended as the shadow rollout
@@ -53,8 +56,17 @@ export const PERMISSION_ROLES = {
   // Impersonation — policy 4 (single narrow role, never default admin)
   "support.impersonate": SUPER,
 
-  // Bulk external sends — mass-comms blast radius (destructive-priority)
+  // Outbound comms, tiered by blast radius:
+  //  • bulk_send — mass/campaign fan-out (destructive-priority). Also covers
+  //    any route that CAN fan out sends (owner ruling: classify by MAX
+  //    reachable side-effect), e.g. automation trigger.
+  //  • reply — a single support/agent reply; support-capable, no bulk authority.
   "comms.bulk_send": OPS,
+  "comms.reply": SUPPORT_REPLY,
+
+  // Ops replay — highest-privilege op in the surface: replays a failed job,
+  // re-firing arbitrary inherited side effects. SUPER only.
+  "ops.replay": SUPER,
 
   // CRM domains (the getAdminActor routes). Reads are open (never deny in
   // shadow — brings them into the layer for the bucketing report); mutations

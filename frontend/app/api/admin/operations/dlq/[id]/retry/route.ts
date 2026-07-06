@@ -14,7 +14,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const actor = await requirePermissionActor("crm.manage");
+  const actor = await requirePermissionActor("ops.replay");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
   const ops = new OperationsService(supabase);

@@ -6,8 +6,17 @@
 ## Policy → roles (see lib/auth/permissions.ts)
 - `crm.read` → ALL roles (never denies in shadow; brings reads into the layer/report)
 - `crm.manage` → SUPER + OPERATIONS
-- `comms.bulk_send` → SUPER + OPERATIONS (mass/outbound comms)
+- `comms.bulk_send` → SUPER + OPERATIONS (mass/campaign fan-out, incl. any route that CAN fan out sends)
+- `comms.reply` → SUPER + OPERATIONS + **SUPPORT** (single agent reply; support-capable, no bulk authority)
+- `ops.replay` → **SUPER only** (replays a failed job — arbitrary inherited side effects)
 - `ai.use` → ALL (policy 5: read+draft; logged under the invoking human)
+
+## Owner five-flag dispositions applied (post-review)
+1. **automations/[id]/trigger → `comms.bulk_send`** (was crm.manage). Classified by MAX reachable side-effect: a route that can fan out sends is a mass-send route for authz.
+2. **operations/dlq/[id]/retry → `ops.replay` (SUPER-only)** (was crm.manage). New highest-privilege tier. **Idempotency verified:** the replay re-emits the Inngest event with the SAME payload, so `emailSendFn`/`smsSendFn` derive the same `uniqueKey` and `acquireIdempotencyGuard` returns `DUPLICATE_BLOCKED` — a manual replay hits the same payload-derived guard as any other emission. It does **not** route around Phase 0.5: the DLQ handles the **Inngest** plane; Phase 0.5's `PaymentProviderEvent.eventId` transactional claim protects the **Stripe webhook** plane (Stripe retries are Stripe-driven, they don't dead-letter here). **One narrow caveat for you:** the fallback key is date-bucketed (`…:email_send:<YYYY-MM-DD>`), so a replay of a *keyless* send job across a midnight boundary would derive a different key and could re-send. Jobs that pass an explicit `idempotencyKey` (payment/commission-origin) are unaffected. Pre-existing property of the send functions, not introduced here; the SUPER-gate + manual nature bounds it. Flagging for a possible follow-up (stable key or a replay-preserves-original-key path).
+3. **conversations/[id]/reply → `comms.reply`** (was comms.bulk_send). New support-capable tier distinct from bulk campaigns, aligning with SUPPORT_ADMIN policy (support replies without holding bulk authority).
+4. **copilot → `ai.use`: confirmed**, plus a durable-intent test (`test:crm-audit`) asserting the audit row carries the HUMAN actor identity (`admin_id`/`admin_email` from the actor), never `system`.
+5. **Four POST-reads → `crm.read`: confirmed.**
 
 ## Classification
 

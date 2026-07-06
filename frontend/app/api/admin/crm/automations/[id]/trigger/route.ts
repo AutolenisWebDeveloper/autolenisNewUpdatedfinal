@@ -15,7 +15,7 @@ interface RouteContext {
 // pairing (used for back-filling, debugging, or one-off sends).
 export async function POST(req: Request, ctx: RouteContext) {
   const { id } = await ctx.params;
-  const actor = await requirePermissionActor("crm.manage");
+  const actor = await requirePermissionActor("comms.bulk_send");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   let body: { contact_id?: string; trigger_data?: Record<string, unknown> };
   try {
