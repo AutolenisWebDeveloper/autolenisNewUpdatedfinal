@@ -36,7 +36,7 @@ export default async function ReceiptPage({ params }: Props) {
         {/* Header */}
         <div className="flex items-start justify-between mb-8 pb-6 border-b border-[#E5E7EB]">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.15em] text-[#0B5FD1] mb-1">
+            <p className="text-xs font-bold uppercase tracking-[0.15em] text-al-primary mb-1">
               AutoLenis
             </p>
             <h1 className="text-2xl font-bold text-[#111827]">Deal Receipt</h1>
@@ -88,7 +88,7 @@ export default async function ReceiptPage({ params }: Props) {
           </div>
           <div className="pt-3 border-t border-[#E5E7EB] flex justify-between">
             <span className="font-bold text-[#111827]">Total via AutoLenis</span>
-            <span className="font-bold text-[#0B5FD1] text-lg">
+            <span className="font-bold text-al-primary text-lg">
               ${((otdPriceCents + (isPremium ? PREMIUM_FEE_CENTS : 0)
                 - DEPOSIT_AMOUNT_CENTS) / 100).toLocaleString()}
             </span>

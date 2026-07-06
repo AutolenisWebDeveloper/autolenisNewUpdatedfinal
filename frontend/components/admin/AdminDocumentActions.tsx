@@ -114,7 +114,7 @@ export default function AdminDocumentActions({ documentId, status }: Props) {
               onChange={e => { setRejectReason(e.target.value); setError(null); }}
               rows={3}
               placeholder="Describe why this document is being rejected…"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-al-primary/30"
             />
             {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
             <div className="flex items-center justify-end gap-3 mt-4">

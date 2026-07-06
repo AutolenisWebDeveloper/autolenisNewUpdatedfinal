@@ -41,7 +41,7 @@ export default function OfferResponseButtons({ offerId, requestId }: Props) {
           onClick={() => respond("ACCEPT")}
           disabled={!!acting}
           data-testid="accept-offer-btn"
-          className="flex-1 h-12 rounded-xl bg-[#0B5FD1] text-white font-bold text-sm
+          className="flex-1 h-12 rounded-xl bg-al-primary text-white font-bold text-sm
             flex items-center justify-center gap-2
             hover:bg-[#0944A8] disabled:opacity-40 transition-colors"
         >

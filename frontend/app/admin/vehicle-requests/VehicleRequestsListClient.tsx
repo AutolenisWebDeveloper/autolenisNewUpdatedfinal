@@ -89,8 +89,8 @@ export default function VehicleRequestsListClient({
               onClick={() => setActiveFilter(f.key)}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                 isActive
-                  ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
-                  : "bg-white text-slate-600 border-slate-200 hover:border-[#0B5FD1]/40"
+                  ? "bg-al-primary text-white border-al-primary"
+                  : "bg-white text-slate-600 border-slate-200 hover:border-al-primary/40"
               }`}
             >
               {f.label}
@@ -132,7 +132,7 @@ export default function VehicleRequestsListClient({
                 key={req.id}
                 href={`/admin/requests/${req.id}`}
                 data-testid={`vehicle-request-row-${req.id}`}
-                className="block bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-[#0B5FD1]/40 hover:shadow-sm transition-all"
+                className="block bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-al-primary/40 hover:shadow-sm transition-all"
               >
                 <div className="flex items-center justify-between gap-4">
                   <div className="min-w-0 flex-1">
@@ -164,7 +164,7 @@ export default function VehicleRequestsListClient({
                       Submitted {new Date(req.createdAt).toLocaleString()}
                     </p>
                   </div>
-                  <span className="text-xs font-semibold text-[#0B5FD1] shrink-0">
+                  <span className="text-xs font-semibold text-al-primary shrink-0">
                     View →
                   </span>
                 </div>

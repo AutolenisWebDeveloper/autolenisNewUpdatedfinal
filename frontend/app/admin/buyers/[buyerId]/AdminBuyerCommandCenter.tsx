@@ -230,7 +230,7 @@ function ConfirmModal({
           )}
           <div className="flex gap-3">
             <button type="button" onClick={onCancel} className="flex-1 border border-slate-200 text-slate-600 rounded-xl py-2.5 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
-            <button type="submit" disabled={loading} className={"flex-1 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (destructive ? "bg-red-600 hover:bg-red-700" : "bg-[#0B5FD1] hover:bg-purple-800")}>
+            <button type="submit" disabled={loading} className={"flex-1 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (destructive ? "bg-red-600 hover:bg-red-700" : "bg-al-primary hover:bg-purple-800")}>
               {loading ? "Processing..." : submitLabel}
             </button>
           </div>
@@ -313,7 +313,7 @@ function EditProfileModal({ buyer, onClose, onSuccess }: {
           </div>
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 transition-colors">{loading ? "Saving..." : "Save Changes"}</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 transition-colors">{loading ? "Saving..." : "Save Changes"}</button>
           </div>
         </form>
       </div>
@@ -363,7 +363,7 @@ function AddNoteModal({ buyerId, onClose, onSuccess }: {
           <p className="text-[10px] text-slate-400 text-right">{content.length}/2000</p>
           <div className="flex gap-3">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">{loading ? "Saving..." : "Add Note"}</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">{loading ? "Saving..." : "Add Note"}</button>
           </div>
         </form>
       </div>
@@ -421,7 +421,7 @@ function MoveWorkflowModal({ buyerId, dealId, currentStatus, onClose, onSuccess 
           <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Reason for stage change (required)" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500" />
           <div className="flex gap-3">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">{loading ? "Moving..." : "Move Stage"}</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">{loading ? "Moving..." : "Move Stage"}</button>
           </div>
         </form>
       </div>
@@ -1092,7 +1092,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
 
         <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-[#0B5FD1] flex items-center justify-center flex-shrink-0 shadow-md">
+            <div className="w-12 h-12 rounded-2xl bg-al-primary flex items-center justify-center flex-shrink-0 shadow-md">
               <span className="text-white text-lg font-bold">{buyer.firstName[0]}{buyer.lastName[0]}</span>
             </div>
             <div>
@@ -1225,7 +1225,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
-              className={"px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors " + (activeTab === t.id ? "border-[#0B5FD1] text-[#0B5FD1]" : "border-transparent text-slate-500 hover:text-slate-700")}
+              className={"px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors " + (activeTab === t.id ? "border-al-primary text-al-primary" : "border-transparent text-slate-500 hover:text-slate-700")}
             >
               {t.label}
             </button>
@@ -1781,7 +1781,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
           <div>
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-sm font-semibold text-slate-700">Internal Notes</h3>
-              <button onClick={() => setModal("addNote")} className="flex items-center gap-1.5 px-4 py-2 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
+              <button onClick={() => setModal("addNote")} className="flex items-center gap-1.5 px-4 py-2 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
                 <MessageSquare size={12} /> Add Note
               </button>
             </div>

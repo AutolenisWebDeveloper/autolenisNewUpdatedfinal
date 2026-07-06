@@ -51,9 +51,9 @@ function OnboardingProgressBar({ currentStep }: { currentStep: number }) {
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
                     done
-                      ? "bg-[#0B5FD1] border-[#0B5FD1] text-white"
+                      ? "bg-al-primary border-al-primary text-white"
                       : active
-                      ? "bg-white border-[#0B5FD1] text-[#0B5FD1]"
+                      ? "bg-white border-al-primary text-al-primary"
                       : "bg-white border-slate-200 text-slate-400"
                   }`}
                   data-testid={`onboarding-step-${step.id}`}
@@ -62,7 +62,7 @@ function OnboardingProgressBar({ currentStep }: { currentStep: number }) {
                 </div>
                 <span
                   className={`mt-1.5 text-xs font-medium text-center whitespace-nowrap ${
-                    done ? "text-[#0B5FD1]" : active ? "text-slate-900" : "text-slate-400"
+                    done ? "text-al-primary" : active ? "text-slate-900" : "text-slate-400"
                   }`}
                 >
                   {step.label}
@@ -71,7 +71,7 @@ function OnboardingProgressBar({ currentStep }: { currentStep: number }) {
               {!isLast && (
                 <div
                   className={`flex-1 h-0.5 mx-1 mb-5 transition-colors ${
-                    done ? "bg-[#0B5FD1]" : "bg-slate-200"
+                    done ? "bg-al-primary" : "bg-slate-200"
                   }`}
                 />
               )}
@@ -220,7 +220,7 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
                     onChange={(e) => setFirstName(e.target.value)}
                     disabled={submitting}
                     data-testid="onboarding-first-name"
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-al-primary focus:ring-2 focus:ring-al-primary/20"
                     required
                   />
                 </div>
@@ -235,7 +235,7 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
                     onChange={(e) => setLastName(e.target.value)}
                     disabled={submitting}
                     data-testid="onboarding-last-name"
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-al-primary focus:ring-2 focus:ring-al-primary/20"
                     required
                   />
                 </div>
@@ -262,13 +262,13 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
                     aria-pressed={selected}
                     className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 p-5 transition-all ${
                       selected
-                        ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
+                        ? "border-al-primary bg-al-primary/5 text-al-primary"
                         : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
                     }`}
                   >
-                    <Icon size={36} className={selected ? "text-[#0B5FD1]" : "text-slate-500"} />
+                    <Icon size={36} className={selected ? "text-al-primary" : "text-slate-500"} />
                     <span className="text-sm font-medium">{label}</span>
-                    {selected && <CheckCircle2 size={14} className="text-[#0B5FD1]" />}
+                    {selected && <CheckCircle2 size={14} className="text-al-primary" />}
                   </button>
                 );
               })}
@@ -291,7 +291,7 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
                     aria-pressed={selected}
                     className={`rounded-xl border-2 px-4 py-4 text-sm font-medium transition-all ${
                       selected
-                        ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
+                        ? "border-al-primary bg-al-primary/5 text-al-primary"
                         : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
                     }`}
                   >
@@ -318,7 +318,7 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
                 checked={emailNotifications}
                 onChange={(e) => setEmailNotifications(e.target.checked)}
                 disabled={submitting}
-                className="h-5 w-5 accent-[#0B5FD1]"
+                className="h-5 w-5 accent-al-primary"
               />
             </label>
           </section>
@@ -336,7 +336,7 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
                 onChange={(e) => setPhone(e.target.value)}
                 disabled={submitting}
                 data-testid="onboarding-phone"
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/20"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-al-primary focus:ring-2 focus:ring-al-primary/20"
                 required
               />
               {phone.trim().length > 0 && (
@@ -349,7 +349,7 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
                     checked={smsConsent}
                     onChange={(e) => setSmsConsent(e.target.checked)}
                     data-testid="onboarding-sms-consent-checkbox"
-                    className="h-4 w-4 mt-0.5 rounded border-slate-300 text-[#0B5FD1] focus:ring-[#0B5FD1]/30"
+                    className="h-4 w-4 mt-0.5 rounded border-slate-300 text-al-primary focus:ring-al-primary/30"
                   />
                   <span className="text-xs text-slate-500 leading-relaxed">
                     I agree to receive SMS messages from AutoLenis regarding auction
@@ -357,9 +357,9 @@ export default function OnboardingWizardClient({ initial }: { initial: BuyerInit
                     communications. Message frequency varies. Message and data rates
                     may apply. Reply STOP to opt out, HELP for assistance. Consent is
                     not a condition of purchase. View our{" "}
-                    <a href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Privacy Policy</a>
+                    <a href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-al-primary hover:underline">Privacy Policy</a>
                     {" "}and{" "}
-                    <a href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Terms of Service</a>.
+                    <a href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-al-primary hover:underline">Terms of Service</a>.
                   </span>
                 </label>
               )}

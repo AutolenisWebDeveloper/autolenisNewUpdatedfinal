@@ -78,8 +78,8 @@ export default async function BuyerInsurancePage() {
   const statusConfig: Record<string, { label: string; icon: React.ReactNode }> = {
     NOT_STARTED:       { label: "Not Started",       icon: <Clock size={14} className="text-[#6B7280]" /> },
     QUOTE_REQUESTED:   { label: "Quote Requested",   icon: <Clock size={14} className="text-[#F59E0B]" /> },
-    QUOTE_RECEIVED:    { label: "Quote Received",    icon: <FileText size={14} className="text-[#0B5FD1]" /> },
-    POLICY_SELECTED:   { label: "Policy Selected",   icon: <FileText size={14} className="text-[#0B5FD1]" /> },
+    QUOTE_RECEIVED:    { label: "Quote Received",    icon: <FileText size={14} className="text-al-primary" /> },
+    POLICY_SELECTED:   { label: "Policy Selected",   icon: <FileText size={14} className="text-al-primary" /> },
     POLICY_BOUND:      { label: "Policy Bound",      icon: <CheckCircle2 size={14} className="text-[#10B981]" /> },
     EXTERNAL_UPLOADED: { label: "Proof Uploaded",    icon: <Clock size={14} className="text-[#F59E0B]" /> },
     VERIFIED:          { label: "Verified",          icon: <CheckCircle2 size={14} className="text-[#10B981]" /> },
@@ -92,7 +92,7 @@ export default async function BuyerInsurancePage() {
     <div className="p-6 md:p-8 max-w-xl" data-testid="buyer-insurance-page">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <Shield size={22} className="text-[#0B5FD1]" />
+        <Shield size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-[#111827]">Insurance</h1>
       </div>
 
@@ -117,10 +117,10 @@ export default async function BuyerInsurancePage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 mb-6">
           {/* OPTION 1: Request a Quote */}
-          <div className="bg-white border-2 border-[#0B5FD1]/20 rounded-xl p-5" data-testid="insurance-quote-section">
+          <div className="bg-white border-2 border-al-primary/20 rounded-xl p-5" data-testid="insurance-quote-section">
             <div className="flex items-start gap-3 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-[#EFF6FF] flex items-center justify-center shrink-0">
-                <FileText size={16} className="text-[#0B5FD1]" />
+              <div className="w-8 h-8 rounded-lg bg-al-primary-subtle flex items-center justify-center shrink-0">
+                <FileText size={16} className="text-al-primary" />
               </div>
               <div>
                 <p className="font-semibold text-[#111827] text-sm">

@@ -170,7 +170,7 @@ export default async function DealerOutreachPage({
       <div className="mx-auto max-w-screen-2xl">
         <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
           <div className="flex items-center gap-3">
-            <Phone size={22} className="text-[#0B5FD1]" />
+            <Phone size={22} className="text-al-primary" />
             <h1 className="text-xl font-bold text-[#0F172A]">
               Dealer Recruitment Pipeline
             </h1>
@@ -206,7 +206,7 @@ export default async function DealerOutreachPage({
               href={`/admin/dealer-outreach?tab=${t}`}
               className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${
                 activeTab === t
-                  ? "border-[#0B5FD1] text-[#0B5FD1]"
+                  ? "border-al-primary text-al-primary"
                   : "border-transparent text-[#64748B] hover:text-[#0F172A]"
               }`}
             >

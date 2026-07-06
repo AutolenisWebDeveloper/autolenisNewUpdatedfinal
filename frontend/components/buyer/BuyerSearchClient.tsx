@@ -276,7 +276,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
     return Array.from(set).sort();
   }, []);
 
-  const inputCls  = "w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 focus:border-[#0B5FD1] bg-white";
+  const inputCls  = "w-full px-3 py-2 border border-[#E5E7EB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20 focus:border-al-primary bg-white";
   const labelCls  = "text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5 block";
 
   return (
@@ -287,7 +287,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
           <div key={t.id} className={`px-4 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2 pointer-events-auto animate-in slide-in-from-right-4 duration-200 ${
             t.type === "error"
               ? "bg-red-50 border border-red-200 text-red-800"
-              : "bg-[#0B5FD1]/10 border border-[#0B5FD1]/20 text-[#0B5FD1]"
+              : "bg-al-primary/10 border border-al-primary/20 text-al-primary"
           }`}>
             {t.message}
             <button onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))} className="ml-2 opacity-60 hover:opacity-100"><X size={12} /></button>
@@ -298,7 +298,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-slate-900">Search Vehicles</h1>
-        <Link href="/buyer/shortlist" data-testid="view-shortlist-link" className="text-sm text-[#0B5FD1] font-semibold hover:underline">
+        <Link href="/buyer/shortlist" data-testid="view-shortlist-link" className="text-sm text-al-primary font-semibold hover:underline">
           My Shortlist ({shortlistCount}/5)
         </Link>
       </div>
@@ -307,9 +307,9 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
       {budgetDollars !== null && (
         <div
           data-testid="budget-badge"
-          className="flex items-center gap-2 px-4 py-3 mb-4 rounded-xl bg-[#0B5FD1]/10 border border-[#0B5FD1]/20 text-[#0B5FD1] text-sm font-medium"
+          className="flex items-center gap-2 px-4 py-3 mb-4 rounded-xl bg-al-primary/10 border border-al-primary/20 text-al-primary text-sm font-medium"
         >
-          <span className="text-[#0B5FD1]">💜</span>
+          <span className="text-al-primary">💜</span>
           Showing vehicles within your <strong>${budgetDollars.toLocaleString()}</strong> pre-qualified budget
         </div>
       )}
@@ -325,7 +325,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
             value={q}
             onChange={e => setQ(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") apply(); }}
-            className="w-full pl-9 pr-3 py-2.5 border border-[#E5E7EB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 focus:border-[#0B5FD1] bg-white"
+            className="w-full pl-9 pr-3 py-2.5 border border-[#E5E7EB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20 focus:border-al-primary bg-white"
           />
         </div>
         <button
@@ -333,7 +333,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
           type="button"
           onClick={() => apply()}
           disabled={isPending}
-          className="px-4 py-2.5 bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white rounded-lg text-sm font-semibold transition-colors disabled:opacity-60"
+          className="px-4 py-2.5 bg-al-primary hover:bg-al-primary-hover text-white rounded-lg text-sm font-semibold transition-colors disabled:opacity-60"
         >
           {isPending ? <Loader2 size={14} className="animate-spin" /> : "Search"}
         </button>
@@ -342,12 +342,12 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
           type="button"
           onClick={() => setDrawerOpen(o => !o)}
           aria-expanded={drawerOpen}
-          className="inline-flex items-center gap-1.5 px-3 py-2.5 border border-[#E5E7EB] rounded-lg text-sm relative bg-white hover:bg-[#F8F9FB] hover:text-[#0B5FD1] transition-colors"
+          className="inline-flex items-center gap-1.5 px-3 py-2.5 border border-[#E5E7EB] rounded-lg text-sm relative bg-white hover:bg-[#F8F9FB] hover:text-al-primary transition-colors"
         >
           <SlidersHorizontal size={14} />
           <span className="hidden sm:inline">Filters</span>
           {activeCount > 0 && (
-            <span data-testid="active-filter-count" className="bg-[#0B5FD1] text-white text-[10px] px-1.5 rounded-full">{activeCount}</span>
+            <span data-testid="active-filter-count" className="bg-al-primary text-white text-[10px] px-1.5 rounded-full">{activeCount}</span>
           )}
         </button>
         <select
@@ -365,11 +365,11 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
         <div className="flex flex-wrap items-center gap-2 mb-3" data-testid="active-chips">
           {chips.map(c => (
             <button key={c.key} onClick={c.clear} data-testid={`chip-${c.key}`} type="button"
-              className="inline-flex items-center gap-1 bg-[#F0F9FF] hover:bg-[#DBEAFE] text-[#0B5FD1] text-xs px-2.5 py-1 rounded-full transition-colors">
+              className="inline-flex items-center gap-1 bg-[#F0F9FF] hover:bg-[#DBEAFE] text-al-primary text-xs px-2.5 py-1 rounded-full transition-colors">
               {c.label}<X size={11} className="opacity-70" />
             </button>
           ))}
-          <button onClick={clearAll} data-testid="clear-all-filters" className="text-xs text-[#0B5FD1] hover:underline font-semibold ml-1">Clear all</button>
+          <button onClick={clearAll} data-testid="clear-all-filters" className="text-xs text-al-primary hover:underline font-semibold ml-1">Clear all</button>
         </div>
       )}
 
@@ -405,7 +405,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
           <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
           <div className="fixed left-0 right-0 bottom-0 z-50 bg-white rounded-t-2xl shadow-2xl max-h-[88vh] flex flex-col" role="dialog" aria-label="Filters" data-testid="filter-panel-mobile">
             <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E7EB]">
-              <h2 className="text-base font-bold text-[#111827]">Filters{activeCount > 0 && <span className="ml-2 text-[#0B5FD1]">({activeCount})</span>}</h2>
+              <h2 className="text-base font-bold text-[#111827]">Filters{activeCount > 0 && <span className="ml-2 text-al-primary">({activeCount})</span>}</h2>
               <button type="button" onClick={() => setDrawerOpen(false)} aria-label="Close filters" data-testid="filter-drawer-close" className="p-2 rounded-md text-slate-500 hover:bg-slate-100">
                 <X size={18} />
               </button>
@@ -433,12 +433,12 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
             </div>
             <div className="flex items-center gap-2 px-5 py-4 border-t border-[#E5E7EB] bg-white">
               <button type="button" data-testid="clear-filters-btn-drawer" onClick={clearAll}
-                className="px-4 h-11 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-[#0B5FD1] hover:bg-[#F8F9FB]">
+                className="px-4 h-11 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-al-primary hover:bg-[#F8F9FB]">
                 Clear
               </button>
               <button type="button" data-testid="show-results-btn"
                 onClick={() => { apply(); setDrawerOpen(false); }} disabled={isPending}
-                className="flex-1 h-11 rounded-lg bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white text-sm font-semibold disabled:opacity-60">
+                className="flex-1 h-11 rounded-lg bg-al-primary hover:bg-al-primary-hover text-white text-sm font-semibold disabled:opacity-60">
                 {isPending ? <Loader2 size={14} className="animate-spin inline" /> : `Show ${totalShown} Results`}
               </button>
             </div>
@@ -456,7 +456,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
           <p className="text-sm font-medium text-red-700 mb-3">{searchError}</p>
           <button
             onClick={() => { void fetchResults(); }}
-            className="text-sm font-semibold text-white bg-[#0B5FD1] hover:bg-[#0A4DB8] px-4 py-2 rounded-lg transition-colors"
+            className="text-sm font-semibold text-white bg-al-primary hover:bg-al-primary-hover px-4 py-2 rounded-lg transition-colors"
             data-testid="search-retry-btn"
           >
             Try again
@@ -505,7 +505,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
                     {v.trim && <p className="text-xs text-slate-500 mt-0.5">{v.trim}</p>}
                     {v.mileage !== null && v.mileage !== undefined && <p className="text-xs text-slate-400 mt-0.5">{v.mileage.toLocaleString()} miles</p>}
                     <div className="flex items-center justify-between mt-3">
-                      <p className="text-lg font-bold text-[#0B5FD1]">${(v.priceCents / 100).toLocaleString()}</p>
+                      <p className="text-lg font-bold text-al-primary">${(v.priceCents / 100).toLocaleString()}</p>
                       <button
                         onClick={(e) => { void addToShortlist(e, v.id); }}
                         disabled={added || shortlistCount >= 5}
@@ -513,7 +513,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
                         className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${
                           added              ? "bg-green-100 text-green-700" :
                           shortlistCount >= 5 ? "bg-slate-100 text-slate-400 cursor-not-allowed" :
-                                               "bg-[#0B5FD1]/10 text-[#0B5FD1] hover:bg-[#0B5FD1] hover:text-white"
+                                               "bg-al-primary/10 text-al-primary hover:bg-al-primary hover:text-white"
                         }`}
                       >
                         <Heart size={12} fill={added ? "currentColor" : "none"} />
@@ -608,7 +608,7 @@ function FilterPanel(p: FilterPanelProps) {
           <label className={p.labelCls}>
             Price Max ($)
             {p.priceMaxCap !== null && (
-              <span className="ml-1 text-[#0B5FD1] normal-case font-semibold">
+              <span className="ml-1 text-al-primary normal-case font-semibold">
                 · Your max: ${p.priceMaxCap.toLocaleString()}
               </span>
             )}
@@ -686,12 +686,12 @@ function FilterPanel(p: FilterPanelProps) {
               <MapPin size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#94A3B8]" />
               <input data-testid="filter-zip" type="text" placeholder="Enter ZIP code"
                 maxLength={5} pattern="[0-9]{5}"
-                className="w-full pl-8 pr-2 py-2 border border-[#E5E7EB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 focus:border-[#0B5FD1]"
+                className="w-full pl-8 pr-2 py-2 border border-[#E5E7EB] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20 focus:border-al-primary"
                 value={p.zip} onChange={e => p.setZip(e.target.value.replace(/\D/g, ""))} />
             </div>
             <button type="button" data-testid="use-my-location-btn"
               onClick={p.useMyLocation} disabled={p.locating}
-              className="inline-flex items-center gap-1 px-2.5 py-2 border border-[#E5E7EB] rounded-lg text-xs hover:bg-[#F8F9FB] hover:text-[#0B5FD1] transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-2 border border-[#E5E7EB] rounded-lg text-xs hover:bg-[#F8F9FB] hover:text-al-primary transition-colors"
               title="Use my location">
               {p.locating ? <Loader2 size={13} className="animate-spin" /> : <Crosshair size={13} />}
             </button>
@@ -716,7 +716,7 @@ function FilterPanel(p: FilterPanelProps) {
         {/* Features */}
         <div className={`col-span-2 ${isInline ? "lg:col-span-4 xl:col-span-6" : ""}`}>
           <label className={p.labelCls}>
-            Features {p.features.length > 0 && <span className="text-[#0B5FD1]">({p.features.length} selected)</span>}
+            Features {p.features.length > 0 && <span className="text-al-primary">({p.features.length} selected)</span>}
           </label>
           <div className="flex flex-wrap gap-1.5" data-testid="filter-features">
             {FEATURE_OPTIONS.map(f => {
@@ -726,7 +726,7 @@ function FilterPanel(p: FilterPanelProps) {
                   data-testid={`filter-feature-${f.toLowerCase().replace(/\s+/g, "-")}`}
                   onClick={() => p.toggleFeature(f)}
                   className={`text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors ${
-                    on ? "bg-[#0B5FD1] border-[#0B5FD1] text-white" : "bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#93C5FD] hover:text-[#0B5FD1]"
+                    on ? "bg-al-primary border-al-primary text-white" : "bg-white border-[#E5E7EB] text-[#4B5563] hover:border-[#93C5FD] hover:text-al-primary"
                   }`}>{f}</button>
               );
             })}
@@ -738,7 +738,7 @@ function FilterPanel(p: FilterPanelProps) {
         {isInline && (
           <div className="flex items-center gap-2 mt-3">
             <button type="button" data-testid="apply-filters-btn" onClick={p.onApply} disabled={p.isPending}
-              className="px-5 py-2 bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white rounded-lg text-xs font-semibold disabled:opacity-60">
+              className="px-5 py-2 bg-al-primary hover:bg-al-primary-hover text-white rounded-lg text-xs font-semibold disabled:opacity-60">
               {p.isPending ? <Loader2 size={13} className="animate-spin inline" /> : "Apply Filters"}
             </button>
             <button type="button" data-testid="clear-filters-btn" onClick={p.onClear}
@@ -747,7 +747,7 @@ function FilterPanel(p: FilterPanelProps) {
             </button>
             {p.onClose && (
               <button type="button" onClick={p.onClose} data-testid="close-filters-btn"
-                className="ml-auto px-3 py-2 text-xs font-semibold text-slate-500 hover:text-[#0B5FD1]">
+                className="ml-auto px-3 py-2 text-xs font-semibold text-slate-500 hover:text-al-primary">
                 Close
               </button>
             )}
@@ -777,7 +777,7 @@ function NoInventoryState({
         className="max-w-lg mx-auto text-center py-16 px-6"
         data-testid="no-dealers-in-area"
       >
-        <div className="w-16 h-16 rounded-full bg-[#EFF6FF] flex items-center justify-center mx-auto mb-6">
+        <div className="w-16 h-16 rounded-full bg-al-primary-subtle flex items-center justify-center mx-auto mb-6">
           <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"
             viewBox="0 0 24 24" fill="none" stroke="#0B5FD1" strokeWidth="2"
             strokeLinecap="round" strokeLinejoin="round">
@@ -803,7 +803,7 @@ function NoInventoryState({
         <a
           href="/buyer/requests/new"
           data-testid="submit-vehicle-request-cta"
-          className="inline-flex items-center gap-2 px-8 py-4 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+          className="inline-flex items-center gap-2 px-8 py-4 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
         >
           Submit a Vehicle Request
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"
@@ -829,7 +829,7 @@ function NoInventoryState({
       <p className="text-sm">Try adjusting your filters or expanding your search radius</p>
       <a
         href="/buyer/requests/new"
-        className="inline-flex items-center gap-1.5 mt-6 text-sm font-semibold text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors"
+        className="inline-flex items-center gap-1.5 mt-6 text-sm font-semibold text-al-primary hover:text-al-primary-hover transition-colors"
         data-testid="no-results-request-cta"
       >
         Can&apos;t find what you&apos;re looking for? Submit a request →

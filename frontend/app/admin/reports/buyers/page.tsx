@@ -50,7 +50,7 @@ export default async function BuyerReportPage({ searchParams }: SP) {
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-reports-buyers-page">
       <div className="flex items-center gap-3 mb-1">
-        <Users size={22} className="text-[#0B5FD1]" />
+        <Users size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Buyer Funnel</h1>
       </div>
       <p className="text-sm text-slate-500 mb-5">Stage-to-stage conversion across the buyer lifecycle.</p>

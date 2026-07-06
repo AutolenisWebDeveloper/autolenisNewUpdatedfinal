@@ -55,7 +55,7 @@ export default async function ContractDetailPage({ params }: Props) {
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="contract-detail-page">
       <div className="flex items-center gap-3 mb-6">
-        <Shield size={22} className="text-[#0B5FD1]" />
+        <Shield size={22} className="text-al-primary" />
         <div>
           <h1 className="text-xl font-bold text-slate-900">Contract Detail</h1>
           <p className="text-sm text-slate-400">Deal #{deal.id.slice(-8)}</p>

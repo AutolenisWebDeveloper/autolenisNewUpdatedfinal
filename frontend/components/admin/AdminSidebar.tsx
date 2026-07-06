@@ -130,7 +130,7 @@ function Inner({ pathname, adminRole, onNavigate }: { pathname: string; adminRol
     <>
       <div className="px-5 py-5 border-b border-[#E2E8F0]">
         <Link href="/admin/dashboard" className="flex items-center gap-2.5" onClick={onNavigate}>
-          <div className="w-8 h-8 rounded-lg bg-[#0B5FD1] flex items-center justify-center shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-al-primary flex items-center justify-center shrink-0">
             <Shield size={14} className="text-white" />
           </div>
           <div>
@@ -161,7 +161,7 @@ function Inner({ pathname, adminRole, onNavigate }: { pathname: string; adminRol
                         data-testid={`admin-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
                         className={`flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs transition-all ${
                           active
-                            ? "bg-[#EFF6FF] text-[#0B5FD1] font-semibold border-l-2 border-[#0B5FD1] pl-[10px]"
+                            ? "bg-al-primary-subtle text-al-primary font-semibold border-l-2 border-al-primary pl-[10px]"
                             : "text-[#475569] hover:bg-[#F8FAFF] hover:text-[#0F172A]"
                         }`}>
                         <item.icon size={13} className="shrink-0" />{item.label}
@@ -196,7 +196,7 @@ export default function AdminSidebar({ adminRole }: { adminRole?: string }) {
       </aside>
       <div className="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between bg-white border-b border-[#E2E8F0] px-4 h-14 shadow-sm" data-testid="admin-mobile-topbar">
         <Link href="/admin/dashboard" className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-[#0B5FD1] flex items-center justify-center shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-al-primary flex items-center justify-center shrink-0">
             <Shield size={14} className="text-white" />
           </div>
           <div>
@@ -206,7 +206,7 @@ export default function AdminSidebar({ adminRole }: { adminRole?: string }) {
         </Link>
         <button type="button" onClick={() => setOpen(true)} aria-label="Open navigation"
           data-testid="admin-mobile-menu-toggle"
-          className="p-2 rounded-md text-[#475569] hover:bg-[#F8FAFF] hover:text-[#0B5FD1] transition-colors">
+          className="p-2 rounded-md text-[#475569] hover:bg-[#F8FAFF] hover:text-al-primary transition-colors">
           <Menu size={22} />
         </button>
       </div>
@@ -218,7 +218,7 @@ export default function AdminSidebar({ adminRole }: { adminRole?: string }) {
             data-testid="admin-mobile-drawer">
             <button type="button" onClick={() => setOpen(false)} aria-label="Close navigation"
               data-testid="admin-mobile-menu-close"
-              className="absolute top-3 right-3 p-2 rounded-md text-[#475569] hover:bg-[#F8FAFF] hover:text-[#0B5FD1] transition-colors">
+              className="absolute top-3 right-3 p-2 rounded-md text-[#475569] hover:bg-[#F8FAFF] hover:text-al-primary transition-colors">
               <X size={20} />
             </button>
             <Inner pathname={pathname} adminRole={adminRole} onNavigate={() => setOpen(false)} />

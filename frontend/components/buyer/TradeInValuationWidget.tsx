@@ -101,8 +101,8 @@ export default function TradeInValuationWidget({ initialYear = "", initialMileag
         className="w-full flex items-center justify-between p-4 text-left"
       >
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-[#0B5FD1]/10 flex items-center justify-center">
-            <Calculator size={15} className="text-[#0B5FD1]" />
+          <div className="w-8 h-8 rounded-lg bg-al-primary/10 flex items-center justify-center">
+            <Calculator size={15} className="text-al-primary" />
           </div>
           <div>
             <p className="text-sm font-semibold text-slate-900">Estimate your trade-in value</p>
@@ -182,8 +182,8 @@ export default function TradeInValuationWidget({ initialYear = "", initialMileag
           </Button>
 
           {result && (
-            <div className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-lg p-4" data-testid="tiv-result">
-              <p className="text-xs font-semibold text-[#0B5FD1] uppercase tracking-wider mb-3">Estimated Range</p>
+            <div className="bg-al-primary/5 border border-al-primary/20 rounded-lg p-4" data-testid="tiv-result">
+              <p className="text-xs font-semibold text-al-primary uppercase tracking-wider mb-3">Estimated Range</p>
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div>
                   <p className="text-xs text-slate-500 mb-1">Low</p>
@@ -191,9 +191,9 @@ export default function TradeInValuationWidget({ initialYear = "", initialMileag
                     ${result.low.toLocaleString()}
                   </p>
                 </div>
-                <div className="border-x border-[#0B5FD1]/20">
+                <div className="border-x border-al-primary/20">
                   <p className="text-xs text-slate-500 mb-1">Mid</p>
-                  <p className="text-lg font-bold text-[#0B5FD1]" data-testid="tiv-mid">
+                  <p className="text-lg font-bold text-al-primary" data-testid="tiv-mid">
                     ${result.mid.toLocaleString()}
                   </p>
                 </div>

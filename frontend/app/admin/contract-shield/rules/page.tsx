@@ -173,7 +173,7 @@ export default function AdminContractShieldRulesPage() {
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-contract-rules-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Shield size={22} className="text-[#0B5FD1]" />
+          <Shield size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Contract Scan Rules</h1>
           <Badge variant="secondary">{activeCount}/{rules.length} active</Badge>
         </div>
@@ -190,7 +190,7 @@ export default function AdminContractShieldRulesPage() {
 
       {/* Add rule form */}
       {showAdd && (
-        <div className="bg-white border-2 border-[#0B5FD1]/20 rounded-xl p-5 mb-5" data-testid="add-rule-form">
+        <div className="bg-white border-2 border-al-primary/20 rounded-xl p-5 mb-5" data-testid="add-rule-form">
           <p className="font-semibold text-slate-800 text-sm mb-4">New Scan Rule</p>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
@@ -241,7 +241,7 @@ export default function AdminContractShieldRulesPage() {
             onClick={handleSeedDefaults}
             disabled={seeding}
             data-testid="seed-rules-btn"
-            className="px-4 py-2 bg-[#0B5FD1] text-white text-sm rounded-xl font-semibold hover:bg-[#0A4DB8] disabled:opacity-50">
+            className="px-4 py-2 bg-al-primary text-white text-sm rounded-xl font-semibold hover:bg-al-primary-hover disabled:opacity-50">
             {seeding ? "Loading…" : "Load Default Rules"}
           </button>
         </div>

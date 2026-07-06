@@ -28,7 +28,7 @@ export default function AdminAiPage() {
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="admin-ai-page">
       <div className="flex items-center gap-3 mb-6">
-        <Brain size={22} className="text-[#0B5FD1]" />
+        <Brain size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Zura — AI Concierge</h1>
         <p className="text-sm text-[#6B7280]">Groq-powered · openai/gpt-oss-120b</p>
         <Badge variant={aiOn ? "green" : "destructive"}>{aiOn ? "Active" : "Kill Switch ON"}</Badge>
@@ -37,7 +37,7 @@ export default function AdminAiPage() {
         <div className="mb-6">
           <button
             onClick={() => document.querySelector<HTMLButtonElement>("[data-testid='chat-toggle-btn']")?.click()}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
             data-testid="open-zura-btn"
           >
             <MessageCircle size={14} /> Chat with Zura

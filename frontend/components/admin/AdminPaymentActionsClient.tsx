@@ -103,7 +103,7 @@ function ActionModal({ title, warning, onCancel, onConfirm }: ModalProps) {
               Cancel
             </button>
             <button type="submit" disabled={loading || reason.trim().length < 10}
-              className="px-4 py-2 text-sm bg-[#0B5FD1] text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              className="px-4 py-2 text-sm bg-al-primary text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
               {loading ? "Processing…" : "Confirm"}
             </button>
           </div>
@@ -200,7 +200,7 @@ export default function AdminPaymentActionsClient(props: Props) {
           <>
             <button
               onClick={() => setModal("send-link")}
-              className="px-3 py-1.5 text-xs bg-[#0B5FD1] text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors"
+              className="px-3 py-1.5 text-xs bg-al-primary text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors"
             >
               Send $99 Payment Link
             </button>
@@ -314,7 +314,7 @@ export default function AdminPaymentActionsClient(props: Props) {
         <>
           <button
             onClick={() => setModal("send-link")}
-            className="px-3 py-1.5 text-xs bg-[#0B5FD1] text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors"
+            className="px-3 py-1.5 text-xs bg-al-primary text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors"
           >
             Send $400 Payment Link
           </button>

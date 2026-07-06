@@ -236,7 +236,7 @@ export default function ManualPreapprovalStatusPage() {
             </Button>
             <Link
               href="/contact"
-              className="block text-center text-sm text-[#0B5FD1] hover:underline"
+              className="block text-center text-sm text-al-primary hover:underline"
               data-testid="additional-info-contact-cta"
             >
               Contact support for help

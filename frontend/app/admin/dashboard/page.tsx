@@ -49,11 +49,11 @@ export default async function AdminDashboard() {
         actions={
           <>
             <Link href="/admin/system-health"
-              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-600 hover:border-[#0B5FD1]/30 hover:text-[#0B5FD1] transition-all shadow-sm font-medium">
+              className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-600 hover:border-al-primary/30 hover:text-al-primary transition-all shadow-sm font-medium">
               <Activity size={12} />System
             </Link>
             <Link href="/admin/queues" data-testid="open-queues-btn"
-              className="flex items-center gap-1.5 px-4 py-2 bg-[#0B5FD1] rounded-xl text-xs font-semibold text-white hover:bg-[#0A4DB8] transition-colors shadow-md shadow-[#0B5FD1]/20">
+              className="flex items-center gap-1.5 px-4 py-2 bg-al-primary rounded-xl text-xs font-semibold text-white hover:bg-al-primary-hover transition-colors shadow-md shadow-al-primary/20">
               <AlertOctagon size={12} />View Queues
             </Link>
           </>
@@ -164,10 +164,10 @@ export default async function AdminDashboard() {
                   key={item.href}
                   href={item.href}
                   data-testid={item.testId ?? `admin-quicklink-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
-                  className="flex flex-col items-center gap-2 p-4 bg-white border border-slate-200/80 rounded-2xl hover:border-[#0B5FD1]/30 hover:bg-[#EFF6FF]/40 hover:shadow-sm transition-all group"
+                  className="flex flex-col items-center gap-2 p-4 bg-white border border-slate-200/80 rounded-2xl hover:border-al-primary/30 hover:bg-al-primary-subtle/40 hover:shadow-sm transition-all group"
                 >
                   <item.icon size={16}
-                    className="text-slate-400 group-hover:text-[#0B5FD1] transition-colors" />
+                    className="text-slate-400 group-hover:text-al-primary transition-colors" />
                   <span className="text-[10px] font-semibold text-slate-400 group-hover:text-slate-900 transition-colors text-center leading-tight">
                     {item.label}
                   </span>
@@ -180,7 +180,7 @@ export default async function AdminDashboard() {
             <div className="flex items-center justify-between mb-3">
               <p className={EYEBROW}>Recent Platform Activity</p>
               <Link href="/admin/activity" data-testid="view-all-activity-link"
-                className="text-xs text-[#0B5FD1] hover:text-[#0A4DB8] font-semibold transition-colors">
+                className="text-xs text-al-primary hover:text-al-primary-hover font-semibold transition-colors">
                 View all →
               </Link>
             </div>
@@ -200,7 +200,7 @@ export default async function AdminDashboard() {
                       className="flex items-center justify-between px-6 py-3.5 hover:bg-slate-50/70 transition-colors"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#0B5FD1] shrink-0" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-al-primary shrink-0" />
                         <p className="text-sm text-slate-700 truncate">{event.title}</p>
                       </div>
                       <p className="text-[11px] text-slate-400 font-mono shrink-0 ml-4">
@@ -219,8 +219,8 @@ export default async function AdminDashboard() {
         <div className="space-y-5">
           <div className={`${CARD} p-5`}>
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-[#EFF6FF] border border-[#DBEAFE] flex items-center justify-center">
-                <Shield size={16} className="text-[#0B5FD1]" />
+              <div className="w-10 h-10 rounded-xl bg-al-primary-subtle border border-[#DBEAFE] flex items-center justify-center">
+                <Shield size={16} className="text-al-primary" />
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-bold text-slate-900 leading-tight">{roleLabel}</p>
@@ -273,7 +273,7 @@ export default async function AdminDashboard() {
                 { label: "Referral Milestones", href: "/admin/referral-milestones" },
               ].map(item => (
                 <Link key={item.href} href={item.href} data-testid={item.testId}
-                  className="flex items-center justify-between px-5 py-3 text-xs text-slate-600 hover:bg-slate-50/70 hover:text-[#0B5FD1] transition-colors">
+                  className="flex items-center justify-between px-5 py-3 text-xs text-slate-600 hover:bg-slate-50/70 hover:text-al-primary transition-colors">
                   {item.label}
                   <ChevronRight size={12} className="text-slate-300" />
                 </Link>

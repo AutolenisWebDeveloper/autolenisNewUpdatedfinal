@@ -106,7 +106,7 @@ export default function OutreachActions({
           onClick={openPreview}
           disabled={!hasEmail || busy}
           title={hasEmail ? "Preview email" : "No email captured"}
-          className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-[#0B5FD1] disabled:opacity-40"
+          className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-al-primary disabled:opacity-40"
         >
           <Eye size={12} />
           Preview
@@ -116,7 +116,7 @@ export default function OutreachActions({
             onClick={() => send({ followup: true })}
             disabled={!hasEmail || busy}
             title="Send a follow-up email"
-            className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-[#0B5FD1] disabled:opacity-40"
+            className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-al-primary disabled:opacity-40"
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
             Followup
@@ -126,7 +126,7 @@ export default function OutreachActions({
             onClick={() => send({})}
             disabled={!hasEmail || busy}
             title={hasEmail ? "Send outreach email" : "No email captured"}
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-[#0B5FD1] hover:underline disabled:opacity-40"
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-al-primary hover:underline disabled:opacity-40"
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
             Send
@@ -180,7 +180,7 @@ export default function OutreachActions({
                   <button
                     onClick={() => send({ useEdited: true, followup: alreadySent })}
                     disabled={busy}
-                    className="inline-flex items-center gap-2 rounded-md bg-[#0B5FD1] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
+                    className="inline-flex items-center gap-2 rounded-md bg-al-primary px-4 py-1.5 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
                   >
                     {busy && <Loader2 size={14} className="animate-spin" />}
                     Send Now

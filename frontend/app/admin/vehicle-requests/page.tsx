@@ -58,13 +58,13 @@ export default async function AdminVehicleRequestsPage() {
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-vehicle-requests-page">
       <div className="flex items-center gap-3 mb-6">
-        <ClipboardList size={22} className="text-[#0B5FD1]" />
+        <ClipboardList size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Public Vehicle Requests</h1>
         <Badge variant="secondary" className="text-xs">{rows.length}</Badge>
         <Link
           href="/admin/vehicle-offers/new"
           data-testid="create-offer-from-requests-btn"
-          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0B5FD1] hover:bg-[#0944a8] text-white rounded-lg text-xs font-semibold transition-colors"
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-al-primary hover:bg-[#0944a8] text-white rounded-lg text-xs font-semibold transition-colors"
         >
           <PlusCircle size={13} /> Create Offer Link
         </Link>

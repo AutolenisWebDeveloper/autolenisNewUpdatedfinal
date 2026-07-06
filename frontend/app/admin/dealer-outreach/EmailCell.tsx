@@ -131,7 +131,7 @@ export default function EmailCell(props: EmailCellProps) {
         {props.email ? (
           <a
             href={`mailto:${props.email}`}
-            className="text-[#0B5FD1] hover:underline max-w-[200px] truncate"
+            className="text-al-primary hover:underline max-w-[200px] truncate"
             title={props.email}
           >
             {props.email}
@@ -153,7 +153,7 @@ export default function EmailCell(props: EmailCellProps) {
           onClick={reEnrich}
           disabled={busy}
           title="Re-enrich via Gemini Search"
-          className="inline-flex items-center gap-1 text-slate-500 hover:text-[#0B5FD1] disabled:opacity-50"
+          className="inline-flex items-center gap-1 text-slate-500 hover:text-al-primary disabled:opacity-50"
         >
           <RefreshCw size={12} className={busy ? "animate-spin" : ""} />
           {busy ? "Working…" : "Re-Enrich"}
@@ -162,7 +162,7 @@ export default function EmailCell(props: EmailCellProps) {
           onClick={() => setEditing(true)}
           disabled={busy}
           title="Manually override email"
-          className="inline-flex items-center gap-1 text-slate-500 hover:text-[#0B5FD1] disabled:opacity-50"
+          className="inline-flex items-center gap-1 text-slate-500 hover:text-al-primary disabled:opacity-50"
         >
           <Pencil size={12} />
           Edit

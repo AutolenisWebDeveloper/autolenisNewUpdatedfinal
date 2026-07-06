@@ -61,7 +61,7 @@ export default async function DealPage() {
       </div>
 
       {/* Price summary */}
-      <div className="bg-[#0B5FD1] text-white rounded-2xl p-6 mb-6" data-testid="deal-price-summary">
+      <div className="bg-al-primary text-white rounded-2xl p-6 mb-6" data-testid="deal-price-summary">
         <p className="text-xs text-white/60 uppercase tracking-wider mb-1">Your Deal</p>
         <p className="text-3xl font-bold">${(otdPriceCents / 100).toLocaleString()}</p>
         <p className="text-sm text-white/60 mt-1">Out-the-door price</p>
@@ -78,7 +78,7 @@ export default async function DealPage() {
               </div>
               <span className={`text-sm font-medium ${step.done ? "text-green-700" : "text-slate-700"}`}>{step.label}</span>
             </div>
-            {!step.done && step.href && <Link href={step.href} className="text-xs text-[#0B5FD1] font-semibold">Continue →</Link>}
+            {!step.done && step.href && <Link href={step.href} className="text-xs text-al-primary font-semibold">Continue →</Link>}
           </div>
         ))}
       </div>

@@ -45,7 +45,7 @@ export default async function DealerReportPage({ searchParams }: SP) {
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-reports-dealers-page">
       <div className="flex items-center gap-3 mb-1">
-        <Building2 size={22} className="text-[#0B5FD1]" />
+        <Building2 size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Dealer Metrics</h1>
       </div>
       <p className="text-sm text-slate-500 mb-5">Invitation response and win rates for the selected range.</p>

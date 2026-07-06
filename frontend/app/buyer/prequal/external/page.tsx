@@ -106,7 +106,7 @@ export default function ExternalPrequalPage() {
         <div>
           <Label>Upload approval document (optional)</Label>
           <label
-            className="mt-1.5 block border-2 border-dashed border-slate-200 rounded-lg p-6 text-center hover:border-[#0B5FD1]/50 transition-colors cursor-pointer"
+            className="mt-1.5 block border-2 border-dashed border-slate-200 rounded-lg p-6 text-center hover:border-al-primary/50 transition-colors cursor-pointer"
             data-testid="ep-upload-zone"
           >
             <input

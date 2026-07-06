@@ -21,13 +21,13 @@ export default function ContractPdfViewer({ downloadUrl }: Props) {
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-6" data-testid="contract-pdf-viewer">
       <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
         <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-          <FileText size={15} className="text-[#0B5FD1]" />
+          <FileText size={15} className="text-al-primary" />
           Contract Document
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={toggleMode}
-            className="text-xs text-[#6B7280] hover:text-[#0B5FD1] transition-colors px-2 py-1 rounded-lg hover:bg-[#EFF6FF]"
+            className="text-xs text-[#6B7280] hover:text-al-primary transition-colors px-2 py-1 rounded-lg hover:bg-al-primary-subtle"
           >
             {viewMode === "iframe" ? "View as download" : "View inline"}
           </button>
@@ -35,7 +35,7 @@ export default function ContractPdfViewer({ downloadUrl }: Props) {
             href={downloadUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8] px-3 py-1.5 bg-[#EFF6FF] rounded-lg transition-colors"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-al-primary hover:text-al-primary-hover px-3 py-1.5 bg-al-primary-subtle rounded-lg transition-colors"
             data-testid="contract-open-new-tab-btn"
           >
             <ExternalLink size={12} /> Open in new tab
@@ -47,7 +47,7 @@ export default function ContractPdfViewer({ downloadUrl }: Props) {
         <div className="relative" style={{ height: 600 }}>
           {!loaded && !error && (
             <div className="absolute inset-0 flex items-center justify-center bg-[#F8F9FB]">
-              <Loader2 size={24} className="animate-spin text-[#0B5FD1]" />
+              <Loader2 size={24} className="animate-spin text-al-primary" />
               <span className="ml-2 text-sm text-[#6B7280]">Loading document…</span>
             </div>
           )}
@@ -59,7 +59,7 @@ export default function ContractPdfViewer({ downloadUrl }: Props) {
                 href={downloadUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8] px-3 py-1.5 bg-[#EFF6FF] rounded-lg transition-colors"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-al-primary hover:text-al-primary-hover px-3 py-1.5 bg-al-primary-subtle rounded-lg transition-colors"
               >
                 <Download size={12} /> Download instead
               </a>
@@ -83,7 +83,7 @@ export default function ContractPdfViewer({ downloadUrl }: Props) {
             href={downloadUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
             data-testid="contract-download-btn"
           >
             <Download size={14} /> Download Contract

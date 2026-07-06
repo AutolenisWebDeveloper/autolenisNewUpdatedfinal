@@ -22,7 +22,7 @@ export default async function ActivityPage() {
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="activity-page">
       <div className="flex items-center gap-3 mb-6">
-        <Clock size={22} className="text-[#0B5FD1]" />
+        <Clock size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Account Activity</h1>
       </div>
 
@@ -39,7 +39,7 @@ export default async function ActivityPage() {
           {events.map((event) => (
             <div key={event.id} data-testid={`activity-event-${event.id}`}
               className="flex items-start gap-3 py-4 border-b border-slate-100 last:border-0">
-              <div className="w-2 h-2 rounded-full bg-[#0B5FD1] mt-1.5 shrink-0" />
+              <div className="w-2 h-2 rounded-full bg-al-primary mt-1.5 shrink-0" />
               <div>
                 {/* Plain language title only — no internal event type labels */}
                 <p className="text-sm font-medium text-slate-800">{event.title}</p>

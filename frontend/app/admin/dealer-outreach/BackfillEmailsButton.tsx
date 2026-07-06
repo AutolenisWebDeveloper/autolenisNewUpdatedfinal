@@ -44,7 +44,7 @@ export default function BackfillEmailsButton({
     <button
       onClick={runBackfill}
       disabled={busy}
-      className="inline-flex items-center gap-2 rounded-md border border-[#0B5FD1] bg-white px-4 py-2 text-sm font-medium text-[#0B5FD1] hover:bg-blue-50 disabled:opacity-50"
+      className="inline-flex items-center gap-2 rounded-md border border-al-primary bg-white px-4 py-2 text-sm font-medium text-al-primary hover:bg-blue-50 disabled:opacity-50"
     >
       <Mail size={16} />
       {busy ? "Queuing…" : `Backfill Missing Emails (${missingCount})`}

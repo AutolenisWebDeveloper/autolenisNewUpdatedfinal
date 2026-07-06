@@ -76,7 +76,7 @@ export default async function RequestDetailPage({ params }: Props) {
             <p className="text-slate-400 text-xs mb-2">Must-have features</p>
             <div className="flex flex-wrap gap-1.5">
               {meta.features.map(f => (
-                <span key={f} className="rounded-full border border-[#E5E7EB] bg-[#F8F9FB] px-2.5 py-1 text-xs text-[#0B5FD1] font-medium">{f}</span>
+                <span key={f} className="rounded-full border border-[#E5E7EB] bg-[#F8F9FB] px-2.5 py-1 text-xs text-al-primary font-medium">{f}</span>
               ))}
             </div>
           </div>
@@ -130,7 +130,7 @@ export default async function RequestDetailPage({ params }: Props) {
               <Link
                 href={adjustHref}
                 data-testid="adjust-request-btn"
-                className="inline-flex items-center gap-2 rounded-lg bg-[#0B5FD1] text-white font-semibold text-sm px-4 h-10 hover:bg-[#0A4DB8] transition-colors"
+                className="inline-flex items-center gap-2 rounded-lg bg-al-primary text-white font-semibold text-sm px-4 h-10 hover:bg-al-primary-hover transition-colors"
               >
                 Adjust Your Request <ArrowRight size={14} />
               </Link>
@@ -141,8 +141,8 @@ export default async function RequestDetailPage({ params }: Props) {
 
       {/* Offer prompt */}
       {hasOffer && (
-        <div className="bg-[#0B5FD1]/5 border-2 border-[#0B5FD1] rounded-xl p-5 mb-6" data-testid="offer-available-banner">
-          <p className="font-semibold text-[#0B5FD1] mb-1">An offer is ready for you</p>
+        <div className="bg-al-primary/5 border-2 border-al-primary rounded-xl p-5 mb-6" data-testid="offer-available-banner">
+          <p className="font-semibold text-al-primary mb-1">An offer is ready for you</p>
           <p className="text-sm text-slate-600 mb-3">Our team has sourced a vehicle matching your request and prepared an offer.</p>
           <Button href={`/buyer/requests/${requestId}/offer`} data-testid="view-offer-btn">
             View Offer <ArrowRight size={14} />

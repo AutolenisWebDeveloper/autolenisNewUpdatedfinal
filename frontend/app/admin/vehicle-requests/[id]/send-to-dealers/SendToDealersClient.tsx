@@ -288,7 +288,7 @@ export default function SendToDealersClient({
 
   return (
     <div className="p-6 md:p-8 max-w-6xl pb-20" data-testid="send-to-dealers-page">
-      <Link href={`/admin/vehicle-requests/${requestId}`} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#0B5FD1] mb-4">
+      <Link href={`/admin/vehicle-requests/${requestId}`} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-al-primary mb-4">
         <ArrowLeft size={14} /> Back to Request
       </Link>
       <div className="mb-6">
@@ -386,7 +386,7 @@ export default function SendToDealersClient({
                         onClick={() => setExpiryHours(p.hours)}
                         className={`rounded-lg border-2 py-2 text-xs font-medium transition-colors ${
                           expiryHours === p.hours
-                            ? "border-[#0B5FD1] bg-[#0B5FD1]/5 text-[#0B5FD1]"
+                            ? "border-al-primary bg-al-primary/5 text-al-primary"
                             : "border-slate-200 text-slate-600 hover:border-slate-300"
                         }`}
                       >
@@ -451,7 +451,7 @@ export default function SendToDealersClient({
                   href={offer.vehicleReferenceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-[#0B5FD1] hover:underline"
+                  className="inline-flex items-center gap-1 text-sm text-al-primary hover:underline"
                 >
                   View listing →
                 </a>
@@ -466,8 +466,8 @@ export default function SendToDealersClient({
               <div className="bg-slate-50 rounded-xl p-4 mt-4">
                 <p className="text-xs text-slate-500 mb-2">Or copy a generic link to share manually:</p>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs text-[#0B5FD1] font-mono truncate bg-white border border-slate-200 rounded px-2 py-1.5">{genericOfferUrl}</code>
-                  <button onClick={copyGenericLink} className="text-xs text-slate-600 hover:text-[#0B5FD1] border border-slate-200 bg-white rounded px-3 py-1.5">
+                  <code className="flex-1 text-xs text-al-primary font-mono truncate bg-white border border-slate-200 rounded px-2 py-1.5">{genericOfferUrl}</code>
+                  <button onClick={copyGenericLink} className="text-xs text-slate-600 hover:text-al-primary border border-slate-200 bg-white rounded px-3 py-1.5">
                     {copied ? "Copied!" : "Copy"}
                   </button>
                 </div>
@@ -536,7 +536,7 @@ export default function SendToDealersClient({
               type="button"
               onClick={addDealer}
               disabled={dealers.length >= 20}
-              className="w-full mt-3 rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-[#0B5FD1] hover:text-[#0B5FD1] transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              className="w-full mt-3 rounded-xl border-2 border-dashed border-slate-200 py-3 text-sm text-slate-500 hover:border-al-primary hover:text-al-primary transition-colors disabled:opacity-50 inline-flex items-center justify-center gap-2"
               data-testid="add-dealer-btn"
             >
               <Plus size={14} /> Add Another Dealer

@@ -110,7 +110,7 @@ export default function AdminDealerInvitePage() {
       </div>
 
       <div className="flex items-center gap-3 mb-6">
-        <Send size={20} className="text-[#0B5FD1]" />
+        <Send size={20} className="text-al-primary" />
         <div>
           <h1 className="text-xl font-bold text-slate-900">Send Direct Invitation</h1>
           <p className="text-sm text-slate-500 mt-0.5">
@@ -136,7 +136,7 @@ export default function AdminDealerInvitePage() {
             required
             value={form.dealershipName}
             onChange={(e) => patch("dealershipName", e.target.value)}
-            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors"
+            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors"
           />
         </div>
 
@@ -152,7 +152,7 @@ export default function AdminDealerInvitePage() {
             required
             value={form.contactName}
             onChange={(e) => patch("contactName", e.target.value)}
-            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors"
+            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors"
           />
         </div>
 
@@ -168,7 +168,7 @@ export default function AdminDealerInvitePage() {
             required
             value={form.email}
             onChange={(e) => patch("email", e.target.value)}
-            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors"
+            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors"
           />
         </div>
 
@@ -185,7 +185,7 @@ export default function AdminDealerInvitePage() {
             rows={3}
             value={form.personalMessage}
             onChange={(e) => patch("personalMessage", e.target.value)}
-            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors resize-none"
+            className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors resize-none"
           />
           <p className="text-xs text-slate-400 mt-1 text-right">{form.personalMessage.length}/500</p>
         </div>
@@ -204,7 +204,7 @@ export default function AdminDealerInvitePage() {
             type="submit"
             disabled={loading}
             data-testid="admin-invite-submit-btn"
-            className="flex-1 py-2.5 bg-[#0B5FD1] text-white font-semibold text-sm rounded-lg hover:bg-[#3a0063] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="flex-1 py-2.5 bg-al-primary text-white font-semibold text-sm rounded-lg hover:bg-[#3a0063] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             <Send size={14} />
             {loading ? "Sending…" : "Send Invitation"}

@@ -32,7 +32,7 @@ export default async function PickupPage() {
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="pickup-page">
       <div className="flex items-center gap-3 mb-6">
-        <MapPin size={24} className="text-[#0B5FD1]" />
+        <MapPin size={24} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Vehicle Pickup</h1>
       </div>
 
@@ -57,9 +57,9 @@ export default async function PickupPage() {
       ) : (
         <div>
           {pickup.scheduledAt && (
-            <div className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl p-5 mb-6" data-testid="pickup-scheduled">
+            <div className="bg-al-primary/5 border border-al-primary/20 rounded-xl p-5 mb-6" data-testid="pickup-scheduled">
               <p className="text-sm font-semibold text-slate-800">Scheduled pickup</p>
-              <p className="text-lg font-bold text-[#0B5FD1] mt-1">
+              <p className="text-lg font-bold text-al-primary mt-1">
                 {pickup.scheduledAt.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
               </p>
               {pickup.location && <p className="text-sm text-slate-500 mt-0.5">{pickup.location}</p>}
@@ -69,7 +69,7 @@ export default async function PickupPage() {
           {/* QR code — generated via qrcode npm package (D7 — no external API) */}
           {pickup.qrCodeImage && (
             <div className="text-center bg-white border border-slate-200 rounded-xl p-8 mb-6" data-testid="pickup-qr-code">
-              <QrCode size={32} className="text-[#0B5FD1] mx-auto mb-3" />
+              <QrCode size={32} className="text-al-primary mx-auto mb-3" />
               <p className="text-sm text-slate-600 mb-4">Present this QR code at the lot</p>
               <img src={pickup.qrCodeImage} alt="Pickup QR Code" className="mx-auto max-w-[200px]" />
               {expiresAt && (
@@ -87,7 +87,7 @@ export default async function PickupPage() {
                 <a
                   href="/buyer/messages"
                   data-testid="qr-expired-contact-support"
-                  className="inline-flex items-center gap-1.5 mt-3 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors"
+                  className="inline-flex items-center gap-1.5 mt-3 text-xs font-semibold text-al-primary hover:text-al-primary-hover transition-colors"
                 >
                   Message support to regenerate →
                 </a>

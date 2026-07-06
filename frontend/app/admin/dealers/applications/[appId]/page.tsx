@@ -84,7 +84,7 @@ export default async function AdminDealerApplicationDetailPage({ params }: Props
       {/* Back link */}
       <Link
         href="/admin/dealers/applications"
-        className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-[#0B5FD1] mb-4 transition-colors"
+        className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-al-primary mb-4 transition-colors"
         data-testid="back-to-applications-link"
       >
         <ArrowLeft size={14} />
@@ -130,7 +130,7 @@ export default async function AdminDealerApplicationDetailPage({ params }: Props
                 value={
                   <a
                     href={`mailto:${app.contactEmail}`}
-                    className="text-[#0B5FD1] hover:underline"
+                    className="text-al-primary hover:underline"
                     data-testid="application-contact-email"
                   >
                     {app.contactEmail}
@@ -141,7 +141,7 @@ export default async function AdminDealerApplicationDetailPage({ params }: Props
                 label="Phone"
                 value={
                   app.contactPhone ? (
-                    <a href={`tel:${app.contactPhone}`} className="text-[#0B5FD1] hover:underline">
+                    <a href={`tel:${app.contactPhone}`} className="text-al-primary hover:underline">
                       {app.contactPhone}
                     </a>
                   ) : null
@@ -188,7 +188,7 @@ export default async function AdminDealerApplicationDetailPage({ params }: Props
                     value={
                       <Link
                         href={`/admin/dealers/${app.dealerId}`}
-                        className="text-[#0B5FD1] hover:underline"
+                        className="text-al-primary hover:underline"
                         data-testid="application-dealer-link"
                       >
                         {createdDealerEmail || app.dealerId.slice(0, 8) + "…"}

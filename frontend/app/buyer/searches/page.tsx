@@ -26,7 +26,7 @@ export default async function SavedSearchesPage() {
     <div className="p-6 md:p-8 max-w-2xl" data-testid="saved-searches-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Bookmark size={22} className="text-[#0B5FD1]" />
+          <Bookmark size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Saved Searches</h1>
         </div>
         <p className="text-xs text-slate-400">{searches.length}/3 max</p>

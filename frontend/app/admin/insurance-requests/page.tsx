@@ -80,7 +80,7 @@ export default async function AdminInsuranceRequestsPage() {
   return (
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-insurance-requests-page">
       <div className="flex items-center gap-3 mb-6">
-        <Shield size={22} className="text-[#0B5FD1]" />
+        <Shield size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">
           Insurance Quote Requests
           <span className="ml-2 text-slate-400 font-normal text-sm">({pending.length} pending)</span>
@@ -137,7 +137,7 @@ export default async function AdminInsuranceRequestsPage() {
                   </span>
                   <Link
                     href={`/admin/deals/${r.dealId}`}
-                    className="text-xs text-[#0B5FD1] hover:underline"
+                    className="text-xs text-al-primary hover:underline"
                     data-testid={`view-deal-${r.id}`}
                   >
                     View Deal →

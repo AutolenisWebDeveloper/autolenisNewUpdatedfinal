@@ -52,7 +52,7 @@ const fmtNum = (n: number) => n.toLocaleString("en-US");
 
 const HEALTH_TONE: Record<MarketHealthIndex["tone"], { ring: string; text: string; chip: string }> = {
   strong: { ring: "#059669", text: "text-[#059669]", chip: "bg-[#ECFDF5] text-[#059669] border-[#A7F3D0]" },
-  healthy: { ring: "#0B5FD1", text: "text-[#0B5FD1]", chip: "bg-[#EFF6FF] text-[#0B5FD1] border-[#BFDBFE]" },
+  healthy: { ring: "#0B5FD1", text: "text-al-primary", chip: "bg-al-primary-subtle text-al-primary border-[#BFDBFE]" },
   developing: { ring: "#4F46E5", text: "text-[#4F46E5]", chip: "bg-[#EEF2FF] text-[#4F46E5] border-[#C7D2FE]" },
   early: { ring: "#D97706", text: "text-[#D97706]", chip: "bg-[#FFFBEB] text-[#D97706] border-[#FDE68A]" },
   initializing: { ring: "#94A3B8", text: "text-[#64748B]", chip: "bg-[#F1F5F9] text-[#64748B] border-[#E2E8F0]" },
@@ -61,7 +61,7 @@ const HEALTH_TONE: Record<MarketHealthIndex["tone"], { ring: string; text: strin
 const CATEGORY: Record<InsightCategory, { icon: LucideIcon; bg: string; color: string; ring: string; label: string }> = {
   opportunity: { icon: Target, bg: "bg-[#ECFDF5]", color: "text-[#059669]", ring: "border-[#A7F3D0]", label: "Opportunity" },
   risk: { icon: AlertTriangle, bg: "bg-[#FFFBEB]", color: "text-[#D97706]", ring: "border-[#FDE68A]", label: "Risk" },
-  performance: { icon: BarChart3, bg: "bg-[#EFF6FF]", color: "text-[#0B5FD1]", ring: "border-[#BFDBFE]", label: "Performance" },
+  performance: { icon: BarChart3, bg: "bg-al-primary-subtle", color: "text-al-primary", ring: "border-[#BFDBFE]", label: "Performance" },
   recommendation: { icon: Lightbulb, bg: "bg-[#EEF2FF]", color: "text-[#4F46E5]", ring: "border-[#C7D2FE]", label: "Recommendation" },
 };
 
@@ -75,7 +75,7 @@ function SectionLabel({ icon: Icon, children, right }: { icon: LucideIcon; child
   return (
     <div className="flex items-center justify-between mb-3">
       <div className="flex items-center gap-2">
-        <Icon size={13} className="text-[#0B5FD1]" />
+        <Icon size={13} className="text-al-primary" />
         <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.15em]">{children}</p>
       </div>
       {right}
@@ -175,7 +175,7 @@ function InsightCard({ insight }: { insight: Insight }) {
   return (
     <Link
       href={insight.href}
-      className={`group/insight bg-white border ${c.ring} rounded-2xl p-4 shadow-sm flex flex-col hover:shadow-md hover:shadow-[#0B5FD1]/5 hover:-translate-y-0.5 transition-all`}
+      className={`group/insight bg-white border ${c.ring} rounded-2xl p-4 shadow-sm flex flex-col hover:shadow-md hover:shadow-al-primary/5 hover:-translate-y-0.5 transition-all`}
     >
       {inner}
     </Link>
@@ -208,14 +208,14 @@ function OpportunityTable({ rows }: { rows: OpportunityMarket[] }) {
                 <td className="px-4 py-3 font-mono text-xs text-[#94A3B8]">{i + 1}</td>
                 <td className="px-4 py-3">
                   <Link href={metroHref(m.metro)} className="group/link">
-                    <p className="font-semibold text-[#0F172A] leading-tight group-hover/link:text-[#0B5FD1] transition-colors">{m.metro}</p>
+                    <p className="font-semibold text-[#0F172A] leading-tight group-hover/link:text-al-primary transition-colors">{m.metro}</p>
                     <p className="text-[10px] text-[#94A3B8]">{m.state}</p>
                   </Link>
                 </td>
                 <td className="px-4 py-3 w-40">
                   <div className="flex items-center gap-2">
                     <div className="h-1.5 flex-1 rounded-full bg-[#F1F5F9] overflow-hidden min-w-[48px]">
-                      <div className="h-full rounded-full bg-[#0B5FD1]" style={{ width: `${m.opportunityScore}%` }} />
+                      <div className="h-full rounded-full bg-al-primary" style={{ width: `${m.opportunityScore}%` }} />
                     </div>
                     <span className="font-mono text-xs font-semibold text-[#0F172A] w-7 text-right">{m.opportunityScore}</span>
                   </div>
@@ -244,7 +244,7 @@ function RiskMonitor({ risks }: { risks: RiskItem[] }) {
   return (
     <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
       <div className="px-4 py-3 border-b border-[#F1F5F9] bg-[#F8FAFC] flex items-center gap-2">
-        <ShieldCheck size={13} className="text-[#0B5FD1]" />
+        <ShieldCheck size={13} className="text-al-primary" />
         <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.15em]">Risk Monitoring</p>
       </div>
       {risks.length === 0 ? (
@@ -269,7 +269,7 @@ function RiskMonitor({ risks }: { risks: RiskItem[] }) {
                   <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${s.chip}`}>{s.label}</span>
                 </div>
                 <p className="text-xs text-[#64748B] mt-1 leading-snug">{r.detail}</p>
-                <p className="text-[11px] font-semibold text-[#0B5FD1] mt-1.5">{r.action} →</p>
+                <p className="text-[11px] font-semibold text-al-primary mt-1.5">{r.action} →</p>
               </div>
             );
           })}
@@ -299,19 +299,19 @@ function VehicleSegments({ segments }: { segments: VehicleSegment[] }) {
           <Link
             key={`${s.make}-${s.model}`}
             href={vehicleHref(s.make, s.model)}
-            className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-sm hover:border-[#BFDBFE] hover:shadow-md hover:shadow-[#0B5FD1]/5 transition-all group"
+            className="bg-white border border-[#E2E8F0] rounded-2xl p-4 shadow-sm hover:border-[#BFDBFE] hover:shadow-md hover:shadow-al-primary/5 transition-all group"
           >
             <div className="flex items-start justify-between">
               <div className="min-w-0">
                 <p className="text-[10px] text-[#94A3B8] font-medium uppercase tracking-wide">{s.make}</p>
-                <p className="text-sm font-bold text-[#0F172A] truncate group-hover:text-[#0B5FD1] transition-colors">{s.model}</p>
+                <p className="text-sm font-bold text-[#0F172A] truncate group-hover:text-al-primary transition-colors">{s.model}</p>
               </div>
               <span className={`shrink-0 text-lg font-bold font-mono ${strong ? "text-[#059669]" : "text-[#0F172A]"}`}>
                 {s.avgBuyerAdvantage.toFixed(1)}
               </span>
             </div>
             <div className="mt-2 h-1.5 w-full rounded-full bg-[#F1F5F9] overflow-hidden">
-              <div className={`h-full rounded-full ${strong ? "bg-[#059669]" : "bg-[#0B5FD1]"}`} style={{ width: `${(s.avgBuyerAdvantage / 10) * 100}%` }} />
+              <div className={`h-full rounded-full ${strong ? "bg-[#059669]" : "bg-al-primary"}`} style={{ width: `${(s.avgBuyerAdvantage / 10) * 100}%` }} />
             </div>
             <p className="text-[11px] font-medium text-[#475569] mt-2">{s.outlook}</p>
             <p className="text-[10px] text-[#94A3B8] mt-0.5">{s.metros} metro{s.metros === 1 ? "" : "s"} · {fmtNum(s.dealers)} dealers</p>
@@ -343,7 +343,7 @@ function ContentPerformancePanel({ content }: { content: ContentPerformance }) {
     <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
       <div className="px-5 py-3 border-b border-[#F1F5F9] bg-[#F8FAFC] flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <FileText size={13} className="text-[#0B5FD1]" />
+          <FileText size={13} className="text-al-primary" />
           <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.15em]">Content Performance Intelligence</p>
         </div>
         <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${DECISION_CHIP[content.indexationDecision]}`}>
@@ -410,7 +410,7 @@ function OperationsPanel({ ops }: { ops: OperationsSnapshot }) {
         <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.12em] mb-3">Generation Queue</p>
         <div className="grid grid-cols-4 gap-3">
           {[
-            { label: "Pending", value: ops.queue.pending, color: "text-[#0B5FD1]" },
+            { label: "Pending", value: ops.queue.pending, color: "text-al-primary" },
             { label: "In Progress", value: ops.queue.inProgress, color: "text-[#D97706]" },
             { label: "Complete", value: ops.queue.complete, color: "text-[#059669]" },
             { label: "Failed", value: ops.queue.failed, color: ops.queue.failed > 0 ? "text-[#DC2626]" : "text-[#94A3B8]" },
@@ -503,7 +503,7 @@ export default function ExecutiveIntelligenceDashboard({ data }: { data: Executi
           </span>
           <AmipsExportMenu />
           <Link href="/intelligence"
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] rounded-xl text-xs font-semibold text-[#475569] hover:border-[#BFDBFE] hover:text-[#0B5FD1] transition-all shadow-sm">
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] rounded-xl text-xs font-semibold text-[#475569] hover:border-[#BFDBFE] hover:text-al-primary transition-all shadow-sm">
             <ExternalLink size={12} /> Public
           </Link>
         </div>

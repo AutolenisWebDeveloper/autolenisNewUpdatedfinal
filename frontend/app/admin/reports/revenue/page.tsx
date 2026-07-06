@@ -50,7 +50,7 @@ export default async function RevenueReportPage({ searchParams }: SP) {
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-reports-revenue-page">
       <div className="flex items-center gap-3 mb-1">
-        <DollarSign size={22} className="text-[#0B5FD1]" />
+        <DollarSign size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Revenue</h1>
       </div>
       <p className="text-sm text-slate-500 mb-5">Collections, refunds, and net revenue for the selected range.</p>

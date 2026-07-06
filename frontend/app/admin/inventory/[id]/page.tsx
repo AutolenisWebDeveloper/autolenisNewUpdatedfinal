@@ -46,7 +46,7 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
               const prices = priceHistory.slice(-12).map(ph => ph.price);
               const min = Math.min(...prices); const max = Math.max(...prices);
               const h = Math.max(4, Math.round(((p.price - min) / (max - min || 1)) * 40));
-              return <div key={i} className="flex-1 bg-[#0B5FD1] rounded-t opacity-70" style={{ height: `${h}px` }} title={`$${(p.price/100).toLocaleString()}`} />;
+              return <div key={i} className="flex-1 bg-al-primary rounded-t opacity-70" style={{ height: `${h}px` }} title={`$${(p.price/100).toLocaleString()}`} />;
             })}
           </div>
         </div>

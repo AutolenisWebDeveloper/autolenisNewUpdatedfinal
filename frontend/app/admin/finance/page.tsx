@@ -59,7 +59,7 @@ function MetricCard({
   const colors = {
     green:  { ring: "border-green-200",  bg: "bg-green-50",  text: "text-green-700",  icon: "text-green-600"  },
     red:    { ring: "border-red-200",    bg: "bg-red-50",    text: "text-red-700",    icon: "text-red-500"    },
-    blue:   { ring: "border-[#DBEAFE]",  bg: "bg-[#EFF6FF]", text: "text-[#0B5FD1]", icon: "text-[#0B5FD1]"  },
+    blue:   { ring: "border-[#DBEAFE]",  bg: "bg-al-primary-subtle", text: "text-al-primary", icon: "text-al-primary"  },
   };
   const c = colors[accent];
   return (
@@ -129,7 +129,7 @@ export default function AdminFinancePage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <DollarSign size={22} className="text-[#0B5FD1]" />
+          <DollarSign size={22} className="text-al-primary" />
           <div>
             <h1 className="text-xl font-bold text-slate-900">Finance Dashboard</h1>
             {data?.generatedAt && (
@@ -158,7 +158,7 @@ export default function AdminFinancePage() {
       {/* Loading skeleton */}
       {loading && !data && (
         <div className="flex items-center justify-center py-24" data-testid="finance-loading">
-          <Loader2 size={28} className="animate-spin text-[#0B5FD1]" />
+          <Loader2 size={28} className="animate-spin text-al-primary" />
         </div>
       )}
 

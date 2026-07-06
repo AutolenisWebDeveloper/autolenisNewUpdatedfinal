@@ -129,7 +129,7 @@ export default function AdminSystemHealthPage() {
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-system-health-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Activity size={22} className="text-[#0B5FD1]" />
+          <Activity size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">System Health</h1>
         </div>
         <button
@@ -247,7 +247,7 @@ export default function AdminSystemHealthPage() {
           { label: "Contract Fails", value: report?.contractFails ?? "—", testid: "metric-contract-fails" },
         ].map(m => (
           <div key={m.label} data-testid={m.testid} className="bg-white border border-slate-200 rounded-xl p-4 text-center">
-            <p className="text-2xl font-bold text-[#0B5FD1]">{m.value}</p>
+            <p className="text-2xl font-bold text-al-primary">{m.value}</p>
             <p className="text-xs text-slate-500 mt-0.5">{m.label}</p>
           </div>
         ))}

@@ -39,7 +39,7 @@ export default async function AdminAuctionsPage({ searchParams }: Props) {
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-auctions-page">
       <div className="flex items-center justify-between mb-6 gap-3">
         <div className="flex items-center gap-3">
-          <Gavel size={22} className="text-[#0B5FD1]" />
+          <Gavel size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Auctions <span className="text-slate-400 font-normal text-sm">({auctions.length})</span></h1>
         </div>
         <StartAuctionButton />
@@ -53,7 +53,7 @@ export default async function AdminAuctionsPage({ searchParams }: Props) {
             <Link key={s} href={s === "ALL" ? "/admin/auctions" : `/admin/auctions?status=${s}`}
               data-testid={`auction-filter-${s.toLowerCase()}`}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                active ? "bg-[#0B5FD1] text-white border-[#0B5FD1]" : "bg-white text-slate-600 border-slate-200 hover:border-[#0B5FD1]/30"
+                active ? "bg-al-primary text-white border-al-primary" : "bg-white text-slate-600 border-slate-200 hover:border-al-primary/30"
               }`}>
               {s === "ALL" ? "All" : s.charAt(0) + s.slice(1).toLowerCase()}
             </Link>
@@ -78,7 +78,7 @@ export default async function AdminAuctionsPage({ searchParams }: Props) {
       <div className="space-y-2">
         {auctions.map(a => (
           <Link key={a.id} href={`/admin/auctions/${a.id}`} data-testid={`auction-row-${a.id}`}
-            className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-[#0B5FD1]/30 transition-colors">
+            className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-al-primary/30 transition-colors">
             <div>
               <p className="font-semibold text-slate-900 text-sm">Auction #{a.id.slice(-8)}</p>
               <p className="text-xs text-slate-400">

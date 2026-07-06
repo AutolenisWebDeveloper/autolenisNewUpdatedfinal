@@ -97,7 +97,7 @@ export default async function AdminRefundsPage() {
         </div>
         <Link
           href="/admin/payments"
-          className="text-xs text-slate-500 hover:text-[#0B5FD1] hover:underline"
+          className="text-xs text-slate-500 hover:text-al-primary hover:underline"
           data-testid="refunds-back-to-payments"
         >
           ← Back to Payments
@@ -136,7 +136,7 @@ export default async function AdminRefundsPage() {
               </span>
               <Link
                 href={`/admin/buyers/${r.buyerId}`}
-                className="text-sm font-semibold text-slate-800 truncate hover:text-[#0B5FD1]"
+                className="text-sm font-semibold text-slate-800 truncate hover:text-al-primary"
               >
                 {r.buyerName}
               </Link>

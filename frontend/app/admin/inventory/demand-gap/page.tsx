@@ -17,7 +17,7 @@ export default async function AdminDemandGapPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="demand-gap-page">
-      <div className="flex items-center gap-3 mb-6"><BarChart2 size={22} className="text-[#0B5FD1]" /><h1 className="text-xl font-bold text-slate-900">Demand vs. Supply Analysis</h1></div>
+      <div className="flex items-center gap-3 mb-6"><BarChart2 size={22} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">Demand vs. Supply Analysis</h1></div>
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 border-b border-slate-200">

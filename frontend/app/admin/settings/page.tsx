@@ -95,12 +95,12 @@ export default function AdminSettingsPage() {
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="admin-settings-page">
       <div className="flex items-center gap-3 mb-6">
-        <Settings size={22} className="text-[#0B5FD1]" />
+        <Settings size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Platform Settings</h1>
       </div>
 
       {/* Best Price Engine Weights — full editor */}
-      <div className="bg-white border-2 border-[#0B5FD1]/20 rounded-xl p-6 mb-6" data-testid="bpe-weights-section">
+      <div className="bg-white border-2 border-al-primary/20 rounded-xl p-6 mb-6" data-testid="bpe-weights-section">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="font-semibold text-slate-900">Best Price Engine Weights</h2>

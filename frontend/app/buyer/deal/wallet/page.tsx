@@ -23,7 +23,7 @@ export default async function DealWalletPage() {
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="deal-wallet-page">
       <div className="flex items-center gap-3 mb-6">
-        <Wallet size={22} className="text-[#0B5FD1]" />
+        <Wallet size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Deal Financial Wallet</h1>
       </div>
 
@@ -66,9 +66,9 @@ function WalletBreakdown({ deal }: {
         </div>
       ))}
 
-      <div className="flex items-center justify-between bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl px-4 py-4 mt-4" data-testid="wallet-total">
+      <div className="flex items-center justify-between bg-al-primary/5 border border-al-primary/20 rounded-xl px-4 py-4 mt-4" data-testid="wallet-total">
         <span className="font-semibold text-slate-800">Total vehicle cost</span>
-        <span className="font-bold text-[#0B5FD1] text-lg">
+        <span className="font-bold text-al-primary text-lg">
           ${((otdPriceCents + (deal.feePaidAt ? deal.feeAmountCents ?? 0 : 0)) / 100).toLocaleString()}
         </span>
       </div>

@@ -20,7 +20,7 @@ const STATUS_CFG: Record<StageStatus, {
 }> = {
   COMPLETE:  { icon: <CheckCircle2 size={15} className="text-green-600" />,  badge: "bg-green-100 text-green-700 border-green-200",   rowBg: "bg-white",        label: "Complete"      },
   SKIPPED:   { icon: <CheckCircle2 size={15} className="text-slate-400" />,  badge: "bg-slate-100 text-slate-500 border-slate-200",   rowBg: "bg-slate-50/60",  label: "Skipped"       },
-  ACTIVE:    { icon: <Clock size={15} className="text-[#0B5FD1]" />,         badge: "bg-blue-100 text-[#0B5FD1] border-blue-200",     rowBg: "bg-blue-50/30",   label: "Active"        },
+  ACTIVE:    { icon: <Clock size={15} className="text-al-primary" />,         badge: "bg-blue-100 text-al-primary border-blue-200",     rowBg: "bg-blue-50/30",   label: "Active"        },
   LOCKED:    { icon: <Lock size={15} className="text-slate-300" />,           badge: "bg-slate-100 text-slate-400 border-slate-200",   rowBg: "bg-white",        label: "Locked"        },
   UNLOCKED:  { icon: <Unlock size={15} className="text-amber-500" />,         badge: "bg-amber-100 text-amber-700 border-amber-200",   rowBg: "bg-amber-50/40",  label: "Admin Unlocked" },
 };
@@ -143,12 +143,12 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
             </p>
           </div>
           <div className="text-right">
-            <p className="text-2xl font-black text-[#0B5FD1]">{journey.percentComplete}%</p>
+            <p className="text-2xl font-black text-al-primary">{journey.percentComplete}%</p>
             <p className="text-xs text-slate-400">complete</p>
           </div>
         </div>
         <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-          <div className="h-2 bg-[#0B5FD1] rounded-full transition-all duration-500"
+          <div className="h-2 bg-al-primary rounded-full transition-all duration-500"
             style={{ width: `${journey.percentComplete}%` }} />
         </div>
       </div>
@@ -301,7 +301,7 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
                           stageRoute: stage.route!,
                         });
                       }}
-                      className="text-xs font-medium text-slate-400 border border-slate-200 px-2 py-0.5 rounded-lg hover:text-[#0B5FD1] hover:border-[#0B5FD1]/30 flex items-center gap-1 whitespace-nowrap"
+                      className="text-xs font-medium text-slate-400 border border-slate-200 px-2 py-0.5 rounded-lg hover:text-al-primary hover:border-al-primary/30 flex items-center gap-1 whitespace-nowrap"
                       title={`Preview buyer's ${stage.label} page`}
                     >
                       <ExternalLink size={11} /> View
@@ -359,7 +359,7 @@ export default function BuyerJourneyTab({ buyerId }: Props) {
                     title="Stage notes">
                     <StickyNote size={11} />
                     {stage.notes.length > 0 && (
-                      <span className="text-[10px] font-bold text-[#0B5FD1]">{stage.notes.length}</span>
+                      <span className="text-[10px] font-bold text-al-primary">{stage.notes.length}</span>
                     )}
                   </button>
                 </div>
@@ -505,7 +505,7 @@ function MarkCompleteModal({
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
               <input type="number" value={maxOtd} onChange={e => setMaxOtd(Number(e.target.value))}
-                className="w-full pl-7 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                className="w-full pl-7 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                 min={1000} step={5000} />
             </div>
             <p className="text-xs text-slate-400 mt-1">Default $50,000. Sets the buyer&apos;s approved purchase budget.</p>
@@ -519,7 +519,7 @@ function MarkCompleteModal({
           <textarea value={note} onChange={e => setNote(e.target.value)}
             placeholder="e.g. Completing on behalf of buyer per phone call 5/13/26"
             rows={2}
-            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 resize-none" />
+            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-al-primary/20 resize-none" />
         </div>
 
         {error && (
@@ -534,7 +534,7 @@ function MarkCompleteModal({
             Cancel
           </button>
           <button onClick={submit} disabled={loading}
-            className="flex-[2] bg-[#0B5FD1] text-white font-bold py-2.5 rounded-xl hover:bg-[#0944a8] text-sm flex items-center justify-center gap-2 disabled:opacity-40">
+            className="flex-[2] bg-al-primary text-white font-bold py-2.5 rounded-xl hover:bg-[#0944a8] text-sm flex items-center justify-center gap-2 disabled:opacity-40">
             {loading ? <><Loader2 size={14} className="animate-spin" /> Completing…</> : "✓ Mark as Complete"}
           </button>
         </div>
@@ -577,10 +577,10 @@ function NoteInline({
         onChange={e => setContent(e.target.value)}
         onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); save(); } }}
         placeholder="Add internal note for this stage…"
-        className="flex-1 px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 bg-white"
+        className="flex-1 px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-al-primary/20 bg-white"
       />
       <button onClick={save} disabled={saving || !content.trim()}
-        className="text-xs font-semibold bg-[#0B5FD1] text-white px-3 py-1.5 rounded-lg hover:bg-[#0944a8] disabled:opacity-40 flex items-center gap-1">
+        className="text-xs font-semibold bg-al-primary text-white px-3 py-1.5 rounded-lg hover:bg-[#0944a8] disabled:opacity-40 flex items-center gap-1">
         {saving ? <Loader2 size={10} className="animate-spin" /> : <MessageSquare size={10} />} Add
       </button>
       {err && <p className="text-xs text-red-500 self-center">{err}</p>}
@@ -642,7 +642,7 @@ function SimpleModal({
             </label>
             <textarea value={message} onChange={e => setMessage(e.target.value)} rows={2}
               placeholder="Leave blank to use the default message for this stage"
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 resize-none" />
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-al-primary/20 resize-none" />
           </div>
         )}
 
@@ -653,7 +653,7 @@ function SimpleModal({
             </label>
             <input type="text" value={reason} onChange={e => setReason(e.target.value)}
               placeholder="e.g. Buyer confirmed by phone"
-              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20" />
+              className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20" />
           </div>
         )}
 
@@ -669,7 +669,7 @@ function SimpleModal({
             Cancel
           </button>
           <button onClick={submit} disabled={loading}
-            className="flex-[2] bg-[#0B5FD1] text-white font-bold py-2.5 rounded-xl hover:bg-[#0944a8] text-sm flex items-center justify-center gap-2 disabled:opacity-40">
+            className="flex-[2] bg-al-primary text-white font-bold py-2.5 rounded-xl hover:bg-[#0944a8] text-sm flex items-center justify-center gap-2 disabled:opacity-40">
             {loading ? <><Loader2 size={14} className="animate-spin" /> Working…</> : submitLabel}
           </button>
         </div>

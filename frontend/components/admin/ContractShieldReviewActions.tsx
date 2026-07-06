@@ -28,7 +28,7 @@ const ACTION_META: Record<ReviewAction, { title: string; verb: string; intent: s
   REQUEST_REVISION: {
     title: "Request Revision",
     verb: "Request Revision",
-    intent: "bg-[#0B5FD1] hover:bg-[#0a52b5]",
+    intent: "bg-al-primary hover:bg-[#0a52b5]",
     needsReason: true,
     needsIssues: false,
     description: "Sends the contract back to the dealer for a corrected upload with the reason below. The dealer is asked to revise; the buyer is told a minor revision is in progress.",
@@ -87,7 +87,7 @@ export default function ContractShieldReviewActions({ reviewId }: { reviewId: st
         </Button>
         <Button size="sm" variant="secondary" className="text-xs" data-testid={`shield-revision-${reviewId}`}
           onClick={() => setOpen("REQUEST_REVISION")}>
-          <RotateCcw size={13} className="text-[#0B5FD1]" /> Request Revision
+          <RotateCcw size={13} className="text-al-primary" /> Request Revision
         </Button>
       </div>
 

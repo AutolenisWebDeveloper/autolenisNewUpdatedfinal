@@ -20,7 +20,7 @@ export default async function ContractsPage() {
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="contracts-page">
       <div className="flex items-center gap-3 mb-6">
-        <FileText size={22} className="text-[#0B5FD1]" />
+        <FileText size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Contracts</h1>
       </div>
       {deals.length === 0 ? (
@@ -35,7 +35,7 @@ export default async function ContractsPage() {
         <div className="space-y-3">
           {deals.map((deal) => (
             <Link key={deal.id} href={`/buyer/contracts/${deal.id}`} data-testid={`contract-deal-${deal.id}`}
-              className="block bg-white border border-slate-200 rounded-xl p-5 hover:border-[#0B5FD1] hover:shadow-sm transition-all">
+              className="block bg-white border border-slate-200 rounded-xl p-5 hover:border-al-primary hover:shadow-sm transition-all">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-semibold text-slate-900 text-sm">Deal #{deal.id.slice(-8)}</p>

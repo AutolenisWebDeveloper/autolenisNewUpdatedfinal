@@ -77,19 +77,19 @@ export default function FinancingPage() {
           </div>
         </div>
         {selected === "EXTERNAL" && (
-          <div className="bg-[#EFF6FF] border border-[#DBEAFE] rounded-xl p-5 mb-6">
+          <div className="bg-al-primary-subtle border border-[#DBEAFE] rounded-xl p-5 mb-6">
             <p className="text-sm font-semibold text-[#111827] mb-1">Upload your pre-approval letter</p>
             <p className="text-xs text-[#4B5563] mb-3">
               Upload your lender pre-approval letter or submit your financing details for verification.
             </p>
             <a href="/buyer/prequal/external"
-              className="inline-flex items-center gap-2 text-sm font-semibold text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors">
+              className="inline-flex items-center gap-2 text-sm font-semibold text-al-primary hover:text-al-primary-hover transition-colors">
               Submit pre-approval details →
             </a>
           </div>
         )}
         <a href="/buyer/deal/payment"
-          className="flex items-center justify-center gap-2 w-full py-4 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+          className="flex items-center justify-center gap-2 w-full py-4 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
           data-testid="financing-continue-btn">
           Continue to Fee Payment
         </a>
@@ -127,14 +127,14 @@ export default function FinancingPage() {
             key={path.id}
             onClick={() => setSelected(path.id)}
             data-testid={`financing-option-${path.id.toLowerCase()}`}
-            className={`w-full text-left p-5 rounded-xl border-2 transition-colors ${selected === path.id ? "border-[#0B5FD1] bg-[#0B5FD1]/5" : "border-slate-200 hover:border-slate-300 bg-white"}`}
+            className={`w-full text-left p-5 rounded-xl border-2 transition-colors ${selected === path.id ? "border-al-primary bg-al-primary/5" : "border-slate-200 hover:border-slate-300 bg-white"}`}
           >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="font-semibold text-slate-900 text-sm">{path.label}</p>
                 <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{path.desc}</p>
               </div>
-              {selected === path.id && <CheckCircle2 size={18} className="text-[#0B5FD1] shrink-0 mt-0.5" />}
+              {selected === path.id && <CheckCircle2 size={18} className="text-al-primary shrink-0 mt-0.5" />}
             </div>
           </button>
         ))}
@@ -143,13 +143,13 @@ export default function FinancingPage() {
       {/* Feature 18 — Link to Pre-Approval Display */}
       <div className="flex items-center justify-between mb-6 p-3 bg-slate-50 rounded-lg border border-slate-200">
         <div className="flex items-center gap-2 text-sm text-slate-600">
-          <CreditCard size={14} className="text-[#0B5FD1]" />
+          <CreditCard size={14} className="text-al-primary" />
           <span>View pre-approvals &amp; payment calculator</span>
         </div>
         <Link
           href="/buyer/deal/financing/pre-approval"
           data-testid="view-pre-approval-link"
-          className="text-xs text-[#0B5FD1] font-semibold hover:underline flex items-center gap-1"
+          className="text-xs text-al-primary font-semibold hover:underline flex items-center gap-1"
         >
           Open <ArrowRight size={11} />
         </Link>

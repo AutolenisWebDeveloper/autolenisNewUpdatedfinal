@@ -120,7 +120,7 @@ export default function DepositPage() {
         }`}
       >
         {isPremium ? (
-          <Sparkles size={16} className="text-[#0B5FD1] shrink-0" />
+          <Sparkles size={16} className="text-al-primary shrink-0" />
         ) : (
           <Shield size={16} className="text-[#50D14E] shrink-0" />
         )}

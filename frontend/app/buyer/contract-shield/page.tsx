@@ -23,7 +23,7 @@ export default async function ContractShieldPage() {
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="contract-shield-page">
       <div className="flex items-center gap-3 mb-6">
-        <Shield size={24} className="text-[#0B5FD1]" />
+        <Shield size={24} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Contract Shield Review</h1>
       </div>
 

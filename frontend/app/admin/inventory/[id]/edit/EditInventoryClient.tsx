@@ -154,7 +154,7 @@ export default function EditInventoryClient({ initial }: { initial: Initial }) {
   }
 
   const labelCls = "text-xs font-semibold text-slate-700 mb-1 block";
-  const inputCls = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]";
+  const inputCls = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary";
 
   return (
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-inventory-edit-page">
@@ -236,7 +236,7 @@ export default function EditInventoryClient({ initial }: { initial: Initial }) {
           <h2 className="text-sm font-bold text-slate-900 mb-1">Images <span className="font-normal text-slate-400">({images.length}/10)</span></h2>
           <div className="flex flex-wrap items-center gap-2 my-3">
             <button type="button" data-testid="upload-image-btn" onClick={() => fileRef.current?.click()} disabled={images.length >= 10 || uploadingCount > 0}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#0B5FD1] hover:bg-[#0A4DB8] disabled:bg-slate-300 text-white rounded-lg text-xs font-semibold">
+              className="inline-flex items-center gap-2 px-4 py-2 bg-al-primary hover:bg-al-primary-hover disabled:bg-slate-300 text-white rounded-lg text-xs font-semibold">
               {uploadingCount > 0 ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
               {uploadingCount > 0 ? `Uploading ${uploadingCount}...` : "Upload"}
             </button>
@@ -256,7 +256,7 @@ export default function EditInventoryClient({ initial }: { initial: Initial }) {
                   <img src={url} alt="" className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
                   <button type="button" data-testid={`remove-image-${idx}`} onClick={() => removeImage(idx)}
                     className="absolute top-1 right-1 w-6 h-6 bg-black/70 hover:bg-black text-white rounded-full flex items-center justify-center"><X size={12} /></button>
-                  {idx === 0 && <span className="absolute bottom-1 left-1 bg-[#0B5FD1] text-white text-[10px] px-1.5 py-0.5 rounded font-semibold">COVER</span>}
+                  {idx === 0 && <span className="absolute bottom-1 left-1 bg-al-primary text-white text-[10px] px-1.5 py-0.5 rounded font-semibold">COVER</span>}
                 </div>
               ))}
             </div>
@@ -269,7 +269,7 @@ export default function EditInventoryClient({ initial }: { initial: Initial }) {
 
         <div className="flex items-center gap-3 pt-2">
           <button type="submit" data-testid="submit-edit-btn" disabled={submitting}
-            className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#0B5FD1] hover:bg-[#0A4DB8] disabled:bg-slate-300 text-white rounded-lg text-sm font-semibold">
+            className="inline-flex items-center gap-2 px-6 py-2.5 bg-al-primary hover:bg-al-primary-hover disabled:bg-slate-300 text-white rounded-lg text-sm font-semibold">
             {submitting && <Loader2 size={14} className="animate-spin" />}
             {submitting ? "Saving..." : "Save Changes"}
           </button>

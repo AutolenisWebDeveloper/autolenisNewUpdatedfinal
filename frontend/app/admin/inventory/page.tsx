@@ -94,8 +94,8 @@ export default async function AdminInventoryPage() {
               data-testid={c.testId}
               className="block bg-white border border-[#E5E7EB] rounded-xl p-5 hover:border-[#93C5FD] hover:shadow-sm transition-all"
             >
-              <div className="w-10 h-10 rounded-lg bg-[#0B5FD1]/10 flex items-center justify-center mb-4">
-                <c.icon size={18} className="text-[#0B5FD1]" />
+              <div className="w-10 h-10 rounded-lg bg-al-primary/10 flex items-center justify-center mb-4">
+                <c.icon size={18} className="text-al-primary" />
               </div>
               <h3 className="text-sm font-bold text-[#111827] mb-1.5">{c.title}</h3>
               <p className="text-xs text-[#4B5563] leading-relaxed">{c.body}</p>

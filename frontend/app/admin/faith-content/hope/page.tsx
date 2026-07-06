@@ -10,7 +10,7 @@ export default async function AdminFaithHopePage() {
   const required = ["opening", "encouragement", "born-again", "resources"];
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="admin-faith-hope-page">
-      <div className="flex items-center gap-3 mb-4"><BookOpen size={20} className="text-[#0B5FD1]" /><h1 className="text-xl font-bold text-slate-900">/hope Page CMS</h1></div>
+      <div className="flex items-center gap-3 mb-4"><BookOpen size={20} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">/hope Page CMS</h1></div>
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-6 text-xs text-amber-700" data-testid="hope-born-again-notice">
         Born-again invitation section appears ONLY on /hope. It must never appear on any other page.
       </div>

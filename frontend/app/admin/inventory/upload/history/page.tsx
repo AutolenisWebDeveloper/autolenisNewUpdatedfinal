@@ -19,7 +19,7 @@ export default async function AdminInventoryUploadHistoryPage() {
           <ArrowLeft size={14} /> Back to bulk upload
         </Link>
         <div className="flex items-center gap-2">
-          <History size={20} className="text-[#0B5FD1]" />
+          <History size={20} className="text-al-primary" />
           <h1 className="text-2xl font-bold text-slate-900">Upload History</h1>
         </div>
         <p className="text-sm text-slate-500 mt-1">{batches.length} past upload batch{batches.length === 1 ? "" : "es"}</p>
@@ -29,7 +29,7 @@ export default async function AdminInventoryUploadHistoryPage() {
         <div className="text-center py-12 bg-white border border-slate-200 rounded-xl">
           <History size={28} className="mx-auto text-slate-300 mb-2" />
           <p className="text-sm text-slate-500">No upload history yet</p>
-          <Link href="/admin/inventory/upload" className="text-xs text-[#0B5FD1] font-semibold mt-2 inline-block">Run your first upload</Link>
+          <Link href="/admin/inventory/upload" className="text-xs text-al-primary font-semibold mt-2 inline-block">Run your first upload</Link>
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">

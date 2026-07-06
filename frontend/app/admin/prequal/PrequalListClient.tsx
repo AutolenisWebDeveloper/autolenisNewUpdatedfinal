@@ -82,14 +82,14 @@ export default function PrequalListClient({ initialRows }: { initialRows: Prequa
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by buyer name or email…"
-            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-[#0B5FD1] focus:ring-1 focus:ring-[#0B5FD1]"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-al-primary focus:ring-1 focus:ring-al-primary"
           />
         </div>
         <select
           data-testid="prequal-list-decision-filter"
           value={decision}
           onChange={(e) => setDecision(e.target.value)}
-          className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-[#0B5FD1]"
+          className="px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:border-al-primary"
         >
           {DECISION_FILTERS.map((f) => (
             <option key={f.value} value={f.value}>{f.label}</option>
@@ -137,7 +137,7 @@ export default function PrequalListClient({ initialRows }: { initialRows: Prequa
               </span>
               <Link
                 href={`/admin/prequal/${r.id}`}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:underline justify-self-end"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-al-primary hover:underline justify-self-end"
                 data-testid={`prequal-list-open-${r.id}`}
               >
                 View

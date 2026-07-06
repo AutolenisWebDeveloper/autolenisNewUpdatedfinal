@@ -24,7 +24,7 @@ export default async function AdminESignPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-esign-page">
-      <div className="flex items-center gap-3 mb-6"><PenLine size={22} className="text-[#0B5FD1]" /><h1 className="text-xl font-bold text-slate-900">E-Sign Management</h1></div>
+      <div className="flex items-center gap-3 mb-6"><PenLine size={22} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">E-Sign Management</h1></div>
       {loadError && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 flex items-start gap-2 text-red-700" data-testid="esign-load-error">
           <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />

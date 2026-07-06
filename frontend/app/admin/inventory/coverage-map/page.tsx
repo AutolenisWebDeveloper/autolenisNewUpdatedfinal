@@ -72,7 +72,7 @@ export default function AdminCoverageMapPage() {
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="coverage-map-page">
       <div className="flex items-center gap-3 mb-6">
-        <MapPin size={22} className="text-[#0B5FD1]" />
+        <MapPin size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Inventory Coverage Map</h1>
         <span className="text-xs text-slate-400">(Leaflet.js — no Google Maps)</span>
       </div>

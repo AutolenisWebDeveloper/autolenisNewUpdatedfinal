@@ -26,7 +26,7 @@ export default function AmipsExportMenu() {
     <div className="flex items-center gap-2">
       <Link
         href="/admin/amips/report"
-        className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] rounded-xl text-xs font-semibold text-[#475569] hover:border-[#BFDBFE] hover:text-[#0B5FD1] transition-all shadow-sm"
+        className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] rounded-xl text-xs font-semibold text-[#475569] hover:border-[#BFDBFE] hover:text-al-primary transition-all shadow-sm"
       >
         <FileText size={12} /> Report
       </Link>
@@ -35,7 +35,7 @@ export default function AmipsExportMenu() {
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] rounded-xl text-xs font-semibold text-[#475569] hover:border-[#BFDBFE] hover:text-[#0B5FD1] transition-all shadow-sm"
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-[#E2E8F0] rounded-xl text-xs font-semibold text-[#475569] hover:border-[#BFDBFE] hover:text-al-primary transition-all shadow-sm"
         >
           <Download size={12} /> Export <ChevronDown size={12} className={open ? "rotate-180 transition-transform" : "transition-transform"} />
         </button>
@@ -49,7 +49,7 @@ export default function AmipsExportMenu() {
                 key={r.kind}
                 href={`/api/admin/amips/export?report=${r.kind}`}
                 onClick={() => setOpen(false)}
-                className="flex items-center gap-2 px-3 py-2.5 text-xs text-[#475569] hover:bg-[#F8FAFF] hover:text-[#0B5FD1] transition-colors"
+                className="flex items-center gap-2 px-3 py-2.5 text-xs text-[#475569] hover:bg-[#F8FAFF] hover:text-al-primary transition-colors"
               >
                 <FileSpreadsheet size={13} className="text-[#94A3B8]" />
                 {r.label}

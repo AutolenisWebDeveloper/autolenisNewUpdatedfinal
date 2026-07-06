@@ -356,7 +356,7 @@ function TierOverrideModal({ dealerName, currentTier, dealerId, onClose, onSucce
           />
           <div className="flex gap-3">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-xl py-2.5 text-sm hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={loading || reason.trim().length < 10} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-50">
+            <button type="submit" disabled={loading || reason.trim().length < 10} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-50">
               {loading ? "Updating..." : "Update Tier"}
             </button>
           </div>
@@ -408,7 +408,7 @@ function ConfirmModal({
           )}
           <div className="flex gap-3">
             <button type="button" onClick={onCancel} className="flex-1 border border-slate-200 text-slate-600 rounded-xl py-2.5 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
-            <button type="submit" disabled={loading} className={"flex-1 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (destructive ? "bg-red-600 hover:bg-red-700" : "bg-[#0B5FD1] hover:bg-purple-800")}>
+            <button type="submit" disabled={loading} className={"flex-1 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (destructive ? "bg-red-600 hover:bg-red-700" : "bg-al-primary hover:bg-purple-800")}>
               {loading ? "Processing..." : submitLabel}
             </button>
           </div>
@@ -464,7 +464,7 @@ function AddNoteModal({ dealerId, onClose, onSuccess }: {
           <p className="text-[10px] text-slate-400 text-right">{content.length}/2000</p>
           <div className="flex gap-3">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
+            <button type="submit" disabled={loading} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
               {loading ? "Saving..." : "Add Note"}
             </button>
           </div>
@@ -551,7 +551,7 @@ function EditProfileModal({ dealer, onClose, onSuccess }: {
           </div>
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 transition-colors">{loading ? "Saving..." : "Save Changes"}</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 transition-colors">{loading ? "Saving..." : "Save Changes"}</button>
           </div>
         </form>
       </div>
@@ -699,7 +699,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
 
         <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-[#0B5FD1] flex items-center justify-center flex-shrink-0 shadow-md">
+            <div className="w-12 h-12 rounded-2xl bg-al-primary flex items-center justify-center flex-shrink-0 shadow-md">
               <span className="text-white text-lg font-bold">{dealer.dealershipName[0]?.toUpperCase() ?? "D"}</span>
             </div>
             <div>
@@ -758,7 +758,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={"px-4 py-3.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap " + (activeTab === tab.id ? "border-[#0B5FD1] text-[#0B5FD1]" : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300")}
+              className={"px-4 py-3.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap " + (activeTab === tab.id ? "border-al-primary text-al-primary" : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300")}
             >
               {tab.label}
             </button>
@@ -904,7 +904,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
               <InfoRow label="Updated" value={fmtDateTime(dealer.updatedAt)} />
               <InfoRow label="Supabase ID" value={<code className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">{dealer.supabaseId}</code>} />
               <div className="pt-4">
-                <button onClick={() => setModal("profile-edit")} className="flex items-center gap-2 px-4 py-2.5 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors">
+                <button onClick={() => setModal("profile-edit")} className="flex items-center gap-2 px-4 py-2.5 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors">
                   <Edit2 size={13} /> Edit Profile
                 </button>
               </div>
@@ -935,7 +935,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
                         <span className="text-xs text-slate-400">{pct}%</span>
                       </div>
                       <div className="w-full bg-slate-100 rounded-full h-2">
-                        <div className="bg-[#0B5FD1] h-2 rounded-full transition-all" style={{ width: pct + "%" }} />
+                        <div className="bg-al-primary h-2 rounded-full transition-all" style={{ width: pct + "%" }} />
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -1371,7 +1371,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
           <div className="max-w-2xl">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold text-slate-700">Internal Notes ({supportNotes.length})</h2>
-              <button onClick={() => setModal("note")} className="flex items-center gap-1.5 px-3.5 py-2 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
+              <button onClick={() => setModal("note")} className="flex items-center gap-1.5 px-3.5 py-2 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
                 <MessageSquare size={12} /> Add Note
               </button>
             </div>
@@ -1492,7 +1492,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
                     <p className="text-sm font-semibold text-slate-800">Override Tier</p>
                     <p className="text-xs text-slate-500">Current: <strong>{dealer.tier}</strong> — change to STANDARD / GOLD / PLATINUM / PROBATION</p>
                   </div>
-                  <button onClick={() => setModal("tier-override")} className="px-4 py-2 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
+                  <button onClick={() => setModal("tier-override")} className="px-4 py-2 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
                     Override Tier
                   </button>
                 </div>
@@ -1507,7 +1507,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
                     <p className="text-sm font-semibold text-slate-800">Update Profile</p>
                     <p className="text-xs text-slate-500">Edit dealer profile information</p>
                   </div>
-                  <button onClick={() => setModal("profile-edit")} className="px-4 py-2 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
+                  <button onClick={() => setModal("profile-edit")} className="px-4 py-2 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
                     Edit
                   </button>
                 </div>

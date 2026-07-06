@@ -24,7 +24,7 @@ const STATUS_CFG: Record<StageStatus, {
 }> = {
   COMPLETE:  { icon: <CheckCircle2 size={15} className="text-green-600" />, badge: "bg-green-100 text-green-700 border-green-200",  rowBg: "bg-white",       label: "Complete"      },
   SKIPPED:   { icon: <CheckCircle2 size={15} className="text-slate-400" />, badge: "bg-slate-100 text-slate-500 border-slate-200",  rowBg: "bg-slate-50/60", label: "Skipped"       },
-  ACTIVE:    { icon: <Clock size={15} className="text-[#0B5FD1]" />,        badge: "bg-blue-100 text-[#0B5FD1] border-blue-200",    rowBg: "bg-blue-50/30",  label: "Active"        },
+  ACTIVE:    { icon: <Clock size={15} className="text-al-primary" />,        badge: "bg-blue-100 text-al-primary border-blue-200",    rowBg: "bg-blue-50/30",  label: "Active"        },
   LOCKED:    { icon: <Lock size={15} className="text-slate-300" />,         badge: "bg-slate-100 text-slate-400 border-slate-200",  rowBg: "bg-white",       label: "Locked"        },
   UNLOCKED:  { icon: <Unlock size={15} className="text-amber-500" />,       badge: "bg-amber-100 text-amber-700 border-amber-200",  rowBg: "bg-amber-50/40", label: "Admin Unlocked" },
 };
@@ -92,7 +92,7 @@ function BuyerSearchView({ onSelect }: { onSelect: (b: BuyerResult) => void }) {
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder="Search buyer name or email…"
-          className="w-full pl-9 pr-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+          className="w-full pl-9 pr-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20"
         />
         {searching && (
           <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 animate-spin" />
@@ -264,7 +264,7 @@ function LiveJourneyView({ buyer, onChange }: { buyer: BuyerResult; onChange: ()
     <div className="p-6 md:p-8 max-w-5xl">
       {/* Header */}
       <div className="flex items-center justify-between gap-3 mb-2">
-        <button onClick={onChange} className="flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:underline">
+        <button onClick={onChange} className="flex items-center gap-1 text-xs font-semibold text-al-primary hover:underline">
           <ChevronLeft size={13} /> Change buyer
         </button>
         <button
@@ -284,7 +284,7 @@ function LiveJourneyView({ buyer, onChange }: { buyer: BuyerResult; onChange: ()
           </div>
           <Link
             href={`/admin/buyers/${buyer.id}`}
-            className="flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:underline whitespace-nowrap"
+            className="flex items-center gap-1 text-xs font-semibold text-al-primary hover:underline whitespace-nowrap"
           >
             Full Profile <ExternalLink size={11} />
           </Link>
@@ -300,7 +300,7 @@ function LiveJourneyView({ buyer, onChange }: { buyer: BuyerResult; onChange: ()
             </div>
             <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
               <div
-                className="h-full bg-[#0B5FD1] transition-all"
+                className="h-full bg-al-primary transition-all"
                 style={{ width: `${journey.percentComplete}%` }}
               />
             </div>

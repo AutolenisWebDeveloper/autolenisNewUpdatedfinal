@@ -34,7 +34,7 @@ export default async function AdminDealsPage({ searchParams }: Props) {
 
   return (
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-deals-page">
-      <div className="flex items-center gap-3 mb-6"><FileText size={22} className="text-[#0B5FD1]" /><h1 className="text-xl font-bold text-slate-900">Deals <span className="text-slate-400 font-normal text-sm">({deals.length})</span></h1></div>
+      <div className="flex items-center gap-3 mb-6"><FileText size={22} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">Deals <span className="text-slate-400 font-normal text-sm">({deals.length})</span></h1></div>
 
       {/* Status filter */}
       <form method="GET" className="flex items-center gap-2 mb-5" data-testid="deal-status-filter">
@@ -46,7 +46,7 @@ export default async function AdminDealsPage({ searchParams }: Props) {
             <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
           ))}
         </select>
-        <button type="submit" className="text-xs font-medium px-3 py-1.5 rounded-lg bg-[#0B5FD1] text-white" data-testid="deal-filter-apply">
+        <button type="submit" className="text-xs font-medium px-3 py-1.5 rounded-lg bg-al-primary text-white" data-testid="deal-filter-apply">
           Apply
         </button>
       </form>
@@ -68,15 +68,15 @@ export default async function AdminDealsPage({ searchParams }: Props) {
       <div className="space-y-2">
         {deals.map(d => (
           <div key={d.id} data-testid={`deal-row-${d.id}`}
-            className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-[#0B5FD1]/30 transition-colors">
+            className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-al-primary/30 transition-colors">
             <Link href={`/admin/deals/${d.id}`} className="flex-1 min-w-0" data-testid={`deal-link-${d.id}`}>
               <p className="font-semibold text-slate-900 text-sm">{d.buyer?.firstName ?? ""} {d.buyer?.lastName ?? ""} — {d.offer?.dealer?.dealershipName ?? "Unknown Dealer"}</p>
               <p className="text-xs text-slate-400">${((d.offer?.otdPriceCents ?? 0) / 100).toLocaleString()} · {d.createdAt.toLocaleDateString()}</p>
             </Link>
             <div className="flex items-center gap-2 shrink-0">
               <Badge variant={d.status === "COMPLETED" ? "green" : "secondary"} className="text-xs">{d.status.replace(/_/g, " ")}</Badge>
-              <Link href={`/admin/deals/${d.id}/esign`} className="p-1.5 text-slate-400 hover:text-[#0B5FD1]" data-testid={`deal-esign-${d.id}`}><PenLine size={14} /></Link>
-              <Link href={`/admin/deals/${d.id}/pickup`} className="p-1.5 text-slate-400 hover:text-[#0B5FD1]" data-testid={`deal-pickup-${d.id}`}><MapPin size={14} /></Link>
+              <Link href={`/admin/deals/${d.id}/esign`} className="p-1.5 text-slate-400 hover:text-al-primary" data-testid={`deal-esign-${d.id}`}><PenLine size={14} /></Link>
+              <Link href={`/admin/deals/${d.id}/pickup`} className="p-1.5 text-slate-400 hover:text-al-primary" data-testid={`deal-pickup-${d.id}`}><MapPin size={14} /></Link>
             </div>
           </div>
         ))}

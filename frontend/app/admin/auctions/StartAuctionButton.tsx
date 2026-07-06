@@ -73,7 +73,7 @@ export default function StartAuctionButton() {
         type="button"
         onClick={() => setOpen(true)}
         data-testid="start-auction-button"
-        className="inline-flex items-center gap-1.5 bg-[#0B5FD1] text-white text-xs font-semibold px-3.5 py-2 rounded-xl hover:bg-[#0944a8]"
+        className="inline-flex items-center gap-1.5 bg-al-primary text-white text-xs font-semibold px-3.5 py-2 rounded-xl hover:bg-[#0944a8]"
       >
         <Gavel size={12} /> Start Auction
       </button>
@@ -90,7 +90,7 @@ export default function StartAuctionButton() {
           >
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <Gavel size={14} className="text-[#0B5FD1]" />
+                <Gavel size={14} className="text-al-primary" />
                 <h3 className="text-sm font-bold text-slate-900">Start auction — pick a buyer</h3>
               </div>
               <button
@@ -112,7 +112,7 @@ export default function StartAuctionButton() {
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search by name or email…"
                   data-testid="start-auction-search"
-                  className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                  className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                 />
                 {loading && (
                   <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 animate-spin" />
@@ -142,7 +142,7 @@ export default function StartAuctionButton() {
                       <p className="text-sm font-semibold text-slate-800 truncate">{name}</p>
                       <p className="text-xs text-slate-400 truncate">{b.email}</p>
                     </div>
-                    <span className="text-[10px] font-semibold text-[#0B5FD1] uppercase tracking-wide shrink-0">
+                    <span className="text-[10px] font-semibold text-al-primary uppercase tracking-wide shrink-0">
                       Select
                     </span>
                   </button>

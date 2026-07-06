@@ -68,15 +68,15 @@ export default async function BillingPage() {
       {/* Plan */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-3">
         <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-          <CreditCard className="h-5 w-5 text-[#0B5FD1]" />
+          <CreditCard className="h-5 w-5 text-al-primary" />
           Current Plan
         </h2>
         <div className="flex items-center gap-3">
-          <span className="text-lg font-bold text-[#0B5FD1]">
+          <span className="text-lg font-bold text-al-primary">
             {buyer.plan === "PREMIUM" ? "Premium Concierge" : "Standard"}
           </span>
           {buyer.plan === "PREMIUM" && (
-            <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-[#EFF6FF] text-[#0B5FD1]">
+            <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-al-primary-subtle text-al-primary">
               Premium
             </span>
           )}
@@ -84,7 +84,7 @@ export default async function BillingPage() {
         {buyer.plan === "STANDARD" && (
           <p className="text-sm text-gray-500">
             Upgrade to Premium for full concierge service, priority dealer access, and expert negotiation.{" "}
-            <Link href="/buyer/settings" className="text-[#0B5FD1] hover:underline">
+            <Link href="/buyer/settings" className="text-al-primary hover:underline">
               Learn more
             </Link>
           </p>
@@ -94,7 +94,7 @@ export default async function BillingPage() {
       {/* Deposit */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
         <h2 className="font-semibold text-gray-900 flex items-center gap-2">
-          <ShieldCheck className="h-5 w-5 text-[#0B5FD1]" />
+          <ShieldCheck className="h-5 w-5 text-al-primary" />
           Auction Access Fee
         </h2>
 
@@ -104,7 +104,7 @@ export default async function BillingPage() {
             <p className="text-gray-500 text-sm">No Auction Access Fee on file.</p>
             <Link
               href="/buyer/deposit"
-              className="inline-block bg-[#0B5FD1] text-white text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-[#0A4DB8] transition"
+              className="inline-block bg-al-primary text-white text-sm font-semibold px-5 py-2.5 rounded-lg hover:bg-al-primary-hover transition"
             >
               Activate My Auction — {formatCurrency(DEPOSIT_AMOUNT_CENTS)}
             </Link>
@@ -135,7 +135,7 @@ export default async function BillingPage() {
                 <RefreshCw className="h-4 w-4 mt-0.5 flex-shrink-0" />
                 <span>
                   Your previous Auction Access Fee was refunded.{" "}
-                  <Link href="/buyer/deposit" className="text-[#0B5FD1] hover:underline">
+                  <Link href="/buyer/deposit" className="text-al-primary hover:underline">
                     Activate a new auction
                   </Link>
                 </span>
@@ -181,7 +181,7 @@ export default async function BillingPage() {
 
       <p className="text-xs text-gray-400 text-center">
         Questions about billing?{" "}
-        <a href="mailto:support@autolenis.com" className="text-[#0B5FD1] hover:underline">
+        <a href="mailto:support@autolenis.com" className="text-al-primary hover:underline">
           Contact support
         </a>
       </p>

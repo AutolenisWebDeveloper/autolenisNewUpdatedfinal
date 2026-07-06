@@ -578,7 +578,7 @@ export default function PrequalDetailClient({ data }: { data: PrequalDetailData 
               <button
                 type="button"
                 onClick={() => setConsentOpen((v) => !v)}
-                className="flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:underline mt-3"
+                className="flex items-center gap-1 text-xs font-semibold text-al-primary hover:underline mt-3"
                 data-testid="prequal-consent-toggle"
               >
                 {consentOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}

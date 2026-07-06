@@ -98,10 +98,10 @@ function SearchBar({
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input value={value} onChange={e => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20" />
+          className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-al-primary/20" />
       </div>
       <select value={filterValue} onChange={e => onFilterChange(e.target.value)}
-        className="border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20">
+        className="border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-al-primary/20">
         {filterOptions.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
     </div>
@@ -117,7 +117,7 @@ function ActionBtn({
   variant?: "default" | "danger" | "success" | "outline"; disabled?: boolean;
 }) {
   const styles = {
-    default: "bg-[#0B5FD1] text-white hover:bg-[#0944a8]",
+    default: "bg-al-primary text-white hover:bg-[#0944a8]",
     danger:  "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100",
     success: "bg-green-50 text-green-700 border border-green-200 hover:bg-green-100",
     outline: "border border-slate-200 text-slate-700 hover:bg-slate-50",
@@ -210,7 +210,7 @@ function BuyerSearchInput({
             value={search}
             onChange={e => onSearchChange(e.target.value)}
             placeholder="Search buyer by name or email…"
-            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-al-primary/20"
           />
           {loading && (
             <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 animate-spin" />
@@ -354,13 +354,13 @@ function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
       <div className="flex gap-2 mb-5">
         <button
           onClick={() => setModal({ type: "new_charge_deposit" })}
-          className="inline-flex items-center gap-2 bg-[#0B5FD1] text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0944a8] transition-colors"
+          className="inline-flex items-center gap-2 bg-al-primary text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0944a8] transition-colors"
           data-testid="deposit-charge-card-btn">
           <CreditCard size={15} /> Charge Card — $99 Deposit
         </button>
         <button
           onClick={() => setModal({ type: "new_link_deposit" })}
-          className="inline-flex items-center gap-2 border border-[#0B5FD1] text-[#0B5FD1] text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0B5FD1]/5 transition-colors"
+          className="inline-flex items-center gap-2 border border-al-primary text-al-primary text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-al-primary/5 transition-colors"
           data-testid="deposit-send-link-btn">
           <Link2 size={15} /> Send Payment Link
         </button>
@@ -626,13 +626,13 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
       <div className="flex gap-2 mb-5">
         <button
           onClick={() => setModal({ type: "new_charge_fee" })}
-          className="inline-flex items-center gap-2 bg-[#0B5FD1] text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0944a8] transition-colors"
+          className="inline-flex items-center gap-2 bg-al-primary text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0944a8] transition-colors"
           data-testid="fee-charge-card-btn">
           <CreditCard size={15} /> Charge Card — $400 Service Fee
         </button>
         <button
           onClick={() => setModal({ type: "new_link_fee" })}
-          className="inline-flex items-center gap-2 border border-[#0B5FD1] text-[#0B5FD1] text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0B5FD1]/5 transition-colors"
+          className="inline-flex items-center gap-2 border border-al-primary text-al-primary text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-al-primary/5 transition-colors"
           data-testid="fee-send-link-btn">
           <Link2 size={15} /> Send Payment Link
         </button>
@@ -780,7 +780,7 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
                 <Label>Deal ID {selectedBuyer?.activeDealId ? "(pre-filled from active deal)" : "(optional)"}</Label>
                 <input value={dealIdInput} onChange={e => setDealIdInput(e.target.value)}
                   placeholder="Paste deal ID or leave blank"
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm mt-1.5 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20" />
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm mt-1.5 focus:outline-none focus:ring-2 focus:ring-al-primary/20" />
                 {selectedBuyer && !selectedBuyer.activeDealId && (
                   <p className="text-xs text-slate-400 mt-1">No active deal found — enter manually if known.</p>
                 )}
@@ -819,7 +819,7 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
                 <Label>Deal ID {selectedBuyer?.activeDealId ? "(pre-filled from active deal)" : "(optional)"}</Label>
                 <input value={dealIdInput} onChange={e => setDealIdInput(e.target.value)}
                   placeholder="Paste deal ID or leave blank"
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm mt-1.5 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20" />
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm mt-1.5 focus:outline-none focus:ring-2 focus:ring-al-primary/20" />
                 {selectedBuyer && !selectedBuyer.activeDealId && (
                   <p className="text-xs text-slate-400 mt-1">No active deal found — enter manually if known.</p>
                 )}
@@ -1033,7 +1033,7 @@ function AffiliatePayoutsTab() {
               <div>
                 <Label>Payment Method *</Label>
                 <select value={payMethod} onChange={e => setPayMethod(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm mt-1.5 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20">
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm mt-1.5 focus:outline-none focus:ring-2 focus:ring-al-primary/20">
                   <option value="">Select method</option>
                   {["ACH Transfer","Zelle","PayPal","Check","Venmo","Other"].map(m => (
                     <option key={m} value={m}>{m}</option>
@@ -1044,7 +1044,7 @@ function AffiliatePayoutsTab() {
                 <Label>Reference / Transaction ID *</Label>
                 <input value={payRef} onChange={e => setPayRef(e.target.value)}
                   placeholder="ACH trace #, check number, or transaction ID"
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm mt-1.5 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20" />
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm mt-1.5 focus:outline-none focus:ring-2 focus:ring-al-primary/20" />
                 <p className="text-xs text-slate-400 mt-1">Saved for audit trail — required.</p>
               </div>
               <div>
@@ -1165,7 +1165,7 @@ export default function AdminPaymentsClient({
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors ${
               tab === t.id
-                ? "border-[#0B5FD1] text-[#0B5FD1]"
+                ? "border-al-primary text-al-primary"
                 : "border-transparent text-slate-500 hover:text-slate-800"}`}>
             <t.icon size={14} />{t.label}
           </button>

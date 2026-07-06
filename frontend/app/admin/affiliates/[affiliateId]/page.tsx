@@ -74,7 +74,7 @@ export default async function AdminAffiliateDetailPage({
           </Link>
           <a
             href={`/admin/affiliates/${affiliateId}`}
-            className="inline-flex items-center gap-2 bg-[#0B5FD1] text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0944a8]"
+            className="inline-flex items-center gap-2 bg-al-primary text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0944a8]"
           >
             Retry
           </a>

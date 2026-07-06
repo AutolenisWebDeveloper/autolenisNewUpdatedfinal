@@ -84,7 +84,7 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
           <h1 className="text-xl font-semibold text-slate-900 mb-2">Account Access Suspended</h1>
           <p className="text-sm text-slate-500 leading-relaxed">
             Your account access has been suspended. Please contact{" "}
-            <a href="mailto:support@autolenis.com" className="text-[#0B5FD1] hover:underline">
+            <a href="mailto:support@autolenis.com" className="text-al-primary hover:underline">
               support@autolenis.com
             </a>{" "}
             if you believe this is an error.

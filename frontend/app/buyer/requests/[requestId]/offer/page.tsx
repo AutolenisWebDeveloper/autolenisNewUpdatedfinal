@@ -58,14 +58,14 @@ export default async function RequestOfferPage({ params }: Props) {
       <div className="p-6 md:p-8 max-w-xl" data-testid="request-offer-empty">
         <Link
           href={`/buyer/requests/${requestId}`}
-          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#0B5FD1] mb-4"
+          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-al-primary mb-4"
           data-testid="offer-back-link"
         >
           <ArrowLeft size={14} /> Back to Request
         </Link>
         <div className="bg-white border-2 border-dashed border-[#E5E7EB] rounded-2xl p-8 text-center">
           <div className="mx-auto h-14 w-14 rounded-full bg-[#F8F9FB] flex items-center justify-center mb-4">
-            <Loader2 size={26} className="text-[#0B5FD1] animate-spin" />
+            <Loader2 size={26} className="text-al-primary animate-spin" />
           </div>
           <h1 className="text-xl font-bold text-slate-900 mb-2">No offer yet</h1>
           <p className="text-sm text-slate-600 mb-1">We&apos;re still sourcing options for your request.</p>
@@ -98,7 +98,7 @@ export default async function RequestOfferPage({ params }: Props) {
       <p className="text-sm text-slate-500 mb-6">AutoLenis sourced a vehicle matching your request. Review the offer below.</p>
 
       {/* Offer details — vehicle card */}
-      <div className="bg-white border-2 border-[#0B5FD1] rounded-2xl p-7 mb-6" data-testid="offer-details">
+      <div className="bg-white border-2 border-al-primary rounded-2xl p-7 mb-6" data-testid="offer-details">
         <div className="flex items-start justify-between mb-4">
           <div>
             <p className="text-2xl font-bold text-slate-900" data-testid="offer-vehicle-title">
@@ -112,7 +112,7 @@ export default async function RequestOfferPage({ params }: Props) {
                 target="_blank"
                 rel="noopener noreferrer"
                 data-testid="offer-vehicle-link"
-                className="inline-flex items-center gap-2 rounded-lg border border-[#0B5FD1] text-[#0B5FD1] text-sm font-medium px-4 py-2 hover:bg-[#0B5FD1]/5 transition-colors mt-3"
+                className="inline-flex items-center gap-2 rounded-lg border border-al-primary text-al-primary text-sm font-medium px-4 py-2 hover:bg-al-primary/5 transition-colors mt-3"
               >
                 <ExternalLink size={14} />
                 View This Vehicle →
@@ -124,7 +124,7 @@ export default async function RequestOfferPage({ params }: Props) {
         <div className="border-t border-slate-100 pt-4 grid grid-cols-2 gap-3">
           <div>
             <p className="text-xs uppercase tracking-wider text-slate-400 mb-1">OTD Price</p>
-            <p className="text-2xl font-bold text-[#0B5FD1] font-mono" data-testid="offer-otd-price">
+            <p className="text-2xl font-bold text-al-primary font-mono" data-testid="offer-otd-price">
               ${(otdCents / 100).toLocaleString()}
             </p>
           </div>

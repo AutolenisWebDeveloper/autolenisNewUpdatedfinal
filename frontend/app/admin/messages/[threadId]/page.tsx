@@ -36,7 +36,7 @@ export default async function AdminThreadPage({
         <Link href="/admin/messages" className="text-slate-400 hover:text-slate-700" data-testid="back-to-admin-messages">
           <ArrowLeft size={18} />
         </Link>
-        <MessageSquare size={20} className="text-[#0B5FD1]" />
+        <MessageSquare size={20} className="text-al-primary" />
         <div>
           <h1 className="text-lg font-bold text-slate-900">
             Thread — {buyer ? `${buyer.firstName} ${buyer.lastName}` : "Unknown Buyer"}
@@ -67,7 +67,7 @@ export default async function AdminThreadPage({
               <div
                 className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm ${
                   isAdmin
-                    ? "bg-[#0B5FD1] text-white rounded-br-sm"
+                    ? "bg-al-primary text-white rounded-br-sm"
                     : "bg-white border border-slate-200 text-slate-800 rounded-bl-sm"
                 }`}
               >

@@ -51,7 +51,7 @@ export default function BuyerPickerButton({ stageRoute, stageLabel }: Props) {
       <button
         onClick={() => setOpen(true)}
         disabled={!!opening}
-        className="flex items-center gap-1.5 text-xs font-semibold text-[#0B5FD1] border border-[#0B5FD1]/30 bg-white px-3 py-1.5 rounded-lg hover:bg-[#0B5FD1]/5 whitespace-nowrap shrink-0 disabled:opacity-50"
+        className="flex items-center gap-1.5 text-xs font-semibold text-al-primary border border-al-primary/30 bg-white px-3 py-1.5 rounded-lg hover:bg-al-primary/5 whitespace-nowrap shrink-0 disabled:opacity-50"
       >
         {opening ? <Loader2 size={11} className="animate-spin" /> : (
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -83,7 +83,7 @@ export default function BuyerPickerButton({ stageRoute, stageLabel }: Props) {
                 value={query}
                 onChange={e => search(e.target.value)}
                 placeholder="Search buyer name or email…"
-                className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20"
               />
               {searching && (
                 <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 animate-spin" />

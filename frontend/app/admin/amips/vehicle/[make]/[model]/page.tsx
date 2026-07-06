@@ -13,7 +13,7 @@ interface Props {
 const LIFECYCLE_CHIP: Record<string, string> = {
   ACTIVE: "bg-[#ECFDF5] text-[#059669]",
   UNDER_REVIEW: "bg-[#FFFBEB] text-[#D97706]",
-  REFRESH_REQUIRED: "bg-[#EFF6FF] text-[#0B5FD1]",
+  REFRESH_REQUIRED: "bg-al-primary-subtle text-al-primary",
   RETIRED: "bg-[#F1F5F9] text-[#64748B]",
 };
 
@@ -40,13 +40,13 @@ export default async function VehicleProfilePage({ params }: Props) {
 
   return (
     <div className="min-h-screen bg-[#F4F6FA] p-6 md:p-8 max-w-[1200px] mx-auto">
-      <Link href="/admin/amips" className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-[#0B5FD1] transition-colors mb-4">
+      <Link href="/admin/amips" className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-al-primary transition-colors mb-4">
         <ChevronLeft size={14} /> Market Intelligence Center
       </Link>
 
       <header className="mb-6">
         <div className="flex items-center gap-2 mb-1.5">
-          <Car size={13} className="text-[#0B5FD1]" />
+          <Car size={13} className="text-al-primary" />
           <p className="text-[10px] text-[#94A3B8] font-semibold uppercase tracking-widest">Vehicle Intelligence Profile</p>
         </div>
         <h1 className="text-2xl font-bold text-[#0F172A] tracking-tight">{profile.make} {profile.model}</h1>
@@ -98,7 +98,7 @@ export default async function VehicleProfilePage({ params }: Props) {
         {/* By metro */}
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <MapPinned size={13} className="text-[#0B5FD1]" />
+            <MapPinned size={13} className="text-al-primary" />
             <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.15em]">Buyer Advantage by Metro</p>
           </div>
           <div className="rounded-2xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
@@ -117,13 +117,13 @@ export default async function VehicleProfilePage({ params }: Props) {
                   {profile.byMetro.map((m) => (
                     <tr key={`${m.metro}-${m.state}`} className="hover:bg-[#F8FAFF] transition-colors">
                       <td className="px-5 py-3">
-                        <Link href={`/admin/amips/metro/${encodeURIComponent(m.metro)}`} className="font-semibold text-[#0F172A] hover:text-[#0B5FD1] transition-colors">{m.metro}</Link>
+                        <Link href={`/admin/amips/metro/${encodeURIComponent(m.metro)}`} className="font-semibold text-[#0F172A] hover:text-al-primary transition-colors">{m.metro}</Link>
                         <span className="text-[10px] text-[#94A3B8] ml-1">{m.state}</span>
                       </td>
                       <td className="px-5 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
                           <div className="h-1.5 w-16 rounded-full bg-[#F1F5F9] overflow-hidden">
-                            <div className={`h-full rounded-full ${m.advantage >= 6 ? "bg-[#059669]" : "bg-[#0B5FD1]"}`} style={{ width: `${(m.advantage / 10) * 100}%` }} />
+                            <div className={`h-full rounded-full ${m.advantage >= 6 ? "bg-[#059669]" : "bg-al-primary"}`} style={{ width: `${(m.advantage / 10) * 100}%` }} />
                           </div>
                           <span className="font-mono font-semibold text-[#0F172A] w-8">{m.advantage.toFixed(1)}</span>
                         </div>
@@ -140,7 +140,7 @@ export default async function VehicleProfilePage({ params }: Props) {
         {/* Pages */}
         <div>
           <div className="flex items-center gap-2 mb-3">
-            <FileText size={13} className="text-[#0B5FD1]" />
+            <FileText size={13} className="text-al-primary" />
             <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.15em]">Published Pages ({profile.pages.length})</p>
           </div>
           <div className="rounded-2xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
@@ -151,7 +151,7 @@ export default async function VehicleProfilePage({ params }: Props) {
                 {profile.pages.map((p) => (
                   <div key={p.slug} className="px-5 py-3">
                     <div className="flex items-center justify-between gap-2">
-                      <Link href={`/intelligence/${p.slug}`} className="text-sm font-medium text-[#0F172A] hover:text-[#0B5FD1] transition-colors truncate">{p.title}</Link>
+                      <Link href={`/intelligence/${p.slug}`} className="text-sm font-medium text-[#0F172A] hover:text-al-primary transition-colors truncate">{p.title}</Link>
                       <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${LIFECYCLE_CHIP[p.lifecycleStatus] ?? "bg-[#F1F5F9] text-[#64748B]"}`}>{p.lifecycleStatus}</span>
                     </div>
                     <p className="text-[10px] text-[#94A3B8] mt-1 font-mono">{p.impressions.toLocaleString("en-US")} impressions · {p.clicks.toLocaleString("en-US")} clicks · {p.leads.toLocaleString("en-US")} leads</p>

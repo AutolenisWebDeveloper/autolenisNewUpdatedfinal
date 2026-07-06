@@ -67,7 +67,7 @@ export default function VehicleDetailPanel({
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden" data-testid="vehicle-action-panel">
       {/* Price */}
-      <div className="bg-[#0B5FD1] p-6 text-white">
+      <div className="bg-al-primary p-6 text-white">
         <p className="text-xs text-white/60 uppercase tracking-wider mb-1">Listed Price</p>
         <p className="text-4xl font-bold tracking-tight" data-testid="vehicle-price">
           ${(priceCents / 100).toLocaleString()}
@@ -130,7 +130,7 @@ export default function VehicleDetailPanel({
             </Button>
             <p className="text-xs text-slate-400 text-center">
               Already have an account?{" "}
-              <Link href="/auth/signin" className="text-[#0B5FD1] hover:underline">Sign in</Link>
+              <Link href="/auth/signin" className="text-al-primary hover:underline">Sign in</Link>
             </p>
           </>
         )}

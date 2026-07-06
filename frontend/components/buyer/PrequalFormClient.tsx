@@ -587,7 +587,7 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
                   checked={form.fcraConsent}
                   onChange={(e) => update("fcraConsent", e.target.checked)}
                   disabled={fieldDisabled}
-                  className="mt-0.5 h-4 w-4 accent-[#0B5FD1]"
+                  className="mt-0.5 h-4 w-4 accent-al-primary"
                   required
                 />
                 <span>I have read and agree to the above authorization.</span>
@@ -598,7 +598,7 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
                 href="/legal/prequal-consent"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[#0B5FD1] underline"
+                className="text-al-primary underline"
                 data-testid="prequal-soft-pull-link"
               >
                 What is a soft pull?
@@ -615,7 +615,7 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
               <button
                 type="button"
                 onClick={resetSubmissionState}
-                className="text-sm font-medium text-[#0B5FD1] underline"
+                className="text-sm font-medium text-al-primary underline"
                 data-testid="prequal-retry-btn"
               >
                 Try Again
@@ -651,7 +651,7 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
 // ─── Field helpers ──────────────────────────────────────────────────────────
 
 const inputCls =
-  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-[#0B5FD1] focus:ring-2 focus:ring-[#0B5FD1]/20 disabled:bg-slate-50 disabled:text-slate-400";
+  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-al-primary focus:ring-2 focus:ring-al-primary/20 disabled:bg-slate-50 disabled:text-slate-400";
 
 function Field({
   label,

@@ -56,8 +56,8 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
   if (pending) {
     return (
       <div className="p-6 md:p-8 max-w-xl text-center" data-testid="deposit-processing-page">
-        <div className="w-20 h-20 rounded-full bg-[#EFF6FF] border border-[#DBEAFE] flex items-center justify-center mx-auto mb-5">
-          <Clock size={40} className="text-[#0B5FD1]" />
+        <div className="w-20 h-20 rounded-full bg-al-primary-subtle border border-[#DBEAFE] flex items-center justify-center mx-auto mb-5">
+          <Clock size={40} className="text-al-primary" />
         </div>
         <h1 className="text-2xl font-bold text-[#111827] mb-2">Payment processing…</h1>
         <p className="text-[#4B5563] text-sm mb-6 leading-relaxed">
@@ -65,7 +65,7 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
           Refresh this page or check your auctions page in a moment.
         </p>
         <Link href="/buyer/auctions"
-          className="inline-flex items-center gap-2 px-8 py-4 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors">
+          className="inline-flex items-center gap-2 px-8 py-4 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors">
           Go to My Auctions <ArrowRight size={15} />
         </Link>
       </div>
@@ -81,7 +81,7 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
         <h1 className="text-2xl font-bold text-[#111827] mb-2">Payment not confirmed</h1>
         <p className="text-[#4B5563] text-sm mb-8 leading-relaxed">{errorMsg}</p>
         <Link href="/buyer/deposit"
-          className="inline-flex items-center gap-2 px-8 py-4 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors">
+          className="inline-flex items-center gap-2 px-8 py-4 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors">
           Return to Payment <ArrowRight size={15} />
         </Link>
       </div>
@@ -98,14 +98,14 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
       <p className="text-[#4B5563] text-sm mb-8 leading-relaxed">
         Your $99 Limited-Time Auction Access Fee was received. Your private 48-hour dealer competition is being prepared.
       </p>
-      <div className="bg-[#EFF6FF] border border-[#DBEAFE] rounded-xl p-5 mb-6 text-left text-sm text-[#374151] space-y-2">
+      <div className="bg-al-primary-subtle border border-[#DBEAFE] rounded-xl p-5 mb-6 text-left text-sm text-[#374151] space-y-2">
         <p>• Dealers will receive invitations within the next few minutes</p>
         <p>• Your 48-hour auction window starts now</p>
         <p>• You will be notified when offers arrive</p>
         <p>• Your $99 is fully refundable if no competitive offers are submitted</p>
       </div>
       <Link href="/buyer/auctions" data-testid="view-auction-btn"
-        className="inline-flex items-center justify-center gap-2 w-full py-4 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors">
+        className="inline-flex items-center justify-center gap-2 w-full py-4 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors">
         View My Auction <ArrowRight size={15} />
       </Link>
     </div>

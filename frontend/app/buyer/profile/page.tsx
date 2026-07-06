@@ -25,7 +25,7 @@ export default async function ProfilePage() {
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="profile-page">
       <div className="flex items-center gap-3 mb-6">
-        <User size={22} className="text-[#0B5FD1]" />
+        <User size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">My Profile</h1>
       </div>
 

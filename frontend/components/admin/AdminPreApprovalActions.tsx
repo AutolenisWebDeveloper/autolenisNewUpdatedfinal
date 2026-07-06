@@ -61,7 +61,7 @@ export function AdminPreApprovalActions({ submissionId, status }: Props) {
             <h2 className="font-bold text-slate-900 mb-1">{modal.action === "approve" ? "Approve" : "Reject"} Pre-Approval</h2>
             <p className="text-sm text-slate-500 mb-4">Provide a reason (min 10 characters).</p>
             <textarea
-              className="w-full border border-slate-300 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+              className="w-full border border-slate-300 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-al-primary"
               rows={3}
               placeholder={modal.action === "approve" ? "e.g. Pre-approval documents verified and valid" : "e.g. Documentation does not meet requirements"}
               value={reason}

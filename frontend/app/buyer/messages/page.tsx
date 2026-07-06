@@ -21,7 +21,7 @@ export default async function MessagesPage() {
     <div className="p-6 md:p-8 max-w-2xl" data-testid="messages-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <MessageSquare size={22} className="text-[#0B5FD1]" />
+          <MessageSquare size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Messages</h1>
         </div>
       </div>
@@ -52,8 +52,8 @@ export default async function MessagesPage() {
                 key={t.id}
                 href={`/buyer/messages/${t.id}`}
                 data-testid={`thread-${t.id}`}
-                className={`block bg-white border rounded-xl p-4 hover:border-[#0B5FD1]/30 transition-colors ${
-                  hasUnread ? "border-[#0B5FD1]/50 bg-[#0B5FD1]/5" : "border-slate-200"
+                className={`block bg-white border rounded-xl p-4 hover:border-al-primary/30 transition-colors ${
+                  hasUnread ? "border-al-primary/50 bg-al-primary/5" : "border-slate-200"
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -67,7 +67,7 @@ export default async function MessagesPage() {
                           : "Support"}
                       </p>
                       {hasUnread && (
-                        <span className="inline-block w-2 h-2 rounded-full bg-[#0B5FD1]" data-testid={`unread-dot-${t.id}`} />
+                        <span className="inline-block w-2 h-2 rounded-full bg-al-primary" data-testid={`unread-dot-${t.id}`} />
                       )}
                     </div>
                     {latestMsg && (

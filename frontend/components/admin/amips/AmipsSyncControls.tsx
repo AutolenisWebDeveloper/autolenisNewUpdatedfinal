@@ -71,15 +71,15 @@ export default function AmipsSyncControls() {
         return (
           <div
             key={c.endpoint}
-            className="flex flex-col rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm transition-all hover:border-[#BFDBFE] hover:shadow-md hover:shadow-[#0B5FD1]/5"
+            className="flex flex-col rounded-2xl border border-[#E2E8F0] bg-white p-5 shadow-sm transition-all hover:border-[#BFDBFE] hover:shadow-md hover:shadow-al-primary/5"
             data-testid={`amips-control-${c.endpoint}`}
           >
             <div className="flex items-start justify-between mb-3">
-              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center">
-                <c.icon size={15} className="text-[#0B5FD1]" />
+              <div className="w-9 h-9 rounded-xl bg-al-primary-subtle flex items-center justify-center">
+                <c.icon size={15} className="text-al-primary" />
               </div>
               {running && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#0B5FD1]">
+                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-al-primary">
                   <Loader2 size={11} className="animate-spin" />
                   Running
                 </span>
@@ -91,7 +91,7 @@ export default function AmipsSyncControls() {
               type="button"
               onClick={() => run(c)}
               disabled={running}
-              className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#0B5FD1] px-3 py-2 text-xs font-semibold text-white shadow-md shadow-[#0B5FD1]/20 transition-colors hover:bg-[#0A4DB8] disabled:opacity-50 disabled:shadow-none"
+              className="mt-4 inline-flex items-center justify-center gap-1.5 rounded-xl bg-al-primary px-3 py-2 text-xs font-semibold text-white shadow-md shadow-al-primary/20 transition-colors hover:bg-al-primary-hover disabled:opacity-50 disabled:shadow-none"
             >
               {running ? (
                 <>

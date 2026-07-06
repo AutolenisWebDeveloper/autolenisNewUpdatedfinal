@@ -49,7 +49,7 @@ export default function BuyerMessageCompose() {
         <button
           onClick={() => setOpen(true)}
           data-testid="compose-new-message-btn"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-[#0B5FD1] text-white rounded-xl text-sm font-semibold hover:bg-[#0B5FD1] transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-al-primary text-white rounded-xl text-sm font-semibold hover:bg-al-primary transition-colors"
         >
           <MessageSquare size={15} />
           New Message
@@ -67,7 +67,7 @@ export default function BuyerMessageCompose() {
             placeholder="How can we help you today?"
             rows={4}
             maxLength={4000}
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
             data-testid="compose-textarea"
           />
           {error && (
@@ -87,7 +87,7 @@ export default function BuyerMessageCompose() {
             <button
               type="submit"
               disabled={submitting || !content.trim()}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-[#0B5FD1] text-white rounded-lg text-xs font-semibold hover:bg-[#0B5FD1] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-al-primary text-white rounded-lg text-xs font-semibold hover:bg-al-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               data-testid="compose-submit-btn"
             >
               <Send size={12} />

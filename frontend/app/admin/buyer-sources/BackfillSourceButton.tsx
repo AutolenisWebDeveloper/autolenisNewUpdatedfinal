@@ -44,7 +44,7 @@ export default function BackfillSourceButton({ nullCount }: { nullCount: number 
     <button
       onClick={runBackfill}
       disabled={busy}
-      className="inline-flex items-center gap-2 rounded-md bg-[#0B5FD1] px-4 py-2 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
+      className="inline-flex items-center gap-2 rounded-md bg-al-primary px-4 py-2 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
     >
       <Wand2 size={16} />
       {busy ? "Backfilling…" : `Backfill Unknown Sources (${nullCount})`}

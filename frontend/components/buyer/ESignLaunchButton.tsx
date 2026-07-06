@@ -49,7 +49,7 @@ export default function ESignLaunchButton({ dealId, signingUrl }: Props) {  cons
         onClick={handleLaunch}
         disabled={loading}
         data-testid="open-docusign-btn"
-        className="w-full flex items-center justify-center gap-2 py-4 px-6 bg-[#0B5FD1] text-white font-semibold rounded-xl hover:bg-[#0A4DB8] disabled:opacity-60 disabled:cursor-not-allowed transition-colors text-sm"
+        className="w-full flex items-center justify-center gap-2 py-4 px-6 bg-al-primary text-white font-semibold rounded-xl hover:bg-al-primary-hover disabled:opacity-60 disabled:cursor-not-allowed transition-colors text-sm"
       >
         {loading ? (
           <><Loader2 size={15} className="animate-spin" /> Preparing session…</>

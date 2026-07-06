@@ -68,7 +68,7 @@ export default async function AdminDepositsPage({ searchParams }: SP) {
               href={href}
               className={`px-3 py-1 text-xs rounded-full border transition-colors ${
                 isActive
-                  ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                  ? "bg-al-primary text-white border-al-primary"
                   : "border-slate-300 text-slate-600 hover:bg-slate-50"
               }`}
               data-testid={`deposit-filter-${s.toLowerCase()}`}
@@ -79,7 +79,7 @@ export default async function AdminDepositsPage({ searchParams }: SP) {
         })}
         <Link
           href="/admin/payments"
-          className="ml-auto text-xs text-slate-500 hover:text-[#0B5FD1] hover:underline"
+          className="ml-auto text-xs text-slate-500 hover:text-al-primary hover:underline"
           data-testid="deposits-back-to-payments"
         >
           ← Back to Payments
@@ -109,7 +109,7 @@ export default async function AdminDepositsPage({ searchParams }: SP) {
             >
               <Link
                 href={`/admin/buyers/${d.buyerId}`}
-                className="text-sm font-semibold text-slate-800 truncate hover:text-[#0B5FD1]"
+                className="text-sm font-semibold text-slate-800 truncate hover:text-al-primary"
               >
                 {d.buyerName}
               </Link>

@@ -85,7 +85,7 @@ export default function JourneyNavigator({
         aria-label="Toggle journey progress"
       >
         <div className="flex items-center gap-3">
-          <span className="text-xs font-semibold text-[#0B5FD1] bg-[#0B5FD1]/10 px-2.5 py-1 rounded-full">
+          <span className="text-xs font-semibold text-al-primary bg-al-primary/10 px-2.5 py-1 rounded-full">
             Step {stepNum} of {STAGES.length}
           </span>
           <span className="text-sm font-medium text-slate-700">
@@ -125,7 +125,7 @@ export default function JourneyNavigator({
                   className={[
                     "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
                     isCurrent
-                      ? "bg-[#0B5FD1] text-white"
+                      ? "bg-al-primary text-white"
                       : isCompleted
                       ? isClickable
                         ? "bg-green-100 text-green-700 cursor-pointer hover:bg-green-200 hover:text-green-800"

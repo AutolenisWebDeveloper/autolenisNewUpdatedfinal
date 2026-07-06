@@ -751,8 +751,8 @@ export function PrequalAdminPanel({
         {/* Action buttons */}
         <div className="space-y-3" data-testid="prequal-action-buttons">
           {/* Real iPredict run */}
-          <div className="border-2 border-[#0B5FD1]/20 rounded-xl p-4 bg-[#0B5FD1]/5">
-            <p className="text-xs font-semibold text-[#0B5FD1] uppercase tracking-wide mb-1">
+          <div className="border-2 border-al-primary/20 rounded-xl p-4 bg-al-primary/5">
+            <p className="text-xs font-semibold text-al-primary uppercase tracking-wide mb-1">
               MicroBilt iPredict — Real Provider Run
             </p>
             <p className="text-xs text-slate-500 mb-3">
@@ -1127,8 +1127,8 @@ export function PrequalAdminPanel({
           </details>
 
           {/* ── Consent Acknowledgment Section ──────────────────────────────── */}
-          <div className="border-2 border-[#0B5FD1]/30 rounded-xl p-4 space-y-4 bg-[#0B5FD1]/5">
-            <p className="text-xs font-semibold text-[#0B5FD1] uppercase tracking-wide">
+          <div className="border-2 border-al-primary/30 rounded-xl p-4 space-y-4 bg-al-primary/5">
+            <p className="text-xs font-semibold text-al-primary uppercase tracking-wide">
               Buyer Authorization / Consent Acknowledgment
             </p>
 
@@ -1213,7 +1213,7 @@ export function PrequalAdminPanel({
               <input
                 type="checkbox"
                 data-testid="ip-admin-certification"
-                className="mt-1 h-4 w-4 accent-[#0B5FD1]"
+                className="mt-1 h-4 w-4 accent-al-primary"
                 checked={ipForm.adminCertification}
                 onChange={e => setIpForm(f => ({ ...f, adminCertification: e.target.checked }))}
               />
@@ -1267,9 +1267,9 @@ export function PrequalAdminPanel({
     return (
       <div className="mt-6" data-testid="ipredict-confirm-section">
         {/* Overlay-style confirmation panel */}
-        <div className="border-2 border-[#0B5FD1] rounded-xl bg-white shadow-lg p-6">
+        <div className="border-2 border-al-primary rounded-xl bg-white shadow-lg p-6">
           <h2 className="text-base font-bold text-slate-900 mb-1 flex items-center gap-2">
-            <ShieldAlert size={18} className="text-[#0B5FD1]" />
+            <ShieldAlert size={18} className="text-al-primary" />
             Confirm MicroBilt iPredict Run
           </h2>
           <p className="text-xs text-slate-500 mb-5">
@@ -1364,7 +1364,7 @@ export function PrequalAdminPanel({
   if (state.view === "ipredict_running") {
     return (
       <div className="mt-6 flex flex-col items-center py-12" data-testid="ipredict-running">
-        <Loader2 size={36} className="text-[#0B5FD1] animate-spin mb-4" />
+        <Loader2 size={36} className="text-al-primary animate-spin mb-4" />
         <p className="text-base font-semibold text-slate-900">Running MicroBilt iPredict…</p>
         <p className="text-sm text-slate-500 mt-1">Calling MicroBilt — this may take up to 10 seconds.</p>
       </div>

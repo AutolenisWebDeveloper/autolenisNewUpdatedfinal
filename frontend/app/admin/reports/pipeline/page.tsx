@@ -50,7 +50,7 @@ export default async function AdminPipelinePage() {
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-pipeline-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <BarChart2 size={22} className="text-[#0B5FD1]" />
+          <BarChart2 size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Revenue Pipeline</h1>
         </div>
         <Button variant="secondary" size="sm" href="/api/admin/reports/pipeline?format=csv" data-testid="export-pipeline-csv-btn">

@@ -77,7 +77,7 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
       <div className="flex items-start justify-between mb-6">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <Gavel size={22} className="text-[#0B5FD1]" />
+            <Gavel size={22} className="text-al-primary" />
             <h1 className="text-xl font-bold text-slate-900">Auction #{auction.id.slice(-8)}</h1>
             <Badge variant={isActive ? "green" : "secondary"}>{auction.status}</Badge>
             {isActive && <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />}
@@ -86,7 +86,7 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
         </div>
         {isActive && remaining > 0 && (
           <div className="text-right" data-testid="auction-countdown">
-            <p className="text-2xl font-bold font-mono text-[#0B5FD1]">
+            <p className="text-2xl font-bold font-mono text-al-primary">
               {h.toString().padStart(2,"0")}:{m.toString().padStart(2,"0")}:{s.toString().padStart(2,"0")}
             </p>
             <p className="text-xs text-slate-400">remaining</p>
@@ -106,7 +106,7 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
             ].map(s => (
               <div key={s.label} data-testid={`auction-stat-${s.label.toLowerCase().replace(/\s+/g, "-")}`}
                 className="bg-white border border-slate-200 rounded-xl p-4 text-center">
-                <s.icon size={16} className="text-[#0B5FD1] mx-auto mb-1" />
+                <s.icon size={16} className="text-al-primary mx-auto mb-1" />
                 <p className="text-2xl font-bold text-slate-900">{s.value}</p>
                 <p className="text-xs text-slate-500">{s.label}</p>
               </div>
@@ -115,9 +115,9 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
 
           {/* Buyer budget */}
           {auction.buyer.preQualification && (
-            <div className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl p-4 text-sm" data-testid="buyer-budget-panel">
+            <div className="bg-al-primary/5 border border-al-primary/20 rounded-xl p-4 text-sm" data-testid="buyer-budget-panel">
               <span className="text-slate-600 font-medium">Approved budget (immutable): </span>
-              <span className="font-bold text-[#0B5FD1]">${(auction.buyer.preQualification.maxOtdAmountCents / 100).toLocaleString()}</span>
+              <span className="font-bold text-al-primary">${(auction.buyer.preQualification.maxOtdAmountCents / 100).toLocaleString()}</span>
               <Badge variant="secondary" className="ml-2 text-xs">{auction.buyer.preQualification.tier}</Badge>
             </div>
           )}
@@ -173,7 +173,7 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
                     <p className="text-xs font-semibold text-slate-500 uppercase mb-1">{label}</p>
                     {offer ? (
                       <>
-                        <p className="text-lg font-bold text-[#0B5FD1]">${(offer.otdPriceCents/100).toLocaleString()}</p>
+                        <p className="text-lg font-bold text-al-primary">${(offer.otdPriceCents/100).toLocaleString()}</p>
                         <p className="text-xs text-slate-500 mt-0.5">{offer.dealer.dealershipName}</p>
                       </>
                     ) : <p className="text-xs text-slate-400">No eligible offers</p>}
@@ -225,7 +225,7 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
 
         {/* Right: Admin action panel */}
         <div className="sticky top-6" data-testid="auction-action-panel">
-          <div className="bg-white border-2 border-[#0B5FD1]/20 rounded-xl p-5">
+          <div className="bg-white border-2 border-al-primary/20 rounded-xl p-5">
             <h3 className="font-semibold text-slate-800 text-sm mb-4">Admin Actions</h3>
 
             <div className="mb-4">

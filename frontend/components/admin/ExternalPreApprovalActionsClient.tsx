@@ -39,7 +39,7 @@ function ReasonModal({
         <textarea
           value={reason}
           onChange={e => setReason(e.target.value)}
-          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 resize-none"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 resize-none"
           rows={3}
           placeholder="Describe the reason for this action…"
         />

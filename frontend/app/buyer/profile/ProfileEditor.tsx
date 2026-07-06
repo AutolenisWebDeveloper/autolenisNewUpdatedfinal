@@ -74,7 +74,7 @@ export default function ProfileEditor({ initial }: { initial: Profile }) {
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5FD1] hover:bg-[#0B5FD1]/5 px-3 py-1.5 rounded-md transition-colors border border-[#0B5FD1]/20"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-al-primary hover:bg-al-primary/5 px-3 py-1.5 rounded-md transition-colors border border-al-primary/20"
             data-testid="edit-profile-btn"
           >
             <Pencil size={12} />
@@ -86,7 +86,7 @@ export default function ProfileEditor({ initial }: { initial: Profile }) {
               type="button"
               onClick={onSave}
               disabled={saving}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold bg-[#0B5FD1] text-white hover:bg-[#0A4DB8] px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold bg-al-primary text-white hover:bg-al-primary-hover px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
               data-testid="save-profile-btn"
             >
               <Check size={12} />

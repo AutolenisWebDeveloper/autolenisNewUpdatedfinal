@@ -91,7 +91,7 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
             <button key={tab} onClick={() => setActiveTab(tab)}
               data-testid={`deal-tab-${tab.toLowerCase()}`}
               className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-colors border-b-2 -mb-px ${
-                activeTab === tab ? "border-[#0B5FD1] text-[#0B5FD1]" : "border-transparent text-slate-500 hover:text-slate-700"
+                activeTab === tab ? "border-al-primary text-al-primary" : "border-transparent text-slate-500 hover:text-slate-700"
               }`}>
               {tab}
             </button>
@@ -391,7 +391,7 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
 
       {/* Right: Admin action panel */}
       <div className="space-y-4" data-testid="admin-action-panel">
-        <div className="bg-white border-2 border-[#0B5FD1]/20 rounded-xl p-5 sticky top-6">
+        <div className="bg-white border-2 border-al-primary/20 rounded-xl p-5 sticky top-6">
           <h3 className="font-semibold text-slate-800 text-sm mb-4">Admin Actions</h3>
 
           <div className="mb-4">

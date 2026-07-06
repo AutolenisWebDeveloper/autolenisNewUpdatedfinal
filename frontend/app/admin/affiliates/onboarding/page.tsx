@@ -57,7 +57,7 @@ export default async function AdminAffiliateOnboardingPage() {
                 <td className="px-4 py-3">
                   <Link
                     href={`/admin/affiliates/${review.affiliateId}`}
-                    className="text-[#0B5FD1] hover:underline font-medium text-xs"
+                    className="text-al-primary hover:underline font-medium text-xs"
                   >
                     View Affiliate →
                   </Link>

@@ -55,7 +55,7 @@ export default function PickupRescheduleButton({ dealId, currentDate, location }
       {!open ? (
         <button
           onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors mt-3"
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-al-primary hover:text-al-primary-hover transition-colors mt-3"
           data-testid="reschedule-pickup-btn"
         >
           <Calendar size={14} /> Reschedule pickup
@@ -70,27 +70,27 @@ export default function PickupRescheduleButton({ dealId, currentDate, location }
             <label className="block text-xs font-medium text-[#374151] mb-1.5">New date &amp; time</label>
             <input type="datetime-local" value={newDate} min={minDate}
               onChange={e => setNewDate(e.target.value)} required
-              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary"
               data-testid="reschedule-datetime" />
           </div>
           <div>
             <label className="block text-xs font-medium text-[#374151] mb-1.5">Location</label>
             <input type="text" value={newLoc} onChange={e => setNewLoc(e.target.value)}
               required minLength={5}
-              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary"
               data-testid="reschedule-location" />
           </div>
           <div>
             <label className="block text-xs font-medium text-[#374151] mb-1.5">Reason (optional)</label>
             <input type="text" value={reason} onChange={e => setReason(e.target.value)}
               maxLength={200} placeholder="e.g. Schedule conflict"
-              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary"
               data-testid="reschedule-reason" />
           </div>
           {error && <p className="text-xs text-red-600">{error}</p>}
           <div className="flex items-center gap-3">
             <button onClick={handleReschedule} disabled={loading || !newDate || !newLoc.trim()}
-              className="flex-1 flex items-center justify-center gap-2 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl disabled:opacity-60 transition-colors hover:bg-[#0A4DB8]"
+              className="flex-1 flex items-center justify-center gap-2 py-3 bg-al-primary text-white font-semibold text-sm rounded-xl disabled:opacity-60 transition-colors hover:bg-al-primary-hover"
               data-testid="confirm-reschedule-btn">
               {loading ? <><Loader2 size={14} className="animate-spin" />Updating…</> : "Confirm New Time"}
             </button>

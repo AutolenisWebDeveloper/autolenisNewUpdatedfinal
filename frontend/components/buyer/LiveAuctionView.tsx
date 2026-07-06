@@ -79,7 +79,7 @@ export default function LiveAuctionView({
   const isActive = remaining > 0;
 
   return (
-    <div className="bg-[#0B5FD1] rounded-2xl p-6 text-white" data-testid="auction-status-panel">
+    <div className="bg-al-primary rounded-2xl p-6 text-white" data-testid="auction-status-panel">
       <div className="flex items-center gap-2 mb-4">
         <div className={`w-2 h-2 rounded-full ${isActive ? "bg-green-400 animate-pulse" : "bg-slate-400"}`} />
         <span className="text-xs font-semibold text-white/70 uppercase tracking-wider">

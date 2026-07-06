@@ -479,12 +479,12 @@ function ProgressBar({ step }: { step: 1 | 2 | 3 | 4 }) {
     <div data-testid="wizard-progress" className="mb-2">
       {/* Mobile: text + thin line */}
       <div className="sm:hidden">
-        <p className="text-xs font-semibold text-[#0B5FD1] mb-2" data-testid="wizard-step-text">
+        <p className="text-xs font-semibold text-al-primary mb-2" data-testid="wizard-step-text">
           Step {step} of 4 · {labels[step - 1]}
         </p>
         <div className="h-1.5 w-full bg-[#E5E7EB] rounded-full overflow-hidden">
           <div
-            className="h-full bg-[#0B5FD1] transition-all duration-500 ease-out"
+            className="h-full bg-al-primary transition-all duration-500 ease-out"
             style={{ width: `${(step / 4) * 100}%` }}
           />
         </div>
@@ -495,14 +495,14 @@ function ProgressBar({ step }: { step: 1 | 2 | 3 | 4 }) {
           const isCurrent = step === n;
           const isComplete = step > n;
           const labelColor =
-            isCurrent ? "text-[#0B5FD1]" :
+            isCurrent ? "text-al-primary" :
             isComplete ? "text-[#1A6B18]" :
             "text-slate-400";
           const dotBg =
-            isCurrent ? "bg-[#0B5FD1] text-white" :
+            isCurrent ? "bg-al-primary text-white" :
             isComplete ? "bg-[#50D14E] text-white" :
             "bg-slate-200 text-slate-500";
-          const ring = isCurrent ? "ring-4 ring-[#0B5FD1]/15" : "";
+          const ring = isCurrent ? "ring-4 ring-al-primary/15" : "";
           return (
             <div key={n} className="flex-1 flex items-center gap-2.5" data-testid={`progress-step-${n}`}>
               <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-all ${dotBg} ${ring}`}>
@@ -562,17 +562,17 @@ function Step1({
                 data-testid={`vehicle-type-${id.toLowerCase()}`}
                 className={`relative rounded-xl border-2 px-4 py-4 text-left transition-all hover:-translate-y-0.5 ${
                   selected
-                    ? "border-[#0B5FD1] bg-[#EFF6FF] shadow-sm shadow-[#0B5FD1]/15"
+                    ? "border-al-primary bg-al-primary-subtle shadow-sm shadow-al-primary/15"
                     : "border-slate-200 bg-white hover:border-slate-300"
                 }`}
               >
                 {selected && (
-                  <span className="absolute top-2 right-2 h-5 w-5 rounded-full bg-[#0B5FD1] text-white flex items-center justify-center">
+                  <span className="absolute top-2 right-2 h-5 w-5 rounded-full bg-al-primary text-white flex items-center justify-center">
                     <Check size={12} />
                   </span>
                 )}
                 <span className="text-2xl block mb-1.5" aria-hidden>{icon}</span>
-                <span className={`text-sm font-semibold ${selected ? "text-[#0B5FD1]" : "text-slate-800"}`}>
+                <span className={`text-sm font-semibold ${selected ? "text-al-primary" : "text-slate-800"}`}>
                   {label}
                 </span>
               </button>
@@ -594,7 +594,7 @@ function Step1({
                 data-testid={`condition-${opt.toLowerCase()}`}
                 className={`rounded-xl border-2 px-4 py-3.5 font-semibold text-sm transition-all ${
                   selected
-                    ? "bg-[#0B5FD1] text-white border-[#0B5FD1] shadow-sm shadow-[#0B5FD1]/20"
+                    ? "bg-al-primary text-white border-al-primary shadow-sm shadow-al-primary/20"
                     : "bg-white text-slate-800 border-slate-200 hover:border-slate-300"
                 }`}
               >
@@ -617,7 +617,7 @@ function Step1({
             onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
             placeholder="e.g. Toyota Camry, Honda CR-V, Ford F-150"
             data-testid="make-model-input"
-            className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+            className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
           />
           {showSuggestions && suggestions.length > 0 && (
             <ul
@@ -629,7 +629,7 @@ function Step1({
                   <button
                     type="button"
                     onMouseDown={(e) => { e.preventDefault(); update("makeModel", s); setShowSuggestions(false); }}
-                    className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-[#EFF6FF] hover:text-[#0B5FD1]"
+                    className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-al-primary-subtle hover:text-al-primary"
                   >
                     {s}
                   </button>
@@ -649,7 +649,7 @@ function Step1({
               value={form.yearMin ?? ""}
               onChange={(e) => update("yearMin", e.target.value ? Number(e.target.value) : null)}
               data-testid="year-min-select"
-              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
             >
               <option value="">No minimum</option>
               {REQUEST_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
@@ -661,7 +661,7 @@ function Step1({
               value={form.yearMax ?? ""}
               onChange={(e) => update("yearMax", e.target.value ? Number(e.target.value) : null)}
               data-testid="year-max-select"
-              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
             >
               <option value="">No maximum</option>
               {REQUEST_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
@@ -683,7 +683,7 @@ function Step1({
                 data-testid={`timeline-${t.toLowerCase().replace(/\s+/g, "-")}`}
                 className={`rounded-full border px-4 py-2.5 text-sm font-medium transition-all ${
                   selected
-                    ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                    ? "bg-al-primary text-white border-al-primary"
                     : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
                 }`}
               >
@@ -707,7 +707,7 @@ function Step1({
                 data-testid={`purchase-timeframe-${tf.val.toLowerCase()}`}
                 className={`rounded-full border px-4 py-2.5 text-xs font-medium transition-all ${
                   selected
-                    ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                    ? "bg-al-primary text-white border-al-primary"
                     : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
                 }`}
               >
@@ -759,7 +759,7 @@ function Step2({
           onChange={(e) => update("zip", e.target.value.replace(/\D/g, "").slice(0, 5))}
           placeholder="e.g. 30309"
           data-testid="zip-input"
-          className={`w-full rounded-lg border bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1] ${
+          className={`w-full rounded-lg border bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary ${
             errors.zip ? "border-red-400" : "border-slate-200"
           }`}
         />
@@ -775,7 +775,7 @@ function Step2({
             onChange={(e) => update("budget", formatCurrency(e.target.value))}
             placeholder="35,000"
             data-testid="budget-input"
-            className={`w-full rounded-lg border bg-white pl-9 pr-4 py-3 text-base font-medium focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1] ${
+            className={`w-full rounded-lg border bg-white pl-9 pr-4 py-3 text-base font-medium focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary ${
               errors.budget ? "border-red-400" : "border-slate-200"
             }`}
           />
@@ -800,7 +800,7 @@ function Step2({
               onChange={(e) => update("downPayment", formatCurrency(e.target.value))}
               placeholder="5,000"
               data-testid="down-payment-input"
-              className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+              className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
             />
           </div>
         </FieldGroup>
@@ -814,7 +814,7 @@ function Step2({
               onChange={(e) => update("monthlyTarget", formatCurrency(e.target.value))}
               placeholder="500/mo"
               data-testid="monthly-target-input"
-              className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+              className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
             />
           </div>
         </FieldGroup>
@@ -825,7 +825,7 @@ function Step2({
         data-testid="budget-summary"
         className="mt-6 rounded-xl border border-[#E5E7EB] bg-gradient-to-br from-[#F8F9FB] to-white p-5"
       >
-        <p className="text-xs font-bold uppercase tracking-wider text-[#0B5FD1] mb-3">Your Budget Summary</p>
+        <p className="text-xs font-bold uppercase tracking-wider text-al-primary mb-3">Your Budget Summary</p>
         <dl className="space-y-2 text-sm">
           <div className="flex justify-between">
             <dt className="text-slate-600">Target price:</dt>
@@ -841,7 +841,7 @@ function Step2({
           </div>
           <div className="flex justify-between border-t border-[#E5E7EB] pt-2 mt-2">
             <dt className="text-slate-600">Est. monthly:</dt>
-            <dd className="font-bold text-[#0B5FD1] font-mono" data-testid="summary-monthly">
+            <dd className="font-bold text-al-primary font-mono" data-testid="summary-monthly">
               {monthlyEst > 0 ? `~$${monthlyEst.toLocaleString()}/mo estimate` : "—"}
             </dd>
           </div>
@@ -887,13 +887,13 @@ function Step3({
           onChange={(e) => update("trim", e.target.value)}
           placeholder="e.g. EX, Sport, Limited"
           data-testid="trim-input"
-          className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+          className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
         />
       </FieldGroup>
 
       <FieldGroup label="Maximum Mileage" testId="field-mileage" optional>
         <div className="px-1">
-          <p className="text-xl font-bold text-[#0B5FD1] font-mono mb-3" data-testid="mileage-value">
+          <p className="text-xl font-bold text-al-primary font-mono mb-3" data-testid="mileage-value">
             {form.maxMileage === "Any" ? "Any mileage" : `Up to ${form.maxMileage}`}
           </p>
           <input
@@ -904,7 +904,7 @@ function Step3({
             value={mileageIdx === -1 ? MILEAGE_STOPS.length - 1 : mileageIdx}
             onChange={(e) => update("maxMileage", MILEAGE_STOPS[Number(e.target.value)])}
             data-testid="mileage-slider"
-            className="w-full accent-[#0B5FD1]"
+            className="w-full accent-al-primary"
           />
           <div className="flex justify-between text-xs text-slate-500 mt-1.5">
             {MILEAGE_STOPS.map(s => <span key={s}>{s}</span>)}
@@ -924,7 +924,7 @@ function Step3({
                 data-testid={`feature-${f.toLowerCase().replace(/\s+/g, "-")}`}
                 className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all ${
                   selected
-                    ? "border-[#0B5FD1] bg-[#EFF6FF] text-[#0B5FD1]"
+                    ? "border-al-primary bg-al-primary-subtle text-al-primary"
                     : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
                 }`}
               >
@@ -936,7 +936,7 @@ function Step3({
         {form.features.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5" data-testid="selected-features">
             {form.features.map(f => (
-              <span key={f} className="inline-flex items-center gap-1 rounded-full bg-[#0B5FD1] text-white text-xs px-2.5 py-1">
+              <span key={f} className="inline-flex items-center gap-1 rounded-full bg-al-primary text-white text-xs px-2.5 py-1">
                 {f}
                 <button
                   type="button"
@@ -1031,7 +1031,7 @@ function Step4({
           onClick={onSkip}
           disabled={loading}
           data-testid="skip-financing-btn"
-          className="text-sm text-slate-400 hover:text-[#0B5FD1] transition-colors mt-1 shrink-0"
+          className="text-sm text-slate-400 hover:text-al-primary transition-colors mt-1 shrink-0"
         >
           Skip this step
         </button>
@@ -1059,10 +1059,10 @@ function Step4({
                 }}
                 data-testid={`payment-method-${pm.id.toLowerCase()}`}
                 className={`rounded-xl border-2 px-4 py-3 text-left transition-all ${
-                  sel ? "border-[#0B5FD1] bg-[#EFF6FF]" : "border-slate-200 bg-white hover:border-slate-300"
+                  sel ? "border-al-primary bg-al-primary-subtle" : "border-slate-200 bg-white hover:border-slate-300"
                 }`}
               >
-                <p className={`font-semibold text-sm ${sel ? "text-[#0B5FD1]" : "text-slate-800"}`}>{pm.label}</p>
+                <p className={`font-semibold text-sm ${sel ? "text-al-primary" : "text-slate-800"}`}>{pm.label}</p>
                 <p className="text-xs text-slate-500 mt-0.5">{pm.desc}</p>
               </button>
             );
@@ -1084,7 +1084,7 @@ function Step4({
                   onClick={() => set("preApprovalStatus", opt.val)}
                   data-testid={`pre-approval-${opt.val.toLowerCase()}`}
                   className={`rounded-xl border-2 px-4 py-3 text-sm font-semibold transition-all ${
-                    sel ? "border-[#0B5FD1] bg-[#EFF6FF] text-[#0B5FD1]" : "border-slate-200 bg-white text-slate-800 hover:border-slate-300"
+                    sel ? "border-al-primary bg-al-primary-subtle text-al-primary" : "border-slate-200 bg-white text-slate-800 hover:border-slate-300"
                   }`}
                 >{opt.label}</button>
               );
@@ -1094,7 +1094,7 @@ function Step4({
               data-testid="pre-approval-self_arrange"
               className={`col-span-2 rounded-xl border-2 px-4 py-3 text-sm font-semibold transition-all ${
                 financing.preApprovalStatus === "SELF_ARRANGE"
-                  ? "border-[#0B5FD1] bg-[#EFF6FF] text-[#0B5FD1]"
+                  ? "border-al-primary bg-al-primary-subtle text-al-primary"
                   : "border-slate-200 bg-white text-slate-800 hover:border-slate-300"
               }`}
             >Exploring options / I&apos;ll arrange my own</button>
@@ -1109,7 +1109,7 @@ function Step4({
             <input type="text" value={financing.lenderName} onChange={e => set("lenderName", e.target.value)}
               placeholder="e.g. Capital One Auto, Chase, local CU"
               data-testid="lender-name-input"
-              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
           </FieldGroup>
           <div className="grid grid-cols-2 gap-4">
             <FieldGroup label="Approved amount" testId="field-approved-amount" optional>
@@ -1118,21 +1118,21 @@ function Step4({
                 <input type="text" inputMode="numeric" value={financing.approvedAmount}
                   onChange={e => set("approvedAmount", formatCurrency(e.target.value))}
                   placeholder="30,000" data-testid="approved-amount-input"
-                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
               </div>
             </FieldGroup>
             <FieldGroup label="APR (%)" testId="field-apr" optional>
               <input type="text" inputMode="decimal" value={financing.quotedApr}
                 onChange={e => set("quotedApr", e.target.value.replace(/[^0-9.]/g, ""))}
                 placeholder="6.99" data-testid="apr-input"
-                className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+                className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
             </FieldGroup>
           </div>
           <FieldGroup label="Approval expiry date" testId="field-expiry" optional>
             <input type="date" value={financing.approvalExpiresAt}
               onChange={e => set("approvalExpiresAt", e.target.value)}
               data-testid="expiry-date-input"
-              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+              className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
           </FieldGroup>
           <div className="grid grid-cols-2 gap-4">
             <FieldGroup label="Down payment planned" testId="field-down-approved" optional>
@@ -1141,7 +1141,7 @@ function Step4({
                 <input type="text" inputMode="numeric" value={financing.downPayment}
                   onChange={e => set("downPayment", formatCurrency(e.target.value))}
                   placeholder="5,000" data-testid="down-payment-approved-input"
-                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
               </div>
             </FieldGroup>
             <FieldGroup label="Monthly target" testId="field-monthly-approved" optional>
@@ -1150,7 +1150,7 @@ function Step4({
                 <input type="text" inputMode="numeric" value={financing.monthlyPaymentTarget}
                   onChange={e => set("monthlyPaymentTarget", formatCurrency(e.target.value))}
                   placeholder="500" data-testid="monthly-target-approved-input"
-                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
               </div>
             </FieldGroup>
           </div>
@@ -1159,7 +1159,7 @@ function Step4({
               <button type="button" onClick={() => fileInputRef.current?.click()}
                 disabled={financing.letterUploading}
                 data-testid="upload-letter-btn"
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-[#0B5FD1] hover:text-[#0B5FD1] transition-colors disabled:opacity-60">
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:border-al-primary hover:text-al-primary transition-colors disabled:opacity-60">
                 {financing.letterUploading
                   ? <><Loader2 size={14} className="animate-spin" /> Uploading…</>
                   : <><Upload size={14} /> {financing.preApprovalLetterUrl ? "Replace file" : "Choose file"}</>}
@@ -1187,7 +1187,7 @@ function Step4({
                   <button key={cr.id} type="button" onClick={() => set("estimatedCreditRange", cr.id)}
                     data-testid={`credit-range-${cr.id.toLowerCase()}`}
                     className={`rounded-lg border-2 px-4 py-2.5 text-sm font-medium transition-all text-left ${
-                      sel ? "border-[#0B5FD1] bg-[#EFF6FF] text-[#0B5FD1]" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                      sel ? "border-al-primary bg-al-primary-subtle text-al-primary" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
                     }`}
                   >{cr.label}</button>
                 );
@@ -1201,7 +1201,7 @@ function Step4({
                 <input type="text" inputMode="numeric" value={financing.estimatedAnnualIncome}
                   onChange={e => set("estimatedAnnualIncome", formatCurrency(e.target.value))}
                   placeholder="65,000" data-testid="annual-income-input"
-                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
               </div>
             </FieldGroup>
             <FieldGroup label="Down payment available" testId="field-down-help" optional>
@@ -1210,7 +1210,7 @@ function Step4({
                 <input type="text" inputMode="numeric" value={financing.downPayment}
                   onChange={e => set("downPayment", formatCurrency(e.target.value))}
                   placeholder="3,000" data-testid="down-payment-help-input"
-                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
               </div>
             </FieldGroup>
           </div>
@@ -1220,7 +1220,7 @@ function Step4({
               <input type="text" inputMode="numeric" value={financing.monthlyPaymentTarget}
                 onChange={e => set("monthlyPaymentTarget", formatCurrency(e.target.value))}
                 placeholder="450" data-testid="monthly-target-help-input"
-                className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+                className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
             </div>
           </FieldGroup>
         </div>
@@ -1238,7 +1238,7 @@ function Step4({
                     onClick={() => set("proofOfFundsAvailable", opt.val)}
                     data-testid={`proof-funds-${opt.label.toLowerCase()}`}
                     className={`rounded-xl border-2 px-4 py-3 text-sm font-semibold transition-all ${
-                      sel ? "border-[#0B5FD1] bg-[#EFF6FF] text-[#0B5FD1]" : "border-slate-200 bg-white text-slate-800 hover:border-slate-300"
+                      sel ? "border-al-primary bg-al-primary-subtle text-al-primary" : "border-slate-200 bg-white text-slate-800 hover:border-slate-300"
                     }`}
                   >{opt.label}</button>
                 );
@@ -1251,7 +1251,7 @@ function Step4({
               <input type="text" inputMode="numeric" value={financing.maxBudget}
                 onChange={e => set("maxBudget", formatCurrency(e.target.value))}
                 placeholder="45,000" data-testid="cash-budget-input"
-                className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+                className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
             </div>
           </FieldGroup>
         </div>
@@ -1268,7 +1268,7 @@ function Step4({
                   <button key={months} type="button" onClick={() => set("leaseTermMonths", months)}
                     data-testid={`lease-term-${months}`}
                     className={`rounded-xl border-2 px-4 py-3 text-sm font-semibold transition-all ${
-                      sel ? "border-[#0B5FD1] bg-[#EFF6FF] text-[#0B5FD1]" : "border-slate-200 bg-white text-slate-800 hover:border-slate-300"
+                      sel ? "border-al-primary bg-al-primary-subtle text-al-primary" : "border-slate-200 bg-white text-slate-800 hover:border-slate-300"
                     }`}
                   >{months} months</button>
                 );
@@ -1280,7 +1280,7 @@ function Step4({
               <input type="text" inputMode="numeric" value={financing.leaseMilesPerYear}
                 onChange={e => set("leaseMilesPerYear", e.target.value.replace(/\D/g, ""))}
                 placeholder="12,000" data-testid="lease-miles-input"
-                className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+                className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
             </FieldGroup>
             <FieldGroup label="Down payment planned" testId="field-down-lease" optional>
               <div className="relative">
@@ -1288,7 +1288,7 @@ function Step4({
                 <input type="text" inputMode="numeric" value={financing.downPayment}
                   onChange={e => set("downPayment", formatCurrency(e.target.value))}
                   placeholder="2,000" data-testid="down-payment-lease-input"
-                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]" />
+                  className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary" />
               </div>
             </FieldGroup>
           </div>
@@ -1306,7 +1306,7 @@ function Step4({
                   <button key={String(opt.val)} type="button" onClick={() => set("tradeIn", opt.val)}
                     data-testid={`trade-in-${opt.label.toLowerCase()}`}
                     className={`rounded-xl border-2 px-4 py-3 text-sm font-semibold transition-all ${
-                      sel ? "border-[#0B5FD1] bg-[#EFF6FF] text-[#0B5FD1]" : "border-slate-200 bg-white text-slate-800 hover:border-slate-300"
+                      sel ? "border-al-primary bg-al-primary-subtle text-al-primary" : "border-slate-200 bg-white text-slate-800 hover:border-slate-300"
                     }`}
                   >{opt.label}</button>
                 );
@@ -1322,7 +1322,7 @@ function Step4({
                   <button key={tf.id} type="button" onClick={() => set("purchaseTimeframe", tf.id)}
                     data-testid={`timeframe-${tf.id.toLowerCase()}`}
                     className={`rounded-full border px-4 py-2.5 text-xs font-medium transition-all ${
-                      sel ? "bg-[#0B5FD1] text-white border-[#0B5FD1]" : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
+                      sel ? "bg-al-primary text-white border-al-primary" : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
                     }`}
                   >{tf.label}</button>
                 );
@@ -1355,7 +1355,7 @@ function Step4({
         onClick={onSubmit}
         disabled={loading || rateLimitSeconds > 0}
         data-testid="submit-request-btn"
-        className="w-full h-12 rounded-lg bg-[#0B5FD1] text-white font-semibold text-sm hover:bg-[#0A4DB8] active:scale-[0.99] transition-all shadow-md shadow-[#0B5FD1]/20 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        className="w-full h-12 rounded-lg bg-al-primary text-white font-semibold text-sm hover:bg-al-primary-hover active:scale-[0.99] transition-all shadow-md shadow-al-primary/20 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
       >
         {loading ? (<><Loader2 size={16} className="animate-spin" /> Submitting your request…</>)
                  : "Submit My Request"}
@@ -1364,7 +1364,7 @@ function Step4({
         Or{" "}
         <button type="button" onClick={onSkip} disabled={loading}
           data-testid="skip-financing-bottom-btn"
-          className="text-[#0B5FD1] hover:underline">
+          className="text-al-primary hover:underline">
           skip financing and submit now
         </button>
       </p>
@@ -1393,7 +1393,7 @@ function SuccessState({ requestId }: { requestId: string }) {
         <p className="text-slate-600 mb-1.5">
           We&apos;re reviewing your information and will begin searching for the best options.
         </p>
-        <p className="text-sm font-mono text-[#0B5FD1] mb-7" data-testid="success-ref">
+        <p className="text-sm font-mono text-al-primary mb-7" data-testid="success-ref">
           Request {ref}
         </p>
 
@@ -1404,12 +1404,12 @@ function SuccessState({ requestId }: { requestId: string }) {
             {["Request Received", "Searching", "Options Ready", "Selection", "Deal"].map((label, i) => (
               <li key={label} className="flex flex-col items-center text-center" data-testid={`tracker-stage-${i + 1}`}>
                 <span className={`h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                  i === 0 ? "bg-[#0B5FD1] text-white" : "bg-slate-100 text-slate-400"
+                  i === 0 ? "bg-al-primary text-white" : "bg-slate-100 text-slate-400"
                 }`}>
                   {i === 0 ? <Check size={12} /> : i + 1}
                 </span>
                 <span className={`text-[10px] mt-1.5 leading-tight ${
-                  i === 0 ? "text-[#0B5FD1] font-semibold" : "text-slate-400"
+                  i === 0 ? "text-al-primary font-semibold" : "text-slate-400"
                 }`}>{label}</span>
               </li>
             ))}
@@ -1420,7 +1420,7 @@ function SuccessState({ requestId }: { requestId: string }) {
           <Link
             href={`/buyer/requests/${requestId}`}
             data-testid="view-request-btn"
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#0B5FD1] text-white font-semibold text-sm px-6 h-12 hover:bg-[#0A4DB8] transition-colors shadow-md shadow-[#0B5FD1]/20"
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-al-primary text-white font-semibold text-sm px-6 h-12 hover:bg-al-primary-hover transition-colors shadow-md shadow-al-primary/20"
           >
             View Your Request <ArrowRight size={14} />
           </Link>
@@ -1467,7 +1467,7 @@ function ContinueButton({ onClick, testId, label }: { onClick: () => void; testI
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className="mt-7 w-full h-12 rounded-lg bg-[#0B5FD1] text-white font-semibold text-sm hover:bg-[#0A4DB8] active:scale-[0.99] transition-all shadow-md shadow-[#0B5FD1]/20 flex items-center justify-center gap-2"
+      className="mt-7 w-full h-12 rounded-lg bg-al-primary text-white font-semibold text-sm hover:bg-al-primary-hover active:scale-[0.99] transition-all shadow-md shadow-al-primary/20 flex items-center justify-center gap-2"
     >
       {label} <ArrowRight size={16} />
     </button>
@@ -1480,7 +1480,7 @@ function BackLink({ onClick }: { onClick: () => void }) {
       type="button"
       onClick={onClick}
       data-testid="wizard-back-btn"
-      className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#0B5FD1] mb-4 transition-colors"
+      className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-al-primary mb-4 transition-colors"
     >
       <ChevronLeft size={14} /> Back
     </button>
@@ -1490,7 +1490,7 @@ function BackLink({ onClick }: { onClick: () => void }) {
 function TrustItem({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
     <div className="flex items-center gap-2 rounded-lg bg-white border border-slate-200 px-3 py-2.5">
-      <span className="text-[#0B5FD1]">{icon}</span>
+      <span className="text-al-primary">{icon}</span>
       <span className="text-slate-700 font-medium">{text}</span>
     </div>
   );

@@ -206,7 +206,7 @@ function ManualOfferSection({ offerId }: { offerId: string }) {
           <p className="text-sm font-bold text-[#111827]">Submit Manual Offer</p>
           <p className="text-xs text-slate-500">Enter an offer on behalf of a registered or unregistered dealer</p>
         </div>
-        <span className="text-[#0B5FD1] text-sm font-semibold">{open ? "Hide" : "Add Offer"}</span>
+        <span className="text-al-primary text-sm font-semibold">{open ? "Hide" : "Add Offer"}</span>
       </button>
 
       {open && (
@@ -218,7 +218,7 @@ function ManualOfferSection({ offerId }: { offerId: string }) {
                 key={t}
                 type="button"
                 onClick={() => setTab(t)}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${tab === t ? "bg-[#0B5FD1] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${tab === t ? "bg-al-primary text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
                 data-testid={`manual-offer-tab-${t}`}
               >
                 {t === "registered" ? "Registered Dealer" : "Outside Dealer"}
@@ -308,7 +308,7 @@ function ManualOfferSection({ offerId }: { offerId: string }) {
           {error && <p className="text-xs text-red-600 mt-2" data-testid="manual-offer-error">{error}</p>}
           {success && <p className="text-xs text-green-600 mt-2" data-testid="manual-offer-success">Offer submitted — refreshing…</p>}
 
-          <Button type="submit" disabled={submitting || success} className="mt-3 bg-[#0B5FD1] text-white" data-testid="manual-offer-submit">
+          <Button type="submit" disabled={submitting || success} className="mt-3 bg-al-primary text-white" data-testid="manual-offer-submit">
             {submitting ? <><Loader2 size={14} className="animate-spin mr-1.5" />Submitting…</> : "Submit Offer"}
           </Button>
         </form>
@@ -437,7 +437,7 @@ export default function VehicleOfferDetailClient({ offer: initialOffer, appUrl }
             href={offer.vehicleReferenceUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 text-[#0B5FD1] text-sm font-medium hover:underline"
+            className="inline-flex items-center gap-2 text-al-primary text-sm font-medium hover:underline"
             data-testid="offer-reference-link"
           >
             <ExternalLink size={14} /> View Vehicle Reference →
@@ -521,7 +521,7 @@ export default function VehicleOfferDetailClient({ offer: initialOffer, appUrl }
                     return (
                       <div
                         key={idx}
-                        className={`rounded-xl p-4 border-2 transition-colors ${isSelected ? "border-[#0B5FD1] bg-[#0B5FD1]/5" : "border-slate-100 bg-slate-50"}`}
+                        className={`rounded-xl p-4 border-2 transition-colors ${isSelected ? "border-al-primary bg-al-primary/5" : "border-slate-100 bg-slate-50"}`}
                         data-testid={`submission-${s.id}-vehicle-${idx}`}
                       >
                         <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold mb-1">Vehicle Offer {idx + 1}</p>
@@ -537,14 +537,14 @@ export default function VehicleOfferDetailClient({ offer: initialOffer, appUrl }
                           href={v.vehicleUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 mt-3 bg-[#0B5FD1] text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-[#0944a8]"
+                          className="inline-flex items-center gap-2 mt-3 bg-al-primary text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-[#0944a8]"
                         >
                           <ExternalLink size={12} /> View Vehicle →
                         </a>
                         <div className="grid grid-cols-2 gap-3 mt-3 text-sm">
                           <div>
                             <p className="text-xs text-slate-400">OTD Price</p>
-                            <p className="font-mono font-bold text-[#0B5FD1]">${(v.offerPriceCents / 100).toLocaleString()}</p>
+                            <p className="font-mono font-bold text-al-primary">${(v.offerPriceCents / 100).toLocaleString()}</p>
                           </div>
                           <div>
                             <p className="text-xs text-slate-400">Availability</p>
@@ -560,7 +560,7 @@ export default function VehicleOfferDetailClient({ offer: initialOffer, appUrl }
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => toggle(s.id, idx)}
-                              className="h-4 w-4 rounded border-slate-300 accent-[#0B5FD1]"
+                              className="h-4 w-4 rounded border-slate-300 accent-al-primary"
                               data-testid={`select-vehicle-${s.id}-${idx}`}
                             />
                             <span className="text-xs font-medium text-slate-700">Select this vehicle for buyer review</span>
@@ -595,10 +595,10 @@ export default function VehicleOfferDetailClient({ offer: initialOffer, appUrl }
 
       {/* Send to buyer panel */}
       {selected.size > 0 && !sentResult && (
-        <div className="fixed bottom-0 left-0 right-0 lg:left-[220px] z-20 bg-white border-t border-[#E5E7EB] shadow-2xl shadow-[#0B5FD1]/10" data-testid="send-to-buyer-panel">
+        <div className="fixed bottom-0 left-0 right-0 lg:left-[220px] z-20 bg-white border-t border-[#E5E7EB] shadow-2xl shadow-al-primary/10" data-testid="send-to-buyer-panel">
           <form onSubmit={handleSendToBuyer} className="max-w-4xl mx-auto p-6">
             <p className="text-sm font-semibold text-[#111827] mb-3">
-              Selected: <span className="text-[#0B5FD1]">{selected.size}</span> vehicle offer{selected.size === 1 ? "" : "s"} ready to send
+              Selected: <span className="text-al-primary">{selected.size}</span> vehicle offer{selected.size === 1 ? "" : "s"} ready to send
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -630,7 +630,7 @@ export default function VehicleOfferDetailClient({ offer: initialOffer, appUrl }
               <p className="font-semibold text-green-800 mb-1">Sent to {buyerName} at {buyerEmail}</p>
               <div className="flex items-center gap-2 mt-2">
                 <code className="text-xs text-slate-700 font-mono bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 truncate flex-1">{sentResult.reviewUrl}</code>
-                <button onClick={copyReviewUrl} className="text-xs font-medium text-slate-600 hover:text-[#0B5FD1] border border-slate-200 bg-white rounded-lg px-3 py-1.5">
+                <button onClick={copyReviewUrl} className="text-xs font-medium text-slate-600 hover:text-al-primary border border-slate-200 bg-white rounded-lg px-3 py-1.5">
                   {copied ? "Copied!" : "Copy"}
                 </button>
               </div>

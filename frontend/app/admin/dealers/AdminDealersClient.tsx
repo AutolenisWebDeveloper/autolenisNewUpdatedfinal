@@ -264,7 +264,7 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
                 <button
                   type="submit"
                   disabled={actionLoading || (modalConfig[actionModal.type].requireReason && !actionInput.trim())}
-                  className={"flex-1 rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (modalConfig[actionModal.type].destructive ? "bg-red-600 hover:bg-red-700" : "bg-[#0B5FD1] hover:bg-purple-800")}
+                  className={"flex-1 rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (modalConfig[actionModal.type].destructive ? "bg-red-600 hover:bg-red-700" : "bg-al-primary hover:bg-purple-800")}
                 >
                   {actionLoading ? "Processing…" : modalConfig[actionModal.type].submitLabel}
                 </button>
@@ -277,7 +277,7 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
       {/* Header */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[#0B5FD1] flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-al-primary flex items-center justify-center">
             <Users size={18} className="text-white" />
           </div>
           <div>
@@ -302,7 +302,7 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
           <Link
             href="/admin/dealers/invite"
             data-testid="admin-dealers-invite-link"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white rounded-lg text-xs font-semibold transition-colors"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-al-primary hover:bg-al-primary-hover text-white rounded-lg text-xs font-semibold transition-colors"
           >
             <UserPlus size={13} />
             Invite Dealer
@@ -348,7 +348,7 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
           <button
             onClick={() => applyFilters()}
             disabled={loading}
-            className="px-5 py-2.5 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+            className="px-5 py-2.5 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
           >
             {loading ? <RefreshCw size={14} className="animate-spin" /> : null}
             Search

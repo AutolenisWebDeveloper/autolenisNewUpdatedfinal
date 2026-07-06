@@ -81,7 +81,7 @@ export default async function BuyerSourcesPage({
     <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-buyer-sources-page">
       <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
         <div className="flex items-center gap-3">
-          <BarChart2 size={22} className="text-[#0B5FD1]" />
+          <BarChart2 size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Buyer Sources</h1>
         </div>
         <BackfillSourceButton nullCount={nullCount} />
@@ -107,7 +107,7 @@ export default async function BuyerSourcesPage({
             href={`/admin/buyer-sources?filter=${f.key}`}
             className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${
               activeFilter === f.key
-                ? "border-[#0B5FD1] text-[#0B5FD1]"
+                ? "border-al-primary text-al-primary"
                 : "border-transparent text-slate-500 hover:text-slate-700"
             }`}
           >

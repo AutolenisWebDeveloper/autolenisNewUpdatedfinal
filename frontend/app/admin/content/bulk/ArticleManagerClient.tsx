@@ -517,7 +517,7 @@ export default function ArticleManagerClient({
 
   // ── Render ───────────────────────────────────────────────────────────────────
   const statCards = [
-    { key: "", label: "Total Articles", value: stats.total, tone: "text-[#0B5FD1]", ring: "" },
+    { key: "", label: "Total Articles", value: stats.total, tone: "text-al-primary", ring: "" },
     { key: "PUBLISHED", label: "Published", value: stats.published, tone: "text-green-600", ring: "" },
     { key: "REVIEW_NEEDED", label: "Review Needed", value: stats.review_needed, tone: "text-amber-600", ring: "" },
     { key: "DRAFT", label: "Draft", value: stats.draft, tone: "text-slate-600", ring: "" },
@@ -527,12 +527,12 @@ export default function ArticleManagerClient({
   return (
     <div className="min-h-screen bg-[#F4F6FA] p-6 md:p-8" data-testid="bulk-article-page">
       <div className="flex items-center gap-3 mb-1">
-        <FileText size={22} className="text-[#0B5FD1]" />
+        <FileText size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Bulk Article Management</h1>
       </div>
       <p className="text-sm text-slate-500 mb-6">
         Select, filter, preview, and bulk publish or retire generated articles.
-        <Link href="/admin/content" className="text-[#0B5FD1] hover:underline ml-1">
+        <Link href="/admin/content" className="text-al-primary hover:underline ml-1">
           Content Engine overview →
         </Link>
       </p>
@@ -584,7 +584,7 @@ export default function ArticleManagerClient({
               onClick={() => patchFilter({ status: c.key })}
               data-testid={`stat-card-${c.key || "all"}`}
               className={`bg-white border rounded-2xl shadow-sm px-4 py-3 text-left transition-all ${
-                active ? "border-[#0B5FD1] ring-1 ring-[#0B5FD1]" : "border-[#E2E8F0] hover:border-[#CBD5E1]"
+                active ? "border-al-primary ring-1 ring-al-primary" : "border-[#E2E8F0] hover:border-[#CBD5E1]"
               }`}
             >
               <p className={`text-2xl font-bold ${c.tone}`}>{fmt(c.value)}</p>
@@ -605,7 +605,7 @@ export default function ArticleManagerClient({
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search article titles..."
               data-testid="search-input"
-              className="w-full pl-9 pr-3 py-2 text-sm border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#0B5FD1]"
+              className="w-full pl-9 pr-3 py-2 text-sm border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-al-primary"
             />
           </div>
           <Select
@@ -655,7 +655,7 @@ export default function ArticleManagerClient({
             type="button"
             onClick={() => setMatchingAll(true)}
             data-testid="select-all-matching"
-            className="text-xs font-semibold text-[#0B5FD1] hover:underline"
+            className="text-xs font-semibold text-al-primary hover:underline"
           >
             Select All Matching ({fmt(total)})
           </button>
@@ -812,7 +812,7 @@ export default function ArticleManagerClient({
                             type="button"
                             onClick={() => openDrawer(a.id)}
                             data-testid={`row-preview-${a.id}`}
-                            className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:bg-blue-50 px-2 py-1 rounded"
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-al-primary hover:bg-blue-50 px-2 py-1 rounded"
                           >
                             <Eye size={13} /> Preview
                           </button>
@@ -1051,7 +1051,7 @@ function Select({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       data-testid={testid}
-      className="text-sm border border-[#E2E8F0] rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-[#0B5FD1]"
+      className="text-sm border border-[#E2E8F0] rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-al-primary"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>
@@ -1099,7 +1099,7 @@ function DrawerBody({ article }: { article: FullArticle }) {
           <Link
             href={`/buying-guide/${article.slug}`}
             target="_blank"
-            className="inline-flex items-center gap-1 text-xs text-[#0B5FD1] hover:underline"
+            className="inline-flex items-center gap-1 text-xs text-al-primary hover:underline"
           >
             View live <ExternalLink size={11} />
           </Link>
@@ -1126,7 +1126,7 @@ function DrawerBody({ article }: { article: FullArticle }) {
         </div>
       )}
       <div
-        className="content-article-preview text-sm text-slate-700 leading-relaxed [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-2 [&_h3]:font-semibold [&_h3]:text-slate-800 [&_h3]:mt-4 [&_p]:mb-3 [&_a]:text-[#0B5FD1] [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_li]:mb-1"
+        className="content-article-preview text-sm text-slate-700 leading-relaxed [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-2 [&_h3]:font-semibold [&_h3]:text-slate-800 [&_h3]:mt-4 [&_p]:mb-3 [&_a]:text-al-primary [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_li]:mb-1"
         dangerouslySetInnerHTML={{ __html: article.body }}
       />
       {faqs.length > 0 && (

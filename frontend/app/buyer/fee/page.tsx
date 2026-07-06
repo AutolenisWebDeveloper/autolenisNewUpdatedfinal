@@ -375,8 +375,8 @@ function FeePage_Due({
   return (
     <PageShell>
       <HeroCard
-        icon={<Sparkles size={28} className="text-[#0B5FD1]" />}
-        iconBg="bg-[#0B5FD1]/10"
+        icon={<Sparkles size={28} className="text-al-primary" />}
+        iconBg="bg-al-primary/10"
         title="AutoLenis Service Fee"
         subtitle="Payment required to continue"
         badge={{ text: "Premium Plan", color: "purple" }}
@@ -593,7 +593,7 @@ function HeroCard({
 }) {
   const badgeColors = {
     green: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    purple: "bg-[#0B5FD1]/10 text-[#0B5FD1] border-[#0B5FD1]/20",
+    purple: "bg-al-primary/10 text-al-primary border-al-primary/20",
     amber: "bg-amber-100 text-amber-700 border-amber-200",
     blue: "bg-blue-100 text-blue-700 border-blue-200",
   };
@@ -810,7 +810,7 @@ function PlanInfoCard({
       data-testid="fee-plan-info"
     >
       {isPremium ? (
-        <Sparkles size={18} className="text-[#0B5FD1] mt-0.5 shrink-0" />
+        <Sparkles size={18} className="text-al-primary mt-0.5 shrink-0" />
       ) : (
         <Shield size={18} className="text-emerald-600 mt-0.5 shrink-0" />
       )}
@@ -847,7 +847,7 @@ function CtaLink({
     <Link
       href={href}
       data-testid={testId}
-      className="flex items-center justify-center gap-2 w-full bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white font-semibold py-3.5 px-6 rounded-xl transition-colors text-sm shadow-md shadow-[#0B5FD1]/20"
+      className="flex items-center justify-center gap-2 w-full bg-al-primary hover:bg-al-primary-hover text-white font-semibold py-3.5 px-6 rounded-xl transition-colors text-sm shadow-md shadow-al-primary/20"
     >
       {children}
     </Link>

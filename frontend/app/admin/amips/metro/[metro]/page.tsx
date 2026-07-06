@@ -13,7 +13,7 @@ interface Props {
 const LIFECYCLE_CHIP: Record<string, string> = {
   ACTIVE: "bg-[#ECFDF5] text-[#059669]",
   UNDER_REVIEW: "bg-[#FFFBEB] text-[#D97706]",
-  REFRESH_REQUIRED: "bg-[#EFF6FF] text-[#0B5FD1]",
+  REFRESH_REQUIRED: "bg-al-primary-subtle text-al-primary",
   RETIRED: "bg-[#F1F5F9] text-[#64748B]",
 };
 
@@ -38,14 +38,14 @@ export default async function MetroProfilePage({ params }: Props) {
 
   return (
     <div className="min-h-screen bg-[#F4F6FA] p-6 md:p-8 max-w-[1200px] mx-auto">
-      <Link href="/admin/amips" className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-[#0B5FD1] transition-colors mb-4">
+      <Link href="/admin/amips" className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-al-primary transition-colors mb-4">
         <ChevronLeft size={14} /> Market Intelligence Center
       </Link>
 
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
         <div>
           <div className="flex items-center gap-2 mb-1.5">
-            <MapPinned size={13} className="text-[#0B5FD1]" />
+            <MapPinned size={13} className="text-al-primary" />
             <p className="text-[10px] text-[#94A3B8] font-semibold uppercase tracking-widest">Metro Intelligence Profile</p>
           </div>
           <h1 className="text-2xl font-bold text-[#0F172A] tracking-tight">{profile.metro}, {profile.state}</h1>
@@ -56,7 +56,7 @@ export default async function MetroProfilePage({ params }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-2xl border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
-          <Target size={16} className="text-[#0B5FD1]" />
+          <Target size={16} className="text-al-primary" />
           <div>
             <p className="text-[10px] text-[#94A3B8] font-medium uppercase tracking-wide">Opportunity</p>
             <p className="text-xl font-bold font-mono text-[#0F172A] leading-none">{profile.opportunityScore}<span className="text-xs text-[#94A3B8] font-normal">/100</span></p>
@@ -84,7 +84,7 @@ export default async function MetroProfilePage({ params }: Props) {
         {/* Vehicles in this metro */}
         <div className="lg:col-span-2">
           <div className="flex items-center gap-2 mb-3">
-            <Gauge size={13} className="text-[#0B5FD1]" />
+            <Gauge size={13} className="text-al-primary" />
             <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.15em]">Vehicle Buyer Advantage</p>
           </div>
           <div className="rounded-2xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
@@ -104,7 +104,7 @@ export default async function MetroProfilePage({ params }: Props) {
                     <tr key={`${v.make}-${v.model}`} className="hover:bg-[#F8FAFF] transition-colors">
                       <td className="px-5 py-3">
                         <Link href={`/admin/amips/vehicle/${encodeURIComponent(v.make)}/${encodeURIComponent(v.model)}`}
-                          className="font-semibold text-[#0F172A] hover:text-[#0B5FD1] transition-colors">
+                          className="font-semibold text-[#0F172A] hover:text-al-primary transition-colors">
                           {v.make} {v.model}
                         </Link>
                       </td>
@@ -122,7 +122,7 @@ export default async function MetroProfilePage({ params }: Props) {
         <div className="space-y-5">
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Building2 size={13} className="text-[#0B5FD1]" />
+              <Building2 size={13} className="text-al-primary" />
               <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.15em]">Dealer Brand Mix</p>
             </div>
             <div className="rounded-2xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
@@ -146,7 +146,7 @@ export default async function MetroProfilePage({ params }: Props) {
       {/* Published pages */}
       <div className="mt-6">
         <div className="flex items-center gap-2 mb-3">
-          <FileText size={13} className="text-[#0B5FD1]" />
+          <FileText size={13} className="text-al-primary" />
           <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.15em]">Published Pages ({profile.pages.length})</p>
         </div>
         <div className="rounded-2xl border border-[#E2E8F0] bg-white shadow-sm overflow-hidden">
@@ -168,7 +168,7 @@ export default async function MetroProfilePage({ params }: Props) {
                   {profile.pages.map((p) => (
                     <tr key={p.slug} className="hover:bg-[#F8FAFF] transition-colors">
                       <td className="px-5 py-3">
-                        <Link href={`/intelligence/${p.slug}`} className="font-medium text-[#0F172A] hover:text-[#0B5FD1] transition-colors">{p.title}</Link>
+                        <Link href={`/intelligence/${p.slug}`} className="font-medium text-[#0F172A] hover:text-al-primary transition-colors">{p.title}</Link>
                       </td>
                       <td className="px-5 py-3">
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${LIFECYCLE_CHIP[p.lifecycleStatus] ?? "bg-[#F1F5F9] text-[#64748B]"}`}>{p.lifecycleStatus}</span>

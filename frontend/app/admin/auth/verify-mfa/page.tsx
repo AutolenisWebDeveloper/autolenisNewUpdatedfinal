@@ -80,7 +80,7 @@ export default function AdminVerifyMfaPage() {
     <div className="min-h-screen bg-gradient-to-br from-[#0A0A0A] via-[#111827] to-[#0B3D8A] flex items-center justify-center p-6" data-testid="admin-verify-mfa-page">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-[#0B5FD1] flex items-center justify-center mx-auto mb-4 shadow-md shadow-[#0B5FD1]/25">
+          <div className="w-14 h-14 rounded-2xl bg-al-primary flex items-center justify-center mx-auto mb-4 shadow-md shadow-al-primary/25">
             <Shield size={24} className="text-white" />
           </div>
           <h1 className="text-2xl font-bold text-white">Two-Factor Authentication</h1>

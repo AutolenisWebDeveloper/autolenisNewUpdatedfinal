@@ -161,7 +161,7 @@ export default function NewInventoryClient() {
   }
 
   const labelCls = "text-xs font-semibold text-slate-700 mb-1 block";
-  const inputCls = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]";
+  const inputCls = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary";
   const errorCls = "text-xs text-red-600 mt-1";
 
   return (
@@ -307,7 +307,7 @@ export default function NewInventoryClient() {
               data-testid="upload-image-btn"
               disabled={images.length >= 10 || uploadingCount > 0}
               onClick={() => fileRef.current?.click()}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#0B5FD1] hover:bg-[#0A4DB8] disabled:bg-slate-300 text-white rounded-lg text-xs font-semibold transition"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-al-primary hover:bg-al-primary-hover disabled:bg-slate-300 text-white rounded-lg text-xs font-semibold transition"
             >
               {uploadingCount > 0 ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
               {uploadingCount > 0 ? `Uploading ${uploadingCount}...` : "Upload Images"}
@@ -346,7 +346,7 @@ export default function NewInventoryClient() {
                     className="absolute top-1 right-1 w-6 h-6 bg-black/70 hover:bg-black text-white rounded-full flex items-center justify-center"
                   ><X size={12} /></button>
                   {idx === 0 && (
-                    <span className="absolute bottom-1 left-1 bg-[#0B5FD1] text-white text-[10px] px-1.5 py-0.5 rounded font-semibold">COVER</span>
+                    <span className="absolute bottom-1 left-1 bg-al-primary text-white text-[10px] px-1.5 py-0.5 rounded font-semibold">COVER</span>
                   )}
                 </div>
               ))}
@@ -365,7 +365,7 @@ export default function NewInventoryClient() {
             type="submit"
             data-testid="submit-vehicle-btn"
             disabled={submitting}
-            className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#0B5FD1] hover:bg-[#0A4DB8] disabled:bg-slate-300 text-white rounded-lg text-sm font-semibold transition"
+            className="inline-flex items-center gap-2 px-6 py-2.5 bg-al-primary hover:bg-al-primary-hover disabled:bg-slate-300 text-white rounded-lg text-sm font-semibold transition"
           >
             {submitting && <Loader2 size={14} className="animate-spin" />}
             {submitting ? "Saving..." : "Save Vehicle"}
