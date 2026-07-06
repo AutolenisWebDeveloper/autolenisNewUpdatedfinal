@@ -31,7 +31,7 @@
 | crm/automations/[id]/activate | POST | state change | crm.manage |
 | crm/automations/[id]/pause | POST | state change | crm.manage |
 | crm/automations/[id]/versions/[versionId]/restore | POST | mutate | crm.manage |
-| **crm/automations/[id]/trigger** | POST | fires automation | **crm.manage ⚠️** — may fan out downstream sends; consider comms.bulk_send |
+| **crm/automations/[id]/trigger** | POST | fires automation | **comms.bulk_send** ✅ (reclassified: max reachable side-effect = mass send) |
 | crm/badges | GET | read | crm.read |
 | crm/campaigns | GET | list | crm.read |
 | crm/campaigns | POST | create campaign | crm.manage |
@@ -47,8 +47,8 @@
 | crm/conversations/[id]/read | POST | mark-read (write) | crm.manage |
 | crm/conversations/[id]/escalate | PATCH | mutate | crm.manage |
 | crm/conversations/[id]/resolve | POST | mutate | crm.manage |
-| **crm/conversations/[id]/reply** | POST | **outbound message to contact** (8 send calls) | **comms.bulk_send ⚠️** — single outbound; owner may want a narrower comms.reply tier |
-| **crm/copilot** | POST | **AI draft, 0 writes** | **ai.use ⚠️** (policy 5) |
+| **crm/conversations/[id]/reply** | POST | **outbound message to contact** (8 send calls) | **comms.reply** ✅ (reclassified: support-capable single reply, distinct from bulk) |
+| **crm/copilot** | POST | **AI draft, 0 writes** | **ai.use** ✅ (policy 5; human-actor audit pinned by test:crm-audit) |
 | crm/messages/sent | GET | read | crm.read |
 | crm/segments | GET | list | crm.read |
 | crm/segments | POST | create | crm.manage |
@@ -65,14 +65,17 @@
 | crm/templates/preview | POST | **preview compute, 0 writes** | crm.read ⚠️ (POST-read) |
 | search | GET | global read | crm.read |
 | operations/analytics/refresh | POST | recompute analytics | crm.manage |
-| **operations/dlq/[id]/retry** | POST | **replays a failed job** | **crm.manage ⚠️** — a replayed job can re-fire arbitrary side effects incl. sends; consider a dedicated ops.dlq tier |
+| **operations/dlq/[id]/retry** | POST | **replays a failed job** | **ops.replay** ✅ (reclassified: SUPER-only; highest-privilege — arbitrary inherited side effects) |
 
-## Non-obvious calls flagged for your review (⚠️)
-1. **automations/[id]/trigger** — gated crm.manage, but a triggered automation may fan out sends. Decide: keep manage, or comms.bulk_send.
-2. **conversations/[id]/reply** — a single outbound message; gated at comms.bulk_send (the only outbound tier today). Decide whether single replies warrant a narrower tier than bulk campaigns.
-3. **copilot** — AI draft generation, gated ai.use per policy 5 (all roles read+draft). Confirm the copilot's actions are logged under the invoking admin (they are — `actor` is passed through).
-4. **operations/dlq/[id]/retry** — replays failed jobs; gated crm.manage. A replay can re-fire any side effect. Decide whether this deserves an ops-restricted or SUPER tier.
-5. **All four POST-reads** (campaigns/segments/templates preview, and note search is GET) — classified read despite POST because they perform zero writes.
+## Non-obvious calls — RESOLVED by owner five-flag dispositions (history retained)
+All five reviewed; three reclassified toward tighter restriction, two confirmed. Live in code (`lib/auth/permissions.ts` + route bindings) as of commit a91a3cc.
+1. **automations/[id]/trigger** — ✅ **RECLASSIFIED crm.manage → comms.bulk_send** (max reachable side-effect = mass send).
+2. **conversations/[id]/reply** — ✅ **SPLIT to comms.reply** (support-capable, distinct from bulk campaigns; aligns with SUPPORT_ADMIN).
+3. **copilot** — ✅ **ai.use CONFIRMED**; human-actor audit attribution pinned by a durable-intent test (`test:crm-audit`).
+4. **operations/dlq/[id]/retry** — ✅ **RECLASSIFIED crm.manage → ops.replay (SUPER-only)**, the new highest-privilege tier. Idempotency verified (re-emits same Inngest payload → same `acquireIdempotencyGuard` key); date-bucketed keyless-send caveat flagged above.
+5. **All four POST-reads** — ✅ **crm.read CONFIRMED** (zero writes despite POST).
+
+**Enforce-flip note:** the two up-tiered routes (trigger, dlq/retry) now emit a different `RBAC_SHADOW_DENY` signal than pre-reclassification, so they reset their own meaningful soak window. Do not compile the bucketing report from pre-reclassification data.
 
 ## Coverage
 - getAdminActor route call-sites remaining: **0** (all 39 migrated: 5 destructive sends in the prior commit + 34 here). `lib/auth/admin-actor.ts` retains the underlying `getAuthenticatedAdmin` helpers used by `requirePermissionActor`.
