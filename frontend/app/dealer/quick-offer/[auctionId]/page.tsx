@@ -5,7 +5,6 @@
 
 "use client";
 
-import { logger } from "@/lib/logger";
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -58,11 +57,9 @@ export default function QuickOfferPage() {
     fetch(`/api/dealer/auctions/${auctionId}`)
       .then(r => r.json())
       .then(data => {
-        // Debug: surface dealer/auction ids so a "not invited" 404 is diagnosable.
-        const sessionDealerId = data?.data?.sessionDealerId ?? data?.sessionDealerId ?? data?.error?.sessionDealerId;
-        logger.info("[quick-offer] dealerId from session:", sessionDealerId);
-        logger.info("[quick-offer] auctionId:", auctionId);
-        if (data.auction) setAuctionCtx(data.auction);
+        // The dealer API wraps payloads in { success, data } (successResponse).
+        const auction = data?.data?.auction;
+        if (auction) setAuctionCtx(auction);
         else setAuctionError(data.error?.message ?? "Auction not found or you are not invited.");
       })
       .catch(() => setAuctionError("Unable to load auction details."));
