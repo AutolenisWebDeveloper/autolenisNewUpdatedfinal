@@ -5,10 +5,18 @@ import { prisma } from "@/lib/prisma";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
 import { dispatch } from "@/lib/qstash/dispatch";
+import { limitPaymentIntent, clientIpKey } from "@/lib/security/rate-limit";
 
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
+
+  // Card-testing guard: throttle intent creation per buyer and per source IP.
+  // Fails CLOSED on limiter-store outage (see lib/security/rate-limit.ts).
+  for (const key of [`deposit:buyer:${buyer.id}`, `deposit:ip:${clientIpKey(request.headers)}`]) {
+    const rl = await limitPaymentIntent(key);
+    if (!rl.ok) return errorResponse("RATE_LIMITED", rl.message, rl.status);
+  }
 
   // D1: Verify prequal is valid (expiresAt > now) before allowing deposit
   const prequal = buyer.preQualification;
