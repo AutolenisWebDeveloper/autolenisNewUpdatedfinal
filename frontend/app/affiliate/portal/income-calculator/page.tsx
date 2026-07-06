@@ -239,7 +239,7 @@ Join the AutoLenis affiliate program: ${enrollUrl}`;
           </div>
         </div>
         <p className="text-xs text-white/40">
-          Rates: L1={Math.round(L1_RATE * 100)}%, L2={Math.round(L2_RATE * 100)}%, L3={Math.round(L3_RATE * 100)}% of $499 fee. Not a guarantee.
+          Rates: L1={Math.round(L1_RATE * 100)}%, L2={Math.round(L2_RATE * 100)}%, L3={Math.round(L3_RATE * 100)}% of the ${FEE} fee. Not a guarantee.
         </p>
       </div>
 

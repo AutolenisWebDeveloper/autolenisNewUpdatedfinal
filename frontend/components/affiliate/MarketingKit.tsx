@@ -157,14 +157,17 @@ export default function MarketingKit({ referralCode, referralLink }: Props) {
                     data-testid={`resource-item-${t.id}`}
                     className="bg-white border border-slate-200 rounded-xl overflow-hidden"
                   >
-                    {/* Header row */}
-                    <button
-                      type="button"
-                      onClick={() => setExpandedId(isOpen ? null : t.id)}
-                      data-testid={`resource-toggle-${t.id}`}
-                      className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
+                    {/* Header row — toggle and Copy are SIBLING buttons: a
+                        button may not contain another button (invalid HTML,
+                        broken keyboard/AT semantics). */}
+                    <div className="flex items-center justify-between px-5 py-2 hover:bg-slate-50 transition-colors">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedId(isOpen ? null : t.id)}
+                        aria-expanded={isOpen}
+                        data-testid={`resource-toggle-${t.id}`}
+                        className="flex flex-1 items-center gap-3 py-2 text-left"
+                      >
                         <div className="p-1.5 bg-[#0B5FD1]/8 rounded-lg">
                           <t.icon size={14} className="text-[#0B5FD1]" />
                         </div>
@@ -172,7 +175,7 @@ export default function MarketingKit({ referralCode, referralLink }: Props) {
                           <p className="text-sm font-semibold text-slate-800">{t.title}</p>
                           <p className="text-xs text-slate-400">{t.desc}</p>
                         </div>
-                      </div>
+                      </button>
                       <div className="flex items-center gap-2 shrink-0 ml-3">
                         <CopyButton text={t.content} testId={`copy-btn-${t.id}`} />
                         {isOpen ? (
@@ -181,7 +184,7 @@ export default function MarketingKit({ referralCode, referralLink }: Props) {
                           <ChevronDown size={16} className="text-slate-400" />
                         )}
                       </div>
-                    </button>
+                    </div>
 
                     {/* Expanded content */}
                     {isOpen && (
