@@ -22,7 +22,14 @@ export async function POST(request: NextRequest) {
   const stripe = getStripe();
   const body = await request.text();
   const sig = request.headers.get("stripe-signature");
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    // Fail loudly instead of silently verifying against "" — a missing secret
+    // is a deployment error, not a bad request. 500 keeps Stripe retrying so
+    // no events are lost while ops fixes the env.
+    logger.error("[stripe/webhook] STRIPE_WEBHOOK_SECRET is not set — rejecting webhook");
+    return new NextResponse("Webhook not configured", { status: 500 });
+  }
 
   let event: Stripe.Event;
   try {
@@ -31,10 +38,9 @@ export async function POST(request: NextRequest) {
     return new NextResponse("Webhook signature invalid", { status: 400 });
   }
 
-  // D3: Idempotency — atomic claim on PaymentProviderEvent.eventId.
-  // Two concurrent Stripe retries can both pass a findUnique check, so we
-  // rely on the unique-index error from create() to detect duplicates. The
-  // first writer wins; the loser returns 200 so Stripe stops retrying.
+  // D3: Idempotency — the event row (unique on eventId) is the claim record.
+  // Ensure the row exists; the unique index arbitrates concurrent creates.
+  // Fast-path duplicate ack when the event was already fully processed.
   const existing = await prisma.paymentProviderEvent.findUnique({
     where: { eventId: event.id },
     select: { processed: true },
@@ -49,12 +55,9 @@ export async function POST(request: NextRequest) {
       });
     } catch (err) {
       const code = (err as { code?: string } | null)?.code;
-      if (code === "P2002") {
-        // Another retry won the race. Ack so Stripe stops retrying — the
-        // winner is responsible for the side effects.
-        return NextResponse.json({ received: true, duplicate: true });
-      }
-      throw err;
+      if (code !== "P2002") throw err;
+      // Another delivery created the row concurrently — fall through; the
+      // transactional claim below decides a single winner.
     }
   }
 
@@ -65,56 +68,84 @@ export async function POST(request: NextRequest) {
         const { buyerId, type } = pi.metadata;
 
         if (type === "deposit") {
-          // BUG2 FIX: Admin send-link creates Checkout Session — PI metadata is empty unless
-          // payment_intent_data.metadata is set. Support both paths:
-          // 1. Buyer-initiated: pi.metadata.buyerId present, deposit already has stripePaymentIntentId
-          // 2. Admin send-link: pi.metadata.depositId present, deposit has no PI ID yet — link it first
-          const depositIdFromMeta = pi.metadata?.depositId;
-          if (depositIdFromMeta) {
-            // Link PI to deposit created by admin send-link (which had no PI ID yet)
-            await prisma.deposit.updateMany({
-              where: { id: depositIdFromMeta, stripePaymentIntentId: null },
-              data: { stripePaymentIntentId: pi.id },
+          // Phase 0.5-3: the deposit money-cluster (PI link → deposit PAID →
+          // auction create → in-app notification) runs INSIDE one interactive
+          // transaction together with the idempotency claim (processed=true).
+          // Consequences:
+          //   • Replay-safe: once committed, a redelivery loses the claim
+          //     (updateMany count 0) and acks as duplicate.
+          //   • Concurrency-safe: a second in-flight delivery blocks on the
+          //     row lock, then sees processed=true and acks — no double run.
+          //   • Crash-safe: a failure anywhere in the cluster rolls back the
+          //     claim too, so Stripe's retry re-runs everything cleanly.
+          const outcome = await prisma.$transaction(async (tx) => {
+            const claimed = await tx.paymentProviderEvent.updateMany({
+              where: { eventId: event.id, processed: false },
+              data: { processed: true, processedAt: new Date() },
             });
-          }
+            if (claimed.count === 0) return null; // another delivery won
 
-          await prisma.deposit.updateMany({
-            where: { stripePaymentIntentId: pi.id },
-            data: { status: "PAID" },
-          });
-          // Create auction after deposit paid
-          const deposit = await prisma.deposit.findFirst({
-            where: { stripePaymentIntentId: pi.id },
-            include: {
-              buyer: {
-                include: { user: { select: { email: true } } },
+            // BUG2 FIX: Admin send-link creates Checkout Session — PI metadata is empty unless
+            // payment_intent_data.metadata is set. Support both paths:
+            // 1. Buyer-initiated: pi.metadata.buyerId present, deposit already has stripePaymentIntentId
+            // 2. Admin send-link: pi.metadata.depositId present, deposit has no PI ID yet — link it first
+            const depositIdFromMeta = pi.metadata?.depositId;
+            if (depositIdFromMeta) {
+              await tx.deposit.updateMany({
+                where: { id: depositIdFromMeta, stripePaymentIntentId: null },
+                data: { stripePaymentIntentId: pi.id },
+              });
+            }
+
+            // Out-of-order guard: a late-arriving success event must never
+            // resurrect a deposit that charge.refunded already settled.
+            await tx.deposit.updateMany({
+              where: { stripePaymentIntentId: pi.id, status: { not: "REFUNDED" } },
+              data: { status: "PAID" },
+            });
+
+            const deposit = await tx.deposit.findFirst({
+              where: { stripePaymentIntentId: pi.id },
+              include: {
+                buyer: {
+                  include: { user: { select: { email: true } } },
+                },
               },
-            },
-          });
-          if (deposit) {
-            // Auction.depositId is unique. Use upsert so a webhook retry (e.g.
-            // after a transient 5xx from a downstream side-effect) does not
-            // throw P2002 and trap the event in a permanent failure loop.
-            const existingAuction = await prisma.auction.findUnique({
+            });
+            if (!deposit) return { deposit: null, createdAuction: null, isNewAuction: false };
+
+            // Auction.depositId is unique — re-use if a prior partial run created it.
+            const existingAuction = await tx.auction.findUnique({
               where: { depositId: deposit.id },
               select: { id: true },
             });
             const createdAuction = existingAuction
               ? existingAuction
-              : await prisma.auction.create({
+              : await tx.auction.create({
                   data: {
                     buyerId: deposit.buyerId,
                     depositId: deposit.id,
                     status: "PENDING",
                   },
                 });
-            // Notify buyer in-app — only on the first time we create the auction
-            // so retries don't spam duplicate in-app notifications.
             if (!existingAuction) {
-              await prisma.notification.create({
+              await tx.notification.create({
                 data: { buyerId: deposit.buyerId, title: "Auction activated!", body: "Your $99 deposit was received. Your private auction is being prepared.", type: "AUCTION_STARTED" },
               });
             }
+            return { deposit, createdAuction, isNewAuction: !existingAuction };
+          });
+
+          if (outcome === null) {
+            return NextResponse.json({ received: true, duplicate: true });
+          }
+
+          const { deposit, createdAuction, isNewAuction } = outcome;
+          const existingAuction = isNewAuction ? null : createdAuction;
+          if (deposit) {
+            // Post-commit effects: idempotent or best-effort; failures are
+            // alerted via logger.error → Sentry rather than retried by Stripe
+            // (the money state above has already committed).
 
             // BUG1 FIX: Launch auction and invite dealers (was missing — dealers were never notified)
             if (createdAuction && !existingAuction) {
@@ -297,8 +328,11 @@ export async function POST(request: NextRequest) {
         const pi = event.data.object as Stripe.PaymentIntent;
 
         if (pi.metadata.type === "deposit") {
+          // Out-of-order guard: only a still-PENDING deposit can fail — a late
+          // failure event must not downgrade a deposit that already succeeded
+          // (PAID) or settled (REFUNDED).
           await prisma.deposit.updateMany({
-            where: { stripePaymentIntentId: pi.id },
+            where: { stripePaymentIntentId: pi.id, status: "PENDING" },
             data:  { status: "FAILED" },
           });
         }
@@ -438,9 +472,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Mark as processed
-    await prisma.paymentProviderEvent.update({
-      where: { eventId: event.id },
+    // Claim-at-end for the non-deposit event types. These handlers are each
+    // idempotent (status-guarded deal advance, qualifyingEventId-keyed
+    // commissions, PI-keyed email rail), so re-running on retry is safe and a
+    // transient failure above (→ 500) keeps Stripe retrying. The deposit path
+    // claims transactionally up front and returns before reaching here when
+    // it loses the claim.
+    await prisma.paymentProviderEvent.updateMany({
+      where: { eventId: event.id, processed: false },
       data: { processed: true, processedAt: new Date() },
     });
 
