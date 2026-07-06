@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Wand2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface BackfillResult {
   prospectId: string;
@@ -19,26 +20,18 @@ export default function BackfillButton({ missingCount }: { missingCount: number 
   async function runBackfill() {
     setBusy(true);
     try {
-      const res = await fetch("/api/admin/dealer-outreach/backfill", {
-        method: "POST",
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
-      }
-      const data = body?.data as
-        | { attempted: number; succeeded: number; failed: number; results: BackfillResult[] }
-        | undefined;
-      if (data) {
-        window.alert(
-          `Backfill complete — attempted ${data.attempted}, succeeded ${data.succeeded}, failed ${data.failed}.`,
-        );
-      } else {
-        window.alert("Backfill complete.");
-      }
+      const data = await api.post<{
+        attempted: number;
+        succeeded: number;
+        failed: number;
+        results: BackfillResult[];
+      }>("/api/admin/dealer-outreach/backfill");
+      window.alert(
+        `Backfill complete — attempted ${data.attempted}, succeeded ${data.succeeded}, failed ${data.failed}.`,
+      );
       router.refresh();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Backfill failed");
+      window.alert(apiErrorMessage(err, "Backfill failed"));
     } finally {
       setBusy(false);
     }

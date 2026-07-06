@@ -12,6 +12,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { parseSource } from "@/lib/admin/buyer-source";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 export interface OutreachLogEntry {
   id: string;
@@ -236,20 +237,12 @@ export default function ProspectDetailClient({
     setBusy(action);
     setMessage(null);
     try {
-      const res = await fetch(`/api/admin/dealer-outreach/${prospect.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
-      }
+      await api.patch(`/api/admin/dealer-outreach/${prospect.id}`, payload);
       setMessage("Saved.");
       router.refresh();
       return true;
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Save failed");
+      setMessage(apiErrorMessage(err, "Save failed"));
       return false;
     } finally {
       setBusy(null);
@@ -260,19 +253,14 @@ export default function ProspectDetailClient({
     setBusy("regenerate");
     setMessage(null);
     try {
-      const res = await fetch(
+      const data = await api.post<{ script?: string }>(
         `/api/admin/dealer-outreach/${prospect.id}/regenerate-script`,
-        { method: "POST" },
       );
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
-      }
-      if (body?.data?.script) setScript(body.data.script);
+      if (data?.script) setScript(data.script);
       setMessage("Script regenerated.");
       router.refresh();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Regenerate failed");
+      setMessage(apiErrorMessage(err, "Regenerate failed"));
     } finally {
       setBusy(null);
     }
@@ -714,18 +702,13 @@ export default function ProspectDetailClient({
 // ─── Re-enrich + email helpers ───────────────────────────────────────────────
 async function reEnrich(prospectId: string, onDone: () => void) {
   try {
-    const res = await fetch(
+    const data = await api.post<{ email?: string | null }>(
       `/api/admin/dealer-outreach/${prospectId}/reenrich-email`,
-      { method: "POST" },
     );
-    const body = await res.json().catch(() => null);
-    if (!res.ok) {
-      throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
-    }
-    if (!body?.data?.email) window.alert("No email found for this dealer.");
+    if (!data?.email) window.alert("No email found for this dealer.");
     onDone();
   } catch (err) {
-    window.alert(err instanceof Error ? err.message : "Re-enrich failed");
+    window.alert(apiErrorMessage(err, "Re-enrich failed"));
   }
 }
 
@@ -745,17 +728,13 @@ function EmailEdit({
   async function save() {
     setBusy(true);
     try {
-      const res = await fetch(`/api/admin/dealer-outreach/${prospectId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: draft.trim() }),
+      await api.patch(`/api/admin/dealer-outreach/${prospectId}`, {
+        email: draft.trim(),
       });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error?.message ?? `Failed (${res.status})`);
       setEditing(false);
       onRefresh();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Save failed");
+      window.alert(apiErrorMessage(err, "Save failed"));
     } finally {
       setBusy(false);
     }
@@ -933,20 +912,12 @@ function ComposeSection({
     setSending(true);
     setResult(null);
     try {
-      const res = await fetch("/api/admin/dealer-outreach/compose", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dealerProspectId: prospect.id,
-          subject: subject.trim(),
-          body: body.trim(),
-          emailType,
-        }),
+      await api.post("/api/admin/dealer-outreach/compose", {
+        dealerProspectId: prospect.id,
+        subject: subject.trim(),
+        body: body.trim(),
+        emailType,
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error?.message ?? `Failed (${res.status})`);
-      }
       setResult({ ok: true, msg: "Email sent — logged to communication history" });
       setSubject("");
       setBody("");
@@ -954,7 +925,7 @@ function ComposeSection({
     } catch (err) {
       setResult({
         ok: false,
-        msg: err instanceof Error ? err.message : "Send failed",
+        msg: apiErrorMessage(err, "Send failed"),
       });
     } finally {
       setSending(false);

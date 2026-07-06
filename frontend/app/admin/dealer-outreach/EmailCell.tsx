@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw, Pencil, Check, X } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface EmailCellProps {
   prospectId: string;
@@ -50,21 +51,15 @@ export default function EmailCell(props: EmailCellProps) {
   async function reEnrich() {
     setBusy(true);
     try {
-      const res = await fetch(
+      const data = await api.post<{ email?: string | null }>(
         `/api/admin/dealer-outreach/${props.prospectId}/reenrich-email`,
-        { method: "POST" },
       );
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
-      }
-      const found = body?.data?.email as string | null | undefined;
-      if (!found) {
+      if (!data?.email) {
         window.alert("No email found for this dealer.");
       }
       router.refresh();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Re-enrich failed");
+      window.alert(apiErrorMessage(err, "Re-enrich failed"));
     } finally {
       setBusy(false);
     }
@@ -73,19 +68,13 @@ export default function EmailCell(props: EmailCellProps) {
   async function saveOverride() {
     setBusy(true);
     try {
-      const res = await fetch(`/api/admin/dealer-outreach/${props.prospectId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: draft.trim() }),
+      await api.patch(`/api/admin/dealer-outreach/${props.prospectId}`, {
+        email: draft.trim(),
       });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
-      }
       setEditing(false);
       router.refresh();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Save failed");
+      window.alert(apiErrorMessage(err, "Save failed"));
     } finally {
       setBusy(false);
     }

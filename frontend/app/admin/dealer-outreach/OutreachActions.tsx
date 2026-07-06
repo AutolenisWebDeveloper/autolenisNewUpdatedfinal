@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mail, Eye, Loader2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface OutreachActionsProps {
   prospectId: string;
@@ -42,17 +43,14 @@ export default function OutreachActions({
     setPreviewOpen(true);
     setLoadingPreview(true);
     try {
-      const res = await fetch("/api/admin/dealer-outreach/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealerProspectId: prospectId }),
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error?.message ?? `Failed (${res.status})`);
-      setSubject(body?.data?.subject ?? "");
-      setBodyText(body?.data?.bodyText ?? "");
+      const data = await api.post<{ subject?: string; bodyText?: string }>(
+        "/api/admin/dealer-outreach/preview",
+        { dealerProspectId: prospectId },
+      );
+      setSubject(data?.subject ?? "");
+      setBodyText(data?.bodyText ?? "");
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Preview failed");
+      window.alert(apiErrorMessage(err, "Preview failed"));
       setPreviewOpen(false);
     } finally {
       setLoadingPreview(false);
@@ -71,17 +69,11 @@ export default function OutreachActions({
         payload.customSubject = subject.trim();
         payload.customBody = bodyText.trim();
       }
-      const res = await fetch("/api/admin/dealer-outreach/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error?.message ?? `Failed (${res.status})`);
+      await api.post("/api/admin/dealer-outreach/send", payload);
       setPreviewOpen(false);
       router.refresh();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Send failed");
+      window.alert(apiErrorMessage(err, "Send failed"));
     } finally {
       setBusy(false);
     }
