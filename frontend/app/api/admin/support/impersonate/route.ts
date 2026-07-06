@@ -1,5 +1,6 @@
+import { requirePermission } from "@/lib/auth/permissions";
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError, getClientIp } from "@/lib/auth/admin-api";
+import { adminSuccess, adminError, getClientIp } from "@/lib/auth/admin-api";
 import { startImpersonation } from "@/lib/services/admin/admin-support.service";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
@@ -7,7 +8,7 @@ import { z } from "zod";
 const schema = z.object({ targetUserId: z.string(), reason: z.string().min(10) });
 
 export async function POST(request: NextRequest) {
-  const admin = await getAdminFromRequest(request);
+  const admin = await requirePermission(request, "support.impersonate");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
   if (admin.role !== "SUPER_ADMIN" && admin.role !== "SUPPORT_ADMIN") return adminError("FORBIDDEN", "Insufficient permissions", 403);
   const body = await request.json();

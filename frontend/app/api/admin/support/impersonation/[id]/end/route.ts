@@ -1,13 +1,14 @@
+import { requirePermission } from "@/lib/auth/permissions";
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
+import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { endImpersonation } from "@/lib/services/admin/admin-support.service";
 
 interface Props { params: Promise<{ id: string }> }
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { id: impersonationId } = await params;
-  const admin = await getAdminFromRequest(request);
+  const admin = await requirePermission(request, "support.impersonate");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
   if (admin.role !== "SUPER_ADMIN" && admin.role !== "SUPPORT_ADMIN") {
     return adminError("FORBIDDEN", "Insufficient permissions", 403);

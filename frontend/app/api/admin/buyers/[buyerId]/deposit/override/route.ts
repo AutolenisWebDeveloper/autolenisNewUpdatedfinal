@@ -3,9 +3,10 @@
 // This unblocks auction creation for manual/administrative workflows.
 // AuditLog entry with override reason required.
 
+import { requirePermission } from "@/lib/auth/permissions";
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { DEPOSIT_AMOUNT_CENTS, DEPOSIT_AMOUNT_USD } from "@/lib/constants";
@@ -20,7 +21,7 @@ const schema = z.object({
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { buyerId } = await params;
-  const admin = await getAdminFromRequest(request);
+  const admin = await requirePermission(request, "finance.deposit.override");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
   const buyer = await prisma.buyer.findUnique({
