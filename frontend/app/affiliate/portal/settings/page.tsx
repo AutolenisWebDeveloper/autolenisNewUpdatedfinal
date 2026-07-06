@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import { Settings, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api/client";
 
 interface Prefs {
   emailEnabled: boolean;
@@ -26,11 +27,8 @@ export default function AffiliateSettingsPage() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    fetch("/api/affiliate/settings")
-      .then(r => r.json())
-      .then((json: { success?: boolean; data?: Prefs }) => {
-        if (json.success && json.data) setPrefs(json.data);
-      })
+    api.get<Prefs>("/api/affiliate/settings")
+      .then((data) => setPrefs(data))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -39,13 +37,8 @@ export default function AffiliateSettingsPage() {
     setSaving(true);
     setSaved(false);
     try {
-      const res = await fetch("/api/affiliate/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(prefs),
-      });
-      const json = await res.json() as { success?: boolean; data?: Prefs };
-      if (json.success && json.data) { setPrefs(json.data); setSaved(true); setTimeout(() => setSaved(false), 3000); }
+      const data = await api.patch<Prefs>("/api/affiliate/settings", prefs);
+      setPrefs(data); setSaved(true); setTimeout(() => setSaved(false), 3000);
     } catch { /* ignore */ }
     setSaving(false);
   }

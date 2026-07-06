@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Bell, CheckCheck, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api/client";
 
 interface Notification {
   id: string;
@@ -22,12 +23,9 @@ export default function AffiliateNotificationsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/affiliate/notifications");
-      const json = await res.json() as { success?: boolean; data?: { notifications: Notification[]; unreadCount: number } };
-      if (json.success && json.data) {
-        setNotifications(json.data.notifications);
-        setUnreadCount(json.data.unreadCount);
-      }
+      const data = await api.get<{ notifications: Notification[]; unreadCount: number }>("/api/affiliate/notifications");
+      setNotifications(data.notifications);
+      setUnreadCount(data.unreadCount);
     } catch { /* ignore */ }
     setLoading(false);
   }, []);

@@ -6,6 +6,7 @@ import {
   CheckCircle2, ChevronRight, ChevronLeft, Upload, AlertCircle,
   User, Building2, FileText, CreditCard, FolderOpen, ClipboardList,
 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface OnboardingWizardProps {
   affiliateId: string;
@@ -159,24 +160,18 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
       setError("Please fill in all required fields.");
       return false;
     }
-    const res = await fetch("/api/affiliate/onboarding/profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ step: 2, firstName, lastName, phone, dateOfBirth: dateOfBirth || undefined, addressLine1: address1, addressLine2: address2 || null, city, state, zip }),
-    });
-    if (!res.ok) { const d = await res.json(); setError(d.error?.message ?? "Save failed"); return false; }
-    return true;
+    try {
+      await api.post("/api/affiliate/onboarding/profile", { step: 2, firstName, lastName, phone, dateOfBirth: dateOfBirth || undefined, addressLine1: address1, addressLine2: address2 || null, city, state, zip });
+      return true;
+    } catch (err) { setError(apiErrorMessage(err, "Save failed")); return false; }
   }
 
   async function saveStep3() {
     if (!entityType) { setError("Please select an entity type."); return false; }
-    const res = await fetch("/api/affiliate/onboarding/profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ step: 3, entityType, businessName: businessName || null, dbaName: dbaName || null, businessAddress: businessAddress || null, einLast4: einLast4 || null }),
-    });
-    if (!res.ok) { const d = await res.json(); setError(d.error?.message ?? "Save failed"); return false; }
-    return true;
+    try {
+      await api.post("/api/affiliate/onboarding/profile", { step: 3, entityType, businessName: businessName || null, dbaName: dbaName || null, businessAddress: businessAddress || null, einLast4: einLast4 || null });
+      return true;
+    } catch (err) { setError(apiErrorMessage(err, "Save failed")); return false; }
   }
 
   async function saveStep4() {
@@ -184,13 +179,10 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
       setError("Please complete all fields and check the certification box.");
       return false;
     }
-    const res = await fetch("/api/affiliate/onboarding/tax", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ taxClassification: taxClass, tinType, tinLast4, legalName, certified, signature }),
-    });
-    if (!res.ok) { const d = await res.json(); setError(d.error?.message ?? "Save failed"); return false; }
-    return true;
+    try {
+      await api.post("/api/affiliate/onboarding/tax", { taxClassification: taxClass, tinType, tinLast4, legalName, certified, signature });
+      return true;
+    } catch (err) { setError(apiErrorMessage(err, "Save failed")); return false; }
   }
 
   async function saveStep5() {
@@ -207,13 +199,10 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
     if (accountType) body.accountType = accountType;
     if (paypalEmail) body.paypalEmail = paypalEmail;
     if (zellePhone) body.zellePhone = zellePhone;
-    const res = await fetch("/api/affiliate/onboarding/payment", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) { const d = await res.json(); setError(d.error?.message ?? "Save failed"); return false; }
-    return true;
+    try {
+      await api.post("/api/affiliate/onboarding/payment", body);
+      return true;
+    } catch (err) { setError(apiErrorMessage(err, "Save failed")); return false; }
   }
 
   async function uploadDocument() {
@@ -249,10 +238,10 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
     setError(null);
     setLoading(true);
     try {
-      const res = await fetch("/api/affiliate/onboarding/submit", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error?.message ?? "Submission failed"); return; }
+      await api.post("/api/affiliate/onboarding/submit");
       setSubmitted(true);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Submission failed"));
     } finally {
       setLoading(false);
     }
