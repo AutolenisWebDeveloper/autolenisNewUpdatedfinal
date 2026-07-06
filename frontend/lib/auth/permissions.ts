@@ -23,6 +23,8 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAdminFromRequest } from "@/lib/auth/admin-api";
+import { getAuthenticatedAdmin } from "@/lib/auth/admin-session";
+import type { AdminActor } from "@/lib/auth/admin-actor";
 import type { AdminJwtPayload } from "@/lib/admin-auth";
 import { logger } from "@/lib/logger";
 
@@ -51,8 +53,14 @@ export const PERMISSION_ROLES = {
   // Impersonation — policy 4 (single narrow role, never default admin)
   "support.impersonate": SUPER,
 
-  // Bulk external sends — mass-comms blast radius
+  // Bulk external sends — mass-comms blast radius (destructive-priority)
   "comms.bulk_send": OPS,
+
+  // CRM domains (the getAdminActor routes). Reads are open (never deny in
+  // shadow — brings them into the layer for the bucketing report); mutations
+  // are OPS-tier pending the owner's per-route ruling.
+  "crm.read": ALL,
+  "crm.manage": OPS,
 
   // System administration
   "system.admins.manage": SUPER,
@@ -107,4 +115,46 @@ export async function requirePermission(
     return null;
   }
   return admin; // SHADOW: allow, recorded above
+}
+
+/**
+ * Cookie/actor variant of requirePermission for the CRM routes that use
+ * getAdminActor() (no NextRequest argument). Same shadow semantics — records a
+ * would-be denial and allows unless RBAC_ENFORCE=true — and returns the
+ * AdminActor {adminId, adminEmail} shape those call sites already consume, so
+ * it is a drop-in replacement for `getAdminActor()`.
+ */
+export async function requirePermissionActor(
+  permission: Permission,
+  ctx: { path?: string; method?: string } = {},
+): Promise<AdminActor | null> {
+  const admin = await getAuthenticatedAdmin();
+  if (!admin) return null;
+  const actor: AdminActor = { adminId: admin.adminId, adminEmail: admin.email };
+
+  const allowed = (PERMISSION_ROLES[permission] as readonly string[]).includes(admin.role);
+  if (allowed) return actor;
+
+  await prisma.adminAuditLog.create({
+    data: {
+      adminId: admin.adminId,
+      adminEmail: admin.email,
+      action: "RBAC_SHADOW_DENY",
+      entityType: "RBAC",
+      entityId: permission,
+      metadata: {
+        permission,
+        role: admin.role,
+        path: ctx.path ?? null,
+        method: ctx.method ?? null,
+        enforcing: enforcing(),
+      },
+    },
+  }).catch((err: unknown) => logger.error("[rbac] shadow-deny audit write failed:", err));
+
+  if (enforcing()) {
+    logger.error(`[rbac] DENY ${admin.role} → ${permission} (actor)`);
+    return null;
+  }
+  return actor; // SHADOW: allow, recorded above
 }

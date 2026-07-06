@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { SuppressionService } from '@/lib/services/suppression.service';
 import { inngest } from '@/lib/inngest/client';
-import { getAdminActor } from '@/lib/auth/admin-actor';
+import { requirePermissionActor } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 import type { Contact } from '@/lib/types/crm';
 
@@ -24,7 +24,7 @@ type BulkSendBody = {
 // inngest events the single-contact send endpoints use — every gate (DNC,
 // consent, suppression) is enforced by the workers themselves.
 export async function POST(req: Request) {
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("comms.bulk_send");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   let body: BulkSendBody;
   try {
