@@ -35,7 +35,7 @@ export default function DealerForgotPasswordPage() {
   return (
     <div className="min-h-screen bg-white flex flex-col" data-testid="dealer-forgot-password-page">
       {/* Branded top bar */}
-      <div className="h-[64px] bg-gradient-to-r from-[#0B5FD1] to-[#0A4DB8] flex items-center px-8">
+      <div className="h-[64px] bg-gradient-to-r from-al-primary to-al-primary-hover flex items-center px-8">
         <AutoLenisLogo size="sm" variant="light" href="/" testId="forgot-password-logo" />
       </div>
 
@@ -43,11 +43,11 @@ export default function DealerForgotPasswordPage() {
         <div className="w-full max-w-sm">
           {!submitted ? (
             <>
-              <div className="w-12 h-12 rounded-full bg-[#0B5FD1]/10 flex items-center justify-center mb-6">
-                <Mail size={20} className="text-[#0B5FD1]" />
+              <div className="w-12 h-12 rounded-full bg-al-primary/10 flex items-center justify-center mb-6">
+                <Mail size={20} className="text-al-primary" />
               </div>
 
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-2">
+              <p className="text-xs font-bold uppercase tracking-[0.2em] text-al-primary mb-2">
                 Dealer Portal
               </p>
               <h1 className="text-2xl font-bold text-[#111827] mb-2 tracking-tight">
@@ -74,7 +74,7 @@ export default function DealerForgotPasswordPage() {
                     placeholder="dealer@example.com"
                     required
                     autoComplete="email"
-                    className="w-full px-4 py-3 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-[#111827] placeholder-[#94A3B8] text-sm focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors"
+                    className="w-full px-4 py-3 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-[#111827] placeholder-[#94A3B8] text-sm focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors"
                   />
                 </div>
 
@@ -91,7 +91,7 @@ export default function DealerForgotPasswordPage() {
                   type="submit"
                   disabled={loading}
                   data-testid="forgot-password-submit"
-                  className="w-full py-3.5 bg-[#0B5FD1] text-white font-bold text-sm rounded-md hover:bg-[#0A4DB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-[#0B5FD1]/20"
+                  className="w-full py-3.5 bg-al-primary text-white font-bold text-sm rounded-md hover:bg-al-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-al-primary/20"
                 >
                   {loading ? "Sending…" : "Send Reset Link"}
                 </button>
@@ -100,7 +100,7 @@ export default function DealerForgotPasswordPage() {
               <div className="mt-6 text-center">
                 <Link
                   href="/dealer/sign-in"
-                  className="inline-flex items-center gap-1 text-xs text-[#94A3B8] hover:text-[#0B5FD1] transition-colors"
+                  className="inline-flex items-center gap-1 text-xs text-[#94A3B8] hover:text-al-primary transition-colors"
                   data-testid="forgot-password-back-link"
                 >
                   <ArrowLeft size={12} />
@@ -119,7 +119,7 @@ export default function DealerForgotPasswordPage() {
               </p>
               <Link
                 href="/dealer/sign-in"
-                className="inline-flex items-center gap-1 text-sm text-[#0B5FD1] hover:underline"
+                className="inline-flex items-center gap-1 text-sm text-al-primary hover:underline"
                 data-testid="forgot-password-return-link"
               >
                 <ArrowLeft size={14} />

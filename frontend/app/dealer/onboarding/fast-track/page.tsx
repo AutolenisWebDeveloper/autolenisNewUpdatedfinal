@@ -32,7 +32,7 @@ export default async function FastTrackOnboardingPage() {
           { n: "03", t: "Set your availability", d: "Confirm you can respond to auction invitations within 48 hours." },
         ].map(step => (
           <div key={step.n} data-testid={`fast-track-step-${step.n}`} className="flex gap-4 p-4 bg-white border border-slate-200 rounded-xl">
-            <span className="text-2xl font-bold text-[#0B5FD1]/20 shrink-0">{step.n}</span>
+            <span className="text-2xl font-bold text-al-primary/20 shrink-0">{step.n}</span>
             <div>
               <p className="font-semibold text-slate-800 text-sm">{step.t}</p>
               <p className="text-xs text-slate-400 mt-0.5">{step.d}</p>

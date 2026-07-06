@@ -114,8 +114,8 @@ export default async function DealerAuctionInsightsPage({ params }: Props) {
         {FACTOR_CARDS.map((card, i) => (
           <div key={i} data-testid={`insight-card-${i}`} className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-lg bg-[#0B5FD1]/10 flex items-center justify-center shrink-0">
-                <card.icon size={18} className="text-[#0B5FD1]" />
+              <div className="w-10 h-10 rounded-lg bg-al-primary/10 flex items-center justify-center shrink-0">
+                <card.icon size={18} className="text-al-primary" />
               </div>
               <div>
                 <p className="font-semibold text-slate-900 text-sm mb-1">{card.title}</p>

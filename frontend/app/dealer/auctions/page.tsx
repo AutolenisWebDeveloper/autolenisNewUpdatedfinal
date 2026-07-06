@@ -105,7 +105,7 @@ export default async function DealerAuctionsPage() {
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-auctions-page">
       <div className="flex items-center gap-3 mb-6">
-        <Gavel size={22} className="text-[#0B5FD1]" />
+        <Gavel size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Auction Invitations</h1>
         {active.length > 0 && <Badge>{active.length} active</Badge>}
       </div>
@@ -124,7 +124,7 @@ export default async function DealerAuctionsPage() {
                   key={inv.id}
                   href={`/dealer/auctions/${inv.auction.id}`}
                   data-testid={`active-auction-${inv.id}`}
-                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border-2 border-[#0B5FD1]/20 rounded-xl p-5 hover:border-[#0B5FD1] transition-colors min-h-[44px]"
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border-2 border-al-primary/20 rounded-xl p-5 hover:border-al-primary transition-colors min-h-[44px]"
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -151,7 +151,7 @@ export default async function DealerAuctionsPage() {
                         </p>
                       </div>
                     ) : (
-                      <p className="text-sm font-semibold text-[#0B5FD1]">Submit Offer</p>
+                      <p className="text-sm font-semibold text-al-primary">Submit Offer</p>
                     )}
                     <ArrowRight size={14} className="text-slate-400" />
                   </div>
@@ -195,7 +195,7 @@ export default async function DealerAuctionsPage() {
                   {state === "won" ? (
                     <Link
                       href={`/dealer/deals?auctionId=${inv.auction.id}`}
-                      className="text-xs font-semibold text-[#0B5FD1] hover:underline shrink-0"
+                      className="text-xs font-semibold text-al-primary hover:underline shrink-0"
                     >
                       Open Deal →
                     </Link>
@@ -204,7 +204,7 @@ export default async function DealerAuctionsPage() {
                   ) : (
                     <Link
                       href={`/dealer/auctions/${inv.auction.id}/insights`}
-                      className="text-xs text-[#0B5FD1] hover:underline shrink-0"
+                      className="text-xs text-al-primary hover:underline shrink-0"
                       data-testid={`view-insights-${inv.id}`}
                     >
                       View Insights →

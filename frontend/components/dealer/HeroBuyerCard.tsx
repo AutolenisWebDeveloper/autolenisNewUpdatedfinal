@@ -28,7 +28,7 @@ export default function HeroBuyerCard({ className = "" }: { className?: string }
     >
       {/* Header */}
       <div className="mb-4 flex items-center gap-2.5">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#0B5FD1]">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-al-primary">
           <Users className="h-[18px] w-[18px] text-white" aria-hidden="true" />
         </span>
         <span className="text-base font-bold text-[#111827]">New Buyer Opportunity</span>
@@ -52,7 +52,7 @@ export default function HeroBuyerCard({ className = "" }: { className?: string }
             <p className="text-base font-bold leading-tight text-[#111827]">2024 Toyota RAV4 XLE</p>
             <p className="text-[13px] font-medium text-[#4B5563]">AWD • SUV</p>
           </div>
-          <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-[#EEF4FF] px-3 py-1.5 text-xs font-bold text-[#0B5FD1]">
+          <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-[#EEF4FF] px-3 py-1.5 text-xs font-bold text-al-primary">
             <Star className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
             High Intent Buyer
           </span>
@@ -64,7 +64,7 @@ export default function HeroBuyerCard({ className = "" }: { className?: string }
             {ROWS.map((r) => (
               <div key={r.label} className="flex items-center justify-between gap-3">
                 <dt className="flex items-center gap-2 text-[13px] text-[#4B5563]">
-                  <r.icon className="h-4 w-4 shrink-0 text-[#0B5FD1]" aria-hidden="true" />
+                  <r.icon className="h-4 w-4 shrink-0 text-al-primary" aria-hidden="true" />
                   {r.label}
                 </dt>
                 <dd className="text-right text-[13px] font-semibold text-[#111827]">{r.value}</dd>

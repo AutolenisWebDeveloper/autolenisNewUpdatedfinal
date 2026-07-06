@@ -45,7 +45,7 @@ export default async function DealerDocumentsPage() {
     <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-documents-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <FolderOpen size={22} className="text-[#0B5FD1]" />
+          <FolderOpen size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Documents</h1>
         </div>
         <DealerDocumentUploadButton deals={dealOptions} />
@@ -70,7 +70,7 @@ export default async function DealerDocumentsPage() {
                     {d.type.replace(/_/g, " ")}
                   </span>
                   {d.dealId && (
-                    <span className="inline-flex items-center gap-1 text-[11px] text-[#0B5FD1]">
+                    <span className="inline-flex items-center gap-1 text-[11px] text-al-primary">
                       <Link2 size={11} /> Deal {d.dealId.slice(0, 8)}
                     </span>
                   )}

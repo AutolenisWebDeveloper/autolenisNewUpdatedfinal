@@ -61,13 +61,13 @@ export default async function DealerDealDetailPage({ params }: Props) {
     <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-deal-detail-page">
       <Link
         href="/dealer/deals"
-        className="text-sm text-slate-400 hover:text-[#0B5FD1] transition-colors mb-6 flex items-center gap-1"
+        className="text-sm text-slate-400 hover:text-al-primary transition-colors mb-6 flex items-center gap-1"
       >
         ← Back to Deals
       </Link>
 
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        <Handshake size={22} className="text-[#0B5FD1]" />
+        <Handshake size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Deal Progress</h1>
         <Badge variant="secondary" className="text-xs font-mono">
           #{deal.id.slice(0, 8)}
@@ -79,11 +79,11 @@ export default async function DealerDealDetailPage({ params }: Props) {
 
       {nextAction && (
         <div
-          className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+          className="bg-al-primary/5 border border-al-primary/20 rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
           data-testid="deal-next-action"
         >
           <div>
-            <p className="text-xs font-semibold text-[#0B5FD1] uppercase tracking-wider">Next action</p>
+            <p className="text-xs font-semibold text-al-primary uppercase tracking-wider">Next action</p>
             <p className="text-sm font-semibold text-slate-900 mt-1">{nextAction.label}</p>
           </div>
           <Button href={nextAction.href} className="shrink-0 min-h-[44px]">
@@ -106,7 +106,7 @@ export default async function DealerDealDetailPage({ params }: Props) {
                 <div className="flex flex-col items-center">
                   <div
                     className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors
-                      ${isCompleted ? "bg-green-500 text-white" : isCurrent ? "bg-[#0B5FD1] text-white" : "bg-slate-100 text-slate-400"}`}
+                      ${isCompleted ? "bg-green-500 text-white" : isCurrent ? "bg-al-primary text-white" : "bg-slate-100 text-slate-400"}`}
                     data-testid={`stage-step-${stage}`}
                   >
                     {isCompleted ? "✓" : i + 1}
@@ -114,7 +114,7 @@ export default async function DealerDealDetailPage({ params }: Props) {
                   <span
                     className={`text-[9px] mt-1 text-center leading-tight max-w-[52px] ${
                       isCurrent
-                        ? "text-[#0B5FD1] font-semibold"
+                        ? "text-al-primary font-semibold"
                         : isCompleted
                         ? "text-green-600"
                         : "text-slate-400"
@@ -205,7 +205,7 @@ export default async function DealerDealDetailPage({ params }: Props) {
                 <dd>
                   <a
                     href={`mailto:${buyer.email}`}
-                    className="text-[#0B5FD1] hover:underline break-all min-h-[44px] inline-flex items-center"
+                    className="text-al-primary hover:underline break-all min-h-[44px] inline-flex items-center"
                     data-testid="buyer-email"
                   >
                     {buyer.email}
@@ -219,7 +219,7 @@ export default async function DealerDealDetailPage({ params }: Props) {
                 <dd>
                   <a
                     href={`tel:${buyer.phone}`}
-                    className="text-[#0B5FD1] hover:underline min-h-[44px] inline-flex items-center"
+                    className="text-al-primary hover:underline min-h-[44px] inline-flex items-center"
                     data-testid="buyer-phone"
                   >
                     {buyer.phone}

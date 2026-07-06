@@ -25,7 +25,7 @@ export default function DealerFeedSetupPage() {
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="feed-setup-page">
       <div className="flex items-center gap-3 mb-6">
-        <RefreshCw size={22} className="text-[#0B5FD1]" />
+        <RefreshCw size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">DMS Feed Setup</h1>
       </div>
       <p className="text-sm text-slate-500 mb-6">Connect your Dealer Management System to automatically sync inventory. Provide a URL and AutoLenis will pull your feed on schedule.</p>

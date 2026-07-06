@@ -76,7 +76,7 @@ export default function MessageThreadPage() {
       <div className="flex items-center gap-3 mb-6">
         <Link
           href="/dealer/messages"
-          className="text-sm text-slate-400 hover:text-[#0B5FD1] transition-colors"
+          className="text-sm text-slate-400 hover:text-al-primary transition-colors"
         >
           ← Messages
         </Link>
@@ -109,7 +109,7 @@ export default function MessageThreadPage() {
             <div
               className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm ${
                 isDealer(msg)
-                  ? "bg-[#0B5FD1] text-white rounded-br-sm"
+                  ? "bg-al-primary text-white rounded-br-sm"
                   : "bg-slate-100 text-slate-900 rounded-bl-sm"
               }`}
             >
@@ -134,7 +134,7 @@ export default function MessageThreadPage() {
           onChange={(e) => setCompose(e.target.value)}
           placeholder="Type a message..."
           rows={2}
-          className="flex-1 border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 resize-none"
+          className="flex-1 border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 resize-none"
           data-testid="compose-input"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -146,7 +146,7 @@ export default function MessageThreadPage() {
         <button
           type="submit"
           disabled={sending || !compose.trim()}
-          className="px-5 py-3 bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold rounded-lg transition-colors text-sm"
+          className="px-5 py-3 bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold rounded-lg transition-colors text-sm"
           data-testid="send-btn"
         >
           {sending ? "..." : "Send"}

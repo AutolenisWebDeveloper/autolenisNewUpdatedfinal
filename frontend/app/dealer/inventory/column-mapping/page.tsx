@@ -65,7 +65,7 @@ export default function ColumnMappingPage() {
       <div className="flex items-center gap-3 mb-2">
         <Link
           href="/dealer/inventory/bulk-upload"
-          className="text-sm text-slate-400 hover:text-[#0B5FD1] transition-colors"
+          className="text-sm text-slate-400 hover:text-al-primary transition-colors"
         >
           ← Back
         </Link>
@@ -99,7 +99,7 @@ export default function ColumnMappingPage() {
             <select
               value={mapping[col] ?? "Skip"}
               onChange={(e) => updateMapping(col, e.target.value as StandardField)}
-              className="border border-slate-200 rounded-lg px-3 py-2 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+              className="border border-slate-200 rounded-lg px-3 py-2 text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30"
               data-testid={`mapping-select-${col}`}
             >
               {STANDARD_FIELDS.map((f) => (
@@ -115,7 +115,7 @@ export default function ColumnMappingPage() {
       <button
         onClick={handleSave}
         disabled={loading}
-        className="w-full bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
+        className="w-full bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
         data-testid="save-mapping-btn"
       >
         {loading ? "Saving..." : "Save Mapping"}

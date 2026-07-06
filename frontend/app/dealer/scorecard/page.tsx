@@ -114,7 +114,7 @@ export default async function DealerScorecardPage() {
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="dealer-scorecard-page">
       <div className="flex items-center gap-3 mb-6">
-        <Star size={22} className="text-[#0B5FD1]" />
+        <Star size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Performance Scorecard</h1>
       </div>
 
@@ -139,7 +139,7 @@ export default async function DealerScorecardPage() {
                 strokeDasharray={`${compositeScore} ${100 - compositeScore}`}
                 strokeLinecap="round" />
             </svg>
-            <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-[#0B5FD1]">
+            <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-al-primary">
               {compositeScore}
             </span>
           </div>
@@ -164,17 +164,17 @@ export default async function DealerScorecardPage() {
             return (
               <div key={tier} className="flex items-center gap-2 flex-1">
                 <div className={`flex-1 flex flex-col items-center gap-1 px-2 py-2 rounded-xl border-2 transition-colors ${
-                  isCurrent ? "border-[#0B5FD1] bg-[#0B5FD1]/5" :
+                  isCurrent ? "border-al-primary bg-al-primary/5" :
                   isPast ? "border-green-300 bg-green-50" :
                   "border-slate-200 bg-slate-50"
                 }`} data-testid={`tier-step-${tier.toLowerCase()}`}>
-                  <span className={`text-xs font-bold uppercase ${isCurrent ? "text-[#0B5FD1]" : isPast ? "text-green-700" : "text-slate-400"}`}>
+                  <span className={`text-xs font-bold uppercase ${isCurrent ? "text-al-primary" : isPast ? "text-green-700" : "text-slate-400"}`}>
                     {tier}
                   </span>
-                  {isCurrent && <span className="text-[10px] text-[#0B5FD1] font-semibold">← You are here</span>}
+                  {isCurrent && <span className="text-[10px] text-al-primary font-semibold">← You are here</span>}
                   {isPast && <CheckCircle2 size={12} className="text-green-500" />}
                 </div>
-                {i < 2 && <div className={`w-4 h-0.5 ${isPast || isCurrent ? "bg-[#0B5FD1]" : "bg-slate-200"}`} />}
+                {i < 2 && <div className={`w-4 h-0.5 ${isPast || isCurrent ? "bg-al-primary" : "bg-slate-200"}`} />}
               </div>
             );
           })}
@@ -193,7 +193,7 @@ export default async function DealerScorecardPage() {
           <div key={i} data-testid={`scorecard-metric-${m.label.toLowerCase().replace(/\s+/g, "-")}`}
             className="bg-white border border-slate-200 rounded-xl p-5">
             <div className="flex items-center gap-2 mb-2">
-              <m.icon size={16} className="text-[#0B5FD1]" />
+              <m.icon size={16} className="text-al-primary" />
               <p className="text-xs text-slate-500 font-medium">{m.label}</p>
             </div>
             <p className="text-2xl font-bold text-slate-900 mb-1">{m.value}</p>
@@ -205,7 +205,7 @@ export default async function DealerScorecardPage() {
       {/* Achievements */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-8" data-testid="achievements-section">
         <p className="font-semibold text-slate-800 text-sm mb-4 flex items-center gap-2">
-          <Award size={15} className="text-[#0B5FD1]" />
+          <Award size={15} className="text-al-primary" />
           Achievements
           <Badge variant="secondary" className="ml-auto">{unlockedCount}/{achievements.length}</Badge>
         </p>
@@ -214,13 +214,13 @@ export default async function DealerScorecardPage() {
             <div key={ach.id} data-testid={`achievement-${ach.id}`}
               className={`flex flex-col items-center gap-2 p-3 rounded-xl border text-center transition-opacity ${
                 ach.unlocked
-                  ? "border-[#0B5FD1]/20 bg-[#0B5FD1]/5 opacity-100"
+                  ? "border-al-primary/20 bg-al-primary/5 opacity-100"
                   : "border-slate-200 bg-slate-50 opacity-40"
               }`}>
-              <div className={`w-9 h-9 rounded-full flex items-center justify-center ${ach.unlocked ? "bg-[#0B5FD1] text-white" : "bg-slate-200 text-slate-400"}`}>
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center ${ach.unlocked ? "bg-al-primary text-white" : "bg-slate-200 text-slate-400"}`}>
                 <ach.icon size={16} />
               </div>
-              <p className={`text-xs font-semibold ${ach.unlocked ? "text-[#0B5FD1]" : "text-slate-400"}`}>{ach.label}</p>
+              <p className={`text-xs font-semibold ${ach.unlocked ? "text-al-primary" : "text-slate-400"}`}>{ach.label}</p>
               <p className="text-[10px] text-slate-400 leading-tight">{ach.desc}</p>
             </div>
           ))}

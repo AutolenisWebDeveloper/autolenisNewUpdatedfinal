@@ -241,7 +241,7 @@ export default function QuickOfferPage() {
 
       {/* OTD total */}
       {otdCents > 0 && (
-        <div className="bg-[#0B5FD1] text-white rounded-xl p-5 mb-5" data-testid="otd-total">
+        <div className="bg-al-primary text-white rounded-xl p-5 mb-5" data-testid="otd-total">
           <p className="text-xs text-white/60 uppercase tracking-wider mb-1">Out-the-Door Total</p>
           <p className="text-3xl font-bold">${(otdCents / 100).toLocaleString()}</p>
           {junkFeesCents > 0 && (

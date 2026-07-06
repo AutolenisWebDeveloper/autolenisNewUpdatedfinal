@@ -23,7 +23,7 @@ export default async function DealerAnalyticsPage() {
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="dealer-analytics-page">
       <div className="flex items-center gap-3 mb-6">
-        <BarChart2 size={22} className="text-[#0B5FD1]" />
+        <BarChart2 size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Analytics</h1>
       </div>
 

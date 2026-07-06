@@ -38,7 +38,7 @@ export default async function DealerAuctionsInvitedPage() {
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-auctions-invited-page">
       <div className="flex items-center gap-3 mb-6">
-        <MailOpen size={22} className="text-[#0B5FD1]" />
+        <MailOpen size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Auction Invitations</h1>
         {invitations.length > 0 && (
           <Badge variant="secondary">{invitations.length}</Badge>
@@ -61,7 +61,7 @@ export default async function DealerAuctionsInvitedPage() {
               key={inv.id}
               href={`/dealer/auctions/${inv.auction.id}`}
               data-testid={`invitation-item-${inv.id}`}
-              className="flex items-center justify-between bg-white border border-slate-200 rounded-xl p-5 hover:border-[#0B5FD1]/30 transition-colors"
+              className="flex items-center justify-between bg-white border border-slate-200 rounded-xl p-5 hover:border-al-primary/30 transition-colors"
             >
               <div>
                 <p className="font-semibold text-slate-900 text-sm font-mono">

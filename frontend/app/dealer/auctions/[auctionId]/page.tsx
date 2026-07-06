@@ -230,7 +230,7 @@ export default async function DealerAuctionDetailPage({ params }: Props) {
         <div className="mt-4">
           <Link
             href={`/dealer/auctions/${auctionId}/insights`}
-            className="text-sm text-[#0B5FD1] font-semibold hover:underline"
+            className="text-sm text-al-primary font-semibold hover:underline"
             data-testid="view-insights-link"
           >
             View post-auction insights →

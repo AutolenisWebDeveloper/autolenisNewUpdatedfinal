@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 const INPUT_CLASS =
-  "w-full border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30";
+  "w-full border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30";
 
 interface InventoryItem {
   id: string;
@@ -145,7 +145,7 @@ export default function EditInventoryPage({ params }: Props) {
       <div className="flex items-center gap-3 mb-6">
         <Link
           href="/dealer/inventory"
-          className="text-sm text-slate-400 hover:text-[#0B5FD1] transition-colors"
+          className="text-sm text-slate-400 hover:text-al-primary transition-colors"
         >
           ← Inventory
         </Link>
@@ -183,7 +183,7 @@ export default function EditInventoryPage({ params }: Props) {
               </button>
             </div>
             {vinDecodeMsg && (
-              <p className="text-xs text-[#0B5FD1] mt-1" data-testid="vin-decode-msg">
+              <p className="text-xs text-al-primary mt-1" data-testid="vin-decode-msg">
                 {vinDecodeMsg}
               </p>
             )}
@@ -310,7 +310,7 @@ export default function EditInventoryPage({ params }: Props) {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
+            className="w-full bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
             data-testid="save-vehicle-btn"
           >
             {submitting ? "Saving..." : "Save Changes"}

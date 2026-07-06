@@ -20,7 +20,7 @@ export default async function DealerNotificationsPage() {
     <div className="p-6 md:p-8 max-w-2xl" data-testid="dealer-notifications-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Bell size={22} className="text-[#0B5FD1]" />
+          <Bell size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Notifications</h1>
           {unreadCount > 0 && <Badge>{unreadCount} new</Badge>}
         </div>
@@ -37,9 +37,9 @@ export default async function DealerNotificationsPage() {
             <div
               key={n.id}
               data-testid={`dealer-notification-${n.id}`}
-              className={`bg-white border rounded-xl p-4 ${!n.readAt ? "border-[#0B5FD1]/20" : "border-slate-200"}`}
+              className={`bg-white border rounded-xl p-4 ${!n.readAt ? "border-al-primary/20" : "border-slate-200"}`}
             >
-              {!n.readAt && <div className="w-2 h-2 rounded-full bg-[#0B5FD1] mb-2" />}
+              {!n.readAt && <div className="w-2 h-2 rounded-full bg-al-primary mb-2" />}
               <p className="font-semibold text-slate-900 text-sm">{n.title}</p>
               <p className="text-sm text-slate-500 mt-0.5">{n.body}</p>
               <p className="text-xs text-slate-400 mt-1">{n.createdAt.toLocaleDateString()}</p>

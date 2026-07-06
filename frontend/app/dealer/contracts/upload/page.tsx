@@ -36,7 +36,7 @@ export default async function DealerContractUploadPage({ searchParams }: Props) 
           >
             <input
               type="checkbox"
-              className="mt-0.5 accent-[#0B5FD1]"
+              className="mt-0.5 accent-al-primary"
               data-testid={`checklist-check-${i}`}
             />
             <span className="text-sm text-slate-700">{item}</span>

@@ -98,7 +98,7 @@ export default function DealerSignInPage() {
 
       {/* ── Left panel — branded hero (desktop only) ─────────────────────── */}
       <div className="hidden lg:flex lg:w-[45%] relative flex-col justify-between p-14 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0B5FD1] via-[#0A4DB8] to-[#2667BF]" />
+        <div className="absolute inset-0 bg-gradient-to-br from-al-primary via-al-primary-hover to-[#2667BF]" />
         <div className="absolute inset-0 opacity-10 bg-[repeating-linear-gradient(45deg,_#ffffff10_0px,_#ffffff10_1px,_transparent_1px,_transparent_40px)]" />
 
         {/* Logo */}
@@ -161,13 +161,13 @@ export default function DealerSignInPage() {
       {/* ── Right panel — form ────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col bg-white">
         {/* Mobile-only branded top bar (72px) */}
-        <div className="lg:hidden h-[72px] bg-gradient-to-r from-[#0B5FD1] to-[#0A4DB8] flex items-center px-6">
+        <div className="lg:hidden h-[72px] bg-gradient-to-r from-al-primary to-al-primary-hover flex items-center px-6">
           <AutoLenisLogo size="sm" variant="light" href="/" testId="dealer-signin-mobile-logo" />
         </div>
 
         <div className="flex-1 flex items-center justify-center px-6 lg:px-12 py-10 lg:py-0">
           <div className="w-full max-w-sm">
-            <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#0B5FD1] mb-4">Dealer Portal</p>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-al-primary mb-4">Dealer Portal</p>
             <h2 className="text-2xl font-bold text-[#111827] mb-1 tracking-tight">Sign in to your account</h2>
             <p className="text-sm text-[#94A3B8] mb-8">Access your auction queue, inventory, and leads.</p>
 
@@ -186,7 +186,7 @@ export default function DealerSignInPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="dealer@example.com"
-                  className="w-full px-4 py-3 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-[#111827] placeholder-[#94A3B8] text-sm focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors"
+                  className="w-full px-4 py-3 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-[#111827] placeholder-[#94A3B8] text-sm focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors"
                   required
                   autoComplete="email"
                 />
@@ -202,7 +202,7 @@ export default function DealerSignInPage() {
                   </label>
                   <Link
                     href="/dealer/forgot-password"
-                    className="text-xs text-[#94A3B8] hover:text-[#0B5FD1] transition-colors"
+                    className="text-xs text-[#94A3B8] hover:text-al-primary transition-colors"
                     data-testid="dealer-forgot-password-link"
                   >
                     Forgot?
@@ -216,15 +216,15 @@ export default function DealerSignInPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full px-4 py-3 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-[#111827] placeholder-[#94A3B8] text-sm focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors pr-11"
+                    className="w-full px-4 py-3 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-[#111827] placeholder-[#94A3B8] text-sm focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors pr-11"
                     required
                     autoComplete="current-password"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#0B5FD1] transition-colors"
-                    tabIndex={-1}
+                    aria-pressed={showPassword}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-al-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus rounded transition-colors"
                     aria-label={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -241,7 +241,7 @@ export default function DealerSignInPage() {
                   checked={remember}
                   onChange={(e) => setRemember(e.target.checked)}
                   data-testid="dealer-signin-remember-checkbox"
-                  className="h-4 w-4 rounded border-[#D8C7EE] text-[#0B5FD1] focus:ring-[#0B5FD1]/30"
+                  className="h-4 w-4 rounded border-[#D8C7EE] text-al-primary focus:ring-al-primary/30"
                 />
                 <span className="text-xs text-[#4B5563]">Remember me for 30 days</span>
               </label>
@@ -259,7 +259,7 @@ export default function DealerSignInPage() {
                 type="submit"
                 disabled={loading}
                 data-testid="dealer-signin-submit"
-                className="w-full py-3.5 bg-[#0B5FD1] text-white font-bold text-sm rounded-md hover:bg-[#0A4DB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-[#0B5FD1]/20"
+                className="w-full py-3.5 bg-al-primary text-white font-bold text-sm rounded-md hover:bg-al-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-al-primary/20"
               >
                 {loading ? "Signing in…" : "Sign In"}
               </button>
@@ -268,14 +268,14 @@ export default function DealerSignInPage() {
             <div className="mt-8 pt-6 border-t border-[#E5E7EB] grid grid-cols-2 gap-3 text-center">
               <Link
                 href="/dealer/apply"
-                className="text-xs text-[#94A3B8] hover:text-[#0B5FD1] transition-colors"
+                className="text-xs text-[#94A3B8] hover:text-al-primary transition-colors"
                 data-testid="dealer-signin-apply-to-join-link"
               >
                 Apply to join →
               </Link>
               <Link
                 href="/dealer/invite/claim"
-                className="text-xs text-[#94A3B8] hover:text-[#0B5FD1] transition-colors"
+                className="text-xs text-[#94A3B8] hover:text-al-primary transition-colors"
                 data-testid="dealer-signin-claim-invite-link"
               >
                 Claim invitation →
