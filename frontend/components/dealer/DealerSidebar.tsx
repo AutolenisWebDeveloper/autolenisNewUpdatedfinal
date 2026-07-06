@@ -8,9 +8,10 @@ import { AutoLenisLogo } from "@/components/shared/AutoLenisLogo";
 import {
   LayoutDashboard, Gavel, FileText, Shield, BarChart2,
   Bell, MessageSquare, FolderOpen, Settings, LogOut, Star,
-  CreditCard, Handshake, Menu, X, Sparkles, Briefcase,
+  CreditCard, Handshake, Menu, Sparkles, Briefcase,
   Package, Banknote, Truck, User,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 // 14 required V4 dealer portal destinations — exactly one entry per route
 const NAV_GROUPS = [
@@ -157,21 +158,21 @@ export default function DealerSidebar() {
           </button>
         </div>
       </div>
-      {open && (
-        <>
-          <div className="lg:hidden fixed inset-0 z-40 bg-black/40" onClick={() => setOpen(false)}
-            data-testid="dealer-mobile-drawer-backdrop" />
-          <aside className="lg:hidden fixed top-0 left-0 z-50 w-72 max-w-[85vw] h-screen bg-white shadow-xl flex flex-col"
-            data-testid="dealer-mobile-drawer">
-            <button type="button" onClick={() => setOpen(false)} aria-label="Close navigation"
-              data-testid="dealer-mobile-menu-close"
-              className="absolute top-3 right-3 p-2 rounded-md text-slate-600 hover:bg-slate-100">
-              <X size={20} />
-            </button>
-            <Inner pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} />
-          </aside>
-        </>
-      )}
+      {/* Mobile drawer — kit Dialog (sheet variant). REFERENCE CONVERSION for
+          the hand-built `fixed inset-0` modal class: Radix supplies the focus
+          trap, Esc-close, focus-return-to-trigger, aria-modal + labelledby,
+          scroll-lock, and overlay dismissal the hand-rolled version lacked. */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          variant="sheet"
+          side="left"
+          className="lg:hidden flex flex-col"
+          data-testid="dealer-mobile-drawer"
+        >
+          <DialogTitle className="sr-only">Dealer navigation</DialogTitle>
+          <Inner pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
