@@ -6,6 +6,7 @@ import { Settings, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface BpeWeights {
   weightOtd: number;
@@ -49,11 +50,8 @@ export default function AdminSettingsPage() {
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
 
   useEffect(() => {
-    fetch("/api/admin/best-price/weights")
-      .then(r => r.json())
-      .then((json: { success?: boolean; data?: BpeWeights }) => {
-        if (json.success && json.data) setWeights(json.data);
-      })
+    api.get<BpeWeights>("/api/admin/best-price/weights")
+      .then((data) => { setWeights(data); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -66,20 +64,11 @@ export default function AdminSettingsPage() {
     setSaving(true);
     setFeedback(null);
     try {
-      const res = await fetch("/api/admin/best-price/weights", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(weights),
-      });
-      const json = await res.json() as { success?: boolean; data?: BpeWeights; error?: { message: string } };
-      if (json.success && json.data) {
-        setWeights(json.data);
-        setFeedback({ msg: "Weights saved successfully", ok: true });
-        setTimeout(() => setFeedback(null), 4000);
-      } else {
-        setFeedback({ msg: json.error?.message ?? "Save failed", ok: false });
-      }
-    } catch { setFeedback({ msg: "Network error", ok: false }); }
+      const data = await api.patch<BpeWeights>("/api/admin/best-price/weights", weights);
+      setWeights(data);
+      setFeedback({ msg: "Weights saved successfully", ok: true });
+      setTimeout(() => setFeedback(null), 4000);
+    } catch (err) { setFeedback({ msg: apiErrorMessage(err, "Save failed"), ok: false }); }
     setSaving(false);
   }
 

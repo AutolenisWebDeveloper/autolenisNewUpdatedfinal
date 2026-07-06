@@ -16,6 +16,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { DollarSign, TrendingUp, TrendingDown, RefreshCw, Loader2, AlertTriangle } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface MonthPoint {
   month: string;
@@ -101,15 +102,10 @@ export default function AdminFinancePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/reports/financial-summary");
-      const json = await res.json() as { success?: boolean; data?: { summary: FinancialSummary }; error?: { message: string } };
-      if (json.success && json.data?.summary) {
-        setData(json.data.summary);
-      } else {
-        setError(json.error?.message ?? "Failed to load summary");
-      }
-    } catch {
-      setError("Network error — please refresh");
+      const data = await api.get<{ summary: FinancialSummary }>("/api/admin/reports/financial-summary");
+      setData(data.summary);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to load summary"));
     }
     setLoading(false);
   }, []);

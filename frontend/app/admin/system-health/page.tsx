@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Activity, CheckCircle2, AlertTriangle, XCircle, RefreshCw, Database, ShieldCheck, BarChart2, CreditCard, FileSignature, Mail, Building2, Loader2 } from "lucide-react";
+import { api } from "@/lib/api/client";
 
 interface IntegrationStatus {
   stripe: boolean;
@@ -78,13 +79,9 @@ export default function AdminSystemHealthPage() {
     setLoadingIntegrations(true);
     setLiveIntegrations(null);
     try {
-      const res = await fetch("/api/admin/health/integrations");
-      const json = await res.json() as {
-        success?: boolean;
-        data?: { integrations: LiveIntegration[]; microbilt?: MicroBiltConfig };
-      };
-      if (json.success && json.data?.integrations) setLiveIntegrations(json.data.integrations);
-      if (json.success && json.data?.microbilt) setMicrobiltConfig(json.data.microbilt);
+      const data = await api.get<{ integrations: LiveIntegration[]; microbilt?: MicroBiltConfig }>("/api/admin/health/integrations");
+      if (data.integrations) setLiveIntegrations(data.integrations);
+      if (data.microbilt) setMicrobiltConfig(data.microbilt);
     } catch { /* ignore */ }
     setLoadingIntegrations(false);
   }, []);
@@ -94,9 +91,8 @@ export default function AdminSystemHealthPage() {
     setLoadingIntegrations(true);
     setLiveIntegrations(null);
     try {
-      const res = await fetch("/api/admin/health");
-      const json = await res.json() as { success?: boolean; data?: { report: HealthReport } };
-      if (json.success && json.data?.report) setReport(json.data.report);
+      const data = await api.get<{ report: HealthReport }>("/api/admin/health");
+      if (data.report) setReport(data.report);
     } catch { /* ignore */ }
     setLoading(false);
     void loadIntegrations();

@@ -11,6 +11,7 @@ import {
   FileText, ShieldAlert,
 } from "lucide-react";
 import type { AdminAffiliateKpis } from "@/lib/services/admin/admin-affiliate-command-center.service";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -127,19 +128,10 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
     setError(null);
     try {
       const qs = new URLSearchParams(params).toString();
-      const res = await fetch("/api/admin/affiliates?" + qs);
-      if (!res.ok) {
-        let errMsg = "Failed to load affiliates";
-        try {
-          const errData = await res.json() as { error?: { message: string } };
-          if (errData.error?.message) errMsg = errData.error.message;
-        } catch { /* ignore */ }
-        throw new Error(errMsg);
-      }
-      const data = await res.json() as { data?: { affiliates: AffiliateListRow[]; total: number } };
-      if (data.data) { setAffiliates(data.data.affiliates); setTotal(data.data.total); }
+      const data = await api.get<{ affiliates: AffiliateListRow[]; total: number }>("/api/admin/affiliates?" + qs);
+      setAffiliates(data.affiliates); setTotal(data.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load affiliates");
+      setError(apiErrorMessage(err, "Failed to load affiliates"));
     } finally {
       setLoading(false);
     }
@@ -199,17 +191,11 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
         reactivate: `${actionModal.affiliateEmail} reactivated`,
         note: `Note added to ${actionModal.affiliateEmail}`,
       };
-      const res = await fetch(endpointMap[actionModal.type], {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bodyMap[actionModal.type]),
-      });
-      if (res.ok) {
-        showToast(successMap[actionModal.type]);
-        applyFilters();
-      } else {
-        const d = await res.json() as { error?: { message: string } };
-        showToast(d.error?.message ?? "Action failed", "error");
-      }
+      await api.post<unknown>(endpointMap[actionModal.type], bodyMap[actionModal.type]);
+      showToast(successMap[actionModal.type]);
+      applyFilters();
+    } catch (err) {
+      showToast(apiErrorMessage(err, "Action failed"), "error");
     } finally {
       setActionLoading(false);
       setActionModal(null);

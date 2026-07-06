@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Brain, Loader2, MessageCircle, RefreshCw } from "lucide-react";
 import { isAiEnabled } from "@/lib/ai/kill-switch";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 export default function AdminAiPage() {
   const [briefing, setBriefing] = useState<string | null>(null);
@@ -18,11 +19,14 @@ export default function AdminAiPage() {
   async function generateBriefing() {
     setLoading(true);
     setError(null);
-    const res = await fetch("/api/admin/ai/briefing", { method: "POST" });
-    const d = await res.json() as { success: boolean; data?: { briefing: string }; error?: { message: string } };
-    setLoading(false);
-    if (res.ok && d.data) setBriefing(d.data.briefing);
-    else setError(d.error?.message ?? "Briefing generation failed");
+    try {
+      const d = await api.post<{ briefing: string }>("/api/admin/ai/briefing");
+      setBriefing(d.briefing);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Briefing generation failed"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (

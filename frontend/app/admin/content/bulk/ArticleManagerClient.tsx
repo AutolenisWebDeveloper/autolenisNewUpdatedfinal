@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -278,10 +279,7 @@ export default function ArticleManagerClient({
     setLoading(true);
     try {
       const params = buildParams({ page: String(page), limit: String(PAGE_SIZE) });
-      const res = await fetch(`/api/admin/content/articles?${params.toString()}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error?.message ?? "Failed to load articles");
-      const data = json.data as { articles: Article[]; total: number; hasMore: boolean; stats: Stats };
+      const data = await api.get<{ articles: Article[]; total: number; hasMore: boolean; stats: Stats }>(`/api/admin/content/articles?${params.toString()}`);
       setArticles(data.articles);
       setTotal(data.total);
       setHasMore(data.hasMore);
@@ -290,7 +288,7 @@ export default function ArticleManagerClient({
         rowMetaRef.current.set(a.id, { cluster: a.cluster, metro: a.metro ?? "Unassigned" });
       }
     } catch (e) {
-      showToast(e instanceof Error ? e.message : "Failed to load articles", "error");
+      showToast(apiErrorMessage(e, "Failed to load articles"), "error");
     } finally {
       setLoading(false);
     }
@@ -401,18 +399,12 @@ export default function ArticleManagerClient({
     async (id: string, status: "PUBLISHED" | "RETIRED", fromDrawer = false) => {
       setRowBusy(id);
       try {
-        const res = await fetch(`/api/admin/content/articles/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json?.error?.message ?? "Update failed");
+        await api.patch<unknown>(`/api/admin/content/articles/${id}`, { status });
         showToast(status === "PUBLISHED" ? "Article published." : "Article retired.");
         if (fromDrawer) closeDrawer();
         await fetchArticles();
       } catch (e) {
-        showToast(e instanceof Error ? e.message : "Update failed", "error");
+        showToast(apiErrorMessage(e, "Update failed"), "error");
       } finally {
         setRowBusy(null);
       }
@@ -429,9 +421,8 @@ export default function ArticleManagerClient({
         // Pull a server-side breakdown for the full matching set.
         try {
           const params = buildParams({ breakdown: "1", limit: "1", page: "1" });
-          const res = await fetch(`/api/admin/content/articles?${params.toString()}`);
-          const json = await res.json();
-          if (res.ok && json.data.breakdown) setConfirmBreakdown(json.data.breakdown);
+          const data = await api.get<{ breakdown?: { clusters: Record<string, number>; metros: Record<string, number> } }>(`/api/admin/content/articles?${params.toString()}`);
+          if (data.breakdown) setConfirmBreakdown(data.breakdown);
         } catch {
           /* breakdown is best-effort */
         }
@@ -458,20 +449,14 @@ export default function ArticleManagerClient({
       const payload: Record<string, unknown> = { action: confirmAction };
       if (matchingAll) payload.filter = filterObject;
       else payload.ids = [...selectedIds];
-      const res = await fetch(`/api/admin/content/articles/bulk`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error?.message ?? "Bulk action failed");
+      const data = await api.post<{ updated: number }>(`/api/admin/content/articles/bulk`, payload);
       const verb = confirmAction === "publish" ? "Published" : "Retired";
-      showToast(`${verb} ${fmt(json.data.updated)} article${json.data.updated === 1 ? "" : "s"}.`);
+      showToast(`${verb} ${fmt(data.updated)} article${data.updated === 1 ? "" : "s"}.`);
       setConfirmAction(null);
       clearSelection();
       await fetchArticles();
     } catch (e) {
-      showToast(e instanceof Error ? e.message : "Bulk action failed", "error");
+      showToast(apiErrorMessage(e, "Bulk action failed"), "error");
     } finally {
       setConfirmBusy(false);
     }
@@ -488,10 +473,9 @@ export default function ArticleManagerClient({
     setConfirmBreakdown(null);
     // Breakdown fetch keyed on the filter we just set.
     const params = new URLSearchParams({ status: "REVIEW_NEEDED", breakdown: "1", limit: "1", page: "1" });
-    fetch(`/api/admin/content/articles?${params.toString()}`)
-      .then((r) => r.json())
-      .then((j) => {
-        if (j?.data?.breakdown) setConfirmBreakdown(j.data.breakdown);
+    api.get<{ breakdown?: { clusters: Record<string, number>; metros: Record<string, number> } }>(`/api/admin/content/articles?${params.toString()}`)
+      .then((d) => {
+        if (d.breakdown) setConfirmBreakdown(d.breakdown);
       })
       .catch(() => {});
   }, []);

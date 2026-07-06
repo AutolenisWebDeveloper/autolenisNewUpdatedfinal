@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 import type { InsuranceQuoteRequest } from "./page";
 
 interface Props {
@@ -35,20 +36,11 @@ function RequestRow({ req }: { req: InsuranceQuoteRequest }) {
     setLoading(true);
     setError(null);
     try {
-      const res  = await fetch("/api/admin/insurance-requests/respond", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ dealId: req.dealId, buyerId: req.buyerId, premiumCents: cents, note: note.trim() || null }),
-      });
-      const data = await res.json() as { data?: unknown; error?: { message: string } };
-      if (!data.data && data.error) {
-        setError(data.error.message ?? "Action failed. Please try again.");
-      } else {
-        setDone(true);
-        router.refresh();
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      await api.post<unknown>("/api/admin/insurance-requests/respond", { dealId: req.dealId, buyerId: req.buyerId, premiumCents: cents, note: note.trim() || null });
+      setDone(true);
+      router.refresh();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Action failed. Please try again."));
     } finally {
       setLoading(false);
     }

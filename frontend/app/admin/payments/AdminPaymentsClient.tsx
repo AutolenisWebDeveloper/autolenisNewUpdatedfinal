@@ -15,6 +15,7 @@ import { loadStripe } from "@stripe/stripe-js";
 import type {
   DepositRow, ConciergeFeeRow,
 } from "@/lib/services/admin/admin-payments.service";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const STRIPE_PK = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
 const stripePromise = STRIPE_PK && !STRIPE_PK.includes("placeholder")
@@ -323,9 +324,8 @@ function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
     setBuyerSearchLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/admin/buyers?q=${encodeURIComponent(buyerSearch)}&perPage=5`);
-        const data = await res.json() as { data?: { buyers?: BuyerResult[] } };
-        setBuyerResults(data.data?.buyers ?? []);
+        const data = await api.get<{ buyers?: BuyerResult[] }>(`/api/admin/buyers?q=${encodeURIComponent(buyerSearch)}&perPage=5`);
+        setBuyerResults(data.buyers ?? []);
       } catch { /* ignore */ }
       finally { setBuyerSearchLoading(false); }
     }, 300);
@@ -341,11 +341,9 @@ function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
   async function handleAction(url: string, body: object) {
     setLoading(true); setError(null);
     try {
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await res.json() as { success: boolean; data?: { clientSecret?: string }; error?: { message: string } };
-      if (!data.success) { setError(data.error?.message ?? "Action failed"); return null; }
+      const data = await api.post<{ clientSecret?: string }>(url, body);
       return data;
-    } catch { setError("Network error"); return null; }
+    } catch (err) { setError(apiErrorMessage(err, "Action failed")); return null; }
     finally { setLoading(false); }
   }
 
@@ -428,7 +426,7 @@ function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
                 onClick={async () => {
                   const data = await handleAction("/api/admin/payments/deposit/create-intent",
                     { buyerId: modal.buyerId, reason });
-                  if (data?.data?.clientSecret) setClientSecret(data.data.clientSecret);
+                  if (data?.clientSecret) setClientSecret(data.clientSecret);
                 }}>
                 {loading ? <><Loader2 size={14} className="animate-spin mr-1" />Creating…</> : "Continue to Card Entry →"}
               </Button>
@@ -513,7 +511,7 @@ function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
                   if (!selectedBuyer) return;
                   const data = await handleAction("/api/admin/payments/deposit/create-intent",
                     { buyerId: selectedBuyer.id, reason });
-                  if (data?.data?.clientSecret) setClientSecret(data.data.clientSecret);
+                  if (data?.clientSecret) setClientSecret(data.clientSecret);
                 }}>
                 {loading ? <><Loader2 size={14} className="animate-spin mr-1" />Creating…</> : "Create Payment Intent →"}
               </Button>
@@ -595,9 +593,8 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
     setBuyerSearchLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/admin/buyers?q=${encodeURIComponent(buyerSearch)}&perPage=5`);
-        const data = await res.json() as { data?: { buyers?: BuyerResult[] } };
-        setBuyerResults(data.data?.buyers ?? []);
+        const data = await api.get<{ buyers?: BuyerResult[] }>(`/api/admin/buyers?q=${encodeURIComponent(buyerSearch)}&perPage=5`);
+        setBuyerResults(data.buyers ?? []);
       } catch { /* ignore */ }
       finally { setBuyerSearchLoading(false); }
     }, 300);
@@ -613,11 +610,9 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
   async function handleAction(url: string, body: object) {
     setLoading(true); setError(null);
     try {
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await res.json() as { success: boolean; data?: { clientSecret?: string }; error?: { message: string } };
-      if (!data.success) { setError(data.error?.message ?? "Failed"); return null; }
+      const data = await api.post<{ clientSecret?: string }>(url, body);
       return data;
-    } catch { setError("Network error"); return null; }
+    } catch (err) { setError(apiErrorMessage(err, "Failed")); return null; }
     finally { setLoading(false); }
   }
 
@@ -700,7 +695,7 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
                 onClick={async () => {
                   const data = await handleAction("/api/admin/payments/concierge-fee/create-intent",
                     { dealId: modal.dealId, reason });
-                  if (data?.data?.clientSecret) setClientSecret(data.data.clientSecret);
+                  if (data?.clientSecret) setClientSecret(data.clientSecret);
                 }}>
                 {loading ? <><Loader2 size={14} className="animate-spin mr-1" />Creating…</> : "Continue to Card Entry →"}
               </Button>
@@ -793,7 +788,7 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
                 onClick={async () => {
                   const data = await handleAction("/api/admin/payments/concierge-fee/create-intent",
                     { dealId: dealIdInput.trim(), reason });
-                  if (data?.data?.clientSecret) setClientSecret(data.data.clientSecret);
+                  if (data?.clientSecret) setClientSecret(data.clientSecret);
                 }}>
                 {loading ? <><Loader2 size={14} className="animate-spin mr-1" />Creating…</> : "Create Payment Intent →"}
               </Button>
@@ -867,10 +862,9 @@ function AffiliatePayoutsTab() {
   const [payNote, setPayNote] = useState("");
 
   useEffect(() => {
-    fetch("/api/admin/payments/commissions")
-      .then(r => r.json())
-      .then((d: { data?: { commissions?: CommissionRow[] } }) => {
-        setCommissions(d.data?.commissions ?? []);
+    api.get<{ commissions?: CommissionRow[] }>("/api/admin/payments/commissions")
+      .then((d) => {
+        setCommissions(d.commissions ?? []);
         setLoadingData(false);
       })
       .catch(() => setLoadingData(false));
@@ -894,11 +888,9 @@ function AffiliatePayoutsTab() {
   async function handleAction(url: string, body: object) {
     setLoading(true); setError(null);
     try {
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await res.json() as { success: boolean; error?: { message: string } };
-      if (!data.success) { setError(data.error?.message ?? "Action failed"); return false; }
+      await api.post<unknown>(url, body);
       return true;
-    } catch { setError("Network error"); return false; }
+    } catch (err) { setError(apiErrorMessage(err, "Action failed")); return false; }
     finally { setLoading(false); }
   }
 

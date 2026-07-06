@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Shield, Plus, Edit2, Trash2, CheckCircle2, XCircle } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 type Severity = "HIGH" | "MEDIUM" | "LOW";
 
@@ -51,12 +52,6 @@ const SEVERITY_COLORS: Record<string, string> = {
   LOW: "bg-slate-100 text-slate-600",
 };
 
-interface ApiResponse<T> {
-  success?: boolean;
-  data?: T;
-  error?: { code: string; message: string };
-}
-
 function getThreshold(rule: ScanRule): number | undefined {
   const t = (rule.config as { threshold?: unknown })?.threshold;
   return typeof t === "number" ? t : undefined;
@@ -74,15 +69,11 @@ export default function AdminContractShieldRulesPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/contract-shield/rules");
-      const json = (await res.json()) as ApiResponse<{ rules: ScanRule[] }>;
-      if (!res.ok || !json.data) {
-        setError(json.error?.message ?? "Failed to load rules");
-        return;
-      }
-      setRules(json.data.rules);
-    } catch {
-      setError("Network error loading rules");
+      const data = await api.get<{ rules: ScanRule[] }>("/api/admin/contract-shield/rules");
+      setRules(data.rules);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to load rules"));
+      return;
     } finally {
       setLoading(false);
     }
@@ -93,12 +84,9 @@ export default function AdminContractShieldRulesPage() {
   async function toggleRule(rule: ScanRule) {
     const updated = rules.map(r => r.id === rule.id ? { ...r, isActive: !r.isActive } : r);
     setRules(updated);
-    const res = await fetch(`/api/admin/contract-shield/rules/${rule.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !rule.isActive }),
-    });
-    if (!res.ok) {
+    try {
+      await api.patch<unknown>(`/api/admin/contract-shield/rules/${rule.id}`, { isActive: !rule.isActive });
+    } catch {
       setError("Failed to update rule");
       await loadRules();
     }
@@ -106,10 +94,10 @@ export default function AdminContractShieldRulesPage() {
 
   async function deleteRule(id: string) {
     if (!confirm("Delete this scan rule? This cannot be undone.")) return;
-    const res = await fetch(`/api/admin/contract-shield/rules/${id}`, { method: "DELETE" });
-    if (!res.ok) {
-      const json = (await res.json().catch(() => ({}))) as ApiResponse<unknown>;
-      setError(json.error?.message ?? "Failed to delete rule");
+    try {
+      await api.del<unknown>(`/api/admin/contract-shield/rules/${id}`);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to delete rule"));
       return;
     }
     setRules(rules.filter(r => r.id !== id));
@@ -129,14 +117,10 @@ export default function AdminContractShieldRulesPage() {
       const t = parseInt(newRule.threshold, 10);
       if (!Number.isNaN(t)) payload.threshold = t;
     }
-    const res = await fetch("/api/admin/contract-shield/rules", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const json = (await res.json().catch(() => ({}))) as ApiResponse<unknown>;
-      setError(json.error?.message ?? "Failed to create rule");
+    try {
+      await api.post<unknown>("/api/admin/contract-shield/rules", payload);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to create rule"));
       return;
     }
     setNewRule({ name: "", ruleType: "JUNK_FEE_KEYWORD", severity: "MEDIUM", description: "", threshold: "" });

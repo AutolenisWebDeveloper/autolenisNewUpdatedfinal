@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Send, Bell } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 type Tab = "email" | "notification";
 
@@ -59,26 +60,17 @@ export default function AdminCommsPage() {
     setEmailLoading(true);
     setEmailResult(null);
     try {
-      const res = await fetch("/api/admin/comms/send-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recipientType: emailRecipientType,
-          recipientId: emailRecipientId,
-          subject: emailSubject,
-          body: emailBody,
-          reason: emailReason,
-        }),
+      const data = await api.post<{ recipientEmail?: string }>("/api/admin/comms/send-email", {
+        recipientType: emailRecipientType,
+        recipientId: emailRecipientId,
+        subject: emailSubject,
+        body: emailBody,
+        reason: emailReason,
       });
-      const data = await res.json() as { success?: boolean; data?: { recipientEmail?: string }; error?: { message?: string } };
-      if (!res.ok || !data.success) {
-        setEmailResult({ type: "error", message: data.error?.message ?? "Failed to send email" });
-      } else {
-        setEmailResult({ type: "success", message: `Email sent to ${data.data?.recipientEmail ?? "recipient"}` });
-        setEmailRecipientId(""); setEmailSubject(""); setEmailBody(""); setEmailReason("");
-      }
-    } catch {
-      setEmailResult({ type: "error", message: "Network error — please try again" });
+      setEmailResult({ type: "success", message: `Email sent to ${data.recipientEmail ?? "recipient"}` });
+      setEmailRecipientId(""); setEmailSubject(""); setEmailBody(""); setEmailReason("");
+    } catch (err) {
+      setEmailResult({ type: "error", message: apiErrorMessage(err, "Failed to send email") });
     } finally {
       setEmailLoading(false);
     }
@@ -89,28 +81,19 @@ export default function AdminCommsPage() {
     setNotifLoading(true);
     setNotifResult(null);
     try {
-      const res = await fetch("/api/admin/comms/send-notification", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recipientType: notifRecipientType,
-          ...(isBulkNotif ? {} : { recipientId: notifRecipientId }),
-          title: notifTitle,
-          body: notifBody,
-          actionUrl: notifActionUrl || undefined,
-          reason: notifReason,
-        }),
+      const data = await api.post<{ sent?: number }>("/api/admin/comms/send-notification", {
+        recipientType: notifRecipientType,
+        ...(isBulkNotif ? {} : { recipientId: notifRecipientId }),
+        title: notifTitle,
+        body: notifBody,
+        actionUrl: notifActionUrl || undefined,
+        reason: notifReason,
       });
-      const data = await res.json() as { success?: boolean; data?: { sent?: number }; error?: { message?: string } };
-      if (!res.ok || !data.success) {
-        setNotifResult({ type: "error", message: data.error?.message ?? "Failed to send notification" });
-      } else {
-        const count = data.data?.sent ?? 0;
-        setNotifResult({ type: "success", message: `${count} notification${count === 1 ? "" : "s"} sent` });
-        setNotifRecipientId(""); setNotifTitle(""); setNotifBody(""); setNotifActionUrl(""); setNotifReason("");
-      }
-    } catch {
-      setNotifResult({ type: "error", message: "Network error — please try again" });
+      const count = data.sent ?? 0;
+      setNotifResult({ type: "success", message: `${count} notification${count === 1 ? "" : "s"} sent` });
+      setNotifRecipientId(""); setNotifTitle(""); setNotifBody(""); setNotifActionUrl(""); setNotifReason("");
+    } catch (err) {
+      setNotifResult({ type: "error", message: apiErrorMessage(err, "Failed to send notification") });
     } finally {
       setNotifLoading(false);
     }

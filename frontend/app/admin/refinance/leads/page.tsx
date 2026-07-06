@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { RefreshCw, Download, ExternalLink } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 type LeadRow = {
   id: string;
@@ -65,15 +66,10 @@ export default function AdminRefinanceLeadsPage() {
     if (status) params.set("status", status);
     params.set("page", String(page));
     try {
-      const res = await fetch(`/api/admin/refinance/leads?${params.toString()}`);
-      const json: LeadsResponse = await res.json();
-      if (!res.ok || !json.success || !json.data) {
-        setError(json.error?.message ?? "Unable to load leads");
-      } else {
-        setData(json.data);
-      }
-    } catch {
-      setError("Network error");
+      const data = await api.get<{ items: LeadRow[]; total: number; page: number; totalPages: number; pageSize: number }>(`/api/admin/refinance/leads?${params.toString()}`);
+      setData(data);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Unable to load leads"));
     } finally {
       setLoading(false);
     }

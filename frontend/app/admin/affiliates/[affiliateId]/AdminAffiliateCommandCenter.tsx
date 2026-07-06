@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { AffiliateActionAvailability } from "@/lib/services/admin/admin-affiliate-command-center.service";
 import AdminDocumentActions from "@/components/admin/AdminDocumentActions";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // ─── Local Types ──────────────────────────────────────────────────────────────
 
@@ -333,13 +334,14 @@ function AddNoteModal({ affiliateId, onClose, onSuccess }: {
     e.preventDefault();
     if (!content.trim()) { setError("Note content is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/affiliates/" + affiliateId + "/note", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: content.trim(), type }),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
+    try {
+      await api.post<unknown>("/api/admin/affiliates/" + affiliateId + "/note", { content: content.trim(), type });
+    } catch (err) {
+      setLoading(false);
+      setError(apiErrorMessage(err, "Failed to add note"));
+      return;
+    }
     setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Failed to add note"); return; }
     onSuccess();
   }
 
@@ -392,13 +394,14 @@ function EditProfileModal({ affiliate, onClose, onSuccess }: {
     e.preventDefault();
     if (!form.reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/affiliates/" + affiliate.id, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
+    try {
+      await api.patch<unknown>("/api/admin/affiliates/" + affiliate.id, form);
+    } catch (err) {
+      setLoading(false);
+      setError(apiErrorMessage(err, "Update failed"));
+      return;
+    }
     setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Update failed"); return; }
     onSuccess();
   }
 
@@ -459,23 +462,13 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
   };
 
   async function doAction(endpoint: string, body: Record<string, string>, successMsg: string) {
-    const res = await fetch("/api/admin/affiliates/" + affiliate.id + "/" + endpoint, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const d = await res.json() as { success?: boolean; data?: unknown; error?: { message: string } };
-    if (!res.ok) throw new Error(d.error?.message ?? "Action failed");
+    await api.post<unknown>("/api/admin/affiliates/" + affiliate.id + "/" + endpoint, body);
     handleSuccess(successMsg);
   }
 
   // Commission endpoints live under /api/admin/affiliates/commissions/{id}/...
   async function doCommissionAction(commissionId: string, action: string, body: Record<string, string>, successMsg: string) {
-    const res = await fetch("/api/admin/affiliates/commissions/" + commissionId + "/" + action, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const d = await res.json() as { success?: boolean; data?: unknown; error?: { message: string } };
-    if (!res.ok) throw new Error(d.error?.message ?? "Action failed");
+    await api.post<unknown>("/api/admin/affiliates/commissions/" + commissionId + "/" + action, body);
     handleSuccess(successMsg);
   }
 

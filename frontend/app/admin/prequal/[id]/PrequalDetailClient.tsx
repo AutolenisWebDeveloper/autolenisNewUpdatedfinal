@@ -14,6 +14,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -237,22 +238,14 @@ function ActionPanel({
         body.maxOtdAmountCents = Math.round(Number(overrideAmount) * 100);
         body.tier = overrideTier;
       }
-      const res = await fetch(`/api/admin/prequal/${data.id}/decide`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) {
-        throw new Error(json?.error?.message ?? "Failed to update prequal.");
-      }
+      await api.post<unknown>(`/api/admin/prequal/${data.id}/decide`, body);
       onSuccess(
         a === "APPROVE" ? "Prequal approved" : a === "DECLINE" ? "Prequal declined" : "Prequal overridden",
       );
       reset();
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update prequal.");
+      setError(apiErrorMessage(e, "Failed to update prequal."));
     } finally {
       setSubmitting(false);
     }
