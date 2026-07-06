@@ -3,39 +3,13 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, ShieldCheck, AlertTriangle } from "lucide-react";
+import { AFFILIATE_DISCLOSURES } from "@/lib/affiliate/disclosures";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
-const DISCLOSURES = [
-  {
-    id: "ftc-material",
-    title: "FTC Material Connection Disclosure",
-    text: "You must disclose your relationship with AutoLenis when promoting the platform. This includes any blogs, social media posts, videos, or other content where you mention or recommend AutoLenis in exchange for compensation.",
-    required: true,
-  },
-  {
-    id: "earnings-claims",
-    title: "No Guaranteed Earnings Claims",
-    text: "You may not make guarantees about earnings potential when promoting the AutoLenis affiliate program. You may share your own results accurately, but must note that results vary.",
-    required: true,
-  },
-  {
-    id: "tcpa-compliance",
-    title: "TCPA Compliance",
-    text: "You may not send unsolicited text messages or use auto-dialers to promote AutoLenis. All communications must comply with the Telephone Consumer Protection Act.",
-    required: true,
-  },
-  {
-    id: "spam-prohibition",
-    title: "Anti-Spam Policy",
-    text: "You may not use spam, deceptive email subject lines, purchased email lists, or any unsolicited bulk messaging to promote your referral link.",
-    required: true,
-  },
-  {
-    id: "platform-accuracy",
-    title: "Accurate Platform Representation",
-    text: "You must accurately represent AutoLenis features and pricing. You may not claim the $99 deposit is non-refundable or misrepresent the $499 concierge fee structure.",
-    required: true,
-  },
-];
+// M-19: the disclosure list lives in lib/affiliate/disclosures.ts — the
+// acknowledge API validates the submitted set against the same source of truth
+// and records exactly which disclosures were shown and checked.
+const DISCLOSURES = AFFILIATE_DISCLOSURES;
 
 interface Props {
   // ISO string of the last acknowledgment, or null if never acknowledged.
@@ -71,18 +45,16 @@ export default function ComplianceClient({ initialAcknowledgedAt }: Props) {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/affiliate/compliance/acknowledge", {
-        method: "POST",
-      });
-      const json = await res.json() as { success?: boolean; data?: { acknowledgedAt: string } };
-      if (!res.ok || !json.success) {
-        setError("Failed to save. Please try again.");
-        return;
-      }
+      // Send exactly which disclosures were shown and checked — the server
+      // validates the set against the canonical list before recording.
+      const { acknowledgedAt } = await api.post<{ acknowledgedAt: string; version: number | string }>(
+        "/api/affiliate/compliance/acknowledge",
+        { acknowledgedDisclosures: Array.from(acknowledged) },
+      );
       setSaved(true);
-      setSavedAt(json.data?.acknowledgedAt ?? new Date().toISOString());
-    } catch {
-      setError("Network error. Please try again.");
+      setSavedAt(acknowledgedAt ?? new Date().toISOString());
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to save. Please try again."));
     } finally {
       setSaving(false);
     }
