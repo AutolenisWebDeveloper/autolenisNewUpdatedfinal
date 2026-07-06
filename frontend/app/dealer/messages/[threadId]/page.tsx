@@ -31,8 +31,9 @@ export default function MessageThreadPage() {
           setError("Failed to load messages.");
           return;
         }
-        const data = (await res.json()) as { messages?: Message[] };
-        setMessages(data.messages ?? []);
+        // The dealer API wraps payloads in { success, data } (successResponse).
+        const data = (await res.json()) as { data?: { messages?: Message[] } };
+        setMessages(data.data?.messages ?? []);
       } catch {
         setError("Network error. Please try again.");
       } finally {
@@ -61,9 +62,10 @@ export default function MessageThreadPage() {
         setError("Failed to send message.");
         return;
       }
-      const data = (await res.json()) as { message?: Message };
-      if (data.message) {
-        setMessages((prev) => [...prev, data.message!]);
+      const data = (await res.json()) as { data?: { message?: Message } };
+      const sent = data.data?.message;
+      if (sent) {
+        setMessages((prev) => [...prev, sent]);
       }
       setCompose("");
     } catch {
