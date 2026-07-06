@@ -1,101 +1,129 @@
-# AutoLenis — Phase 1 Plan: Design System Spec & Execution Backlog
+# AutoLenis — Phase 1 Plan v2: Design System Spec & Execution Backlog
 
 **Repo:** `AutolenisWebDeveloper/autolenisNewUpdatedfinal` · branch `claude/fintech-platform-audit-redesign-razk04`
-**Date:** 2026-07-05 · **Status:** awaiting approval — no implementation code until this plan is signed off.
-**Input:** `AUTOLENIS_UIUX_PLATFORM_AUDIT.md` (Phase 0, approved). Finding IDs (C-*, H-*, M-*, Low) refer to that document's register.
+**Date:** 2026-07-06 · **Status:** v2 — revised per owner directives; awaiting approval at the Phase 1 gate. No Phase 0.5/2+ implementation until sign-off.
+**Supersedes:** Phase 1 plan v1 (merged in PR #282). Changes in v2: adds the **Phase 0.5 Launch-Blocker Hardening track**, the **RBAC workstream**, the **marketing token-consumer guardrail**, updated decisions, and the shipped-hotfix record.
+**Input:** `AUTOLENIS_UIUX_PLATFORM_AUDIT.md` (Phase 0, merged). Finding IDs (C-*, H-*, M-*) refer to its register.
+
+---
+
+## STANDING DIRECTIVES (owner-issued, binding)
+
+1. **Phase 2 promotes `components/admin/crm/ui/` platform-wide. No net-new component system.** Any deviation requires owner sign-off.
+2. **Marketing (`(public)`) is out of redesign scope but is a token-consumer.** Verified shared imports from marketing into redesign targets: `components/ui/button` (8 files), `input`/`select`/`label` (3 each), `textarea` (2), plus `ChatWidget`. **Guardrail:** during token migration these primitives must be re-tokenized visually-equivalent by construction (tokens resolve to the exact current computed values); marketing visuals are frozen — every Phase 2 verification loop includes a marketing spot-check (`/`, one SEO landing page, one form page). No marketing-visible change ships without explicit approval.
+3. Every phase gate pauses for owner approval; every wave verifies against the green baseline (typecheck clean · lint 0 errors · 76/76 tests).
+
+---
+
+## HOTFIX WAVE — SHIPPED (this branch, 7 isolated commits)
+
+| # | Commit | Fix | Finding |
+|---|--------|-----|---------|
+| 1 | `6f77007` | Dealer quick-offer reads payload at correct envelope depth — bid entry restored | C-1 |
+| 2 | `f437542` | Dealer messages thread reads correct depth — threads render, send appends | C-2 |
+| 3 | `82ffd86` | Insurance quote resolves the same vehicle the page displays (`desc` both sides) | H-1 |
+| 4 | `24cb896` | Buyer search error state + retry; offer-selection surfaces real API message (incl. AUCTION_LIVE) | H-3 / H-2 (partial) |
+| 5 | `1daa2cc` | Total Earned excludes REVERSED, reconciles to level rows/leaderboard; pending stays separate; digest aligned | H-5 |
+| 6 | `6070402` | Payout CTA removed; balance visible; "Payouts opening soon"; readiness steps listed | H-4 |
+| 7 | `6dc989f` | Premium upgrade: race-safe idempotency + AuditLog/BuyerActivityEvent (no charge behavior change) | Decision #3 |
+
+Each verified individually against the baseline. Note: the full early-accept (`forceEarly`) confirmation flow for H-2 remains in Phase 3C — the hotfix makes the failure honest, not the flow complete. Premium-endpoint durable rate limiting lands with the Phase 0.5 limiter.
+
+---
+
+## PHASE 0.5 — LAUNCH-BLOCKER HARDENING (new track, parallel to redesign, same gating)
+
+Runs alongside Phases 2–3 as its own commit series; each item independently verifiable.
+
+| # | Item | Detail | Effort |
+|---|------|--------|--------|
+| 0.5-1 | **Durable rate limiting** on sign-in (buyer/dealer/affiliate/admin) **and payment-intent creation** | Upstash-backed sliding window (`@upstash/qstash` already a dep; add `@upstash/ratelimit` + Redis, or DB-backed fallback — final choice in the 0.5 design note). Per-IP + per-identifier keys; fail-open on limiter outage with alert, fail-closed on payment-intent abuse thresholds. Payment-intent limiting is Critical-adjacent (card-testing → Stripe account risk) and ships first. Retrofit onto `plan/upgrade` and password-reset. Replaces the in-memory Map on public AI chat. | M |
+| 0.5-2 | **Stripe webhook idempotency + atomic side-effects** | Wrap deposit-update → auction-create in `$transaction`; per-side-effect processed markers on `PaymentProviderEvent` metadata so retries resume, not re-run; keep the existing atomic event-claim. No contract change to Stripe. (M-10) | M |
+| 0.5-3 | **Error monitoring** | Sentry (`@sentry/nextjs`): server + edge + client, release tagging, `logger.error` bridge, alert rules for webhook/payment paths. Requires `SENTRY_DSN` env from you. (H-9) | M |
+
+Gate: all three verified (limiter exercised, webhook replay tested, Sentry event visible) before launch sign-off. **These are launch blockers — Phase 5 cannot pass without them.**
+
+---
+
+## RBAC WORKSTREAM (own track — not folded into UI work)
+
+Priority: the **224 any-admin API routes**, not nav filtering.
+
+1. **RBAC-1 (deliverable for your approval):** role → permission matrix covering all 298 admin routes, grouped by capability domain (finance, dealers, buyers, compliance, content, social, system), mapped to the existing roles (`SUPER_ADMIN`, `FINANCE_ADMIN`, `SUPPORT_ADMIN`, …) and the existing `getAdminWithRole`/`requireContentCapability` mechanisms. Effort M.
+2. **RBAC-2 (shadow mode):** enforcement wrapper logs would-be-denied calls (audit-only, zero behavior change) for a soak period you set; report of observed denials. Effort M.
+3. **RBAC-3 (hard enforcement):** flip to enforce after you review the shadow report. Behavior change — separately gated. Effort S–M.
 
 ---
 
 ## Part A — Shared Design System Spec ("AutoLenis UI")
 
-**Principle:** promote the proven, token-driven CRM kit (`components/admin/crm/ui/` + its `tokens.ts` model) to the platform-wide system rather than inventing a new one. Light mode is the launch target; the token model keeps the CRM kit's dark capability so dark mode remains a flip, not a rebuild.
+*(Unchanged from v1 except where noted; restated for one-document completeness.)*
 
-### A1. Token layer (single source of truth)
-- One global CSS-variable layer at `:root` in `app/globals.css`, exposed to Tailwind v4 via `@theme`. The CRM `.crm-root` scoping is lifted to global; the shadcn HSL block and the dead `.dark` block are removed; `tailwind.config.ts` v3 remnants deleted (v4 `@theme` is canonical). `components.json` corrected or removed.
-- **Color roles** (semantic, never raw hex in feature code):
-  - `--color-primary` `#0B5FD1` (+ `-hover #0A4DB8`, `-subtle`, `-fg`)
-  - `--color-success #15803D` · `--color-warning #B45309` · `--color-danger #B91C1C` · `--color-info` (each + `-subtle` bg + `-fg`) — resolves the three-greens drift (`#50D14E`/`#4CAF50`/`#15803D` → one success role)
-  - Neutrals: `--color-bg`, `--color-surface`, `--color-surface-raised`, `--color-border`, `--color-text`, `--color-text-muted`, `--color-text-subtle` (slate-derived ramp; all text roles ≥4.5:1 on their surfaces)
-  - Trust accent `#643293` retained as `--color-accent` (CRM already uses it)
-- **Radius:** `--radius-sm 6px`, `--radius-md 8px`, `--radius-lg 12px`. One card radius platform-wide: `--radius-lg` (ends the rounded-lg/xl/2xl split).
-- **Elevation:** 3 shadow tokens (`--shadow-1` card, `--shadow-2` popover/dropdown, `--shadow-3` modal). No ad-hoc shadows.
-- **Spacing:** Tailwind 4px scale only — no arbitrary `p-[10px]`-style values. Standard card padding 16/24; page gutter 24 (mobile) / 32 (desktop); section gap 24.
-- `design_guidelines.json` (unbuilt dark spec) is archived to `docs/archive/` and superseded by this spec. **[Default decision #5 — flag if a rebrand toward that spec is actually planned]**
+**Principle:** promote the CRM kit + its `tokens.ts` model. Light mode is the launch target; dark capability retained in the token model.
 
-### A2. Typography
-- **Three families, one dropped:** Space Grotesk = display/headings; **Inter = body & data UI** (better at dense 12–14px data than Space Grotesk); JetBrains Mono = numerals/code/IDs in tables where alignment matters. **Plus Jakarta Sans is removed.** **[Default decision #6 — dealer surfaces adopt the shared system; say if the dealer sub-brand is deliberate]**
-- **Scale (rem/line-height):** 12/16 caption · 14/20 body-sm (dense tables) · 16/24 body · 18/28 lead · 20/28 h4 · 24/32 h3 · 30/36 h2 · 36/40 h1. Weights 400/500/600/700.
-- **Floor:** 12px minimum for any readable text. The 9–10px `text-[9px]/[10px]` usages (admin sidebar, dense screens) are migrated to 12px caption with tracking, not kept.
+### A1. Tokens
+- One global CSS-var layer at `:root` (CRM model lifted out of `.crm-root`), exposed via Tailwind v4 `@theme`; shadcn HSL block, dead `.dark` block, and v3 `tailwind.config.ts` remnants removed; `components.json` corrected.
+- Color roles: `--color-primary #0B5FD1` (+hover `#0A4DB8`, subtle, fg) · `success #15803D` · `warning #B45309` · `danger #B91C1C` · `info` (each + subtle/fg) · neutrals `bg/surface/surface-raised/border/text/text-muted/text-subtle` · accent `#643293`. Token values are chosen to match current rendered output where marketing-shared primitives are concerned (Standing Directive 2).
+- Radius `6/8/12px`; one card radius (12). Elevation: 3 shadow tokens. Spacing: 4px scale, no arbitrary bracket values.
+- `design_guidelines.json` is **removed from the repo** and archived as a design-decision record (`docs/design-decisions/2026-07-dark-spec-retired.md`) noting: never implemented, retired 2026-07, current light/blue system canonized, no rebrand coupled to launch. (Decision #5.)
+
+### A2. Typography — **one type system** (Decision #6)
+- **Two families:** Inter (all UI text — body, data, headings) + JetBrains Mono (numerals/IDs/code). Space Grotesk and Plus Jakarta Sans are removed from the app payload; any dealer-surface distinction is expressed through theme tokens (color/weight/density), not fonts. *(v2 change: v1 kept Space Grotesk for display; the "consolidate to one type system" directive collapses this to Inter + mono.)*
+- Scale: 12/16 · 14/20 · 16/24 · 18/28 · 20/28 · 24/32 · 30/36 · 36/40; weights 400–700; 12px floor (9–10px usages migrate up).
 
 ### A3. Component inventory
-**Promoted from CRM kit (generalized, moved to `components/ui/`):** Button, Badge/StatusPill, DataTable (sorting + `aria-sort`, sticky header, zebra option, empty/loading rows, pagination slot), Tabs, KpiCard, PageHeader, EmptyState, Skeleton, SlideOver, Toolbar.
-**Repaired in place:** existing 8 primitives re-tokenized (purple `hover:#3A0061` bug removed, hardcoded hex → tokens, real `asChild`).
-**New (Radix primitives under the hood for a11y):** Dialog (focus trap, `aria-modal`, ESC, scroll lock), DropdownMenu, Tooltip, Checkbox, Radio, Switch, Pagination, Toast (thin wrapper standardizing sonner), FormField/FormError (react-hook-form + zodResolver), DashboardShell (skip link, `<header>`/`<nav>`/`<main>` landmarks, config-driven sidebar with role/journey-aware item visibility, mobile drawer).
-**Shared utilities:** `lib/format.ts` — `formatCurrency` (cents-in), `formatNumber`, `formatDate`, `formatRelative`; single source replacing ~8 formatters + inline call sites.
+Promoted CRM kit: Button, Badge/StatusPill, DataTable, Tabs, KpiCard, PageHeader, EmptyState, Skeleton, SlideOver, Toolbar. Repaired existing 8 primitives (visual-equivalent re-tokenization; purple-hover bug fix is a visible defect fix, called out in its commit). New Radix-based: Dialog, DropdownMenu, Tooltip, Checkbox, Radio, Switch, Pagination, Toast (sonner wrapper), FormField/FormError (RHF + zodResolver), DashboardShell (skip link, landmarks, config-driven role/journey-aware sidebar). Shared `lib/format.ts`.
 
-### A4. Interaction & state standards (every view, enforced in Phase 3 checklists)
-- **Five states wired with real data paths:** loading = Skeleton matching final layout; empty = EmptyState with icon + one-line explanation + primary action; error = inline retry + correlation/digest id (never a silent empty — closes M-18); partial = per-section fallback when one query fails (buyer dashboard pattern generalized); success.
-- **Feedback:** all mutations confirm via sonner toast or inline status; no `alert()`; destructive actions require Dialog confirmation.
-- **Motion:** 150–200ms ease-out for enter/hover only; everything behind `prefers-reduced-motion`; no decorative animation.
+### A4. States & interaction
+Five states on every view (loading skeleton / empty w/ action / error w/ retry + correlation id / partial / success); mutations confirm via toast or inline status; no `alert()`; destructive actions confirm via Dialog; motion 150–200ms ease-out behind `prefers-reduced-motion`.
 
 ### A5. Accessibility (WCAG 2.2 AA)
-`focus-visible` rings on all interactive elements (sweep 567 `focus:ring` call sites); keyboard-complete modals/menus (Radix); `aria-label` on every icon-only button; status never conveyed by color/dot alone (dot + text label); landmarks + skip link in DashboardShell; forms with `<label htmlFor>`, `aria-invalid`, `aria-describedby` error binding via FormField; 4.5:1 contrast verified per token pair at spec time.
+`focus-visible` everywhere; keyboard-complete overlays; `aria-label` on icon-only buttons; status = dot **and** text; landmarks + skip link; labeled forms with `aria-invalid`/`aria-describedby`; 4.5:1 verified per token pair.
 
 ### A6. Breakpoints & density
-`sm 640 · md 768 · lg 1024 · xl 1280`. Dashboards optimize for lg/xl (data-dense: KPI rows, 8-column tables); every table gets a defined `<md` behavior — priority-column collapse or card list, not bare horizontal scroll. Sidebars: drawer `<lg`.
+`sm 640 / md 768 / lg 1024 / xl 1280`; dashboards optimized lg/xl; every table defines `<md` behavior (priority-column or card list); sidebars drawer `<lg`.
 
 ---
 
-## Part B — Execution Backlog (sequenced, commit-boundary per item)
+## Part B — Execution Backlog
 
-Effort: S <1d · M = days · L = 1–2 wks. Every wave ends with the verification loop (build + typecheck + lint + tests green vs the 76-test baseline, visual QA of states, a11y spot-check, cross-role access check) and pauses for your approval.
-
-### Wave 0 — Behavior-restoring hotfixes (needs explicit approval: alters behavior from "broken" to "as documented")
-| # | Fix | Finding | Effort |
-|---|-----|---------|--------|
-| 0.1 | Dealer quick-offer reads `data.data.auction` (restore bid entry) | C-1 | S |
-| 0.2 | Dealer messages thread reads `data.data.messages`/`.message` (restore messaging) | C-2 | S |
-| 0.3 | Buyer insurance: align vehicle resolution (`desc` on both sides) | H-1 | S |
-| 0.4 | Buyer search: catch + error state + retry | H-3 | S |
-| 0.5 | Affiliate payout CTA: honest disabled state ("Payouts open soon") while rail is disabled **[default decision #4: hide, don't build processor now]** | H-4 | S |
-| 0.6 | Affiliate Total Earned: exclude REVERSED+PENDING (align with level rows & leaderboard) | H-5 | S |
-
-### Phase 2 — Foundation (each item = one PR-sized commit)
+### Phase 2 — Foundation (each item = one reviewable commit; marketing spot-check in every loop)
 | # | Item | Closes | Effort |
 |---|------|--------|--------|
-| 2.1 | Token layer: global CSS vars + `@theme`; delete HSL/.dark/v3 config remnants; archive design_guidelines.json | H-7 (root) | M |
-| 2.2 | `lib/format.ts` + codemod the 8 formatters & inline call sites | H-7 | M |
-| 2.3 | Repair 8 existing primitives (tokens, purple bug, asChild) | Foundation §4 | S |
-| 2.4 | Promote CRM kit → `components/ui` (generalize, keep CRM pages working) | H-13 | L |
-| 2.5 | New Radix primitives: Dialog first, then DropdownMenu/Tooltip/Checkbox/Radio/Switch/Pagination | H-8 | L |
-| 2.6 | Form stack (RHF + zodResolver + FormField/FormError) | Foundation | M |
-| 2.7 | Toast standardization on sonner; remove ad-hoc useState toasts | Foundation | S–M |
-| 2.8 | DashboardShell + config-driven sidebar; add `app/affiliate/layout.tsx`; skip link + landmarks | Foundation §3, M-21 partial | L |
-| 2.9 | Global a11y sweep: focus-visible, reduced-motion guard | M-23 | M |
+| 2.1 | Global token layer + Tailwind v4 cleanup + `design_guidelines.json` retirement record | H-7 root, Decision #5 | M |
+| 2.2 | `lib/format.ts` + codemod 8 formatters & inline call sites | H-7 | M |
+| 2.3 | Re-tokenize 8 existing primitives **visually equivalent** (separate commit for the purple-hover defect fix) | Foundation §4 | S |
+| 2.4 | Promote CRM kit → `components/ui` (CRM pages keep working) | H-13 | L |
+| 2.5 | Radix primitives: Dialog first, then the rest | H-8 | L |
+| 2.6 | Form stack (RHF + zodResolver + FormField) | Foundation | M |
+| 2.7 | sonner standardization | Foundation | S–M |
+| 2.8 | DashboardShell + affiliate layout + landmarks/skip-link | Foundation §3 | L |
+| 2.9 | Typography consolidation to Inter + JetBrains Mono (fonts removed from payload; heading styles remapped) | Decision #6 | M |
+| 2.10 | a11y sweep: focus-visible, reduced-motion | M-23 | M |
 
-### Phase 3 — Per-dashboard redesign & hardening (complete + verify one before the next)
-**Order: Dealer → Affiliate → Buyer → Admin** (smallest core-flow debt first; proves the shell; admin last because largest).
+### Phase 3 — Per-dashboard (order: Dealer → Affiliate → Buyer → Admin; complete & verify one before the next)
+- **3A Dealer:** shell/tokens/primitives; shared API client (one envelope convention, kills `[object Object]` errors — M-7); consolidate dual bid forms, remove fake gauge & free-text auction ID (M-6); remove duplicate signin route; keyboard-accessible password toggle; dot+label statuses; messages refresh affordance; hex migration.
+- **3B Affiliate:** shell + loading.tsx (M-17); error-vs-empty separation (M-18); **unify banking models — Finance Hub `AffiliatePayoutMethod` canonical, onboarding reads/writes it (H-6; data-contract change, explicitly gated)**; document signed-URL downloads (M-20); compliance ack records disclosures (M-19); 2%→3% copy; nested-button fix; leaderboard SQL aggregate (H-12); network-tree N+1s.
+- **3C Buyer:** shell/tokens; **early-accept `forceEarly` flow with disclosure Dialog (H-2 completion; behavior addition, gated)**; shared `computeJourney()` (M-3); journey-aware sidebar (M-4); accessible lightbox (M-5); EmptyState adoption; remove dead `auction/` tree; `next/image`; **API auth helper suspended/verified checks (M-1; hardening, gated)**; guard Contract Shield mock-PASS (M-2; gated); split request form.
+- **3D Admin:** shell/tokens + kit adoption across 52 sections; split giant clients (H-14); section error/not-found boundaries (M-16); nav restructure + dedupe (M-21); mobile table behavior (M-22); aria-label sweep; `next/dynamic` recharts; self-host leaflet markers.
 
-**3A Dealer:** adopt shell/tokens/primitives; single shared API client (envelope unwrap + `.error.message`) killing the three conventions (M-7); consolidate the two bid forms into quick-offer, delete fake competitiveness gauge & free-text auction ID (M-6); remove duplicate `/dealer/signin`; keyboard-accessible password toggle; dot+label statuses; messages polling or refresh affordance; remove debug logging; migrate 233 hex.
-**3B Affiliate:** shell + loading.tsx everywhere (M-17); error-vs-empty separation (M-18); unify banking models — Finance Hub becomes canonical, onboarding reads/writes the same model **(H-6 — schema/contract change, called out explicitly for approval)**; document signed-URL downloads (M-20); compliance ack records disclosure checklist (M-19); fix 2%→3% copy; un-nest buttons; leaderboard → SQL aggregate + limit (H-12); N+1 fixes (network tree).
-**3C Buyer:** shell + tokens; offer-selection early-accept flow w/ disclosure Dialog (H-2 — **behavior addition, flagged**); shared `computeJourney()` (M-3); journey-aware sidebar gating (M-4); accessible VehicleGallery lightbox via Dialog (M-5); EmptyState adoption; remove dead `auction/` tree; replace `alert()`; `next/image` migration; API auth helper adds suspended/verified checks (M-1 — **hardening, flagged**); guard Contract Shield mock-PASS route behind env/admin (M-2 — **flagged**); split 1,497-line request form.
-**3D Admin:** shell + tokens + DataTable/KpiCard/PageHeader adoption across sections; split SocialDashboardClient + command centers into shared tabbed-detail scaffolding (H-14); section `error.tsx` + `not-found.tsx` (M-16); nav restructure (dedupe Affiliates ×3, funnel entries, orphaned `/admin/operations`; role-driven visibility) (M-21); mobile table behavior (M-22); aria-label sweep; `next/dynamic` for recharts; self-host leaflet markers.
-
-### Phase 4 — Optimization & automation (cross-cutting)
-Code-splitting sweep (M-13) · cache strategy: audit 215 `force-dynamic` pages, ISR for public/SEO tree (M-14) · unbounded `findMany` sweep — add `take`/pagination (M-11) · N+1 batch fixes incl. bulk-send suppression checks (M-12) · dead-code removal: CRA scaffold, `.eslintrc.json`, duplicate routes, unused deps, 82 lint warnings → 0 (Lows) · env validation module w/ boot-time fail-fast (M-15) · error monitoring (Sentry) (H-9) · rate limiting (Upstash, already a dep) on auth + payment endpoints (H-10) · proxy.ts: fix dead guard blocks + auth-route header on request headers (M-8, M-9) · Stripe webhook side-effect idempotency hardening (M-10) · **admin RBAC extension (H-11) [decision #7 — requires your role-matrix sign-off; scheduled here, gated separately]**.
+### Phase 4 — Optimization & cleanup
+Code-splitting sweep (M-13) · cache/ISR audit of 215 force-dynamic pages (M-14) · unbounded `findMany` sweep (M-11) · N+1 batching (M-12) · dead code: CRA scaffold, `.eslintrc.json`, duplicate routes, unused deps (incl. now-unused `PayoutRequestButton` if the rail stays closed), 82 lint warnings → 0 · env validation w/ boot-time fail-fast (M-15) · proxy.ts dead-guard + auth-route header fix (M-8/M-9) · `backend/server.py` decision (pending owner: still on Emergent preview?).
 
 ### Phase 5 — Launch readiness
-Full verification loop; WCAG 2.2 AA spot-audit per dashboard; cross-role access re-check (buyer/dealer/affiliate/admin token against each other's routes); Lighthouse/bundle before-after; Definition-of-Done checklist against the brief; final report.
+Verification loop; WCAG spot-audit per dashboard; cross-role access re-check; bundle before/after; **Phase 0.5 items confirmed live**; RBAC status report; Definition-of-Done review; final sign-off.
 
 ---
 
-## Default decisions embedded in this plan (approve or override)
-1. **Inventory** — four dashboards as audited; `(public)` out of scope. *(Assumed confirmed by Phase 0 approval.)*
-2. **Wave 0 hotfixes** — proceed first, one commit each.
-3. **Buyer Premium self-upgrade** — left as-is (treated as intentional); no change planned.
-4. **Affiliate payouts** — honest disabled CTA now; payout processor build stays out of scope.
-5. **`design_guidelines.json`** — archived; current light/blue system canonized.
-6. **Fonts** — drop Plus Jakarta Sans; Inter becomes body/data face; dealer sub-brand dissolved into shared system.
-7. **Admin RBAC** — in scope, Phase 4, gated on a role matrix I'll draft for your sign-off before enforcement changes.
+## Decision register (v2)
+| # | Decision | Status |
+|---|----------|--------|
+| 1 | Inventory: Admin/Buyer/Dealer/Affiliate; marketing out of redesign scope, token-consumer w/ visual freeze | **Confirmed** |
+| 2 | CRM kit promotion, no net-new system | **Standing directive** |
+| 3 | Buyer Premium free upgrade | **PENDING owner** — endpoint hardened now (idempotent, audited; rate limit via 0.5-1) |
+| 4 | Affiliate payout rail | **Deferred, out of scope** — CTA hidden, balance visible (shipped) |
+| 5 | `design_guidelines.json` | **Remove + archive as decision record; light/blue canonized; no launch-coupled rebrand** |
+| 6 | Fonts | **One type system (Inter + JetBrains Mono); dealer distinction via tokens only** |
+| 7 | Admin RBAC | **Own workstream: matrix → shadow → enforce; API-layer first; not folded into UI work** |
 
-**Approval requested:** Part A spec, Part B sequencing, Wave 0 go-ahead, and the seven defaults above.
+**Approval requested at this gate:** Part A (incl. A2's one-type-system reading of Decision #6), Part B sequencing, Phase 0.5 scope/order (payment-intent limiter first), and the RBAC workstream shape.

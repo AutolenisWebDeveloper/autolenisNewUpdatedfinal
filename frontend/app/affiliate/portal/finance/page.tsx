@@ -6,9 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Landmark, DollarSign, Clock, CheckCircle2 } from "lucide-react";
 import AffiliatePayoutMethodForm from "@/components/affiliate/AffiliatePayoutMethodForm";
 import AffiliateTaxInfoForm from "@/components/affiliate/AffiliateTaxInfoForm";
-import PayoutRequestButton from "@/components/affiliate/PayoutRequestButton";
-
-const MINIMUM_PAYOUT_CENTS = 2500; // $25
 
 function statusVariant(status: string): "green" | "destructive" | "amber" | "secondary" {
   if (status === "PAID" || status === "COMPLETED") return "green";
@@ -61,11 +58,6 @@ export default async function AffiliateFinancePage() {
   const hasBanking    = !!payoutMethod?.method;
   const hasTax        = taxProfile?.certified === true;
   const isApproved    = affiliate.status === "ACTIVE";
-  const canRequestPayout =
-    summary.approvedCents >= MINIMUM_PAYOUT_CENTS &&
-    hasBanking &&
-    hasTax &&
-    isApproved;
 
   const missing: string[] = [];
   if (!hasBanking) missing.push("banking");
@@ -96,7 +88,9 @@ export default async function AffiliateFinancePage() {
             </div>
           ))}
         </div>
-        <p className="text-xs text-slate-400 mt-4">Minimum payout: $25</p>
+        <p className="text-xs text-slate-400 mt-4">
+          Minimum payout: $25 · Totals reflect settled commissions; reversed commissions are excluded.
+        </p>
       </div>
 
       {/* Section 2: Payout Method */}
@@ -125,31 +119,23 @@ export default async function AffiliateFinancePage() {
         />
       </div>
 
-      {/* Section 4: Request Payout */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-4">Request Payout</p>
-        {canRequestPayout ? (
-          <div>
-            <p className="text-sm text-slate-600 mb-4">
-              You have <strong className="text-slate-900">${(summary.approvedCents / 100).toFixed(2)}</strong> approved and available for payout.
-              {summary.pendingReviewCents > 0 && (
-                <span className="text-slate-400"> An additional ${(summary.pendingReviewCents / 100).toFixed(2)} is awaiting admin approval.</span>
-              )}
-            </p>
-            <PayoutRequestButton canRequest={canRequestPayout} missing={missing} />
-          </div>
-        ) : (
-          <div className="py-4">
-            <p className="text-sm text-slate-500 text-center">
-              Minimum payout is $25. You currently have{" "}
-              <strong className="text-slate-700">${(summary.approvedCents / 100).toFixed(2)}</strong> approved.
-              {summary.pendingReviewCents > 0 && (
-                <span className="text-slate-400"> An additional ${(summary.pendingReviewCents / 100).toFixed(2)} is pending admin review.</span>
-              )}
-            </p>
-            <PayoutRequestButton canRequest={false} missing={missing} />
-          </div>
-        )}
+      {/* Section 4: Payouts — the settlement rail is not live yet, so no
+          request CTA is shown. The accrued balance stays visible. */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="payouts-section">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Payouts</p>
+          <Badge variant="secondary">Payouts opening soon</Badge>
+        </div>
+        <p className="text-sm text-slate-600">
+          You have <strong className="text-slate-900">${(summary.approvedCents / 100).toFixed(2)}</strong> approved and accruing.
+          {summary.pendingReviewCents > 0 && (
+            <span className="text-slate-400"> An additional ${(summary.pendingReviewCents / 100).toFixed(2)} is awaiting admin approval.</span>
+          )}
+        </p>
+        <p className="text-xs text-slate-400 mt-2">
+          Payout requests aren&apos;t available yet — your approved balance carries over and will be payable
+          as soon as payouts open{missing.length > 0 ? `. To be payout-ready, complete: ${missing.join(", ")}.` : "."}
+        </p>
       </div>
 
       {/* Section 5: Payout History */}

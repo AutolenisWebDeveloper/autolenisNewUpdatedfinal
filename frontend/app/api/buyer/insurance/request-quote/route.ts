@@ -10,11 +10,15 @@ import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
 const schema = z.object({
-  dealId:         z.string().uuid("Invalid deal ID"),
-  coverageType:   z.enum(["full", "liability", "gap"]),
-  currentInsurer: z.string().max(100).optional().nullable(),
-  driverDob:      z.string().optional().nullable(),
-  additionalInfo: z.string().max(500).optional().nullable(),
+  dealId:          z.string().uuid("Invalid deal ID"),
+  // The vehicle the buyer was actually shown on the insurance page. The quote
+  // is bound to this explicit ID — the server never re-resolves "most recent
+  // shortlist item", which raced against concurrent shortlist changes.
+  inventoryItemId: z.string().uuid("Invalid vehicle ID").optional().nullable(),
+  coverageType:    z.enum(["full", "liability", "gap"]),
+  currentInsurer:  z.string().max(100).optional().nullable(),
+  driverDob:       z.string().optional().nullable(),
+  additionalInfo:  z.string().max(500).optional().nullable(),
 });
 
 export async function POST(request: NextRequest) {
@@ -37,7 +41,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { dealId, coverageType, currentInsurer, driverDob, additionalInfo } = parsed.data;
+  const { dealId, inventoryItemId, coverageType, currentInsurer, driverDob, additionalInfo } = parsed.data;
 
   // Verify deal ownership
   const deal = await prisma.deal.findFirst({
@@ -62,28 +66,34 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Resolve vehicle info via buyer shortlist (ShortlistItem has no Prisma relation)
+  // Resolve vehicle info from the EXPLICIT inventoryItemId the page rendered.
+  // The ID must belong to the buyer's shortlist (authorization: reject arbitrary
+  // vehicle IDs). No "most recent shortlist item" fallback — a server-side
+  // re-resolve raced against concurrent shortlist changes and could record a
+  // different vehicle than the buyer was shown.
   let vehicleSummary = "Vehicle details unavailable";
-  try {
-    const shortlist = await prisma.shortlist.findUnique({
-      where: { buyerId: buyer.id },
-      include: { items: { take: 1, orderBy: { addedAt: "asc" } } },
+  if (inventoryItemId) {
+    const shortlisted = await prisma.shortlistItem.findFirst({
+      where: { inventoryItemId, shortlist: { buyerId: buyer.id } },
+      select: { id: true },
     });
-    const firstItemId = shortlist?.items[0]?.inventoryItemId ?? null;
-    if (firstItemId) {
-      const inv = await prisma.inventoryItem.findUnique({
-        where: { id: firstItemId },
-        select: { year: true, make: true, model: true, trim: true, vin: true },
-      });
-      if (inv) {
-        vehicleSummary =
-          `${inv.year} ${inv.make} ${inv.model}` +
-          (inv.trim ? ` ${inv.trim}` : "") +
-          (inv.vin  ? ` (VIN: ${inv.vin})` : "");
-      }
+    if (!shortlisted) {
+      return errorResponse(
+        "VALIDATION_ERROR",
+        "The selected vehicle is not on your shortlist.",
+        400,
+      );
     }
-  } catch (err) {
-    logger.error("[insurance-quote] vehicle lookup failed:", err);
+    const inv = await prisma.inventoryItem.findUnique({
+      where: { id: inventoryItemId },
+      select: { year: true, make: true, model: true, trim: true, vin: true },
+    });
+    if (inv) {
+      vehicleSummary =
+        `${inv.year} ${inv.make} ${inv.model}` +
+        (inv.trim ? ` ${inv.trim}` : "") +
+        (inv.vin  ? ` (VIN: ${inv.vin})` : "");
+    }
   }
 
   // Update deal insurance status
@@ -101,10 +111,11 @@ export async function POST(request: NextRequest) {
       entityType: "DEAL",
       entityId:   dealId,
       metadata: {
-        buyerId:        buyer.id,
-        buyerName:      `${buyer.firstName ?? ""} ${buyer.lastName ?? ""}`.trim(),
+        buyerId:         buyer.id,
+        buyerName:       `${buyer.firstName ?? ""} ${buyer.lastName ?? ""}`.trim(),
         dealId,
-        vehicle:        vehicleSummary,
+        inventoryItemId: inventoryItemId ?? null,
+        vehicle:         vehicleSummary,
         otdPriceCents:  deal.offer?.otdPriceCents ?? null,
         coverageType,
         currentInsurer: currentInsurer ?? null,

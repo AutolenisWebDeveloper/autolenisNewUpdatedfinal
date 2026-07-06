@@ -39,6 +39,7 @@ export default async function BuyerInsurancePage() {
     InventoryItem,
     "year" | "make" | "model" | "trim" | "vin" | "exteriorColor" | "mileage" | "priceCents"
   > | null = null;
+  let vehicleInventoryItemId: string | null = null;
 
   if (deal) {
     const shortlist = await prisma.shortlist.findUnique({
@@ -47,6 +48,7 @@ export default async function BuyerInsurancePage() {
     });
     const recentItemId = shortlist?.items[0]?.inventoryItemId ?? null;
     if (recentItemId) {
+      vehicleInventoryItemId = recentItemId;
       vehicle = await prisma.inventoryItem.findUnique({
         where: { id: recentItemId },
         select: {
@@ -138,6 +140,7 @@ export default async function BuyerInsurancePage() {
               deal && (
                 <InsuranceQuoteForm
                   dealId={deal.id}
+                  inventoryItemId={vehicle ? vehicleInventoryItemId : null}
                   vehicle={vehicle ? {
                     year:          vehicle.year,
                     make:          vehicle.make,

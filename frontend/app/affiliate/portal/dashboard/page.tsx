@@ -137,7 +137,7 @@ export default async function AffiliateDashboardPage() {
         <StatCard
           label="Total Earned"
           value={`$${(summary.totalCents / 100).toLocaleString()}`}
-          sub="all-time"
+          sub="all-time · settled, reversed excluded"
           icon={DollarSign}
           tone="success"
           href="/affiliate/portal/earnings"

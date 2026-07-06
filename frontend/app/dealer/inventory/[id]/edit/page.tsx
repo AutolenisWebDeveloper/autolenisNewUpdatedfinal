@@ -128,8 +128,8 @@ export default function EditInventoryPage({ params }: Props) {
         }),
       });
       if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
-        setError(data.error ?? "Something went wrong");
+        const data = (await res.json()) as { error?: { message?: string } };
+        setError(data.error?.message ?? "Something went wrong");
         return;
       }
       router.push("/dealer/inventory");

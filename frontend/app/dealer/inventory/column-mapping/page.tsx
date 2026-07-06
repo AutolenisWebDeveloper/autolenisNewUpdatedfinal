@@ -48,8 +48,8 @@ export default function ColumnMappingPage() {
         body: JSON.stringify({ mapping }),
       });
       if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
-        setError(data.error ?? "Failed to save mapping");
+        const data = (await res.json()) as { error?: { message?: string } };
+        setError(data.error?.message ?? "Failed to save mapping");
         return;
       }
       router.push("/dealer/inventory/bulk-upload");

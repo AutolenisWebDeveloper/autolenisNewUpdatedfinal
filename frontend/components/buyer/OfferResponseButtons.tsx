@@ -32,13 +32,12 @@ export default function OfferResponseButtons({ offerId, requestId }: Props) {
         setActing(null);
         return;
       }
-      const data = await res.json() as {
-        status:    string;
-        redirect?: string | null;
-        message?:  string;
+      // The buyer API wraps payloads in { success, data } (successResponse).
+      const body = await res.json() as {
+        data?: { status: string; redirect?: string | null; message?: string };
       };
-      if (data.redirect) {
-        router.push(data.redirect);
+      if (body.data?.redirect) {
+        router.push(body.data.redirect);
       } else {
         router.refresh();
       }

@@ -121,6 +121,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
   const [shortlisted,   setShortlisted]   = useState<Set<string>>(new Set());
   const [shortlistCount, setShortlistCount] = useState(0);
   const [toasts,        setToasts]        = useState<Toast[]>([]);
+  const [searchError,   setSearchError]   = useState<string | null>(null);
   const toastCounter = useRef(0);
 
   // budget from server (may differ from prop if user has no prequal)
@@ -169,16 +170,21 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
   // ── fetch results whenever URL search params change ───────────────────────
   const fetchResults = useCallback(async () => {
     setLoading(true);
+    setSearchError(null);
     try {
       const params = new URLSearchParams(sp.toString());
       params.set("limit", "48");
       const res  = await fetch(`/api/buyer/search?${params.toString()}`);
-      const data = await res.json() as { success: boolean; data: SearchResult };
+      const data = await res.json() as { success: boolean; data: SearchResult; error?: { message?: string } };
       if (data.success) {
         setVehicles(data.data.vehicles);
         setTotalShown(data.data.count);
         setHasLocalDealerInventory(data.data.hasLocalDealerInventory ?? null);
+      } else {
+        setSearchError(data.error?.message ?? "We couldn't load search results. Please try again.");
       }
+    } catch {
+      setSearchError("We couldn't load search results. Please check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -440,8 +446,26 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
         </div>
       )}
 
+      {/* Search error */}
+      {!loading && searchError && (
+        <div
+          role="alert"
+          data-testid="search-error"
+          className="bg-red-50 border border-red-200 rounded-xl px-4 py-6 mb-6 text-center"
+        >
+          <p className="text-sm font-medium text-red-700 mb-3">{searchError}</p>
+          <button
+            onClick={() => { void fetchResults(); }}
+            className="text-sm font-semibold text-white bg-[#0B5FD1] hover:bg-[#0A4DB8] px-4 py-2 rounded-lg transition-colors"
+            data-testid="search-retry-btn"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
       {/* Results count */}
-      {!loading && (
+      {!loading && !searchError && (
         <p className="text-sm text-slate-500 mb-4" data-testid="results-count">
           Showing {vehicles.length} vehicle{vehicles.length !== 1 ? "s" : ""}
           {budgetDollars !== null ? " within your budget" : ""}
@@ -455,7 +479,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
             <div key={i} className="bg-white border border-slate-200 rounded-xl h-56 animate-pulse" />
           ))}
         </div>
-      ) : (
+      ) : searchError ? null : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {vehicles.map((v, i) => {
             const laneInfo = LANE_INFO[v.lane] ?? LANE_INFO.LANE_3;
@@ -504,7 +528,7 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
         </div>
       )}
 
-      {!loading && vehicles.length === 0 && (
+      {!loading && !searchError && vehicles.length === 0 && (
         <NoInventoryState
           hasLocalDealerInventory={hasLocalDealerInventory}
           buyerZip={zip || buyerZip || null}
