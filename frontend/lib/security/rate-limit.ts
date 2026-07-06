@@ -19,7 +19,45 @@
 
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
-import { logger } from "@/lib/logger";
+import { pageOnCall, notifyOncall } from "@/lib/observability/alert";
+
+// Time-boxed fail-open (owner directive): the auth/general tiers stay open
+// while the store is down, but only for a bounded window per warm instance —
+// after AUTH_FAILOPEN_MAX_MS of continuous outage the tier flips to fail
+// CLOSED to bound brute-force exposure. Tracked in module memory: this bounds
+// exposure on any warm instance; a cold start resets the window, and a
+// cross-instance breaker would require a second (independent) store, which is
+// out of scope for launch. now() is read from Date.now (allowed in app code).
+function failOpenWindowMs(): number {
+  return Number(process.env.RL_FAILOPEN_MAX_MS ?? 5 * 60 * 1000);
+}
+let authOutageStartedAt: number | null = null;
+
+function evaluateFailOpen(err: unknown, tier: "auth" | "general"): RateLimitResult {
+  const now = Date.now();
+  if (authOutageStartedAt === null) authOutageStartedAt = now;
+  const outageMs = now - authOutageStartedAt;
+  const windowMs = failOpenWindowMs();
+
+  if (outageMs > windowMs) {
+    // Exposure window exceeded — page and fail CLOSED.
+    pageOnCall(`[rate-limit] ${tier} limiter store down > ${Math.round(windowMs / 1000)}s — failing CLOSED`, {
+      outageMs,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { ok: false, status: 503, message: "Service temporarily unavailable. Please try again shortly." };
+  }
+  // Within the window — page (auth outage is security-relevant) and fail OPEN.
+  pageOnCall(`[rate-limit] ${tier} limiter store unavailable — failing OPEN (within ${Math.round(windowMs / 1000)}s window)`, {
+    outageMs,
+    error: err instanceof Error ? err.message : String(err),
+  });
+  return OK;
+}
+
+function clearOutage(): void {
+  authOutageStartedAt = null;
+}
 
 export type RateLimitResult =
   | { ok: true }
@@ -63,7 +101,7 @@ function warnUnconfigured(context: string): void {
   if (warnedUnconfigured) return;
   warnedUnconfigured = true;
   if (process.env.NODE_ENV === "production") {
-    logger.error(
+    notifyOncall(
       `[rate-limit] no Redis store configured (UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN) — ${context} is UNTHROTTLED. Provision the store.`,
     );
   }
@@ -90,13 +128,14 @@ export async function limitAuthAttempt(
   }
   try {
     const res = await limiter.limit(key);
+    clearOutage();
     return res.success
       ? OK
       : { ok: false, status: 429, message: "Too many attempts. Please wait a few minutes and try again." };
   } catch (err) {
-    // FAIL OPEN + alert: an outage of the limiter store must not block sign-in.
-    logger.error("[rate-limit] auth limiter store unavailable — failing open:", err);
-    return OK;
+    // Time-boxed FAIL OPEN + page: open while the store is briefly down, then
+    // flip closed if the outage persists past the window.
+    return evaluateFailOpen(err, "auth");
   }
 }
 
@@ -118,8 +157,11 @@ export async function limitPaymentIntent(
       : { ok: false, status: 429, message: "Too many payment attempts. Please wait and try again." };
   } catch (err) {
     // FAIL CLOSED (degraded): refuse rather than expose an unthrottled
-    // card-testing surface while the store is down.
-    logger.error("[rate-limit] payment limiter store unavailable — failing CLOSED:", err);
+    // card-testing surface. This sits on the revenue-critical path, so a store
+    // outage is a HIGH-severity revenue incident — page, do not merely log.
+    pageOnCall("[rate-limit] payment limiter store unavailable — failing CLOSED (checkout blocked)", {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return {
       ok: false,
       status: 503,
@@ -140,11 +182,12 @@ export async function limitGeneral(
   }
   try {
     const res = await limiter.limit(key);
+    clearOutage();
     return res.success
       ? OK
       : { ok: false, status: 429, message: "Too many requests. Please slow down and try again." };
   } catch (err) {
-    logger.error("[rate-limit] general limiter store unavailable — failing open:", err);
-    return OK;
+    // Time-boxed FAIL OPEN (same window as the auth tier).
+    return evaluateFailOpen(err, "general");
   }
 }

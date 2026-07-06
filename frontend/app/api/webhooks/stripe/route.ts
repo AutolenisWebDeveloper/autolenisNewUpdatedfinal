@@ -17,6 +17,7 @@ import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { dispatch } from "@/lib/qstash/dispatch";
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
+import { allowedPredecessors } from "@/lib/payments/deposit-state";
 
 export async function POST(request: NextRequest) {
   const stripe = getStripe();
@@ -97,10 +98,13 @@ export async function POST(request: NextRequest) {
               });
             }
 
-            // Out-of-order guard: a late-arriving success event must never
-            // resurrect a deposit that charge.refunded already settled.
+            // Transition matrix (deposit-state.ts): only advance to PAID from a
+            // permitted predecessor (PENDING). A terminal REFUNDED/FAILED, or an
+            // already-PAID row, is left untouched — the WHERE clause enforces the
+            // allowed edge at the DB level, so a late/out-of-order success can
+            // never resurrect a settled deposit.
             await tx.deposit.updateMany({
-              where: { stripePaymentIntentId: pi.id, status: { not: "REFUNDED" } },
+              where: { stripePaymentIntentId: pi.id, status: { in: allowedPredecessors("PAID") } },
               data: { status: "PAID" },
             });
 
@@ -134,6 +138,14 @@ export async function POST(request: NextRequest) {
               });
             }
             return { deposit, createdAuction, isNewAuction: !existingAuction };
+          }, {
+            // Bound the row-lock hold and connection acquisition so a burst of
+            // concurrent Stripe redeliveries on the same deposit can't exhaust
+            // the serverless connection pool: a contended delivery gives up
+            // fast (→ 500) and Stripe retries, rather than pinning a connection.
+            // The body is a handful of local queries, so these are generous.
+            maxWait: 2000,
+            timeout: 5000,
           });
 
           if (outcome === null) {
@@ -328,11 +340,10 @@ export async function POST(request: NextRequest) {
         const pi = event.data.object as Stripe.PaymentIntent;
 
         if (pi.metadata.type === "deposit") {
-          // Out-of-order guard: only a still-PENDING deposit can fail — a late
-          // failure event must not downgrade a deposit that already succeeded
-          // (PAID) or settled (REFUNDED).
+          // Transition matrix: FAILED is reachable only from PENDING, so a late
+          // failure event can never downgrade a PAID or REFUNDED deposit.
           await prisma.deposit.updateMany({
-            where: { stripePaymentIntentId: pi.id, status: "PENDING" },
+            where: { stripePaymentIntentId: pi.id, status: { in: allowedPredecessors("FAILED") } },
             data:  { status: "FAILED" },
           });
         }
@@ -366,11 +377,18 @@ export async function POST(request: NextRequest) {
           select: { id: true, status: true, buyerId: true },
         });
 
-        if (deposit && deposit.status !== "REFUNDED") {
-          await prisma.deposit.update({
-            where: { id: deposit.id },
-            data:  { status: "REFUNDED", refundedAt: new Date() },
-          });
+        // Transition matrix: REFUNDED is reachable only from PAID. The updateMany
+        // WHERE enforces the edge atomically (count 1 = we performed the refund,
+        // count 0 = disallowed/already-settled → skip side effects). This closes
+        // the check-then-write race a findFirst+update leaves open.
+        const refundApplied = deposit
+          ? (await prisma.deposit.updateMany({
+              where: { id: deposit.id, status: { in: allowedPredecessors("REFUNDED") } },
+              data:  { status: "REFUNDED", refundedAt: new Date() },
+            })).count === 1
+          : false;
+
+        if (deposit && refundApplied) {
           await prisma.notification.create({
             data: {
               buyerId: deposit.buyerId,

@@ -88,7 +88,19 @@ test("auth limiter FAILS OPEN when the store is unreachable, with an alert", asy
 
   const res = await limitAuthAttempt("signin:x");
   assert.deepEqual(res, { ok: true });
-  assert.ok(errorLogs.some((m) => m.includes("failing open")), "outage must be alerted");
+  assert.ok(errorLogs.some((m) => m.includes("failing OPEN")), "outage must page on-call");
+});
+
+test("auth limiter flips to FAIL CLOSED once the outage exceeds the window", async () => {
+  process.env.RL_FAILOPEN_MAX_MS = "-1"; // any outage duration exceeds a negative window
+  const { limitAuthAttempt } = await loadModule();
+  limitBehavior = "throw";
+
+  const res = await limitAuthAttempt("signin:x");
+  assert.equal(res.ok, false);
+  if (!res.ok) assert.equal(res.status, 503);
+  assert.ok(errorLogs.some((m) => m.includes("failing CLOSED")), "flip must page on-call");
+  delete process.env.RL_FAILOPEN_MAX_MS;
 });
 
 test("auth limiter 429s over the limit when the store is healthy", async () => {

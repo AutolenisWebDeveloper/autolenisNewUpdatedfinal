@@ -53,14 +53,17 @@ function makeClient(state: Db) {
     },
     deposit: {
       updateMany: async ({ where, data }: {
-        where: { id?: string; stripePaymentIntentId?: string | null; status?: string | { not: string } };
+        where: { id?: string; stripePaymentIntentId?: string | null; status?: string | { not?: string; in?: string[] } };
         data: Partial<DepositRow>;
       }) => {
         const hits = state.deposits.filter((d) => {
           if (where.id !== undefined && d.id !== where.id) return false;
           if (where.stripePaymentIntentId !== undefined && d.stripePaymentIntentId !== where.stripePaymentIntentId) return false;
           if (typeof where.status === "string" && d.status !== where.status) return false;
-          if (typeof where.status === "object" && where.status !== null && d.status === where.status.not) return false;
+          if (where.status && typeof where.status === "object") {
+            if (where.status.not !== undefined && d.status === where.status.not) return false;
+            if (where.status.in !== undefined && !where.status.in.includes(d.status)) return false;
+          }
           return true;
         });
         hits.forEach((d) => Object.assign(d, data));
