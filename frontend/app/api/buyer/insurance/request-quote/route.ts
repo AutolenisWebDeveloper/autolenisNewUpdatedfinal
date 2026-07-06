@@ -62,12 +62,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Resolve vehicle info via buyer shortlist (ShortlistItem has no Prisma relation)
+  // Resolve vehicle info via buyer shortlist (ShortlistItem has no Prisma relation).
+  // Must match the insurance page's resolution (addedAt desc = most recently
+  // shortlisted) so the vehicle recorded on the quote is the one shown to the buyer.
   let vehicleSummary = "Vehicle details unavailable";
   try {
     const shortlist = await prisma.shortlist.findUnique({
       where: { buyerId: buyer.id },
-      include: { items: { take: 1, orderBy: { addedAt: "asc" } } },
+      include: { items: { take: 1, orderBy: { addedAt: "desc" } } },
     });
     const firstItemId = shortlist?.items[0]?.inventoryItemId ?? null;
     if (firstItemId) {
