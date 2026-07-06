@@ -28,7 +28,7 @@ function formatMonthYear(date: Date | string | null) {
 
 export default async function AffiliateProfilePage() {
   const affiliate = await requireAffiliate();
-  let onboardingData: Awaited<ReturnType<typeof getOnboardingProfile>> = { review: null, profile: null, taxProfile: null, paymentProfile: null, documents: [] };
+  let onboardingData: Awaited<ReturnType<typeof getOnboardingProfile>> = { review: null, profile: null, taxProfile: null, paymentProfile: null, payoutMethod: null, documents: [] };
   try {
     onboardingData = await getOnboardingProfile(affiliate.id);
   } catch {
