@@ -3,6 +3,7 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import { NotificationType, NotificationChannel } from "@prisma/client";
 import { logger } from "@/lib/logger";
+import { limitGeneral } from "@/lib/security/rate-limit";
 
 // POST /api/buyer/plan/upgrade
 // Upgrades an authenticated Standard buyer to Premium.
@@ -20,6 +21,10 @@ export async function POST(request: NextRequest) {
   if (buyer.plan === "PREMIUM") {
     return successResponse({ plan: "PREMIUM", alreadyUpgraded: true });
   }
+
+  // Abuse guard on the self-service mutation (fails OPEN on store outage).
+  const rl = await limitGeneral(`plan-upgrade:${buyer.id}`, { tokens: 5, window: "10 m" });
+  if (!rl.ok) return errorResponse("RATE_LIMITED", rl.message, rl.status);
 
   // Upgrade plan. updateMany with a plan guard makes the flip race-safe: two
   // concurrent requests can't both record an upgrade (count tells us who won).

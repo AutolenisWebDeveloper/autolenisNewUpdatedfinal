@@ -6,40 +6,7 @@ import { ZURA_SYSTEM_PROMPT } from "@/lib/ai/zura-knowledge";
 
 // Public Zura concierge endpoint — no authentication required.
 // Used by the public homepage ChatWidget for unauthenticated visitors.
-
-// Simple in-memory per-IP rate limit: 20 messages per hour.
-// Note: in-memory state is per server instance and resets on cold start —
-// acceptable for basic abuse mitigation on a public endpoint.
-const RATE_LIMIT_MAX = 20;
-const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
-const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
-
-function getClientIp(request: NextRequest): string {
-  const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return request.headers.get("x-real-ip") ?? "unknown";
-}
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-
-  // Opportunistic cleanup of expired buckets to prevent unbounded growth.
-  // Runs at most once every cleanup window when the map gets large.
-  if (rateLimitBuckets.size > 1000) {
-    for (const [key, b] of rateLimitBuckets) {
-      if (b.resetAt < now) rateLimitBuckets.delete(key);
-    }
-  }
-
-  const bucket = rateLimitBuckets.get(ip);
-  if (!bucket || bucket.resetAt < now) {
-    rateLimitBuckets.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return true;
-  }
-  if (bucket.count >= RATE_LIMIT_MAX) return false;
-  bucket.count += 1;
-  return true;
-}
+import { limitGeneral, clientIpKey } from "@/lib/security/rate-limit";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_HISTORY_MESSAGES = 8;
@@ -50,10 +17,11 @@ export async function POST(request: NextRequest) {
     return errorResponse("AI_DISABLED", "AI services are currently unavailable", 503);
   }
 
-  // Rate limit per IP
-  const ip = getClientIp(request);
-  if (!checkRateLimit(ip)) {
-    return errorResponse("RATE_LIMITED", "Too many requests. Please try again later.", 429);
+  // Durable per-IP rate limit (20/hour) — shared across serverless instances,
+  // survives cold starts. Fails OPEN with an alert if the store is down.
+  const rl = await limitGeneral(`chat:ip:${clientIpKey(request.headers)}`, { tokens: 20, window: "1 h" });
+  if (!rl.ok) {
+    return errorResponse("RATE_LIMITED", rl.message, rl.status);
   }
 
   let body: {

@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { prisma } from "@/lib/prisma";
 import { signDealerJwt, DEALER_TOKEN_COOKIE } from "@/lib/dealer-auth";
+import { limitAuthAttempt, clientIpKey } from "@/lib/security/rate-limit";
 
 export async function POST(request: NextRequest) {
   let email: string, password: string, remember: boolean;
@@ -19,6 +20,13 @@ export async function POST(request: NextRequest) {
 
   if (!email || !password) {
     return NextResponse.json({ error: "Incorrect email or password" }, { status: 401 });
+  }
+
+  // Brute-force guard, keyed by source IP and by target account. Fails OPEN
+  // on limiter-store outage (sign-in must never be blocked by our own infra).
+  for (const key of [`signin:dealer:ip:${clientIpKey(request.headers)}`, `signin:dealer:email:${email}`]) {
+    const rl = await limitAuthAttempt(key);
+    if (!rl.ok) return NextResponse.json({ error: rl.message }, { status: rl.status });
   }
 
   // Verify with Supabase

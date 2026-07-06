@@ -2,6 +2,8 @@
 
 import { logger } from "@/lib/logger";
 import { createServerSupabaseClient, createServiceSupabaseClient } from "@/lib/supabase";
+import { headers } from "next/headers";
+import { limitAuthAttempt } from "@/lib/security/rate-limit";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { UserRole, BuyerPlan, AffiliateStatus } from "@prisma/client";
@@ -334,6 +336,17 @@ export async function signInAction(formData: FormData): Promise<AuthResult> {
     return { error: "Incorrect email or password" };
   }
 
+  // Brute-force guard, keyed by source IP and by target account. Fails OPEN
+  // on limiter-store outage (sign-in must never be blocked by our own infra).
+  {
+    const hdrs = await headers();
+    const ip = (hdrs.get("x-forwarded-for")?.split(",")[0]?.trim()) || hdrs.get("x-real-ip") || "unknown";
+    for (const key of [`signin:portal:ip:${ip}`, `signin:portal:email:${email}`]) {
+      const rl = await limitAuthAttempt(key);
+      if (!rl.ok) return { error: rl.message };
+    }
+  }
+
   const supabase = await createServerSupabaseClient({ extendedSession: remember });
 
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -412,6 +425,17 @@ export async function forgotPasswordAction(formData: FormData): Promise<AuthResu
   const email = (formData.get("email") as string)?.toLowerCase()?.trim();
   // Identical success message whether email exists or not — prevents enumeration
   if (!email) return { success: true, message: "Check your email for password reset instructions." };
+
+  // Throttle reset-email sends per IP + target address (email-bombing guard).
+  // Fails OPEN; the enumeration-safe success message doubles as the 429 shape.
+  {
+    const hdrs = await headers();
+    const ip = (hdrs.get("x-forwarded-for")?.split(",")[0]?.trim()) || hdrs.get("x-real-ip") || "unknown";
+    for (const key of [`reset:ip:${ip}`, `reset:email:${email}`]) {
+      const rl = await limitAuthAttempt(key, { tokens: 5, window: "10 m" });
+      if (!rl.ok) return { success: true, message: "Check your email for password reset instructions." };
+    }
+  }
 
   try {
     const redirectTo = `${getAppUrl()}/auth/reset-password`;

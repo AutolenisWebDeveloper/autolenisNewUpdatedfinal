@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { signPreMfaToken, ADMIN_PREMFA_COOKIE } from "@/lib/admin-auth";
 import { compare } from "bcryptjs";
+import { limitAuthAttempt, clientIpKey } from "@/lib/security/rate-limit";
 
 // POST /api/admin/auth/signin — admin credentials check
 // Uses SEPARATE admin auth — never Supabase buyer/dealer system
@@ -18,6 +19,14 @@ export async function POST(request: NextRequest) {
     if (!email || !password) {
       // "Incorrect email or password" — never distinguish which
       return NextResponse.json({ error: "Incorrect email or password" }, { status: 401 });
+    }
+
+    // Pre-MFA brute-force guard (MFA verification already has a per-account
+    // DB lockout; this throttles the password stage). Fails OPEN on store
+    // outage so our own infra can never lock admins out.
+    for (const key of [`signin:admin:ip:${clientIpKey(request.headers)}`, `signin:admin:email:${email.toLowerCase()}`]) {
+      const rl = await limitAuthAttempt(key);
+      if (!rl.ok) return NextResponse.json({ error: rl.message }, { status: rl.status });
     }
 
     const user = await prisma.user.findFirst({
