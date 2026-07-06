@@ -24,8 +24,28 @@ function serializeArg(arg: unknown): unknown {
   return arg;
 }
 
+// Forward error-level entries to Sentry when it is active (no-op without a
+// DSN). Lazy require keeps this module dependency-light for unit tests and
+// avoids a hard edge-runtime import cost on non-error paths.
+function forwardToSentry(message: string, args: unknown[]): void {
+  try {
+    const Sentry = require("@sentry/nextjs") as typeof import("@sentry/nextjs");
+    const err = args.find((a): a is Error => a instanceof Error);
+    if (err) {
+      Sentry.captureException(err, { extra: { message, args: args.filter((a) => a !== err) } });
+    } else {
+      Sentry.captureMessage(message, { level: "error", extra: { args } });
+    }
+  } catch {
+    // Sentry unavailable (edge bundle stripped it, or SDK not initialized) —
+    // console logging below still happens.
+  }
+}
+
 function emit(level: LogLevel, message: string, args: unknown[]): void {
   if (WEIGHT[level] < threshold()) return;
+
+  if (level === "error" && isProd) forwardToSentry(message, args);
 
   const sink = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
 

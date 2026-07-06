@@ -1,5 +1,6 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
 import { logger } from "@/lib/logger";
 import { useEffect } from "react";
 
@@ -16,6 +17,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
+    Sentry.captureException(error);
     logger.error("[global] root layout error:", error);
   }, [error]);
 
