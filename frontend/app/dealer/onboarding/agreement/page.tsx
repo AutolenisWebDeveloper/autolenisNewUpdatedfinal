@@ -7,6 +7,7 @@ import {
   CURRENT_DEALER_AGREEMENT_VERSION,
   DEALER_AGREEMENT_TEXT,
 } from "@/lib/constants/dealer-agreement";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 export default function DealerAgreementPage() {
   const router = useRouter();
@@ -30,29 +31,14 @@ export default function DealerAgreementPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/dealer/agreement/sign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          agreedToTerms: true,
-          agreementVersion: CURRENT_DEALER_AGREEMENT_VERSION,
-          consentedToElectronic: true,
-        }),
+      await api.post("/api/dealer/agreement/sign", {
+        agreedToTerms: true,
+        agreementVersion: CURRENT_DEALER_AGREEMENT_VERSION,
+        consentedToElectronic: true,
       });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as
-          | { error?: { message?: string } | string }
-          | null;
-        const message =
-          typeof data?.error === "string"
-            ? data.error
-            : data?.error?.message ?? "Signing failed.";
-        setError(message);
-        return;
-      }
       router.push("/dealer/dashboard");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Network error. Please try again."));
     } finally {
       setLoading(false);
     }

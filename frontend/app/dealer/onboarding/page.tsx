@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle, Building2, FileText, Truck, ClipboardCheck } from "lucide-react";
+import { api } from "@/lib/api/client";
 
 const STEPS = [
   { id: "BUSINESS_INFO", label: "Business Info", icon: Building2 },
@@ -54,17 +55,15 @@ export default function DealerOnboardingPage() {
   // Hydrate previously persisted onboarding values so refresh does not lose progress.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/dealer/onboarding")
-      .then((r) => r.json())
-      .then((d: { success?: boolean; data?: {
+    api.get<{
         dealershipName?: string | null; phone?: string | null; address?: string | null;
         city?: string | null; state?: string | null; zip?: string | null;
         licenseNumber?: string | null; agreedToTermsAt?: string | null;
         onboardingStep?: string | null;
-      } }) => {
+      }>("/api/dealer/onboarding")
+      .then((data) => {
         if (cancelled) return;
-        const data = d?.data;
-        if (d?.success && data) {
+        if (data) {
           if (data.dealershipName) {
             setBusiness((b) => ({
               ...b,

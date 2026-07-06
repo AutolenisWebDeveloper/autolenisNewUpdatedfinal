@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Upload } from "lucide-react";
+import { api, apiErrorMessage, ApiError } from "@/lib/api/client";
 
 type UploadState = "idle" | "file-selected" | "parsing" | "preview" | "uploading" | "committed" | "error";
 
@@ -135,9 +136,9 @@ export default function BulkUploadPage() {
     setState("uploading");
     setError(null);
     try {
-      let body: string;
+      let body: Record<string, unknown>;
       if (rawData) {
-        body = JSON.stringify({ rawRows: rawData.rows });
+        body = { rawRows: rawData.rows };
       } else if (csvRows.length > 0) {
         const rows = csvRows.map((r) => ({
           vin: r.vin,
@@ -146,31 +147,21 @@ export default function BulkUploadPage() {
           model: r.model,
           priceCents: convertToPriceCents(r.price),
         })).filter((r) => !isNaN(r.year) && r.priceCents > 0);
-        body = JSON.stringify({ rows });
+        body = { rows };
       } else {
         return;
       }
 
-      const res = await fetch("/api/dealer/inventory/bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-      });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: { code?: string; message?: string } };
-        if (data.error?.code === "MAPPING_REQUIRED") {
-          setNeedsMapping(true);
-          setError("This CSV has non-standard headers. Please save a column mapping first.");
-        } else {
-          setError(data.error?.message ?? "Upload failed");
-        }
-        setState("error");
-        return;
-      }
+      await api.post("/api/dealer/inventory/bulk", body);
       setState("committed");
       router.push("/dealer/inventory");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "MAPPING_REQUIRED") {
+        setNeedsMapping(true);
+        setError("This CSV has non-standard headers. Please save a column mapping first.");
+      } else {
+        setError(apiErrorMessage(err, "Upload failed"));
+      }
       setState("error");
     }
   }

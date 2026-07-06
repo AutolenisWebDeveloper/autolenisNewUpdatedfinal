@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   dealershipName: string;
@@ -29,26 +30,17 @@ export default function DealerProfileClient(props: Props) {
     setError(null);
     setSaved(false);
     try {
-      const res = await fetch("/api/dealer/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dealershipName: dealershipName.trim() || undefined,
-          phone: phone.trim() || undefined,
-          address: address.trim() || undefined,
-          city: city.trim() || undefined,
-          state: stateVal.trim() || undefined,
-          zip: zip.trim() || undefined,
-        }),
+      await api.patch("/api/dealer/profile", {
+        dealershipName: dealershipName.trim() || undefined,
+        phone: phone.trim() || undefined,
+        address: address.trim() || undefined,
+        city: city.trim() || undefined,
+        state: stateVal.trim() || undefined,
+        zip: zip.trim() || undefined,
       });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: { message?: string } };
-        setError(data.error?.message ?? "Failed to save profile.");
-        return;
-      }
       setSaved(true);
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Network error. Please try again."));
     } finally {
       setSaving(false);
     }

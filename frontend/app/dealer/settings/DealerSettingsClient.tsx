@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   initialNotifyNewAuction?: boolean;
@@ -26,19 +27,10 @@ export default function DealerSettingsClient({
     setError(null);
     setSaved(false);
     try {
-      const res = await fetch("/api/dealer/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notifyNewAuction, notifyOfferAccepted, notifyPickupReady }),
-      });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: { message?: string } };
-        setError(data.error?.message ?? "Failed to save settings.");
-        return;
-      }
+      await api.patch("/api/dealer/settings", { notifyNewAuction, notifyOfferAccepted, notifyPickupReady });
       setSaved(true);
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Network error. Please try again."));
     } finally {
       setSaving(false);
     }

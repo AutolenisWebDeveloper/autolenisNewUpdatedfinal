@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const INPUT_CLASS =
   "w-full border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30";
@@ -19,19 +20,10 @@ export default function NewMessagePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/dealer/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealId, content }),
-      });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: { message?: string } };
-        setError(data.error?.message ?? "Something went wrong");
-        return;
-      }
+      await api.post("/api/dealer/messages", { dealId, content });
       router.push("/dealer/messages");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Network error. Please try again."));
     } finally {
       setLoading(false);
     }

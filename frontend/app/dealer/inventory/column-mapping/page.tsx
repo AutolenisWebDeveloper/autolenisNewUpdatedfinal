@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const DETECTED_COLUMNS = ["VehicleID", "yr", "Mk", "Mdl", "Miles", "ListPrice"];
 
@@ -42,19 +43,10 @@ export default function ColumnMappingPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/dealer/inventory/column-mapping", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mapping }),
-      });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: { message?: string } };
-        setError(data.error?.message ?? "Failed to save mapping");
-        return;
-      }
+      await api.post("/api/dealer/inventory/column-mapping", { mapping });
       router.push("/dealer/inventory/bulk-upload");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Network error. Please try again."));
     } finally {
       setLoading(false);
     }

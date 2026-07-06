@@ -1,6 +1,7 @@
 "use client";
 
 import { logger } from "@/lib/logger";
+import { api } from "@/lib/api/client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -124,9 +125,8 @@ export default function DealerSidebar() {
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    fetch("/api/dealer/notifications/unread-count")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.data?.count) setUnreadCount(d.data.count); })
+    api.get<{ count: number }>("/api/dealer/notifications/unread-count")
+      .then(d => { if (d?.count) setUnreadCount(d.count); })
       .catch(() => { /* badge stays at 0 on failure */ });
   }, []);
 
