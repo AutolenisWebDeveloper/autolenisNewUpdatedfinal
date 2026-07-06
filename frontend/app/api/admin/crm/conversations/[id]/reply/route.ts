@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import twilio from 'twilio';
 import { getServiceSupabase } from '@/lib/supabase-service';
-import { getAdminActor } from '@/lib/auth/admin-actor';
+import { requirePermissionActor } from '@/lib/auth/permissions';
 import { SuppressionService } from '@/lib/services/suppression.service';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
@@ -20,7 +20,7 @@ export async function POST(
   }
 
   const isInternalNote = !!body.is_internal_note;
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("comms.bulk_send");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const adminId = actor.adminId;
   const supabase = getServiceSupabase();

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
-import { getAdminActor } from '@/lib/auth/admin-actor';
+import { requirePermissionActor } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 import {
   generateContentDraft,
@@ -24,7 +24,7 @@ interface CopilotRequest {
 // generation is audit-logged (prompt + mode + model only — NOT the context,
 // which may carry recipient PII).
 export async function POST(req: Request) {
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("ai.use");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
 
   let body: CopilotRequest;

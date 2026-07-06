@@ -2,13 +2,13 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { WorkflowService } from '@/lib/services/workflow.service';
 import { getPrebuilt } from '@/lib/services/workflow.prebuilt';
-import { getAdminActor } from '@/lib/auth/admin-actor';
+import { requirePermissionActor } from '@/lib/auth/permissions';
 import type { WorkflowStatus, WorkflowInput } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("crm.read");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
 
   const url = new URL(req.url);
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
   }
   if (!body) return NextResponse.json({ error: 'BODY_REQUIRED' }, { status: 400 });
 
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("crm.manage");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
 

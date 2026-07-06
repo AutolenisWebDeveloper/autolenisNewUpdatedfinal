@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { WorkflowEngine } from '@/lib/services/workflow.engine';
-import { getAdminActor } from '@/lib/auth/admin-actor';
+import { requirePermissionActor } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ interface RouteContext {
 // pairing (used for back-filling, debugging, or one-off sends).
 export async function POST(req: Request, ctx: RouteContext) {
   const { id } = await ctx.params;
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("crm.manage");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   let body: { contact_id?: string; trigger_data?: Record<string, unknown> };
   try {

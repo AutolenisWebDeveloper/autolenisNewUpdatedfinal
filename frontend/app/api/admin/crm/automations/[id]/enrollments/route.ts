@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAdminActor } from '@/lib/auth/admin-actor';
+import { requirePermissionActor } from '@/lib/auth/permissions';
 import { getServiceSupabase } from '@/lib/supabase-service';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +11,7 @@ interface RouteContext {
 // Lists most recent enrollments for a workflow + per-status counts. Powers the
 // workflow detail page and the operations panel's "failed enrollments" table.
 export async function GET(req: Request, ctx: RouteContext) {
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("crm.read");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
 
   const { id } = await ctx.params;

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
-import { getAdminActor } from '@/lib/auth/admin-actor';
+import { requirePermissionActor } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 // scheduled run. Safe to invoke at any cadence: REFRESH CONCURRENTLY does
 // not block readers and is itself a no-op replay if no rows changed.
 export async function POST() {
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("crm.manage");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
   const { error } = await supabase.rpc('refresh_analytics_views');

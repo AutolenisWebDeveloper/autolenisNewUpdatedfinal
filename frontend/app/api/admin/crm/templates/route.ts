@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { TemplateService } from '@/lib/services/template.service';
-import { getAdminActor } from '@/lib/auth/admin-actor';
+import { requirePermissionActor } from '@/lib/auth/permissions';
 import type {
   EmailTemplateInput,
   EmailTemplateStatus,
@@ -10,7 +10,7 @@ import type {
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("crm.read");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
 
   const url = new URL(req.url);
@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("crm.manage");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   const supabase = getServiceSupabase();
 

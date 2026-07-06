@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { CampaignService } from '@/lib/services/campaign.service';
-import { getAdminActor } from '@/lib/auth/admin-actor';
+import { requirePermissionActor } from '@/lib/auth/permissions';
 import type { CampaignType } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 // worker will compute — segment size, suppression count, will-receive.
 // Read-only — no audit log entry (preview doesn't mutate state).
 export async function POST(req: Request) {
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("crm.read");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   let body: { type: CampaignType; segment_id: string };
   try {

@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getAdminActor } from '@/lib/auth/admin-actor';
+import { requirePermissionActor } from '@/lib/auth/permissions';
 import { PREBUILT_WORKFLOWS } from '@/lib/services/workflow.prebuilt';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("crm.read");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
 
   return NextResponse.json({
