@@ -7,9 +7,16 @@ export const dynamic = "force-dynamic";
 export default async function DealerLeadsPage() {
   const dealer = await requireDealer();
   // Leads = auction invitations with buyer context
+  // Select only the anonymized fields this view renders — never the full
+  // auction row (which carries internal FKs like buyerId/depositId).
   const leads = await prisma.auctionInvitation.findMany({
     where: { dealerId: dealer.id },
-    include: { auction: { include: { _count: { select: { offers: true } } } } },
+    select: {
+      id: true,
+      auctionId: true,
+      sentAt: true,
+      auction: { select: { status: true } },
+    },
     orderBy: { sentAt: "desc" },
     take: 20,
   });

@@ -31,11 +31,27 @@ export async function POST(request: NextRequest) {
     where: { status: "ACTIVE" },
     include: { user: { select: { email: true } } },
   });
-  const weekKey = isoWeekKey(new Date());
+  const now = new Date();
+  const weekKey = isoWeekKey(now);
+  // Idempotency: the snapshot table has no unique constraint on the week, so a
+  // second run in the same ISO week (Vercel retry, manual trigger, double-fire)
+  // would insert duplicate rows that double-count in the trend chart/history.
+  // Guard by skipping any dealer already snapshotted this week.
+  const weekStart = new Date(now);
+  weekStart.setUTCDate(weekStart.getUTCDate() - 7);
   let processed = 0;
+  let skipped = 0;
   const errors: string[] = [];
   for (const dealer of dealers) {
     try {
+      const existing = await prisma.dealerScorecardSnapshot.findFirst({
+        where: { dealerId: dealer.id, snapshotDate: { gte: weekStart } },
+        select: { id: true },
+      });
+      if (existing) {
+        skipped++;
+        continue;
+      }
       const scorecard = await computeDealerScorecard(dealer.id);
       await prisma.dealerScorecardSnapshot.create({
         data: {
@@ -70,5 +86,5 @@ export async function POST(request: NextRequest) {
       errors.push(`${dealer.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  return NextResponse.json({ processed, errors: errors.length, details: errors.slice(0, 10) });
+  return NextResponse.json({ processed, skipped, errors: errors.length, details: errors.slice(0, 10) });
 }

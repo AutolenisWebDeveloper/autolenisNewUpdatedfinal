@@ -176,6 +176,37 @@ server-side pagination on the 500-capped list (large refactors); ECOA/Reg B
 credit "application"); a real automated OFAC screen on the external path
 (attestation is the interim control).
 
+## DEALER ACQUISITION + DEALER SYSTEMS (focused follow-on pass)
+
+Four deep-audit agents mapped both systems (acquisition/recruitment backend,
+dealer-portal backend, dealer-portal UI/UX, admin-dealer + acquisition UI/UX).
+Headline verdicts: **dealer-portal tenancy is strong — no cross-dealer IDOR
+found** (every route filters by the JWT `dealerId`); offer/auction financial
+integrity is a high-water mark (server re-derives OTD, enforces auction-close in
+Serializable txns). The real backend gaps are data-minimization, cron
+idempotency, and honest metrics. The design system exists but is ~2% adopted
+across ~50 dealer pages + the admin-dealer/outreach consoles (both UI audits
+scored cohesion 4.5–5.5/10; the fix is mechanical kit adoption, not redesign).
+
+| # | Unit | Commit | Highlights |
+|---|---|---|---|
+| D-BE1 | Dealer portal backend correctness & data-minimization | (this commit) | `leads` list/page no longer return the full auction row (leaked internal FKs `buyerId`/`depositId`) — now select anonymized fields only; auction-insights median suppressed below a 4-offer sample (was de-anonymizing a single competitor's exact OTD at n=2); competitiveness-check benchmarks a ±35% price band instead of a global pool (an $80k truck was scored against a $20k-sedan median); scorecard junk-fee tip fixed (dead `junkFeeRatio(0,…)` always evaluated 0 → never fired) and **`avgResponseHours` now computed** from invitation→offer deltas (was hardcoded `8`); scorecard-snapshot cron made idempotent (no more duplicate weekly rows double-counting the trend chart); negative junk-fee line items rejected in the OTD assertion (blocked a misrepresented-but-reconciling breakdown) |
+
+**Systemic finding (flagged, not partial-fixed):** all **47 cron routes** authorize
+with a spoofable `x-vercel-cron: 1` header shortcut (`!isVercelCron && !isValidSecret`)
+and there is no shared cron-auth helper. Vercel does not strip an inbound
+`x-vercel-cron` header, so any unauthenticated caller can trigger crons (mass
+email / DB writes). This is an app-wide convention, not a dealer bug — fixing 4
+of 47 would create inconsistency and risk breaking scheduled jobs. Recommend a
+dedicated pass that switches every cron to unconditional `CRON_SECRET` bearer
+verification (the QStash jobs already verify properly). Owner/security decision.
+
+**Deferred (documented):** `contracts/upload` accepts a free-form `documentUrl`
+(should validate an owned storage-path prefix) — needs client-contract check to
+avoid breakage; public lead-capture endpoints (`dealer-application`,
+`tools/dealer-fee-lead`, `prospect-claim`) lack rate-limit/captcha; prospect-claim
+token stored in plaintext (bounded impact — yields only a PENDING application).
+
 ## SETUP (human actions required)
 
 - (carried from PHASE_BACKLOG) SENTRY_DSN + Upstash/KV env vars still owed by ops for Phase 0.5 sign-off.

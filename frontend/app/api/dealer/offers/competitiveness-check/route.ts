@@ -13,9 +13,19 @@ export async function GET(request: NextRequest) {
 
   if (!otdCents || otdCents <= 0) return errorResponse("VALIDATION_ERROR", "otdCents is required", 400);
 
-  // Compute anonymized segment median from recent offers
+  // Compute anonymized segment median from recent offers in a COMPARABLE price
+  // band. Benchmarking against the whole platform mislabels the result — an
+  // $80k truck compared to a pool dominated by $20k sedans reads "WEAK" against
+  // an irrelevant median. Scope to offers within ±35% of the proposed OTD so
+  // the "segment" median is actually a like-for-like comparison.
+  const bandLow = Math.round(otdCents * 0.65);
+  const bandHigh = Math.round(otdCents * 1.35);
   const recentOffers = await prisma.offer.findMany({
-    where: { createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }, status: "SUBMITTED" },
+    where: {
+      createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+      status: "SUBMITTED",
+      otdPriceCents: { gte: bandLow, lte: bandHigh },
+    },
     select: { otdPriceCents: true },
     take: 100,
   });
