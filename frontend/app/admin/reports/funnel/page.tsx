@@ -27,10 +27,18 @@ export default async function AdminFunnelPage() {
   ];
 
   const maxCount = Math.max(...stages.map(s => s.count), 1);
+  const allZero = stages.every(s => s.count === 0);
 
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-funnel-page">
       <div className="flex items-center gap-3 mb-6"><BarChart2 size={22} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">Conversion Funnel</h1></div>
+      {allZero && (
+        <div className="text-center py-16 text-slate-400 bg-white border border-slate-200 rounded-xl mb-4" data-testid="funnel-empty">
+          <p className="font-medium text-slate-500">No funnel data yet</p>
+          <p className="text-xs mt-1">Stages populate as buyers register and move through the pipeline.</p>
+        </div>
+      )}
+      {!allZero && (
       <div className="space-y-3">
         {stages.map((stage, i) => {
           const prev = stages[i - 1];
@@ -54,6 +62,7 @@ export default async function AdminFunnelPage() {
           );
         })}
       </div>
+      )}
     </div>
   );
 }

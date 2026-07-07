@@ -24,6 +24,7 @@ export interface ConciergeFeeRow {
   buyerEmail: string;
   amountCents: number;
   feePaidAt: string | null;
+  feeRefundedAt: string | null;
   feeStatus: "PENDING" | "PAID" | "REFUNDED";
   createdAt: string;
   stripeFeePIId: string | null;
@@ -69,6 +70,7 @@ export async function getAdminConciergeFeeList(): Promise<ConciergeFeeRow[]> {
       buyerEmail: d.buyer.user.email,
       amountCents: d.feeAmountCents ?? PREMIUM_FEE_REMAINING_CENTS,
       feePaidAt: d.feePaidAt?.toISOString() ?? null,
+      feeRefundedAt: d.feeRefundedAt?.toISOString() ?? null,
       feeStatus,
       createdAt: d.createdAt.toISOString(),
       stripeFeePIId: d.stripeFeePIId ?? null,
