@@ -3,37 +3,43 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 
 // GET /api/buyer/prequal/external-status — System 4B
-// Returns current status of external pre-approval submission
+// Status of the buyer's most recent external pre-approval submission.
+// Reads the ExternalPreApproval record directly (the real source of truth) —
+// previously it keyed on PreQualification.isExternal, which the submit route
+// never set, so this always returned PENDING forever.
+const STATUS_MAP: Record<string, string> = {
+  SUBMITTED: "PENDING",
+  REVIEWING: "PENDING",
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED",
+  ADDITIONAL_INFO_REQUIRED: "ADDITIONAL_INFO_REQUIRED",
+};
+
 export async function GET(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
-  const prequal = buyer.preQualification;
+  const submission = await prisma.externalPreApproval.findFirst({
+    where: { buyerId: buyer.id },
+    orderBy: { createdAt: "desc" },
+  });
 
-  // If no prequal or not external, return pending
-  if (!prequal || !prequal.isExternal) {
-    return successResponse({
-      status: "PENDING",
-      lenderName: null,
-      approvedAmount: null,
-    });
+  if (!submission) {
+    return successResponse({ status: "PENDING", lenderName: null, approvedAmount: null });
   }
 
-  // Map decision to status for the polling page
-  const statusMap: Record<string, string> = {
-    APPROVED: "APPROVED",
-    DECLINED: "REJECTED",
-    MANUAL_REVIEW: "ADDITIONAL_INFO_REQUIRED",
-    OFAC_REVIEW: "PENDING",
-    OFAC_ESCALATED: "PENDING",
-    PENDING: "PENDING",
-  };
-
   return successResponse({
-    status: statusMap[prequal.decision] ?? "PENDING",
-    // maxOtdAmountCents is READ-ONLY from iPredict — display only
-    approvedAmount: prequal.decision === "APPROVED" ? Math.round(prequal.maxOtdAmountCents / 100) : null,
-    expiryDate: prequal.expiresAt?.toISOString(),
-    reviewedAt: prequal.updatedAt?.toISOString(),
+    status: STATUS_MAP[submission.status] ?? "PENDING",
+    lenderName: submission.lenderName,
+    approvedAmount:
+      submission.approvedAmountCents != null
+        ? Math.round(submission.approvedAmountCents / 100)
+        : null,
+    aprRate: submission.aprRate,
+    termMonths: submission.termMonths,
+    expiryDate: submission.expiryDate?.toISOString() ?? null,
+    reviewedAt: submission.reviewedAt?.toISOString() ?? null,
+    rejectionReason: submission.rejectionReason,
+    additionalInfoRequired: submission.additionalInfoRequired,
   });
 }

@@ -11,6 +11,9 @@ interface Submission {
   buyerId: string;
   lenderName: string | null;
   approvedAmountCents: number | null;
+  aprRate: number | null;
+  termMonths: number | null;
+  hasDocument: boolean;
   status: string;
   createdAt: string;
 }
@@ -71,6 +74,15 @@ export default function ExternalPreApprovalActionsClient({ submissions: initialS
     toast.success(msg);
   }
 
+  async function openDocument(id: string) {
+    try {
+      const d = await api.get<{ signedUrl: string }>(`/api/admin/external-preapprovals/${id}/document`);
+      window.open(d.signedUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Could not open the lender letter"));
+    }
+  }
+
   async function handleAction(id: string, action: "approve" | "reject", reason: string) {
     setLoading(true);
     try {
@@ -114,10 +126,24 @@ export default function ExternalPreApprovalActionsClient({ submissions: initialS
               <p className="font-medium text-slate-800 text-sm">{s.lenderName ?? "Unknown Lender"}</p>
               <p className="text-xs text-slate-400">
                 {s.approvedAmountCents ? `$${(s.approvedAmountCents / 100).toLocaleString()}` : "—"}
+                {s.aprRate != null ? ` · ${s.aprRate}% APR` : ""}
+                {s.termMonths != null ? ` · ${s.termMonths} mo` : ""}
                 {" · "}{new Date(s.createdAt).toLocaleDateString()}
               </p>
             </div>
             <div className="flex items-center gap-2">
+              {s.hasDocument ? (
+                <button
+                  type="button"
+                  onClick={() => void openDocument(s.id)}
+                  className="text-xs font-medium text-al-primary hover:underline"
+                  data-testid={`view-letter-${s.id}`}
+                >
+                  View letter
+                </button>
+              ) : (
+                <span className="text-xs text-slate-300" title="No lender letter uploaded">No letter</span>
+              )}
               <Badge variant="secondary" className="text-xs">{s.status}</Badge>
               {s.status === "SUBMITTED" && (
                 <>

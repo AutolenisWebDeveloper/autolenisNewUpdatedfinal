@@ -16,6 +16,9 @@ export default async function AdminExternalPreApprovalsPage() {
     buyerId: s.buyerId,
     lenderName: s.lenderName,
     approvedAmountCents: s.approvedAmountCents,
+    aprRate: s.aprRate,
+    termMonths: s.termMonths,
+    hasDocument: !!s.documentUrl,
     status: s.status,
     createdAt: s.createdAt.toISOString(),
   }));

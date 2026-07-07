@@ -11,7 +11,6 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { sendAdverseActionEmail } from "@/lib/services/email/resend.service";
 
 interface Props { params: Promise<{ id: string }> }
 
@@ -64,21 +63,22 @@ export async function POST(request: NextRequest, { params }: Props) {
     },
   });
 
-  // Send rejection email — failure must not block the response
-  try {
-    const buyer = submission.buyer;
-    if (buyer?.user?.email) {
-      const firstName = buyer.firstName ?? buyer.user.email.split("@")[0];
-      const decisionDate = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-      await sendAdverseActionEmail({
-        to: buyer.user.email,
-        firstName,
-        decisionDate,
-      });
-    }
-  } catch (err) {
-    logger.error("[external-preapprovals/reject] email failed:", err);
-  }
+  // Notify the buyer in-app with the reason. This is NOT an FCRA § 615
+  // consumer-report adverse action — AutoLenis is declining to accept a
+  // self-reported external lender letter, not denying credit on a MicroBilt
+  // report. The previous code sent the MicroBilt adverse-action template,
+  // which told the buyer (falsely) that the denial was "based on information
+  // obtained from MicroBilt Corporation", and — lacking a per-submission
+  // idempotency key — silently suppressed any second rejection for the buyer.
+  await prisma.notification.create({
+    data: {
+      buyerId: submission.buyerId,
+      type: "REQUEST_STATUS_UPDATE",
+      title: "External pre-approval not accepted",
+      body: `We were unable to accept your ${submission.lenderName ?? "external"} pre-approval. Reason: ${reason}`,
+      actionUrl: "/buyer/prequal/manual-preapproval/status",
+    },
+  }).catch((err) => logger.error("[external-preapprovals/reject] notification failed:", err));
 
   return adminSuccess({ rejected: true });
 }
