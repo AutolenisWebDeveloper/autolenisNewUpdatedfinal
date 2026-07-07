@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Activity, CheckCircle2, AlertTriangle, XCircle, RefreshCw, Database, ShieldCheck, BarChart2, CreditCard, FileSignature, Mail, Building2, Loader2 } from "lucide-react";
 import { api } from "@/lib/api/client";
+import { useAutoRefresh } from "@/lib/hooks/use-auto-refresh";
 
 interface IntegrationStatus {
   stripe: boolean;
@@ -71,8 +72,10 @@ function ConfigRow({
 export default function AdminSystemHealthPage() {
   const [report, setReport] = useState<HealthReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reportError, setReportError] = useState(false);
   const [liveIntegrations, setLiveIntegrations] = useState<LiveIntegration[] | null>(null);
   const [loadingIntegrations, setLoadingIntegrations] = useState(true);
+  const [integrationsError, setIntegrationsError] = useState(false);
   const [microbiltConfig, setMicrobiltConfig] = useState<MicroBiltConfig | null>(null);
 
   const loadIntegrations = useCallback(async () => {
@@ -82,7 +85,11 @@ export default function AdminSystemHealthPage() {
       const data = await api.get<{ integrations: LiveIntegration[]; microbilt?: MicroBiltConfig }>("/api/admin/health/integrations");
       if (data.integrations) setLiveIntegrations(data.integrations);
       if (data.microbilt) setMicrobiltConfig(data.microbilt);
-    } catch { /* ignore */ }
+      setIntegrationsError(false);
+    } catch {
+      // A failed probe must read as unknown, never as healthy.
+      setIntegrationsError(true);
+    }
     setLoadingIntegrations(false);
   }, []);
 
@@ -93,12 +100,19 @@ export default function AdminSystemHealthPage() {
     try {
       const data = await api.get<{ report: HealthReport }>("/api/admin/health");
       if (data.report) setReport(data.report);
-    } catch { /* ignore */ }
+      setReportError(false);
+    } catch {
+      // A failed health check must surface as such, never default to "healthy".
+      setReportError(true);
+    }
     setLoading(false);
     void loadIntegrations();
   }, [loadIntegrations]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Health surfaces go stale silently — poll so the status shown is real.
+  useAutoRefresh(load, { intervalMs: 60_000 });
 
   const getLiveStatus = (name: string): boolean | null => {
     if (!liveIntegrations) return null;
@@ -119,7 +133,10 @@ export default function AdminSystemHealthPage() {
     { name: "MicroBilt (PreQual)",    icon: Building2,      liveKey: "microbilt", testid: "health-microbilt" },
   ];
 
-  const overallStatus = report?.status ?? "healthy";
+  // "unknown" when the health check itself failed or hasn't returned yet —
+  // an unreachable health endpoint must never render as "healthy".
+  const overallStatus: "healthy" | "degraded" | "down" | "unknown" =
+    reportError ? "unknown" : report?.status ?? "unknown";
 
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-system-health-page">
@@ -142,18 +159,35 @@ export default function AdminSystemHealthPage() {
       <div className={`rounded-xl p-5 mb-6 border-2 flex items-center gap-4 ${
         overallStatus === "healthy" ? "bg-green-50 border-green-200" :
         overallStatus === "degraded" ? "bg-amber-50 border-amber-200" :
+        overallStatus === "unknown" ? "bg-slate-50 border-slate-300" :
         "bg-red-50 border-red-200"
       }`} data-testid="overall-status">
         {overallStatus === "healthy" ? <CheckCircle2 size={28} className="text-green-600" /> :
          overallStatus === "degraded" ? <AlertTriangle size={28} className="text-amber-600" /> :
+         overallStatus === "unknown" ? <AlertTriangle size={28} className="text-slate-500" /> :
          <XCircle size={28} className="text-red-600" />}
         <div>
-          <p className="font-bold text-slate-900 capitalize">{overallStatus}</p>
-          {report?.timestamp && (
+          <p className="font-bold text-slate-900 capitalize">
+            {overallStatus === "unknown" ? "Status unknown" : overallStatus}
+          </p>
+          {reportError ? (
+            <p className="text-xs text-red-600" data-testid="health-report-error">
+              The health check itself failed — displayed data may be stale. Retry with Refresh.
+            </p>
+          ) : report?.timestamp ? (
             <p className="text-xs text-slate-500">Last checked: {new Date(report.timestamp).toLocaleString()}</p>
-          )}
+          ) : null}
         </div>
       </div>
+
+      {integrationsError && (
+        <div className="mb-6 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4" data-testid="health-integrations-error">
+          <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-900">
+            Live integration probes could not be reached — external statuses below are unknown, not necessarily down.
+          </p>
+        </div>
+      )}
 
       {/* Integration statuses */}
       <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">Integration Statuses</h2>

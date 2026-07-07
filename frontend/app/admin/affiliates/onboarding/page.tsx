@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { requireAdmin } from "@/lib/auth/admin-session";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 
@@ -12,6 +13,7 @@ function statusVariant(status: string): "green" | "amber" | "destructive" | "sec
 }
 
 export default async function AdminAffiliateOnboardingPage() {
+  await requireAdmin();
   const reviews = await prisma.affiliateOnboardingReview.findMany({
     include: {
       affiliate: { include: { user: { select: { email: true } } } },

@@ -5,7 +5,11 @@ import { BookOpen } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export default async function AdminFaithHopePage() {
-  await requireAdmin();
+  const admin = await requireAdmin();
+  // Same gate as the faith-content hub — SUPER_ADMIN / OPERATIONS_ADMIN only.
+  if (admin.role !== "SUPER_ADMIN" && admin.role !== "OPERATIONS_ADMIN") {
+    return <div className="p-8 text-slate-500" data-testid="faith-content-access-denied">Access restricted to Super Admin and Operations Admin.</div>;
+  }
   const sections = await prisma.hopePageContent.findMany({ orderBy: { order: "asc" } });
   const required = ["opening", "encouragement", "born-again", "resources"];
   return (

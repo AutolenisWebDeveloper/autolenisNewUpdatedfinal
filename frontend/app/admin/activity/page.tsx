@@ -1,10 +1,11 @@
 // Feature 18 — Platform Live Activity Feed
 // Reads from existing BuyerActivityEvent + event ledger — no new event infrastructure required
-// SSE stream (client-side polling workaround for preview environment)
+// Liveness via <AutoRefresh/> RSC re-fetch polling (visibility-aware)
 
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import { Activity } from "lucide-react";
+import AutoRefresh from "@/components/admin/AutoRefresh";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +23,9 @@ export default async function AdminActivityPage() {
       <div className="flex items-center gap-3 mb-6">
         <Activity size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Platform Activity Feed</h1>
-        <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse ml-1" />
+        <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse ml-1" aria-hidden />
         <span className="text-xs text-slate-400">Live</span>
+        <span className="ml-auto"><AutoRefresh intervalMs={30_000} /></span>
       </div>
 
       <div className="space-y-2" data-testid="activity-feed">

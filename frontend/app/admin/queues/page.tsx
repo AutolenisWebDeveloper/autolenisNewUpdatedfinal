@@ -1,10 +1,13 @@
 // Feature 11 — Admin Queue Command Center (8 tabs) with functional resolve
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { AlertOctagon, CheckCircle2, Loader2 } from "lucide-react";
+import { useState, useCallback, useEffect } from "react";
+import { AlertOctagon, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ErrorState } from "@/components/ui/kit";
+import { useAutoRefresh } from "@/lib/hooks/use-auto-refresh";
 
 const QUEUE_TABS = [
   { id: "ofac",           label: "OFAC Escalations",       priority: "P0" as const },
@@ -36,55 +39,102 @@ export default function AdminQueuesPage() {
   const [resolving, setResolving] = useState<Record<string, boolean>>({});
   const [resolved, setResolved] = useState<Record<string, boolean>>({});
   const [items, setItems] = useState<Record<string, QueueItem[]>>({});
-  const [loadedTab] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   // Fetch counts for all queues
   const loadCounts = useCallback(async () => {
-    try {
-      const results = await Promise.all(
-        QUEUE_TABS.map(async tab => {
-          const res = await fetch(`/api/admin/queues/${QUEUE_TYPE_MAP[tab.id]}`);
-          const json = await res.json() as { success?: boolean; data?: { items: QueueItem[] } };
-          return { id: tab.id, count: json.data?.items?.length ?? 0, items: json.data?.items ?? [] };
-        })
-      );
-      const newCounts: Record<string, number> = {};
-      const newItems: Record<string, QueueItem[]> = {};
-      results.forEach(r => { newCounts[r.id] = r.count; newItems[r.id] = r.items; });
-      setCounts(newCounts);
-      setItems(newItems);
-    } catch { /* ignore */ }
+    const results = await Promise.all(
+      QUEUE_TABS.map(async tab => {
+        const res = await fetch(`/api/admin/queues/${QUEUE_TYPE_MAP[tab.id]}`);
+        if (!res.ok) throw new Error(`queue ${tab.id} returned ${res.status}`);
+        const json = await res.json() as { success?: boolean; data?: { items: QueueItem[] } };
+        return { id: tab.id, count: json.data?.items?.length ?? 0, items: json.data?.items ?? [] };
+      })
+    );
+    const newCounts: Record<string, number> = {};
+    const newItems: Record<string, QueueItem[]> = {};
+    results.forEach(r => { newCounts[r.id] = r.count; newItems[r.id] = r.items; });
+    setCounts(newCounts);
+    setItems(newItems);
   }, []);
 
-  useEffect(() => { loadCounts(); }, [loadCounts]);
+  const guardedLoad = useCallback(async () => {
+    try {
+      await loadCounts();
+      setLoadError(false);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoaded(true);
+    }
+  }, [loadCounts]);
 
-  async function _loadTabItems(tabId: string) {
-    if (loadedTab === tabId) return;
-  }
+  useEffect(() => { void guardedLoad(); }, [guardedLoad]);
+
+  // Operational queue — keep counts current without manual reloads.
+  const { refresh, refreshing, lastRefreshed } = useAutoRefresh(guardedLoad, { intervalMs: 30_000 });
 
   async function resolve(tabId: string, itemId: string) {
     const key = `${tabId}-${itemId}`;
     setResolving(p => ({ ...p, [key]: true }));
     try {
-      await fetch(`/api/admin/queues/${QUEUE_TYPE_MAP[tabId]}/${itemId}/resolve`, {
+      const res = await fetch(`/api/admin/queues/${QUEUE_TYPE_MAP[tabId]}/${itemId}/resolve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ resolution: "Resolved via admin console" }),
       });
+      const json = await res.json().catch(() => null) as { success?: boolean; error?: { message?: string } } | null;
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error?.message ?? `Resolve failed (${res.status})`);
+      }
       setResolved(p => ({ ...p, [key]: true }));
       setCounts(p => ({ ...p, [tabId]: Math.max(0, (p[tabId] ?? 0) - 1) }));
       setItems(p => ({ ...p, [tabId]: (p[tabId] ?? []).filter(i => i.id !== itemId) }));
-    } catch { /* ignore */ }
+      toast.success("Queue item resolved");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to resolve queue item");
+    }
     setResolving(p => ({ ...p, [key]: false }));
   }
 
   return (
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-queues-page">
-      <div className="flex items-center gap-3 mb-6">
-        <AlertOctagon size={22} className="text-al-primary" />
-        <h1 className="text-xl font-bold text-slate-900">Exception Queue Command Center</h1>
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <AlertOctagon size={22} className="text-al-primary" />
+          <h1 className="text-xl font-bold text-slate-900">Exception Queue Command Center</h1>
+        </div>
+        <div className="flex items-center gap-3">
+          {lastRefreshed && (
+            <span className="text-xs text-slate-400" data-testid="queues-last-refreshed">
+              Updated {lastRefreshed.toLocaleTimeString()}
+            </span>
+          )}
+          <Button size="sm" variant="outline" onClick={() => void refresh()} disabled={refreshing}
+            data-testid="queues-refresh-btn" className="gap-1.5">
+            <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} aria-hidden />
+            Refresh
+          </Button>
+        </div>
       </div>
 
+      {loadError && (
+        <div className="mb-6 bg-white border border-red-200 rounded-xl">
+          <ErrorState
+            title="Failed to load queues"
+            description="One or more queues could not be loaded. Counts below may be stale."
+            onRetry={() => void refresh()}
+            data-testid="queues-load-error"
+          />
+        </div>
+      )}
+
+      {!loaded ? (
+        <div className="flex items-center justify-center py-24" data-testid="queues-loading">
+          <Loader2 size={20} className="animate-spin text-slate-400" />
+        </div>
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {QUEUE_TABS.map(queue => {
           const count = counts[queue.id] ?? 0;
@@ -143,23 +193,11 @@ export default function AdminQueuesPage() {
                   )}
                 </div>
               )}
-
-              {/* Empty tab resolve placeholder (for testing resolve API even if no DB items) */}
-              {!hasItems && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  data-testid={`queue-resolve-empty-${queue.id}`}
-                  onClick={() => resolve(queue.id, `placeholder-${queue.id}`)}
-                  className="mt-2 text-xs text-slate-400 h-7"
-                >
-                  Resolve empty queue
-                </Button>
-              )}
             </div>
           );
         })}
       </div>
+      )}
     </div>
   );
 }

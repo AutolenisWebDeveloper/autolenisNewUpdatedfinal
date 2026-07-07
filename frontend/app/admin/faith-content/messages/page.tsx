@@ -5,7 +5,11 @@ import { MessageSquare } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export default async function AdminFaithMessagesPage() {
-  await requireAdmin();
+  const admin = await requireAdmin();
+  // Same gate as the faith-content hub — SUPER_ADMIN / OPERATIONS_ADMIN only.
+  if (admin.role !== "SUPER_ADMIN" && admin.role !== "OPERATIONS_ADMIN") {
+    return <div className="p-8 text-slate-500" data-testid="faith-content-access-denied">Access restricted to Super Admin and Operations Admin.</div>;
+  }
   const messages = await prisma.encouragementMessage.findMany({ orderBy: { placement: "asc" } });
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="admin-faith-messages-page">

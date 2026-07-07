@@ -6,14 +6,18 @@ import { BookOpen } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export default async function AdminFaithVersesPage() {
-  await requireAdmin();
+  const admin = await requireAdmin();
+  // Same gate as the faith-content hub — SUPER_ADMIN / OPERATIONS_ADMIN only.
+  if (admin.role !== "SUPER_ADMIN" && admin.role !== "OPERATIONS_ADMIN") {
+    return <div className="p-8 text-slate-500" data-testid="faith-content-access-denied">Access restricted to Super Admin and Operations Admin.</div>;
+  }
   const verses = await prisma.verseLibrary.findMany({ orderBy: { book: "asc" }, take: 100 });
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-faith-verses-page">
       <div className="flex items-center gap-3 mb-6"><BookOpen size={20} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">Verse Library — {verses.length} NKJV Verses</h1></div>
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-700">NKJV translation ONLY. No other translations permitted.</div>
       <div className="space-y-2">
-        {verses.slice(0, 20).map(v => (
+        {verses.map(v => (
           <div key={v.id} data-testid={`verse-row-${v.id}`} className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-4 py-3">
             <div>
               <p className="text-sm font-semibold text-slate-800">{v.reference}</p>
@@ -25,7 +29,7 @@ export default async function AdminFaithVersesPage() {
             </div>
           </div>
         ))}
-        {verses.length > 20 && <p className="text-xs text-slate-400 text-center py-2">Showing 20 of {verses.length} verses</p>}
+        
       </div>
     </div>
   );

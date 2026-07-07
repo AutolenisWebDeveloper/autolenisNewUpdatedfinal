@@ -33,8 +33,8 @@ export default async function AdminThreadPage({
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="admin-thread-page">
       <div className="flex items-center gap-3 mb-6">
-        <Link href="/admin/messages" className="text-slate-400 hover:text-slate-700" data-testid="back-to-admin-messages">
-          <ArrowLeft size={18} />
+        <Link href="/admin/messages" className="text-slate-400 hover:text-slate-700" data-testid="back-to-admin-messages" aria-label="Back to all message threads">
+          <ArrowLeft size={18} aria-hidden />
         </Link>
         <MessageSquare size={20} className="text-al-primary" />
         <div>
