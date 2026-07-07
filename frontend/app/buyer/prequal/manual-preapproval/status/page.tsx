@@ -71,10 +71,16 @@ export default function ManualPreapprovalStatusPage() {
 
   if (!data) {
     return (
-      <div className="p-6 md:p-8 max-w-xl" data-testid="prequal-status-loading">
-        <div className="flex items-center gap-3 text-slate-500">
-          <RefreshCw size={18} className="animate-spin" />
-          <span className="text-sm">Loading application status…</span>
+      <div className="mx-auto w-full max-w-xl px-4 py-8 sm:px-6 md:py-10" data-testid="prequal-status-loading">
+        <div className="h-7 w-48 rounded-lg bg-slate-200 animate-pulse mb-2" />
+        <div className="h-4 w-64 rounded bg-slate-100 animate-pulse mb-6" />
+        <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-6">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="w-14 h-14 rounded-2xl bg-slate-200 animate-pulse" />
+            <div className="h-6 w-28 rounded-full bg-slate-200 animate-pulse" />
+          </div>
+          <div className="h-4 w-full rounded bg-slate-100 animate-pulse mb-2" />
+          <div className="h-4 w-3/4 rounded bg-slate-100 animate-pulse" />
         </div>
       </div>
     );
@@ -84,16 +90,16 @@ export default function ManualPreapprovalStatusPage() {
   const Icon = config.icon;
 
   return (
-    <div className="p-6 md:p-8 max-w-xl" data-testid="manual-preapproval-status-page">
-      <h1 className="text-xl font-bold text-slate-900 mb-1">Pre-Approval Status</h1>
+    <div className="mx-auto w-full max-w-xl px-4 py-8 sm:px-6 md:py-10" data-testid="manual-preapproval-status-page">
+      <h1 className="text-2xl sm:text-[1.75rem] font-bold text-slate-900 tracking-tight mb-1">Pre-Approval Status</h1>
       {data.lenderName && (
         <p className="text-sm text-slate-500 mb-6">Submitted to <strong>{data.lenderName}</strong></p>
       )}
 
       {/* Status card */}
-      <div className={`border-2 rounded-2xl p-8 mb-6 ${config.bg}`} data-testid={`status-card-${data.status.toLowerCase()}`}>
+      <div className={`border rounded-2xl shadow-sm p-6 mb-6 ${config.bg}`} data-testid={`status-card-${data.status.toLowerCase()}`}>
         <div className="flex items-center gap-4 mb-4">
-          <div className="w-14 h-14 rounded-full bg-white/60 flex items-center justify-center">
+          <div className="w-14 h-14 rounded-2xl bg-white/60 flex items-center justify-center">
             <Icon size={28} className={
               data.status === "APPROVED" ? "text-green-600"
               : data.status === "REJECTED" ? "text-red-600"
@@ -114,19 +120,19 @@ export default function ManualPreapprovalStatusPage() {
         {/* State-specific content */}
         {data.status === "APPROVED" && data.approvedAmount && (
           <div className="mt-2" data-testid="approved-details">
-            <p className="text-3xl font-bold text-green-900 mb-1">
+            <p className="text-3xl font-mono tabular-nums font-bold text-green-900 mb-1">
               ${data.approvedAmount.toLocaleString()}
             </p>
             <p className="text-sm text-green-700">Approved budget</p>
             <div className="grid grid-cols-3 gap-4 mt-4 text-sm">
               {data.aprRate && (
-                <div><p className="text-xs text-slate-500">APR</p><p className="font-semibold">{data.aprRate}%</p></div>
+                <div><p className="text-xs text-slate-500">APR</p><p className="font-semibold tabular-nums">{data.aprRate}%</p></div>
               )}
               {data.termMonths && (
-                <div><p className="text-xs text-slate-500">Term</p><p className="font-semibold">{data.termMonths} mo</p></div>
+                <div><p className="text-xs text-slate-500">Term</p><p className="font-semibold tabular-nums">{data.termMonths} mo</p></div>
               )}
               {data.expiryDate && (
-                <div><p className="text-xs text-slate-500">Valid until</p><p className="font-semibold">{new Date(data.expiryDate).toLocaleDateString()}</p></div>
+                <div><p className="text-xs text-slate-500">Valid until</p><p className="font-semibold tabular-nums">{new Date(data.expiryDate).toLocaleDateString()}</p></div>
               )}
             </div>
           </div>

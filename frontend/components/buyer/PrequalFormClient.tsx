@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, ShieldCheck, ArrowRight, AlertCircle } from "lucide-react";
 
 // Verbatim FCRA consent text — must NEVER be paraphrased, shortened, or
 // reworded. Any change here must be mirrored in microbilt.service.ts
@@ -83,6 +83,8 @@ interface PrequalForm {
 }
 
 interface PrequalFormProps {
+  /** Show the "your pre-qualification has expired" banner above the form. */
+  expired?: boolean;
   initial?: {
     firstName?:        string;
     lastName?:         string;
@@ -126,7 +128,7 @@ function isoToMmddyyyy(iso: string): string {
 // buffer and guarantees the form never sits on "Processing…" indefinitely.
 const CLIENT_TIMEOUT_MS = 15_000;
 
-export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
+export default function PrequalFormClient({ initial, expired = false }: PrequalFormProps = {}) {
   const router = useRouter();
   const [form, setForm] = useState<PrequalForm>({
     ...INITIAL_FORM,
@@ -141,6 +143,16 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // DOB bounds — applicants must be 18–110. Bounding the native date picker
+  // prevents obviously-invalid ages before the request ever leaves the client.
+  const dobBounds = useMemo(() => {
+    const today = new Date();
+    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const max = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
+    const min = new Date(today.getFullYear() - 110, today.getMonth(), today.getDate());
+    return { max: iso(max), min: iso(min) };
+  }, []);
 
   // Section 1 fields are required; Section 2 employment fields also required.
   const section1Complete = useMemo(() => {
@@ -279,20 +291,48 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
 
   return (
     <div className="px-4 py-8 sm:px-6 md:px-8 md:py-10" data-testid="prequal-page">
-      <div className="mx-auto w-full max-w-[640px]">
+      <div className="mx-auto w-full max-w-2xl">
+        {expired && (
+          <div
+            className="mb-6 flex items-start gap-3 px-4 py-3 bg-al-warning-subtle border border-al-warning/25 rounded-xl"
+            data-testid="prequal-expired-banner"
+          >
+            <AlertCircle size={18} className="text-al-warning mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-al-warning-fg">
+                Your pre-qualification has expired
+              </p>
+              <p className="text-xs text-al-warning-fg/80 mt-0.5">
+                Your information has been pre-filled. Review and resubmit to get a fresh approval.
+              </p>
+            </div>
+          </div>
+        )}
         {/* ─── Header ─────────────────────────────────────────────────────── */}
         <header className="mb-8 text-center" data-testid="prequal-header">
-          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">Check Your Buying Power</h1>
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-al-primary-subtle mb-4">
+            <ShieldCheck size={24} className="text-al-primary" />
+          </div>
+          <h1 className="text-2xl sm:text-[1.75rem] font-bold text-slate-900 tracking-tight">
+            Check Your Buying Power
+          </h1>
           <p className="mt-2 text-sm sm:text-base text-slate-500">
             A soft credit check with no impact to your credit score
           </p>
-          <p
-            className="mt-4 text-xs sm:text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-full inline-block px-4 py-1.5"
+          <div
+            className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs font-medium text-slate-600"
             data-testid="prequal-trust-strip"
           >
-            🔒 Soft pull only · No score impact · FCRA-compliant · Results in seconds
-          </p>
-          <p className="mt-2 text-xs text-slate-400" data-testid="prequal-not-lender">
+            {["Soft pull only", "No score impact", "FCRA-compliant", "Results in seconds"].map(
+              (claim) => (
+                <span key={claim} className="inline-flex items-center gap-1.5">
+                  <ShieldCheck size={13} className="text-al-success shrink-0" />
+                  {claim}
+                </span>
+              ),
+            )}
+          </div>
+          <p className="mt-3 text-xs text-slate-400" data-testid="prequal-not-lender">
             AutoLenis is not a lender or dealer.
           </p>
         </header>
@@ -300,7 +340,7 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
         <form onSubmit={handleSubmit} data-testid="prequal-form" className="space-y-8" noValidate>
           {/* ─── Section 1: Personal Information (required) ──────────────── */}
           <section data-testid="prequal-section-personal">
-            <h2 className="text-base font-semibold text-slate-900 mb-4">Personal Information</h2>
+            <SectionHeading step={1} title="Personal Information" className="mb-4" />
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <FieldText
@@ -330,6 +370,8 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
                   onChange={(e) => update("dateOfBirth", e.target.value)}
                   disabled={fieldDisabled}
                   required
+                  min={dobBounds.min}
+                  max={dobBounds.max}
                   className={inputCls}
                   autoComplete="bday"
                 />
@@ -401,7 +443,7 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
 
           {/* ─── Section 2: Employment Information (required) ────────────── */}
           <section data-testid="prequal-section-employment">
-            <h2 className="text-base font-semibold text-slate-900 mb-1">Employment Information</h2>
+            <SectionHeading step={2} title="Employment Information" className="mb-2" />
             <p
               className="text-xs text-slate-500 leading-relaxed mb-4"
               data-testid="prequal-employment-disclaimer"
@@ -490,7 +532,7 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
 
           {/* ─── Section 2.5: Housing & Debt (required) ─────────────────── */}
           <section data-testid="prequal-section-housing">
-            <h2 className="text-base font-semibold text-slate-900 mb-1">Housing &amp; Monthly Debt</h2>
+            <SectionHeading step={3} title="Housing & Monthly Debt" className="mb-2" />
             <p
               className="text-xs text-slate-500 leading-relaxed mb-4"
               data-testid="prequal-housing-disclaimer"
@@ -573,10 +615,12 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
           {/* ─── Section 3: FCRA consent (required) ──────────────────────── */}
           <section data-testid="prequal-section-fcra">
             <div
-              className="w-full p-4 rounded-[12px]"
-              style={{ backgroundColor: "#EFF6FF" }}
+              className="w-full p-5 rounded-2xl bg-al-primary-subtle border border-al-primary/15"
               data-testid="prequal-fcra-box"
             >
+              <p className="text-[11px] font-semibold text-al-primary uppercase tracking-[0.14em] mb-2">
+                Authorization
+              </p>
               <p
                 className="text-sm leading-relaxed text-slate-800 whitespace-pre-line"
                 data-testid="prequal-fcra-text"
@@ -611,38 +655,42 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
 
           {error && (
             <div
-              className="bg-red-50 border border-red-200 rounded-md px-3 py-2 space-y-2"
+              className="flex items-start gap-3 bg-al-danger-subtle border border-al-danger/20 rounded-xl px-4 py-3"
+              role="alert"
               data-testid="prequal-error"
             >
-              <p className="text-sm text-red-700">{error}</p>
-              <button
-                type="button"
-                onClick={resetSubmissionState}
-                className="text-sm font-medium text-al-primary underline"
-                data-testid="prequal-retry-btn"
-              >
-                Try Again
-              </button>
+              <AlertCircle size={18} className="text-al-danger mt-0.5 shrink-0" />
+              <div className="space-y-2">
+                <p className="text-sm text-al-danger-fg">{error}</p>
+                <button
+                  type="button"
+                  onClick={resetSubmissionState}
+                  className="text-sm font-semibold text-al-primary hover:underline"
+                  data-testid="prequal-retry-btn"
+                >
+                  Try Again
+                </button>
+              </div>
             </div>
           )}
 
           {/* ─── Submit ──────────────────────────────────────────────────── */}
+          {/* Label must read "I AGREE" — the FCRA consent text above refers to
+              "clicking on the I AGREE button". Do not rename. */}
           <button
             type="submit"
             disabled={!canSubmit}
             data-testid="prequal-submit-btn"
-            style={{
-              backgroundColor: canSubmit ? "#0B5FD1" : "#A78BCC",
-              height: 48,
-            }}
-            className="w-full text-white font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors disabled:cursor-not-allowed"
+            className="w-full h-12 bg-al-primary text-white font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors hover:bg-al-primary-hover disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
           >
             {loading ? (
               <>
                 <Loader2 size={18} className="animate-spin" /> Processing your request...
               </>
             ) : (
-              <>I AGREE →</>
+              <>
+                I AGREE <ArrowRight size={18} />
+              </>
             )}
           </button>
         </form>
@@ -654,7 +702,27 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
 // ─── Field helpers ──────────────────────────────────────────────────────────
 
 const inputCls =
-  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-al-primary focus:ring-2 focus:ring-al-primary/20 disabled:bg-slate-50 disabled:text-slate-400";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition-colors focus:border-al-primary focus:ring-2 focus:ring-al-primary/20 disabled:bg-slate-50 disabled:text-slate-400";
+
+/** Numbered section heading — gives the long single-column form clear steps. */
+function SectionHeading({
+  step,
+  title,
+  className,
+}: {
+  step: number;
+  title: string;
+  className?: string;
+}) {
+  return (
+    <div className={`flex items-center gap-2.5 ${className ?? ""}`}>
+      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-al-primary-subtle text-al-primary text-xs font-bold shrink-0">
+        {step}
+      </span>
+      <h2 className="text-lg font-semibold text-slate-900 tracking-tight">{title}</h2>
+    </div>
+  );
+}
 
 function Field({
   label,
@@ -667,9 +735,9 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="text-xs font-medium text-slate-700 mb-1.5 block">
+      <span className="text-[13px] font-medium text-slate-700 mb-1.5 block">
         {label}
-        {required && <span className="text-red-500"> *</span>}
+        {required && <span className="text-al-danger"> *</span>}
       </span>
       {children}
     </label>

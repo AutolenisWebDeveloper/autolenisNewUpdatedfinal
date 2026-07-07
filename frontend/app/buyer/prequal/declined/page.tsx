@@ -3,23 +3,24 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { title: "Application Status", robots: { index: false, follow: false } };
 
 import Link from "next/link";
-import { XCircle, Mail } from "lucide-react";
+import { XCircle, Mail, ArrowRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 // FCRA adverse action language is a legal requirement on every DECLINED result page
 export default function PrequalDeclinedPage() {
   return (
-    <div className="p-6 md:p-8 max-w-2xl" data-testid="prequal-declined-page">
+    <div className="mx-auto w-full max-w-2xl px-4 py-8 sm:px-6 md:py-10" data-testid="prequal-declined-page">
       <div className="text-center mb-8">
-        <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-          <XCircle size={32} className="text-red-600" />
+        <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center mx-auto mb-4">
+          <XCircle size={30} className="text-red-600" />
         </div>
-        <h1 className="text-2xl font-bold text-slate-900 mb-2">Application not approved</h1>
+        <h1 className="text-2xl sm:text-[1.75rem] font-bold text-slate-900 tracking-tight mb-2">Application not approved</h1>
         <p className="text-slate-500 text-sm leading-relaxed">We were unable to pre-qualify you at this time. You have the right to know why.</p>
       </div>
 
       {/* FCRA adverse-action email confirmation — must be visible, not buried */}
       <div
-        className="flex items-start gap-3 rounded-xl border border-al-primary/30 bg-[#F8F9FB] p-4 mb-6"
+        className="flex items-start gap-3 rounded-2xl border border-al-primary/20 bg-al-primary-subtle p-4 mb-4"
         data-testid="adverse-action-email-notice"
       >
         <Mail size={20} className="text-al-primary mt-0.5 shrink-0" />
@@ -28,18 +29,18 @@ export default function PrequalDeclinedPage() {
             An adverse action notice has been sent to your email address explaining this decision and your rights under the Fair Credit Reporting Act.
           </p>
           <p>
-            You have the right to obtain a free copy of your consumer report from <strong>MicroBilt Corporation</strong> (<a href="tel:18008844747" className="text-al-primary hover:underline">1-800-884-4747</a>) within 60 days.
+            You have the right to obtain a free copy of your consumer report from <strong>MicroBilt Corporation</strong> (<a href="tel:18008844747" className="text-al-primary font-medium hover:underline">1-800-884-4747</a>) within 60 days.
           </p>
         </div>
       </div>
 
       {/* FCRA Adverse Action Notice — LEGALLY REQUIRED */}
-      <div className="border-2 border-slate-200 rounded-xl p-6 mb-6" data-testid="fcra-adverse-action-notice">
+      <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-6 mb-6" data-testid="fcra-adverse-action-notice">
         <h2 className="font-semibold text-slate-900 mb-3 text-sm">Notice of Adverse Action — Fair Credit Reporting Act (FCRA)</h2>
         <p className="text-sm text-slate-600 leading-relaxed mb-4">
           Your application was reviewed in whole or in part based on information obtained from a consumer reporting agency. You have the right to obtain a free copy of your consumer report from the agency below and to dispute the accuracy of any information in your report.
         </p>
-        <div className="bg-slate-50 rounded-lg p-4 text-sm" data-testid="fcra-cra-info">
+        <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 text-sm" data-testid="fcra-cra-info">
           <p className="font-semibold text-slate-800 mb-2">Consumer Reporting Agency Used:</p>
           <p className="text-slate-600"><strong>MicroBilt Corporation</strong></p>
           <p className="text-slate-600">1-800-884-4747</p>
@@ -49,17 +50,17 @@ export default function PrequalDeclinedPage() {
             </a>
           </p>
         </div>
-        <p className="text-xs text-slate-400 mt-4">
+        <p className="text-xs text-slate-500 mt-4">
           The agency did not make the adverse decision and cannot explain why it was made. You have the right to dispute inaccurate information under the Fair Credit Reporting Act (15 U.S.C. § 1681 et seq.).
         </p>
       </div>
 
-      <div className="text-center space-y-3">
-        <p className="text-sm text-slate-600">You may provide your own pre-approval from your bank or credit union, or re-apply once your financial circumstances have changed.</p>
-        <Link href="/buyer/prequal/external" data-testid="use-external-financing-link" className="text-sm text-al-primary font-semibold hover:underline block">
-          I have my own bank financing →
-        </Link>
-        <Link href="/buyer/dashboard" data-testid="back-to-dashboard-link" className="text-sm text-slate-400 hover:underline block">
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600 text-center">You may provide your own pre-approval from your bank or credit union, or re-apply once your financial circumstances have changed.</p>
+        <Button href="/buyer/prequal/external" size="lg" className="w-full" data-testid="use-external-financing-link">
+          I have my own bank financing <ArrowRight size={16} />
+        </Button>
+        <Link href="/buyer/dashboard" data-testid="back-to-dashboard-link" className="block text-center text-sm text-slate-500 hover:text-slate-700 hover:underline">
           ← Back to dashboard
         </Link>
       </div>

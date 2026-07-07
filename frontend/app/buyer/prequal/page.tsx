@@ -6,7 +6,8 @@ import { requireBuyer } from "@/lib/auth/session";
 import { redirect } from "next/navigation";
 import PrequalFormClient from "@/components/buyer/PrequalFormClient";
 import PrequalBudgetCalculator from "@/components/buyer/PrequalBudgetCalculator";
-import { formatCents } from "@/lib/utils";
+import { formatCents, cn } from "@/lib/utils";
+import { CARD, TONE_STYLES, type Tone } from "@/components/ui/patterns/tokens";
 import {
   getStabilityFactor,
   FRONT_END_AUTO_DTI,
@@ -18,7 +19,6 @@ import {
   ArrowRight,
   RefreshCw,
   ShieldCheck,
-  ChevronDown,
   ChevronRight,
   Star,
   CalendarDays,
@@ -35,18 +35,20 @@ import {
   FileText,
   Pen,
   Package,
+  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import ExpandableSection from "@/components/buyer/prequal/ExpandableSection";
 
 export const dynamic = "force-dynamic";
 
-const TIER_LABELS: Record<string, { label: string; color: string; bg: string }> = {
-  STRONG: { label: "Strong", color: "text-emerald-700", bg: "bg-emerald-100" },
-  GOOD: { label: "Good", color: "text-blue-700", bg: "bg-blue-100" },
-  FAIR: { label: "Fair", color: "text-amber-700", bg: "bg-amber-100" },
-  WEAK: { label: "Weak", color: "text-orange-700", bg: "bg-orange-100" },
-  DECLINED: { label: "Declined", color: "text-red-700", bg: "bg-red-100" },
+// Tier → sanctioned tone (kit palette only — no ad-hoc hues on the dashboard).
+const TIER_LABELS: Record<string, { label: string; tone: Tone }> = {
+  STRONG: { label: "Strong", tone: "success" },
+  GOOD: { label: "Good", tone: "brand" },
+  FAIR: { label: "Fair", tone: "warning" },
+  WEAK: { label: "Weak", tone: "warning" },
+  DECLINED: { label: "Declined", tone: "danger" },
 };
 
 function getPrequalSource(prequal: {
@@ -153,7 +155,7 @@ export default async function PrequalPage() {
     }
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-[#F8F9FB] via-white to-al-primary-subtle" data-testid="prequal-status-page">
+      <div className="min-h-screen bg-gradient-to-br from-al-bg via-white to-al-primary-subtle" data-testid="prequal-status-page">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
           {/* ── Hero card ───────────────────────────────────────────────── */}
@@ -193,7 +195,7 @@ export default async function PrequalPage() {
                 <p className="text-white/60 text-xs uppercase tracking-widest mb-2">
                   Approved Max Out-the-Door Budget
                 </p>
-                <p className="text-5xl sm:text-6xl font-extrabold text-white tracking-tight mb-2">
+                <p className="text-5xl sm:text-6xl font-mono tabular-nums font-extrabold text-white tracking-tight mb-2">
                   {formatCents(prequal.maxOtdAmountCents)}
                 </p>
                 <p className="text-white/60 text-sm">
@@ -222,8 +224,8 @@ export default async function PrequalPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* Approval status */}
             <DetailCard
-              icon={<ShieldCheck size={18} className="text-emerald-600" />}
-              iconBg="bg-emerald-100"
+              icon={ShieldCheck}
+              tone="success"
               label="Approval Status"
               value="Approved"
               sub="Active & valid"
@@ -233,8 +235,8 @@ export default async function PrequalPage() {
             {/* Credit profile */}
             {tierInfo ? (
               <DetailCard
-                icon={<Star size={18} className={tierInfo.color} />}
-                iconBg={tierInfo.bg}
+                icon={Star}
+                tone={tierInfo.tone}
                 label="Credit Profile"
                 value={`${tierInfo.label} Profile`}
                 sub="Based on iPredict analysis"
@@ -242,8 +244,8 @@ export default async function PrequalPage() {
               />
             ) : (
               <DetailCard
-                icon={<Info size={18} className="text-slate-400" />}
-                iconBg="bg-slate-100"
+                icon={Info}
+                tone="neutral"
                 label="Credit Profile"
                 value="Not available"
                 sub="No tier assigned"
@@ -253,8 +255,8 @@ export default async function PrequalPage() {
 
             {/* Prequal source */}
             <DetailCard
-              icon={<BadgeCheck size={18} className="text-al-primary" />}
-              iconBg="bg-al-primary/10"
+              icon={BadgeCheck}
+              tone="brand"
               label="Approval Source"
               value={source.label}
               sub={source.detail}
@@ -263,8 +265,8 @@ export default async function PrequalPage() {
 
             {/* Created date */}
             <DetailCard
-              icon={<CalendarDays size={18} className="text-blue-600" />}
-              iconBg="bg-blue-50"
+              icon={CalendarDays}
+              tone="indigo"
               label="Submitted"
               value={createdLabel}
               sub="Original application date"
@@ -273,8 +275,8 @@ export default async function PrequalPage() {
 
             {/* Last updated */}
             <DetailCard
-              icon={<TrendingUp size={18} className="text-violet-600" />}
-              iconBg="bg-violet-50"
+              icon={TrendingUp}
+              tone="neutral"
               label="Last Updated"
               value={updatedLabel}
               sub="Most recent change"
@@ -283,8 +285,8 @@ export default async function PrequalPage() {
 
             {/* Recommended search range */}
             <DetailCard
-              icon={<Search size={18} className="text-teal-600" />}
-              iconBg="bg-teal-50"
+              icon={Search}
+              tone="brand"
               label="Recommended Search Range"
               value={`Up to ${formatCents(recommendedMaxCents)}`}
               sub="~90% of approved max — leaves room for taxes & fees"
@@ -482,60 +484,50 @@ export default async function PrequalPage() {
 
   // No prequal, declined, or expired — show the application form.
   const now = new Date();
+  const isExpired = Boolean(prequal && prequal.expiresAt && prequal.expiresAt <= now);
   return (
-    <div className="p-6 md:p-8 max-w-xl">
-      {prequal && prequal.expiresAt && prequal.expiresAt <= now && (
-        <div className="mb-4 px-4 py-3 bg-[#FFFBEB] border border-[#FDE68A] rounded-xl">
-          <p className="text-sm font-semibold text-[#92400E]">Your pre-qualification has expired</p>
-          <p className="text-xs text-[#78350F] mt-0.5">
-            Your information has been pre-filled. Review and resubmit to get a fresh approval.
-          </p>
-        </div>
-      )}
-      <PrequalFormClient
-        initial={{
-          firstName:        buyer.firstName      ?? undefined,
-          lastName:         buyer.lastName       ?? undefined,
-          address:          buyer.address        ?? undefined,
-          city:             buyer.city           ?? undefined,
-          state:            buyer.state          ?? undefined,
-          zip:              buyer.zip            ?? undefined,
-          employmentStatus: prequal?.employmentStatus ?? undefined,
-        }}
-      />
-    </div>
+    <PrequalFormClient
+      expired={isExpired}
+      initial={{
+        firstName:        buyer.firstName      ?? undefined,
+        lastName:         buyer.lastName       ?? undefined,
+        address:          buyer.address        ?? undefined,
+        city:             buyer.city           ?? undefined,
+        state:            buyer.state          ?? undefined,
+        zip:              buyer.zip            ?? undefined,
+        employmentStatus: prequal?.employmentStatus ?? undefined,
+      }}
+    />
   );
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
 function DetailCard({
-  icon,
-  iconBg,
+  icon: Icon,
+  tone,
   label,
   value,
   sub,
   testId,
 }: {
-  icon: React.ReactNode;
-  iconBg: string;
+  icon: LucideIcon;
+  tone: Tone;
   label: string;
   value: string;
   sub: string;
   testId?: string;
 }) {
+  const t = TONE_STYLES[tone];
   return (
-    <div
-      className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col gap-3 shadow-sm"
-      data-testid={testId}
-    >
-      <div className={`w-9 h-9 ${iconBg} rounded-xl flex items-center justify-center`}>
-        {icon}
+    <div className={cn(CARD, "p-5 flex flex-col gap-3")} data-testid={testId}>
+      <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center", t.iconBg)}>
+        <Icon size={18} className={t.iconText} />
       </div>
       <div>
         <p className="text-xs text-slate-500 mb-0.5">{label}</p>
-        <p className="text-sm font-semibold text-slate-900">{value}</p>
-        <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{sub}</p>
+        <p className="text-sm font-semibold text-slate-900 tabular-nums">{value}</p>
+        <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{sub}</p>
       </div>
     </div>
   );
@@ -558,7 +550,7 @@ function CalcRow({
         {label}
       </span>
       <span
-        className={`tabular-nums shrink-0 ${emphasize ? "font-bold text-al-primary" : muted ? "text-slate-400" : "text-slate-700"}`}
+        className={`font-mono tabular-nums shrink-0 ${emphasize ? "font-bold text-al-primary" : muted ? "text-slate-400" : "text-slate-700"}`}
       >
         {value}
       </span>
