@@ -1,7 +1,10 @@
 import { requireDealer } from "@/lib/auth/dealer-session";
 import { prisma } from "@/lib/prisma";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Plus } from "lucide-react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { PageContainer, PageHeader, EmptyState, CARD, CARD_HOVER } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -15,13 +18,23 @@ export default async function DealerMessagesPage() {
   });
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-messages-page">
-      <div className="flex items-center gap-3 mb-6">
-        <MessageSquare size={22} className="text-al-primary" />
-        <h1 className="text-xl font-bold text-slate-900">Messages</h1>
-      </div>
+    <PageContainer testId="dealer-messages-page">
+      <PageHeader
+        title="Messages"
+        subtitle="Deal threads with buyers and the AutoLenis team."
+        actions={
+          <Button size="sm" variant="outline" href="/dealer/messages/new" data-testid="new-message-btn">
+            <Plus size={14} /> New message
+          </Button>
+        }
+      />
       {threads.length === 0 ? (
-        <p className="text-slate-500 text-sm">No active deal threads. Messaging is available once a deal is created.</p>
+        <EmptyState
+          icon={MessageSquare}
+          title="No active threads"
+          body="Messaging is available once a deal is created. Start a new message or wait for a deal thread to open."
+          testId="no-dealer-threads"
+        />
       ) : (
         <div className="space-y-2">
           {threads.map((t) => (
@@ -29,7 +42,7 @@ export default async function DealerMessagesPage() {
               key={t.id}
               href={`/dealer/messages/${t.id}`}
               data-testid={`message-thread-${t.id}`}
-              className="block bg-white border border-slate-200 hover:border-al-primary/40 hover:shadow-sm rounded-xl p-4 transition-all"
+              className={cn(CARD, CARD_HOVER, "block p-4")}
             >
               <p className="font-semibold text-slate-800 text-sm">Deal Thread</p>
               {t.messages[0] && (
@@ -41,6 +54,6 @@ export default async function DealerMessagesPage() {
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }
