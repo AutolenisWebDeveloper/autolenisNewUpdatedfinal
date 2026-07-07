@@ -103,6 +103,9 @@ export default function StartAuctionButton() {
               </button>
             </div>
             <div className="p-3 border-b border-slate-100">
+              <p className="text-xs text-slate-400 mb-2 px-0.5">
+                Picking a buyer opens their Auctions tab, where you launch the auction with vehicles and dealers.
+              </p>
               <div className="relative">
                 <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 <input
