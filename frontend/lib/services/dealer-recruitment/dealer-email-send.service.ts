@@ -18,6 +18,7 @@ import {
   type EmailTemplate,
 } from "./email-template.service"
 import { issueProspectClaimToken, buildClaimUrl } from "./prospect-claim.service"
+import { buildUnsubscribeUrl } from "./unsubscribe-token.service"
 
 export type OutreachType = "initial" | "followup_1" | "followup_2"
 
@@ -258,6 +259,10 @@ export async function sendDealerEmail(
     }
   }
 
+  // One-click unsubscribe URL (CAN-SPAM + Gmail/Yahoo bulk one-click). Null when
+  // no signing secret is configured — the footer then degrades to reply-only.
+  const unsubscribeUrl = buildUnsubscribeUrl(prospect.email)
+
   // 4. Build the email (prebuilt > custom override > AI-generated).
   let template: EmailTemplate
   if (input.prebuiltTemplate) {
@@ -281,7 +286,7 @@ export async function sendDealerEmail(
         city: prospect.city ?? "",
         state: prospect.state ?? "",
       },
-      { dealerEmail: prospect.email },
+      { dealerEmail: prospect.email, unsubscribeUrl },
     )
   }
 
@@ -331,13 +336,22 @@ export async function sendDealerEmail(
   }
 
   try {
+    const replyTo = process.env.DEALER_OUTREACH_REPLY_TO ?? "markist@skaipay.com"
     const result = await resend.emails.send({
       from: fromAddress(),
       to: prospect.email,
-      replyTo: process.env.DEALER_OUTREACH_REPLY_TO ?? "markist@skaipay.com",
+      replyTo,
       subject: template.subject,
       html: template.body,
       text: template.bodyText,
+      // RFC 8058 one-click unsubscribe headers so Gmail/Yahoo render a native
+      // "Unsubscribe" control and a reply-mailto fallback is always present.
+      headers: unsubscribeUrl
+        ? {
+            "List-Unsubscribe": `<mailto:${replyTo}?subject=unsubscribe>, <${unsubscribeUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          }
+        : { "List-Unsubscribe": `<mailto:${replyTo}?subject=unsubscribe>` },
       tags: [
         { name: "outreach_type", value: outreachType },
         { name: "dealer_id", value: prospect.id },

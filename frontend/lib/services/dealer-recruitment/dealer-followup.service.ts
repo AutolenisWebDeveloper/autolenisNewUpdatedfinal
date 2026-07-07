@@ -18,6 +18,7 @@ import {
   generateFollowUp1Template,
   generateFollowUp2Template,
 } from "./email-template.service"
+import { buildUnsubscribeUrl } from "./unsubscribe-token.service"
 
 // Cadence (days). FOLLOWUP_1 fires 3 days after the initial; FOLLOWUP_2 fires
 // 5 days after follow-up 1 (≈ day 8 overall).
@@ -173,7 +174,7 @@ export async function sendFollowUp(dealerProspectId: string): Promise<void> {
     buyerCount,
     daysAgo,
   }
-  const opts = { dealerEmail: prospect.email }
+  const opts = { dealerEmail: prospect.email, unsubscribeUrl: buildUnsubscribeUrl(prospect.email) }
 
   const template =
     nextStep === 2
