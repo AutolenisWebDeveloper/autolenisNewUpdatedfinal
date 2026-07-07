@@ -3,8 +3,8 @@
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { PenLine, AlertTriangle } from "lucide-react";
+import ESignHubRowActions from "@/components/admin/ESignHubRowActions";
 
 export const dynamic = "force-dynamic";
 export default async function AdminESignPage() {
@@ -47,8 +47,7 @@ export default async function AdminESignPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant={env.status === "COMPLETED" ? "green" : env.status === "VOIDED" ? "destructive" : "amber"} className="text-xs">{env.status}</Badge>
-                <Button size="sm" variant="ghost" data-testid={`resend-envelope-${env.id}`} disabled={env.status === "COMPLETED"}>Resend</Button>
-                <Button size="sm" variant="ghost" data-testid={`void-envelope-${env.id}`} disabled={env.status === "VOIDED" || env.status === "COMPLETED"}>Void</Button>
+                <ESignHubRowActions dealId={env.dealId} envelopeId={env.id} status={env.status} />
               </div>
             </div>
           ))}

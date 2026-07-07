@@ -61,6 +61,7 @@ export default function AdminContractShieldRulesPage() {
   const [rules, setRules] = useState<ScanRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newRule, setNewRule] = useState<{ name: string; ruleType: string; severity: Severity; description: string; threshold: string }>({ name: "", ruleType: "JUNK_FEE_KEYWORD", severity: "MEDIUM", description: "", threshold: "" });
@@ -103,28 +104,55 @@ export default function AdminContractShieldRulesPage() {
     setRules(rules.filter(r => r.id !== id));
   }
 
-  async function addRule() {
+  function startEdit(rule: ScanRule) {
+    const threshold = getThreshold(rule);
+    setNewRule({
+      name: rule.name,
+      ruleType: rule.ruleType,
+      severity: rule.severity,
+      description: rule.description ?? "",
+      threshold: threshold !== undefined ? String(threshold) : "",
+    });
+    setEditingId(rule.id);
+    setShowAdd(true);
+    setError(null);
+  }
+
+  function closeForm() {
+    setNewRule({ name: "", ruleType: "JUNK_FEE_KEYWORD", severity: "MEDIUM", description: "", threshold: "" });
+    setEditingId(null);
+    setShowAdd(false);
+  }
+
+  async function saveRule() {
     if (!newRule.name || !newRule.ruleType) return;
     const payload: Record<string, unknown> = {
       name: newRule.name,
-      ruleType: newRule.ruleType,
       severity: newRule.severity,
       description: newRule.description || undefined,
-      isActive: true,
-      config: {},
     };
     if (newRule.threshold) {
       const t = parseInt(newRule.threshold, 10);
       if (!Number.isNaN(t)) payload.threshold = t;
+    } else if (editingId) {
+      payload.threshold = null; // cleared in the edit form → remove from config
     }
     try {
-      await api.post<unknown>("/api/admin/contract-shield/rules", payload);
+      if (editingId) {
+        await api.patch<unknown>(`/api/admin/contract-shield/rules/${editingId}`, payload);
+      } else {
+        await api.post<unknown>("/api/admin/contract-shield/rules", {
+          ...payload,
+          ruleType: newRule.ruleType,
+          isActive: true,
+          config: {},
+        });
+      }
     } catch (err) {
-      setError(apiErrorMessage(err, "Failed to create rule"));
+      setError(apiErrorMessage(err, editingId ? "Failed to update rule" : "Failed to create rule"));
       return;
     }
-    setNewRule({ name: "", ruleType: "JUNK_FEE_KEYWORD", severity: "MEDIUM", description: "", threshold: "" });
-    setShowAdd(false);
+    closeForm();
     await loadRules();
   }
 
@@ -175,7 +203,7 @@ export default function AdminContractShieldRulesPage() {
       {/* Add rule form */}
       {showAdd && (
         <div className="bg-white border-2 border-al-primary/20 rounded-xl p-5 mb-5" data-testid="add-rule-form">
-          <p className="font-semibold text-slate-800 text-sm mb-4">New Scan Rule</p>
+          <p className="font-semibold text-slate-800 text-sm mb-4">{editingId ? "Edit Scan Rule" : "New Scan Rule"}</p>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
               <Label>Rule name</Label>
@@ -183,7 +211,7 @@ export default function AdminContractShieldRulesPage() {
             </div>
             <div>
               <Label>Rule type</Label>
-              <Select className="mt-1.5" data-testid="rule-type-select" value={newRule.ruleType} onChange={e => setNewRule({...newRule, ruleType: e.target.value})}>
+              <Select className="mt-1.5" data-testid="rule-type-select" value={newRule.ruleType} disabled={!!editingId} onChange={e => setNewRule({...newRule, ruleType: e.target.value})}>
                 {["JUNK_FEE_KEYWORD", "FEE_CAP", "APR_VALIDATION", "PAYMENT_PACKING", "DISCLOSURE_CHECK", "FINANCE_MARKUP"].map(t => (
                   <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
                 ))}
@@ -209,8 +237,8 @@ export default function AdminContractShieldRulesPage() {
             <Textarea className="mt-1.5" data-testid="rule-description-input" value={newRule.description} onChange={e => setNewRule({...newRule, description: e.target.value})} placeholder="Explain what this rule detects and why it matters." />
           </div>
           <div className="flex gap-2">
-            <Button size="sm" onClick={addRule} data-testid="save-rule-btn" disabled={!newRule.name}>Save Rule</Button>
-            <Button size="sm" variant="ghost" onClick={() => setShowAdd(false)} data-testid="cancel-rule-btn">Cancel</Button>
+            <Button size="sm" onClick={saveRule} data-testid="save-rule-btn" disabled={!newRule.name}>{editingId ? "Save Changes" : "Save Rule"}</Button>
+            <Button size="sm" variant="ghost" onClick={closeForm} data-testid="cancel-rule-btn">Cancel</Button>
           </div>
         </div>
       )}
@@ -259,8 +287,8 @@ export default function AdminContractShieldRulesPage() {
                       className={`p-1 rounded transition-colors ${rule.isActive ? "text-green-600 hover:text-green-700" : "text-slate-300 hover:text-slate-500"}`}>
                       {rule.isActive ? <CheckCircle2 size={17} /> : <XCircle size={17} />}
                     </button>
-                    <button data-testid={`edit-rule-${rule.id}`} className="p-1 text-slate-400 hover:text-slate-600" title="Edit (toggle active state for now)">
-                      <Edit2 size={15} />
+                    <button onClick={() => startEdit(rule)} data-testid={`edit-rule-${rule.id}`} className="p-1 text-slate-400 hover:text-slate-600" title="Edit rule" aria-label={`Edit rule ${rule.name}`}>
+                      <Edit2 size={15} aria-hidden />
                     </button>
                     <button onClick={() => deleteRule(rule.id)} data-testid={`delete-rule-${rule.id}`} className="p-1 text-slate-400 hover:text-red-500">
                       <Trash2 size={15} />
