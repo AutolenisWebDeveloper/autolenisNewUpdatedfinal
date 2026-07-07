@@ -69,6 +69,9 @@ async function callGroq(options: {
       temperature: options.temperature ?? 0.6,
       top_p: 1.0,
     }),
+    // Request-level timeout so a hung upstream can't stall the whole batch
+    // send — the generator already has a deterministic fallback on failure.
+    signal: AbortSignal.timeout(25_000),
   })
 
   if (!res.ok) {

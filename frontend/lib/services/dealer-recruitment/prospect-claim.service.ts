@@ -118,9 +118,14 @@ export async function claimProspectToApplication(
         contactName,
         contactEmail,
         contactPhone: p.contactPhone ?? p.phone ?? null,
-        // Provenance: a Maps-discovered prospect → F-011 can treat as
-        // auto-approvable. Recorded in notes (no schema change to applications).
-        notes: `[Origin: recruited prospect ${p.id} (Maps-discovered, verified placeId)]`,
+        // Provenance: record the prospect's real origin. Do NOT assert a
+        // "verified placeId" — the DealerProspect model carries no place-id
+        // field, so that claim was always fabricated and could mislead any
+        // auto-approval that reads this note. State honestly what we know and
+        // that license/identity still require manual review.
+        notes: `[Origin: recruited prospect ${p.id} via ${
+          p.buyerOppId ? "buyer-intake" : "bulk/Maps discovery"
+        }${p.sourceUrl ? `; source ${p.sourceUrl}` : ""}. Dealer license & identity NOT independently verified — manual review required.]`,
         status: "PENDING",
       },
       select: { id: true },

@@ -134,18 +134,20 @@ async function checkRateLimit(): Promise<boolean> {
   return true
 }
 
-// Best-effort suppression check. Fails open only when the Supabase client can't
-// be constructed (missing env) — never silently emails a known-suppressed
-// address.
+// Suppression check. Fails CLOSED: if the check cannot run (Supabase client
+// can't be constructed, lookup error), treat the address as suppressed and skip
+// the send rather than risk emailing a bounced/complained/unsubscribed address
+// during an outage. This mirrors the SMS/TCPA path (twilio.service) and keeps
+// cold sending CAN-SPAM-safe — availability yields to compliance.
 async function isSuppressed(email: string): Promise<boolean> {
   try {
     const supabase = getServiceSupabase()
     return await SuppressionService.isEmailSuppressed(supabase, email)
   } catch (err) {
     logger.warn(
-      `[phase-4b3] Suppression check failed (allowing send): ${err instanceof Error ? err.message : String(err)}`,
+      `[phase-4b3] Suppression check failed (failing closed — skipping send): ${err instanceof Error ? err.message : String(err)}`,
     )
-    return false
+    return true
   }
 }
 
@@ -218,6 +220,29 @@ export async function sendDealerEmail(
   })
   if (!prospect) return { success: false, error: "Dealer not found" }
   if (!prospect.email) return { success: false, error: "Dealer has no email" }
+
+  // 1b. Idempotency — never send the same outreach step to the same prospect
+  // twice. The automatic post-intake path guards externally, but the admin
+  // send / send-batch paths and the follow-up cron+manual overlap do not, so a
+  // double-click, a prospect appearing in two batches, or the cron and the
+  // manual "run follow-ups" firing in the same window would dispatch duplicate
+  // cold emails. Short-circuit when a non-failed log for this outreach type
+  // already exists. (outreachType maps 1:1 to sequence step, so this also
+  // dedupes follow-ups.)
+  const priorSend = await prisma.dealerOutreachLog.findFirst({
+    where: {
+      dealerProspectId: prospect.id,
+      outreachType,
+      status: { in: ["queued", "sent", "delivered"] },
+    },
+    select: { id: true },
+  })
+  if (priorSend) {
+    logger.info(
+      `[phase-4b3] Skipping duplicate ${outreachType} send for prospect ${prospect.id} (log ${priorSend.id})`,
+    )
+    return { success: false, error: "Already contacted for this outreach step", outreachLogId: priorSend.id }
+  }
 
   // 2. Suppression gate (CAN-SPAM / deliverability).
   if (await isSuppressed(prospect.email)) {
