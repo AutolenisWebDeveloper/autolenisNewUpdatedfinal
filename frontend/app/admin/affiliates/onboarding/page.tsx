@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
+import AffiliateOnboardingReviewActions from "@/components/admin/AffiliateOnboardingReviewActions";
 
 export const dynamic = "force-dynamic";
 
@@ -57,12 +58,18 @@ export default async function AdminAffiliateOnboardingPage() {
                   {review.submittedAt ? new Date(review.submittedAt).toLocaleDateString() : "—"}
                 </td>
                 <td className="px-4 py-3">
-                  <Link
-                    href={`/admin/affiliates/${review.affiliateId}`}
-                    className="text-al-primary hover:underline font-medium text-xs"
-                  >
-                    View Affiliate →
-                  </Link>
+                  <div className="flex items-center gap-3">
+                    <AffiliateOnboardingReviewActions
+                      affiliateId={review.affiliateId}
+                      status={review.status}
+                    />
+                    <Link
+                      href={`/admin/affiliates/${review.affiliateId}`}
+                      className="text-al-primary hover:underline font-medium text-xs whitespace-nowrap"
+                    >
+                      View →
+                    </Link>
+                  </div>
                 </td>
               </tr>
             ))}
