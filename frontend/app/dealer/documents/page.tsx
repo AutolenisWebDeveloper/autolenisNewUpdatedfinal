@@ -2,6 +2,8 @@ import { requireDealer } from "@/lib/auth/dealer-session";
 import { FolderOpen, Link2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import DealerDocumentUploadButton from "@/components/dealer/DealerDocumentUploadButton";
+import { PageContainer, PageHeader, EmptyState, CARD } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -42,26 +44,26 @@ export default async function DealerDocumentsPage() {
   });
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-documents-page">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <FolderOpen size={22} className="text-al-primary" />
-          <h1 className="text-xl font-bold text-slate-900">Documents</h1>
-        </div>
-        <DealerDocumentUploadButton deals={dealOptions} />
-      </div>
+    <PageContainer testId="dealer-documents-page">
+      <PageHeader
+        title="Documents"
+        subtitle="Deal documents, finance agreements, and compliance records."
+        actions={<DealerDocumentUploadButton deals={dealOptions} />}
+      />
       {documents.length === 0 ? (
-        <p className="text-slate-500 text-sm">
-          No documents. Upload deal documents (sales contracts, finance agreements, buyer
-          orders) or compliance records here.
-        </p>
+        <EmptyState
+          icon={FolderOpen}
+          title="No documents yet"
+          body="Upload deal documents (sales contracts, finance agreements, buyer orders) or compliance records here."
+          testId="no-dealer-documents"
+        />
       ) : (
         <div className="space-y-2">
           {documents.map((d, i) => (
             <div
               key={d.id}
               data-testid={`dealer-doc-${i}`}
-              className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4"
+              className={cn(CARD, "flex items-center justify-between px-5 py-4")}
             >
               <div className="min-w-0">
                 <p className="font-medium text-slate-800 text-sm truncate">{d.name}</p>
@@ -70,17 +72,17 @@ export default async function DealerDocumentsPage() {
                     {d.type.replace(/_/g, " ")}
                   </span>
                   {d.dealId && (
-                    <span className="inline-flex items-center gap-1 text-[11px] text-al-primary">
+                    <span className="inline-flex items-center gap-1 text-[11px] text-al-primary font-mono tabular-nums">
                       <Link2 size={11} /> Deal {d.dealId.slice(0, 8)}
                     </span>
                   )}
                 </div>
               </div>
-              <span className="text-xs text-slate-400 shrink-0 ml-3">{d.uploadedAt.toLocaleDateString()}</span>
+              <span className="text-xs text-slate-500 shrink-0 ml-3 tabular-nums">{d.uploadedAt.toLocaleDateString()}</span>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }
