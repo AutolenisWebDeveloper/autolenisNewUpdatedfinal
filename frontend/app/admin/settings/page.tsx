@@ -52,7 +52,11 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     api.get<BpeWeights>("/api/admin/best-price/weights")
       .then((data) => { setWeights(data); })
-      .catch(() => {})
+      .catch(() => {
+        // Surface the failure — silently keeping defaults would let an admin
+        // save weights on top of values that never loaded.
+        setFeedback({ msg: "Current weights could not be loaded — the values below are defaults, not what is live. Reload before saving.", ok: false });
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -72,13 +76,14 @@ export default function AdminSettingsPage() {
     setSaving(false);
   }
 
-  const SETTINGS_LINKS = [
-    "Nudge Engine Thresholds",
-    "SLA Thresholds",
-    "Refinance Partner",
-    "Contract Shield Rules",
-    "Referral Milestone Tiers",
-    "Platform Stats Floor",
+  // Only settings with a real management surface are listed — inert
+  // placeholder rows were removed (no dead-ends).
+  const SETTINGS_LINKS: Array<{ label: string; href: string }> = [
+    { label: "Contract Shield Rules", href: "/admin/contract-shield/rules" },
+    { label: "Refinance Partner", href: "/admin/refinance/partner" },
+    { label: "Referral Milestone Tiers", href: "/admin/referral-milestones" },
+    { label: "Admin Accounts", href: "/admin/settings/admins" },
+    { label: "Security / MFA", href: "/admin/security/mfa" },
   ];
 
   return (
@@ -138,9 +143,9 @@ export default function AdminSettingsPage() {
       {/* Other settings (future implementation) */}
       <div className="space-y-3" data-testid="other-settings-list">
         {SETTINGS_LINKS.map(s => (
-          <div key={s} className="bg-white border border-slate-200 rounded-xl p-4 text-sm font-medium text-slate-700">
-            {s}
-          </div>
+          <a key={s.href} href={s.href} className="block bg-white border border-slate-200 rounded-xl p-4 text-sm font-medium text-slate-700 hover:border-al-primary/30 transition-colors">
+            {s.label} →
+          </a>
         ))}
       </div>
     </div>

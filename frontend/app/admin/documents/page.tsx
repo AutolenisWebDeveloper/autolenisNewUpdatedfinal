@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import { FolderOpen } from "lucide-react";
+import DocumentOpenButton from "@/components/admin/DocumentOpenButton";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,7 @@ export default async function AdminDocumentsPage() {
                   <th className="text-left px-5 py-3">Type</th>
                   <th className="text-left px-5 py-3">Uploaded</th>
                   <th className="text-left px-5 py-3">Status</th>
+                  <th className="px-5 py-3"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#F3F4F6]">
@@ -78,6 +80,9 @@ export default async function AdminDocumentsPage() {
                         }`}>
                           {doc.isVerified ? "VERIFIED" : "UPLOADED"}
                         </span>
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        <DocumentOpenButton endpoint={`/api/admin/documents/${doc.id}/signed-url`} />
                       </td>
                     </tr>
                   );
@@ -105,6 +110,7 @@ export default async function AdminDocumentsPage() {
                   <th className="text-left px-5 py-3">Type</th>
                   <th className="text-left px-5 py-3">Uploaded</th>
                   <th className="text-left px-5 py-3">Status</th>
+                  <th className="px-5 py-3"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#F3F4F6]">
@@ -126,6 +132,9 @@ export default async function AdminDocumentsPage() {
                       }`}>
                         {doc.status ?? "PENDING"}
                       </span>
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <DocumentOpenButton endpoint={`/api/admin/affiliates/documents/${doc.id}/signed-url`} />
                     </td>
                   </tr>
                 ))}

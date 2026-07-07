@@ -5,6 +5,7 @@
 // the quality score, the failed-check flags from the rubric, the SEO metadata,
 // and the FAQ block so a reviewer can decide whether to publish.
 
+import { sanitizeBody } from "@/lib/content/sanitize";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/admin-session";
@@ -130,7 +131,7 @@ export default async function AdminContentDetailPage({ params }: PageProps) {
             </p>
             <div
               className="content-article-preview text-sm text-slate-700 leading-relaxed [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-2 [&_h3]:font-semibold [&_h3]:text-slate-800 [&_h3]:mt-4 [&_p]:mb-3 [&_a]:text-al-primary [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_li]:mb-1"
-              dangerouslySetInnerHTML={{ __html: article.body }}
+              dangerouslySetInnerHTML={{ __html: sanitizeBody(article.body) }}
             />
           </section>
 
