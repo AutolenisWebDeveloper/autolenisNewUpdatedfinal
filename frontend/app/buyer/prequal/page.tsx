@@ -391,6 +391,7 @@ export default async function PrequalPage() {
                   approval, rate, and terms are determined by the lender after reviewing your full
                   credit profile, the specific vehicle, and other factors.
                 </p>
+                <p>AutoLenis is not a lender or dealer.</p>
                 {tierInfo && (
                   <p>
                     Your <strong>{tierInfo.label}</strong> credit profile is used to estimate the

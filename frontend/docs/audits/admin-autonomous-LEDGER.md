@@ -151,6 +151,31 @@ None hard-blocking. Unit 10 was executed at PLAN scope on owner resume (toast co
 - **Why unroutable:** the Vercel MCP token is denied for this project's deployments (403 list / 404 get), so build logs are unreadable from here; the fix lives in the Vercel/Supabase dashboards, which agents must not modify.
 - **What's needed from a human:** run `npx vercel inspect dpl_Cof6HzGC2Cg742MsdPw1oMJJ2AC7 --logs` (or open https://vercel.com/autolenis/autolenis/Cof6HzGC2Cg742MsdPw1oMJJ2AC7) to read the failure, and check the Supabase Branching ↔ Vercel integration settings (env-var injection for preview deploys). Not a merge blocker for code review — the GitHub Actions gate is green.
 
+## PREQUALIFICATION HARDENING (focused follow-on pass)
+
+Four deep-audit agents mapped the full prequal surface (buyer flow, MicroBilt/
+DTI service layer, admin surfaces, lifecycle crons + FCRA/OFAC compliance).
+Strong foundations confirmed (DTI cents/bps discipline, fail-closed MicroBilt
+taxonomy, AES-256-GCM rawResponse, no SSN persisted). Fixes shipped:
+
+| # | Unit | Commit | Highlights |
+|---|---|---|---|
+| PQ1 | Admin decision rails | db27e38 | **OFAC bypass closed** (decide route hard-blocks OFAC-flagged records; detail page routes to OFAC queue); OFAC CLEAR resets the flag + writes ComplianceEvents + conditional approve; decide stamps fresh 90-day expiry, passes §615 reason codes, honest adverse-action send events, race-safe; manual-override bounded $8k–$85k; history allowlist + modal a11y |
+| PQ2 | Buyer decisioning service | 7a17930 | Durable pre-pull claim (double-submit no longer double-pulls credit; self-healing 30s marker); **consent persisted before the pull**; DOB 18–110/real-date/not-future validation; deposit gate → isPrequalValid SoT; MicroBilt error body no longer logged (PII); silent OFAC/MLA catches log; +5 income-gate boundary tests (19/19) |
+| PQ3 | External pre-approval flow | 4d93a52 | End-to-end repair: status reads the real ExternalPreApproval (was PENDING forever); lender letter persisted + admin signed-URL "View letter" (was orphaned); success links to status tracker; reject no longer sends the false MicroBilt §615 template / silently suppresses 2nd rejection |
+| PQ4 | Lifecycle, retention, notifications | (this commit) | External approve requires **admin OFAC attestation** (owner decision) recorded as ComplianceEvent; **rawResponse scrubbed after 90 days** on APPROVED rows (owner decision); ibv-reminders + sla-escalation crons made idempotent (were duplicating up to 7 emails / re-paging daily); real-time in-app notification at decision time incl. DECLINE (was cron-delayed / absent); locked phrase "AutoLenis is not a lender or dealer" added to form + approved dashboard; declined-page copy reconciled |
+
+**Owner decisions captured this pass:** external-approve OFAC handling → require
+explicit admin attestation (ComplianceEvent `EXTERNAL_PREQUAL_OFAC_ATTESTED`);
+rawResponse retention → scrub after 90 days.
+
+**Deferred (documented, not done):** split the 1,661-line PrequalAdminPanel +
+server-side pagination on the 500-capped list (large refactors); ECOA/Reg B
+30-day decision-SLA tracking (legal-process question — whether prequal is a
+credit "application"); a real automated OFAC screen on the external path
+(attestation is the interim control).
+
 ## SETUP (human actions required)
 
 - (carried from PHASE_BACKLOG) SENTRY_DSN + Upstash/KV env vars still owed by ops for Phase 0.5 sign-off.
+- **Supabase Storage:** confirm the `prequal-letters` private bucket exists (the external-flow letter upload + admin signed-URL read depend on it).

@@ -55,7 +55,7 @@ export default function PrequalDeclinedPage() {
       </div>
 
       <div className="text-center space-y-3">
-        <p className="text-sm text-slate-600">You may apply again in 30 days, or provide your own pre-approval from your bank or credit union.</p>
+        <p className="text-sm text-slate-600">You may provide your own pre-approval from your bank or credit union, or re-apply once your financial circumstances have changed.</p>
         <Link href="/buyer/prequal/external" data-testid="use-external-financing-link" className="text-sm text-al-primary font-semibold hover:underline block">
           I have my own bank financing →
         </Link>

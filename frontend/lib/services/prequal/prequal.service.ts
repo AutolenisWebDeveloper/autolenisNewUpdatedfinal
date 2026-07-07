@@ -413,6 +413,36 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     logger.error("[prequal] CRM prequal_started emit failed:", err);
   }
 
+  // Real-time in-app notification at decision time (approved / declined).
+  // Previously approval was only surfaced by the 4-hourly delivery cron and
+  // decline had no in-app notification at all — the buyer saw nothing in-app
+  // until the next cron tick (approval) or never (decline).
+  if (finalDecision === PreQualDecision.APPROVED) {
+    await prisma.notification
+      .create({
+        data: {
+          buyerId: buyer.id,
+          type: "PREQUAL_APPROVED",
+          title: "You're pre-qualified",
+          body: `Your approved budget is $${(maxOtdAmountCents / 100).toLocaleString()}.`,
+          actionUrl: "/buyer/prequal",
+        },
+      })
+      .catch((err) => logger.error("[prequal] approval notification failed:", err));
+  } else if (finalDecision === PreQualDecision.DECLINED) {
+    await prisma.notification
+      .create({
+        data: {
+          buyerId: buyer.id,
+          type: "PREQUAL_DECLINED",
+          title: "Prequalification update",
+          body: "We've completed your prequalification review. Check your email for details and next steps.",
+          actionUrl: "/buyer/prequal/result",
+        },
+      })
+      .catch((err) => logger.error("[prequal] decline notification failed:", err));
+  }
+
   // Send congratulations email and log compliance event for APPROVED decisions.
   // Email failure must never block the approval — catch and log only.
   if (finalDecision === PreQualDecision.APPROVED) {

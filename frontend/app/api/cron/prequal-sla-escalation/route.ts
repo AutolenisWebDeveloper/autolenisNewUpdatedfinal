@@ -1,3 +1,4 @@
+import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -30,18 +31,32 @@ export async function GET(request: NextRequest) {
     },
   });
 
+  let paged = false;
   if (aged > 0) {
-    await prisma.notification
-      .create({
-        data: {
-          title: "OFAC Escalation SLA",
-          body: `${aged} OFAC review case(s) have exceeded the ${OFAC_SLA_HOURS}h SLA. Review now via /admin/manual-reviews.`,
-          type: "SYSTEM_ALERT",
-          actionUrl: "/admin/manual-reviews",
-        },
-      })
-      .catch(() => {});
+    // Idempotent: don't re-page every daily run while the queue stays aged.
+    // Only raise a fresh alert if none was raised in the last SLA window.
+    const recentAlert = await prisma.notification.findFirst({
+      where: {
+        title: "OFAC Escalation SLA",
+        type: "SYSTEM_ALERT",
+        createdAt: { gte: slaCutoff },
+      },
+      select: { id: true },
+    });
+    if (!recentAlert) {
+      await prisma.notification
+        .create({
+          data: {
+            title: "OFAC Escalation SLA",
+            body: `${aged} OFAC review case(s) have exceeded the ${OFAC_SLA_HOURS}h SLA. Review now via /admin/manual-reviews.`,
+            type: "SYSTEM_ALERT",
+            actionUrl: "/admin/manual-reviews",
+          },
+        })
+        .then(() => { paged = true; })
+        .catch((err) => logger.error("[prequal-sla-escalation] alert notification failed:", err));
+    }
   }
 
-  return NextResponse.json({ success: true, data: { escalated: aged } });
+  return NextResponse.json({ success: true, data: { escalated: aged, paged } });
 }

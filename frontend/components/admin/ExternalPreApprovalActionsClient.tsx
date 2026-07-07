@@ -22,6 +22,7 @@ function ReasonModal({
   title,
   confirmLabel,
   confirmVariant,
+  requireOfacAttest,
   onConfirm,
   onClose,
   loading,
@@ -29,32 +30,53 @@ function ReasonModal({
   title: string;
   confirmLabel: string;
   confirmVariant: "default" | "destructive" | "secondary";
-  onConfirm: (reason: string) => Promise<void>;
+  /** Approve requires an OFAC attestation (external path has no bureau screen). */
+  requireOfacAttest: boolean;
+  onConfirm: (reason: string, ofacAttested: boolean) => Promise<void>;
   onClose: () => void;
   loading: boolean;
 }) {
   const [reason, setReason] = useState("");
+  const [ofacAttested, setOfacAttested] = useState(false);
+  const canConfirm = reason.trim().length >= 10 && (!requireOfacAttest || ofacAttested);
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-label={title}>
       <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
         <h2 className="text-base font-semibold text-slate-900 mb-4">{title}</h2>
-        <label className="text-xs font-medium text-slate-600 block mb-1">
+        <label className="text-xs font-medium text-slate-600 block mb-1" htmlFor="ext-reason">
           Reason <span className="text-slate-400">(required, min 10 chars)</span>
         </label>
         <textarea
+          id="ext-reason"
           value={reason}
           onChange={e => setReason(e.target.value)}
           className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 resize-none"
           rows={3}
           placeholder="Describe the reason for this action…"
         />
+        {requireOfacAttest && (
+          <label className="flex items-start gap-2 mt-3 text-xs text-slate-700">
+            <input
+              type="checkbox"
+              checked={ofacAttested}
+              onChange={e => setOfacAttested(e.target.checked)}
+              className="mt-0.5"
+              data-testid="ext-ofac-attest"
+            />
+            <span>
+              I confirm an OFAC / sanctions screening was completed for this buyer.
+              External pre-approvals skip the automated bureau OFAC check, so this
+              attestation is recorded to the compliance log.
+            </span>
+          </label>
+        )}
         <div className="flex gap-2 mt-4 justify-end">
           <Button variant="ghost" size="sm" onClick={onClose} disabled={loading}>Cancel</Button>
           <Button
             variant={confirmVariant}
             size="sm"
-            disabled={loading || reason.trim().length < 10}
-            onClick={() => onConfirm(reason.trim())}
+            disabled={loading || !canConfirm}
+            onClick={() => onConfirm(reason.trim(), ofacAttested)}
           >
             {loading ? <span className="flex items-center gap-1"><span className="animate-spin h-3 w-3 border-2 border-white/30 border-t-white rounded-full" />Processing…</span> : confirmLabel}
           </Button>
@@ -83,10 +105,13 @@ export default function ExternalPreApprovalActionsClient({ submissions: initialS
     }
   }
 
-  async function handleAction(id: string, action: "approve" | "reject", reason: string) {
+  async function handleAction(id: string, action: "approve" | "reject", reason: string, ofacAttested: boolean) {
     setLoading(true);
     try {
-      await api.post(`/api/admin/external-preapprovals/${id}/${action}`, { reason });
+      await api.post(
+        `/api/admin/external-preapprovals/${id}/${action}`,
+        action === "approve" ? { reason, ofacAttested } : { reason },
+      );
       // Derive new status from the action taken
       const newStatus = action === "approve" ? "APPROVED" : "REJECTED";
       setSubmissions(prev =>
@@ -112,9 +137,10 @@ export default function ExternalPreApprovalActionsClient({ submissions: initialS
           title={modal.action === "approve" ? "Approve Pre-Approval" : "Reject Pre-Approval"}
           confirmLabel={modal.action === "approve" ? "Approve" : "Reject"}
           confirmVariant={modal.action === "approve" ? "default" : "destructive"}
+          requireOfacAttest={modal.action === "approve"}
           loading={loading}
           onClose={() => setModal(null)}
-          onConfirm={reason => handleAction(modal.id, modal.action, reason)}
+          onConfirm={(reason, ofacAttested) => handleAction(modal.id, modal.action, reason, ofacAttested)}
         />
       )}
 

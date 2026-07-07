@@ -292,6 +292,9 @@ export default function PrequalFormClient({ initial }: PrequalFormProps = {}) {
           >
             🔒 Soft pull only · No score impact · FCRA-compliant · Results in seconds
           </p>
+          <p className="mt-2 text-xs text-slate-400" data-testid="prequal-not-lender">
+            AutoLenis is not a lender or dealer.
+          </p>
         </header>
 
         <form onSubmit={handleSubmit} data-testid="prequal-form" className="space-y-8" noValidate>
