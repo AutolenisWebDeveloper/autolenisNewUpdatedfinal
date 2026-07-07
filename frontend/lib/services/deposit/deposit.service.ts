@@ -73,6 +73,12 @@ export async function refundDeposit(depositId: string, reason: string): Promise<
   if (!deposit?.stripePaymentIntentId) throw new Error("Deposit not found or no payment");
   if (deposit.status === "REFUNDED") return; // Already refunded
 
-  await getStripe().refunds.create({ payment_intent: deposit.stripePaymentIntentId });
+  // Deposit-scoped idempotency key so a double-invocation (or a concurrent
+  // admin refund) cannot issue a second real refund — shared namespace with the
+  // admin refund routes and refund.service.
+  await getStripe().refunds.create(
+    { payment_intent: deposit.stripePaymentIntentId },
+    { idempotencyKey: `refund-deposit-${depositId}` },
+  );
   await prisma.deposit.update({ where: { id: depositId }, data: { status: "REFUNDED", refundedAt: new Date() } });
 }
