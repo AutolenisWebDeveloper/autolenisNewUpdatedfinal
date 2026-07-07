@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "sonner";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -369,12 +370,18 @@ function ActionPanel({
       </div>
 
       {confirming && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" role="dialog">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="prequal-confirm-title"
+          onKeyDown={(e) => { if (e.key === "Escape" && !submitting) setConfirming(null); }}
+        >
           <div
             className="bg-white rounded-xl border border-slate-200 max-w-md w-full p-5"
             data-testid="prequal-confirm-modal"
           >
-            <h3 className="text-sm font-bold text-slate-900 mb-3">
+            <h3 id="prequal-confirm-title" className="text-sm font-bold text-slate-900 mb-3">
               {confirming === "APPROVE"
                 ? "Approve this prequal?"
                 : confirming === "DECLINE"
@@ -422,15 +429,20 @@ export default function PrequalDetailClient({ data }: { data: PrequalDetailData 
   const source = useMemo(() => getPrequalSource(data), [data]);
   const [rawOpen, setRawOpen] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
-  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
-  const showActionPanel = ["MANUAL_REVIEW", "OFAC_REVIEW", "OFAC_ESCALATED", "PENDING"].includes(data.decision);
+
+  // OFAC-flagged records are NOT decidable here — the decide API hard-gates
+  // them (409) and they must go through Compliance → OFAC Review first.
+  const ofacBlocked =
+    data.checkOfacAlert || ["OFAC_REVIEW", "OFAC_ESCALATED"].includes(data.decision);
+  const showActionPanel =
+    !ofacBlocked && ["MANUAL_REVIEW", "PENDING"].includes(data.decision);
   const expiresIn = daysFromNow(data.expiresAt);
   const fullName = `${data.buyer.firstName} ${data.buyer.lastName}`.trim();
 
   function showToast(msg: string) {
-    setToast({ msg, type: "success" });
-    window.setTimeout(() => setToast(null), 4000);
+    // sonner toast — global Toaster in app/layout.tsx (aria-live handled there)
+    toast.success(msg);
   }
 
   return (
@@ -499,6 +511,22 @@ export default function PrequalDetailClient({ data }: { data: PrequalDetailData 
       </div>
 
       {/* Action panel */}
+      {ofacBlocked && (
+        <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4" data-testid="prequal-ofac-blocked">
+          <p className="text-sm font-semibold text-red-800 mb-1">OFAC review required before any decision</p>
+          <p className="text-xs text-red-700 mb-3">
+            This record carries an uncleared OFAC alert. Approving, declining, or overriding is
+            blocked until Compliance clears or escalates the alert.
+          </p>
+          <Link
+            href="/admin/compliance/ofac"
+            className="inline-flex items-center gap-1 text-xs font-semibold text-red-800 underline hover:no-underline"
+            data-testid="prequal-goto-ofac"
+          >
+            Open OFAC Review queue →
+          </Link>
+        </div>
+      )}
       {showActionPanel && (
         <div className="mb-6">
           <ActionPanel data={data} onSuccess={showToast} />
@@ -639,17 +667,6 @@ export default function PrequalDetailClient({ data }: { data: PrequalDetailData 
         </div>
       )}
 
-      {toast && (
-        <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm shadow-xl font-medium flex items-center gap-2 max-w-sm ${
-            toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
-          }`}
-          data-testid="prequal-toast"
-        >
-          {toast.type === "success" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
-          <span>{toast.msg}</span>
-        </div>
-      )}
     </div>
   );
 }

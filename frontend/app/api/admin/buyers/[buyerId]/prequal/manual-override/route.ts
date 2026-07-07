@@ -38,7 +38,13 @@ interface Props { params: Promise<{ buyerId: string }> }
 const schema = z.object({
   decision:          z.nativeEnum(PreQualDecision),
   tier:              z.nativeEnum(PreQualTier).optional(),
-  maxOtdAmountCents: z.number().int().positive("Max OTD amount must be positive"),
+  // Bounded to the same platform window the decide rail enforces ($8k–$85k) —
+  // previously unbounded, letting an override bypass the platform cap.
+  maxOtdAmountCents: z
+    .number()
+    .int()
+    .min(800000, "Max OTD must be at least $8,000")
+    .max(8500000, "Max OTD cannot exceed the $85,000 platform cap"),
   reason:            z.string().trim().min(1, "Reason note is required").max(1000),
   checkOfacAlert:    z.boolean().default(false),
 });
