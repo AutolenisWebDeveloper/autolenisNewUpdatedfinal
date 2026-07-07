@@ -98,10 +98,52 @@ export async function sendEnvelope(dealId: string): Promise<void> {
   }
 }
 
+// Retrieve the executed (combined) signed PDF from DocuSign and store it in the
+// private "contracts" bucket, returning the storage key. Returns null in the
+// mock/unconfigured path (no real envelope to fetch). Throws on a real fetch /
+// upload failure so the caller can log it and leave documentKey null (the buyer
+// download route then 404s gracefully until a later run populates it).
+async function retrieveAndStoreSignedContract(
+  docusignEnvelopeId: string,
+  dealId: string,
+): Promise<string | null> {
+  if (!isDocuSignConfigured()) return null;
+
+  const config = getDocuSignConfig();
+  const accessToken = await getDocuSignAccessToken();
+  const url = `${config.baseUrl}/v2.1/accounts/${config.accountId}/envelopes/${docusignEnvelopeId}/documents/combined`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/pdf" } });
+  if (!res.ok) throw new Error(`DocuSign combined-document fetch failed (${res.status})`);
+
+  const bytes = Buffer.from(await res.arrayBuffer());
+  const { createServiceSupabaseClient } = await import("@/lib/supabase");
+  const supabase = createServiceSupabaseClient();
+  const key = `signed/${dealId}/${docusignEnvelopeId}.pdf`;
+  const { error } = await supabase.storage
+    .from("contracts")
+    .upload(key, bytes, { contentType: "application/pdf", upsert: true });
+  if (error) throw new Error(`Signed contract upload failed: ${error.message}`);
+
+  return key;
+}
+
 export async function handleEnvelopeCompleted(docusignEnvelopeId: string): Promise<void> {
   const envelope = await prisma.eSignEnvelope.findFirst({ where: { docusignEnvelopeId } });
   if (!envelope) return;
   await prisma.eSignEnvelope.update({ where: { id: envelope.id }, data: { status: ESignStatus.COMPLETED, completedAt: new Date() } });
+
+  // Retrieve & store the executed PDF so the buyer can download their signed
+  // contract. Best-effort: a retrieval blip must NOT roll back the signing
+  // completion (already committed above). documentKey stays null on failure and
+  // the download route reports "not yet available" until a later run stores it.
+  try {
+    const documentKey = await retrieveAndStoreSignedContract(docusignEnvelopeId, envelope.dealId);
+    if (documentKey) {
+      await prisma.eSignEnvelope.update({ where: { id: envelope.id }, data: { documentKey } });
+    }
+  } catch (err) {
+    logger.error("[esign] signed contract retrieval/storage failed:", err);
+  }
   // Authoritative external event (DocuSign reports the envelope signed): force the
   // SIGNED transition so it is always recorded, with DealStatusHistory.
   await advanceDealStatus(envelope.dealId, "SIGNED", { actorRole: "SYSTEM", force: true });

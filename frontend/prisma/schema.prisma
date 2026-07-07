@@ -618,6 +618,11 @@ model ESignEnvelope {
   dealId             String      @unique @map("deal_id")
   docusignEnvelopeId String?     @unique @map("docusign_envelope_id")
   status             ESignStatus @default(PENDING)
+  // Storage key of the executed/combined signed PDF in the private "contracts"
+  // bucket, populated on envelope-completed so the buyer can download their
+  // executed contract. Null until DocuSign reports completion (or if retrieval
+  // is still pending).
+  documentKey        String?     @map("document_key")
   sentAt             DateTime?   @map("sent_at")
   completedAt        DateTime?   @map("completed_at")
   voidedAt           DateTime?   @map("voided_at")

@@ -36,36 +36,29 @@ export async function GET(request: NextRequest, { params }: Props) {
     );
   }
 
-  // If the envelope model gains a documentUrl field in future, handle it here.
-  const envelope = deal.eSignEnvelope as Record<string, unknown>;
-  const documentUrl =
-    (envelope.documentUrl as string | null) ??
-    (envelope.contractUrl as string | null) ??
-    (envelope.pdfUrl as string | null);
-
-  if (!documentUrl) {
+  // documentKey is the private-bucket storage path of the executed signed PDF,
+  // populated on envelope-completed (esign.service). Null means retrieval hasn't
+  // succeeded yet — report a clear not-yet-available rather than a crash.
+  const documentKey = deal.eSignEnvelope.documentKey;
+  if (!documentKey) {
     return errorResponse(
       "NOT_AVAILABLE",
-      "Contract document is not yet available. Please contact support.",
+      "Your signed contract is being finalized and will be available shortly. Please check back soon.",
       404
     );
   }
 
-  if (!documentUrl.startsWith("http")) {
-    try {
-      const { createServiceSupabaseClient } = await import("@/lib/supabase");
-      const supabase = createServiceSupabaseClient();
-      const { data, error } = await supabase.storage
-        .from("contracts")
-        .createSignedUrl(documentUrl, 900);
-      if (error || !data?.signedUrl) {
-        return errorResponse("STORAGE_ERROR", "Could not generate download link.", 500);
-      }
-      return NextResponse.redirect(data.signedUrl);
-    } catch {
-      return errorResponse("STORAGE_ERROR", "Could not access contract storage.", 500);
+  try {
+    const { createServiceSupabaseClient } = await import("@/lib/supabase");
+    const supabase = createServiceSupabaseClient();
+    const { data, error } = await supabase.storage
+      .from("contracts")
+      .createSignedUrl(documentKey, 900);
+    if (error || !data?.signedUrl) {
+      return errorResponse("STORAGE_ERROR", "Could not generate download link.", 500);
     }
+    return NextResponse.redirect(data.signedUrl);
+  } catch {
+    return errorResponse("STORAGE_ERROR", "Could not access contract storage.", 500);
   }
-
-  return NextResponse.redirect(documentUrl);
 }
