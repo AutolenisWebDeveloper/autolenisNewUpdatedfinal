@@ -140,7 +140,12 @@ async function sendIdempotent(params: {
     logger.error("[EMAIL] EmailSendLog check failed — proceeding with send:", err);
     // Non-blocking — allow send to proceed even if idempotency check fails
   }
-  if (existing) {
+  // Only a genuinely-SENT prior attempt blocks a re-send. A previously FAILED
+  // (transient Resend/DB outage) or DEV_SKIPPED attempt MUST be retriable —
+  // otherwise one blip permanently poisons the key and the email (including the
+  // FCRA §615 adverse-action notice and every cron/job email) can never be
+  // resent. The log write below upserts so the retry updates that prior row.
+  if (existing && existing.status === "SENT") {
     return { sent: false, outcome: "DUPLICATE", resendId: existing.resendId ?? undefined };
   }
 
@@ -187,10 +192,19 @@ async function sendIdempotent(params: {
     status = "FAILED";
   }
 
-  // Log the send attempt
-  await prisma.emailSendLog.create({
-    data: {
+  // Log the send attempt. Upsert (not create) so a retry of a previously
+  // FAILED/DEV_SKIPPED key updates that row to SENT instead of throwing a
+  // unique-constraint violation on idempotencyKey.
+  await prisma.emailSendLog.upsert({
+    where: { idempotencyKey: params.idempotencyKey },
+    create: {
       idempotencyKey: params.idempotencyKey,
+      recipient: params.to,
+      templateId: params.templateId,
+      status,
+      resendId: resendId ?? null,
+    },
+    update: {
       recipient: params.to,
       templateId: params.templateId,
       status,

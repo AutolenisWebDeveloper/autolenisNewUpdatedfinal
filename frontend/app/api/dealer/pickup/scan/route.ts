@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
     subject: "Congratulations — your AutoLenis deal is complete",
     html: `<p>Hi ${pickup.deal.buyer.firstName},</p>
            <p>Your vehicle pickup has been confirmed by the dealer. The deal is now marked as <strong>COMPLETED</strong> in your AutoLenis account.</p>
-           <p>You can view your final receipt and contract at <a href="${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/deals/${pickup.dealId}/receipt">your dashboard</a>.</p>
+           <p>You can view your final receipt and contract at <a href="${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/deal/${pickup.dealId}/receipt">your dashboard</a>.</p>
            <p>Thank you for choosing AutoLenis.</p>`,
   }).catch(() => { /* non-fatal */ });
 

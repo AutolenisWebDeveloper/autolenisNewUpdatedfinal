@@ -36,12 +36,24 @@ export async function POST(request: NextRequest) {
     if (body.buyerId && body.status === "completed") {
       const prequal = await prisma.preQualification.findUnique({ where: { buyerId: body.buyerId } });
       if (prequal) {
+        // Send an HONEST notification based on the callback's decision. The bug
+        // this fixes: the type was hardcoded to PREQUAL_APPROVED, so a DECLINED
+        // applicant was told "approved". We do NOT overwrite PreQualification
+        // here — the decision is authoritatively set by the synchronous
+        // decisioning path (prequal.service); this async callback only notifies.
+        const decision = (body.decision ?? "").toUpperCase();
+        const notice =
+          decision === "APPROVED"
+            ? { type: "PREQUAL_APPROVED" as const, title: "You're pre-qualified", body: "Your pre-qualification is complete. View your buying power on your dashboard." }
+            : decision === "DECLINED"
+              ? { type: "PREQUAL_DECLINED" as const, title: "Pre-qualification decision", body: "Your pre-qualification could not be approved at this time. See your dashboard for details and next steps." }
+              : { type: "REQUEST_STATUS_UPDATE" as const, title: "Pre-qualification update", body: "Your pre-qualification status has been updated. Check your dashboard." };
         await prisma.notification.create({
           data: {
             buyerId: body.buyerId,
-            title: "Pre-qualification update",
-            body: "Your prequalification has been updated. Check your dashboard.",
-            type: "PREQUAL_APPROVED",
+            title: notice.title,
+            body: notice.body,
+            type: notice.type,
           },
         }).catch(() => {});
       }

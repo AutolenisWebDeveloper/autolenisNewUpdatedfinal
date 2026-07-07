@@ -21,7 +21,9 @@ export async function POST(request: NextRequest) {
   try {
     const { buyerId, firstName, email } = (await request.json()) as Payload;
 
-    const referralUrl = `${NOTIFY_APP_URL}/auth/signup?ref=`;
+    // Point at the buyer's referral hub (where their real link lives) rather
+    // than a pre-baked empty `?ref=` signup link that attributes to no one.
+    const referralUrl = `${NOTIFY_APP_URL}/buyer/referral`;
 
     await notifyContact({
       entityType: "buyer",

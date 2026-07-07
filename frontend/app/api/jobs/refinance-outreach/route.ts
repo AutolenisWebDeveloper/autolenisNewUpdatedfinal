@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
       entityId: buyerId,
       email,
       // The "Reply STOP to opt out." suffix is appended by the notify layer.
-      sms: `Hi ${firstName} — did you know you could lower your monthly payment on your recent vehicle purchase? AutoLenis has connected with OpenRoad Lending to help buyers explore refinancing options. Check your options here: autolenis.com/buyer/refinance`,
+      sms: `Hi ${firstName} — did you know you could lower your monthly payment on your recent vehicle purchase? AutoLenis has connected with OpenRoad Lending to help buyers explore refinancing options. Check your options here: autolenis.com/refinance`,
       emailSubject: "Could you lower your car payment?",
       emailHtml: renderEmail({
         heading: "Could you lower your car payment?",
