@@ -48,6 +48,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Deals", href: "/admin/deals", icon: FileText },
     { label: "Offers", href: "/admin/offers", icon: DollarSign },
     { label: "Payment Hub", href: "/admin/payments", icon: CreditCard },
+    { label: "Reconciliation", href: "/admin/payments/reconciliation", icon: CreditCard, visibleTo: ["SUPER_ADMIN", "FINANCE_ADMIN", "OPERATIONS_ADMIN"] },
   ]},
   { label: "Operations", items: [
     { label: "Queues", href: "/admin/queues", icon: AlertOctagon },

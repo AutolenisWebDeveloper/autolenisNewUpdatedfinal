@@ -214,6 +214,28 @@ export default function InboxPage() {
     return () => clearInterval(interval);
   }, [selectedId]);
 
+  // Poll the conversation LIST too — new inbound threads must appear without
+  // a manual filter/tab change. Paused while the tab is hidden.
+  useEffect(() => {
+    if (tab !== 'inbox') return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      const statusParam = filter === 'open' ? 'open,assigned,escalated' : '';
+      const url = statusParam
+        ? `/api/admin/crm/conversations?status=${statusParam}`
+        : '/api/admin/crm/conversations';
+      fetch(url)
+        .then((r) => r.json())
+        .then((json) => {
+          const next = (json.data as ConversationListItem[]) ?? [];
+          // Preserve the locally-cleared unread count on the open thread.
+          setConversations(next.map((c) => (c.id === selectedId ? { ...c, unread_count: 0 } : c)));
+        })
+        .catch(() => {});
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [tab, filter, selectedId]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);

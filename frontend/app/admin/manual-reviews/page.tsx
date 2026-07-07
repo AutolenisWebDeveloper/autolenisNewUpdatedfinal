@@ -1,4 +1,5 @@
 // /admin/manual-reviews — Manual prequal review queue (MANUAL_REVIEW + OFAC decisions)
+import AutoRefresh from "@/components/admin/AutoRefresh";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
@@ -78,11 +79,14 @@ export default async function AdminManualReviewsPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-manual-reviews-page">
-      <div className="mb-6">
-        <h1 className="text-xl font-bold text-slate-900">Manual Reviews</h1>
-        <p className="text-sm text-slate-500 mt-0.5">
-          Prequalifications and OFAC alerts awaiting compliance decision
-        </p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">Manual Reviews</h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Prequalifications and OFAC alerts awaiting compliance decision
+          </p>
+        </div>
+        <AutoRefresh intervalMs={30_000} />
       </div>
 
       {/* Stat tiles */}

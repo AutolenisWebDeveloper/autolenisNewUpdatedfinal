@@ -2,6 +2,7 @@
 // Shows live platform metrics derived from real Prisma data.
 // No fake KPIs: all numbers come directly from DB counts/aggregates.
 
+import AutoRefresh from "@/components/admin/AutoRefresh";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { getOpsDashboardData } from "@/lib/services/admin/admin-ops.service";
 import Link from "next/link";
@@ -80,6 +81,7 @@ export default async function OpsDashboard() {
           <h1 className="text-xl font-bold text-slate-900">Operations Dashboard</h1>
           <p className="text-xs text-slate-400 mt-0.5">All metrics reflect live database state · Feature 26</p>
         </div>
+        <span className="ml-auto"><AutoRefresh intervalMs={60_000} /></span>
       </div>
 
       {/* Top metrics grid */}
