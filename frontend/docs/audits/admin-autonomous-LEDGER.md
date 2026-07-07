@@ -2,7 +2,7 @@
 
 **Mission:** Autonomous discovery, planning, remediation, elevation & automation of the AutoLenis admin console to Fortune-500 fintech grade.
 **Branch:** `claude/admin-autonomous-hardening-fefvfe` (base: `main`)
-**Started:** 2026-07-07T02:15:00Z · **Last updated:** 2026-07-07T04:55:00Z
+**Started:** 2026-07-07T02:15:00Z · **Last updated:** 2026-07-07T05:45:00Z
 **Resume protocol:** read this file first, then `admin-autonomous-PLAN.md`; continue from the first unit not marked DONE. Never redo DONE units.
 
 ---
@@ -131,7 +131,7 @@
 | 7 | CRM compliance | DONE | suppression stub (page:12-25, no route); bulk email skipped consent_email (route:79-100); SMS preview first-100 (modal:38-51); no confirm step both modals; 4 dead buttons contacts/[id] (:108,201,246,249); consentSms gate (ContactActions:31); contrast text-gray-900-on-blue (SegmentBuilder:343,396,405; TemplateEditor:222) | full suppression manager on SuppressionService; contacts ids= lookup; two-phase confirm | — | tsc✅ lint✅(80w) | 81c671a | SMS unsuppress deliberately not exposed (TCPA START flow) |
 | 8 | Growth & settings | DONE | settings swallowed load error (:55) + 6 inert rows (:138-144); seo/schema Prisma no-op filter (:6); unsanitized innerHTML (content/[id]:133, ArticleManagerClient:1114); hardcoded excluded-states (refinance/compliance:72); unopenable documents/contracts | signed-url routes (platform docs by ownership bucket; contract versions) + Open buttons; contracts load-error + deal links | — | tsc✅ lint✅(80w) | b5f480b | sanitizeBody defense-in-depth at render |
 | 9 | Automation | DONE | support "Coming Soon" stub over live orphaned impersonation APIs; inbox list never polled | /admin/payments/reconciliation (5 money-state checks, read-only triage); support session manager (search/start-with-reason/end/history) | manual-reviews + ops-dashboard + operations RSC polling; inbox list 30s poll | tsc✅ lint✅(80w) | 6e22b4f | reconciliation never auto-resolves money |
-| 10 | Design elevation — mass kit adoption sweep | DEFERRED (decision) | — | — | — | — | — | See FOUNDATION DECISIONS below |
+| 10 | Design elevation — toast consolidation + StatCard adoption on high-traffic surfaces | DONE | 6 hand-rolled floating-toast implementations deleted (AdminESignActions, AdminPaymentActionsClient, AdminPickupActions, AdminPickupListActions, AdminPreApprovalActions, ExternalPreApprovalActionsClient) → sonner (spec §2.7); 2 duplicate hand-rolled KpiCard components deleted (AdminBuyersClient:114, AdminDealersClient:79) | buyers (8 KPIs), dealers (10 KPIs), manual-reviews (3 tiles) now on the canonical patterns StatCard with semantic tones | — | tsc✅ lint✅(80w) build✅ | (this commit) | Owner resume directive executed the previously-deferred unit at PLAN scope; the remaining ~90-page sweep stays with Phase 3D per FOUNDATION DECISIONS |
 
 ## FOUNDATION DECISIONS
 
@@ -144,8 +144,7 @@
 
 ## BLOCKERS (final)
 
-None hard-blocking. One owner decision was made autonomously and is flagged for review:
-- Unit 10 mass kit-adoption sweep deferred to the owner-gated Phase 3D backlog (see FOUNDATION DECISIONS). If the owner prefers it now, the foundation from this run makes it mechanical.
+None hard-blocking. Unit 10 was executed at PLAN scope on owner resume (toast consolidation + high-traffic StatCard adoption); the full ~90-page/2,191-hex sweep remains sequenced under the owner-gated Phase 3D backlog (see FOUNDATION DECISIONS).
 
 ## SETUP (human actions required)
 

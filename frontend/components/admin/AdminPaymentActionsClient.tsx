@@ -1,7 +1,8 @@
 "use client";
 
+import { toast } from "sonner";
 import { useState } from "react";
-import { X, CheckCircle2, AlertTriangle } from "lucide-react";
+import { X, AlertTriangle } from "lucide-react";
 import { api } from "@/lib/api/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -114,25 +115,18 @@ function ActionModal({ title, warning, onCancel, onConfirm }: ModalProps) {
   );
 }
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-
-interface Toast {
-  msg: string;
-  type: "success" | "error";
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AdminPaymentActionsClient(props: Props) {
-  const [toast, setToast] = useState<Toast | null>(null);
   const [modal, setModal] = useState<string | null>(null);
   const [status, setStatus] = useState<string>(
     props.type === "deposit" ? props.status : props.feeStatus,
   );
 
   function showToast(msg: string, type: "success" | "error" = "success") {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 4000);
+    // sonner toast — global Toaster in app/layout.tsx
+    if (type === "success") toast.success(msg);
+    else toast.error(msg);
   }
 
   async function callApi(url: string, body: Record<string, unknown>): Promise<void> {
@@ -172,13 +166,6 @@ export default function AdminPaymentActionsClient(props: Props) {
 
     return (
       <div className="flex items-center gap-2 flex-wrap">
-        {toast && (
-          <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm shadow-xl font-medium flex items-center gap-2 ${toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`}>
-            {toast.type === "success" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
-            {toast.msg}
-          </div>
-        )}
-
         <StatusBadge status={status} />
 
         {status === "PENDING" && (
@@ -278,13 +265,6 @@ export default function AdminPaymentActionsClient(props: Props) {
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      {toast && (
-        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm shadow-xl font-medium flex items-center gap-2 ${toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`}>
-          {toast.type === "success" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
-          {toast.msg}
-        </div>
-      )}
-
       <StatusBadge status={status} />
 
       {status === "PENDING" && (

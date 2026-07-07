@@ -1,5 +1,6 @@
 "use client";
 
+import StatCard from "@/components/ui/patterns/StatCard";
 import { useState, useCallback } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -102,27 +103,6 @@ function DealStatusBadge({ status }: { status: string | null }) {
   const bad = ["CANCELLED", "REFUNDED"].includes(status);
   const variant: "green" | "destructive" | "blue" = done ? "green" : bad ? "destructive" : "blue";
   return <Badge variant={variant} className="text-[10px]">{label}</Badge>;
-}
-
-interface KpiCardProps {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  color: string;
-  testId?: string;
-}
-function KpiCard({ icon, label, value, color, testId }: KpiCardProps) {
-  return (
-    <div className={"bg-white border border-slate-200 rounded-xl p-4 flex items-start gap-3 shadow-sm hover:shadow-md transition-shadow"} data-testid={testId}>
-      <div className={"w-9 h-9 rounded-lg flex items-center justify-center " + color + " flex-shrink-0"}>
-        {icon}
-      </div>
-      <div className="min-w-0">
-        <p className="text-2xl font-bold text-slate-900 leading-none">{value.toLocaleString()}</p>
-        <p className="text-xs text-slate-500 mt-1 leading-snug">{label}</p>
-      </div>
-    </div>
-  );
 }
 
 function AddBuyerModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
@@ -428,14 +408,14 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
-        <KpiCard icon={<Users size={16} className="text-purple-700" />} label="Total Buyers" value={kpis.total} color="bg-purple-50" testId="kpi-total" />
-        <KpiCard icon={<CheckCircle2 size={16} className="text-green-700" />} label="Active" value={kpis.active} color="bg-green-50" testId="kpi-active" />
-        <KpiCard icon={<Clock size={16} className="text-amber-700" />} label="Pending Onboard" value={kpis.pendingOnboarding} color="bg-amber-50" testId="kpi-onboarding" />
-        <KpiCard icon={<TrendingUp size={16} className="text-blue-700" />} label="Prequalified" value={kpis.prequalified} color="bg-blue-50" testId="kpi-prequal" />
-        <KpiCard icon={<Briefcase size={16} className="text-indigo-700" />} label="Active Deals" value={kpis.withActiveDeals} color="bg-indigo-50" testId="kpi-deals" />
-        <KpiCard icon={<Zap size={16} className="text-orange-700" />} label="Needs Action" value={kpis.needingAction} color="bg-orange-50" testId="kpi-action" />
-        <KpiCard icon={<CreditCard size={16} className="text-red-700" />} label="Payment Issues" value={kpis.paymentIssues} color="bg-red-50" testId="kpi-payments" />
-        <KpiCard icon={<ShieldAlert size={16} className="text-rose-700" />} label="Exceptions" value={kpis.exceptionCases} color="bg-rose-50" testId="kpi-exceptions" />
+        <StatCard icon={Users} label="Total Buyers" value={kpis.total.toLocaleString()} tone="indigo" testId="kpi-total" />
+        <StatCard icon={CheckCircle2} label="Active" value={kpis.active.toLocaleString()} tone="success" testId="kpi-active" />
+        <StatCard icon={Clock} label="Pending Onboard" value={kpis.pendingOnboarding.toLocaleString()} tone="warning" testId="kpi-onboarding" />
+        <StatCard icon={TrendingUp} label="Prequalified" value={kpis.prequalified.toLocaleString()} tone="brand" testId="kpi-prequal" />
+        <StatCard icon={Briefcase} label="Active Deals" value={kpis.withActiveDeals.toLocaleString()} tone="indigo" testId="kpi-deals" />
+        <StatCard icon={Zap} label="Needs Action" value={kpis.needingAction.toLocaleString()} tone="warning" testId="kpi-action" />
+        <StatCard icon={CreditCard} label="Payment Issues" value={kpis.paymentIssues.toLocaleString()} tone="danger" testId="kpi-payments" />
+        <StatCard icon={ShieldAlert} label="Exceptions" value={kpis.exceptionCases.toLocaleString()} tone="danger" testId="kpi-exceptions" />
       </div>
 
       {/* Lifecycle Tabs */}

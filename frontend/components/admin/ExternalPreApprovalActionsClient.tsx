@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "sonner";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -64,11 +65,10 @@ export default function ExternalPreApprovalActionsClient({ submissions: initialS
   const [submissions, setSubmissions] = useState(initialSubmissions);
   const [modal, setModal] = useState<{ id: string; action: "approve" | "reject" } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
 
   function showToast(msg: string) {
-    setToast(msg);
-    setTimeout(() => setToast(null), 4000);
+    // sonner toast — global Toaster in app/layout.tsx
+    toast.success(msg);
   }
 
   async function handleAction(id: string, action: "approve" | "reject", reason: string) {
@@ -95,12 +95,6 @@ export default function ExternalPreApprovalActionsClient({ submissions: initialS
 
   return (
     <>
-      {toast && (
-        <div className="fixed top-4 right-4 z-50 bg-slate-900 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg">
-          {toast}
-        </div>
-      )}
-
       {modal && (
         <ReasonModal
           title={modal.action === "approve" ? "Approve Pre-Approval" : "Reject Pre-Approval"}

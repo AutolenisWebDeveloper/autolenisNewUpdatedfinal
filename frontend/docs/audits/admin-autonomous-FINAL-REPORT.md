@@ -41,6 +41,9 @@ See LEDGER unit table for full file:line detail. Commits, in order:
 | U7 CRM compliance | 81c671a | suppression manager, bulk-send consent parity, contrast |
 | U8 Growth & settings | b5f480b | settings dead-ends, seo/schema bug, sanitization, openable docs |
 | U9 Automation | 6e22b4f | reconciliation, support sessions, ops polling |
+| U10 Design elevation | (final commit) | sonner toast consolidation, StatCard adoption on buyers/dealers/manual-reviews |
+
+**Update (owner resume, 2026-07-07):** Unit 10 was subsequently executed at PLAN scope — 6 hand-rolled floating-toast implementations consolidated onto sonner (spec §2.7), the two duplicate hand-rolled KpiCard components deleted, and the buyers (8 KPIs), dealers (10 KPIs), and manual-reviews (3 tiles) stat rows migrated to the canonical patterns `StatCard`. The remaining ~90-page sweep stays sequenced under Phase 3D.
 
 ## 4. Design-system foundation
 
@@ -71,7 +74,7 @@ No test suites were removed; no new Vitest/Playwright specs were added this run 
 
 ## 8. Blockers requiring human action
 
-None hard-blocking. Owner-review flag: Unit 10 (mass kit adoption) deferred to Phase 3D — see LEDGER.
+None hard-blocking. Unit 10 executed at PLAN scope on owner resume; the full admin-wide sweep remains with the owner-gated Phase 3D backlog — see LEDGER.
 
 ## 9. Setup checklist (carried from prior phases, unchanged)
 
