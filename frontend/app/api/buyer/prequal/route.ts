@@ -18,10 +18,29 @@ const STATE_RE = /^[A-Z]{2}$/i;
 const ZIP_RE = /^\d{5}$/;
 const DOB_RE = /^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/\d{4}$/;
 
+// A well-formed MM/DD/YYYY that is a real calendar date, an applicant aged
+// 18–110, and not in the future. The regex alone accepted 02/30/2050 etc.
+function isEligibleDob(value: string): boolean {
+  const m = DOB_RE.exec(value);
+  if (!m) return false;
+  const [mm, dd, yyyy] = value.split("/").map(Number);
+  const d = new Date(yyyy, mm - 1, dd);
+  // Reject impossible calendar dates (e.g. 02/30) — Date rolls them over.
+  if (d.getFullYear() !== yyyy || d.getMonth() !== mm - 1 || d.getDate() !== dd) return false;
+  const now = new Date();
+  if (d > now) return false;
+  let age = now.getFullYear() - yyyy;
+  if (now.getMonth() < mm - 1 || (now.getMonth() === mm - 1 && now.getDate() < dd)) age--;
+  return age >= 18 && age <= 110;
+}
+
 const submissionSchema = z.object({
   firstName: z.string().trim().min(1).max(64),
   lastName: z.string().trim().min(1).max(64),
-  dateOfBirth: z.string().regex(DOB_RE, "Date of birth must be MM/DD/YYYY"),
+  dateOfBirth: z
+    .string()
+    .regex(DOB_RE, "Date of birth must be MM/DD/YYYY")
+    .refine(isEligibleDob, "You must be at least 18 years old, and the date must be valid"),
   address: z.string().trim().min(1).max(200),
   city: z.string().trim().min(1).max(100),
   state: z.string().regex(STATE_RE, "State must be a 2-letter code"),

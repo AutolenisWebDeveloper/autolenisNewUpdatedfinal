@@ -224,3 +224,84 @@ test("effectiveIncomeCents reflects the stability haircut (part-time = 60%)", ()
   assert.equal(r.stabilityFactor, 0.6);
   assert.equal(r.effectiveIncomeCents, D(3000)); // $5000 × 0.60
 });
+
+// ─── Boundary cases (added during the prequal hardening pass) ────────────────
+
+test("zero income → belowMinimum, $0 capacity, DTI reported as 0", () => {
+  const r = computeIncomeGate({
+    monthlyIncomeCents: 0,
+    employmentStatus: "Full-time Employed",
+    lengthOfEmployment: "2+ years",
+    statedBudgetCents: null,
+    monthlyHousingPaymentCents: 0,
+    monthlyOtherDebtCents: 0,
+    benchmarkTier: "GOOD",
+  });
+  assert.equal(r.effectiveIncomeCents, 0);
+  assert.equal(r.estimatedMonthlyPayment, 0);
+  assert.equal(r.belowMinimum, true);
+  // No divide-by-zero — DTI floored to 0 when effective income is 0.
+  assert.equal(r.frontEndDtiBps, 0);
+  assert.equal(r.backEndDtiBps, 0);
+});
+
+test("stated budget CAPS the requested amount below income-based max", () => {
+  // High income supports well above $25k; buyer asks for $25k.
+  const r = computeIncomeGate({
+    monthlyIncomeCents: D(12000),
+    employmentStatus: "Full-time Employed",
+    lengthOfEmployment: "2+ years",
+    statedBudgetCents: D(25000),
+    monthlyHousingPaymentCents: 0,
+    monthlyOtherDebtCents: 0,
+    benchmarkTier: "STRONG",
+  });
+  assert.ok(r.incomeBasedMaxCents > D(25000), "income should support more than the stated budget");
+  assert.equal(r.requestedAmtCents, D(25000), "requested amount is capped at the stated budget");
+});
+
+test("requested amount is floored at the $8,000 platform minimum", () => {
+  // Modest income + a tiny stated budget: the floor pushes the request to $8k.
+  const r = computeIncomeGate({
+    monthlyIncomeCents: D(4000),
+    employmentStatus: "Full-time Employed",
+    lengthOfEmployment: "2+ years",
+    statedBudgetCents: D(3000),
+    monthlyHousingPaymentCents: 0,
+    monthlyOtherDebtCents: 0,
+    benchmarkTier: "GOOD",
+  });
+  assert.equal(r.requestedAmtCents, D(8000), "requested amount never drops below the platform floor");
+});
+
+test("existing debt consuming back-end capacity trips belowMinimum ($150 boundary)", () => {
+  // Back-end capacity (45% of income) is almost entirely consumed by existing
+  // obligations, leaving < $150/mo for an auto payment.
+  const r = computeIncomeGate({
+    monthlyIncomeCents: D(4000),
+    employmentStatus: "Full-time Employed",
+    lengthOfEmployment: "2+ years",
+    statedBudgetCents: null,
+    monthlyHousingPaymentCents: D(1700), // 45% of $4000 = $1800; leaves $100 < $150
+    monthlyOtherDebtCents: 0,
+    benchmarkTier: "GOOD",
+  });
+  assert.ok(r.estimatedMonthlyPayment < D(150));
+  assert.equal(r.belowMinimum, true);
+});
+
+test("income-based max below the platform floor trips belowMinimum in isolation", () => {
+  // Income so low the income-based max lands under $8,000 even with no debt and
+  // no stated-budget cap — the belowMinimum branch fires on the floor alone.
+  const r = computeIncomeGate({
+    monthlyIncomeCents: D(700),
+    employmentStatus: "Full-time Employed",
+    lengthOfEmployment: "2+ years",
+    statedBudgetCents: null,
+    monthlyHousingPaymentCents: 0,
+    monthlyOtherDebtCents: 0,
+    benchmarkTier: "GOOD",
+  });
+  assert.ok(r.incomeBasedMaxCents < D(8000));
+  assert.equal(r.belowMinimum, true);
+});

@@ -6,6 +6,7 @@ import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
 import { dispatch } from "@/lib/qstash/dispatch";
 import { limitPaymentIntent, clientIpKey } from "@/lib/security/rate-limit";
+import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
@@ -18,9 +19,12 @@ export async function POST(request: NextRequest) {
     if (!rl.ok) return errorResponse("RATE_LIMITED", rl.message, rl.status);
   }
 
-  // D1: Verify prequal is valid (expiresAt > now) before allowing deposit
+  // D1: Verify prequal is valid before allowing deposit. Uses the platform
+  // single-source-of-truth (decision === APPROVED AND not expired) rather than
+  // an expiry-only check — a future-dated DECLINED/PENDING/MANUAL_REVIEW record
+  // must not pass this gate (defense-in-depth behind the layout gate).
   const prequal = buyer.preQualification;
-  if (!prequal || prequal.expiresAt <= new Date()) {
+  if (!isPrequalValid(prequal ?? null)) {
     return errorResponse("PREQUAL_REQUIRED", "Valid prequalification required before deposit", 400);
   }
 

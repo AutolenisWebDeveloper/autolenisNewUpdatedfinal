@@ -122,6 +122,78 @@ interface BuyerForPrequal {
   user: { email: string };
 }
 
+// A soft-pull in-flight marker older than this is treated as abandoned (e.g. a
+// crashed pull) and may be re-claimed. Comfortably above the iPredict 10s abort.
+const PULL_INFLIGHT_TTL_MS = 30_000;
+
+/**
+ * Atomically claim the credit-pull slot for a buyer and capture FCRA consent
+ * BEFORE the pull. Returns "claimed" if this caller may pull, or "inflight" if
+ * another pull is already running (or was claimed microseconds ago).
+ *
+ * The @unique buyerId makes the create path a natural mutex: a concurrent
+ * create throws a unique violation, which we treat as "inflight". The
+ * update path is conditional on the exact updatedAt we read, so exactly one
+ * racing updater wins.
+ */
+async function claimPrequalPull(
+  buyerId: string,
+  input: PrequalSubmission,
+): Promise<"claimed" | "inflight"> {
+  const current = await prisma.preQualification.findUnique({ where: { buyerId } });
+  const now = Date.now();
+
+  if (!current) {
+    // No row yet — create the in-flight PENDING marker. A racing create hits
+    // the unique constraint and throws → the loser is "inflight".
+    try {
+      await prisma.preQualification.create({
+        data: {
+          buyerId,
+          decision: PreQualDecision.PENDING,
+          maxOtdAmountCents: 0,
+          // Placeholder; overwritten by the real decision. PENDING is never
+          // `isPrequalValid`, so a crashed pull leaves a harmless marker.
+          expiresAt: new Date(now),
+          checkOfacAlert: false,
+        },
+      });
+    } catch {
+      return "inflight";
+    }
+  } else {
+    const isFresh =
+      current.decision === PreQualDecision.PENDING &&
+      now - current.updatedAt.getTime() < PULL_INFLIGHT_TTL_MS;
+    if (isFresh) return "inflight";
+
+    // Claim conditionally on the state we read — a racing claimant matches 0.
+    const res = await prisma.preQualification.updateMany({
+      where: { buyerId, updatedAt: current.updatedAt },
+      data: { decision: PreQualDecision.PENDING },
+    });
+    if (res.count === 0) return "inflight";
+  }
+
+  // Consent captured now, before the pull. Required: if this fails, we abort
+  // the whole request and never reach the bureau call.
+  const claimed = await prisma.preQualification.findUniqueOrThrow({
+    where: { buyerId },
+    select: { id: true },
+  });
+  await prisma.prequalConsent.create({
+    data: {
+      prequalId: claimed.id,
+      buyerId,
+      consentText: FCRA_CONSENT_TEXT,
+      ipAddress: input.ipAddress ?? null,
+      userAgent: input.userAgent ?? null,
+      termsVersion: process.env.CURRENT_TERMS_VERSION ?? "2026-01-01",
+    },
+  });
+  return "claimed";
+}
+
 export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSubmission) {
   if (!input.fcraConsent) throw new Error("FCRA consent required");
 
@@ -134,6 +206,24 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
   });
   if (existing && isPrequalValid(existing)) {
     return { prequal: existing, mocked: false };
+  }
+
+  // ── Pre-pull claim (double-pull guard + consent-before-pull) ───────────────
+  // A soft credit inquiry costs money and touches the consumer. Two concurrent
+  // submissions (two tabs) previously both passed the check above and both
+  // pulled. We claim a durable in-flight slot on the @unique buyerId row before
+  // pulling: the loser of the race gets `inflight` and returns the current
+  // record WITHOUT a second pull. The claim self-heals — a PENDING marker older
+  // than the pull TTL (e.g. a crashed pull) is reclaimable. FCRA consent is
+  // persisted in this same step, BEFORE the pull, so a pull can never happen
+  // without a durable consent record (previously consent was written post-pull).
+  const claim = await claimPrequalPull(buyer.id, input);
+  if (claim === "inflight") {
+    // A pull is already running for this buyer — surface the current state
+    // rather than firing a duplicate inquiry.
+    const latest = await prisma.preQualification.findUnique({ where: { buyerId: buyer.id } });
+    if (!latest) throw new Error("Prequal in flight but no record found");
+    return { prequal: latest, mocked: false, inFlight: true };
   }
 
   const pii: MicroBiltBuyerPII = {
@@ -174,7 +264,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
           type: "SYSTEM_ALERT",
         },
       })
-      .catch(() => {});
+      .catch((err) => logger.error(`[prequal] OFAC alert notification failed for buyer ${buyer.id}:`, err));
   }
   // Gate 2: Deceased indicator → manual review.
   else if (result.deceasedFlag) {
@@ -192,7 +282,7 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
           type: "SYSTEM_ALERT",
         },
       })
-      .catch(() => {});
+      .catch((err) => logger.error(`[prequal] MLA notification failed for buyer ${buyer.id}:`, err));
   }
   // Gate 4: Fraud warning → manual review.
   else if (result.fraudWarning && result.fraudWarning !== "N" && result.fraudWarning !== "") {
@@ -209,8 +299,9 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
 
   const tier: PreQualTier | null = result.tier;
 
-  // Persist application + consent atomically so we never have a prequal record
-  // without its FCRA audit trail (or vice versa).
+  // Persist the decision. Consent was already captured in claimPrequalPull()
+  // BEFORE the pull, so the FCRA audit row always exists by the time we get
+  // here; this transaction only writes the decision result.
   const prequal = await prisma.$transaction(async (tx) => {
     const upserted = await tx.preQualification.upsert({
       where: { buyerId: buyer.id },
@@ -270,17 +361,6 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
         adverseReasonCodes: result.adverseReasonCodes ?? [],
         deceasedFlag: result.deceasedFlag ?? false,
         bankruptcyFlag: result.bankruptcyFlag ?? false,
-      },
-    });
-
-    await tx.prequalConsent.create({
-      data: {
-        prequalId: upserted.id,
-        buyerId: buyer.id,
-        consentText: FCRA_CONSENT_TEXT,
-        ipAddress: input.ipAddress ?? null,
-        userAgent: input.userAgent ?? null,
-        termsVersion: process.env.CURRENT_TERMS_VERSION ?? "2026-01-01",
       },
     });
 
