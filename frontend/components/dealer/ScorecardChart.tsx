@@ -14,7 +14,7 @@ export default function ScorecardChart({ data }: ScorecardChartProps) {
         <YAxis tick={{ fontSize: 11 }} />
         <Tooltip />
         <Line type="monotone" dataKey="winRate" stroke="#0B5FD1" strokeWidth={2} dot={false} name="Win Rate %" />
-        <Line type="monotone" dataKey="completion" stroke="#50D14E" strokeWidth={2} dot={false} name="Completion %" />
+        <Line type="monotone" dataKey="completion" stroke="#10b981" strokeWidth={2} dot={false} name="Completion %" />
       </LineChart>
     </ResponsiveContainer>
   );
