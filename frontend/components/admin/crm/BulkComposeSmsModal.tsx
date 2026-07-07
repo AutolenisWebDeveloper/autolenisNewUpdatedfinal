@@ -21,6 +21,7 @@ function segmentsFor(text: string): number {
 export function BulkComposeSmsModal({ contactIds, onClose, onSent }: Props) {
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [consentCheck, setConsentCheck] = useState<{
     eligible: number;
@@ -35,17 +36,19 @@ export function BulkComposeSmsModal({ contactIds, onClose, onSent }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/admin/crm/contacts?per_page=100', {
-          method: 'GET',
-        });
+        // Exact-id lookup so the preview covers the ACTUAL selection —
+        // the old first-100-contacts fetch undercounted large selections.
+        const res = await fetch(
+          `/api/admin/crm/contacts?ids=${encodeURIComponent(contactIds.join(','))}`,
+          { method: 'GET' },
+        );
         if (!res.ok) return;
         const json = await res.json();
-        const all = (json.data ?? []) as Array<{
+        const filtered = (json.data ?? []) as Array<{
           id: string;
           phone: string | null;
           consent_sms: boolean;
         }>;
-        const filtered = all.filter((c) => contactIds.includes(c.id));
         const eligible = filtered.filter((c) => c.phone && c.consent_sms).length;
         const no_consent = filtered.filter((c) => c.phone && !c.consent_sms).length;
         const no_phone = filtered.filter((c) => !c.phone).length;
@@ -156,7 +159,7 @@ export function BulkComposeSmsModal({ contactIds, onClose, onSent }: Props) {
                 <label className="text-xs font-medium text-gray-700">Message</label>
                 <textarea
                   value={body}
-                  onChange={(e) => setBody(e.target.value)}
+                  onChange={(e) => { setBody(e.target.value); setConfirming(false); }}
                   rows={5}
                   placeholder="Type your SMS message…"
                   className="mt-1 w-full bg-white border border-gray-300 focus:border-blue-500 outline-none rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 resize-y"
@@ -183,14 +186,24 @@ export function BulkComposeSmsModal({ contactIds, onClose, onSent }: Props) {
               >
                 Cancel
               </button>
-              <button
-                onClick={send}
-                disabled={sending}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                {sending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                Send to {contactIds.length}
-              </button>
+              {!confirming ? (
+                <button
+                  onClick={() => setConfirming(true)}
+                  disabled={sending || !body.trim()}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  Review &amp; confirm…
+                </button>
+              ) : (
+                <button
+                  onClick={send}
+                  disabled={sending}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {sending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Confirm — send SMS to {consentCheck ? consentCheck.eligible : contactIds.length} eligible
+                </button>
+              )}
             </div>
           </>
         )}

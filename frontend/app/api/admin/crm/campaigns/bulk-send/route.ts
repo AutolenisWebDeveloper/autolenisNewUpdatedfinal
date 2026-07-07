@@ -81,6 +81,12 @@ export async function POST(req: Request) {
         skipped_no_channel++;
         continue;
       }
+      // CAN-SPAM posture parity with single-send: marketing email requires
+      // affirmative email consent, not merely absence of DNC/suppression.
+      if (!c.consent_email) {
+        skipped_consent++;
+        continue;
+      }
       if (await SuppressionService.isEmailSuppressed(supabase, c.email)) {
         skipped_suppressed++;
         continue;

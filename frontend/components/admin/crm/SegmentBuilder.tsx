@@ -340,7 +340,7 @@ export function SegmentBuilder(props: Props) {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             {props.mode === 'create' ? 'Create' : 'Save'}
@@ -393,7 +393,7 @@ export function SegmentBuilder(props: Props) {
                     onClick={() => setConditions((prev) => ({ ...prev, match: 'all' }))}
                     className={cn(
                       'px-2.5 py-1 rounded',
-                      conditions.match === 'all' ? 'bg-blue-600 text-gray-900' : 'text-gray-500',
+                      conditions.match === 'all' ? 'bg-blue-600 text-white' : 'text-gray-500',
                     )}
                   >
                     ALL
@@ -402,7 +402,7 @@ export function SegmentBuilder(props: Props) {
                     onClick={() => setConditions((prev) => ({ ...prev, match: 'any' }))}
                     className={cn(
                       'px-2.5 py-1 rounded',
-                      conditions.match === 'any' ? 'bg-blue-600 text-gray-900' : 'text-gray-500',
+                      conditions.match === 'any' ? 'bg-blue-600 text-white' : 'text-gray-500',
                     )}
                   >
                     ANY

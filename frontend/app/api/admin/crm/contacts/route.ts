@@ -39,6 +39,14 @@ export async function GET(req: Request) {
     .is('deleted_at', null)
     .order('created_at', { ascending: false });
 
+  // Exact-id lookup (comma-separated, capped) — used by bulk-send previews so
+  // consent counts cover the ACTUAL selection, not just the first page.
+  const idsParam = (url.searchParams.get('ids') ?? '').trim();
+  if (idsParam) {
+    const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 500);
+    if (ids.length > 0) query = query.in('id', ids);
+  }
+
   if (stage) query = query.eq('lifecycle_stage', stage);
 
   if (q.length >= 1) {
@@ -48,8 +56,9 @@ export async function GET(req: Request) {
     );
   }
 
-  const from = (page - 1) * perPage;
-  const to = from + perPage - 1;
+  // Id lookups return the full selection in one page (bounded to 500 above).
+  const from = idsParam ? 0 : (page - 1) * perPage;
+  const to = idsParam ? 499 : from + perPage - 1;
   query = query.range(from, to);
 
   const { data, count, error } = await query;
