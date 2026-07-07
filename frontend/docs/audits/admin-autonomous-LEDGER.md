@@ -218,7 +218,40 @@ avoid breakage; public lead-capture endpoints (`dealer-application`,
 `tools/dealer-fee-lead`, `prospect-claim`) lack rate-limit/captcha; prospect-claim
 token stored in plaintext (bounded impact — yields only a PENDING application).
 
+## GAP-CRIT — verified-critical remediation (post gap-analysis)
+
+Remediating the verified criticals from `platform-gap-analysis.md`. Money logic
+stays human-in-the-loop (harden idempotency/reconciliation; never auto-fire
+refunds). Each is a focused CI-green commit.
+
+| Ref | Fix | Commit | Notes |
+|-----|-----|--------|-------|
+| GAP-CRIT-1 | Honest prequal notification + broken links + email idempotency | 7d1f6b1 | MicroBilt webhook branched decision→notice type (was hardcoded PREQUAL_APPROVED); fixed 5 broken buyer links; inverted email idempotency (was blocking FAILED retries incl. FCRA notice + would violate unique key) → SENT-guarded + upsert |
+| GAP-CRIT-2 | Idempotency keys on service-layer deposit refunds | a174bdb | `refundPaymentIntent` gained optional key; `processRefund` + `refundDeposit` pass `refund-deposit-${id}` + status-guarded `updateMany` — a double-invocation can't issue a 2nd real Stripe refund (admin routes already keyed) |
+| GAP-CRIT #9 | Affiliate onboarding review wiring | e2c67e0 | The review flow was non-completable — page had only a "View Affiliate" link and the working POST route had ZERO callers (the one true orphan route). Added per-row Approve/Corrections/Reject actions (reason modal, min-10-char note for reject/correction) → existing role-gated route; added sidebar link |
+| GAP-CRIT #1 | Contract Shield scans REAL PDF text, fails closed | 0caa14a | Was scanning `"Contract version N"` placeholder → always score 100 → PASS → cron auto-APPROVED; scan error → terminal REJECTED. Now extracts real text (unpdf, serverless-safe) from the stored PDF; shared `scanContractVersion` converges status fail-closed (PASS→APPROVED, WARNING/FAIL→REJECTED w/ findings, error→retryable UPLOADED, never auto-approves an unreadable doc); cron auth hardened |
+| GAP-CRIT #2 | Buyer can download executed signed contract | 2cd95ad | Download route read documentUrl/contractUrl/pdfUrl (absent on ESignEnvelope) → always 404. Added `ESignEnvelope.documentKey` (+ idempotent migration); on envelope-completed, retrieve the combined executed PDF from DocuSign → private `contracts` bucket → persist key (best-effort, never rolls back signing); route now signs a short-lived URL from the key |
+
+**GAP-CRIT #6 — resolved as ALREADY MITIGATED (no code change).** The report
+flagged the Stripe post-commit dealer-invite as fire-and-forget/never-retried
+(`webhooks/stripe/route.ts` `.catch(log)`). Spot-verification found the
+`deposit-activation-reconcile` cron (every 5 min, registered in `vercel.json`)
+is a **state-based durable reconciler** (`deposit-activation.service.ts`) that
+already sweeps PAID-deposit-with-no-auction, PENDING auctions, and
+ACTIVE-with-zero-invitations, and re-runs launch+invite idempotently (Supabase
+idempotency guard; zero-invitation-guarded so load isn't double-incremented).
+The webhook `.catch(log)` is deliberately best-effort *because* this backstop
+exists. Finding #6 didn't account for the reconciler — verified false-positive.
+
+**HELD for owner product decision (not code bugs):**
+- GAP-CRIT #7 — insurance bind/verify records a policy with no provider call.
+  Needs the real insurance provider/integration decision before wiring.
+- GAP-CRIT #8 — referral milestone payout thresholds. Needs the owner's
+  threshold/amount schedule (money logic — human-in-the-loop).
+
 ## SETUP (human actions required)
 
 - (carried from PHASE_BACKLOG) SENTRY_DSN + Upstash/KV env vars still owed by ops for Phase 0.5 sign-off.
 - **Supabase Storage:** confirm the `prequal-letters` private bucket exists (the external-flow letter upload + admin signed-URL read depend on it).
+- **Supabase Storage:** confirm the private `contracts` bucket exists (buyer executed-contract download signs from it; GAP-CRIT #2).
+- **DB migration:** apply `20260919000005_add_esign_envelope_document_key` (adds `e_sign_envelopes.document_key`).
