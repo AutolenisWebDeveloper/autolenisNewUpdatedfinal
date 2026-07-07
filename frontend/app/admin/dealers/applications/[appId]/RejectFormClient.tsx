@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmDialog } from "@/components/ui/kit";
 
 interface Props {
   appId: string;
@@ -11,6 +12,7 @@ export default function RejectFormClient({ appId }: Props) {
   const router = useRouter();
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function submit() {
@@ -24,15 +26,22 @@ export default function RejectFormClient({ appId }: Props) {
         body: JSON.stringify({ reason: reason.trim() || undefined }),
       });
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setErr(j.error || `Reject failed (${res.status})`);
+        const j = (await res.json().catch(() => null)) as { error?: unknown } | null;
+        // Routes return string errors for domain failures but an object
+        // { code, message } for auth — read both shapes.
+        const msg = typeof j?.error === "string"
+          ? j.error
+          : (j?.error as { message?: string } | undefined)?.message ?? `Reject failed (${res.status})`;
+        setErr(msg);
         setBusy(false);
-        return;
+        throw new Error(msg);
       }
       router.refresh();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Network error");
+      const msg = e instanceof Error ? e.message : "Network error";
+      setErr(msg);
       setBusy(false);
+      throw e instanceof Error ? e : new Error(msg);
     }
   }
 
@@ -52,13 +61,23 @@ export default function RejectFormClient({ appId }: Props) {
       />
       {err && <p className="text-xs text-red-600 mb-3" data-testid="reject-error">{err}</p>}
       <button
-        onClick={submit}
+        onClick={() => setConfirmOpen(true)}
         disabled={busy}
         className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
         data-testid="reject-application-btn"
       >
         {busy ? "Rejecting…" : "Reject Application"}
       </button>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Reject this dealer application?"
+        description="The applicant is emailed an automated rejection notice. This cannot be undone."
+        confirmLabel="Reject application"
+        variant="danger"
+        onConfirm={submit}
+        data-testid="reject-application-confirm"
+      />
     </div>
   );
 }

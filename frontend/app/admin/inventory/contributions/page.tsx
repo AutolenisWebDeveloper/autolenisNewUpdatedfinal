@@ -23,6 +23,13 @@ export default async function AdminDealerContributionsPage() {
             <tr>{["Dealer","Tier","Inventory","Offers","Load"].map(h => <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">{h}</th>)}</tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
+            {dealers.length === 0 && (
+              <tr>
+                <td colSpan={5} className="text-center py-10 text-slate-400 text-sm" data-testid="contributions-empty">
+                  No active dealers yet — contributions appear as dealers onboard.
+                </td>
+              </tr>
+            )}
             {dealers.map(d => (
               <tr key={d.id} data-testid={`contribution-${d.id}`} className="hover:bg-slate-50">
                 <td className="px-4 py-3 font-medium text-slate-800">{d.dealershipName}</td>

@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import type { DealerApplication } from "@prisma/client";
 import Link from "next/link";
+import ApplicationRowActions from "@/components/admin/ApplicationRowActions";
 
 export const dynamic = "force-dynamic";
 
@@ -148,26 +149,7 @@ export default async function AdminDealerApplicationsPage() {
                   </td>
                   <td className="px-4 py-3">
                     {app.status === "PENDING" && (
-                      <div className="flex gap-2">
-                        <form action={`/api/admin/dealers/applications/${app.id}/approve`} method="POST">
-                          <button
-                            type="submit"
-                            className="px-3 py-1 bg-green-600 text-white text-xs rounded font-semibold hover:bg-green-700"
-                            data-testid={`approve-btn-${app.id}`}
-                          >
-                            Approve
-                          </button>
-                        </form>
-                        <form action={`/api/admin/dealers/applications/${app.id}/reject`} method="POST">
-                          <button
-                            type="submit"
-                            className="px-3 py-1 bg-red-600 text-white text-xs rounded font-semibold hover:bg-red-700"
-                            data-testid={`reject-btn-${app.id}`}
-                          >
-                            Reject
-                          </button>
-                        </form>
-                      </div>
+                      <ApplicationRowActions appId={app.id} />
                     )}
                   </td>
                 </tr>
