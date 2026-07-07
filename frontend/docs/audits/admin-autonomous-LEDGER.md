@@ -243,11 +243,21 @@ idempotency guard; zero-invitation-guarded so load isn't double-incremented).
 The webhook `.catch(log)` is deliberately best-effort *because* this backstop
 exists. Finding #6 didn't account for the reconciler — verified false-positive.
 
-**HELD for owner product decision (not code bugs):**
-- GAP-CRIT #7 — insurance bind/verify records a policy with no provider call.
-  Needs the real insurance provider/integration decision before wiring.
-- GAP-CRIT #8 — referral milestone payout thresholds. Needs the owner's
-  threshold/amount schedule (money logic — human-in-the-loop).
+**Owner-decided criticals (resolved per product call):**
+- GAP-CRIT #7 — insurance bind/verify → **fail closed + flag for manual** (76f1c15).
+  `bindPolicy` no longer fabricates POLICY_BOUND (records SELECTED + throws
+  "provider not configured — flagged for manual admin binding"); `verifyExternalProof`
+  records the proof UNVERIFIED (no verifiedAt) leaving the deal EXTERNAL_UPLOADED
+  "under review"; added explicit human-in-the-loop `verifyExternalPolicy` +
+  `markInsuranceBound`. Production routes were already fail-closed; this removed
+  the service-layer fabrication footgun.
+- GAP-CRIT #8 — referral milestones → **admin-configurable thresholds** (469acd2).
+  New `ReferralMilestoneConfig` (admin-editable tier: threshold/label/reward,
+  no hardcoded money) + CRUD gated to SUPER_ADMIN/FINANCE_ADMIN; idempotent
+  award engine (`evaluateBuyerReferralMilestones`, counts referrals via the same
+  metric the buyer sees, unique per buyer+milestone, never auto-pays) wired into
+  the buyer referral hub; admin config UI on the referral-milestones page. Payout
+  stays a manual admin action.
 
 ## SETUP (human actions required)
 
@@ -255,3 +265,5 @@ exists. Finding #6 didn't account for the reconciler — verified false-positive
 - **Supabase Storage:** confirm the `prequal-letters` private bucket exists (the external-flow letter upload + admin signed-URL read depend on it).
 - **Supabase Storage:** confirm the private `contracts` bucket exists (buyer executed-contract download signs from it; GAP-CRIT #2).
 - **DB migration:** apply `20260919000005_add_esign_envelope_document_key` (adds `e_sign_envelopes.document_key`).
+- **DB migration:** apply `20260919000006_add_referral_milestone_config` (new `referral_milestone_configs` table + unique `(buyer_id, milestone)` on `referral_milestones`).
+- **Referral milestones:** admin must configure threshold tiers at `/admin/referral-milestones` — no tiers are seeded, so buyers earn nothing until set.
