@@ -80,7 +80,7 @@ export default function AdminInventorySearchTool() {
       )}
 
       <div className="flex items-center gap-3 mb-6">
-        <Search size={22} className="text-[#0B5FD1]" />
+        <Search size={22} className="text-al-primary" />
         <div>
           <h1 className="text-xl font-bold text-slate-900">Inventory Search Tool</h1>
           <p className="text-sm text-slate-400">Search MarketCheck or local inventory and add vehicles directly</p>
@@ -125,7 +125,7 @@ export default function AdminInventorySearchTool() {
           </div>
         </div>
         {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
-        <button data-testid="search-submit" type="submit" disabled={loading} className="flex items-center gap-2 bg-[#0B5FD1] hover:bg-purple-800 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-semibold transition-colors">
+        <button data-testid="search-submit" type="submit" disabled={loading} className="flex items-center gap-2 bg-al-primary hover:bg-purple-800 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg text-sm font-semibold transition-colors">
           <Search size={15} /> {loading ? "Searching..." : "Search"}
         </button>
       </form>
@@ -147,7 +147,7 @@ export default function AdminInventorySearchTool() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {results.map((vehicle) => (
-                <div key={vehicle.vin} data-testid={`result-${vehicle.vin}`} className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-[#0B5FD1]/30 transition-colors">
+                <div key={vehicle.vin} data-testid={`result-${vehicle.vin}`} className="bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-al-primary/30 transition-colors">
                   {vehicle.imageUrl ? (
                     <img src={vehicle.imageUrl} alt={`${vehicle.year} ${vehicle.make} ${vehicle.model}`} className="w-full h-40 object-cover" />
                   ) : (
@@ -174,7 +174,7 @@ export default function AdminInventorySearchTool() {
                           data-testid={`add-to-inv-${vehicle.vin}`}
                           onClick={() => addToInventory(vehicle)}
                           disabled={addingVin === vehicle.vin}
-                          className="flex items-center gap-1.5 bg-[#0B5FD1] hover:bg-purple-800 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium w-full justify-center transition-colors"
+                          className="flex items-center gap-1.5 bg-al-primary hover:bg-purple-800 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium w-full justify-center transition-colors"
                         >
                           <Plus size={12} /> {addingVin === vehicle.vin ? "Adding..." : "Add to Inventory"}
                         </button>

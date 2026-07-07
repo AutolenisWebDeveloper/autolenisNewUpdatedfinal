@@ -89,7 +89,7 @@ export default async function AdminAuditLogPage({ searchParams }: SP) {
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-audit-log-page">
       <div className="flex items-center gap-3 mb-1">
-        <ScrollText size={22} className="text-[#0B5FD1]" />
+        <ScrollText size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Audit Log <span className="text-slate-400 font-normal text-sm">({total.toLocaleString()})</span></h1>
       </div>
       <p className="text-sm text-slate-500 mb-6">Append-only record of every admin action. Read-only.</p>
@@ -126,7 +126,7 @@ export default async function AdminAuditLogPage({ searchParams }: SP) {
         <div className="flex gap-2">
           <input name="q" defaultValue={q} placeholder="entity id"
             className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-2" />
-          <button type="submit" className="text-xs font-medium px-3 py-2 rounded-lg bg-[#0B5FD1] text-white shrink-0" data-testid="audit-filter-apply">
+          <button type="submit" className="text-xs font-medium px-3 py-2 rounded-lg bg-al-primary text-white shrink-0" data-testid="audit-filter-apply">
             Filter
           </button>
         </div>
@@ -149,7 +149,7 @@ export default async function AdminAuditLogPage({ searchParams }: SP) {
                     <span className="text-xs font-mono font-semibold text-slate-700 bg-slate-100 rounded px-2 py-0.5 shrink-0">{humanize(r.action)}</span>
                     <span className="text-xs text-slate-500 truncate">
                       {r.entityType}
-                      {href ? <Link href={href} className="text-[#0B5FD1] hover:underline ml-1" onClick={e => e.stopPropagation()}>{r.entityId.slice(0, 8)}</Link> : <span className="ml-1 text-slate-400">{r.entityId.slice(0, 8)}</span>}
+                      {href ? <Link href={href} className="text-al-primary hover:underline ml-1" onClick={e => e.stopPropagation()}>{r.entityId.slice(0, 8)}</Link> : <span className="ml-1 text-slate-400">{r.entityId.slice(0, 8)}</span>}
                     </span>
                   </div>
                   <div className="text-right shrink-0">
@@ -194,13 +194,13 @@ export default async function AdminAuditLogPage({ searchParams }: SP) {
       {totalPages > 1 && (
         <div className="flex items-center justify-between mt-5" data-testid="audit-pagination">
           {page > 1 ? (
-            <Link href={pageHref(page - 1)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-2 rounded-lg border border-slate-200 hover:border-[#0B5FD1]/30" data-testid="audit-prev">
+            <Link href={pageHref(page - 1)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-2 rounded-lg border border-slate-200 hover:border-al-primary/30" data-testid="audit-prev">
               <ChevronLeft size={14} /> Previous
             </Link>
           ) : <span />}
           <span className="text-xs text-slate-500">Page {page} of {totalPages}</span>
           {page < totalPages ? (
-            <Link href={pageHref(page + 1)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-2 rounded-lg border border-slate-200 hover:border-[#0B5FD1]/30" data-testid="audit-next">
+            <Link href={pageHref(page + 1)} className="inline-flex items-center gap-1 text-xs font-medium px-3 py-2 rounded-lg border border-slate-200 hover:border-al-primary/30" data-testid="audit-next">
               Next <ChevronRight size={14} />
             </Link>
           ) : <span />}

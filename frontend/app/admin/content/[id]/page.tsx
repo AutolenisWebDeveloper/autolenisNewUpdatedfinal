@@ -90,7 +90,7 @@ export default async function AdminContentDetailPage({ params }: PageProps) {
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-content-detail-page">
       <Link
         href="/admin/content"
-        className="inline-flex items-center gap-1.5 text-sm text-[#0B5FD1] hover:underline mb-4"
+        className="inline-flex items-center gap-1.5 text-sm text-al-primary hover:underline mb-4"
       >
         <ArrowLeft size={14} /> Back to Content Engine
       </Link>
@@ -107,7 +107,7 @@ export default async function AdminContentDetailPage({ params }: PageProps) {
             <Link
               href={`/buying-guide/${article.slug}`}
               target="_blank"
-              className="inline-flex items-center gap-1 text-[#0B5FD1] hover:underline"
+              className="inline-flex items-center gap-1 text-al-primary hover:underline"
             >
               View live <ExternalLink size={12} />
             </Link>
@@ -129,7 +129,7 @@ export default async function AdminContentDetailPage({ params }: PageProps) {
               Article Body
             </p>
             <div
-              className="content-article-preview text-sm text-slate-700 leading-relaxed [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-2 [&_h3]:font-semibold [&_h3]:text-slate-800 [&_h3]:mt-4 [&_p]:mb-3 [&_a]:text-[#0B5FD1] [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_li]:mb-1"
+              className="content-article-preview text-sm text-slate-700 leading-relaxed [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-2 [&_h3]:font-semibold [&_h3]:text-slate-800 [&_h3]:mt-4 [&_p]:mb-3 [&_a]:text-al-primary [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_li]:mb-1"
               dangerouslySetInnerHTML={{ __html: article.body }}
             />
           </section>
@@ -158,7 +158,7 @@ export default async function AdminContentDetailPage({ params }: PageProps) {
               Quality
             </p>
             <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-3xl font-bold text-[#0B5FD1]">
+              <span className="text-3xl font-bold text-al-primary">
                 {article.qualityScore ?? "—"}
               </span>
               <span className="text-sm text-slate-400">/ 6</span>

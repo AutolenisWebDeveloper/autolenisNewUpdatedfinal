@@ -81,7 +81,7 @@ export default function AdminQueuesPage() {
   return (
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-queues-page">
       <div className="flex items-center gap-3 mb-6">
-        <AlertOctagon size={22} className="text-[#0B5FD1]" />
+        <AlertOctagon size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Exception Queue Command Center</h1>
       </div>
 

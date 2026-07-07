@@ -28,12 +28,12 @@ export default async function AffiliateEarningsPage() {
   const maxLevelTotal = Math.max(...byLevel.map((b) => b.total), 1);
 
   const rates = [COMMISSION_RATES.LEVEL_1, COMMISSION_RATES.LEVEL_2, COMMISSION_RATES.LEVEL_3];
-  const levelColors = ["bg-[#0B5FD1]", "bg-blue-500", "bg-emerald-500"];
+  const levelColors = ["bg-al-primary", "bg-blue-500", "bg-emerald-500"];
 
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="affiliate-earnings-page">
       <div className="flex items-center gap-3 mb-6">
-        <DollarSign size={22} className="text-[#0B5FD1]" />
+        <DollarSign size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Earnings</h1>
       </div>
 
@@ -42,7 +42,7 @@ export default async function AffiliateEarningsPage() {
         {[
           { label: "Total Earned", value: `$${(summary.totalCents / 100).toLocaleString()}`, color: "text-slate-900" },
           { label: "Paid Out",     value: `$${(summary.paidCents / 100).toLocaleString()}`,   color: "text-green-600" },
-          { label: "Pending",      value: `$${(summary.pendingCents / 100).toLocaleString()}`, color: "text-[#0B5FD1]" },
+          { label: "Pending",      value: `$${(summary.pendingCents / 100).toLocaleString()}`, color: "text-al-primary" },
         ].map(s => (
           <div key={s.label} data-testid={`earnings-stat-${s.label.toLowerCase().replace(/\s+/g, "-")}`}
             className="bg-white border border-slate-200 rounded-xl p-5 text-center">
@@ -58,7 +58,7 @@ export default async function AffiliateEarningsPage() {
       {/* Level breakdown with horizontal bars */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-8" data-testid="earnings-level-breakdown">
         <div className="flex items-center gap-2 mb-4">
-          <TrendingUp size={15} className="text-[#0B5FD1]" />
+          <TrendingUp size={15} className="text-al-primary" />
           <p className="text-sm font-semibold text-slate-800">Earnings by level</p>
         </div>
         <div className="space-y-4">

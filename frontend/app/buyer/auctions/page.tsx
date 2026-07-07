@@ -42,7 +42,7 @@ export default async function AuctionsPage() {
         <div className="space-y-3">
           {auctions.map((auction) => (
             <Link key={auction.id} href={`/buyer/auction/${auction.id}`} data-testid={`auction-list-item-${auction.id}`}
-              className="flex items-center justify-between bg-white border border-slate-200 rounded-xl p-5 hover:border-[#0B5FD1] hover:shadow-sm transition-all">
+              className="flex items-center justify-between bg-white border border-slate-200 rounded-xl p-5 hover:border-al-primary hover:shadow-sm transition-all">
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <Badge variant={statusVariant[auction.status] ?? "gray"}>{auction.status}</Badge>
@@ -51,7 +51,7 @@ export default async function AuctionsPage() {
                   )}
                 </div>
                 {auction._count.offers > 0 && (
-                  <p className="text-xs font-semibold text-[#0B5FD1] mt-1"
+                  <p className="text-xs font-semibold text-al-primary mt-1"
                     data-testid={`auction-offer-count-${auction.id}`}>
                     {auction._count.offers} offer{auction._count.offers !== 1 ? "s" : ""} received
                   </p>

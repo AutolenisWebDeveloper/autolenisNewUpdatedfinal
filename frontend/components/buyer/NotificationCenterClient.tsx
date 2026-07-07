@@ -32,8 +32,8 @@ function getTypeDisplay(type: string): { Icon: React.ElementType; color: string;
     AUCTION_STARTED:      { Icon: Gavel,        color: "text-amber-600",  bg: "bg-amber-50" },
     AUCTION_CLOSING_SOON: { Icon: Gavel,        color: "text-orange-600", bg: "bg-orange-50" },
     OFFER_RECEIVED:       { Icon: Gavel,        color: "text-amber-600",  bg: "bg-amber-50" },
-    DEAL_SELECTED:        { Icon: Car,          color: "text-[#0B5FD1]",  bg: "bg-[#0B5FD1]/8" },
-    DEAL_STAGE_CHANGED:   { Icon: Car,          color: "text-[#0B5FD1]",  bg: "bg-[#0B5FD1]/8" },
+    DEAL_SELECTED:        { Icon: Car,          color: "text-al-primary",  bg: "bg-al-primary/8" },
+    DEAL_STAGE_CHANGED:   { Icon: Car,          color: "text-al-primary",  bg: "bg-al-primary/8" },
     CONTRACT_READY:       { Icon: FileText,     color: "text-blue-600",   bg: "bg-blue-50" },
     CONTRACT_APPROVED:    { Icon: CheckCircle2, color: "text-green-600",  bg: "bg-green-50" },
     SIGNING_READY:        { Icon: PenLine,      color: "text-indigo-600", bg: "bg-indigo-50" },
@@ -109,7 +109,7 @@ export default function NotificationCenterClient({ initialNotifications }: Props
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Bell size={22} className="text-[#0B5FD1]" />
+          <Bell size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Notifications</h1>
           {unreadCount > 0 && (
             <Badge data-testid="unread-badge">{unreadCount} new</Badge>
@@ -120,7 +120,7 @@ export default function NotificationCenterClient({ initialNotifications }: Props
             onClick={markAllRead}
             disabled={isPending}
             data-testid="mark-all-read-btn"
-            className="flex items-center gap-1.5 text-xs text-[#0B5FD1] font-semibold hover:underline disabled:opacity-50"
+            className="flex items-center gap-1.5 text-xs text-al-primary font-semibold hover:underline disabled:opacity-50"
           >
             <CheckCheck size={14} /> Mark all read
           </button>
@@ -143,7 +143,7 @@ export default function NotificationCenterClient({ initialNotifications }: Props
               <div
                 key={n.id}
                 data-testid={`notification-${n.id}`}
-                className={`bg-white border rounded-xl p-4 transition-colors group ${isUnread ? "border-[#0B5FD1]/25 shadow-sm" : "border-slate-200"}`}
+                className={`bg-white border rounded-xl p-4 transition-colors group ${isUnread ? "border-al-primary/25 shadow-sm" : "border-slate-200"}`}
               >
                 <div className="flex items-start gap-3">
                   {/* Icon */}
@@ -156,7 +156,7 @@ export default function NotificationCenterClient({ initialNotifications }: Props
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
                         {isUnread && (
-                          <div className="w-2 h-2 rounded-full bg-[#0B5FD1] mb-1.5" data-testid={`unread-dot-${n.id}`} />
+                          <div className="w-2 h-2 rounded-full bg-al-primary mb-1.5" data-testid={`unread-dot-${n.id}`} />
                         )}
                         <p className={`text-sm font-semibold ${isUnread ? "text-slate-900" : "text-slate-700"}`}>
                           {n.title}

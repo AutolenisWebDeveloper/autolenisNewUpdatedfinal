@@ -46,7 +46,7 @@ export default async function AdminAffiliateReportPage() {
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-affiliate-report-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Share2 size={22} className="text-[#0B5FD1]" />
+          <Share2 size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Affiliate Performance Report</h1>
         </div>
         <Button variant="secondary" size="sm" href="/api/admin/reports/affiliate?format=csv" data-testid="export-affiliate-csv-btn">
@@ -71,7 +71,7 @@ export default async function AdminAffiliateReportPage() {
       </div>
 
       {/* Commission rate reminder */}
-      <div className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl p-4 mb-6 text-sm text-slate-600" data-testid="commission-rate-info">
+      <div className="bg-al-primary/5 border border-al-primary/20 rounded-xl p-4 mb-6 text-sm text-slate-600" data-testid="commission-rate-info">
         <strong>Commission structure</strong> (sourced from lib/constants.ts): L1={Math.round(COMMISSION_RATES.LEVEL_1 * 100)}% · L2={Math.round(COMMISSION_RATES.LEVEL_2 * 100)}% · L3={Math.round(COMMISSION_RATES.LEVEL_3 * 100)}% of ${PREMIUM_FEE_CENTS / 100} fee. Max payout: 20% per deal across all levels.
       </div>
 
@@ -93,7 +93,7 @@ export default async function AdminAffiliateReportPage() {
                 <td className="px-4 py-3 text-slate-700">{s.l1Count}</td>
                 <td className="px-4 py-3 font-semibold text-slate-900">${(s.totalEarned / 100).toLocaleString()}</td>
                 <td className="px-4 py-3 text-green-600">${(s.paidOut / 100).toLocaleString()}</td>
-                <td className="px-4 py-3 text-[#0B5FD1]">${(s.pending / 100).toLocaleString()}</td>
+                <td className="px-4 py-3 text-al-primary">${(s.pending / 100).toLocaleString()}</td>
                 <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded-full ${s.status === "ACTIVE" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>{s.status}</span></td>
               </tr>
             ))}

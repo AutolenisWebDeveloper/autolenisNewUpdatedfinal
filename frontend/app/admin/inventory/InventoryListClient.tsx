@@ -241,7 +241,7 @@ export default function InventoryListClient({ initialItems }: { initialItems: It
       <div className="mb-6 flex flex-col md:flex-row md:items-end md:justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <Package size={20} className="text-[#0B5FD1]" />
+            <Package size={20} className="text-al-primary" />
             <h1 className="text-2xl font-bold text-slate-900">Inventory</h1>
             <Badge variant="gray" className="text-xs">{filtered.length} of {items.length}</Badge>
           </div>
@@ -257,7 +257,7 @@ export default function InventoryListClient({ initialItems }: { initialItems: It
           <Link href="/admin/inventory/upload" data-testid="open-bulk-upload-btn" className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 hover:bg-slate-100 rounded-lg text-xs font-semibold text-slate-700">
             <Upload size={13} /> Bulk Upload
           </Link>
-          <Link href="/admin/inventory/new" data-testid="open-add-vehicle-btn" className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white rounded-lg text-xs font-semibold">
+          <Link href="/admin/inventory/new" data-testid="open-add-vehicle-btn" className="inline-flex items-center gap-1.5 px-3 py-2 bg-al-primary hover:bg-al-primary-hover text-white rounded-lg text-xs font-semibold">
             <Plus size={13} /> Add Vehicle
           </Link>
         </div>
@@ -274,7 +274,7 @@ export default function InventoryListClient({ initialItems }: { initialItems: It
               placeholder="Search by year / make / model / VIN..."
               value={query}
               onChange={e => setQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+              className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -294,8 +294,8 @@ export default function InventoryListClient({ initialItems }: { initialItems: It
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
-        <div className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-xl p-3 mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" data-testid="bulk-action-bar">
-          <span className="text-sm font-semibold text-[#0B5FD1]">{selected.size} selected</span>
+        <div className="bg-al-primary/5 border border-al-primary/20 rounded-xl p-3 mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" data-testid="bulk-action-bar">
+          <span className="text-sm font-semibold text-al-primary">{selected.size} selected</span>
           <div className="flex items-center gap-2 flex-wrap">
             {/* Bulk move to lane */}
             <div className="inline-flex items-center gap-1.5 bg-white border border-slate-300 rounded px-2 py-1" data-testid="bulk-move-lane">
@@ -312,7 +312,7 @@ export default function InventoryListClient({ initialItems }: { initialItems: It
                 <option value="">Select lane…</option>
                 {MOVE_LANE_OPTIONS.map(l => <option key={l} value={l}>{laneLabel(l)}</option>)}
               </select>
-              {movingLane && <Loader2 size={12} className="animate-spin text-[#0B5FD1]" data-testid="bulk-move-lane-spinner" />}
+              {movingLane && <Loader2 size={12} className="animate-spin text-al-primary" data-testid="bulk-move-lane-spinner" />}
             </div>
             <button onClick={() => bulkAction("activate")} disabled={bulkBusy || movingLane !== null} data-testid="bulk-activate-btn" className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 rounded text-xs font-semibold disabled:opacity-50">
               <CheckCircle2 size={12} /> Activate

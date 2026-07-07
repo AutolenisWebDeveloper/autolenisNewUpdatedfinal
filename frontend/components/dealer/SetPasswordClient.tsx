@@ -39,7 +39,7 @@ export default function SetPasswordClient({ email }: { email: string }) {
     <div className="min-h-screen flex items-center justify-center bg-[#F8F9FA] p-6">
       <div data-testid="dealer-set-password-card" className="bg-white rounded-2xl shadow-sm border border-slate-200 max-w-md w-full p-8">
         <div className="flex items-center gap-2 mb-2">
-          <Lock size={18} className="text-[#0B5FD1]" />
+          <Lock size={18} className="text-al-primary" />
           <h1 className="text-lg font-bold text-slate-900">Set a new password</h1>
         </div>
         <p className="text-sm text-slate-500 mb-6">
@@ -61,7 +61,7 @@ export default function SetPasswordClient({ email }: { email: string }) {
               type="password"
               value={pw}
               onChange={(e) => setPw(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0B5FD1]"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-al-primary"
               required
             />
             <p className="text-[11px] text-slate-400 mt-1">10+ chars, with uppercase, lowercase, and number</p>
@@ -73,7 +73,7 @@ export default function SetPasswordClient({ email }: { email: string }) {
               type="password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0B5FD1]"
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-al-primary"
               required
             />
           </div>

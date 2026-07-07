@@ -13,7 +13,7 @@ export default async function DealerPickupsPage() {
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-pickups-page">
       <div className="flex items-center gap-3 mb-6">
-        <Truck size={22} className="text-[#0B5FD1]" />
+        <Truck size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Scheduled Pickups</h1>
         <Badge variant="secondary">{pickups.length}</Badge>
       </div>

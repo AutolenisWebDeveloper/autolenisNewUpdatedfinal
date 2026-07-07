@@ -35,7 +35,7 @@ export default async function DealCompletePage({ params }: Props) {
         <p className="text-slate-500">Your vehicle purchase is complete.</p>
       </div>
 
-      <div className="bg-[#0B5FD1] text-white rounded-2xl p-6 mb-6" data-testid="deal-complete-summary">
+      <div className="bg-al-primary text-white rounded-2xl p-6 mb-6" data-testid="deal-complete-summary">
         <p className="text-xs text-white/60 uppercase tracking-wider mb-1">Deal Summary</p>
         <p className="text-2xl font-bold mb-1">${(otdPriceCents / 100).toLocaleString()}</p>
         <p className="text-sm text-white/60">Out-the-door price paid</p>

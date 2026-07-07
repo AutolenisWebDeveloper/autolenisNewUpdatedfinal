@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const INPUT_CLASS =
-  "w-full border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30";
+  "w-full border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30";
 
 interface InventoryItem {
   id: string;
@@ -49,13 +50,7 @@ export default function EditInventoryPage({ params }: Props) {
   useEffect(() => {
     async function fetchItem() {
       try {
-        const res = await fetch(`/api/dealer/inventory/${id}`);
-        if (!res.ok) {
-          setError("Vehicle not found.");
-          return;
-        }
-        const data = (await res.json()) as { item?: InventoryItem };
-        const item = data.item;
+        const { item } = await api.get<{ item: InventoryItem }>(`/api/dealer/inventory/${id}`);
         if (!item) { setError("Vehicle not found."); return; }
         setVin(item.vin ?? "");
         setYear(item.year?.toString() ?? "");
@@ -66,8 +61,8 @@ export default function EditInventoryPage({ params }: Props) {
         setCondition(item.condition ?? "Good");
         setPrice(item.priceCents ? (item.priceCents / 100).toString() : "");
         setDescription(item.description ?? "");
-      } catch {
-        setError("Network error. Please try again.");
+      } catch (err) {
+        setError(apiErrorMessage(err, "Network error. Please try again."));
       } finally {
         setLoading(false);
       }
@@ -84,24 +79,17 @@ export default function EditInventoryPage({ params }: Props) {
     setVinDecoding(true);
     setVinDecodeMsg("Decoding…");
     try {
-      const res = await fetch(`/api/dealer/inventory/vin-decode?vin=${encodeURIComponent(v)}`);
-      const data = (await res.json()) as {
-        success?: boolean;
-        data?: { decoded: { year?: string | null; make?: string | null; model?: string | null; trim?: string | null } };
-        error?: { message: string };
-      };
-      if (!res.ok || !data.data) {
-        setVinDecodeMsg(data.error?.message ?? "Decode failed");
-        return;
-      }
-      const { decoded } = data.data;
+      const { decoded } = await api.get<{ decoded: { year?: string | null; make?: string | null; model?: string | null; trim?: string | null } }>(
+        `/api/dealer/inventory/vin-decode?vin=${encodeURIComponent(v)}`
+      );
       if (decoded.year)  setYear(decoded.year);
       if (decoded.make)  setMake(decoded.make);
       if (decoded.model) setModel(decoded.model);
       if (decoded.trim)  setTrim(decoded.trim);
       setVinDecodeMsg(`Decoded: ${decoded.year ?? ""} ${decoded.make ?? ""} ${decoded.model ?? ""}`.trim());
-    } catch {
-      setVinDecodeMsg("Network error — enter details manually");
+    } catch (err) {
+      setVinDecodeMsg(apiErrorMessage(err, "Network error — enter details manually"));
+      return;
     } finally {
       setVinDecoding(false);
     }
@@ -112,29 +100,20 @@ export default function EditInventoryPage({ params }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/dealer/inventory/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vin: vin || undefined,
-          year: year ? parseInt(year, 10) : undefined,
-          make,
-          model,
-          trim: trim || undefined,
-          mileage: mileage ? parseInt(mileage, 10) : undefined,
-          condition,
-          priceCents: price ? Math.round(parseFloat(price) * 100) : undefined,
-          description: description || undefined,
-        }),
+      await api.patch(`/api/dealer/inventory/${id}`, {
+        vin: vin || undefined,
+        year: year ? parseInt(year, 10) : undefined,
+        make,
+        model,
+        trim: trim || undefined,
+        mileage: mileage ? parseInt(mileage, 10) : undefined,
+        condition,
+        priceCents: price ? Math.round(parseFloat(price) * 100) : undefined,
+        description: description || undefined,
       });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: { message?: string } };
-        setError(data.error?.message ?? "Something went wrong");
-        return;
-      }
       router.push("/dealer/inventory");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Network error. Please try again."));
     } finally {
       setSubmitting(false);
     }
@@ -145,7 +124,7 @@ export default function EditInventoryPage({ params }: Props) {
       <div className="flex items-center gap-3 mb-6">
         <Link
           href="/dealer/inventory"
-          className="text-sm text-slate-400 hover:text-[#0B5FD1] transition-colors"
+          className="text-sm text-slate-400 hover:text-al-primary transition-colors"
         >
           ← Inventory
         </Link>
@@ -183,7 +162,7 @@ export default function EditInventoryPage({ params }: Props) {
               </button>
             </div>
             {vinDecodeMsg && (
-              <p className="text-xs text-[#0B5FD1] mt-1" data-testid="vin-decode-msg">
+              <p className="text-xs text-al-primary mt-1" data-testid="vin-decode-msg">
                 {vinDecodeMsg}
               </p>
             )}
@@ -310,7 +289,7 @@ export default function EditInventoryPage({ params }: Props) {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
+            className="w-full bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
             data-testid="save-vehicle-btn"
           >
             {submitting ? "Saving..." : "Save Changes"}

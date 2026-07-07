@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { X, CheckCircle2, AlertTriangle } from "lucide-react";
+import { api } from "@/lib/api/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -103,7 +104,7 @@ function ActionModal({ title, warning, onCancel, onConfirm }: ModalProps) {
               Cancel
             </button>
             <button type="submit" disabled={loading || reason.trim().length < 10}
-              className="px-4 py-2 text-sm bg-[#0B5FD1] text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              className="px-4 py-2 text-sm bg-al-primary text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
               {loading ? "Processing…" : "Confirm"}
             </button>
           </div>
@@ -135,15 +136,7 @@ export default function AdminPaymentActionsClient(props: Props) {
   }
 
   async function callApi(url: string, body: Record<string, unknown>): Promise<void> {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data?.error?.message ?? `Request failed (${res.status})`);
-    }
+    await api.post(url, body);
   }
 
   // ── Deposit actions ──────────────────────────────────────────────────────
@@ -152,15 +145,7 @@ export default function AdminPaymentActionsClient(props: Props) {
     const { depositId, buyerId, buyerEmail } = props;
 
     async function sendDepositLink(reason: string) {
-      const res = await fetch("/api/admin/payments/deposit/send-link", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ buyerId, reason }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error?.message ?? `Request failed (${res.status})`);
-      }
+      await api.post("/api/admin/payments/deposit/send-link", { buyerId, reason });
       showToast(`Payment link sent to ${buyerEmail}`);
     }
 
@@ -200,7 +185,7 @@ export default function AdminPaymentActionsClient(props: Props) {
           <>
             <button
               onClick={() => setModal("send-link")}
-              className="px-3 py-1.5 text-xs bg-[#0B5FD1] text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors"
+              className="px-3 py-1.5 text-xs bg-al-primary text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors"
             >
               Send $99 Payment Link
             </button>
@@ -273,15 +258,7 @@ export default function AdminPaymentActionsClient(props: Props) {
   const { dealId, buyerEmail } = props;
 
   async function sendFeeLink(reason: string) {
-    const res = await fetch("/api/admin/payments/concierge-fee/send-link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dealId, reason }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data?.error?.message ?? `Request failed (${res.status})`);
-    }
+    await api.post("/api/admin/payments/concierge-fee/send-link", { dealId, reason });
     showToast(`Payment link sent to ${buyerEmail}`);
   }
 
@@ -314,7 +291,7 @@ export default function AdminPaymentActionsClient(props: Props) {
         <>
           <button
             onClick={() => setModal("send-link")}
-            className="px-3 py-1.5 text-xs bg-[#0B5FD1] text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors"
+            className="px-3 py-1.5 text-xs bg-al-primary text-white rounded-lg font-semibold hover:bg-[#52287a] transition-colors"
           >
             Send $400 Payment Link
           </button>

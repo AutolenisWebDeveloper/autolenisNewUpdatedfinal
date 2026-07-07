@@ -25,7 +25,7 @@ export default function CompleteCheckpointButton({
           router.refresh();
         });
       }}
-      className="text-xs px-2.5 py-1 rounded-md bg-[#0B5FD1] text-white font-medium hover:bg-[#0A4DB8] disabled:opacity-50"
+      className="text-xs px-2.5 py-1 rounded-md bg-al-primary text-white font-medium hover:bg-al-primary-hover disabled:opacity-50"
     >
       {pending ? "Completing…" : "Mark Complete"}
     </button>

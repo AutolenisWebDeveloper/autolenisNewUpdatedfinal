@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, Clock, XCircle, AlertTriangle, RefreshCw, ArrowRight } from "lucide-react";
 import Link from "next/link";
+import { api } from "@/lib/api/client";
 
 type StatusType = "PENDING" | "APPROVED" | "REJECTED" | "ADDITIONAL_INFO_REQUIRED" | "LOADING";
 
@@ -48,13 +49,9 @@ export default function ManualPreapprovalStatusPage() {
     if (showPolling) setPolling(true);
     setError(null);
     try {
-      const res = await fetch("/api/buyer/prequal/external-status");
-      if (!res.ok) throw new Error("Unable to fetch status");
-      const json = await res.json() as { success: boolean; data: PreApprovalStatus };
-      if (json.success) {
-        setData(json.data);
-        setLastChecked(new Date());
-      }
+      const status = await api.get<PreApprovalStatus>("/api/buyer/prequal/external-status");
+      setData(status);
+      setLastChecked(new Date());
     } catch (err) {
       setError("Unable to load status. Retrying…");
     } finally {
@@ -236,7 +233,7 @@ export default function ManualPreapprovalStatusPage() {
             </Button>
             <Link
               href="/contact"
-              className="block text-center text-sm text-[#0B5FD1] hover:underline"
+              className="block text-center text-sm text-al-primary hover:underline"
               data-testid="additional-info-contact-cta"
             >
               Contact support for help

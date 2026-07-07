@@ -6,6 +6,7 @@ import {
   CheckCircle2, ChevronRight, ChevronLeft, Upload, AlertCircle,
   User, Building2, FileText, CreditCard, FolderOpen, ClipboardList,
 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface OnboardingWizardProps {
   affiliateId: string;
@@ -87,7 +88,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
-      className={`w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/40 focus:border-[#0B5FD1] ${props.className ?? ""}`}
+      className={`w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/40 focus:border-al-primary ${props.className ?? ""}`}
     />
   );
 }
@@ -96,7 +97,7 @@ function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       {...props}
-      className={`w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/40 focus:border-[#0B5FD1] bg-white ${props.className ?? ""}`}
+      className={`w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/40 focus:border-al-primary bg-white ${props.className ?? ""}`}
     />
   );
 }
@@ -159,24 +160,18 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
       setError("Please fill in all required fields.");
       return false;
     }
-    const res = await fetch("/api/affiliate/onboarding/profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ step: 2, firstName, lastName, phone, dateOfBirth: dateOfBirth || undefined, addressLine1: address1, addressLine2: address2 || null, city, state, zip }),
-    });
-    if (!res.ok) { const d = await res.json(); setError(d.error?.message ?? "Save failed"); return false; }
-    return true;
+    try {
+      await api.post("/api/affiliate/onboarding/profile", { step: 2, firstName, lastName, phone, dateOfBirth: dateOfBirth || undefined, addressLine1: address1, addressLine2: address2 || null, city, state, zip });
+      return true;
+    } catch (err) { setError(apiErrorMessage(err, "Save failed")); return false; }
   }
 
   async function saveStep3() {
     if (!entityType) { setError("Please select an entity type."); return false; }
-    const res = await fetch("/api/affiliate/onboarding/profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ step: 3, entityType, businessName: businessName || null, dbaName: dbaName || null, businessAddress: businessAddress || null, einLast4: einLast4 || null }),
-    });
-    if (!res.ok) { const d = await res.json(); setError(d.error?.message ?? "Save failed"); return false; }
-    return true;
+    try {
+      await api.post("/api/affiliate/onboarding/profile", { step: 3, entityType, businessName: businessName || null, dbaName: dbaName || null, businessAddress: businessAddress || null, einLast4: einLast4 || null });
+      return true;
+    } catch (err) { setError(apiErrorMessage(err, "Save failed")); return false; }
   }
 
   async function saveStep4() {
@@ -184,13 +179,10 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
       setError("Please complete all fields and check the certification box.");
       return false;
     }
-    const res = await fetch("/api/affiliate/onboarding/tax", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ taxClassification: taxClass, tinType, tinLast4, legalName, certified, signature }),
-    });
-    if (!res.ok) { const d = await res.json(); setError(d.error?.message ?? "Save failed"); return false; }
-    return true;
+    try {
+      await api.post("/api/affiliate/onboarding/tax", { taxClassification: taxClass, tinType, tinLast4, legalName, certified, signature });
+      return true;
+    } catch (err) { setError(apiErrorMessage(err, "Save failed")); return false; }
   }
 
   async function saveStep5() {
@@ -207,13 +199,10 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
     if (accountType) body.accountType = accountType;
     if (paypalEmail) body.paypalEmail = paypalEmail;
     if (zellePhone) body.zellePhone = zellePhone;
-    const res = await fetch("/api/affiliate/onboarding/payment", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) { const d = await res.json(); setError(d.error?.message ?? "Save failed"); return false; }
-    return true;
+    try {
+      await api.post("/api/affiliate/onboarding/payment", body);
+      return true;
+    } catch (err) { setError(apiErrorMessage(err, "Save failed")); return false; }
   }
 
   async function uploadDocument() {
@@ -249,10 +238,10 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
     setError(null);
     setLoading(true);
     try {
-      const res = await fetch("/api/affiliate/onboarding/submit", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error?.message ?? "Submission failed"); return; }
+      await api.post("/api/affiliate/onboarding/submit");
       setSubmitted(true);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Submission failed"));
     } finally {
       setLoading(false);
     }
@@ -271,7 +260,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
           </p>
           <button
             onClick={() => router.push("/affiliate/portal/dashboard")}
-            className="w-full bg-[#0B5FD1] text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-[#0B5FD1]/90 transition-colors"
+            className="w-full bg-al-primary text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-al-primary/90 transition-colors"
           >
             Go to Dashboard
           </button>
@@ -300,8 +289,8 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                 <button
                   onClick={() => s.number < step && goTo(s.number)}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    active ? "bg-[#0B5FD1] text-white" :
-                    done   ? "bg-[#0B5FD1]/10 text-[#0B5FD1] cursor-pointer hover:bg-[#0B5FD1]/20" :
+                    active ? "bg-al-primary text-white" :
+                    done   ? "bg-al-primary/10 text-al-primary cursor-pointer hover:bg-al-primary/20" :
                              "bg-slate-100 text-slate-400 cursor-default"
                   }`}
                   disabled={s.number > step}
@@ -310,7 +299,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   <span className="hidden sm:inline">{s.label}</span>
                   <span className="sm:hidden">{s.number}</span>
                 </button>
-                {i < STEPS.length - 1 && <div className={`w-4 h-px ${done ? "bg-[#0B5FD1]" : "bg-slate-200"}`} />}
+                {i < STEPS.length - 1 && <div className={`w-4 h-px ${done ? "bg-al-primary" : "bg-slate-200"}`} />}
               </div>
             );
           })}
@@ -343,7 +332,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   { n: 6, label: "Identity Document",    desc: "Government-issued photo ID" },
                 ].map(item => (
                   <div key={item.n} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg">
-                    <div className="w-6 h-6 bg-[#0B5FD1] text-white rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">{item.n}</div>
+                    <div className="w-6 h-6 bg-al-primary text-white rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">{item.n}</div>
                     <div>
                       <p className="text-sm font-semibold text-slate-800">{item.label}</p>
                       <p className="text-xs text-slate-500">{item.desc}</p>
@@ -486,7 +475,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   <Input value={signature} onChange={e => setSignature(e.target.value)} placeholder="Your full legal name" />
                 </div>
                 <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" checked={certified} onChange={e => setCertified(e.target.checked)} className="mt-0.5 w-4 h-4 accent-[#0B5FD1]" />
+                  <input type="checkbox" checked={certified} onChange={e => setCertified(e.target.checked)} className="mt-0.5 w-4 h-4 accent-al-primary" />
                   <span className="text-sm text-slate-700">I certify the above statements under penalties of perjury and agree that this electronic signature is legally binding.</span>
                 </label>
               </div>
@@ -578,7 +567,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   </div>
                   <div>
                     <Label required>File</Label>
-                    <label className="block border-2 border-dashed border-slate-300 rounded-lg p-6 text-center cursor-pointer hover:border-[#0B5FD1]/50 transition-colors">
+                    <label className="block border-2 border-dashed border-slate-300 rounded-lg p-6 text-center cursor-pointer hover:border-al-primary/50 transition-colors">
                       <Upload size={24} className="mx-auto mb-2 text-slate-400" />
                       <p className="text-sm font-medium text-slate-700">{uploadFile ? uploadFile.name : "Click to select file"}</p>
                       <p className="text-xs text-slate-400 mt-1">PDF, JPG, PNG, WEBP — max 10 MB</p>
@@ -647,7 +636,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   <div key={section.title} className="border border-slate-200 rounded-xl p-4">
                     <div className="flex items-center justify-between mb-3">
                       <p className="text-sm font-semibold text-slate-800">{section.title}</p>
-                      <button onClick={() => goTo(parseInt(section.href.split("step=")[1]))} className="text-xs text-[#0B5FD1] hover:underline">Edit</button>
+                      <button onClick={() => goTo(parseInt(section.href.split("step=")[1]))} className="text-xs text-al-primary hover:underline">Edit</button>
                     </div>
                     <dl className="space-y-1.5">
                       {section.items.map(item => (
@@ -680,7 +669,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               <button
                 onClick={handleNext}
                 disabled={loading}
-                className="flex items-center gap-1.5 px-6 py-2.5 bg-[#0B5FD1] text-white rounded-lg text-sm font-semibold hover:bg-[#0B5FD1]/90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center gap-1.5 px-6 py-2.5 bg-al-primary text-white rounded-lg text-sm font-semibold hover:bg-al-primary/90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
                 {loading ? "Saving…" : "Continue"} <ChevronRight size={16} />
               </button>
@@ -688,7 +677,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               <button
                 onClick={handleSubmit}
                 disabled={loading}
-                className="flex items-center gap-1.5 px-6 py-2.5 bg-[#0B5FD1] text-white rounded-lg text-sm font-semibold hover:bg-[#0B5FD1]/90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                className="flex items-center gap-1.5 px-6 py-2.5 bg-al-primary text-white rounded-lg text-sm font-semibold hover:bg-al-primary/90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
                 {loading ? "Submitting…" : "Submit Application"} <CheckCircle2 size={16} />
               </button>

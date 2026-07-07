@@ -11,6 +11,7 @@ import {
   FileText, ShieldAlert,
 } from "lucide-react";
 import type { AdminAffiliateKpis } from "@/lib/services/admin/admin-affiliate-command-center.service";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -127,19 +128,10 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
     setError(null);
     try {
       const qs = new URLSearchParams(params).toString();
-      const res = await fetch("/api/admin/affiliates?" + qs);
-      if (!res.ok) {
-        let errMsg = "Failed to load affiliates";
-        try {
-          const errData = await res.json() as { error?: { message: string } };
-          if (errData.error?.message) errMsg = errData.error.message;
-        } catch { /* ignore */ }
-        throw new Error(errMsg);
-      }
-      const data = await res.json() as { data?: { affiliates: AffiliateListRow[]; total: number } };
-      if (data.data) { setAffiliates(data.data.affiliates); setTotal(data.data.total); }
+      const data = await api.get<{ affiliates: AffiliateListRow[]; total: number }>("/api/admin/affiliates?" + qs);
+      setAffiliates(data.affiliates); setTotal(data.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load affiliates");
+      setError(apiErrorMessage(err, "Failed to load affiliates"));
     } finally {
       setLoading(false);
     }
@@ -199,17 +191,11 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
         reactivate: `${actionModal.affiliateEmail} reactivated`,
         note: `Note added to ${actionModal.affiliateEmail}`,
       };
-      const res = await fetch(endpointMap[actionModal.type], {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bodyMap[actionModal.type]),
-      });
-      if (res.ok) {
-        showToast(successMap[actionModal.type]);
-        applyFilters();
-      } else {
-        const d = await res.json() as { error?: { message: string } };
-        showToast(d.error?.message ?? "Action failed", "error");
-      }
+      await api.post<unknown>(endpointMap[actionModal.type], bodyMap[actionModal.type]);
+      showToast(successMap[actionModal.type]);
+      applyFilters();
+    } catch (err) {
+      showToast(apiErrorMessage(err, "Action failed"), "error");
     } finally {
       setActionLoading(false);
       setActionModal(null);
@@ -264,7 +250,7 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
                 <button
                   type="submit"
                   disabled={actionLoading || (modalConfig[actionModal.type].requireReason && !actionInput.trim())}
-                  className={"flex-1 rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (modalConfig[actionModal.type].destructive ? "bg-red-600 hover:bg-red-700" : "bg-[#0B5FD1] hover:bg-purple-800")}
+                  className={"flex-1 rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (modalConfig[actionModal.type].destructive ? "bg-red-600 hover:bg-red-700" : "bg-al-primary hover:bg-purple-800")}
                 >
                   {actionLoading ? "Processing…" : modalConfig[actionModal.type].submitLabel}
                 </button>
@@ -277,7 +263,7 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
       {/* Header */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[#0B5FD1] flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-al-primary flex items-center justify-center">
             <Share2 size={18} className="text-white" />
           </div>
           <div>
@@ -326,7 +312,7 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
           <button
             onClick={() => applyFilters()}
             disabled={loading}
-            className="px-5 py-2.5 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+            className="px-5 py-2.5 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
           >
             {loading ? <RefreshCw size={14} className="animate-spin" /> : null}
             Search

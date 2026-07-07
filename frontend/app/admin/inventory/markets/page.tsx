@@ -32,7 +32,7 @@ export default function AdminInventoryMarketsPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="admin-markets-page">
-      <div className="flex items-center gap-3 mb-6"><MapPin size={22} className="text-[#0B5FD1]" /><h1 className="text-xl font-bold text-slate-900">Market Coverage</h1></div>
+      <div className="flex items-center gap-3 mb-6"><MapPin size={22} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">Market Coverage</h1></div>
       <div className="space-y-2 mb-6">
         {markets.map(m => (
           <div key={m.id} data-testid={`market-${m.id}`} className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-4 py-3">

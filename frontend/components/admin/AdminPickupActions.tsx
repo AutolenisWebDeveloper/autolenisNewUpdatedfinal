@@ -102,7 +102,7 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
                 <label className="text-xs font-medium text-slate-600 block mb-1">Date &amp; Time</label>
                 <input
                   type="datetime-local"
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary"
                   value={scheduleForm.scheduledAt}
                   onChange={e => setScheduleForm(f => ({ ...f, scheduledAt: e.target.value }))}
                 />
@@ -111,7 +111,7 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
                 <label className="text-xs font-medium text-slate-600 block mb-1">Location (min 5 chars)</label>
                 <input
                   type="text"
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary"
                   placeholder="e.g. 123 Main St, Dallas TX"
                   value={scheduleForm.location}
                   onChange={e => setScheduleForm(f => ({ ...f, location: e.target.value }))}
@@ -139,7 +139,7 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
                 <label className="text-xs font-medium text-slate-600 block mb-1">Reason (min 5 chars)</label>
                 <input
                   type="text"
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+                  className="w-full border border-slate-300 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary"
                   placeholder="e.g. Vehicle delivered to buyer"
                   value={confirmReason}
                   onChange={e => setConfirmReason(e.target.value)}

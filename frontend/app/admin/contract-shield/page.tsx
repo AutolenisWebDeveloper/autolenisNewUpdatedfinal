@@ -92,7 +92,7 @@ export default async function AdminContractShieldPage() {
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-contract-shield-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Shield size={22} className="text-[#0B5FD1]" />
+          <Shield size={22} className="text-al-primary" />
           <div>
             <h1 className="text-xl font-bold text-slate-900">Contract Shield Queue</h1>
             <p className="text-xs text-slate-400 mt-0.5">Feature 28 · Risk scoring from real signals</p>

@@ -40,7 +40,7 @@ export default function ContentFilters({ clusters, metros, statuses }: Props) {
   }
 
   const selectClass =
-    "rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20";
+    "rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-al-primary/20";
 
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="content-filters">
@@ -57,7 +57,7 @@ export default function ContentFilters({ clusters, metros, statuses }: Props) {
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search title, slug, keyword…"
           data-testid="content-search"
-          className="w-60 rounded-lg border border-[#E2E8F0] bg-white pl-8 pr-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+          className="w-60 rounded-lg border border-[#E2E8F0] bg-white pl-8 pr-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-al-primary/20"
         />
       </form>
 
@@ -111,7 +111,7 @@ export default function ContentFilters({ clusters, metros, statuses }: Props) {
             router.push("/admin/content");
           }}
           data-testid="content-filter-clear"
-          className="text-xs text-[#0B5FD1] hover:underline px-2"
+          className="text-xs text-al-primary hover:underline px-2"
         >
           Clear
         </button>

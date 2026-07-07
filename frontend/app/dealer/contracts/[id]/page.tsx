@@ -65,13 +65,13 @@ export default async function ContractDetailPage({ params }: Props) {
     <div className="p-6 md:p-8 max-w-3xl" data-testid="contract-detail-page">
       <Link
         href="/dealer/contracts"
-        className="text-sm text-slate-400 hover:text-[#0B5FD1] transition-colors mb-6 flex items-center gap-1"
+        className="text-sm text-slate-400 hover:text-al-primary transition-colors mb-6 flex items-center gap-1"
       >
         ← Back to Contracts
       </Link>
 
       <div className="flex items-center gap-3 mb-6">
-        <Shield size={22} className="text-[#0B5FD1]" />
+        <Shield size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Contract Shield Review</h1>
       </div>
 

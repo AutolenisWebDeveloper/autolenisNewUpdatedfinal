@@ -24,7 +24,7 @@ export default async function ESignPage() {
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="esign-page">
       <div className="flex items-center gap-3 mb-6">
-        <PenLine size={24} className="text-[#0B5FD1]" />
+        <PenLine size={24} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Sign Your Documents</h1>
       </div>
 

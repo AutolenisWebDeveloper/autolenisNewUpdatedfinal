@@ -81,7 +81,7 @@ export default function AffiliateDocumentUpload() {
             id="doc-type"
             value={type}
             onChange={e => setType(e.target.value as DocType)}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-al-primary/30"
           >
             {DOC_TYPES.map(t => (
               <option key={t.value} value={t.value}>{t.label}</option>
@@ -97,7 +97,7 @@ export default function AffiliateDocumentUpload() {
             type="file"
             accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
             onChange={handleFileChange}
-            className="block w-full text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-[#0B5FD1]/10 file:text-[#0B5FD1] hover:file:bg-[#0B5FD1]/20"
+            className="block w-full text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-al-primary/10 file:text-al-primary hover:file:bg-al-primary/20"
           />
           {file && (
             <p className="text-xs text-slate-400 mt-1">{file.name} · {(file.size / 1024).toFixed(0)} KB</p>

@@ -17,7 +17,7 @@ function rankIcon(rank: number) {
 }
 
 function rankBg(rank: number, isCurrentUser: boolean) {
-  if (isCurrentUser) return "bg-[#0B5FD1]/10 border-[#0B5FD1]/40 ring-1 ring-[#0B5FD1]/30";
+  if (isCurrentUser) return "bg-al-primary/10 border-al-primary/40 ring-1 ring-al-primary/30";
   if (rank === 1) return "bg-yellow-50 border-yellow-200";
   if (rank === 2) return "bg-slate-50 border-slate-200";
   if (rank === 3) return "bg-amber-50 border-amber-200";
@@ -42,7 +42,7 @@ export default async function AffiliateLeaderboardPage() {
     <div className="p-6 md:p-8 max-w-2xl" data-testid="affiliate-leaderboard-page">
       {/* Header */}
       <div className="flex items-center gap-3 mb-2">
-        <Trophy size={22} className="text-[#0B5FD1]" />
+        <Trophy size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Leaderboard</h1>
       </div>
       <p className="text-sm text-slate-500 mb-8">
@@ -52,7 +52,7 @@ export default async function AffiliateLeaderboardPage() {
       {/* Your rank card */}
       {currentRank && (
         <div
-          className="bg-gradient-to-r from-[#0B5FD1] to-[#0A4DB8] text-white rounded-2xl p-6 mb-8"
+          className="bg-gradient-to-r from-al-primary to-al-primary-hover text-white rounded-2xl p-6 mb-8"
           data-testid="your-rank-card"
         >
           <p className="text-xs font-bold uppercase tracking-widest text-white/60 mb-3">
@@ -116,7 +116,7 @@ export default async function AffiliateLeaderboardPage() {
                       {entry.maskedCode}
                     </p>
                     {entry.isCurrentUser && (
-                      <Badge variant="secondary" className="text-xs text-[#0B5FD1]">
+                      <Badge variant="secondary" className="text-xs text-al-primary">
                         You
                       </Badge>
                     )}
@@ -158,7 +158,7 @@ export default async function AffiliateLeaderboardPage() {
                 <p className="font-mono text-sm font-semibold text-slate-700">
                   {currentRank.maskedCode}
                 </p>
-                <Badge variant="secondary" className="text-xs text-[#0B5FD1]">
+                <Badge variant="secondary" className="text-xs text-al-primary">
                   You
                 </Badge>
               </div>

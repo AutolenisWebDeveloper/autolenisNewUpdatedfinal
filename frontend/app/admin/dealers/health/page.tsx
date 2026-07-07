@@ -26,7 +26,7 @@ export default async function DealerHealthPage() {
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="dealer-health-page">
       <div className="flex items-center gap-3 mb-6">
-        <Building2 size={22} className="text-[#0B5FD1]" />
+        <Building2 size={22} className="text-al-primary" />
         <div>
           <h1 className="text-xl font-bold text-slate-900">Dealer Health Monitor</h1>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -81,7 +81,7 @@ export default async function DealerHealthPage() {
                   </div>
                   <Link
                     href={`/admin/dealers/${dealer.id}`}
-                    className="text-xs text-[#0B5FD1] hover:underline"
+                    className="text-xs text-al-primary hover:underline"
                     data-testid={`dealer-health-detail-${dealer.id}`}
                   >
                     View dealer →

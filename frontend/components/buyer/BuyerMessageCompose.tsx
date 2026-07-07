@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Send, MessageSquare } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // Feature 33 — Buyer starts a new support message thread
 export default function BuyerMessageCompose() {
@@ -19,25 +20,13 @@ export default function BuyerMessageCompose() {
     setError(null);
 
     try {
-      const res = await fetch("/api/buyer/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: content.trim() }),
-      });
-      const json = (await res.json()) as {
-        success?: boolean;
-        data?: { thread?: { id: string } };
-        error?: { message: string };
-      };
-      if (!res.ok || !json.success) {
-        setError(json.error?.message ?? "Failed to send message. Please try again.");
-        return;
-      }
+      await api.post<{ thread?: { id: string } }>("/api/buyer/messages", { content: content.trim() });
       setContent("");
       setOpen(false);
       router.refresh();
-    } catch {
-      setError("An unexpected error occurred. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to send message. Please try again."));
+      return;
     } finally {
       setSubmitting(false);
     }
@@ -49,7 +38,7 @@ export default function BuyerMessageCompose() {
         <button
           onClick={() => setOpen(true)}
           data-testid="compose-new-message-btn"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-[#0B5FD1] text-white rounded-xl text-sm font-semibold hover:bg-[#0B5FD1] transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-al-primary text-white rounded-xl text-sm font-semibold hover:bg-al-primary transition-colors"
         >
           <MessageSquare size={15} />
           New Message
@@ -67,7 +56,7 @@ export default function BuyerMessageCompose() {
             placeholder="How can we help you today?"
             rows={4}
             maxLength={4000}
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
             data-testid="compose-textarea"
           />
           {error && (
@@ -87,7 +76,7 @@ export default function BuyerMessageCompose() {
             <button
               type="submit"
               disabled={submitting || !content.trim()}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-[#0B5FD1] text-white rounded-lg text-xs font-semibold hover:bg-[#0B5FD1] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-al-primary text-white rounded-lg text-xs font-semibold hover:bg-al-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               data-testid="compose-submit-btn"
             >
               <Send size={12} />

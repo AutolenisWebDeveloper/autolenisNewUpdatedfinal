@@ -3,12 +3,12 @@ import { getCommissionSummary, getNetworkSize } from "@/lib/services/affiliate/c
 import { getReferralClickStats } from "@/lib/services/affiliate/referral.service";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
-import PageContainer from "@/components/dashboard/PageContainer";
-import PageHeader from "@/components/dashboard/PageHeader";
-import StatCard from "@/components/dashboard/StatCard";
-import Panel from "@/components/dashboard/Panel";
-import EmptyState from "@/components/dashboard/EmptyState";
-import { FIGURE } from "@/components/dashboard/tokens";
+import PageContainer from "@/components/ui/patterns/PageContainer";
+import PageHeader from "@/components/ui/patterns/PageHeader";
+import StatCard from "@/components/ui/patterns/StatCard";
+import Panel from "@/components/ui/patterns/Panel";
+import EmptyState from "@/components/ui/patterns/EmptyState";
+import { FIGURE } from "@/components/ui/patterns/tokens";
 import {
   DollarSign, Users, Clock, XCircle, AlertTriangle,
   TrendingUp, Calculator, Landmark, FileCheck, Share2, Inbox,
@@ -262,10 +262,10 @@ export default async function AffiliateDashboardPage() {
               key={a.label}
               href={a.href}
               data-testid={`quick-action-${a.label.toLowerCase().replace(/\s+/g, "-")}`}
-              className="flex flex-col items-center gap-2 bg-white border border-slate-200/80 rounded-2xl p-4 hover:border-[#0B5FD1]/30 hover:shadow-sm transition-all text-center group"
+              className="flex flex-col items-center gap-2 bg-white border border-slate-200/80 rounded-2xl p-4 hover:border-al-primary/30 hover:shadow-sm transition-all text-center group"
             >
-              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center group-hover:bg-[#DBEAFE]/60 transition-colors">
-                <a.icon size={16} className="text-[#0B5FD1]" />
+              <div className="w-9 h-9 rounded-xl bg-al-primary-subtle flex items-center justify-center group-hover:bg-[#DBEAFE]/60 transition-colors">
+                <a.icon size={16} className="text-al-primary" />
               </div>
               <span className="text-xs font-semibold text-slate-700">{a.label}</span>
             </Link>

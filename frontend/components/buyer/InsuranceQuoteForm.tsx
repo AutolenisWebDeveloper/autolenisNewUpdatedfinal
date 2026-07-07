@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const MIN_DRIVER_AGE_YEARS = 16;
 const MIN_DRIVER_AGE_MS    = MIN_DRIVER_AGE_YEARS * 365.25 * 24 * 3600 * 1000;
@@ -44,28 +45,18 @@ export default function InsuranceQuoteForm({ dealId, inventoryItemId, vehicle }:
     setError(null);
 
     try {
-      const res = await fetch("/api/buyer/insurance/request-quote", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dealId,
-          inventoryItemId,
-          coverageType,
-          currentInsurer: currentInsurer.trim() || null,
-          driverDob:      driverDob || null,
-          additionalInfo: additionalInfo.trim() || null,
-        }),
+      await api.post("/api/buyer/insurance/request-quote", {
+        dealId,
+        inventoryItemId,
+        coverageType,
+        currentInsurer: currentInsurer.trim() || null,
+        driverDob:      driverDob || null,
+        additionalInfo: additionalInfo.trim() || null,
       });
-      const data = await res.json() as { success: boolean; error?: { message: string } };
-
-      if (!data.success) {
-        setError(data.error?.message ?? "Submission failed. Please try again.");
-      } else {
-        setSuccess(true);
-        router.refresh();
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      setSuccess(true);
+      router.refresh();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Submission failed. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -84,7 +75,7 @@ export default function InsuranceQuoteForm({ dealId, inventoryItemId, vehicle }:
       <button
         type="button"
         onClick={() => setExpanded(prev => !prev)}
-        className="flex items-center gap-2 text-sm font-semibold text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors"
+        className="flex items-center gap-2 text-sm font-semibold text-al-primary hover:text-al-primary-hover transition-colors"
         data-testid="expand-quote-form-btn"
       >
         {expanded ? "Cancel" : "Request a Quote"}
@@ -126,7 +117,7 @@ export default function InsuranceQuoteForm({ dealId, inventoryItemId, vehicle }:
               onChange={e => setCoverageType(e.target.value)}
               required
               data-testid="quote-coverage-type"
-              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#0B5FD1] focus:border-transparent"
+              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-al-primary focus:border-transparent"
             >
               <option value="full">Full coverage (comprehensive + collision)</option>
               <option value="liability">Liability only</option>
@@ -145,7 +136,7 @@ export default function InsuranceQuoteForm({ dealId, inventoryItemId, vehicle }:
               onChange={e => setCurrentInsurer(e.target.value)}
               placeholder="e.g. State Farm, GEICO, Progressive"
               data-testid="quote-current-insurer"
-              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1] focus:border-transparent"
+              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary focus:border-transparent"
             />
           </div>
 
@@ -161,7 +152,7 @@ export default function InsuranceQuoteForm({ dealId, inventoryItemId, vehicle }:
       max={new Date(Date.now() - MIN_DRIVER_AGE_MS)
                 .toISOString().slice(0, 10)}
               data-testid="quote-driver-dob"
-              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1] focus:border-transparent"
+              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary focus:border-transparent"
             />
           </div>
 
@@ -177,7 +168,7 @@ export default function InsuranceQuoteForm({ dealId, inventoryItemId, vehicle }:
               maxLength={500}
               rows={3}
               data-testid="quote-additional-info"
-              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1] focus:border-transparent resize-none"
+              className="w-full border border-[#D1D5DB] rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary focus:border-transparent resize-none"
             />
           </div>
 
@@ -189,7 +180,7 @@ export default function InsuranceQuoteForm({ dealId, inventoryItemId, vehicle }:
             type="submit"
             disabled={loading}
             data-testid="submit-quote-request-btn"
-            className="w-full flex items-center justify-center gap-2 py-3.5 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-3.5 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? (
               <><Loader2 size={14} className="animate-spin" /> Submitting…</>

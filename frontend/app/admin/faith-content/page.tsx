@@ -27,7 +27,7 @@ export default async function AdminFaithContentPage() {
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="admin-faith-content-page">
       <div className="flex items-center gap-3 mb-6">
-        <BookOpen size={22} className="text-[#0B5FD1]" />
+        <BookOpen size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Faith & Encouragement Content</h1>
         <Badge variant="secondary">System 25</Badge>
       </div>
@@ -44,8 +44,8 @@ export default async function AdminFaithContentPage() {
           { label: "Hope Page Sections", value: hopeCount, sub: "4 required sections", href: "/admin/faith-content/hope" },
         ].map(s => (
           <Link key={s.label} href={s.href} data-testid={`faith-stat-${s.label.toLowerCase().replace(/\s+/g, "-")}`}
-            className="bg-white border border-slate-200 rounded-xl p-5 text-center hover:border-[#0B5FD1]/30 transition-colors">
-            <p className="text-2xl font-bold text-[#0B5FD1]">{s.value}</p>
+            className="bg-white border border-slate-200 rounded-xl p-5 text-center hover:border-al-primary/30 transition-colors">
+            <p className="text-2xl font-bold text-al-primary">{s.value}</p>
             <p className="text-xs font-semibold text-slate-700 mt-0.5">{s.label}</p>
             {s.sub && <p className="text-xs text-slate-400 mt-0.5">{s.sub}</p>}
           </Link>

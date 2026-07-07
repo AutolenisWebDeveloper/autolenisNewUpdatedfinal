@@ -17,7 +17,7 @@ export default async function AdminMessagesPage() {
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-messages-page">
       <div className="flex items-center gap-3 mb-6">
-        <MessageSquare size={22} className="text-[#0B5FD1]" />
+        <MessageSquare size={22} className="text-al-primary" />
         <div>
           <h1 className="text-xl font-bold text-slate-900">Messages</h1>
           <p className="text-xs text-slate-400 mt-0.5">Buyer↔Admin threads · Feature 33</p>
@@ -41,7 +41,7 @@ export default async function AdminMessagesPage() {
                 key={t.id}
                 href={`/admin/messages/${t.id}`}
                 data-testid={`admin-thread-${t.id}`}
-                className="flex items-start justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-[#0B5FD1]/30 transition-colors"
+                className="flex items-start justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-al-primary/30 transition-colors"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ShieldCheck, AlertTriangle, Loader2, X } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 type OfacAction = "CLEAR" | "ESCALATE";
 
@@ -37,17 +38,11 @@ export default function OfacReviewActions({ prequalId, decision }: { prequalId: 
     if (!reason.trim()) { setError("A reason is required."); return; }
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/compliance/ofac/${prequalId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: open, reason: reason.trim() }),
-      });
-      const data = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok || !data.success) { setError(data.error?.message ?? "Action failed."); setLoading(false); return; }
+      await api.post(`/api/admin/compliance/ofac/${prequalId}`, { action: open, reason: reason.trim() });
       reset();
       router.refresh();
-    } catch {
-      setError("Network error — please try again."); setLoading(false);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Action failed.")); setLoading(false);
     }
   }
 

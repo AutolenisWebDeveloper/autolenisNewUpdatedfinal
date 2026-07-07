@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   initialNotifyNewAuction?: boolean;
@@ -26,19 +27,10 @@ export default function DealerSettingsClient({
     setError(null);
     setSaved(false);
     try {
-      const res = await fetch("/api/dealer/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notifyNewAuction, notifyOfferAccepted, notifyPickupReady }),
-      });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: { message?: string } };
-        setError(data.error?.message ?? "Failed to save settings.");
-        return;
-      }
+      await api.patch("/api/dealer/settings", { notifyNewAuction, notifyOfferAccepted, notifyPickupReady });
       setSaved(true);
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Network error. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -54,7 +46,7 @@ export default function DealerSettingsClient({
           type="checkbox"
           checked={notifyNewAuction}
           onChange={(e) => setNotifyNewAuction(e.target.checked)}
-          className="accent-[#0B5FD1] w-4 h-4"
+          className="accent-al-primary w-4 h-4"
           data-testid="toggle-notify-new-auction"
         />
       </label>
@@ -65,7 +57,7 @@ export default function DealerSettingsClient({
           type="checkbox"
           checked={notifyOfferAccepted}
           onChange={(e) => setNotifyOfferAccepted(e.target.checked)}
-          className="accent-[#0B5FD1] w-4 h-4"
+          className="accent-al-primary w-4 h-4"
           data-testid="toggle-notify-offer-accepted"
         />
       </label>
@@ -76,7 +68,7 @@ export default function DealerSettingsClient({
           type="checkbox"
           checked={notifyPickupReady}
           onChange={(e) => setNotifyPickupReady(e.target.checked)}
-          className="accent-[#0B5FD1] w-4 h-4"
+          className="accent-al-primary w-4 h-4"
           data-testid="toggle-notify-pickup-ready"
         />
       </label>
@@ -91,7 +83,7 @@ export default function DealerSettingsClient({
       <button
         type="submit"
         disabled={saving}
-        className="w-full bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"
+        className="w-full bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"
         data-testid="save-settings-btn"
       >
         {saving ? "Saving..." : "Save Settings"}

@@ -46,7 +46,7 @@ export default async function DealPaymentPage() {
             </div>
           </div>
 
-          <div className="border-t border-[#EFF6FF] pt-4 space-y-2 text-sm">
+          <div className="border-t border-al-primary-subtle pt-4 space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-[#4B5563]">AutoLenis Service Fee</span>
               <span className="font-semibold text-[#111827]">$0</span>
@@ -55,14 +55,14 @@ export default async function DealPaymentPage() {
               <span>$99 Auction Access Fee → refundable if no valuable offer</span>
               <span>Refundable</span>
             </div>
-            <div className="flex justify-between font-bold text-base border-t border-[#EFF6FF] pt-2">
+            <div className="flex justify-between font-bold text-base border-t border-al-primary-subtle pt-2">
               <span>Due to AutoLenis today</span>
               <span>$0.00</span>
             </div>
           </div>
 
           <p className="text-xs text-[#94A3B8] mt-4">
-            Want the full white-glove experience? <Link href="/buyer/billing" className="text-[#0B5FD1] hover:underline font-medium">Upgrade to Premium</Link>
+            Want the full white-glove experience? <Link href="/buyer/billing" className="text-al-primary hover:underline font-medium">Upgrade to Premium</Link>
           </p>
         </div>
 
@@ -79,7 +79,7 @@ export default async function DealPaymentPage() {
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="deal-payment-page">
       <h1 className="text-xl font-bold text-[#111827] mb-6 flex items-center gap-2">
-        <Sparkles size={18} className="text-[#0B5FD1]" /> AutoLenis Service Fee
+        <Sparkles size={18} className="text-al-primary" /> AutoLenis Service Fee
       </h1>
 
       <div className="bg-white border border-[#E5E7EB] rounded-xl p-6 mb-6">
@@ -92,9 +92,9 @@ export default async function DealPaymentPage() {
             <span>$99 Auction Access Fee already credited</span>
             <span>-${DEPOSIT_AMOUNT_CENTS / 100}</span>
           </div>
-          <div className="flex justify-between font-bold text-base border-t border-[#EFF6FF] pt-3">
+          <div className="flex justify-between font-bold text-base border-t border-al-primary-subtle pt-3">
             <span>Due today</span>
-            <span className="text-[#0B5FD1]">${netFeeCents / 100}</span>
+            <span className="text-al-primary">${netFeeCents / 100}</span>
           </div>
         </div>
         <p className="text-xs text-[#4B5563] mt-4 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md px-3 py-2 leading-relaxed">

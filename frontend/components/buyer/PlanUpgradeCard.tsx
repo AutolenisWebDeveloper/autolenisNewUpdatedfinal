@@ -5,6 +5,7 @@ import { Crown, CheckCircle2, Clock, AlertCircle, ArrowUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PREMIUM_FEE_REMAINING_CENTS, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 export type DepositStatus = "NOT_PAID" | "PENDING" | "PAID";
 
@@ -26,18 +27,10 @@ export default function PlanUpgradeCard({ plan, depositStatus, planUpgradedAt }:
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/buyer/plan/upgrade", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const json = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok) {
-        setError(json.error?.message ?? "Upgrade failed. Please try again.");
-      } else {
-        setUpgraded(true);
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      await api.post("/api/buyer/plan/upgrade");
+      setUpgraded(true);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Upgrade failed. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -62,18 +55,18 @@ export default function PlanUpgradeCard({ plan, depositStatus, planUpgradedAt }:
   return (
     <div
       data-testid="plan-upgrade-card"
-      className={`border rounded-xl p-5 ${isPremium ? "bg-gradient-to-br from-[#0B5FD1]/5 to-[#0B5FD1]/5 border-[#0B5FD1]/30" : "bg-white border-slate-200"}`}
+      className={`border rounded-xl p-5 ${isPremium ? "bg-gradient-to-br from-al-primary/5 to-al-primary/5 border-al-primary/30" : "bg-white border-slate-200"}`}
     >
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Crown size={18} className={isPremium ? "text-[#0B5FD1]" : "text-slate-400"} />
+          <Crown size={18} className={isPremium ? "text-al-primary" : "text-slate-400"} />
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Your Plan</p>
         </div>
         <Badge
           data-testid="plan-badge"
           variant={isPremium ? "default" : "secondary"}
-          className={`text-xs ${isPremium ? "bg-[#0B5FD1] text-white" : ""}`}
+          className={`text-xs ${isPremium ? "bg-al-primary text-white" : ""}`}
         >
           {isPremium ? "Premium" : "Standard"}
         </Badge>
@@ -97,7 +90,7 @@ export default function PlanUpgradeCard({ plan, depositStatus, planUpgradedAt }:
           {upgraded && (
             <div
               data-testid="upgrade-confirmation-msg"
-              className="flex items-start gap-2 mt-3 bg-[#0B5FD1]/8 border border-[#0B5FD1]/20 rounded-lg px-3 py-2.5 text-xs text-[#0B5FD1] leading-relaxed"
+              className="flex items-start gap-2 mt-3 bg-al-primary/8 border border-al-primary/20 rounded-lg px-3 py-2.5 text-xs text-al-primary leading-relaxed"
             >
               <CheckCircle2 size={13} className="shrink-0 mt-0.5" />
               <span>{CONFIRMATION_MSG}</span>
@@ -116,7 +109,7 @@ export default function PlanUpgradeCard({ plan, depositStatus, planUpgradedAt }:
             size="sm"
             onClick={handleUpgrade}
             disabled={loading}
-            className="bg-[#0B5FD1] hover:bg-[#380062] text-white gap-1.5 text-xs"
+            className="bg-al-primary hover:bg-[#380062] text-white gap-1.5 text-xs"
           >
             <ArrowUp size={12} />
             {loading ? "Upgrading…" : "Upgrade to Premium — $499"}
@@ -132,7 +125,7 @@ export default function PlanUpgradeCard({ plan, depositStatus, planUpgradedAt }:
       {/* Deposit status */}
       <div
         data-testid="deposit-status-row"
-        className={`flex items-center justify-between mt-4 pt-3 border-t border-dashed ${isPremium ? "border-[#0B5FD1]/15" : "border-slate-200"}`}
+        className={`flex items-center justify-between mt-4 pt-3 border-t border-dashed ${isPremium ? "border-al-primary/15" : "border-slate-200"}`}
       >
         <div className="flex items-center gap-1.5 text-xs text-slate-500">
           {depositStatus === "PAID" ? <CheckCircle2 size={12} className="text-green-500" /> : <Clock size={12} />}

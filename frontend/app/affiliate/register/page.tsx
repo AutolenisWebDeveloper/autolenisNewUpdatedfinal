@@ -157,7 +157,7 @@ export default function AffiliateRegisterPage() {
           <p className="text-[#4B5563] text-sm leading-relaxed mb-2">We sent a verification link to</p>
           <p className="text-[#111827] font-semibold text-sm mb-5" data-testid="affiliate-submitted-email">{submittedEmail}</p>
           <p className="text-[#4B5563] text-sm leading-relaxed">Click the link to verify your account. Once our team reviews your application (typically within 2 business days) we'll activate your referral code and email you a link to your affiliate dashboard.</p>
-          <Link href="/affiliate/signin" className="mt-8 inline-block text-sm text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors font-semibold" data-testid="success-signin-link">← Back to sign in</Link>
+          <Link href="/affiliate/signin" className="mt-8 inline-block text-sm text-al-primary hover:text-al-primary-hover transition-colors font-semibold" data-testid="success-signin-link">← Back to sign in</Link>
         </div>
       </div>
     );
@@ -167,7 +167,7 @@ export default function AffiliateRegisterPage() {
     <div className="min-h-screen flex bg-white" data-testid="affiliate-register-page">
       {/* Left panel — Commission tree visual on branded purple hero */}
       <div className="hidden lg:flex lg:w-[48%] relative flex-col justify-between p-14 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#0B5FD1] via-[#0A4DB8] to-[#2667BF]" />
+        <div className="absolute inset-0 bg-gradient-to-br from-al-primary via-al-primary-hover to-[#2667BF]" />
         <div className="absolute inset-0 opacity-10 bg-[repeating-linear-gradient(45deg,_#ffffff10_0px,_#ffffff10_1px,_transparent_1px,_transparent_40px)]" />
 
         <div className="relative">
@@ -235,7 +235,7 @@ export default function AffiliateRegisterPage() {
           {emailExists && (
             <div className="mb-5 p-3 rounded-md border border-amber-200 bg-amber-50 text-sm text-amber-900" data-testid="affiliate-email-exists-error">
               An account with this email already exists.{" "}
-              <Link href="/affiliate/signin" className="font-semibold text-[#0B5FD1] hover:underline" data-testid="existing-account-signin-link">Sign in instead →</Link>
+              <Link href="/affiliate/signin" className="font-semibold text-al-primary hover:underline" data-testid="existing-account-signin-link">Sign in instead →</Link>
             </div>
           )}
           {serverError && (
@@ -249,14 +249,14 @@ export default function AffiliateRegisterPage() {
               <div>
                 <label className="block text-xs font-bold text-[#4B5563] uppercase tracking-wider mb-2">First name</label>
                 <input type="text" data-testid="reg-first-input" required
-                  className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors ${errors.firstName ? "border-red-400" : "border-[#E5E7EB]"}`}
+                  className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors ${errors.firstName ? "border-red-400" : "border-[#E5E7EB]"}`}
                   value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
                 {errors.firstName && <p className="text-[10px] text-red-500 mt-1">{errors.firstName}</p>}
               </div>
               <div>
                 <label className="block text-xs font-bold text-[#4B5563] uppercase tracking-wider mb-2">Last name</label>
                 <input type="text" data-testid="reg-last-input" required
-                  className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors ${errors.lastName ? "border-red-400" : "border-[#E5E7EB]"}`}
+                  className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors ${errors.lastName ? "border-red-400" : "border-[#E5E7EB]"}`}
                   value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
                 {errors.lastName && <p className="text-[10px] text-red-500 mt-1">{errors.lastName}</p>}
               </div>
@@ -264,14 +264,14 @@ export default function AffiliateRegisterPage() {
             <div>
               <label className="block text-xs font-bold text-[#4B5563] uppercase tracking-wider mb-2">Email</label>
               <input type="email" data-testid="reg-email-input" required autoComplete="email"
-                className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors ${errors.email ? "border-red-400" : "border-[#E5E7EB]"}`}
+                className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors ${errors.email ? "border-red-400" : "border-[#E5E7EB]"}`}
                 placeholder="you@example.com" value={form.email} onChange={(e) => { setForm({ ...form, email: e.target.value }); setEmailExists(false); }} />
               {errors.email && <p className="text-[10px] text-red-500 mt-1">{errors.email}</p>}
             </div>
             <div>
               <label className="block text-xs font-bold text-[#4B5563] uppercase tracking-wider mb-2">Password</label>
               <input type="password" data-testid="reg-password-input" required autoComplete="new-password"
-                className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors ${errors.password ? "border-red-400" : "border-[#E5E7EB]"}`}
+                className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors ${errors.password ? "border-red-400" : "border-[#E5E7EB]"}`}
                 placeholder="Min. 8 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
               <PasswordStrength password={form.password} />
               {errors.password && <p className="text-[10px] text-red-500 mt-1">{errors.password}</p>}
@@ -279,20 +279,20 @@ export default function AffiliateRegisterPage() {
             <div>
               <label className="block text-xs font-bold text-[#4B5563] uppercase tracking-wider mb-2">Confirm password</label>
               <input type="password" data-testid="reg-confirm-password-input" required autoComplete="new-password"
-                className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors ${errors.confirmPassword ? "border-red-400" : "border-[#E5E7EB]"}`}
+                className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors ${errors.confirmPassword ? "border-red-400" : "border-[#E5E7EB]"}`}
                 placeholder="Re-enter password" value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} />
               {errors.confirmPassword && <p className="text-[10px] text-red-500 mt-1">{errors.confirmPassword}</p>}
             </div>
             <div>
               <label className="block text-xs font-bold text-[#4B5563] uppercase tracking-wider mb-2">Website or social <span className="text-[#94A3B8] normal-case font-normal">(optional)</span></label>
               <input type="url" data-testid="reg-website-input"
-                className="w-full px-3.5 py-2.5 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors"
+                className="w-full px-3.5 py-2.5 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors"
                 placeholder="https://yourblog.com" value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} />
             </div>
             <div>
               <label className="block text-xs font-bold text-[#4B5563] uppercase tracking-wider mb-2">Primary promotion method</label>
               <select data-testid="reg-promotion-method-select" required
-                className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-sm focus:outline-none focus:border-[#0B5FD1]/50 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors ${errors.promotionMethod ? "border-red-400 text-[#94A3B8]" : "border-[#E5E7EB] text-[#4B5563]"}`}
+                className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-sm focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors ${errors.promotionMethod ? "border-red-400 text-[#94A3B8]" : "border-[#E5E7EB] text-[#4B5563]"}`}
                 value={form.promotionMethod} onChange={(e) => setForm({ ...form, promotionMethod: e.target.value })}>
                 <option value="">Select a method…</option>
                 {PROMOTION_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -302,7 +302,7 @@ export default function AffiliateRegisterPage() {
             <div>
               <label className="flex items-start gap-3 cursor-pointer" data-testid="ftc-disclosure-label">
                 <input type="checkbox" data-testid="ftc-disclosure-checkbox"
-                  className="mt-0.5 w-4 h-4 rounded border-[#DBEAFE] accent-[#0B5FD1] shrink-0"
+                  className="mt-0.5 w-4 h-4 rounded border-[#DBEAFE] accent-al-primary shrink-0"
                   checked={form.ftcDisclosure} onChange={(e) => setForm({ ...form, ftcDisclosure: e.target.checked })} />
                 <span className="text-xs text-[#4B5563] leading-relaxed">I understand FTC requirements to clearly disclose my affiliate relationship in all promotional content. I will not misrepresent the product.</span>
               </label>
@@ -311,20 +311,20 @@ export default function AffiliateRegisterPage() {
             <div>
               <label className="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" data-testid="terms-agreed-checkbox"
-                  className="mt-0.5 w-4 h-4 rounded border-[#DBEAFE] accent-[#0B5FD1] shrink-0"
+                  className="mt-0.5 w-4 h-4 rounded border-[#DBEAFE] accent-al-primary shrink-0"
                   checked={form.termsAgreed} onChange={(e) => setForm({ ...form, termsAgreed: e.target.checked })} />
                 <span className="text-xs text-[#4B5563] leading-relaxed">
-                  I agree to the <Link href="/legal/affiliate-terms" className="text-[#0B5FD1] hover:text-[#0A4DB8] underline">Affiliate Terms</Link> and <Link href="/legal/privacy" className="text-[#0B5FD1] hover:text-[#0A4DB8] underline">Privacy Policy</Link>.
+                  I agree to the <Link href="/legal/affiliate-terms" className="text-al-primary hover:text-al-primary-hover underline">Affiliate Terms</Link> and <Link href="/legal/privacy" className="text-al-primary hover:text-al-primary-hover underline">Privacy Policy</Link>.
                 </span>
               </label>
               {errors.termsAgreed && <p className="text-[10px] text-red-500 mt-1">{errors.termsAgreed}</p>}
             </div>
-            <button type="submit" className="w-full py-3.5 bg-[#0B5FD1] text-white font-bold text-sm rounded-md hover:bg-[#0A4DB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-[#0B5FD1]/20 mt-2" disabled={loading} data-testid="affiliate-register-submit-btn">
+            <button type="submit" className="w-full py-3.5 bg-al-primary text-white font-bold text-sm rounded-md hover:bg-al-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-al-primary/20 mt-2" disabled={loading} data-testid="affiliate-register-submit-btn">
               {loading ? "Creating account…" : "Apply to Join"}
             </button>
           </form>
           <p className="text-center text-xs text-[#94A3B8] mt-6">
-            Already an affiliate? <Link href="/affiliate/signin" className="text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors font-medium" data-testid="affiliate-signin-link">Sign in →</Link>
+            Already an affiliate? <Link href="/affiliate/signin" className="text-al-primary hover:text-al-primary-hover transition-colors font-medium" data-testid="affiliate-signin-link">Sign in →</Link>
           </p>
         </div>
       </div>

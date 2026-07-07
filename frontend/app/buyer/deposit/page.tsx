@@ -9,6 +9,7 @@ import { Shield, ArrowRight, Sparkles } from "lucide-react";
 import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 
 import PreIntelligencePanel from "@/components/buyer/PreIntelligencePanel";
+import { api } from "@/lib/api/client";
 
 // Inline Stripe checkout — NOT a redirect to Stripe URL
 const STRIPE_PK = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
@@ -63,10 +64,9 @@ export default function DepositPage() {
 
   useEffect(() => {
     // Fetch buyer's plan + create payment intent in parallel
-    fetch("/api/buyer/profile")
-      .then(r => r.json())
-      .then((d: { success: boolean; data?: { plan?: string } }) => {
-        if (d.success && d.data?.plan === "PREMIUM") setPlan("PREMIUM");
+    api.get<{ plan?: string }>("/api/buyer/profile")
+      .then(data => {
+        if (data?.plan === "PREMIUM") setPlan("PREMIUM");
       })
       .catch(() => { /* default to STANDARD */ });
 
@@ -120,7 +120,7 @@ export default function DepositPage() {
         }`}
       >
         {isPremium ? (
-          <Sparkles size={16} className="text-[#0B5FD1] shrink-0" />
+          <Sparkles size={16} className="text-al-primary shrink-0" />
         ) : (
           <Shield size={16} className="text-[#50D14E] shrink-0" />
         )}

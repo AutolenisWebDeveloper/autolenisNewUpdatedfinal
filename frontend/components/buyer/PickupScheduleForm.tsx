@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Calendar, MapPin, Loader2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 export default function PickupScheduleForm({ dealId }: { dealId: string }) {
   const router = useRouter();
@@ -20,19 +21,10 @@ export default function PickupScheduleForm({ dealId }: { dealId: string }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/buyer/pickup/${dealId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scheduledAt, location, notes: notes.trim() || undefined }),
-      });
-      const data = await res.json() as { success: boolean; error?: { message: string } };
-      if (!data.success) {
-        setError(data.error?.message ?? "Scheduling failed. Please try again.");
-      } else {
-        router.refresh();
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      await api.post(`/api/buyer/pickup/${dealId}`, { scheduledAt, location, notes: notes.trim() || undefined });
+      router.refresh();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Scheduling failed. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -51,7 +43,7 @@ export default function PickupScheduleForm({ dealId }: { dealId: string }) {
           onChange={e => setScheduledAt(e.target.value)}
           required
           data-testid="pickup-datetime-input"
-          className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1] focus:border-transparent"
+          className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary focus:border-transparent"
         />
       </div>
       <div>
@@ -66,7 +58,7 @@ export default function PickupScheduleForm({ dealId }: { dealId: string }) {
           required
           minLength={5}
           data-testid="pickup-location-input"
-          className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1] focus:border-transparent"
+          className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary focus:border-transparent"
         />
       </div>
       <div>
@@ -78,7 +70,7 @@ export default function PickupScheduleForm({ dealId }: { dealId: string }) {
           rows={2}
           placeholder="Any special instructions or questions…"
           data-testid="pickup-notes-input"
-          className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1] focus:border-transparent resize-none"
+          className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary focus:border-transparent resize-none"
         />
       </div>
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -86,7 +78,7 @@ export default function PickupScheduleForm({ dealId }: { dealId: string }) {
         type="submit"
         disabled={loading || !scheduledAt || !location}
         data-testid="submit-pickup-btn"
-        className="w-full flex items-center justify-center gap-2 py-4 bg-[#0B5FD1] text-white font-semibold rounded-xl hover:bg-[#0A4DB8] disabled:opacity-60 disabled:cursor-not-allowed transition-colors text-sm"
+        className="w-full flex items-center justify-center gap-2 py-4 bg-al-primary text-white font-semibold rounded-xl hover:bg-al-primary-hover disabled:opacity-60 disabled:cursor-not-allowed transition-colors text-sm"
       >
         {loading ? <><Loader2 size={15} className="animate-spin" /> Scheduling…</> : "Confirm Pickup Time"}
       </button>

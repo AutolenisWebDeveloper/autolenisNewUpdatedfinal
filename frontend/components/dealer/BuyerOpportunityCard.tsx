@@ -42,17 +42,17 @@ export default function BuyerOpportunityCard({
     >
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#0B5FD1]">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-al-primary">
           <Users className="h-5 w-5 text-white" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-[15px] font-extrabold leading-tight text-[#111827]">
             New Buyer Opportunity
           </p>
-          <p className="text-xs font-semibold text-[#0B5FD1]">Just received</p>
+          <p className="text-xs font-semibold text-al-primary">Just received</p>
         </div>
         <span
-          className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#0B5FD1] motion-safe:animate-pulse"
+          className="h-2.5 w-2.5 shrink-0 rounded-full bg-al-primary motion-safe:animate-pulse"
           aria-hidden="true"
         />
       </div>
@@ -65,7 +65,7 @@ export default function BuyerOpportunityCard({
         <p className="mt-0.5 text-sm font-medium text-[#4B5563]">{trim}</p>
         <div className="mt-3 border-t border-slate-100 pt-3">
           <p className="text-sm font-medium text-[#4B5563]">Budget Range</p>
-          <p className="text-xl font-extrabold text-[#0B5FD1]">{budgetRange}</p>
+          <p className="text-xl font-extrabold text-al-primary">{budgetRange}</p>
         </div>
       </div>
 
@@ -91,16 +91,16 @@ export default function BuyerOpportunityCard({
 
       {/* Verify strip */}
       <div className="mx-5 mb-4 flex items-center gap-3 rounded-xl bg-[#EEF4FF] px-4 py-3">
-        <ShieldCheck className="h-5 w-5 shrink-0 text-[#0B5FD1]" aria-hidden="true" />
+        <ShieldCheck className="h-5 w-5 shrink-0 text-al-primary" aria-hidden="true" />
         <p className="text-[13px] leading-tight">
-          <span className="font-bold text-[#0B5FD1]">Pre-Qualified Buyer</span>
-          <span className="text-[#0B5FD1]"> — Verified · Serious · Actively Shopping</span>
+          <span className="font-bold text-al-primary">Pre-Qualified Buyer</span>
+          <span className="text-al-primary"> — Verified · Serious · Actively Shopping</span>
         </p>
       </div>
 
       {/* CTA */}
       <div className="px-5 pb-5">
-        <span className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0B5FD1] px-4 py-3.5 text-[15px] font-bold text-white shadow-[0_10px_24px_rgba(11,95,209,0.28)]">
+        <span className="flex w-full items-center justify-center gap-2 rounded-xl bg-al-primary px-4 py-3.5 text-[15px] font-bold text-white shadow-[0_10px_24px_rgba(11,95,209,0.28)]">
           Submit Your Best Offer
           <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
         </span>
@@ -127,7 +127,7 @@ function Row({
       }`}
     >
       <dt className="flex items-center gap-2.5 text-[#4B5563]">
-        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#EEF4FF] text-[#0B5FD1]">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#EEF4FF] text-al-primary">
           {icon}
         </span>
         {label}

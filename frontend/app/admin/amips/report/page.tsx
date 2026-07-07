@@ -25,7 +25,7 @@ export default async function AmipsReportPage() {
       <div className="max-w-[850px] mx-auto">
         {/* Toolbar (screen only) */}
         <div className="flex items-center justify-between mb-5 print:hidden">
-          <Link href="/admin/amips" className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-[#0B5FD1] transition-colors">
+          <Link href="/admin/amips" className="inline-flex items-center gap-1 text-xs font-semibold text-[#64748B] hover:text-al-primary transition-colors">
             <ChevronLeft size={14} /> Back to Intelligence Center
           </Link>
           <PrintButton />
@@ -33,8 +33,8 @@ export default async function AmipsReportPage() {
 
         {/* Report sheet */}
         <div className="bg-white border border-[#E5E7EB] print:border-0 rounded-2xl print:rounded-none shadow-sm print:shadow-none p-8 md:p-10">
-          <header className="border-b-2 border-[#0B5FD1] pb-5 mb-6">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-[#0B5FD1]">AutoLenis · Automotive Market Intelligence</p>
+          <header className="border-b-2 border-al-primary pb-5 mb-6">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-al-primary">AutoLenis · Automotive Market Intelligence</p>
             <h1 className="text-2xl font-bold text-[#111827] mt-1">Executive Market Intelligence Report</h1>
             <p className="text-sm text-[#6B7280] mt-1">{today} · Confidential — internal use</p>
           </header>
@@ -42,7 +42,7 @@ export default async function AmipsReportPage() {
           {/* Health + headline */}
           <div className="flex items-center gap-6 mb-6">
             <div className="text-center">
-              <p className="text-5xl font-bold text-[#0B5FD1] leading-none">{intel.health.score}</p>
+              <p className="text-5xl font-bold text-al-primary leading-none">{intel.health.score}</p>
               <p className="text-xs text-[#6B7280] mt-1">/ 100 · {intel.health.grade}</p>
             </div>
             <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-4">

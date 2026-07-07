@@ -153,7 +153,7 @@ export default async function PrequalPage() {
     }
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-[#F8F9FB] via-white to-[#EFF6FF]" data-testid="prequal-status-page">
+      <div className="min-h-screen bg-gradient-to-br from-[#F8F9FB] via-white to-al-primary-subtle" data-testid="prequal-status-page">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
           {/* ── Hero card ───────────────────────────────────────────────── */}
@@ -162,7 +162,7 @@ export default async function PrequalPage() {
             data-testid="prequal-hero-card"
           >
             {/* Gradient background */}
-            <div className="absolute inset-0 bg-gradient-to-br from-[#0B5FD1] via-[#0A4DB8] to-[#083FA0]" />
+            <div className="absolute inset-0 bg-gradient-to-br from-al-primary via-al-primary-hover to-[#083FA0]" />
             {/* Decorative circles */}
             <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full bg-white/5" />
             <div className="absolute -bottom-8 -left-8 w-48 h-48 rounded-full bg-white/5" />
@@ -253,8 +253,8 @@ export default async function PrequalPage() {
 
             {/* Prequal source */}
             <DetailCard
-              icon={<BadgeCheck size={18} className="text-[#0B5FD1]" />}
-              iconBg="bg-[#0B5FD1]/10"
+              icon={<BadgeCheck size={18} className="text-al-primary" />}
+              iconBg="bg-al-primary/10"
               label="Approval Source"
               value={source.label}
               sub={source.detail}
@@ -300,7 +300,7 @@ export default async function PrequalPage() {
             {budgetMath && (
               <ExpandableSection
                 title="How We Calculated Your Budget"
-                icon={<Calculator size={16} className="text-[#0B5FD1]" />}
+                icon={<Calculator size={16} className="text-al-primary" />}
                 testId="prequal-budget-calculation"
               >
                 <div className="space-y-1 text-sm" data-testid="prequal-budget-calculation-rows">
@@ -353,7 +353,7 @@ export default async function PrequalPage() {
             )}
             <ExpandableSection
               title="How Your Budget Works"
-              icon={<Banknote size={16} className="text-[#0B5FD1]" />}
+              icon={<Banknote size={16} className="text-al-primary" />}
               testId="prequal-how-budget-works"
             >
               <div className="space-y-3 text-sm text-slate-600 leading-relaxed">
@@ -440,12 +440,12 @@ export default async function PrequalPage() {
             data-testid="prequal-next-steps"
           >
             <div className="flex items-center gap-2 mb-5">
-              <ListChecks size={18} className="text-[#0B5FD1]" />
+              <ListChecks size={18} className="text-al-primary" />
               <h3 className="font-semibold text-slate-900">Your Buying Journey</h3>
             </div>
             <div className="space-y-3">
               <JourneyStep icon={<CheckCircle2 size={15} className="text-emerald-600" />} label="Pre-Qual complete" done />
-              <JourneyStep icon={<Car size={15} className="text-[#0B5FD1]" />} label="Search vehicles within your budget" current />
+              <JourneyStep icon={<Car size={15} className="text-al-primary" />} label="Search vehicles within your budget" current />
               <JourneyStep icon={<ListChecks size={15} className="text-slate-400" />} label="Build your shortlist" />
               <JourneyStep icon={<Banknote size={15} className="text-slate-400" />} label="Pay the Auction Access Fee" />
               <JourneyStep icon={<TrendingUp size={15} className="text-slate-400" />} label="Participate in auction" />
@@ -460,7 +460,7 @@ export default async function PrequalPage() {
             <Link
               href="/buyer/search"
               data-testid="prequal-search-vehicles-btn"
-              className="flex-1 flex items-center justify-center gap-2 bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white font-semibold py-3.5 px-6 rounded-xl transition-colors text-sm shadow-md shadow-[#0B5FD1]/20"
+              className="flex-1 flex items-center justify-center gap-2 bg-al-primary hover:bg-al-primary-hover text-white font-semibold py-3.5 px-6 rounded-xl transition-colors text-sm shadow-md shadow-al-primary/20"
             >
               Browse Vehicles Within My Budget
               <ArrowRight size={16} />
@@ -557,7 +557,7 @@ function CalcRow({
         {label}
       </span>
       <span
-        className={`tabular-nums shrink-0 ${emphasize ? "font-bold text-[#0B5FD1]" : muted ? "text-slate-400" : "text-slate-700"}`}
+        className={`tabular-nums shrink-0 ${emphasize ? "font-bold text-al-primary" : muted ? "text-slate-400" : "text-slate-700"}`}
       >
         {value}
       </span>
@@ -577,15 +577,15 @@ function JourneyStep({
   current?: boolean;
 }) {
   return (
-    <div className={`flex items-center gap-3 py-2 px-3 rounded-lg ${current ? "bg-[#0B5FD1]/5 border border-[#0B5FD1]/15" : ""}`}>
+    <div className={`flex items-center gap-3 py-2 px-3 rounded-lg ${current ? "bg-al-primary/5 border border-al-primary/15" : ""}`}>
       <span className="shrink-0">{icon}</span>
       <span
-        className={`text-sm ${done ? "text-emerald-700 font-medium" : current ? "text-[#0B5FD1] font-semibold" : "text-slate-400"}`}
+        className={`text-sm ${done ? "text-emerald-700 font-medium" : current ? "text-al-primary font-semibold" : "text-slate-400"}`}
       >
         {label}
       </span>
       {done && <CheckCircle2 size={13} className="text-emerald-500 ml-auto shrink-0" />}
-      {current && <ChevronRight size={13} className="text-[#0B5FD1] ml-auto shrink-0" />}
+      {current && <ChevronRight size={13} className="text-al-primary ml-auto shrink-0" />}
     </div>
   );
 }

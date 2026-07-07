@@ -38,7 +38,7 @@ export default async function AffiliateResourcesPage() {
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="affiliate-resources-page">
       <div className="flex items-center gap-3 mb-2">
-        <FileText size={22} className="text-[#0B5FD1]" />
+        <FileText size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Marketing Resources</h1>
       </div>
       <p className="text-sm text-slate-500 mb-8">
@@ -56,8 +56,8 @@ export default async function AffiliateResourcesPage() {
               return (
                 <div key={asset.id} data-testid={`asset-item-${asset.id}`}
                   className="flex items-center gap-4 bg-white border border-slate-200 rounded-xl px-5 py-4">
-                  <div className="p-2 bg-[#0B5FD1]/8 rounded-lg shrink-0">
-                    <Icon size={16} className="text-[#0B5FD1]" />
+                  <div className="p-2 bg-al-primary/8 rounded-lg shrink-0">
+                    <Icon size={16} className="text-al-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-slate-800">{asset.label}</p>
@@ -67,7 +67,7 @@ export default async function AffiliateResourcesPage() {
                     href={`/affiliate-assets/${asset.filename}`}
                     download={asset.filename}
                     data-testid={`download-btn-${asset.id}`}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#0B5FD1]/10 text-[#0B5FD1] hover:bg-[#0B5FD1]/20 transition-colors shrink-0"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-al-primary/10 text-al-primary hover:bg-al-primary/20 transition-colors shrink-0"
                   >
                     <Download size={12} />Download
                   </a>

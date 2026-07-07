@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Send } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   threadId: string;
@@ -22,23 +23,11 @@ export default function AdminMessageReply({ threadId }: Props) {
     setError(null);
 
     try {
-      const res = await fetch(`/api/admin/messages/${threadId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: content.trim() }),
-      });
-      const json = (await res.json()) as {
-        success?: boolean;
-        error?: { message: string };
-      };
-      if (!res.ok || !json.success) {
-        setError(json.error?.message ?? "Failed to send reply. Please try again.");
-        return;
-      }
+      await api.post(`/api/admin/messages/${threadId}`, { content: content.trim() });
       setContent("");
       router.refresh();
-    } catch {
-      setError("An unexpected error occurred. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to send reply. Please try again."));
     } finally {
       setSubmitting(false);
     }
@@ -59,7 +48,7 @@ export default function AdminMessageReply({ threadId }: Props) {
         placeholder="Type your reply to the buyer…"
         rows={3}
         maxLength={4000}
-        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]"
+        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
         data-testid="admin-reply-textarea"
       />
       {error && (
@@ -71,7 +60,7 @@ export default function AdminMessageReply({ threadId }: Props) {
         <button
           type="submit"
           disabled={submitting || !content.trim()}
-          className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-[#0B5FD1] text-white rounded-lg text-xs font-semibold hover:bg-[#0B5FD1] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-al-primary text-white rounded-lg text-xs font-semibold hover:bg-al-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           data-testid="admin-reply-submit-btn"
         >
           <Send size={12} />

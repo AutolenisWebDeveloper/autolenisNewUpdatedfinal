@@ -11,6 +11,7 @@ import {
   ClipboardList, UserPlus,
 } from "lucide-react";
 import type { AdminDealerKpis } from "@/lib/services/admin/admin-dealer-command-center.service";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -128,19 +129,10 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
     setError(null);
     try {
       const qs = new URLSearchParams(params).toString();
-      const res = await fetch("/api/admin/dealers?" + qs);
-      if (!res.ok) {
-        let errMsg = "Failed to load dealers";
-        try {
-          const errData = await res.json() as { error?: { message: string } };
-          if (errData.error?.message) errMsg = errData.error.message;
-        } catch { /* ignore */ }
-        throw new Error(errMsg);
-      }
-      const data = await res.json() as { data?: { dealers: DealerListRow[]; total: number } };
-      if (data.data) { setDealers(data.data.dealers); setTotal(data.data.total); }
+      const data = await api.get<{ dealers: DealerListRow[]; total: number }>("/api/admin/dealers?" + qs);
+      setDealers(data.dealers); setTotal(data.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load dealers");
+      setError(apiErrorMessage(err, "Failed to load dealers"));
     } finally {
       setLoading(false);
     }
@@ -199,16 +191,12 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
         terminate: `${actionModal.dealerName} terminated`,
         note: `Note added to ${actionModal.dealerName}`,
       };
-      const res = await fetch(endpointMap[actionModal.type], {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bodyMap[actionModal.type]),
-      });
-      if (res.ok) {
+      try {
+        await api.post(endpointMap[actionModal.type], bodyMap[actionModal.type]);
         showToast(successMap[actionModal.type]);
         applyFilters();
-      } else {
-        const d = await res.json() as { error?: { message: string } };
-        showToast(d.error?.message ?? "Action failed", "error");
+      } catch (err) {
+        showToast(apiErrorMessage(err, "Action failed"), "error");
       }
     } finally {
       setActionLoading(false);
@@ -264,7 +252,7 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
                 <button
                   type="submit"
                   disabled={actionLoading || (modalConfig[actionModal.type].requireReason && !actionInput.trim())}
-                  className={"flex-1 rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (modalConfig[actionModal.type].destructive ? "bg-red-600 hover:bg-red-700" : "bg-[#0B5FD1] hover:bg-purple-800")}
+                  className={"flex-1 rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (modalConfig[actionModal.type].destructive ? "bg-red-600 hover:bg-red-700" : "bg-al-primary hover:bg-purple-800")}
                 >
                   {actionLoading ? "Processing…" : modalConfig[actionModal.type].submitLabel}
                 </button>
@@ -277,7 +265,7 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
       {/* Header */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[#0B5FD1] flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-al-primary flex items-center justify-center">
             <Users size={18} className="text-white" />
           </div>
           <div>
@@ -302,7 +290,7 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
           <Link
             href="/admin/dealers/invite"
             data-testid="admin-dealers-invite-link"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white rounded-lg text-xs font-semibold transition-colors"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-al-primary hover:bg-al-primary-hover text-white rounded-lg text-xs font-semibold transition-colors"
           >
             <UserPlus size={13} />
             Invite Dealer
@@ -348,7 +336,7 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
           <button
             onClick={() => applyFilters()}
             disabled={loading}
-            className="px-5 py-2.5 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+            className="px-5 py-2.5 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
           >
             {loading ? <RefreshCw size={14} className="animate-spin" /> : null}
             Search

@@ -95,7 +95,7 @@ export default function DealerClaimProspectPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-4">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-[#0B5FD1] to-[#0B3D8A] flex items-center justify-center">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-al-primary to-[#0B3D8A] flex items-center justify-center">
               <span className="text-white font-black text-sm">AL</span>
             </div>
             <span className="text-[#111827] font-bold text-lg">AutoLenis</span>
@@ -104,7 +104,7 @@ export default function DealerClaimProspectPage() {
         </div>
 
         <div className="bg-white border border-[#E5E7EB] rounded-2xl p-8 shadow-sm">
-          {loading && <p className="text-[#0B5FD1] text-sm text-center">Validating claim link...</p>}
+          {loading && <p className="text-al-primary text-sm text-center">Validating claim link...</p>}
 
           {!loading && loadError && (
             <div data-testid="claim-error" className="text-center">
@@ -113,7 +113,7 @@ export default function DealerClaimProspectPage() {
               <p className="text-red-600 text-sm">{loadError}</p>
               <p className="text-[#4B5563] text-sm mt-4">
                 You can still apply directly on our{" "}
-                <a href="/dealer-application" className="text-[#0B5FD1] font-medium hover:underline">
+                <a href="/dealer-application" className="text-al-primary font-medium hover:underline">
                   dealer application
                 </a>
                 .
@@ -123,7 +123,7 @@ export default function DealerClaimProspectPage() {
 
           {!loading && prefill && !success && (
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-lg p-4 mb-2">
+              <div className="bg-al-primary-subtle border border-[#BFDBFE] rounded-lg p-4 mb-2">
                 <p className="text-[#1D4ED8] text-sm">
                   <strong>Dealership:</strong> {prefill.dealershipName}
                 </p>
@@ -148,7 +148,7 @@ export default function DealerClaimProspectPage() {
                   onChange={(e) => setLicenseNumber(e.target.value)}
                   placeholder="Your state dealer license #"
                   required
-                  className="w-full bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg px-4 py-3 text-[#111827] placeholder-[#9CA3AF] text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 focus:border-[#0B5FD1]"
+                  className="w-full bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg px-4 py-3 text-[#111827] placeholder-[#9CA3AF] text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20 focus:border-al-primary"
                 />
               </div>
 
@@ -159,7 +159,7 @@ export default function DealerClaimProspectPage() {
                   value={contactName}
                   onChange={(e) => setContactName(e.target.value)}
                   placeholder="Your full name"
-                  className="w-full bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg px-4 py-3 text-[#111827] placeholder-[#9CA3AF] text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 focus:border-[#0B5FD1]"
+                  className="w-full bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg px-4 py-3 text-[#111827] placeholder-[#9CA3AF] text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20 focus:border-al-primary"
                 />
               </div>
 
@@ -171,7 +171,7 @@ export default function DealerClaimProspectPage() {
                   value={contactEmail}
                   onChange={(e) => setContactEmail(e.target.value)}
                   placeholder="you@dealership.com"
-                  className="w-full bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg px-4 py-3 text-[#111827] placeholder-[#9CA3AF] text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20 focus:border-[#0B5FD1]"
+                  className="w-full bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg px-4 py-3 text-[#111827] placeholder-[#9CA3AF] text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20 focus:border-al-primary"
                 />
               </div>
 
@@ -185,7 +185,7 @@ export default function DealerClaimProspectPage() {
                 data-testid="claim-submit"
                 type="submit"
                 disabled={submitting}
-                className="w-full bg-[#0B5FD1] hover:bg-[#0A4DB8] disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
+                className="w-full bg-al-primary hover:bg-al-primary-hover disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors text-sm"
               >
                 {submitting ? "Submitting..." : "Submit Application"}
               </button>

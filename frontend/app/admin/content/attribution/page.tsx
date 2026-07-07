@@ -177,7 +177,7 @@ export default async function ContentAttributionPage() {
         <a
           href="/api/admin/content/attribution/export"
           data-testid="attribution-export-csv"
-          className="inline-flex shrink-0 items-center gap-2 px-4 py-2.5 bg-white border border-[#E2E8F0] rounded-xl text-sm font-semibold text-[#0F172A] hover:border-[#0B5FD1] hover:text-[#0B5FD1] transition-colors shadow-sm"
+          className="inline-flex shrink-0 items-center gap-2 px-4 py-2.5 bg-white border border-[#E2E8F0] rounded-xl text-sm font-semibold text-[#0F172A] hover:border-al-primary hover:text-al-primary transition-colors shadow-sm"
         >
           <Download size={15} />
           Export CSV

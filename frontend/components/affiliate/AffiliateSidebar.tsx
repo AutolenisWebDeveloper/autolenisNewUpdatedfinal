@@ -42,14 +42,14 @@ function Inner({ pathname, onNavigate, unreadCount }: { pathname: string; onNavi
             <Link key={item.href} href={item.href} onClick={onNavigate}
               data-testid={`affiliate-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
               className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
-                active ? "bg-[#0B5FD1]/10 text-[#0B5FD1] font-semibold" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                active ? "bg-al-primary/10 text-al-primary font-semibold" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               }`}>
               <item.icon size={15} className="shrink-0" />
               <span className="flex-1">{item.label}</span>
               {showBadge && (
                 <span
                   data-testid="affiliate-sidebar-notification-badge"
-                  className="min-w-[18px] h-[18px] rounded-full bg-[#0B5FD1] text-white text-[10px] font-bold flex items-center justify-center px-1"
+                  className="min-w-[18px] h-[18px] rounded-full bg-al-primary text-white text-[10px] font-bold flex items-center justify-center px-1"
                 >
                   {unreadCount > 99 ? "99+" : unreadCount}
                 </span>
@@ -98,7 +98,7 @@ export default function AffiliateSidebar() {
           {unreadCount > 0 && (
             <Link href="/affiliate/portal/notifications" className="relative p-2" data-testid="affiliate-mobile-notification-bell">
               <Bell size={20} className="text-slate-600" />
-              <span className="absolute top-1 right-1 min-w-[16px] h-[16px] rounded-full bg-[#0B5FD1] text-white text-[9px] font-bold flex items-center justify-center px-0.5">
+              <span className="absolute top-1 right-1 min-w-[16px] h-[16px] rounded-full bg-al-primary text-white text-[9px] font-bold flex items-center justify-center px-0.5">
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>
             </Link>

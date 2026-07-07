@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, AlertTriangle } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   submissionId: string;
@@ -28,18 +29,12 @@ export function AdminPreApprovalActions({ submissionId, status }: Props) {
     if (!modal) return;
     setLoading(modal.action); setError(null);
     try {
-      const res = await fetch(`/api/admin/external-preapprovals/${submissionId}/${modal.action}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: reason.trim() }),
-      });
-      const data = await res.json() as { success?: boolean; error?: { message?: string } };
-      if (!res.ok) throw new Error(data?.error?.message ?? "Request failed");
+      await api.post(`/api/admin/external-preapprovals/${submissionId}/${modal.action}`, { reason: reason.trim() });
       setModal(null); setReason("");
       showToast(modal.action === "approve" ? "Pre-approval approved" : "Pre-approval rejected", "success");
       router.refresh();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed";
+      const msg = apiErrorMessage(e, "Request failed");
       setError(msg); showToast(msg, "error");
     } finally { setLoading(null); }
   }
@@ -61,7 +56,7 @@ export function AdminPreApprovalActions({ submissionId, status }: Props) {
             <h2 className="font-bold text-slate-900 mb-1">{modal.action === "approve" ? "Approve" : "Reject"} Pre-Approval</h2>
             <p className="text-sm text-slate-500 mb-4">Provide a reason (min 10 characters).</p>
             <textarea
-              className="w-full border border-slate-300 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+              className="w-full border border-slate-300 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-al-primary"
               rows={3}
               placeholder={modal.action === "approve" ? "e.g. Pre-approval documents verified and valid" : "e.g. Documentation does not meet requirements"}
               value={reason}

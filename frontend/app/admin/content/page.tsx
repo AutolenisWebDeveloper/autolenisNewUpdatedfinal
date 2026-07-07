@@ -71,7 +71,7 @@ export default async function AdminContentPage({ searchParams }: PageProps) {
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-content-page">
       <div className="flex items-center gap-3 mb-1">
-        <Newspaper size={22} className="text-[#0B5FD1]" />
+        <Newspaper size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Content Engine</h1>
         <Badge variant="secondary">Phase C3</Badge>
       </div>
@@ -87,7 +87,7 @@ export default async function AdminContentPage({ searchParams }: PageProps) {
             key={k.label}
             className="bg-white border border-[#E2E8F0] rounded-xl p-4 text-center"
           >
-            <p className="text-2xl font-bold text-[#0B5FD1]">{k.value}</p>
+            <p className="text-2xl font-bold text-al-primary">{k.value}</p>
             <p className="text-xs font-semibold text-slate-600 mt-0.5">{k.label}</p>
           </div>
         ))}
@@ -103,7 +103,7 @@ export default async function AdminContentPage({ searchParams }: PageProps) {
         </div>
         <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
           <div
-            className="h-full rounded-full bg-[#0B5FD1] transition-all"
+            className="h-full rounded-full bg-al-primary transition-all"
             style={{ width: `${stats.coveragePct}%` }}
           />
         </div>
@@ -173,7 +173,7 @@ export default async function AdminContentPage({ searchParams }: PageProps) {
                     <td className="px-4 py-3">
                       <Link
                         href={`/admin/content/${a.id}`}
-                        className="font-medium text-slate-800 hover:text-[#0B5FD1]"
+                        className="font-medium text-slate-800 hover:text-al-primary"
                       >
                         {a.title}
                       </Link>
@@ -293,7 +293,7 @@ function Pagination({
   return (
     <div className="flex items-center justify-center gap-4 mt-6" data-testid="content-pagination">
       {page > 1 ? (
-        <Link href={buildHref(page - 1)} className="text-sm text-[#0B5FD1] hover:underline">
+        <Link href={buildHref(page - 1)} className="text-sm text-al-primary hover:underline">
           ← Previous
         </Link>
       ) : (
@@ -303,7 +303,7 @@ function Pagination({
         Page {page} of {pageCount}
       </span>
       {page < pageCount ? (
-        <Link href={buildHref(page + 1)} className="text-sm text-[#0B5FD1] hover:underline">
+        <Link href={buildHref(page + 1)} className="text-sm text-al-primary hover:underline">
           Next →
         </Link>
       ) : (

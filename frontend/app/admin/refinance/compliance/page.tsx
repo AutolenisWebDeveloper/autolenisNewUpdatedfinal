@@ -25,7 +25,7 @@ export default async function AdminRefinanceCompliancePage() {
     <div className="p-6 md:p-10 max-w-3xl" data-testid="admin-refinance-compliance-page">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-[#111827] tracking-tight flex items-center gap-2">
-          <ShieldCheck size={22} className="text-[#0B5FD1]" /> Compliance Notes
+          <ShieldCheck size={22} className="text-al-primary" /> Compliance Notes
         </h1>
         <p className="text-sm text-[#4B5563] mt-1">
           How AutoLenis handles refinance lead referrals. Static reference for operations and audit.

@@ -31,9 +31,9 @@ export default async function DealerFinancingPage() {
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="dealer-financing-page">
       <div className="flex items-center gap-3 mb-6">
-        <CreditCard size={22} className="text-[#0B5FD1]" />
+        <CreditCard size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Finance Manager</h1>
-        <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-[#EFF6FF] text-[#0B5FD1]">
+        <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-al-primary-subtle text-al-primary">
           {financings.length} active
         </span>
       </div>
@@ -83,7 +83,7 @@ export default async function DealerFinancingPage() {
                         : "—"}
                     </td>
                     <td className="px-5 py-3">
-                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-[#EFF6FF] text-[#0B5FD1]">
+                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-al-primary-subtle text-al-primary">
                         {f.status}
                       </span>
                     </td>

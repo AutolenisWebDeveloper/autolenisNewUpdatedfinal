@@ -20,7 +20,7 @@ export default async function AdminActivityPage() {
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-activity-page">
       <div className="flex items-center gap-3 mb-6">
-        <Activity size={22} className="text-[#0B5FD1]" />
+        <Activity size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Platform Activity Feed</h1>
         <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse ml-1" />
         <span className="text-xs text-slate-400">Live</span>
@@ -36,7 +36,7 @@ export default async function AdminActivityPage() {
             <div key={event.id} data-testid={`activity-event-${event.id}`}
               className="flex items-start justify-between bg-white border border-slate-100 rounded-xl px-5 py-3.5">
               <div className="flex items-center gap-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#0B5FD1] mt-2 shrink-0" />
+                <div className="w-1.5 h-1.5 rounded-full bg-al-primary mt-2 shrink-0" />
                 <div>
                   {/* Plain language only — no internal event type labels */}
                   <p className="text-sm text-slate-800">{event.title}</p>

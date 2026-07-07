@@ -46,20 +46,20 @@ export default async function ReferralPage() {
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="referral-page">
       <div className="flex items-center gap-3 mb-6">
-        <Share2 size={22} className="text-[#0B5FD1]" />
+        <Share2 size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Referral Hub</h1>
       </div>
 
       {referralLink ? (
         <>
-          <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-xl p-5 mb-6">
+          <div className="bg-al-primary-subtle border border-[#BFDBFE] rounded-xl p-5 mb-6">
             <p className="text-sm font-semibold text-slate-800 mb-2">Your referral link</p>
             <ReferralLinkCopy referralLink={referralLink} />
           </div>
 
           <div className="grid grid-cols-2 gap-4 mb-6">
             <div className="bg-white border border-slate-200 rounded-xl p-5 text-center" data-testid="referral-stats-referrals">
-              <Users size={20} className="text-[#0B5FD1] mx-auto mb-2" />
+              <Users size={20} className="text-al-primary mx-auto mb-2" />
               <p className="text-2xl font-bold text-slate-900">{referralCount}</p>
               <p className="text-xs text-slate-400">Referred buyers</p>
             </div>

@@ -102,7 +102,7 @@ function Card({ icon, title, children }: { icon: React.ReactNode; title: string;
   return (
     <div className="bg-white rounded-2xl border border-[#E5E7EB] p-5">
       <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-100">
-        <span className="text-[#0B5FD1]">{icon}</span>
+        <span className="text-al-primary">{icon}</span>
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">{title}</p>
       </div>
       <div className="space-y-2 text-sm">{children}</div>
@@ -152,7 +152,7 @@ export default function VehicleRequestDetailClient({
     <div className="p-6 md:p-8 max-w-5xl pb-20" data-testid="vehicle-request-detail-page">
       <Link
         href="/admin/vehicle-requests"
-        className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#0B5FD1] mb-4"
+        className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-al-primary mb-4"
       >
         <ArrowLeft size={14} /> Back to Vehicle Requests
       </Link>
@@ -160,7 +160,7 @@ export default function VehicleRequestDetailClient({
       <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <ClipboardList size={20} className="text-[#0B5FD1]" />
+            <ClipboardList size={20} className="text-al-primary" />
             <h1 className="text-2xl font-bold text-slate-900">{fullName}</h1>
           </div>
           <p className="text-sm text-slate-500">Submitted: {new Date(submittedAt).toLocaleString()}</p>
@@ -187,14 +187,14 @@ export default function VehicleRequestDetailClient({
           <Link
             href={`/admin/vehicle-offers/new?fromRequest=${requestId}`}
             data-testid="create-offer-link-btn"
-            className="inline-flex items-center gap-2 bg-[#0B5FD1] text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-[#0944a8]"
+            className="inline-flex items-center gap-2 bg-al-primary text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-[#0944a8]"
           >
             Create Offer Link →
           </Link>
           <Link
             href={`/admin/vehicle-requests/${requestId}/send-to-dealers`}
             data-testid="send-to-dealers-btn"
-            className="inline-flex items-center gap-2 border border-[#0B5FD1] text-[#0B5FD1] rounded-lg px-4 py-2 text-sm font-semibold hover:bg-[#0B5FD1]/5"
+            className="inline-flex items-center gap-2 border border-al-primary text-al-primary rounded-lg px-4 py-2 text-sm font-semibold hover:bg-al-primary/5"
           >
             Send to Dealers →
           </Link>
@@ -204,8 +204,8 @@ export default function VehicleRequestDetailClient({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card icon={<Phone size={14} />} title="Buyer Contact">
           <Row label="Name" value={fullName} />
-          <Row label="Email" value={<a href={`mailto:${meta.email}`} className="text-[#0B5FD1] hover:underline">{meta.email}</a>} />
-          <Row label="Phone" value={<a href={`tel:${meta.phone}`} className="text-[#0B5FD1] hover:underline">{meta.phone}</a>} />
+          <Row label="Email" value={<a href={`mailto:${meta.email}`} className="text-al-primary hover:underline">{meta.email}</a>} />
+          <Row label="Phone" value={<a href={`tel:${meta.phone}`} className="text-al-primary hover:underline">{meta.phone}</a>} />
           <Row label="Location" value={`${meta.city ?? ""}${meta.city && meta.state ? ", " : ""}${meta.state ?? ""} ${meta.zip ?? ""}`.trim()} />
           <Row label="Preferred Contact" value={meta.contactMethod} />
           <Row label="Buying Timeline" value={meta.timeline} />
@@ -271,7 +271,7 @@ export default function VehicleRequestDetailClient({
                 <Row
                   label="Pre-Approval Letter"
                   value={
-                    <a href={meta.preApprovalFileUrl} target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline inline-flex items-center gap-1">
+                    <a href={meta.preApprovalFileUrl} target="_blank" rel="noopener noreferrer" className="text-al-primary hover:underline inline-flex items-center gap-1">
                       <ExternalLink size={11} /> View
                     </a>
                   }
@@ -313,13 +313,13 @@ export default function VehicleRequestDetailClient({
           <Card icon={<MapPin size={14} />} title="Quick Actions">
             <a
               href={`mailto:${meta.email}`}
-              className="block text-[#0B5FD1] hover:underline text-xs"
+              className="block text-al-primary hover:underline text-xs"
             >
               📧 Email {meta.email}
             </a>
             <a
               href={`tel:${meta.phone}`}
-              className="block text-[#0B5FD1] hover:underline text-xs"
+              className="block text-al-primary hover:underline text-xs"
             >
               📞 Call {meta.phone}
             </a>

@@ -10,7 +10,7 @@ export default async function AdminFaithVersesPage() {
   const verses = await prisma.verseLibrary.findMany({ orderBy: { book: "asc" }, take: 100 });
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-faith-verses-page">
-      <div className="flex items-center gap-3 mb-6"><BookOpen size={20} className="text-[#0B5FD1]" /><h1 className="text-xl font-bold text-slate-900">Verse Library — {verses.length} NKJV Verses</h1></div>
+      <div className="flex items-center gap-3 mb-6"><BookOpen size={20} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">Verse Library — {verses.length} NKJV Verses</h1></div>
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-700">NKJV translation ONLY. No other translations permitted.</div>
       <div className="space-y-2">
         {verses.slice(0, 20).map(v => (

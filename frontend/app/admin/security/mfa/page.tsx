@@ -165,7 +165,7 @@ export default function AdminMfaSecurityPage() {
     return (
       <div className={pageShell}>
         <div className="flex flex-col items-center justify-center h-48 gap-3">
-          <div className="w-8 h-8 border-2 border-[#0B5FD1] border-t-transparent rounded-full animate-spin" />
+          <div className="w-8 h-8 border-2 border-al-primary border-t-transparent rounded-full animate-spin" />
           <p className="text-xs text-[#94A3B8]">Loading MFA status…</p>
         </div>
       </div>
@@ -183,7 +183,7 @@ export default function AdminMfaSecurityPage() {
         <div className={card}>
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 rounded-xl bg-[#F3EAFF] flex items-center justify-center shrink-0">
-              <Shield size={18} className="text-[#0B5FD1]" />
+              <Shield size={18} className="text-al-primary" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-[#111827]">MFA Security</h1>
@@ -240,7 +240,7 @@ export default function AdminMfaSecurityPage() {
           </div>
 
           <div className="mt-6 text-center">
-            <Link href="/admin/dashboard" className="text-xs text-[#94A3B8] hover:text-[#0B5FD1] transition-colors">
+            <Link href="/admin/dashboard" className="text-xs text-[#94A3B8] hover:text-al-primary transition-colors">
               ← Back to Dashboard
             </Link>
           </div>
@@ -256,7 +256,7 @@ export default function AdminMfaSecurityPage() {
       <div className={pageShell} data-testid="admin-mfa-reset-scan-step">
         <div className={card}>
           <div className="flex items-center gap-3 mb-6">
-            <Shield size={20} className="text-[#0B5FD1]" />
+            <Shield size={20} className="text-al-primary" />
             <h2 className="text-xl font-bold text-[#111827]">Scan New QR Code</h2>
           </div>
           <p className="text-sm text-[#4B5563] mb-5">
@@ -275,7 +275,7 @@ export default function AdminMfaSecurityPage() {
               </code>
               <button
                 onClick={() => copyText(resetData.secret)}
-                className="text-[#94A3B8] hover:text-[#0B5FD1] transition-colors"
+                className="text-[#94A3B8] hover:text-al-primary transition-colors"
                 data-testid="copy-secret-btn"
               >
                 <Copy size={13} />
@@ -339,7 +339,7 @@ export default function AdminMfaSecurityPage() {
 
           <button
             onClick={() => copyText(resetData.recoveryCodes.join("\n"))}
-            className="flex items-center gap-1.5 text-xs text-[#0B5FD1] hover:underline mb-5"
+            className="flex items-center gap-1.5 text-xs text-al-primary hover:underline mb-5"
             data-testid="copy-all-codes-btn"
           >
             <Copy size={12} /> Copy all codes
@@ -351,7 +351,7 @@ export default function AdminMfaSecurityPage() {
               id="codes-saved"
               checked={codesSaved}
               onChange={e => setCodesSaved(e.target.checked)}
-              className="mt-0.5 accent-[#0B5FD1]"
+              className="mt-0.5 accent-al-primary"
               data-testid="codes-saved-checkbox"
             />
             <label htmlFor="codes-saved" className="text-sm text-amber-900">
@@ -429,7 +429,7 @@ export default function AdminMfaSecurityPage() {
 
           <button
             onClick={() => copyText(regenCodes.join("\n"))}
-            className="flex items-center gap-1.5 text-xs text-[#0B5FD1] hover:underline mb-5"
+            className="flex items-center gap-1.5 text-xs text-al-primary hover:underline mb-5"
             data-testid="copy-all-regen-codes-btn"
           >
             <Copy size={12} /> Copy all codes
@@ -441,7 +441,7 @@ export default function AdminMfaSecurityPage() {
               id="regen-saved"
               checked={regenSaved}
               onChange={e => setRegenSaved(e.target.checked)}
-              className="mt-0.5 accent-[#0B5FD1]"
+              className="mt-0.5 accent-al-primary"
               data-testid="regen-saved-checkbox"
             />
             <label htmlFor="regen-saved" className="text-sm text-amber-900">

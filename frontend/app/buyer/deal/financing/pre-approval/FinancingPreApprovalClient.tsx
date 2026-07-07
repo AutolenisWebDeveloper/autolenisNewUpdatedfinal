@@ -113,7 +113,7 @@ export default function FinancingPreApprovalClient({ data }: Props) {
     <div className="p-6 md:p-8 max-w-2xl" data-testid="financing-pre-approval-page">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <CreditCard size={22} className="text-[#0B5FD1]" />
+        <CreditCard size={22} className="text-al-primary" />
         <div>
           <h1 className="text-xl font-bold text-slate-900">Financing Pre-Approval</h1>
           <p className="text-sm text-slate-500">View your financing status and estimate monthly payments.</p>
@@ -125,7 +125,7 @@ export default function FinancingPreApprovalClient({ data }: Props) {
         <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="deal-financing-status">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
-              <BadgeCheck size={16} className="text-[#0B5FD1]" />
+              <BadgeCheck size={16} className="text-al-primary" />
               <h2 className="font-semibold text-slate-900 text-sm">Deal Financing</h2>
             </div>
             <Badge variant={STATUS_BADGE[financing.status]?.variant ?? "secondary"}>
@@ -167,7 +167,7 @@ export default function FinancingPreApprovalClient({ data }: Props) {
             {financing.monthlyPaymentCents !== null && (
               <div>
                 <dt className="text-xs text-slate-400 uppercase tracking-wider mb-0.5">Monthly Payment</dt>
-                <dd className="text-sm font-bold text-[#0B5FD1]">
+                <dd className="text-sm font-bold text-al-primary">
                   ${(financing.monthlyPaymentCents / 100).toLocaleString()}/mo
                 </dd>
               </div>
@@ -267,7 +267,7 @@ export default function FinancingPreApprovalClient({ data }: Props) {
                 className="bg-white border border-slate-200 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-2">
                   <p className="font-semibold text-slate-900 text-sm">{s.name}</p>
-                  <p className="text-[#0B5FD1] font-bold text-sm">
+                  <p className="text-al-primary font-bold text-sm">
                     ${(s.monthlyPaymentCents / 100).toLocaleString()}/mo
                   </p>
                 </div>
@@ -301,7 +301,7 @@ export default function FinancingPreApprovalClient({ data }: Props) {
       {/* Monthly Payment Calculator — always available as estimate tool */}
       <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="monthly-payment-calculator">
         <div className="flex items-center gap-2 mb-4">
-          <Calculator size={16} className="text-[#0B5FD1]" />
+          <Calculator size={16} className="text-al-primary" />
           <h2 className="font-semibold text-slate-900 text-sm">Monthly Payment Calculator</h2>
           <span className="text-xs text-slate-400 ml-auto">Estimate only</span>
         </div>
@@ -376,7 +376,7 @@ export default function FinancingPreApprovalClient({ data }: Props) {
         </Button>
 
         {calcResult && (
-          <div className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-lg p-4" data-testid="calc-result">
+          <div className="bg-al-primary/5 border border-al-primary/20 rounded-lg p-4" data-testid="calc-result">
             <div className="grid grid-cols-3 gap-3 text-center">
               <div>
                 <p className="text-xs text-slate-500 mb-1">Loan Amount</p>
@@ -384,9 +384,9 @@ export default function FinancingPreApprovalClient({ data }: Props) {
                   ${(calcResult.loan / 100).toLocaleString()}
                 </p>
               </div>
-              <div className="border-x border-[#0B5FD1]/20">
+              <div className="border-x border-al-primary/20">
                 <p className="text-xs text-slate-500 mb-1">Monthly</p>
-                <p className="text-base font-bold text-[#0B5FD1]" data-testid="calc-monthly">
+                <p className="text-base font-bold text-al-primary" data-testid="calc-monthly">
                   ${(calcResult.monthly / 100).toLocaleString()}
                 </p>
               </div>
@@ -406,7 +406,7 @@ export default function FinancingPreApprovalClient({ data }: Props) {
 
       {/* Link back to financing path */}
       <div className="mt-6 text-center">
-        <Link href="/buyer/deal/financing" className="text-sm text-[#0B5FD1] hover:underline flex items-center gap-1 justify-center">
+        <Link href="/buyer/deal/financing" className="text-sm text-al-primary hover:underline flex items-center gap-1 justify-center">
           Back to financing options <ArrowRight size={13} />
         </Link>
       </div>

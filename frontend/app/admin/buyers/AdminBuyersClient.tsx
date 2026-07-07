@@ -11,6 +11,7 @@ import {
   Archive, ArchiveRestore, Lock, Unlock, Trash2,
 } from "lucide-react";
 import type { AdminBuyerKpis } from "@/lib/services/admin/admin-buyer-command-center.service";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface BuyerRow {
   id: string;
@@ -163,7 +164,7 @@ function AddBuyerModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
           </select>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 transition-colors">{loading ? "Creating..." : "Create Buyer"}</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 transition-colors">{loading ? "Creating..." : "Create Buyer"}</button>
           </div>
         </form>
       </div>
@@ -211,19 +212,10 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
     setError(null);
     try {
       const qs = new URLSearchParams(params).toString();
-      const res = await fetch("/api/admin/buyers?" + qs);
-      if (!res.ok) {
-        let errMsg = "Failed to load buyers";
-        try {
-          const errData = await res.json() as { error?: { message: string } };
-          if (errData.error?.message) errMsg = errData.error.message;
-        } catch { /* ignore parse errors */ }
-        throw new Error(errMsg);
-      }
-      const data = await res.json() as { data?: { buyers: BuyerRow[]; total: number } };
-      if (data.data) { setBuyers(data.data.buyers); setTotal(data.data.total); }
+      const data = await api.get<{ buyers: BuyerRow[]; total: number }>("/api/admin/buyers?" + qs);
+      setBuyers(data.buyers); setTotal(data.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load buyers");
+      setError(apiErrorMessage(err, "Failed to load buyers"));
     } finally {
       setLoading(false);
     }
@@ -290,12 +282,12 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
         disable: `${actionModal.buyerName} access disabled`,
         reactivate: `${actionModal.buyerName} access reactivated`,
       };
-      const res = await fetch(endpointMap[actionModal.type], {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bodyMap[actionModal.type]),
-      });
-      if (res.ok) { showToast(successMap[actionModal.type]); applyFilters(); }
-      else { const d = await res.json() as { error?: { message: string } }; showToast(d.error?.message ?? "Action failed", "error"); }
+      try {
+        await api.post(endpointMap[actionModal.type], bodyMap[actionModal.type]);
+        showToast(successMap[actionModal.type]); applyFilters();
+      } catch (err) {
+        showToast(apiErrorMessage(err, "Action failed"), "error");
+      }
     } finally {
       setActionLoading(false);
       setActionModal(null);
@@ -406,7 +398,7 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
               />
               <div className="flex gap-3">
                 <button type="button" onClick={() => setActionModal(null)} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
-                <button type="submit" disabled={actionLoading || !actionInput.trim()} className={"flex-1 rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (modalConfig[actionModal.type].destructive ? "bg-red-600 hover:bg-red-700" : "bg-[#0B5FD1] hover:bg-purple-800")}>
+                <button type="submit" disabled={actionLoading || !actionInput.trim()} className={"flex-1 rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (modalConfig[actionModal.type].destructive ? "bg-red-600 hover:bg-red-700" : "bg-al-primary hover:bg-purple-800")}>
                   {actionLoading ? "Processing…" : modalConfig[actionModal.type].submitLabel}
                 </button>
               </div>
@@ -418,7 +410,7 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
       {/* Header */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-[#0B5FD1] flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-al-primary flex items-center justify-center">
             <Users size={18} className="text-white" />
           </div>
           <div>
@@ -428,7 +420,7 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
         </div>
         <button
           onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 bg-[#0B5FD1] hover:bg-purple-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-sm"
+          className="flex items-center gap-2 bg-al-primary hover:bg-purple-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-sm"
         >
           <UserPlus size={15} /> Create Buyer
         </button>
@@ -456,7 +448,7 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
               setSelected(new Set());
               applyFilters(tab.value);
             }}
-            className={"px-4 py-2 text-xs font-semibold rounded-lg transition-colors " + (lifecycleStatus === tab.value ? "bg-[#0B5FD1] text-white shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50")}
+            className={"px-4 py-2 text-xs font-semibold rounded-lg transition-colors " + (lifecycleStatus === tab.value ? "bg-al-primary text-white shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50")}
           >
             {tab.label}
           </button>
@@ -513,7 +505,7 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
           <button
             onClick={() => applyFilters()}
             disabled={loading}
-            className="px-5 py-2.5 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+            className="px-5 py-2.5 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
           >
             {loading ? <RefreshCw size={14} className="animate-spin" /> : null}
             Search

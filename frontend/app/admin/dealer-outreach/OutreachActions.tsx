@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mail, Eye, Loader2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface OutreachActionsProps {
   prospectId: string;
@@ -42,17 +43,14 @@ export default function OutreachActions({
     setPreviewOpen(true);
     setLoadingPreview(true);
     try {
-      const res = await fetch("/api/admin/dealer-outreach/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealerProspectId: prospectId }),
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error?.message ?? `Failed (${res.status})`);
-      setSubject(body?.data?.subject ?? "");
-      setBodyText(body?.data?.bodyText ?? "");
+      const data = await api.post<{ subject?: string; bodyText?: string }>(
+        "/api/admin/dealer-outreach/preview",
+        { dealerProspectId: prospectId },
+      );
+      setSubject(data?.subject ?? "");
+      setBodyText(data?.bodyText ?? "");
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Preview failed");
+      window.alert(apiErrorMessage(err, "Preview failed"));
       setPreviewOpen(false);
     } finally {
       setLoadingPreview(false);
@@ -71,17 +69,11 @@ export default function OutreachActions({
         payload.customSubject = subject.trim();
         payload.customBody = bodyText.trim();
       }
-      const res = await fetch("/api/admin/dealer-outreach/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error?.message ?? `Failed (${res.status})`);
+      await api.post("/api/admin/dealer-outreach/send", payload);
       setPreviewOpen(false);
       router.refresh();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Send failed");
+      window.alert(apiErrorMessage(err, "Send failed"));
     } finally {
       setBusy(false);
     }
@@ -106,7 +98,7 @@ export default function OutreachActions({
           onClick={openPreview}
           disabled={!hasEmail || busy}
           title={hasEmail ? "Preview email" : "No email captured"}
-          className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-[#0B5FD1] disabled:opacity-40"
+          className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-al-primary disabled:opacity-40"
         >
           <Eye size={12} />
           Preview
@@ -116,7 +108,7 @@ export default function OutreachActions({
             onClick={() => send({ followup: true })}
             disabled={!hasEmail || busy}
             title="Send a follow-up email"
-            className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-[#0B5FD1] disabled:opacity-40"
+            className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-al-primary disabled:opacity-40"
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
             Followup
@@ -126,7 +118,7 @@ export default function OutreachActions({
             onClick={() => send({})}
             disabled={!hasEmail || busy}
             title={hasEmail ? "Send outreach email" : "No email captured"}
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-[#0B5FD1] hover:underline disabled:opacity-40"
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-al-primary hover:underline disabled:opacity-40"
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
             Send
@@ -180,7 +172,7 @@ export default function OutreachActions({
                   <button
                     onClick={() => send({ useEdited: true, followup: alreadySent })}
                     disabled={busy}
-                    className="inline-flex items-center gap-2 rounded-md bg-[#0B5FD1] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
+                    className="inline-flex items-center gap-2 rounded-md bg-al-primary px-4 py-1.5 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
                   >
                     {busy && <Loader2 size={14} className="animate-spin" />}
                     Send Now

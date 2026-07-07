@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowRight, CheckCircle2, AlertTriangle, TrendingUp, Heart } from "lucide-react";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface VehicleDetailPanelProps {
   vehicleId: string;
@@ -30,17 +31,13 @@ export default function VehicleDetailPanel({
     if (!isAuthenticated) return;
     setAdding(true);
     setError(null);
-    const res = await fetch("/api/buyer/shortlist", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ inventoryItemId: vehicleId }),
-    });
-    setAdding(false);
-    if (res.ok) {
+    try {
+      await api.post("/api/buyer/shortlist", { inventoryItemId: vehicleId });
       setAdded(true);
-    } else {
-      const d = await res.json() as { error?: { message?: string } };
-      setError(d.error?.message ?? "Unable to add to shortlist");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Unable to add to shortlist"));
+    } finally {
+      setAdding(false);
     }
   }
 
@@ -67,7 +64,7 @@ export default function VehicleDetailPanel({
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden" data-testid="vehicle-action-panel">
       {/* Price */}
-      <div className="bg-[#0B5FD1] p-6 text-white">
+      <div className="bg-al-primary p-6 text-white">
         <p className="text-xs text-white/60 uppercase tracking-wider mb-1">Listed Price</p>
         <p className="text-4xl font-bold tracking-tight" data-testid="vehicle-price">
           ${(priceCents / 100).toLocaleString()}
@@ -130,7 +127,7 @@ export default function VehicleDetailPanel({
             </Button>
             <p className="text-xs text-slate-400 text-center">
               Already have an account?{" "}
-              <Link href="/auth/signin" className="text-[#0B5FD1] hover:underline">Sign in</Link>
+              <Link href="/auth/signin" className="text-al-primary hover:underline">Sign in</Link>
             </p>
           </>
         )}

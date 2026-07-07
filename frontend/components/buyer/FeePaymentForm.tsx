@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { Loader2, ArrowRight } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const STRIPE_PK = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
 const stripePromise = STRIPE_PK && !STRIPE_PK.includes("placeholder")
@@ -47,7 +48,7 @@ function CheckoutForm({ netFeeCents }: { netFeeCents: number }) {
         type="submit"
         disabled={!stripe || !elements || loading}
         data-testid="submit-fee-payment-btn"
-        className="w-full flex items-center justify-center gap-2 py-4 px-6 bg-[#0B5FD1] text-white font-semibold rounded-xl hover:bg-[#0A4DB8] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+        className="w-full flex items-center justify-center gap-2 py-4 px-6 bg-al-primary text-white font-semibold rounded-xl hover:bg-al-primary-hover disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
       >
         {loading ? (
           <><Loader2 size={15} className="animate-spin" /> Processing…</>
@@ -64,16 +65,15 @@ export default function FeePaymentForm({ dealId, netFeeCents }: Props) {
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/buyer/deals/${dealId}/fee/create-intent`, { method: "POST" })
-      .then(r => r.json())
-      .then((d: { success: boolean; data?: { clientSecret: string }; error?: { message: string } }) => {
-        if (d.success && d.data?.clientSecret) {
-          setClientSecret(d.data.clientSecret);
+    api.post<{ clientSecret: string }>(`/api/buyer/deals/${dealId}/fee/create-intent`)
+      .then(data => {
+        if (data?.clientSecret) {
+          setClientSecret(data.clientSecret);
         } else {
-          setFetchError(d.error?.message ?? "Could not initialize payment.");
+          setFetchError("Could not initialize payment.");
         }
       })
-      .catch(() => setFetchError("Network error. Please refresh and try again."));
+      .catch(err => setFetchError(apiErrorMessage(err, "Network error. Please refresh and try again.")));
   }, [dealId]);
 
   if (fetchError) {

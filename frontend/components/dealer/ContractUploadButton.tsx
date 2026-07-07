@@ -67,7 +67,7 @@ export default function ContractUploadButton({ dealId }: Props) {
           type="button"
           onClick={() => fileRef.current?.click()}
           disabled={state === "uploading"}
-          className="w-full flex items-center justify-center gap-2 bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-lg transition-colors text-sm"
+          className="w-full flex items-center justify-center gap-2 bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-lg transition-colors text-sm"
           data-testid="upload-contract-btn"
         >
           <Upload size={16} />

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Message {
   id: string;
@@ -26,16 +27,10 @@ export default function MessageThreadPage() {
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch(`/api/dealer/messages/threads/${threadId}`);
-        if (!res.ok) {
-          setError("Failed to load messages.");
-          return;
-        }
-        // The dealer API wraps payloads in { success, data } (successResponse).
-        const data = (await res.json()) as { data?: { messages?: Message[] } };
-        setMessages(data.data?.messages ?? []);
-      } catch {
-        setError("Network error. Please try again.");
+        const { messages } = await api.get<{ messages: Message[] }>(`/api/dealer/messages/threads/${threadId}`);
+        setMessages(messages ?? []);
+      } catch (err) {
+        setError(apiErrorMessage(err, "Failed to load messages."));
       } finally {
         setLoading(false);
       }
@@ -53,23 +48,14 @@ export default function MessageThreadPage() {
     setSending(true);
     setError(null);
     try {
-      const res = await fetch(`/api/dealer/messages/threads/${threadId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: compose }),
-      });
-      if (!res.ok) {
-        setError("Failed to send message.");
-        return;
-      }
-      const data = (await res.json()) as { data?: { message?: Message } };
-      const sent = data.data?.message;
-      if (sent) {
-        setMessages((prev) => [...prev, sent]);
-      }
+      const { message } = await api.post<{ message: Message }>(
+        `/api/dealer/messages/threads/${threadId}`,
+        { content: compose },
+      );
+      if (message) setMessages((prev) => [...prev, message]);
       setCompose("");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to send message."));
     } finally {
       setSending(false);
     }
@@ -90,7 +76,7 @@ export default function MessageThreadPage() {
       <div className="flex items-center gap-3 mb-6">
         <Link
           href="/dealer/messages"
-          className="text-sm text-slate-400 hover:text-[#0B5FD1] transition-colors"
+          className="text-sm text-slate-400 hover:text-al-primary transition-colors"
         >
           ← Messages
         </Link>
@@ -123,7 +109,7 @@ export default function MessageThreadPage() {
             <div
               className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm ${
                 isDealer(msg)
-                  ? "bg-[#0B5FD1] text-white rounded-br-sm"
+                  ? "bg-al-primary text-white rounded-br-sm"
                   : "bg-slate-100 text-slate-900 rounded-bl-sm"
               }`}
             >
@@ -148,7 +134,7 @@ export default function MessageThreadPage() {
           onChange={(e) => setCompose(e.target.value)}
           placeholder="Type a message..."
           rows={2}
-          className="flex-1 border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 resize-none"
+          className="flex-1 border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 resize-none"
           data-testid="compose-input"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -160,7 +146,7 @@ export default function MessageThreadPage() {
         <button
           type="submit"
           disabled={sending || !compose.trim()}
-          className="px-5 py-3 bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold rounded-lg transition-colors text-sm"
+          className="px-5 py-3 bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold rounded-lg transition-colors text-sm"
           data-testid="send-btn"
         >
           {sending ? "..." : "Send"}

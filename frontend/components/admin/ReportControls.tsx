@@ -15,7 +15,7 @@ export function DateRangeForm({ fromInput, toInput }: { fromInput: string; toInp
         <input type="date" name="to" defaultValue={toInput}
           className="text-xs border border-slate-200 rounded-lg px-2.5 py-2" />
       </div>
-      <button type="submit" className="text-xs font-medium px-3 py-2 rounded-lg bg-[#0B5FD1] text-white" data-testid="report-apply">
+      <button type="submit" className="text-xs font-medium px-3 py-2 rounded-lg bg-al-primary text-white" data-testid="report-apply">
         Apply
       </button>
     </form>
@@ -45,7 +45,7 @@ export function FunnelRow({ label, count, prev, max }: { label: string; count: n
         </span>
       </div>
       <div className="h-7 bg-slate-100 rounded-lg overflow-hidden">
-        <div className="h-full bg-[#0B5FD1] rounded-lg" style={{ width: `${width}%` }} />
+        <div className="h-full bg-al-primary rounded-lg" style={{ width: `${width}%` }} />
       </div>
     </div>
   );

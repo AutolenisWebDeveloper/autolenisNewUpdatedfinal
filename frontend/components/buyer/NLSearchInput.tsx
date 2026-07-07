@@ -8,6 +8,7 @@ import { useState, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Sparkles, X, Loader2 } from "lucide-react";
+import { api } from "@/lib/api/client";
 
 interface NLSearchInputProps {
   onFiltersApplied: (params: Record<string, string>, interpretation: string) => void;
@@ -27,27 +28,14 @@ export default function NLSearchInput({ onFiltersApplied, onClear, placeholder =
     setAiError(false);
 
     try {
-      const res = await fetch("/api/buyer/search/interpret", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q }),
-      });
-
-      const data = await res.json() as {
-        success: boolean;
-        data: { interpretation: string; params: Record<string, string>; confidence: string } | null
-      };
-
-      if (res.ok && data.success && data.data) {
-        setActiveInterpretation(data.data.interpretation);
-        onFiltersApplied(data.data.params, data.data.interpretation);
-      } else {
-        // AI unavailable — fall back to plain text search
-        setAiError(true);
-        onFiltersApplied({ q }, q);
-        setActiveInterpretation(q);
-      }
+      const data = await api.post<{ interpretation: string; params: Record<string, string>; confidence: string }>(
+        "/api/buyer/search/interpret",
+        { query: q },
+      );
+      setActiveInterpretation(data.interpretation);
+      onFiltersApplied(data.params, data.interpretation);
     } catch {
+      // AI unavailable — fall back to plain text search
       setAiError(true);
       onFiltersApplied({ q }, q);
       setActiveInterpretation(q);
@@ -66,8 +54,8 @@ export default function NLSearchInput({ onFiltersApplied, onClear, placeholder =
   return (
     <div className="space-y-2" data-testid="nl-search-input">
       {/* NL input bar */}
-      <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-[#0B5FD1]/30">
-        <Sparkles size={16} className="text-[#0B5FD1] shrink-0" />
+      <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5 focus-within:ring-2 focus-within:ring-al-primary/30">
+        <Sparkles size={16} className="text-al-primary shrink-0" />
         <input
           type="text"
           value={query}
@@ -90,7 +78,7 @@ export default function NLSearchInput({ onFiltersApplied, onClear, placeholder =
       {/* Interpretation chip */}
       {activeInterpretation && (
         <div className="flex items-center gap-2" data-testid="nl-interpretation-chip">
-          <div className="flex items-center gap-1.5 bg-[#0B5FD1]/8 border border-[#0B5FD1]/20 text-[#0B5FD1] text-xs px-3 py-1.5 rounded-full">
+          <div className="flex items-center gap-1.5 bg-al-primary/8 border border-al-primary/20 text-al-primary text-xs px-3 py-1.5 rounded-full">
             <Sparkles size={11} />
             <span>Showing results matching: <strong>{activeInterpretation}</strong></span>
             {aiError && <span className="ml-1 text-slate-400">(plain search)</span>}

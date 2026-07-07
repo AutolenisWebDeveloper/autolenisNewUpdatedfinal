@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Pencil, Check, X } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Profile {
   firstName: string;
@@ -31,30 +32,22 @@ export default function ProfileEditor({ initial }: { initial: Profile }) {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/buyer/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          firstName: form.firstName,
-          lastName: form.lastName,
-          phone: form.phone,
-          address: form.address,
-          city: form.city,
-          state: form.state,
-          zip: form.zip,
-        }),
+      await api.patch("/api/buyer/profile", {
+        firstName: form.firstName,
+        lastName: form.lastName,
+        phone: form.phone,
+        address: form.address,
+        city: form.city,
+        state: form.state,
+        zip: form.zip,
       });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setError(data.error?.message ?? "Couldn't save. Please retry.");
-        return;
-      }
       setEditing(false);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       startTransition(() => router.refresh());
-    } catch {
-      setError("Network error. Please retry.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Couldn't save. Please retry."));
+      return;
     } finally {
       setSaving(false);
     }
@@ -74,7 +67,7 @@ export default function ProfileEditor({ initial }: { initial: Profile }) {
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5FD1] hover:bg-[#0B5FD1]/5 px-3 py-1.5 rounded-md transition-colors border border-[#0B5FD1]/20"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-al-primary hover:bg-al-primary/5 px-3 py-1.5 rounded-md transition-colors border border-al-primary/20"
             data-testid="edit-profile-btn"
           >
             <Pencil size={12} />
@@ -86,7 +79,7 @@ export default function ProfileEditor({ initial }: { initial: Profile }) {
               type="button"
               onClick={onSave}
               disabled={saving}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold bg-[#0B5FD1] text-white hover:bg-[#0A4DB8] px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold bg-al-primary text-white hover:bg-al-primary-hover px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
               data-testid="save-profile-btn"
             >
               <Check size={12} />

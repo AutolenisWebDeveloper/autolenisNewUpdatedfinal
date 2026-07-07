@@ -55,13 +55,13 @@ export default async function AdminRequestsPage() {
   return (
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-requests-page">
       <div className="flex items-center gap-3 mb-6">
-        <ClipboardList size={22} className="text-[#0B5FD1]" />
+        <ClipboardList size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Request a Car Queue (System 4C)</h1>
         {newCount > 0 && <Badge>{newCount} new</Badge>}
         <Link
           href="/admin/requests/analytics"
           data-testid="admin-requests-analytics-link"
-          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:border-[#93C5FD] hover:bg-[#0B5FD1]/5 text-slate-600 hover:text-[#0B5FD1] rounded-lg text-xs font-semibold transition-colors"
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:border-[#93C5FD] hover:bg-al-primary/5 text-slate-600 hover:text-al-primary rounded-lg text-xs font-semibold transition-colors"
         >
           <BarChart2 size={13} />
           Analytics
@@ -89,7 +89,7 @@ export default async function AdminRequestsPage() {
           const score = req.financing?.leadQualityScore;
           return (
             <Link key={req.id} href={`/admin/requests/${req.id}`} data-testid={`request-row-${req.id}`}
-              className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-[#0B5FD1]/30 transition-colors">
+              className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-al-primary/30 transition-colors">
               <div>
                 <p className="font-semibold text-slate-900 text-sm">{req.buyer?.firstName ?? ""} {req.buyer?.lastName ?? ""}</p>
                 <p className="text-xs text-slate-400">

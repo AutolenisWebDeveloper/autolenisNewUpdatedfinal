@@ -27,7 +27,7 @@ export default async function DealerPaymentsPage() {
 
       {/* Page header */}
       <div className="flex items-center gap-3 mb-6">
-        <CreditCard size={22} className="text-[#0B5FD1]" />
+        <CreditCard size={22} className="text-al-primary" />
         <div>
           <h1 className="text-xl font-bold text-slate-900">Billing &amp; Payments</h1>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -77,7 +77,7 @@ export default async function DealerPaymentsPage() {
         {billing.totalDueCents > 0 ? (
           <Button
             data-testid="pay-now-btn"
-            className="bg-[#0B5FD1] text-white hover:bg-[#4f2577] shrink-0"
+            className="bg-al-primary text-white hover:bg-[#4f2577] shrink-0"
             href="/dealer/payments/checkout"
           >
             Pay Now
@@ -167,7 +167,7 @@ export default async function DealerPaymentsPage() {
                   {/* ── 7. Invoice detail link ──────────────────────────── */}
                   <Link
                     href={inv.detailHref}
-                    className="text-[#0B5FD1] hover:text-[#4f2577]"
+                    className="text-al-primary hover:text-[#4f2577]"
                     data-testid={`invoice-detail-link-${inv.id}`}
                     aria-label="View deal detail"
                   >
@@ -238,7 +238,7 @@ export default async function DealerPaymentsPage() {
         </div>
         <Link
           href="/contact?subject=billing"
-          className="text-sm text-[#0B5FD1] hover:underline whitespace-nowrap"
+          className="text-sm text-al-primary hover:underline whitespace-nowrap"
           data-testid="billing-support-link"
         >
           Contact billing support

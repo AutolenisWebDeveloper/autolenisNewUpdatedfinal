@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -278,10 +279,7 @@ export default function ArticleManagerClient({
     setLoading(true);
     try {
       const params = buildParams({ page: String(page), limit: String(PAGE_SIZE) });
-      const res = await fetch(`/api/admin/content/articles?${params.toString()}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error?.message ?? "Failed to load articles");
-      const data = json.data as { articles: Article[]; total: number; hasMore: boolean; stats: Stats };
+      const data = await api.get<{ articles: Article[]; total: number; hasMore: boolean; stats: Stats }>(`/api/admin/content/articles?${params.toString()}`);
       setArticles(data.articles);
       setTotal(data.total);
       setHasMore(data.hasMore);
@@ -290,7 +288,7 @@ export default function ArticleManagerClient({
         rowMetaRef.current.set(a.id, { cluster: a.cluster, metro: a.metro ?? "Unassigned" });
       }
     } catch (e) {
-      showToast(e instanceof Error ? e.message : "Failed to load articles", "error");
+      showToast(apiErrorMessage(e, "Failed to load articles"), "error");
     } finally {
       setLoading(false);
     }
@@ -401,18 +399,12 @@ export default function ArticleManagerClient({
     async (id: string, status: "PUBLISHED" | "RETIRED", fromDrawer = false) => {
       setRowBusy(id);
       try {
-        const res = await fetch(`/api/admin/content/articles/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json?.error?.message ?? "Update failed");
+        await api.patch<unknown>(`/api/admin/content/articles/${id}`, { status });
         showToast(status === "PUBLISHED" ? "Article published." : "Article retired.");
         if (fromDrawer) closeDrawer();
         await fetchArticles();
       } catch (e) {
-        showToast(e instanceof Error ? e.message : "Update failed", "error");
+        showToast(apiErrorMessage(e, "Update failed"), "error");
       } finally {
         setRowBusy(null);
       }
@@ -429,9 +421,8 @@ export default function ArticleManagerClient({
         // Pull a server-side breakdown for the full matching set.
         try {
           const params = buildParams({ breakdown: "1", limit: "1", page: "1" });
-          const res = await fetch(`/api/admin/content/articles?${params.toString()}`);
-          const json = await res.json();
-          if (res.ok && json.data.breakdown) setConfirmBreakdown(json.data.breakdown);
+          const data = await api.get<{ breakdown?: { clusters: Record<string, number>; metros: Record<string, number> } }>(`/api/admin/content/articles?${params.toString()}`);
+          if (data.breakdown) setConfirmBreakdown(data.breakdown);
         } catch {
           /* breakdown is best-effort */
         }
@@ -458,20 +449,14 @@ export default function ArticleManagerClient({
       const payload: Record<string, unknown> = { action: confirmAction };
       if (matchingAll) payload.filter = filterObject;
       else payload.ids = [...selectedIds];
-      const res = await fetch(`/api/admin/content/articles/bulk`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error?.message ?? "Bulk action failed");
+      const data = await api.post<{ updated: number }>(`/api/admin/content/articles/bulk`, payload);
       const verb = confirmAction === "publish" ? "Published" : "Retired";
-      showToast(`${verb} ${fmt(json.data.updated)} article${json.data.updated === 1 ? "" : "s"}.`);
+      showToast(`${verb} ${fmt(data.updated)} article${data.updated === 1 ? "" : "s"}.`);
       setConfirmAction(null);
       clearSelection();
       await fetchArticles();
     } catch (e) {
-      showToast(e instanceof Error ? e.message : "Bulk action failed", "error");
+      showToast(apiErrorMessage(e, "Bulk action failed"), "error");
     } finally {
       setConfirmBusy(false);
     }
@@ -488,10 +473,9 @@ export default function ArticleManagerClient({
     setConfirmBreakdown(null);
     // Breakdown fetch keyed on the filter we just set.
     const params = new URLSearchParams({ status: "REVIEW_NEEDED", breakdown: "1", limit: "1", page: "1" });
-    fetch(`/api/admin/content/articles?${params.toString()}`)
-      .then((r) => r.json())
-      .then((j) => {
-        if (j?.data?.breakdown) setConfirmBreakdown(j.data.breakdown);
+    api.get<{ breakdown?: { clusters: Record<string, number>; metros: Record<string, number> } }>(`/api/admin/content/articles?${params.toString()}`)
+      .then((d) => {
+        if (d.breakdown) setConfirmBreakdown(d.breakdown);
       })
       .catch(() => {});
   }, []);
@@ -517,7 +501,7 @@ export default function ArticleManagerClient({
 
   // ── Render ───────────────────────────────────────────────────────────────────
   const statCards = [
-    { key: "", label: "Total Articles", value: stats.total, tone: "text-[#0B5FD1]", ring: "" },
+    { key: "", label: "Total Articles", value: stats.total, tone: "text-al-primary", ring: "" },
     { key: "PUBLISHED", label: "Published", value: stats.published, tone: "text-green-600", ring: "" },
     { key: "REVIEW_NEEDED", label: "Review Needed", value: stats.review_needed, tone: "text-amber-600", ring: "" },
     { key: "DRAFT", label: "Draft", value: stats.draft, tone: "text-slate-600", ring: "" },
@@ -527,12 +511,12 @@ export default function ArticleManagerClient({
   return (
     <div className="min-h-screen bg-[#F4F6FA] p-6 md:p-8" data-testid="bulk-article-page">
       <div className="flex items-center gap-3 mb-1">
-        <FileText size={22} className="text-[#0B5FD1]" />
+        <FileText size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Bulk Article Management</h1>
       </div>
       <p className="text-sm text-slate-500 mb-6">
         Select, filter, preview, and bulk publish or retire generated articles.
-        <Link href="/admin/content" className="text-[#0B5FD1] hover:underline ml-1">
+        <Link href="/admin/content" className="text-al-primary hover:underline ml-1">
           Content Engine overview →
         </Link>
       </p>
@@ -584,7 +568,7 @@ export default function ArticleManagerClient({
               onClick={() => patchFilter({ status: c.key })}
               data-testid={`stat-card-${c.key || "all"}`}
               className={`bg-white border rounded-2xl shadow-sm px-4 py-3 text-left transition-all ${
-                active ? "border-[#0B5FD1] ring-1 ring-[#0B5FD1]" : "border-[#E2E8F0] hover:border-[#CBD5E1]"
+                active ? "border-al-primary ring-1 ring-al-primary" : "border-[#E2E8F0] hover:border-[#CBD5E1]"
               }`}
             >
               <p className={`text-2xl font-bold ${c.tone}`}>{fmt(c.value)}</p>
@@ -605,7 +589,7 @@ export default function ArticleManagerClient({
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Search article titles..."
               data-testid="search-input"
-              className="w-full pl-9 pr-3 py-2 text-sm border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#0B5FD1]"
+              className="w-full pl-9 pr-3 py-2 text-sm border border-[#E2E8F0] rounded-lg focus:outline-none focus:ring-1 focus:ring-al-primary"
             />
           </div>
           <Select
@@ -655,7 +639,7 @@ export default function ArticleManagerClient({
             type="button"
             onClick={() => setMatchingAll(true)}
             data-testid="select-all-matching"
-            className="text-xs font-semibold text-[#0B5FD1] hover:underline"
+            className="text-xs font-semibold text-al-primary hover:underline"
           >
             Select All Matching ({fmt(total)})
           </button>
@@ -812,7 +796,7 @@ export default function ArticleManagerClient({
                             type="button"
                             onClick={() => openDrawer(a.id)}
                             data-testid={`row-preview-${a.id}`}
-                            className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:bg-blue-50 px-2 py-1 rounded"
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-al-primary hover:bg-blue-50 px-2 py-1 rounded"
                           >
                             <Eye size={13} /> Preview
                           </button>
@@ -1051,7 +1035,7 @@ function Select({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       data-testid={testid}
-      className="text-sm border border-[#E2E8F0] rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-[#0B5FD1]"
+      className="text-sm border border-[#E2E8F0] rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-al-primary"
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>
@@ -1099,7 +1083,7 @@ function DrawerBody({ article }: { article: FullArticle }) {
           <Link
             href={`/buying-guide/${article.slug}`}
             target="_blank"
-            className="inline-flex items-center gap-1 text-xs text-[#0B5FD1] hover:underline"
+            className="inline-flex items-center gap-1 text-xs text-al-primary hover:underline"
           >
             View live <ExternalLink size={11} />
           </Link>
@@ -1126,7 +1110,7 @@ function DrawerBody({ article }: { article: FullArticle }) {
         </div>
       )}
       <div
-        className="content-article-preview text-sm text-slate-700 leading-relaxed [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-2 [&_h3]:font-semibold [&_h3]:text-slate-800 [&_h3]:mt-4 [&_p]:mb-3 [&_a]:text-[#0B5FD1] [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_li]:mb-1"
+        className="content-article-preview text-sm text-slate-700 leading-relaxed [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-2 [&_h3]:font-semibold [&_h3]:text-slate-800 [&_h3]:mt-4 [&_p]:mb-3 [&_a]:text-al-primary [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_li]:mb-1"
         dangerouslySetInnerHTML={{ __html: article.body }}
       />
       {faqs.length > 0 && (

@@ -73,13 +73,13 @@ export default function PickupActionsClient({ dealId }: Props) {
           value={qrToken}
           onChange={(e) => setQrToken(e.target.value)}
           placeholder="Paste QR token..."
-          className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+          className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-al-primary/30"
           data-testid={`qr-token-input-${dealId}`}
         />
         <button
           type="submit"
           disabled={scanning || !qrToken.trim()}
-          className="px-4 py-2 bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold rounded-lg transition-colors text-sm"
+          className="px-4 py-2 bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold rounded-lg transition-colors text-sm"
           data-testid={`scan-qr-${dealId}`}
         >
           {scanning ? "..." : "Scan QR"}

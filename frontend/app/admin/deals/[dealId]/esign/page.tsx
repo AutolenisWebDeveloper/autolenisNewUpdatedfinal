@@ -19,7 +19,7 @@ export default async function AdminDealESignPage({ params }: Props) {
 
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="admin-deal-esign-page">
-      <div className="flex items-center gap-3 mb-4"><PenLine size={20} className="text-[#0B5FD1]" /><h1 className="text-xl font-bold text-slate-900">E-Sign — Deal #{dealId.slice(-8)}</h1></div>
+      <div className="flex items-center gap-3 mb-4"><PenLine size={20} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">E-Sign — Deal #{dealId.slice(-8)}</h1></div>
       <p className="text-sm text-slate-500 mb-6">Buyer: {deal.buyer.firstName} {deal.buyer.lastName}</p>
       {deal.eSignEnvelope ? (
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3" data-testid="deal-envelope-details">

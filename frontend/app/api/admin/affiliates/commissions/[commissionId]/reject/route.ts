@@ -1,5 +1,6 @@
+import { requirePermission } from "@/lib/auth/permissions";
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-api";
+import { adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
@@ -8,7 +9,7 @@ const schema = z.object({ reason: z.string().min(10, "Reason must be at least 10
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { commissionId } = await params;
-  const admin = await getAdminFromRequest(request);
+  const admin = await requirePermission(request, "finance.commissions.settle");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
   const commission = await prisma.commission.findUnique({

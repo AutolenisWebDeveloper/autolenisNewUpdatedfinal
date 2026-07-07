@@ -54,7 +54,7 @@ function Gauge100({
   return (
     <div className="bg-white rounded-2xl border border-[#E2E8F0] shadow-sm p-4">
       <div className="flex items-center gap-2 mb-3">
-        <Icon size={15} className="text-[#0B5FD1]" />
+        <Icon size={15} className="text-al-primary" />
         <p className="text-xs font-semibold text-[#475569]">{label}</p>
       </div>
       <div className="flex items-end gap-1">
@@ -184,7 +184,7 @@ export default function IntelligenceClient({
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#0B5FD1] flex items-center justify-center">
+          <div className="w-10 h-10 rounded-xl bg-al-primary flex items-center justify-center">
             <BrainCircuit size={18} className="text-white" />
           </div>
           <div>
@@ -207,7 +207,7 @@ export default function IntelligenceClient({
           <button
             onClick={() => generateIndex(false)}
             disabled={busy === "generate"}
-            className="flex items-center gap-1.5 bg-[#0B5FD1] text-white text-xs font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
+            className="flex items-center gap-1.5 bg-al-primary text-white text-xs font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
           >
             {busy === "generate" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
             Generate Market Index
@@ -215,7 +215,7 @@ export default function IntelligenceClient({
           <button
             onClick={() => generateIndex(true)}
             disabled={busy === "publish"}
-            className="flex items-center gap-1.5 bg-white border border-[#0B5FD1] text-[#0B5FD1] text-xs font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
+            className="flex items-center gap-1.5 bg-white border border-al-primary text-al-primary text-xs font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
           >
             {busy === "publish" ? <Loader2 size={14} className="animate-spin" /> : <Linkedin size={14} />}
             Publish to LinkedIn
@@ -274,7 +274,7 @@ export default function IntelligenceClient({
         {/* Competitor opportunities */}
         <div className="lg:col-span-2 bg-white rounded-2xl border border-[#E2E8F0] shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-[#E2E8F0] flex items-center gap-2">
-            <Swords size={14} className="text-[#0B5FD1]" />
+            <Swords size={14} className="text-al-primary" />
             <h2 className="text-sm font-bold text-[#0F172A]">Competitor Content Opportunities</h2>
           </div>
           <div className="overflow-x-auto">
@@ -308,7 +308,7 @@ export default function IntelligenceClient({
                       <button
                         onClick={() => createPost(row)}
                         disabled={busy === `create-${row.id}`}
-                        className="text-[#0B5FD1] font-semibold hover:underline disabled:opacity-50 whitespace-nowrap"
+                        className="text-al-primary font-semibold hover:underline disabled:opacity-50 whitespace-nowrap"
                       >
                         {busy === `create-${row.id}` ? "Creating…" : "Create Post"}
                       </button>

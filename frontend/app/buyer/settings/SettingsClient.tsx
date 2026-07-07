@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Settings as SettingsIcon, Bell, MessageCircle, Megaphone, Gavel, FileText, Lock, Trash2, Mail, Smartphone } from "lucide-react";
+import { api, apiErrorMessage, ApiError } from "@/lib/api/client";
 
 interface Preferences {
   emailNotifications: boolean;
@@ -29,21 +30,11 @@ export default function SettingsClient({ initial, email }: { initial: Preference
     try {
       // smsNotifications is Coming Soon — never include in PATCH body
       const { smsNotifications: _sms, ...payload } = next;
-      const res = await fetch("/api/buyer/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setError(data.error?.message ?? "Couldn't save. Please retry.");
-        setPrefs(initial);
-        return;
-      }
+      await api.patch("/api/buyer/settings", payload);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch {
-      setError("Network error. Please retry.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Couldn't save. Please retry."));
       setPrefs(initial);
     } finally {
       setSaving(false);
@@ -61,27 +52,19 @@ export default function SettingsClient({ initial, email }: { initial: Preference
     setError(null);
     setDeleteError(null);
     try {
-      const res = await fetch("/api/buyer/account", { method: "DELETE" });
-      const data = await res.json() as {
-        success: boolean;
-        error?: { code?: string; message?: string }
-      };
-      if (!data.success) {
-        if (data.error?.code === "ACTIVE_DEAL") {
-          setDeleteError(
-            "You have an active deal in progress. Complete or cancel it before deleting your account."
-          );
-        } else {
-          setDeleteError(
-            data.error?.message ?? "Account deletion failed. Please contact support."
-          );
-        }
-        return;
-      }
+      await api.del("/api/buyer/account");
       // Account deleted — sign out + redirect to home
       window.location.href = "/";
-    } catch {
-      setDeleteError("Network error. Please retry.");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "ACTIVE_DEAL") {
+        setDeleteError(
+          "You have an active deal in progress. Complete or cancel it before deleting your account."
+        );
+      } else {
+        setDeleteError(
+          apiErrorMessage(err, "Account deletion failed. Please contact support.")
+        );
+      }
     } finally {
       setDeleting(false);
     }
@@ -90,7 +73,7 @@ export default function SettingsClient({ initial, email }: { initial: Preference
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="settings-page">
       <div className="flex items-center gap-3 mb-2">
-        <SettingsIcon size={22} className="text-[#0B5FD1]" />
+        <SettingsIcon size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Settings</h1>
       </div>
       <p className="text-sm text-slate-500 mb-6">Manage your notification preferences, security, and account.</p>
@@ -110,7 +93,7 @@ export default function SettingsClient({ initial, email }: { initial: Preference
       <section className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-6" data-testid="notification-preferences">
         <header className="px-5 py-4 border-b border-slate-100">
           <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-            <Bell size={15} className="text-[#0B5FD1]" />
+            <Bell size={15} className="text-al-primary" />
             Notification Preferences
           </h2>
           <p className="text-xs text-slate-500 mt-1">Choose what we send you and how.</p>
@@ -128,7 +111,7 @@ export default function SettingsClient({ initial, email }: { initial: Preference
           <div className="flex items-start justify-between gap-4 px-5 py-4">
             <div className="flex items-start gap-3">
               <div className="w-8 h-8 rounded-lg bg-[#F8F9FB] border border-[#E5E7EB] flex items-center justify-center shrink-0 mt-0.5">
-                <Smartphone size={14} className="text-[#0B5FD1]" />
+                <Smartphone size={14} className="text-al-primary" />
               </div>
               <div>
                 <p className="text-sm font-medium text-[#111827]">SMS Notifications</p>
@@ -173,7 +156,7 @@ export default function SettingsClient({ initial, email }: { initial: Preference
       <section className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-6" data-testid="security-section">
         <header className="px-5 py-4 border-b border-slate-100">
           <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-            <Lock size={15} className="text-[#0B5FD1]" />
+            <Lock size={15} className="text-al-primary" />
             Security
           </h2>
         </header>
@@ -185,7 +168,7 @@ export default function SettingsClient({ initial, email }: { initial: Preference
             </div>
             <Link
               href="/auth/forgot-password"
-              className="text-xs font-semibold text-[#0B5FD1] hover:underline px-3 py-1.5 border border-[#0B5FD1]/30 rounded-md hover:bg-[#0B5FD1]/5 transition-colors shrink-0"
+              className="text-xs font-semibold text-al-primary hover:underline px-3 py-1.5 border border-al-primary/30 rounded-md hover:bg-al-primary/5 transition-colors shrink-0"
               data-testid="change-password-link"
             >
               Change password →
@@ -198,7 +181,7 @@ export default function SettingsClient({ initial, email }: { initial: Preference
             </div>
             <Link
               href="/buyer/messages"
-              className="text-xs text-slate-400 hover:text-[#0B5FD1] shrink-0"
+              className="text-xs text-slate-400 hover:text-al-primary shrink-0"
               data-testid="request-email-change-link"
             >
               Contact support →
@@ -211,7 +194,7 @@ export default function SettingsClient({ initial, email }: { initial: Preference
       <section className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-6" data-testid="support-section">
         <header className="px-5 py-4 border-b border-slate-100">
           <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-            <MessageCircle size={15} className="text-[#0B5FD1]" />
+            <MessageCircle size={15} className="text-al-primary" />
             Support
           </h2>
         </header>
@@ -325,7 +308,7 @@ function PrefRow({ testId, icon: Icon, title, description, checked, disabled, on
     <div className="flex items-start justify-between gap-4 px-5 py-4">
       <div className="flex items-start gap-3">
         <div className="w-8 h-8 rounded-lg bg-[#F8F9FB] border border-[#E5E7EB] flex items-center justify-center shrink-0 mt-0.5">
-          <Icon size={14} className="text-[#0B5FD1]" />
+          <Icon size={14} className="text-al-primary" />
         </div>
         <div>
           <p className="text-sm font-medium text-slate-900">{title}</p>
@@ -339,7 +322,7 @@ function PrefRow({ testId, icon: Icon, title, description, checked, disabled, on
         onClick={onToggle}
         disabled={disabled}
         className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition-colors ${
-          checked ? "bg-[#0B5FD1]" : "bg-slate-300"
+          checked ? "bg-al-primary" : "bg-slate-300"
         } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
         data-testid={testId}
       >

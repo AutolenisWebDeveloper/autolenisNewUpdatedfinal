@@ -45,7 +45,7 @@ export default function TestimonialPromptClient({ dealId }: { dealId: string }) 
       {!open ? (
         <button
           onClick={() => setOpen(true)}
-          className="text-sm text-[#0B5FD1] font-semibold hover:underline"
+          className="text-sm text-al-primary font-semibold hover:underline"
           data-testid="leave-review-link"
         >
           Leave a review →

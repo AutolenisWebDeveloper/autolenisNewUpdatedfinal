@@ -1,6 +1,7 @@
 "use client";
 
 import { logger } from "@/lib/logger";
+import { api } from "@/lib/api/client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -8,9 +9,10 @@ import { AutoLenisLogo } from "@/components/shared/AutoLenisLogo";
 import {
   LayoutDashboard, Gavel, FileText, Shield, BarChart2,
   Bell, MessageSquare, FolderOpen, Settings, LogOut, Star,
-  CreditCard, Handshake, Menu, X, Sparkles, Briefcase,
+  CreditCard, Handshake, Menu, Sparkles, Briefcase,
   Package, Banknote, Truck, User,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 // 14 required V4 dealer portal destinations — exactly one entry per route
 const NAV_GROUPS = [
@@ -90,14 +92,14 @@ function Inner({ pathname, onNavigate, unreadCount }: { pathname: string; onNavi
                     <Link href={item.href} onClick={onNavigate}
                       data-testid={`dealer-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
                       className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
-                        active ? "bg-[#0B5FD1]/10 text-[#0B5FD1] font-semibold" : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                        active ? "bg-al-primary/10 text-al-primary font-semibold" : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
                       }`}>
                       <item.icon size={15} className="shrink-0" />
                       <span className="flex-1">{item.label}</span>
                       {showBadge && (
                         <span
                           data-testid="dealer-sidebar-notification-badge"
-                          className="min-w-[18px] h-[18px] rounded-full bg-[#0B5FD1] text-white text-[10px] font-bold flex items-center justify-center px-1"
+                          className="min-w-[18px] h-[18px] rounded-full bg-al-primary text-white text-[10px] font-bold flex items-center justify-center px-1"
                         >
                           {unreadCount > 99 ? "99+" : unreadCount}
                         </span>
@@ -123,9 +125,8 @@ export default function DealerSidebar() {
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    fetch("/api/dealer/notifications/unread-count")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.data?.count) setUnreadCount(d.data.count); })
+    api.get<{ count: number }>("/api/dealer/notifications/unread-count")
+      .then(d => { if (d?.count) setUnreadCount(d.count); })
       .catch(() => { /* badge stays at 0 on failure */ });
   }, []);
 
@@ -145,7 +146,7 @@ export default function DealerSidebar() {
           {unreadCount > 0 && (
             <Link href="/dealer/notifications" className="relative p-2" data-testid="dealer-mobile-notification-bell">
               <Bell size={20} className="text-slate-600" />
-              <span className="absolute top-1 right-1 min-w-[16px] h-[16px] rounded-full bg-[#0B5FD1] text-white text-[9px] font-bold flex items-center justify-center px-0.5">
+              <span className="absolute top-1 right-1 min-w-[16px] h-[16px] rounded-full bg-al-primary text-white text-[9px] font-bold flex items-center justify-center px-0.5">
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>
             </Link>
@@ -157,21 +158,21 @@ export default function DealerSidebar() {
           </button>
         </div>
       </div>
-      {open && (
-        <>
-          <div className="lg:hidden fixed inset-0 z-40 bg-black/40" onClick={() => setOpen(false)}
-            data-testid="dealer-mobile-drawer-backdrop" />
-          <aside className="lg:hidden fixed top-0 left-0 z-50 w-72 max-w-[85vw] h-screen bg-white shadow-xl flex flex-col"
-            data-testid="dealer-mobile-drawer">
-            <button type="button" onClick={() => setOpen(false)} aria-label="Close navigation"
-              data-testid="dealer-mobile-menu-close"
-              className="absolute top-3 right-3 p-2 rounded-md text-slate-600 hover:bg-slate-100">
-              <X size={20} />
-            </button>
-            <Inner pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} />
-          </aside>
-        </>
-      )}
+      {/* Mobile drawer — kit Dialog (sheet variant). REFERENCE CONVERSION for
+          the hand-built `fixed inset-0` modal class: Radix supplies the focus
+          trap, Esc-close, focus-return-to-trigger, aria-modal + labelledby,
+          scroll-lock, and overlay dismissal the hand-rolled version lacked. */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          variant="sheet"
+          side="left"
+          className="lg:hidden flex flex-col"
+          data-testid="dealer-mobile-drawer"
+        >
+          <DialogTitle className="sr-only">Dealer navigation</DialogTitle>
+          <Inner pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

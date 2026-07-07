@@ -31,7 +31,7 @@ export default async function AdminAccountsPage() {
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-settings-admins-page">
       <div className="flex items-center gap-3 mb-1">
-        <Shield size={22} className="text-[#0B5FD1]" />
+        <Shield size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Admin Accounts</h1>
       </div>
       <p className="text-sm text-slate-500 mb-6">Create and manage platform administrator accounts.</p>

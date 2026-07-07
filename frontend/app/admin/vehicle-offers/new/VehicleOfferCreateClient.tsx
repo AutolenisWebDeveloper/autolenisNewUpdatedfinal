@@ -225,7 +225,7 @@ export default function VehicleOfferCreateClient() {
             className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_24px_60px_-24px_rgba(11,95,209,0.35)]"
             data-testid="offer-link-result"
           >
-            <div className="h-1.5 w-full bg-gradient-to-r from-[#0B5FD1] via-[#2E8BFF] to-[#0B5FD1]" />
+            <div className="h-1.5 w-full bg-gradient-to-r from-al-primary via-[#2E8BFF] to-al-primary" />
             <div className="p-8 md:p-10 text-center">
               <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#ECFDF5] ring-8 ring-[#ECFDF5]/40">
                 <CheckCircle2 size={30} className="text-[#059669]" />
@@ -239,7 +239,7 @@ export default function VehicleOfferCreateClient() {
               <div className="mt-7 flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <Lock size={15} className="shrink-0 text-slate-400" />
                 <code
-                  className="flex-1 truncate text-left font-mono text-sm text-[#0B5FD1]"
+                  className="flex-1 truncate text-left font-mono text-sm text-al-primary"
                   data-testid="offer-link-url"
                 >
                   {result.url}
@@ -247,7 +247,7 @@ export default function VehicleOfferCreateClient() {
                 <button
                   onClick={handleCopy}
                   data-testid="copy-offer-link"
-                  className="shrink-0 rounded-lg bg-[#0B5FD1] px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#0944a8]"
+                  className="shrink-0 rounded-lg bg-al-primary px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#0944a8]"
                 >
                   {copied ? "Copied!" : "Copy link"}
                 </button>
@@ -272,7 +272,7 @@ export default function VehicleOfferCreateClient() {
                 <a
                   href={`/admin/vehicle-offers/${result.id}`}
                   data-testid="view-submissions-link"
-                  className="inline-flex items-center gap-2 rounded-xl bg-[#0B5FD1] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#0944a8]"
+                  className="inline-flex items-center gap-2 rounded-xl bg-al-primary px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#0944a8]"
                 >
                   View submissions →
                 </a>
@@ -302,14 +302,14 @@ export default function VehicleOfferCreateClient() {
         {/* Breadcrumb */}
         <Link
           href="/admin/vehicle-offers"
-          className="mb-5 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 transition-colors hover:text-[#0B5FD1]"
+          className="mb-5 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 transition-colors hover:text-al-primary"
         >
           <ArrowLeft size={13} /> Dealer Offer Links
         </Link>
 
         {/* Header */}
         <div className="mb-6 flex items-start gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#0B5FD1] to-[#2E8BFF] shadow-lg shadow-[#0B5FD1]/25">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-al-primary to-[#2E8BFF] shadow-lg shadow-al-primary/25">
             <Car size={22} className="text-white" />
           </div>
           <div className="min-w-0">
@@ -323,9 +323,9 @@ export default function VehicleOfferCreateClient() {
 
         {/* Trust strip */}
         <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-500">
-          <span className="inline-flex items-center gap-1.5"><Wand2 size={13} className="text-[#0B5FD1]" /> VIN auto-decode</span>
+          <span className="inline-flex items-center gap-1.5"><Wand2 size={13} className="text-al-primary" /> VIN auto-decode</span>
           <span className="inline-flex items-center gap-1.5"><ShieldCheck size={13} className="text-[#059669]" /> Encrypted &amp; audit-logged</span>
-          <span className="inline-flex items-center gap-1.5"><Sparkles size={13} className="text-[#0B5FD1]" /> Competing dealer offers</span>
+          <span className="inline-flex items-center gap-1.5"><Sparkles size={13} className="text-al-primary" /> Competing dealer offers</span>
         </div>
 
         {fromRequest && (
@@ -341,8 +341,8 @@ export default function VehicleOfferCreateClient() {
             <SectionHeader step={1} icon={<Car size={15} />} title="Vehicle Details" subtitle="Paste a VIN to auto-fill, or enter manually." />
             <div className="p-6 pt-2">
               {/* VIN auto-decode */}
-              <div className="mb-5 rounded-xl border border-[#0B5FD1]/20 bg-[#0B5FD1]/[0.03] p-4">
-                <Label htmlFor="vo-vin" className="flex items-center gap-1.5 text-sm font-semibold text-[#0B5FD1]">
+              <div className="mb-5 rounded-xl border border-al-primary/20 bg-al-primary/[0.03] p-4">
+                <Label htmlFor="vo-vin" className="flex items-center gap-1.5 text-sm font-semibold text-al-primary">
                   <Wand2 size={14} /> Auto-fill from VIN
                 </Label>
                 <div className="mt-2 flex flex-col gap-2 sm:flex-row">
@@ -360,7 +360,7 @@ export default function VehicleOfferCreateClient() {
                     onClick={() => void decodeVin(vin)}
                     disabled={decodeStatus === "decoding" || vin.length !== 17}
                     data-testid="vo-vin-decode-btn"
-                    className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-md bg-[#0B5FD1] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0944a8] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-md bg-al-primary px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0944a8] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {decodeStatus === "decoding" ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
                     {decodeStatus === "decoding" ? "Decoding…" : "Auto-fill"}
@@ -519,7 +519,7 @@ export default function VehicleOfferCreateClient() {
 function SectionHeader({ step, icon, title, subtitle }: { step: number; icon: React.ReactNode; title: string; subtitle: string }) {
   return (
     <div className="flex items-center gap-3 border-b border-slate-100 p-6">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#0B5FD1]/10 text-[#0B5FD1]">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-al-primary/10 text-al-primary">
         {icon}
       </div>
       <div className="min-w-0">
@@ -537,7 +537,7 @@ function Field({ label, htmlFor, required, hint, children }: { label: string; ht
   return (
     <div>
       <Label htmlFor={htmlFor} className="text-sm font-medium text-slate-700">
-        {label} {required && <span className="text-[#0B5FD1]">*</span>}
+        {label} {required && <span className="text-al-primary">*</span>}
       </Label>
       <div className="mt-1.5">{children}</div>
       {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}

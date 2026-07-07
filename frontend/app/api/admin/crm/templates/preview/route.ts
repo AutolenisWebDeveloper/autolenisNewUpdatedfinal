@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { TemplateService } from '@/lib/services/template.service';
-import { getAdminActor } from '@/lib/auth/admin-actor';
+import { requirePermissionActor } from '@/lib/auth/permissions';
 import type { TemplateVariable } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
@@ -34,7 +34,7 @@ const SAMPLE: Record<TemplateVariable, string> = {
 
 // Read-only preview render — no audit log entry.
 export async function POST(req: Request) {
-  const actor = await getAdminActor();
+  const actor = await requirePermissionActor("crm.read");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
   let body: PreviewBody;
   try {

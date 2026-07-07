@@ -35,7 +35,7 @@ export default async function DealerInventoryDetailPage({ params }: Props) {
       {/* Analytics panel — dealer inventory performance */}
       <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="inventory-analytics-panel">
         <div className="flex items-center gap-2 mb-4">
-          <BarChart2 size={16} className="text-[#0B5FD1]" />
+          <BarChart2 size={16} className="text-al-primary" />
           <p className="font-semibold text-slate-800 text-sm">Performance Analytics</p>
         </div>
         <div className="grid grid-cols-2 gap-4">

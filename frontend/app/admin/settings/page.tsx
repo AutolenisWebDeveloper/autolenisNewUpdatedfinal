@@ -6,6 +6,7 @@ import { Settings, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface BpeWeights {
   weightOtd: number;
@@ -49,11 +50,8 @@ export default function AdminSettingsPage() {
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
 
   useEffect(() => {
-    fetch("/api/admin/best-price/weights")
-      .then(r => r.json())
-      .then((json: { success?: boolean; data?: BpeWeights }) => {
-        if (json.success && json.data) setWeights(json.data);
-      })
+    api.get<BpeWeights>("/api/admin/best-price/weights")
+      .then((data) => { setWeights(data); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -66,20 +64,11 @@ export default function AdminSettingsPage() {
     setSaving(true);
     setFeedback(null);
     try {
-      const res = await fetch("/api/admin/best-price/weights", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(weights),
-      });
-      const json = await res.json() as { success?: boolean; data?: BpeWeights; error?: { message: string } };
-      if (json.success && json.data) {
-        setWeights(json.data);
-        setFeedback({ msg: "Weights saved successfully", ok: true });
-        setTimeout(() => setFeedback(null), 4000);
-      } else {
-        setFeedback({ msg: json.error?.message ?? "Save failed", ok: false });
-      }
-    } catch { setFeedback({ msg: "Network error", ok: false }); }
+      const data = await api.patch<BpeWeights>("/api/admin/best-price/weights", weights);
+      setWeights(data);
+      setFeedback({ msg: "Weights saved successfully", ok: true });
+      setTimeout(() => setFeedback(null), 4000);
+    } catch (err) { setFeedback({ msg: apiErrorMessage(err, "Save failed"), ok: false }); }
     setSaving(false);
   }
 
@@ -95,12 +84,12 @@ export default function AdminSettingsPage() {
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="admin-settings-page">
       <div className="flex items-center gap-3 mb-6">
-        <Settings size={22} className="text-[#0B5FD1]" />
+        <Settings size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Platform Settings</h1>
       </div>
 
       {/* Best Price Engine Weights — full editor */}
-      <div className="bg-white border-2 border-[#0B5FD1]/20 rounded-xl p-6 mb-6" data-testid="bpe-weights-section">
+      <div className="bg-white border-2 border-al-primary/20 rounded-xl p-6 mb-6" data-testid="bpe-weights-section">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="font-semibold text-slate-900">Best Price Engine Weights</h2>

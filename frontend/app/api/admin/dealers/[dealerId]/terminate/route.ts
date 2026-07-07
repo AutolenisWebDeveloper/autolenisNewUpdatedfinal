@@ -1,7 +1,8 @@
 // POST /api/admin/dealers/[dealerId]/terminate
+import { requirePermission } from "@/lib/auth/permissions";
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { z } from "zod";
 import { terminateDealerByAdmin } from "@/lib/services/admin/admin-dealer-command-center.service";
 import { prisma } from "@/lib/prisma";
@@ -15,7 +16,7 @@ const schema = z.object({
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { dealerId } = await params;
-  const admin = await getAdminFromRequest(request);
+  const admin = await requirePermission(request, "dealers.terminate");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
   if (admin.role !== "SUPER_ADMIN") {

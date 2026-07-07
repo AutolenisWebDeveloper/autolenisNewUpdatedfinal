@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { CheckCircle2, Flag, RotateCcw, AlertTriangle, Loader2, X } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 type ReviewAction = "APPROVE" | "FLAG" | "REQUEST_REVISION";
 
@@ -28,7 +29,7 @@ const ACTION_META: Record<ReviewAction, { title: string; verb: string; intent: s
   REQUEST_REVISION: {
     title: "Request Revision",
     verb: "Request Revision",
-    intent: "bg-[#0B5FD1] hover:bg-[#0a52b5]",
+    intent: "bg-al-primary hover:bg-[#0a52b5]",
     needsReason: true,
     needsIssues: false,
     description: "Sends the contract back to the dealer for a corrected upload with the reason below. The dealer is asked to revise; the buyer is told a minor revision is in progress.",
@@ -56,19 +57,11 @@ export default function ContractShieldReviewActions({ reviewId }: { reviewId: st
 
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/contract-shield/${reviewId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: open, reason: reason.trim() || undefined, issues }),
-      });
-      const data = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok || !data.success) {
-        setError(data.error?.message ?? "Action failed."); setLoading(false); return;
-      }
+      await api.post(`/api/admin/contract-shield/${reviewId}`, { action: open, reason: reason.trim() || undefined, issues });
       reset();
       router.refresh();
-    } catch {
-      setError("Network error — please try again."); setLoading(false);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Action failed.")); setLoading(false);
     }
   }
 
@@ -87,7 +80,7 @@ export default function ContractShieldReviewActions({ reviewId }: { reviewId: st
         </Button>
         <Button size="sm" variant="secondary" className="text-xs" data-testid={`shield-revision-${reviewId}`}
           onClick={() => setOpen("REQUEST_REVISION")}>
-          <RotateCcw size={13} className="text-[#0B5FD1]" /> Request Revision
+          <RotateCcw size={13} className="text-al-primary" /> Request Revision
         </Button>
       </div>
 

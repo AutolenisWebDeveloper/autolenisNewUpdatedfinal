@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle, Building2, FileText, Truck, ClipboardCheck } from "lucide-react";
+import { api } from "@/lib/api/client";
 
 const STEPS = [
   { id: "BUSINESS_INFO", label: "Business Info", icon: Building2 },
@@ -23,10 +24,10 @@ function StepIndicator({ current, completed }: { current: number; completed: num
         return (
           <div key={step.id} className="flex items-center">
             <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors
-              ${isDone ? "bg-[#059669] text-white" : isCurrent ? "bg-[#0B5FD1] text-white" : "bg-[#E2E8F0] text-[#94A3B8]"}`}>
+              ${isDone ? "bg-[#059669] text-white" : isCurrent ? "bg-al-primary text-white" : "bg-[#E2E8F0] text-[#94A3B8]"}`}>
               {isDone ? <CheckCircle size={16} /> : <Icon size={14} />}
             </div>
-            <span className={`ml-1.5 text-xs hidden sm:inline ${isCurrent ? "text-[#0B5FD1] font-semibold" : "text-[#94A3B8]"}`}>
+            <span className={`ml-1.5 text-xs hidden sm:inline ${isCurrent ? "text-al-primary font-semibold" : "text-[#94A3B8]"}`}>
               {step.label}
             </span>
             {i < STEPS.length - 1 && <div className={`w-6 h-px mx-2 ${isDone ? "bg-[#059669]" : "bg-[#E2E8F0]"}`} />}
@@ -54,17 +55,15 @@ export default function DealerOnboardingPage() {
   // Hydrate previously persisted onboarding values so refresh does not lose progress.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/dealer/onboarding")
-      .then((r) => r.json())
-      .then((d: { success?: boolean; data?: {
+    api.get<{
         dealershipName?: string | null; phone?: string | null; address?: string | null;
         city?: string | null; state?: string | null; zip?: string | null;
         licenseNumber?: string | null; agreedToTermsAt?: string | null;
         onboardingStep?: string | null;
-      } }) => {
+      }>("/api/dealer/onboarding")
+      .then((data) => {
         if (cancelled) return;
-        const data = d?.data;
-        if (d?.success && data) {
+        if (data) {
           if (data.dealershipName) {
             setBusiness((b) => ({
               ...b,
@@ -136,13 +135,13 @@ export default function DealerOnboardingPage() {
   if (!hydrated) {
     return (
       <div className="min-h-screen bg-[#F8F9FB] flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-[#0B5FD1] border-t-transparent rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-al-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
-  const inputClass = "w-full bg-white border border-[#E2E8F0] rounded-lg px-4 py-3 text-[#111827] placeholder-[#94A3B8] text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]";
-  const ctaClass = "w-full bg-[#0B5FD1] hover:bg-[#0A4DB8] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm";
+  const inputClass = "w-full bg-white border border-[#E2E8F0] rounded-lg px-4 py-3 text-[#111827] placeholder-[#94A3B8] text-sm focus:outline-none focus:ring-2 focus:ring-al-primary";
+  const ctaClass = "w-full bg-al-primary hover:bg-al-primary-hover disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm";
 
   return (
     <div className="min-h-screen bg-[#F8F9FB] flex items-center justify-center p-4">
@@ -204,7 +203,7 @@ export default function DealerOnboardingPage() {
                 <p>By joining the AutoLenis Dealer Network, you agree to: (1) provide accurate vehicle listings and pricing; (2) respond promptly to buyer inquiries; (3) comply with all applicable state and federal regulations; (4) maintain your dealer license in good standing; (5) abide by AutoLenis marketplace policies. AutoLenis reserves the right to suspend or terminate accounts that violate these terms. Your account data is governed by the AutoLenis Privacy Policy.</p>
               </div>
               <label className="flex items-start gap-3 cursor-pointer">
-                <input data-testid="ob-agree-checkbox" type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-[#E2E8F0] bg-white accent-[#0B5FD1]" />
+                <input data-testid="ob-agree-checkbox" type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-[#E2E8F0] bg-white accent-al-primary" />
                 <span className="text-[#374151] text-sm">I have read and agree to the AutoLenis Dealer Network Agreement</span>
               </label>
               <button data-testid="ob-complete" type="submit" disabled={loading || !agreed} className={ctaClass}>{loading ? "Activating..." : "Complete Setup & Activate Account"}</button>

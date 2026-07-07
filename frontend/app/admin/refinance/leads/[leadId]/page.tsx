@@ -36,7 +36,7 @@ export default async function AdminLeadDetailPage({
     <div className="p-6 md:p-10 max-w-4xl" data-testid="admin-lead-detail-page">
       <Link
         href="/admin/refinance/leads"
-        className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8] mb-4"
+        className="inline-flex items-center gap-1 text-xs font-semibold text-al-primary hover:text-al-primary-hover mb-4"
         data-testid="lead-detail-back"
       >
         <ArrowLeft size={12} /> Back to leads
@@ -118,7 +118,7 @@ export default async function AdminLeadDetailPage({
           <h2 className="text-xs font-bold uppercase tracking-wider text-[#4B5563] mb-4">Compliance log entries</h2>
           <ul className="space-y-2">
             {lead.complianceLogs.map((log) => (
-              <li key={log.id} className="text-xs text-[#4B5563] border-b border-[#EFF6FF] last:border-0 pb-2 last:pb-0">
+              <li key={log.id} className="text-xs text-[#4B5563] border-b border-al-primary-subtle last:border-0 pb-2 last:pb-0">
                 <span className="font-semibold text-[#111827]">{fmt(log.consentTimestamp)}</span>
                 {" — "}TCPA: {log.tcpaConsent ? "Yes" : "No"}
                 {log.source ? `, source: ${log.source}` : ""}

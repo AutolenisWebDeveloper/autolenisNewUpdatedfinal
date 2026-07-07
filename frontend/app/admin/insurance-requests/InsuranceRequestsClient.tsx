@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 import type { InsuranceQuoteRequest } from "./page";
 
 interface Props {
@@ -35,20 +36,11 @@ function RequestRow({ req }: { req: InsuranceQuoteRequest }) {
     setLoading(true);
     setError(null);
     try {
-      const res  = await fetch("/api/admin/insurance-requests/respond", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ dealId: req.dealId, buyerId: req.buyerId, premiumCents: cents, note: note.trim() || null }),
-      });
-      const data = await res.json() as { data?: unknown; error?: { message: string } };
-      if (!data.data && data.error) {
-        setError(data.error.message ?? "Action failed. Please try again.");
-      } else {
-        setDone(true);
-        router.refresh();
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      await api.post<unknown>("/api/admin/insurance-requests/respond", { dealId: req.dealId, buyerId: req.buyerId, premiumCents: cents, note: note.trim() || null });
+      setDone(true);
+      router.refresh();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Action failed. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -70,7 +62,7 @@ function RequestRow({ req }: { req: InsuranceQuoteRequest }) {
           <p className="font-semibold text-slate-900 text-sm truncate">{req.buyerName}</p>
           <p className="text-xs text-slate-500 mt-0.5 truncate">{req.vehicle}</p>
           <div className="flex flex-wrap gap-3 mt-1.5 text-xs text-[#6B7280]">
-            <span className="bg-[#EFF6FF] text-[#0B5FD1] font-medium px-2 py-0.5 rounded-md">
+            <span className="bg-al-primary-subtle text-al-primary font-medium px-2 py-0.5 rounded-md">
               {coverageLabel(req.coverageType)}
             </span>
             {req.otdPriceCents && (
@@ -87,7 +79,7 @@ function RequestRow({ req }: { req: InsuranceQuoteRequest }) {
         <div className="flex items-center gap-2 shrink-0">
           <Link
             href={`/admin/deals/${req.dealId}`}
-            className="text-xs text-[#0B5FD1] hover:underline"
+            className="text-xs text-al-primary hover:underline"
             data-testid={`view-deal-pending-${req.id}`}
           >
             View Deal
@@ -95,7 +87,7 @@ function RequestRow({ req }: { req: InsuranceQuoteRequest }) {
           <button
             type="button"
             onClick={() => setOpen(prev => !prev)}
-            className="flex items-center gap-1 text-xs font-semibold text-white bg-[#0B5FD1] hover:bg-[#0A4DB8] px-3 py-1.5 rounded-lg transition-colors"
+            className="flex items-center gap-1 text-xs font-semibold text-white bg-al-primary hover:bg-al-primary-hover px-3 py-1.5 rounded-lg transition-colors"
             data-testid={`respond-btn-${req.id}`}
           >
             {open ? "Cancel" : "Respond"}
@@ -127,7 +119,7 @@ function RequestRow({ req }: { req: InsuranceQuoteRequest }) {
                   placeholder="120.00"
                   required
                   data-testid={`respond-amount-${req.id}`}
-                  className="w-full border border-[#D1D5DB] rounded-xl pl-7 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1] focus:border-transparent"
+                  className="w-full border border-[#D1D5DB] rounded-xl pl-7 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary focus:border-transparent"
                 />
               </div>
             </div>
@@ -142,7 +134,7 @@ function RequestRow({ req }: { req: InsuranceQuoteRequest }) {
                 placeholder="e.g. Quote valid for 30 days"
                 maxLength={300}
                 data-testid={`respond-note-${req.id}`}
-                className="w-full border border-[#D1D5DB] rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1] focus:border-transparent"
+                className="w-full border border-[#D1D5DB] rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary focus:border-transparent"
               />
             </div>
           </div>
@@ -153,7 +145,7 @@ function RequestRow({ req }: { req: InsuranceQuoteRequest }) {
             type="submit"
             disabled={loading}
             data-testid={`respond-submit-${req.id}`}
-            className="flex items-center gap-2 px-5 py-2.5 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-2 px-5 py-2.5 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? (
               <><Loader2 size={13} className="animate-spin" /> Sending…</>

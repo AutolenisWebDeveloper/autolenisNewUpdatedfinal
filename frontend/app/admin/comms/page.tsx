@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Send, Bell } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 type Tab = "email" | "notification";
 
@@ -12,8 +13,8 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
       onClick={onClick}
       className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
         active
-          ? "bg-[#0B5FD1] text-white"
-          : "text-[#1E40AF] hover:bg-[#F0F9FF] hover:text-[#0B5FD1]"
+          ? "bg-al-primary text-white"
+          : "text-[#1E40AF] hover:bg-[#F0F9FF] hover:text-al-primary"
       }`}
     >
       {children}
@@ -59,26 +60,17 @@ export default function AdminCommsPage() {
     setEmailLoading(true);
     setEmailResult(null);
     try {
-      const res = await fetch("/api/admin/comms/send-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recipientType: emailRecipientType,
-          recipientId: emailRecipientId,
-          subject: emailSubject,
-          body: emailBody,
-          reason: emailReason,
-        }),
+      const data = await api.post<{ recipientEmail?: string }>("/api/admin/comms/send-email", {
+        recipientType: emailRecipientType,
+        recipientId: emailRecipientId,
+        subject: emailSubject,
+        body: emailBody,
+        reason: emailReason,
       });
-      const data = await res.json() as { success?: boolean; data?: { recipientEmail?: string }; error?: { message?: string } };
-      if (!res.ok || !data.success) {
-        setEmailResult({ type: "error", message: data.error?.message ?? "Failed to send email" });
-      } else {
-        setEmailResult({ type: "success", message: `Email sent to ${data.data?.recipientEmail ?? "recipient"}` });
-        setEmailRecipientId(""); setEmailSubject(""); setEmailBody(""); setEmailReason("");
-      }
-    } catch {
-      setEmailResult({ type: "error", message: "Network error — please try again" });
+      setEmailResult({ type: "success", message: `Email sent to ${data.recipientEmail ?? "recipient"}` });
+      setEmailRecipientId(""); setEmailSubject(""); setEmailBody(""); setEmailReason("");
+    } catch (err) {
+      setEmailResult({ type: "error", message: apiErrorMessage(err, "Failed to send email") });
     } finally {
       setEmailLoading(false);
     }
@@ -89,28 +81,19 @@ export default function AdminCommsPage() {
     setNotifLoading(true);
     setNotifResult(null);
     try {
-      const res = await fetch("/api/admin/comms/send-notification", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recipientType: notifRecipientType,
-          ...(isBulkNotif ? {} : { recipientId: notifRecipientId }),
-          title: notifTitle,
-          body: notifBody,
-          actionUrl: notifActionUrl || undefined,
-          reason: notifReason,
-        }),
+      const data = await api.post<{ sent?: number }>("/api/admin/comms/send-notification", {
+        recipientType: notifRecipientType,
+        ...(isBulkNotif ? {} : { recipientId: notifRecipientId }),
+        title: notifTitle,
+        body: notifBody,
+        actionUrl: notifActionUrl || undefined,
+        reason: notifReason,
       });
-      const data = await res.json() as { success?: boolean; data?: { sent?: number }; error?: { message?: string } };
-      if (!res.ok || !data.success) {
-        setNotifResult({ type: "error", message: data.error?.message ?? "Failed to send notification" });
-      } else {
-        const count = data.data?.sent ?? 0;
-        setNotifResult({ type: "success", message: `${count} notification${count === 1 ? "" : "s"} sent` });
-        setNotifRecipientId(""); setNotifTitle(""); setNotifBody(""); setNotifActionUrl(""); setNotifReason("");
-      }
-    } catch {
-      setNotifResult({ type: "error", message: "Network error — please try again" });
+      const count = data.sent ?? 0;
+      setNotifResult({ type: "success", message: `${count} notification${count === 1 ? "" : "s"} sent` });
+      setNotifRecipientId(""); setNotifTitle(""); setNotifBody(""); setNotifActionUrl(""); setNotifReason("");
+    } catch (err) {
+      setNotifResult({ type: "error", message: apiErrorMessage(err, "Failed to send notification") });
     } finally {
       setNotifLoading(false);
     }
@@ -142,7 +125,7 @@ export default function AdminCommsPage() {
                   <input type="radio" name="emailRecipientType" value={type}
                     checked={emailRecipientType === type}
                     onChange={() => setEmailRecipientType(type)}
-                    className="text-[#0B5FD1]" />
+                    className="text-al-primary" />
                   {type.charAt(0) + type.slice(1).toLowerCase()}
                 </label>
               ))}
@@ -153,7 +136,7 @@ export default function AdminCommsPage() {
             <label className="text-xs font-medium text-slate-600 block mb-1">Recipient ID</label>
             <input type="text" value={emailRecipientId} onChange={e => setEmailRecipientId(e.target.value)}
               placeholder={`${emailRecipientType.toLowerCase()} ID`}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30"
               required />
           </div>
 
@@ -161,7 +144,7 @@ export default function AdminCommsPage() {
             <label className="text-xs font-medium text-slate-600 block mb-1">Subject</label>
             <input type="text" value={emailSubject} onChange={e => setEmailSubject(e.target.value)}
               placeholder="Email subject line"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30"
               required />
           </div>
 
@@ -170,7 +153,7 @@ export default function AdminCommsPage() {
             <textarea value={emailBody} onChange={e => setEmailBody(e.target.value)}
               placeholder="Email body (min 20 characters)"
               rows={5} minLength={20}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 resize-none"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 resize-none"
               required />
           </div>
 
@@ -179,14 +162,14 @@ export default function AdminCommsPage() {
             <textarea value={emailReason} onChange={e => setEmailReason(e.target.value)}
               placeholder="Why are you sending this email? (min 10 chars)"
               rows={2} minLength={10}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 resize-none"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 resize-none"
               required />
           </div>
 
           {emailResult && <Alert type={emailResult.type} message={emailResult.message} />}
 
           <button type="submit" disabled={emailLoading || emailReason.length < 10}
-            className="w-full bg-[#0B5FD1] text-white font-semibold text-sm py-2.5 rounded-lg hover:bg-[#0A4DB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+            className="w-full bg-al-primary text-white font-semibold text-sm py-2.5 rounded-lg hover:bg-al-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
             {emailLoading ? <><span className="animate-spin h-4 w-4 border-2 border-white/30 border-t-white rounded-full" />Sending...</> : <><Send size={14} />Send Email</>}
           </button>
         </form>
@@ -199,7 +182,7 @@ export default function AdminCommsPage() {
           <div>
             <label className="text-xs font-medium text-slate-600 block mb-1">Recipient Type</label>
             <select value={notifRecipientType} onChange={e => setNotifRecipientType(e.target.value as typeof notifRecipientType)}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30">
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30">
               <option value="BUYER">Buyer</option>
               <option value="DEALER">Dealer</option>
               <option value="AFFILIATE">Affiliate</option>
@@ -213,7 +196,7 @@ export default function AdminCommsPage() {
               <label className="text-xs font-medium text-slate-600 block mb-1">Recipient ID</label>
               <input type="text" value={notifRecipientId} onChange={e => setNotifRecipientId(e.target.value)}
                 placeholder="recipient ID"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30"
                 required />
             </div>
           )}
@@ -223,7 +206,7 @@ export default function AdminCommsPage() {
             <input type="text" value={notifTitle} onChange={e => setNotifTitle(e.target.value)}
               placeholder="Notification title"
               maxLength={80}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30"
               required />
           </div>
 
@@ -232,7 +215,7 @@ export default function AdminCommsPage() {
             <textarea value={notifBody} onChange={e => setNotifBody(e.target.value)}
               placeholder="Notification body"
               rows={3} maxLength={200}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 resize-none"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 resize-none"
               required />
           </div>
 
@@ -240,7 +223,7 @@ export default function AdminCommsPage() {
             <label className="text-xs font-medium text-slate-600 block mb-1">Action URL <span className="text-slate-400">(optional)</span></label>
             <input type="url" value={notifActionUrl} onChange={e => setNotifActionUrl(e.target.value)}
               placeholder="https://..."
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30" />
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30" />
           </div>
 
           <div>
@@ -248,14 +231,14 @@ export default function AdminCommsPage() {
             <textarea value={notifReason} onChange={e => setNotifReason(e.target.value)}
               placeholder="Why are you sending this notification? (min 10 chars)"
               rows={2} minLength={10}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 resize-none"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 resize-none"
               required />
           </div>
 
           {notifResult && <Alert type={notifResult.type} message={notifResult.message} />}
 
           <button type="submit" disabled={notifLoading || notifReason.length < 10}
-            className="w-full bg-[#0B5FD1] text-white font-semibold text-sm py-2.5 rounded-lg hover:bg-[#0A4DB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+            className="w-full bg-al-primary text-white font-semibold text-sm py-2.5 rounded-lg hover:bg-al-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
             {notifLoading ? <><span className="animate-spin h-4 w-4 border-2 border-white/30 border-t-white rounded-full" />Sending...</> : <><Bell size={14} />Send Notification</>}
           </button>
         </form>

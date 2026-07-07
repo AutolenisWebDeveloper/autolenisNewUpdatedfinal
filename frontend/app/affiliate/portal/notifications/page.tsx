@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Bell, CheckCheck, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api/client";
 
 interface Notification {
   id: string;
@@ -22,12 +23,9 @@ export default function AffiliateNotificationsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/affiliate/notifications");
-      const json = await res.json() as { success?: boolean; data?: { notifications: Notification[]; unreadCount: number } };
-      if (json.success && json.data) {
-        setNotifications(json.data.notifications);
-        setUnreadCount(json.data.unreadCount);
-      }
+      const data = await api.get<{ notifications: Notification[]; unreadCount: number }>("/api/affiliate/notifications");
+      setNotifications(data.notifications);
+      setUnreadCount(data.unreadCount);
     } catch { /* ignore */ }
     setLoading(false);
   }, []);
@@ -57,10 +55,10 @@ export default function AffiliateNotificationsPage() {
     <div className="p-6 md:p-8 max-w-2xl" data-testid="affiliate-notifications-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Bell size={22} className="text-[#0B5FD1]" />
+          <Bell size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Notifications</h1>
           {unreadCount > 0 && (
-            <span className="bg-[#0B5FD1] text-white text-xs font-bold px-2 py-0.5 rounded-full" data-testid="affiliate-unread-badge">
+            <span className="bg-al-primary text-white text-xs font-bold px-2 py-0.5 rounded-full" data-testid="affiliate-unread-badge">
               {unreadCount} new
             </span>
           )}
@@ -92,9 +90,9 @@ export default function AffiliateNotificationsPage() {
             <div
               key={n.id}
               data-testid={`affiliate-notification-${n.id}`}
-              className={`bg-white border rounded-xl p-4 flex items-start gap-3 ${!n.readAt ? "border-[#0B5FD1]/20 bg-[#0B5FD1]/2" : "border-slate-200"}`}
+              className={`bg-white border rounded-xl p-4 flex items-start gap-3 ${!n.readAt ? "border-al-primary/20 bg-al-primary/2" : "border-slate-200"}`}
             >
-              {!n.readAt && <div className="w-2 h-2 rounded-full bg-[#0B5FD1] mt-1.5 shrink-0" data-testid={`unread-dot-${n.id}`} />}
+              {!n.readAt && <div className="w-2 h-2 rounded-full bg-al-primary mt-1.5 shrink-0" data-testid={`unread-dot-${n.id}`} />}
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-slate-900 text-sm">{n.title}</p>
                 <p className="text-slate-500 text-sm mt-0.5">{n.body}</p>
@@ -103,7 +101,7 @@ export default function AffiliateNotificationsPage() {
               {!n.readAt && (
                 <button
                   onClick={() => markRead(n.id)}
-                  className="shrink-0 p-1.5 rounded-lg hover:bg-slate-100 transition-colors text-slate-400 hover:text-[#0B5FD1]"
+                  className="shrink-0 p-1.5 rounded-lg hover:bg-slate-100 transition-colors text-slate-400 hover:text-al-primary"
                   aria-label="Mark as read"
                   data-testid={`mark-read-btn-${n.id}`}
                 >

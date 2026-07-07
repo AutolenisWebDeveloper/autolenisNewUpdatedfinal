@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, ArrowRight, Star, AlertTriangle, Clock, HelpCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface OtdBreakdown {
   vehiclePriceCents: number;
@@ -43,7 +44,7 @@ interface OfferComparisonPanelProps {
 const RANK_COLORS: Record<string, string> = {
   BEST_CASH: "bg-green-50 border-green-200",
   BEST_MONTHLY: "bg-blue-50 border-blue-200",
-  BEST_OVERALL: "bg-[#0B5FD1]/5 border-[#0B5FD1]/20",
+  BEST_OVERALL: "bg-al-primary/5 border-al-primary/20",
 };
 
 export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanelProps) {
@@ -58,12 +59,10 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/buyer/auctions/${auctionId}/best-price?months=${termMonths}`)
-      .then(r => r.json())
-      .then((d: { success: boolean; data?: { offers?: RankedOffer[] } }) => {
+    api.get<{ offers?: RankedOffer[] }>(`/api/buyer/auctions/${auctionId}/best-price?months=${termMonths}`)
+      .then(data => {
         if (cancelled) return;
-        if (d.success) setOffers(d.data?.offers ?? []);
-        else setError("We couldn't load your offers. Please refresh to try again.");
+        setOffers(data?.offers ?? []);
       })
       .catch(() => {
         if (!cancelled) setError("We couldn't load your offers. Please check your connection and refresh.");
@@ -77,25 +76,14 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
   async function selectOffer(offerId: string) {
     setError(null);
     try {
-      const res = await fetch(`/api/buyer/auctions/${auctionId}/select-offer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ offerId }),
-      });
-      if (res.ok) {
-        router.push("/buyer/deal");
-        return;
-      }
-      setConfirming(null);
       // Surface the API's explanation (e.g. AUCTION_LIVE: the 48h auction is
       // still running) instead of a generic failure.
-      const data = (await res.json().catch(() => null)) as
-        | { error?: { message?: string } }
-        | null;
-      setError(data?.error?.message ?? "Failed to select offer. Please try again.");
-    } catch {
+      await api.post(`/api/buyer/auctions/${auctionId}/select-offer`, { offerId });
+      router.push("/buyer/deal");
+      return;
+    } catch (err) {
       setConfirming(null);
-      setError("Network error. Please check your connection and try again.");
+      setError(apiErrorMessage(err, "Failed to select offer. Please try again."));
     }
   }
 
@@ -107,8 +95,8 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
   if (offers.length === 0) {
     return (
       <div className="text-center py-16 px-6 bg-slate-50 rounded-2xl border border-slate-200" data-testid="offer-comparison-empty">
-        <div className="w-14 h-14 rounded-full bg-[#0B5FD1]/10 border border-[#0B5FD1]/20 flex items-center justify-center mx-auto mb-4">
-          <Star size={24} className="text-[#0B5FD1]" />
+        <div className="w-14 h-14 rounded-full bg-al-primary/10 border border-al-primary/20 flex items-center justify-center mx-auto mb-4">
+          <Star size={24} className="text-al-primary" />
         </div>
         <h3 className="text-lg font-semibold text-slate-900 mb-2">No offers to compare yet</h3>
         <p className="text-sm text-slate-500 max-w-xs mx-auto">
@@ -131,7 +119,7 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
         {[36, 48, 60, 72].map(months => (
           <button key={months} onClick={() => setTermMonths(months)}
             data-testid={`term-${months}`}
-            className={`min-h-[44px] px-4 py-2 rounded-full text-xs font-semibold transition-colors ${termMonths === months ? "bg-[#0B5FD1] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+            className={`min-h-[44px] px-4 py-2 rounded-full text-xs font-semibold transition-colors ${termMonths === months ? "bg-al-primary text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
             {months}mo
           </button>
         ))}
@@ -147,14 +135,14 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
             data-testid={offer.rank ? `offer-card-${offer.rank}` : `offer-card-${offer.rankType}`}
             data-rank-type={offer.rankType}
             className={`border-2 rounded-2xl p-6 ${RANK_COLORS[offer.rankType]} relative ${
-              isBest ? "ring-2 ring-[#0B5FD1] ring-offset-2 shadow-md" : ""
+              isBest ? "ring-2 ring-al-primary ring-offset-2 shadow-md" : ""
             }`}>
             {/* Group 7 (7C) — numeric rank badge; #1 is visually dominant */}
             {offer.rank && (
               <div className="absolute -top-3 left-5">
                 <Badge
                   data-testid={`offer-rank-badge-${offer.rank}`}
-                  className={`border-0 px-3 ${isBest ? "bg-[#0B5FD1] text-white" : "bg-slate-700 text-white"}`}
+                  className={`border-0 px-3 ${isBest ? "bg-al-primary text-white" : "bg-slate-700 text-white"}`}
                 >
                   {isBest ? <Star size={11} className="mr-1" /> : null}
                   #{offer.rank}{isBest ? " Best Offer" : ""}
@@ -231,7 +219,7 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
             <div className="relative group inline-block mb-4" data-testid={`offer-rank-tooltip-${offer.rankType}`}>
               <button
                 type="button"
-                className="inline-flex items-center gap-1 text-xs font-medium text-[#0B5FD1] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B5FD1] rounded"
+                className="inline-flex items-center gap-1 text-xs font-medium text-al-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-al-primary rounded"
                 aria-label="Why this rank?"
               >
                 <HelpCircle size={12} /> Why this rank?

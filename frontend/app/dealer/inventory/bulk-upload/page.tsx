@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Upload } from "lucide-react";
+import { api, apiErrorMessage, ApiError } from "@/lib/api/client";
 
 type UploadState = "idle" | "file-selected" | "parsing" | "preview" | "uploading" | "committed" | "error";
 
@@ -135,9 +136,9 @@ export default function BulkUploadPage() {
     setState("uploading");
     setError(null);
     try {
-      let body: string;
+      let body: Record<string, unknown>;
       if (rawData) {
-        body = JSON.stringify({ rawRows: rawData.rows });
+        body = { rawRows: rawData.rows };
       } else if (csvRows.length > 0) {
         const rows = csvRows.map((r) => ({
           vin: r.vin,
@@ -146,31 +147,21 @@ export default function BulkUploadPage() {
           model: r.model,
           priceCents: convertToPriceCents(r.price),
         })).filter((r) => !isNaN(r.year) && r.priceCents > 0);
-        body = JSON.stringify({ rows });
+        body = { rows };
       } else {
         return;
       }
 
-      const res = await fetch("/api/dealer/inventory/bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-      });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: { code?: string; message?: string } };
-        if (data.error?.code === "MAPPING_REQUIRED") {
-          setNeedsMapping(true);
-          setError("This CSV has non-standard headers. Please save a column mapping first.");
-        } else {
-          setError(data.error?.message ?? "Upload failed");
-        }
-        setState("error");
-        return;
-      }
+      await api.post("/api/dealer/inventory/bulk", body);
       setState("committed");
       router.push("/dealer/inventory");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "MAPPING_REQUIRED") {
+        setNeedsMapping(true);
+        setError("This CSV has non-standard headers. Please save a column mapping first.");
+      } else {
+        setError(apiErrorMessage(err, "Upload failed"));
+      }
       setState("error");
     }
   }
@@ -189,7 +180,7 @@ export default function BulkUploadPage() {
             <div className="mt-2">
               <Link
                 href="/dealer/inventory/column-mapping"
-                className="inline-block bg-[#0B5FD1] hover:bg-[#1A6FE0] text-white font-semibold px-3 py-1.5 rounded-md text-xs"
+                className="inline-block bg-al-primary hover:bg-[#1A6FE0] text-white font-semibold px-3 py-1.5 rounded-md text-xs"
                 data-testid="goto-column-mapping-link"
               >
                 Configure Column Mapping →
@@ -202,7 +193,7 @@ export default function BulkUploadPage() {
       {/* Drop Zone */}
       <div
         onClick={() => fileRef.current?.click()}
-        className="border-2 border-dashed border-slate-200 rounded-xl p-10 text-center cursor-pointer hover:border-[#0B5FD1]/40 transition-colors mb-5"
+        className="border-2 border-dashed border-slate-200 rounded-xl p-10 text-center cursor-pointer hover:border-al-primary/40 transition-colors mb-5"
         data-testid="csv-drop-zone"
       >
         <Upload size={28} className="text-slate-300 mx-auto mb-3" />
@@ -229,7 +220,7 @@ export default function BulkUploadPage() {
         <button
           onClick={handleUpload}
           disabled={state === "parsing"}
-          className="w-full bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm mb-4"
+          className="w-full bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm mb-4"
           data-testid="upload-csv-btn"
         >
           {state === "parsing" ? "Parsing CSV..." : "Upload & Preview"}
@@ -267,7 +258,7 @@ export default function BulkUploadPage() {
           <button
             onClick={handleCommit}
             disabled={state === "uploading"}
-            className="w-full mt-4 bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
+            className="w-full mt-4 bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
             data-testid="commit-import-btn"
           >
             {state === "uploading" ? "Importing..." : "Commit Import"}
@@ -283,7 +274,7 @@ export default function BulkUploadPage() {
           </p>
           <p className="text-xs text-slate-500 mb-3">
             Your saved column mapping will be applied during import.{" "}
-            <Link href="/dealer/inventory/column-mapping" className="text-[#0B5FD1] underline">
+            <Link href="/dealer/inventory/column-mapping" className="text-al-primary underline">
               Edit mapping
             </Link>
           </p>
@@ -316,7 +307,7 @@ export default function BulkUploadPage() {
           <button
             onClick={handleCommit}
             disabled={state === "uploading"}
-            className="w-full mt-4 bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
+            className="w-full mt-4 bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
             data-testid="commit-import-btn"
           >
             {state === "uploading" ? "Importing..." : "Apply Mapping & Import"}

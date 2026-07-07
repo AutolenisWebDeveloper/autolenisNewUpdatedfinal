@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
+import { api, apiErrorMessage } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,15 +55,12 @@ export default function QuickOfferPage() {
   // Load auction context on mount
   useEffect(() => {
     if (!auctionId) return;
-    fetch(`/api/dealer/auctions/${auctionId}`)
-      .then(r => r.json())
-      .then(data => {
-        // The dealer API wraps payloads in { success, data } (successResponse).
-        const auction = data?.data?.auction;
+    api.get<{ auction: AuctionContext }>(`/api/dealer/auctions/${auctionId}`)
+      .then(({ auction }) => {
         if (auction) setAuctionCtx(auction);
-        else setAuctionError(data.error?.message ?? "Auction not found or you are not invited.");
+        else setAuctionError("Auction not found or you are not invited.");
       })
-      .catch(() => setAuctionError("Unable to load auction details."));
+      .catch((err) => setAuctionError(apiErrorMessage(err, "Unable to load auction details.")));
   }, [auctionId]);
 
   // Real competitiveness check — debounced on OTD change
@@ -70,12 +68,12 @@ export default function QuickOfferPage() {
     if (otd <= 0) return;
     setCheckingCompetitiveness(true);
     try {
-      const res = await fetch(`/api/dealer/offers/competitiveness-check?otdCents=${otd}`);
-      const data = await res.json();
+      const { competitiveness } = await api.get<{ competitiveness: string }>(
+        `/api/dealer/offers/competitiveness-check?otdCents=${otd}`,
+      );
       // Accept only the four ranked buckets — ignore "unknown" / lowConfidence states.
-      const value = data?.data?.competitiveness ?? data?.competitiveness;
-      if (value === "STRONG" || value === "MODERATE" || value === "WEAK") {
-        setCompetitive(value as "STRONG" | "MODERATE" | "WEAK");
+      if (competitiveness === "STRONG" || competitiveness === "MODERATE" || competitiveness === "WEAK") {
+        setCompetitive(competitiveness);
       } else {
         setCompetitive(null);
       }
@@ -117,19 +115,10 @@ export default function QuickOfferPage() {
         termMonths: includesFinancing && termMonths ? parseInt(termMonths) : undefined,
         junkFeeItems: fees.map(f => ({ name: f.name, amount: f.amountCents / 100 })),
       };
-      const res = await fetch("/api/dealer/offers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setSubmitError(data.error?.message ?? "Failed to submit offer. Please try again.");
-      } else {
-        setSubmitted(true);
-      }
-    } catch {
-      setSubmitError("Network error. Please check your connection and try again.");
+      await api.post("/api/dealer/offers", body);
+      setSubmitted(true);
+    } catch (err) {
+      setSubmitError(apiErrorMessage(err, "Failed to submit offer. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -252,7 +241,7 @@ export default function QuickOfferPage() {
 
       {/* OTD total */}
       {otdCents > 0 && (
-        <div className="bg-[#0B5FD1] text-white rounded-xl p-5 mb-5" data-testid="otd-total">
+        <div className="bg-al-primary text-white rounded-xl p-5 mb-5" data-testid="otd-total">
           <p className="text-xs text-white/60 uppercase tracking-wider mb-1">Out-the-Door Total</p>
           <p className="text-3xl font-bold">${(otdCents / 100).toLocaleString()}</p>
           {junkFeesCents > 0 && (

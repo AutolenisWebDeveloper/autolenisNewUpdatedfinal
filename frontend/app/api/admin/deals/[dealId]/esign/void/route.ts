@@ -1,7 +1,8 @@
 // POST /api/admin/deals/[dealId]/esign/void
 // Voids an existing DocuSign envelope. Requires reason (min 10 chars).
+import { requirePermission } from "@/lib/auth/permissions";
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
+import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { voidEnvelope } from "@/lib/services/esign/esign.service";
@@ -14,7 +15,7 @@ const schema = z.object({
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
-  const admin = await getAdminFromRequest(request);
+  const admin = await requirePermission(request, "deals.esign.void");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
   let body: unknown;

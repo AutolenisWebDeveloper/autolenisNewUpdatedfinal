@@ -83,7 +83,7 @@ export default function AffiliateTaxInfoForm({
           id="tax-classification"
           value={taxClass}
           onChange={e => { setTaxClass(e.target.value as TaxClass); setSuccess(false); setError(null); }}
-          className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+          className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-al-primary/30"
         >
           <option value="INDIVIDUAL">Individual / Sole Proprietor</option>
           <option value="LLC">LLC</option>
@@ -98,7 +98,7 @@ export default function AffiliateTaxInfoForm({
           id="tin-type"
           value={tinType}
           onChange={e => { setTinType(e.target.value as TinType); setSuccess(false); setError(null); }}
-          className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+          className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-al-primary/30"
         >
           <option value="SSN">SSN (Social Security Number)</option>
           <option value="EIN">EIN (Employer Identification Number)</option>

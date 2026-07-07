@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Submission {
   id: string;
@@ -39,7 +40,7 @@ function ReasonModal({
         <textarea
           value={reason}
           onChange={e => setReason(e.target.value)}
-          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 resize-none"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 resize-none"
           rows={3}
           placeholder="Describe the reason for this action…"
         />
@@ -73,25 +74,16 @@ export default function ExternalPreApprovalActionsClient({ submissions: initialS
   async function handleAction(id: string, action: "approve" | "reject", reason: string) {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/external-preapprovals/${id}/${action}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason }),
-      });
-      const data = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok || !data.success) {
-        showToast(`Error: ${data.error?.message ?? "Action failed"}`);
-      } else {
-        // Derive new status from the action taken
-        const newStatus = action === "approve" ? "APPROVED" : "REJECTED";
-        setSubmissions(prev =>
-          prev.map(s => s.id === id ? { ...s, status: newStatus } : s)
-        );
-        showToast(`Pre-approval ${action === "approve" ? "approved" : "rejected"} successfully`);
-        setModal(null);
-      }
-    } catch {
-      showToast("Network error — please try again");
+      await api.post(`/api/admin/external-preapprovals/${id}/${action}`, { reason });
+      // Derive new status from the action taken
+      const newStatus = action === "approve" ? "APPROVED" : "REJECTED";
+      setSubmissions(prev =>
+        prev.map(s => s.id === id ? { ...s, status: newStatus } : s)
+      );
+      showToast(`Pre-approval ${action === "approve" ? "approved" : "rejected"} successfully`);
+      setModal(null);
+    } catch (err) {
+      showToast(`Error: ${apiErrorMessage(err, "Action failed")}`);
     } finally {
       setLoading(false);
     }

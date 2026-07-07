@@ -54,7 +54,7 @@ export default function PreIntelligencePanel() {
       <div className="grid grid-cols-2 gap-3">
         {[
           { icon: Package, label: "Similar vehicles in inventory", value: `${data.similarVehicles}+`, color: "text-blue-600" },
-          { icon: Users, label: "Avg offers per auction", value: `${data.avgOffersPerAuction.toFixed(1)}x`, color: "text-[#0B5FD1]" },
+          { icon: Users, label: "Avg offers per auction", value: `${data.avgOffersPerAuction.toFixed(1)}x`, color: "text-al-primary" },
           { icon: DollarSign, label: "Avg buyer savings", value: `$${data.avgSavings.toLocaleString()}`, color: "text-green-600" },
           { icon: TrendingUp, label: "Auctions completed", value: data.pastAuctions.toLocaleString(), color: "text-amber-600" },
         ].map(item => (

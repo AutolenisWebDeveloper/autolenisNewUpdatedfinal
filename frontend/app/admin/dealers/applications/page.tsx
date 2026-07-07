@@ -61,7 +61,7 @@ export default async function AdminDealerApplicationsPage() {
         </div>
         <Link
           href="/admin/dealers/invite"
-          className="bg-[#0B5FD1] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#3a0063] transition-colors"
+          className="bg-al-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#3a0063] transition-colors"
           data-testid="admin-send-invitation-link"
         >
           Send Direct Invitation
@@ -107,7 +107,7 @@ export default async function AdminDealerApplicationsPage() {
                   <td className="px-4 py-3">
                     <Link
                       href={`/admin/dealers/applications/${app.id}`}
-                      className="font-medium text-slate-900 hover:text-[#0B5FD1] hover:underline"
+                      className="font-medium text-slate-900 hover:text-al-primary hover:underline"
                       data-testid={`application-link-${app.id}`}
                     >
                       {app.dealershipName}

@@ -13,6 +13,7 @@ import {
 import type {
   DealerActionAvailability,
 } from "@/lib/services/admin/admin-dealer-command-center.service";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // Dealer documents live in a private Supabase bucket. Fetch a short-lived
 // signed URL from the authorized admin route at click time, then open it — the
@@ -315,16 +316,10 @@ function TierOverrideModal({ dealerName, currentTier, dealerId, onClose, onSucce
     if (reason.trim().length < 10) { setError("Reason must be at least 10 characters"); return; }
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/dealers/${dealerId}/tier`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier, reason }),
-      });
-      const data = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok) { setError(data.error?.message ?? "Tier update failed"); return; }
+      await api.post(`/api/admin/dealers/${dealerId}/tier`, { tier, reason });
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Request failed");
+      setError(apiErrorMessage(err, "Tier update failed"));
     } finally {
       setLoading(false);
     }
@@ -356,7 +351,7 @@ function TierOverrideModal({ dealerName, currentTier, dealerId, onClose, onSucce
           />
           <div className="flex gap-3">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-xl py-2.5 text-sm hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={loading || reason.trim().length < 10} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-50">
+            <button type="submit" disabled={loading || reason.trim().length < 10} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-xl py-2.5 text-sm font-semibold disabled:opacity-50">
               {loading ? "Updating..." : "Update Tier"}
             </button>
           </div>
@@ -383,7 +378,7 @@ function ConfirmModal({
     if (requireReason && !reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
     try { await onConfirm(reason); }
-    catch (err) { setError(err instanceof Error ? err.message : "Action failed"); }
+    catch (err) { setError(apiErrorMessage(err, "Action failed")); }
     finally { setLoading(false); }
   }
 
@@ -408,7 +403,7 @@ function ConfirmModal({
           )}
           <div className="flex gap-3">
             <button type="button" onClick={onCancel} className="flex-1 border border-slate-200 text-slate-600 rounded-xl py-2.5 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
-            <button type="submit" disabled={loading} className={"flex-1 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (destructive ? "bg-red-600 hover:bg-red-700" : "bg-[#0B5FD1] hover:bg-purple-800")}>
+            <button type="submit" disabled={loading} className={"flex-1 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (destructive ? "bg-red-600 hover:bg-red-700" : "bg-al-primary hover:bg-purple-800")}>
               {loading ? "Processing..." : submitLabel}
             </button>
           </div>
@@ -430,14 +425,14 @@ function AddNoteModal({ dealerId, onClose, onSuccess }: {
     e.preventDefault();
     if (!content.trim()) { setError("Note content is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/dealers/" + dealerId + "/note", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: content.trim(), type }),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
-    setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Failed to add note"); return; }
-    onSuccess();
+    try {
+      await api.post("/api/admin/dealers/" + dealerId + "/note", { content: content.trim(), type });
+      onSuccess();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to add note"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -464,7 +459,7 @@ function AddNoteModal({ dealerId, onClose, onSuccess }: {
           <p className="text-[10px] text-slate-400 text-right">{content.length}/2000</p>
           <div className="flex gap-3">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
+            <button type="submit" disabled={loading} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">
               {loading ? "Saving..." : "Add Note"}
             </button>
           </div>
@@ -494,14 +489,14 @@ function EditProfileModal({ dealer, onClose, onSuccess }: {
     e.preventDefault();
     if (!form.reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/dealers/" + dealer.id, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
-    setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Update failed"); return; }
-    onSuccess();
+    try {
+      await api.patch("/api/admin/dealers/" + dealer.id, form);
+      onSuccess();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Update failed"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -551,7 +546,7 @@ function EditProfileModal({ dealer, onClose, onSuccess }: {
           </div>
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 transition-colors">{loading ? "Saving..." : "Save Changes"}</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 transition-colors">{loading ? "Saving..." : "Save Changes"}</button>
           </div>
         </form>
       </div>
@@ -582,12 +577,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
   };
 
   async function doAction(endpoint: string, body: Record<string, string>, successMsg: string) {
-    const res = await fetch("/api/admin/dealers/" + dealer.id + "/" + endpoint, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const d = await res.json() as { success?: boolean; data?: unknown; error?: { message: string } };
-    if (!res.ok) throw new Error(d.error?.message ?? "Action failed");
+    await api.post("/api/admin/dealers/" + dealer.id + "/" + endpoint, body);
     handleSuccess(successMsg);
   }
 
@@ -699,7 +689,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
 
         <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-[#0B5FD1] flex items-center justify-center flex-shrink-0 shadow-md">
+            <div className="w-12 h-12 rounded-2xl bg-al-primary flex items-center justify-center flex-shrink-0 shadow-md">
               <span className="text-white text-lg font-bold">{dealer.dealershipName[0]?.toUpperCase() ?? "D"}</span>
             </div>
             <div>
@@ -758,7 +748,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={"px-4 py-3.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap " + (activeTab === tab.id ? "border-[#0B5FD1] text-[#0B5FD1]" : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300")}
+              className={"px-4 py-3.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap " + (activeTab === tab.id ? "border-al-primary text-al-primary" : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300")}
             >
               {tab.label}
             </button>
@@ -904,7 +894,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
               <InfoRow label="Updated" value={fmtDateTime(dealer.updatedAt)} />
               <InfoRow label="Supabase ID" value={<code className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">{dealer.supabaseId}</code>} />
               <div className="pt-4">
-                <button onClick={() => setModal("profile-edit")} className="flex items-center gap-2 px-4 py-2.5 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors">
+                <button onClick={() => setModal("profile-edit")} className="flex items-center gap-2 px-4 py-2.5 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-sm font-semibold transition-colors">
                   <Edit2 size={13} /> Edit Profile
                 </button>
               </div>
@@ -935,7 +925,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
                         <span className="text-xs text-slate-400">{pct}%</span>
                       </div>
                       <div className="w-full bg-slate-100 rounded-full h-2">
-                        <div className="bg-[#0B5FD1] h-2 rounded-full transition-all" style={{ width: pct + "%" }} />
+                        <div className="bg-al-primary h-2 rounded-full transition-all" style={{ width: pct + "%" }} />
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -1371,7 +1361,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
           <div className="max-w-2xl">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold text-slate-700">Internal Notes ({supportNotes.length})</h2>
-              <button onClick={() => setModal("note")} className="flex items-center gap-1.5 px-3.5 py-2 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
+              <button onClick={() => setModal("note")} className="flex items-center gap-1.5 px-3.5 py-2 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
                 <MessageSquare size={12} /> Add Note
               </button>
             </div>
@@ -1492,7 +1482,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
                     <p className="text-sm font-semibold text-slate-800">Override Tier</p>
                     <p className="text-xs text-slate-500">Current: <strong>{dealer.tier}</strong> — change to STANDARD / GOLD / PLATINUM / PROBATION</p>
                   </div>
-                  <button onClick={() => setModal("tier-override")} className="px-4 py-2 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
+                  <button onClick={() => setModal("tier-override")} className="px-4 py-2 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
                     Override Tier
                   </button>
                 </div>
@@ -1507,7 +1497,7 @@ export default function AdminDealerCommandCenter({ data, availability, initialTa
                     <p className="text-sm font-semibold text-slate-800">Update Profile</p>
                     <p className="text-xs text-slate-500">Edit dealer profile information</p>
                   </div>
-                  <button onClick={() => setModal("profile-edit")} className="px-4 py-2 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
+                  <button onClick={() => setModal("profile-edit")} className="px-4 py-2 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
                     Edit
                   </button>
                 </div>

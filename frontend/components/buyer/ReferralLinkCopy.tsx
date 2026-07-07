@@ -31,7 +31,7 @@ export default function ReferralLinkCopy({ referralLink }: { referralLink: strin
       </code>
       <button
         onClick={handleCopy}
-        className="p-2 text-[#0B5FD1] hover:bg-[#EFF6FF] rounded-lg transition-colors"
+        className="p-2 text-al-primary hover:bg-al-primary-subtle rounded-lg transition-colors"
         data-testid="copy-referral-link-btn"
         aria-label="Copy referral link"
       >

@@ -3,8 +3,9 @@
 // record. The original record is never modified. Affiliate is notified.
 // Requires reason (min 10 chars). FINANCE_ADMIN or SUPER_ADMIN only.
 
+import { requirePermission } from "@/lib/auth/permissions";
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
+import { adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { z } from "zod";
 import { clawbackCommission } from "@/lib/services/admin/admin-affiliate-command-center.service";
 
@@ -18,7 +19,7 @@ const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "FINANCE_ADMIN"]);
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { commissionId } = await params;
-  const admin = await getAdminFromRequest(request);
+  const admin = await requirePermission(request, "finance.commissions.reverse");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
   if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or FINANCE_ADMIN required", 403);
 

@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, PauseCircle } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 export interface SequenceStep {
   step: number; // 1 | 2 | 3
@@ -54,16 +55,13 @@ export default function SequenceCell({
   async function pause() {
     setBusy(true);
     try {
-      const res = await fetch("/api/admin/dealer-outreach/pause-sequence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealerProspectId: prospectId, reason: "manual" }),
+      await api.post("/api/admin/dealer-outreach/pause-sequence", {
+        dealerProspectId: prospectId,
+        reason: "manual",
       });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error?.message ?? `Failed (${res.status})`);
       router.refresh();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Pause failed");
+      window.alert(apiErrorMessage(err, "Pause failed"));
     } finally {
       setBusy(false);
     }

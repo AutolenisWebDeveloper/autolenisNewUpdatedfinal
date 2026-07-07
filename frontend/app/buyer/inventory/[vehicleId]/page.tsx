@@ -91,7 +91,7 @@ export default async function VehicleDetailPage({ params }: Props) {
       <div className="max-w-7xl mx-auto px-6 md:px-12 pt-6">
         <a
           href="/buyer/search"
-          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#0B5FD1] transition-colors"
+          className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-al-primary transition-colors"
           data-testid="back-to-search"
         >
           ← Back to Search
@@ -182,7 +182,7 @@ export default async function VehicleDetailPage({ params }: Props) {
                   <h2 className="font-semibold text-slate-900 text-sm uppercase tracking-wider">
                     Features &amp; Options
                   </h2>
-                  <span className="text-xs font-semibold text-[#0B5FD1]">
+                  <span className="text-xs font-semibold text-al-primary">
                     {(vehicle.features as string[]).length} included
                   </span>
                 </div>
@@ -227,7 +227,7 @@ export default async function VehicleDetailPage({ params }: Props) {
                       <div
                         key={i}
                         data-testid={`price-bar-${i}`}
-                        className={`flex-1 rounded-t transition-all ${isLatest ? "bg-[#0B5FD1]" : "bg-slate-200"}`}
+                        className={`flex-1 rounded-t transition-all ${isLatest ? "bg-al-primary" : "bg-slate-200"}`}
                         style={{ height: `${height}px` }}
                         title={`$${(point.price / 100).toLocaleString()} — ${new Date(point.date).toLocaleDateString()}`}
                       />
@@ -236,7 +236,7 @@ export default async function VehicleDetailPage({ params }: Props) {
                 </div>
                 <div className="flex items-center justify-between text-xs text-slate-400">
                   <span>{new Date(priceHistory[Math.max(0, priceHistory.length - 10)].date).toLocaleDateString()}</span>
-                  <span className="text-[#0B5FD1] font-semibold">
+                  <span className="text-al-primary font-semibold">
                     Current: ${(vehicle.priceCents / 100).toLocaleString()}
                   </span>
                   <span>{new Date(priceHistory[priceHistory.length - 1].date).toLocaleDateString()}</span>

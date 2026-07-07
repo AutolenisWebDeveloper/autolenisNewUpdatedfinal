@@ -19,13 +19,13 @@ export default async function AdminVehicleOffersPage() {
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-vehicle-offers-page">
       <div className="flex items-center gap-3 mb-6">
-        <Car size={22} className="text-[#0B5FD1]" />
+        <Car size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Dealer Offer Links</h1>
         <Badge variant="secondary" className="text-xs">{offers.length}</Badge>
         <Link
           href="/admin/vehicle-offers/new"
           data-testid="create-offer-link-btn"
-          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#0B5FD1] hover:bg-[#0944a8] text-white rounded-lg text-xs font-semibold transition-colors"
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-al-primary hover:bg-[#0944a8] text-white rounded-lg text-xs font-semibold transition-colors"
         >
           <PlusCircle size={13} /> Create Offer Link
         </Link>
@@ -39,7 +39,7 @@ export default async function AdminVehicleOffersPage() {
           <Link
             href="/admin/vehicle-offers/new"
             data-testid="empty-create-offer-link"
-            className="inline-flex items-center gap-2 bg-[#0B5FD1] hover:bg-[#0944a8] text-white rounded-lg px-4 py-2 text-sm font-semibold transition-colors"
+            className="inline-flex items-center gap-2 bg-al-primary hover:bg-[#0944a8] text-white rounded-lg px-4 py-2 text-sm font-semibold transition-colors"
           >
             <PlusCircle size={14} /> Create Offer Link →
           </Link>
@@ -54,7 +54,7 @@ export default async function AdminVehicleOffersPage() {
                 key={o.id}
                 href={`/admin/vehicle-offers/${o.id}`}
                 data-testid={`offer-row-${o.id}`}
-                className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-[#0B5FD1]/30 transition-colors"
+                className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-al-primary/30 transition-colors"
               >
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold text-slate-900 text-sm truncate">
@@ -80,7 +80,7 @@ export default async function AdminVehicleOffersPage() {
                   ) : (
                     <Badge variant="outline" className="text-xs">No expiry</Badge>
                   )}
-                  <span className="text-xs text-[#0B5FD1] font-medium">View →</span>
+                  <span className="text-xs text-al-primary font-medium">View →</span>
                 </div>
               </Link>
             );

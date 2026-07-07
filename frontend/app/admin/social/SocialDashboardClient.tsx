@@ -351,7 +351,7 @@ export default function SocialDashboardClient({
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#0B5FD1] flex items-center justify-center">
+          <div className="w-10 h-10 rounded-xl bg-al-primary flex items-center justify-center">
             <Radio size={18} className="text-white" />
           </div>
           <div>
@@ -363,14 +363,14 @@ export default function SocialDashboardClient({
           <button
             data-testid="bulk-open"
             onClick={() => setBulkOpen(true)}
-            className="flex items-center gap-1.5 bg-white border border-[#0B5FD1] text-[#0B5FD1] text-xs font-semibold px-4 py-2 rounded-lg hover:bg-[#EFF6FF] transition-colors"
+            className="flex items-center gap-1.5 bg-white border border-al-primary text-al-primary text-xs font-semibold px-4 py-2 rounded-lg hover:bg-al-primary-subtle transition-colors"
           >
             <UploadCloud size={14} /> Bulk Upload
           </button>
           <button
             data-testid="compose-open"
             onClick={() => setComposeOpen(true)}
-            className="flex items-center gap-1.5 bg-[#0B5FD1] text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-[#0a54bc] transition-colors"
+            className="flex items-center gap-1.5 bg-al-primary text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-[#0a54bc] transition-colors"
           >
             <Sparkles size={14} /> Compose
           </button>
@@ -395,7 +395,7 @@ export default function SocialDashboardClient({
               data-testid={`social-tab-${t.key}`}
               onClick={() => setTab(t.key)}
               className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold whitespace-nowrap border-b-2 transition-colors ${
-                active ? "border-[#0B5FD1] text-[#0B5FD1]" : "border-transparent text-[#64748B] hover:text-[#0F172A]"
+                active ? "border-al-primary text-al-primary" : "border-transparent text-[#64748B] hover:text-[#0F172A]"
               }`}
             >
               <Icon size={14} />
@@ -598,12 +598,12 @@ function OverviewTab({
         <StatCard label="Scheduled" value={stats?.posts.scheduled ?? "—"} accent="text-indigo-600" />
         <StatCard label="Published" value={stats?.posts.published ?? "—"} accent="text-emerald-600" />
         <StatCard label="Videos Queued" value={stats ? stats.videos.queued + stats.videos.generating : "—"} accent="text-blue-600" />
-        <StatCard label="Lead Score" value={stats ? fmtNum(stats.performance.totalLeadScore) : "—"} accent="text-[#0B5FD1]" />
+        <StatCard label="Lead Score" value={stats ? fmtNum(stats.performance.totalLeadScore) : "—"} accent="text-al-primary" />
       </div>
 
       <div className="flex flex-wrap gap-2">
         <button data-testid="action-scan-signals" onClick={scanSignals} disabled={busy === "scan"}
-          className="flex items-center gap-1.5 bg-[#0B5FD1] text-white text-xs font-semibold px-4 py-2 rounded-lg disabled:opacity-50">
+          className="flex items-center gap-1.5 bg-al-primary text-white text-xs font-semibold px-4 py-2 rounded-lg disabled:opacity-50">
           {busy === "scan" ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Scan for Signals
         </button>
         <button data-testid="action-approve-all" onClick={approveAllPending} disabled={busy === "approve-all"}
@@ -623,7 +623,7 @@ function OverviewTab({
 
       <div className="bg-white border border-[#E2E8F0] rounded-2xl shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-[#E2E8F0] flex items-center gap-2">
-          <Sparkles size={14} className="text-[#0B5FD1]" />
+          <Sparkles size={14} className="text-al-primary" />
           <h2 className="text-sm font-bold text-[#0F172A]">Recent Signals</h2>
         </div>
         <div className="overflow-x-auto">
@@ -666,7 +666,7 @@ function OverviewTab({
                         </span>
                       )}
                       <button data-testid={`generate-signal-${s.id}`} onClick={() => generateForSignal(s)} disabled={busy === `gen-${s.id}`}
-                        className="text-[#0B5FD1] font-semibold hover:underline disabled:opacity-50">
+                        className="text-al-primary font-semibold hover:underline disabled:opacity-50">
                         {busy === `gen-${s.id}` ? "Generating…" : "Generate"}
                       </button>
                     </div>
@@ -693,7 +693,7 @@ function OverviewTab({
               <p className="text-xs text-slate-500 mb-1">TikTok hashtags</p>
               <div className="flex flex-wrap gap-1">
                 {trendingData.tiktokHashtags.slice(0, 8).map((tag) => (
-                  <span key={tag} className="text-xs bg-[#EFF6FF] text-[#0B5FD1] px-2 py-0.5 rounded-full">
+                  <span key={tag} className="text-xs bg-al-primary-subtle text-al-primary px-2 py-0.5 rounded-full">
                     {tag}
                   </span>
                 ))}
@@ -771,7 +771,7 @@ function CalendarTab({ onOpenPost, showToast }: { onOpenPost: (p: Post) => void;
         <div className="flex gap-1">
           {["all", ...PLATFORMS].map((p) => (
             <button key={p} data-testid={`calendar-platform-${p}`} onClick={() => setPlatform(p)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize ${platform === p ? "bg-[#0B5FD1] text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize ${platform === p ? "bg-al-primary text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
               {p}
             </button>
           ))}
@@ -797,8 +797,8 @@ function CalendarTab({ onOpenPost, showToast }: { onOpenPost: (p: Post) => void;
                   <div className="space-y-1">
                     {postsFor(day, hour).map((p) => (
                       <button key={p.id} onClick={() => onOpenPost(p)} data-testid={`calendar-post-${p.id}`}
-                        className="w-full text-left p-1.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] hover:border-[#0B5FD1]">
-                        <div className="flex items-center gap-1 text-[#0B5FD1]">{platformIcon(p.platform, 11)}
+                        className="w-full text-left p-1.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] hover:border-al-primary">
+                        <div className="flex items-center gap-1 text-al-primary">{platformIcon(p.platform, 11)}
                           <span className="text-[9px] font-semibold text-[#475569] truncate">{p.franchise?.name ?? p.platform}</span>
                         </div>
                         <div className="mt-0.5"><StatusBadge status={p.status} /></div>
@@ -868,7 +868,7 @@ function PendingTab({
         <h2 className="text-sm font-bold text-[#0F172A]">{posts.length} posts awaiting review</h2>
         <div className="flex gap-2">
           <button data-testid="bulk-approve" onClick={() => bulk("approve")} disabled={busy || posts.length === 0}
-            className="bg-[#0B5FD1] text-white text-xs font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50">Approve All ({posts.length})</button>
+            className="bg-al-primary text-white text-xs font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50">Approve All ({posts.length})</button>
           <button data-testid="bulk-reject" onClick={() => bulk("reject")} disabled={busy || posts.length === 0}
             className="bg-white border border-rose-200 text-rose-600 text-xs font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50">Reject All ({posts.length})</button>
         </div>
@@ -892,7 +892,7 @@ function PendingTab({
               {posts.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-[#94A3B8]">Nothing pending review.</td></tr>}
               {posts.map((p) => (
                 <tr key={p.id} className="border-t border-[#F1F5F9] hover:bg-[#F8FAFC]">
-                  <td className="px-4 py-2"><span className="inline-flex items-center gap-1 text-[#0B5FD1] capitalize">{platformIcon(p.platform, 12)}{p.platform}</span></td>
+                  <td className="px-4 py-2"><span className="inline-flex items-center gap-1 text-al-primary capitalize">{platformIcon(p.platform, 12)}{p.platform}</span></td>
                   <td className="px-4 py-2 text-[#475569]">{p.franchise?.name ?? "—"}</td>
                   <td className="px-4 py-2 max-w-[220px]">
                     <div className="flex items-center gap-2">
@@ -911,7 +911,7 @@ function PendingTab({
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => act(p.id, "approve")} className="text-emerald-600 font-semibold hover:underline">Approve</button>
                       <button onClick={() => act(p.id, "reject")} className="text-rose-600 font-semibold hover:underline">Reject</button>
-                      <button onClick={() => onOpenPost(p)} className="text-[#0B5FD1] font-semibold hover:underline">Edit</button>
+                      <button onClick={() => onOpenPost(p)} className="text-al-primary font-semibold hover:underline">Edit</button>
                     </div>
                   </td>
                 </tr>
@@ -982,14 +982,14 @@ function QueueTab({
             {posts.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-[#94A3B8]">Queue is empty.</td></tr>}
             {posts.map((p) => (
               <tr key={p.id} className="border-t border-[#F1F5F9] hover:bg-[#F8FAFC]">
-                <td className="px-4 py-2"><span className="inline-flex items-center gap-1 text-[#0B5FD1] capitalize">{platformIcon(p.platform, 12)}{p.platform}</span></td>
+                <td className="px-4 py-2"><span className="inline-flex items-center gap-1 text-al-primary capitalize">{platformIcon(p.platform, 12)}{p.platform}</span></td>
                 <td className="px-4 py-2 text-[#475569]">{p.franchise?.name ?? "—"}</td>
                 <td className="px-4 py-2 text-[#64748B]"><span className="inline-flex items-center gap-1"><Clock size={11} />{fmtDateTime(p.scheduledAt)}</span></td>
                 <td className="px-4 py-2">{p.video ? <VideoBadge status={p.video.status} /> : <span className="text-[#94A3B8]">no video</span>}</td>
                 <td className="px-4 py-2"><StatusBadge status={p.status} /></td>
                 <td className="px-4 py-2">
                   <div className="flex items-center justify-end gap-2">
-                    <button data-testid={`publish-now-${p.id}`} onClick={() => publishNow(p)} disabled={publishingId === p.id} className="text-[#0B5FD1] font-semibold hover:underline disabled:opacity-50">{publishingId === p.id ? "Publishing…" : "Publish Now"}</button>
+                    <button data-testid={`publish-now-${p.id}`} onClick={() => publishNow(p)} disabled={publishingId === p.id} className="text-al-primary font-semibold hover:underline disabled:opacity-50">{publishingId === p.id ? "Publishing…" : "Publish Now"}</button>
                     <button onClick={() => onOpenPost(p)} className="text-[#64748B] font-semibold hover:underline">View Post</button>
                   </div>
                 </td>
@@ -1161,7 +1161,7 @@ function BufferTab({ showToast }: { showToast: (m: string) => void }) {
         <div className="flex flex-wrap gap-1">
           {BUFFER_STATUS_FILTERS.map((s) => (
             <button key={s.key} data-testid={`buffer-status-${s.key}`} onClick={() => setStatusKey(s.key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${statusKey === s.key ? "bg-[#0B5FD1] text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${statusKey === s.key ? "bg-al-primary text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
               {s.label}
             </button>
           ))}
@@ -1212,7 +1212,7 @@ function BufferTab({ showToast }: { showToast: (m: string) => void }) {
               {!loading && posts.map((p) => (
                 <tr key={p.id} className="border-t border-[#F1F5F9] hover:bg-[#F8FAFC] align-top">
                   <td className="px-4 py-2">
-                    <span className="inline-flex items-center gap-1 text-[#0B5FD1] capitalize">
+                    <span className="inline-flex items-center gap-1 text-al-primary capitalize">
                       {platformIcon(p.channelService, 12)}{p.channelService || "—"}
                     </span>
                     <p className="text-[10px] text-[#94A3B8]">{p.channelName}</p>
@@ -1254,7 +1254,7 @@ function BufferTab({ showToast }: { showToast: (m: string) => void }) {
                     <div className="flex items-center justify-end gap-2 whitespace-nowrap">
                       {p.status !== "sent" && (
                         <>
-                          <button disabled={busyId === p.id} onClick={() => act(p, "reschedule")} className="text-[#0B5FD1] font-semibold hover:underline disabled:opacity-50">Reschedule</button>
+                          <button disabled={busyId === p.id} onClick={() => act(p, "reschedule")} className="text-al-primary font-semibold hover:underline disabled:opacity-50">Reschedule</button>
                           <button disabled={busyId === p.id} onClick={() => act(p, "edit")} className="text-[#64748B] font-semibold hover:underline disabled:opacity-50">Edit</button>
                         </>
                       )}
@@ -1297,7 +1297,7 @@ function PerformanceTab({
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Total Reach" value={stats ? fmtNum(stats.performance.totalReach) : "—"} />
-        <StatCard label="Total Clicks" value={stats ? fmtNum(stats.performance.totalClicks) : "—"} accent="text-[#0B5FD1]" />
+        <StatCard label="Total Clicks" value={stats ? fmtNum(stats.performance.totalClicks) : "—"} accent="text-al-primary" />
         <StatCard label="Lead Score" value={stats ? fmtNum(stats.performance.totalLeadScore) : "—"} accent="text-emerald-600" />
         <StatCard label="Vehicle Requests" value={stats ? fmtNum(stats.performance.totalRequests) : "—"} accent="text-indigo-600" />
       </div>
@@ -1312,7 +1312,7 @@ function PerformanceTab({
           </div>
           <div className="bg-white rounded-xl border border-[#E2E8F0] p-3">
             <p className="text-xs text-slate-500">Deals Won via Social</p>
-            <p className="text-lg font-medium text-[#0B5FD1]">{stats.revenue.dealsWon ?? 0}</p>
+            <p className="text-lg font-medium text-al-primary">{stats.revenue.dealsWon ?? 0}</p>
           </div>
           {stats.revenue.topPost && (
             <div className="col-span-2 bg-white rounded-xl border border-[#E2E8F0] p-3">
@@ -1333,7 +1333,7 @@ function PerformanceTab({
             <div key={b.platform} className="flex items-center gap-3">
               <span className="w-20 text-xs capitalize text-[#64748B] flex items-center gap-1">{platformIcon(b.platform, 12)}{b.platform}</span>
               <div className="flex-1 h-4 bg-[#F1F5F9] rounded-full overflow-hidden">
-                <div className="h-full bg-[#0B5FD1] rounded-full" style={{ width: `${b.pct}%` }} />
+                <div className="h-full bg-al-primary rounded-full" style={{ width: `${b.pct}%` }} />
               </div>
               <span className="w-12 text-right text-xs font-semibold text-[#0F172A]">{fmtNum(b.score)}</span>
             </div>
@@ -1380,8 +1380,8 @@ function PerformanceTab({
                   <td className="px-4 py-2 max-w-[260px] truncate text-[#0F172A] font-medium">{p.hook}</td>
                   <td className="px-4 py-2 capitalize text-[#475569]"><span className="inline-flex items-center gap-1">{platformIcon(p.platform, 12)}{p.platform}</span></td>
                   <td className="px-4 py-2 text-[#475569]">{p.franchise?.name ?? "—"}</td>
-                  <td className="px-4 py-2 font-bold text-[#0B5FD1]">{p.leadScore}</td>
-                  <td className="px-4 py-2 text-right"><button onClick={() => onOpenPost(p)} className="text-[#0B5FD1] font-semibold hover:underline">View</button></td>
+                  <td className="px-4 py-2 font-bold text-al-primary">{p.leadScore}</td>
+                  <td className="px-4 py-2 text-right"><button onClick={() => onOpenPost(p)} className="text-al-primary font-semibold hover:underline">View</button></td>
                 </tr>
               ))}
             </tbody>
@@ -1624,7 +1624,7 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
         <button
           onClick={handleSync}
           disabled={syncing}
-          className="text-xs bg-[#0B5FD1] text-white px-3 py-1.5 rounded-lg hover:bg-[#0a54bc] disabled:opacity-50"
+          className="text-xs bg-al-primary text-white px-3 py-1.5 rounded-lg hover:bg-[#0a54bc] disabled:opacity-50"
         >
           {syncing ? "Syncing..." : "↻ Sync Analytics"}
         </button>
@@ -1655,7 +1655,7 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
             onClick={() => setPlatformFilter(p)}
             className={`text-xs px-3 py-1 rounded-full border whitespace-nowrap ${
               platformFilter === p
-                ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                ? "bg-al-primary text-white border-al-primary"
                 : "bg-white text-slate-600 border-[#E2E8F0]"
             }`}
           >
@@ -1685,16 +1685,16 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
                 <div
                   key={post.id}
                   onClick={() => handleAnalyze(post)}
-                  className={`bg-white rounded-xl border p-3 cursor-pointer hover:border-[#0B5FD1] transition-colors ${
+                  className={`bg-white rounded-xl border p-3 cursor-pointer hover:border-al-primary transition-colors ${
                     selectedPost?.id === post.id
-                      ? "border-[#0B5FD1] ring-1 ring-[#0B5FD1]/20"
+                      ? "border-al-primary ring-1 ring-al-primary/20"
                       : "border-[#E2E8F0]"
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-medium capitalize text-[#0B5FD1] bg-[#EFF6FF] px-1.5 py-0.5 rounded">
+                        <span className="text-xs font-medium capitalize text-al-primary bg-al-primary-subtle px-1.5 py-0.5 rounded">
                           {post.platform}
                         </span>
                         <StatusBadge status={post.status} />
@@ -1712,7 +1712,7 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
                       </p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-bold text-[#0B5FD1]">
+                      <p className="text-sm font-bold text-al-primary">
                         {post.leadScore}
                       </p>
                       <p className="text-xs text-slate-400">score</p>
@@ -1797,12 +1797,12 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
 
               {/* Recommendations */}
               <div className="bg-white rounded-xl border border-[#E2E8F0] p-3">
-                <h4 className="text-xs font-semibold text-[#0B5FD1] mb-2">
+                <h4 className="text-xs font-semibold text-al-primary mb-2">
                   ⚡ Recommendations
                 </h4>
                 <div className="space-y-2">
                   {analysis.recommendations.slice(0, 3).map((r, i) => (
-                    <div key={i} className="border-l-2 border-[#0B5FD1]/30 pl-2">
+                    <div key={i} className="border-l-2 border-al-primary/30 pl-2">
                       <div className="flex items-center gap-1 mb-0.5">
                         <span className={`text-xs font-medium ${
                           r.priority === "high" ? "text-red-500"
@@ -1824,8 +1824,8 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
               </div>
 
               {/* Improved hook */}
-              <div className="bg-[#EFF6FF] rounded-xl border border-[#0B5FD1]/20 p-3">
-                <h4 className="text-xs font-semibold text-[#0B5FD1] mb-1">
+              <div className="bg-al-primary-subtle rounded-xl border border-al-primary/20 p-3">
+                <h4 className="text-xs font-semibold text-al-primary mb-1">
                   💡 Better Hook
                 </h4>
                 <p className="text-xs text-[#0F172A] font-medium">
@@ -1847,7 +1847,7 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
                 </button>
                 <button
                   onClick={() => handleRepost(selectedPost, selectedPost.platform)}
-                  className="border border-[#0B5FD1] text-[#0B5FD1] text-xs font-medium py-2 rounded-xl hover:bg-[#0B5FD1]/5"
+                  className="border border-al-primary text-al-primary text-xs font-medium py-2 rounded-xl hover:bg-al-primary/5"
                 >
                   ↻ Repost Original
                 </button>
@@ -1863,7 +1863,7 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
                       onClick={() => setPublishStrategy(s)}
                       className={`text-xs px-2 py-1 rounded-lg border ${
                         publishStrategy === s
-                          ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                          ? "bg-al-primary text-white border-al-primary"
                           : "text-slate-600 border-[#E2E8F0]"
                       }`}
                     >
@@ -1895,7 +1895,7 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
                     {Object.entries(optimized).map(([platform, version]) => (
                       <div key={platform} className="border border-[#E2E8F0] rounded-xl p-3">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-medium capitalize text-[#0B5FD1] bg-[#EFF6FF] px-2 py-0.5 rounded-full">
+                          <span className="text-xs font-medium capitalize text-al-primary bg-al-primary-subtle px-2 py-0.5 rounded-full">
                             {platform}
                           </span>
                           <span className="text-xs text-slate-400">
@@ -1918,7 +1918,7 @@ function AnalyticsTab({ showToast }: { showToast: (m: string) => void }) {
                               caption: version.caption,
                               hashtags: version.hashtags,
                             })}
-                            className="text-xs bg-[#0B5FD1] text-white px-2 py-1 rounded-lg hover:bg-[#0a54bc]"
+                            className="text-xs bg-al-primary text-white px-2 py-1 rounded-lg hover:bg-[#0a54bc]"
                           >
                             Publish to {platform}
                           </button>
@@ -1957,7 +1957,7 @@ function AudienceBar({ label, pct }: { label: string; pct: number }) {
       <span className="w-24 text-xs text-slate-600 truncate">{label}</span>
       <div className="flex-1 h-3 bg-slate-100 rounded-full">
         <div
-          className="h-full bg-[#0B5FD1] rounded-full"
+          className="h-full bg-al-primary rounded-full"
           style={{ width: `${Math.min(Math.max(pct, 0), 100)}%` }}
         />
       </div>
@@ -2015,7 +2015,7 @@ function AudienceInsights() {
             onClick={() => setPlatform(p)}
             className={`text-xs px-3 py-1 rounded-full border whitespace-nowrap ${
               platform === p
-                ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                ? "bg-al-primary text-white border-al-primary"
                 : "bg-white text-slate-600 border-[#E2E8F0]"
             }`}
           >
@@ -2149,7 +2149,7 @@ function ABTestsTab({ showToast }: { showToast: (m: string) => void }) {
 
   const statusColor = (status: string) =>
     status === "COMPLETED" ? "text-emerald-600 bg-emerald-50"
-    : status === "RUNNING" ? "text-[#0B5FD1] bg-[#EFF6FF]"
+    : status === "RUNNING" ? "text-al-primary bg-al-primary-subtle"
     : "text-slate-500 bg-slate-50";
 
   return (
@@ -2214,7 +2214,7 @@ function ABTestsTab({ showToast }: { showToast: (m: string) => void }) {
           </h3>
           <button
             onClick={() => void load()}
-            className="text-xs text-[#0B5FD1] hover:underline"
+            className="text-xs text-al-primary hover:underline"
           >
             ↻ Refresh
           </button>
@@ -2258,8 +2258,8 @@ function ABTestsTab({ showToast }: { showToast: (m: string) => void }) {
                   <button
                     onClick={() => handleResolve(group.id)}
                     disabled={resolving === group.id}
-                    className="text-xs border border-[#0B5FD1] text-[#0B5FD1]
-                      px-2 py-1 rounded-lg hover:bg-[#0B5FD1]/5 disabled:opacity-50"
+                    className="text-xs border border-al-primary text-al-primary
+                      px-2 py-1 rounded-lg hover:bg-al-primary/5 disabled:opacity-50"
                   >
                     {resolving === group.id ? "Resolving..." : "Resolve Now"}
                   </button>
@@ -2294,7 +2294,7 @@ function ABTestsTab({ showToast }: { showToast: (m: string) => void }) {
                           </span>
                         )}
                       </div>
-                      <span className="text-xs font-semibold text-[#0B5FD1]">
+                      <span className="text-xs font-semibold text-al-primary">
                         {variant.score.toFixed(1)}
                       </span>
                     </div>
@@ -2317,7 +2317,7 @@ function ABTestsTab({ showToast }: { showToast: (m: string) => void }) {
                         <div className="flex-1 h-2 bg-slate-100 rounded-full">
                           <div
                             className={`h-full rounded-full ${
-                              v.isWinner ? "bg-emerald-500" : "bg-[#0B5FD1]"
+                              v.isWinner ? "bg-emerald-500" : "bg-al-primary"
                             }`}
                             style={{ width: `${(v.score / max) * 100}%` }}
                           />
@@ -2370,7 +2370,7 @@ function LeadsTab({ showToast }: { showToast: (m: string) => void }) {
     <div className="space-y-6">
       {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Leads This Week" value={stats ? fmtNum(stats.thisWeek) : "—"} accent="text-[#0B5FD1]" />
+        <StatCard label="Leads This Week" value={stats ? fmtNum(stats.thisWeek) : "—"} accent="text-al-primary" />
         <StatCard label="Leads Today" value={stats ? fmtNum(stats.today) : "—"} accent="text-indigo-600" />
         <StatCard label="Top Platform" value={stats ? stats.topPlatform : "—"} />
         <StatCard label="Conversion Rate" value={stats ? `${stats.conversionRate}%` : "—"} accent="text-emerald-600" />
@@ -2384,7 +2384,7 @@ function LeadsTab({ showToast }: { showToast: (m: string) => void }) {
               key={s}
               onClick={() => setStatus(s)}
               className={`px-3 py-1.5 rounded-full text-xs font-semibold capitalize transition-colors ${
-                status === s ? "bg-[#0B5FD1] text-white" : "bg-white border border-[#E2E8F0] text-[#64748B] hover:text-[#0F172A]"
+                status === s ? "bg-al-primary text-white" : "bg-white border border-[#E2E8F0] text-[#64748B] hover:text-[#0F172A]"
               }`}
             >
               {s === "all" ? "All" : s.toLowerCase()}
@@ -2493,7 +2493,7 @@ function LeadDrawer({ lead, onClose }: { lead: SocialLead; onClose: () => void }
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#E2E8F0] sticky top-0 bg-white">
           <div className="flex items-center gap-2">
-            <Users size={16} className="text-[#0B5FD1]" />
+            <Users size={16} className="text-al-primary" />
             <h2 className="text-sm font-bold text-[#0F172A]">Lead Detail</h2>
             <LeadStatusBadge status={lead.status} />
           </div>
@@ -2610,7 +2610,7 @@ function CreatorsTab({ showToast }: { showToast: (m: string) => void }) {
     <div className="space-y-6">
       {/* Stats row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Total Creators" value={stats ? fmtNum(stats.total) : "—"} accent="text-[#0B5FD1]" />
+        <StatCard label="Total Creators" value={stats ? fmtNum(stats.total) : "—"} accent="text-al-primary" />
         <StatCard label="Active Creators" value={stats ? fmtNum(stats.active) : "—"} accent="text-emerald-600" />
         <StatCard label="Total Clicks" value={stats ? fmtNum(stats.totalClicks) : "—"} accent="text-indigo-600" />
         <StatCard label="Revenue Attributed" value={stats ? fmtUsd(stats.revenueAttributedCents) : "—"} accent="text-emerald-600" />
@@ -2621,7 +2621,7 @@ function CreatorsTab({ showToast }: { showToast: (m: string) => void }) {
         <button
           data-testid="creator-add"
           onClick={() => setShowForm((s) => !s)}
-          className="px-3 py-1.5 rounded-lg bg-[#0B5FD1] text-white text-xs font-semibold hover:bg-[#0A4DB8]"
+          className="px-3 py-1.5 rounded-lg bg-al-primary text-white text-xs font-semibold hover:bg-al-primary-hover"
         >
           {showForm ? "Cancel" : "Add Creator"}
         </button>
@@ -2675,7 +2675,7 @@ function CreatorsTab({ showToast }: { showToast: (m: string) => void }) {
           </label>
           <div className="flex items-end">
             <button data-testid="creator-save" onClick={() => void createCreator()} disabled={saving}
-              className="px-4 py-1.5 rounded-lg bg-[#0B5FD1] text-white text-xs font-semibold hover:bg-[#0A4DB8] disabled:opacity-60">
+              className="px-4 py-1.5 rounded-lg bg-al-primary text-white text-xs font-semibold hover:bg-al-primary-hover disabled:opacity-60">
               {saving ? "Saving…" : "Save Creator"}
             </button>
           </div>
@@ -2741,7 +2741,7 @@ function CreatorsTab({ showToast }: { showToast: (m: string) => void }) {
                   <td className="px-4 py-2 text-right">
                     <button
                       onClick={() => setEditId(editId === c.id ? null : c.id)}
-                      className="text-[#0B5FD1] font-semibold hover:underline">
+                      className="text-al-primary font-semibold hover:underline">
                       {editId === c.id ? "Done" : "Edit"}
                     </button>
                   </td>
@@ -2817,7 +2817,7 @@ function SettingsTab({
         <button
           data-testid="save-mode"
           onClick={() => showToast("Mode is environment-controlled (SOCIAL_AUTOMATION_MODE). Update the env var to persist.")}
-          className="mt-4 bg-[#0B5FD1] text-white text-xs font-semibold px-4 py-2 rounded-lg">
+          className="mt-4 bg-al-primary text-white text-xs font-semibold px-4 py-2 rounded-lg">
           Save
         </button>
       </div>
@@ -2870,7 +2870,7 @@ function SettingsTab({
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
           {platformConnections.map((c) => (
             <div key={c.platform} className="flex items-center gap-2 p-3 rounded-xl border border-[#E2E8F0]">
-              <span className="text-[#0B5FD1]">{platformIcon(c.platform, 16)}</span>
+              <span className="text-al-primary">{platformIcon(c.platform, 16)}</span>
               <div>
                 <p className="text-xs font-semibold capitalize text-[#0F172A]">{c.platform}</p>
                 <p className={`text-[10px] font-bold ${c.connected ? "text-emerald-600" : "text-[#94A3B8]"}`}>{c.connected ? "Connected" : "Not connected"}</p>
@@ -2893,7 +2893,7 @@ function SettingsTab({
               data-testid="buffer-test"
               onClick={testBuffer}
               disabled={testingBuffer}
-              className="text-xs bg-[#0B5FD1] text-white px-3 py-1.5 rounded-lg hover:bg-[#0a54bc] disabled:opacity-50"
+              className="text-xs bg-al-primary text-white px-3 py-1.5 rounded-lg hover:bg-[#0a54bc] disabled:opacity-50"
             >
               {testingBuffer ? "Testing…" : "Test Buffer Connection"}
             </button>
@@ -2957,7 +2957,7 @@ function SettingsTab({
 function ProviderCard({ icon, name, connected, detail }: { icon: ReactNode; name: string; connected: boolean; detail: string }) {
   return (
     <div className="flex items-center gap-3 p-3 rounded-xl border border-[#E2E8F0]">
-      <span className="text-[#0B5FD1]">{icon}</span>
+      <span className="text-al-primary">{icon}</span>
       <div className="min-w-0">
         <p className="text-xs font-semibold text-[#0F172A]">{name}</p>
         <p className={`text-[10px] font-bold ${connected ? "text-emerald-600" : "text-[#94A3B8]"}`}>
@@ -3012,7 +3012,7 @@ function MarketIndexTab({ showToast }: { showToast: (m: string) => void }) {
             data-testid="market-index-generate"
             disabled={generating}
             onClick={generateNow}
-            className="bg-[#0B5FD1] text-white text-xs font-semibold px-4 py-2 rounded-lg disabled:opacity-50 flex items-center gap-2">
+            className="bg-al-primary text-white text-xs font-semibold px-4 py-2 rounded-lg disabled:opacity-50 flex items-center gap-2">
             {generating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
             {generating ? "Generating…" : "Generate Market Index Now"}
           </button>
@@ -3044,7 +3044,7 @@ function MarketIndexTab({ showToast }: { showToast: (m: string) => void }) {
             )}
             {last.linkedInUrl && (
               <a href={last.linkedInUrl} target="_blank" rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5FD1]">
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-al-primary">
                 <ExternalLink size={13} /> View on LinkedIn
               </a>
             )}
@@ -3126,7 +3126,7 @@ function MediaTab({ showToast }: { showToast: (m: string) => void }) {
         <div className="flex gap-1">
           {["all", ...PLATFORMS].map((p) => (
             <button key={p} data-testid={`media-platform-${p}`} onClick={() => setPlatform(p)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize ${platform === p ? "bg-[#0B5FD1] text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize ${platform === p ? "bg-al-primary text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
               {p}
             </button>
           ))}
@@ -3134,7 +3134,7 @@ function MediaTab({ showToast }: { showToast: (m: string) => void }) {
         <div className="flex gap-1">
           {MEDIA_TYPE_FILTERS.map((f) => (
             <button key={f.value} onClick={() => setType(f.value)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${type === f.value ? "bg-[#0B5FD1] text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${type === f.value ? "bg-al-primary text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
               {f.label}
             </button>
           ))}
@@ -3142,7 +3142,7 @@ function MediaTab({ showToast }: { showToast: (m: string) => void }) {
         <div className="flex gap-1">
           {MEDIA_STATUS_FILTERS.map((f) => (
             <button key={f.value} onClick={() => setStatus(f.value)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${status === f.value ? "bg-[#0B5FD1] text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${status === f.value ? "bg-al-primary text-white" : "bg-white border border-[#E2E8F0] text-[#64748B]"}`}>
               {f.label}
             </button>
           ))}
@@ -3190,7 +3190,7 @@ function MediaTab({ showToast }: { showToast: (m: string) => void }) {
                   <div className="flex items-center justify-between gap-2">
                     <VideoBadge status={m.status} />
                     <button onClick={() => { if (url) window.open(url, "_blank"); }} disabled={!url}
-                      className="flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:underline disabled:opacity-40">
+                      className="flex items-center gap-1 text-xs font-semibold text-al-primary hover:underline disabled:opacity-40">
                       ⬇ Download
                     </button>
                   </div>
@@ -3421,7 +3421,7 @@ function BulkUploadModal({
         <div className="flex gap-1 px-5 pt-3 border-b border-[#E2E8F0]">
           {(["form", "csv"] as const).map((m) => (
             <button key={m} onClick={() => setMode(m)}
-              className={`px-4 py-2 text-xs font-semibold border-b-2 ${mode === m ? "border-[#0B5FD1] text-[#0B5FD1]" : "border-transparent text-[#64748B]"}`}>
+              className={`px-4 py-2 text-xs font-semibold border-b-2 ${mode === m ? "border-al-primary text-al-primary" : "border-transparent text-[#64748B]"}`}>
               {m === "form" ? "Multi-row form" : "CSV + images"}
             </button>
           ))}
@@ -3453,7 +3453,7 @@ function BulkUploadModal({
                       className="text-xs border border-[#E2E8F0] rounded-lg px-2 py-1.5" />
                   </div>
                   <div className="flex items-center gap-3">
-                    <label className={`text-xs text-[#0B5FD1] flex items-center gap-1 cursor-pointer hover:underline ${r.uploading ? "opacity-40 pointer-events-none" : ""}`}>
+                    <label className={`text-xs text-al-primary flex items-center gap-1 cursor-pointer hover:underline ${r.uploading ? "opacity-40 pointer-events-none" : ""}`}>
                       <ImageIcon size={12} /> {r.uploading ? "Uploading…" : r.imageUrl ? "Replace image" : "Add image"}
                       <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
                         onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleRowImage(i, f); e.target.value = ""; }} />
@@ -3467,7 +3467,7 @@ function BulkUploadModal({
                 </div>
               ))}
               <button onClick={() => setRows((rs) => [...rs, emptyBulkRow(defaultFranchise)])}
-                className="flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:underline">
+                className="flex items-center gap-1 text-xs font-semibold text-al-primary hover:underline">
                 <Plus size={14} /> Add another post
               </button>
             </div>
@@ -3475,17 +3475,17 @@ function BulkUploadModal({
             <div className="space-y-4">
               <div className="text-xs text-[#475569] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg p-3">
                 <p className="font-semibold mb-1">CSV format</p>
-                <p>Header row with columns: <code className="text-[#0B5FD1]">platform, hook, caption, hashtags, scheduledAt, image</code></p>
+                <p>Header row with columns: <code className="text-al-primary">platform, hook, caption, hashtags, scheduledAt, image</code></p>
                 <p className="mt-1">platform ∈ tiktok/instagram/facebook/youtube/linkedin. <code>image</code> is the filename of an uploaded image (optional). <code>scheduledAt</code> is ISO or any parseable date (optional).</p>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <label className="border-2 border-dashed border-[#E2E8F0] rounded-xl p-4 text-center cursor-pointer hover:border-[#0B5FD1]">
+                <label className="border-2 border-dashed border-[#E2E8F0] rounded-xl p-4 text-center cursor-pointer hover:border-al-primary">
                   <UploadCloud size={20} className="mx-auto text-slate-400 mb-1" />
                   <p className="text-xs font-semibold text-[#0F172A]">{csvRows.length > 0 ? `${csvRows.length} rows loaded` : "Upload CSV"}</p>
                   <input type="file" accept=".csv,text/csv" className="hidden"
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleCsvFile(f); e.target.value = ""; }} />
                 </label>
-                <label className="border-2 border-dashed border-[#E2E8F0] rounded-xl p-4 text-center cursor-pointer hover:border-[#0B5FD1]">
+                <label className="border-2 border-dashed border-[#E2E8F0] rounded-xl p-4 text-center cursor-pointer hover:border-al-primary">
                   <ImageIcon size={20} className="mx-auto text-slate-400 mb-1" />
                   <p className="text-xs font-semibold text-[#0F172A]">{Object.keys(imageFiles).length > 0 ? `${Object.keys(imageFiles).length} images (${matchedImages} matched)` : "Upload images"}</p>
                   <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
@@ -3524,12 +3524,12 @@ function BulkUploadModal({
           <button onClick={onClose} className="ml-auto text-xs font-semibold text-[#64748B] px-3 py-2">Cancel</button>
           {mode === "form" ? (
             <button disabled={submitting} onClick={() => void submitForm()}
-              className="bg-[#0B5FD1] text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-[#0a54bc] disabled:opacity-50">
+              className="bg-al-primary text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-[#0a54bc] disabled:opacity-50">
               {submitting ? "Creating…" : "Create posts"}
             </button>
           ) : (
             <button disabled={submitting || csvRows.length === 0} onClick={() => void submitCsv()}
-              className="bg-[#0B5FD1] text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-[#0a54bc] disabled:opacity-50">
+              className="bg-al-primary text-white text-xs font-semibold px-4 py-2 rounded-lg hover:bg-[#0a54bc] disabled:opacity-50">
               {submitting ? "Importing…" : "Import & create"}
             </button>
           )}
@@ -3901,7 +3901,7 @@ function ComposeDrawer({
                   onClick={() => togglePlatform(p)}
                   className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${
                     targetPlatforms.includes(p)
-                      ? "bg-[#0B5FD1] text-white"
+                      ? "bg-al-primary text-white"
                       : "bg-white border border-[#E2E8F0] text-[#64748B]"
                   }`}
                 >
@@ -3961,7 +3961,7 @@ function ComposeDrawer({
               <button
                 onClick={handleAIGenerate}
                 disabled={generating}
-                className="flex items-center gap-1.5 bg-[#0B5FD1] text-white text-xs
+                className="flex items-center gap-1.5 bg-al-primary text-white text-xs
                   font-semibold px-4 py-2 rounded-lg hover:bg-[#0a54bc]
                   disabled:opacity-50 whitespace-nowrap"
               >
@@ -3985,8 +3985,8 @@ function ComposeDrawer({
                   <button
                     key={tag}
                     onClick={() => addTrendingTag(tag)}
-                    className="text-[10px] bg-[#EFF6FF] text-[#0B5FD1] px-2 py-0.5
-                      rounded-full border border-[#0B5FD1]/20 hover:bg-[#DBEAFE]"
+                    className="text-[10px] bg-al-primary-subtle text-al-primary px-2 py-0.5
+                      rounded-full border border-al-primary/20 hover:bg-[#DBEAFE]"
                   >
                     + {tag}
                   </button>
@@ -4153,7 +4153,7 @@ function ComposeDrawer({
               </label>
               <div className="flex items-center gap-3">
                 <label
-                  className={`text-xs text-[#0B5FD1] flex items-center gap-1 cursor-pointer
+                  className={`text-xs text-al-primary flex items-center gap-1 cursor-pointer
                     hover:underline ${uploadingImage ? "opacity-40 pointer-events-none" : ""}`}
                 >
                   <ImageIcon size={10} />
@@ -4172,7 +4172,7 @@ function ComposeDrawer({
                 <button
                   onClick={() => void handleGenerateImage()}
                   disabled={generatingImage || !imageBrief}
-                  className="text-xs text-[#0B5FD1] flex items-center gap-1
+                  className="text-xs text-al-primary flex items-center gap-1
                     hover:underline disabled:opacity-40"
                 >
                   <RefreshCw size={10} />
@@ -4185,7 +4185,7 @@ function ComposeDrawer({
               <div className="w-full h-48 bg-[#F8FAFC] rounded-xl border border-[#E2E8F0]
                 flex items-center justify-center">
                 <div className="text-center">
-                  <Loader2 size={24} className="animate-spin text-[#0B5FD1] mx-auto mb-2" />
+                  <Loader2 size={24} className="animate-spin text-al-primary mx-auto mb-2" />
                   <p className="text-xs text-slate-400">Generating image...</p>
                 </div>
               </div>
@@ -4207,7 +4207,7 @@ function ComposeDrawer({
                           setPreviewImage(url);
                         }}
                         className={`w-12 h-12 rounded-lg overflow-hidden border-2
-                          ${selectedImageIdx === i ? "border-[#0B5FD1]" : "border-[#E2E8F0]"}`}
+                          ${selectedImageIdx === i ? "border-al-primary" : "border-[#E2E8F0]"}`}
                       >
                         <img src={url} alt="" className="w-full h-full object-cover" />
                       </button>
@@ -4217,7 +4217,7 @@ function ComposeDrawer({
                       disabled={generatingImage}
                       className="w-12 h-12 rounded-lg border-2 border-dashed
                         border-[#E2E8F0] flex items-center justify-center
-                        text-slate-400 hover:border-[#0B5FD1] hover:text-[#0B5FD1]"
+                        text-slate-400 hover:border-al-primary hover:text-al-primary"
                     >
                       +
                     </button>
@@ -4232,7 +4232,7 @@ function ComposeDrawer({
                 onClick={() => imageBrief && void handleGenerateImage()}
                 className="w-full h-32 bg-[#F8FAFC] rounded-xl border-2 border-dashed
                   border-[#E2E8F0] flex items-center justify-center cursor-pointer
-                  hover:border-[#0B5FD1] hover:bg-[#EFF6FF] transition-colors"
+                  hover:border-al-primary hover:bg-al-primary-subtle transition-colors"
               >
                 <div className="text-center">
                   <ImageIcon size={24} className="text-slate-300 mx-auto mb-1" />
@@ -4292,7 +4292,7 @@ function ComposeDrawer({
         {/* Footer */}
         <div className="sticky bottom-0 bg-white border-t border-[#E2E8F0] px-5 py-3">
           {targetPlatforms.length > 1 && (
-            <p className="text-xs text-[#0B5FD1] mb-2 text-center">
+            <p className="text-xs text-al-primary mb-2 text-center">
               Publishing to {targetPlatforms.length} platforms simultaneously
             </p>
           )}
@@ -4301,7 +4301,7 @@ function ComposeDrawer({
               disabled={saving || !hook.trim() || !caption.trim()}
               data-testid="compose-submit"
               onClick={submit}
-              className="flex-1 bg-[#0B5FD1] text-white text-sm font-semibold
+              className="flex-1 bg-al-primary text-white text-sm font-semibold
                 py-2.5 rounded-xl hover:bg-[#0a54bc] disabled:opacity-50"
             >
               {saving ? "Creating…" : `Create Post${targetPlatforms.length > 1 ? ` (${targetPlatforms.length} platforms)` : ""}`}
@@ -4464,7 +4464,7 @@ function PostDrawer({
       <div className="relative w-full max-w-[640px] bg-white h-full overflow-y-auto shadow-2xl">
         <div className="sticky top-0 bg-white border-b border-[#E2E8F0] px-5 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-[#0B5FD1]">{platformIcon(post.platform, 16)}</span>
+            <span className="text-al-primary">{platformIcon(post.platform, 16)}</span>
             <span className="text-sm font-bold text-[#0F172A]">{post.franchise?.name ?? post.platform}</span>
             <StatusBadge status={post.status} />
           </div>
@@ -4514,7 +4514,7 @@ function PostDrawer({
                   <a
                     href={post.video.videoUrl}
                     download={`autolenis-${post.id}.mp4`}
-                    className="flex-1 flex items-center justify-center gap-2 bg-[#0B5FD1] text-white text-xs font-medium py-2 rounded-lg hover:bg-[#0a54bc] transition-colors"
+                    className="flex-1 flex items-center justify-center gap-2 bg-al-primary text-white text-xs font-medium py-2 rounded-lg hover:bg-[#0a54bc] transition-colors"
                   >
                     ⬇ Download Video
                   </a>
@@ -4541,14 +4541,14 @@ function PostDrawer({
                   <a
                     href={post.video.thumbnailUrl}
                     download={`autolenis-${post.id}.jpg`}
-                    className="flex-1 flex items-center justify-center gap-2 bg-[#0B5FD1] text-white text-xs font-medium py-2 rounded-lg hover:bg-[#0a54bc] transition-colors"
+                    className="flex-1 flex items-center justify-center gap-2 bg-al-primary text-white text-xs font-medium py-2 rounded-lg hover:bg-[#0a54bc] transition-colors"
                   >
                     ⬇ Download Image
                   </a>
                   <button
                     onClick={handleGenerateVideo}
                     disabled={generating}
-                    className="flex items-center justify-center gap-2 border border-[#0B5FD1] text-[#0B5FD1] text-xs font-medium py-2 px-3 rounded-lg hover:bg-[#0B5FD1]/5 disabled:opacity-50"
+                    className="flex items-center justify-center gap-2 border border-al-primary text-al-primary text-xs font-medium py-2 px-3 rounded-lg hover:bg-al-primary/5 disabled:opacity-50"
                   >
                     🎬 Generate Video
                   </button>
@@ -4565,7 +4565,7 @@ function PostDrawer({
                   <button
                     onClick={handleGenerateImage}
                     disabled={generating}
-                    className="mt-2 text-xs text-[#0B5FD1] underline disabled:opacity-50"
+                    className="mt-2 text-xs text-al-primary underline disabled:opacity-50"
                   >
                     Generate Now
                   </button>
@@ -4591,7 +4591,7 @@ function PostDrawer({
               <div className="flex items-center gap-2">
                 <code className="flex-1 text-[10px] bg-[#F8FAFC] border border-[#E2E8F0] rounded p-2 truncate">{post.trackedUrl}</code>
                 <button onClick={() => { void navigator.clipboard.writeText(post.trackedUrl ?? ""); showToast("Copied"); }}
-                  className="text-[#0B5FD1]" data-testid="drawer-copy-url"><Copy size={14} /></button>
+                  className="text-al-primary" data-testid="drawer-copy-url"><Copy size={14} /></button>
               </div>
             </div>
           )}
@@ -4621,7 +4621,7 @@ function PostDrawer({
                 />
                 <button
                   onClick={handleReschedule}
-                  className="text-xs bg-[#0B5FD1] text-white px-3 py-1.5 rounded-lg hover:bg-[#0a54bc]"
+                  className="text-xs bg-al-primary text-white px-3 py-1.5 rounded-lg hover:bg-[#0a54bc]"
                 >
                   Save
                 </button>
@@ -4639,7 +4639,7 @@ function PostDrawer({
                 </p>
                 <button
                   onClick={() => setEditingSchedule(true)}
-                  className="text-xs text-[#0B5FD1] underline"
+                  className="text-xs text-al-primary underline"
                   data-testid="drawer-edit-schedule"
                 >
                   Edit
@@ -4669,8 +4669,8 @@ function PostDrawer({
           <button disabled={saving} data-testid="drawer-reject" onClick={() => { const r = window.prompt("Reason?"); if (r != null) void patch({ action: "reject", rejectionReason: r }, "Rejected"); }}
             className="bg-rose-600 text-white text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-50">Reject</button>
           <button disabled={saving} data-testid="drawer-save" onClick={() => patch({ action: "update", caption, script }, "Saved")}
-            className="bg-[#0B5FD1] text-white text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-50">Save Edits</button>
-          <label className={`bg-white border border-[#0B5FD1] text-[#0B5FD1] text-xs font-semibold px-3 py-2 rounded-lg cursor-pointer hover:bg-[#EFF6FF] ${uploadingImage ? "opacity-50 pointer-events-none" : ""}`}>
+            className="bg-al-primary text-white text-xs font-semibold px-3 py-2 rounded-lg disabled:opacity-50">Save Edits</button>
+          <label className={`bg-white border border-al-primary text-al-primary text-xs font-semibold px-3 py-2 rounded-lg cursor-pointer hover:bg-al-primary-subtle ${uploadingImage ? "opacity-50 pointer-events-none" : ""}`}>
             {uploadingImage ? "Uploading…" : "Upload Image"}
             <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleUploadImage(f); e.target.value = ""; }} />

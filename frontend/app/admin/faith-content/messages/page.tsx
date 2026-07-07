@@ -9,7 +9,7 @@ export default async function AdminFaithMessagesPage() {
   const messages = await prisma.encouragementMessage.findMany({ orderBy: { placement: "asc" } });
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="admin-faith-messages-page">
-      <div className="flex items-center gap-3 mb-6"><MessageSquare size={20} className="text-[#0B5FD1]" /><h1 className="text-xl font-bold text-slate-900">Encouragement Messages ({messages.length})</h1></div>
+      <div className="flex items-center gap-3 mb-6"><MessageSquare size={20} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">Encouragement Messages ({messages.length})</h1></div>
       <div className="space-y-2">
         {messages.length === 0 ? <p className="text-slate-400 text-sm">No messages yet</p> : messages.map(m => (
           <div key={m.id} data-testid={`message-row-${m.id}`} className="bg-white border border-slate-200 rounded-xl p-4">

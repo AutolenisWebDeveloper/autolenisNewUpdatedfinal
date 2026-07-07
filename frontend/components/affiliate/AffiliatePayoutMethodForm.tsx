@@ -80,7 +80,7 @@ export default function AffiliatePayoutMethodForm({
           id="payout-method"
           value={method}
           onChange={e => { setMethod(e.target.value as Method); setSuccess(false); setError(null); }}
-          className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+          className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-al-primary/30"
         >
           <option value="CHECK">Check (mailed)</option>
           <option value="ACH">ACH Bank Transfer</option>
@@ -101,7 +101,7 @@ export default function AffiliatePayoutMethodForm({
               id="account-type"
               value={accountType}
               onChange={e => setAccountType(e.target.value)}
-              className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+              className="mt-1.5 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-al-primary/30"
             >
               <option value="CHECKING">Checking</option>
               <option value="SAVINGS">Savings</option>

@@ -19,16 +19,16 @@ export default function PrequalDeclinedPage() {
 
       {/* FCRA adverse-action email confirmation — must be visible, not buried */}
       <div
-        className="flex items-start gap-3 rounded-xl border border-[#0B5FD1]/30 bg-[#F8F9FB] p-4 mb-6"
+        className="flex items-start gap-3 rounded-xl border border-al-primary/30 bg-[#F8F9FB] p-4 mb-6"
         data-testid="adverse-action-email-notice"
       >
-        <Mail size={20} className="text-[#0B5FD1] mt-0.5 shrink-0" />
+        <Mail size={20} className="text-al-primary mt-0.5 shrink-0" />
         <div className="text-sm text-slate-700 leading-relaxed">
           <p className="mb-2">
             An adverse action notice has been sent to your email address explaining this decision and your rights under the Fair Credit Reporting Act.
           </p>
           <p>
-            You have the right to obtain a free copy of your consumer report from <strong>MicroBilt Corporation</strong> (<a href="tel:18008844747" className="text-[#0B5FD1] hover:underline">1-800-884-4747</a>) within 60 days.
+            You have the right to obtain a free copy of your consumer report from <strong>MicroBilt Corporation</strong> (<a href="tel:18008844747" className="text-al-primary hover:underline">1-800-884-4747</a>) within 60 days.
           </p>
         </div>
       </div>
@@ -44,7 +44,7 @@ export default function PrequalDeclinedPage() {
           <p className="text-slate-600"><strong>MicroBilt Corporation</strong></p>
           <p className="text-slate-600">1-800-884-4747</p>
           <p className="text-slate-600">
-            <a href="https://www.microbilt.com" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline" data-testid="microbilt-link">
+            <a href="https://www.microbilt.com" target="_blank" rel="noopener noreferrer" className="text-al-primary hover:underline" data-testid="microbilt-link">
               www.microbilt.com
             </a>
           </p>
@@ -56,7 +56,7 @@ export default function PrequalDeclinedPage() {
 
       <div className="text-center space-y-3">
         <p className="text-sm text-slate-600">You may apply again in 30 days, or provide your own pre-approval from your bank or credit union.</p>
-        <Link href="/buyer/prequal/external" data-testid="use-external-financing-link" className="text-sm text-[#0B5FD1] font-semibold hover:underline block">
+        <Link href="/buyer/prequal/external" data-testid="use-external-financing-link" className="text-sm text-al-primary font-semibold hover:underline block">
           I have my own bank financing →
         </Link>
         <Link href="/buyer/dashboard" data-testid="back-to-dashboard-link" className="text-sm text-slate-400 hover:underline block">

@@ -40,7 +40,7 @@ export default async function BuyerSuspendedPage() {
         </div>
         <a
           href={`mailto:${supportEmail}?subject=Account Suspension Appeal`}
-          className="inline-flex items-center justify-center gap-2 bg-[#0B5FD1] text-white font-semibold text-sm px-6 py-3 rounded-xl hover:bg-[#0A4DB8] transition-colors"
+          className="inline-flex items-center justify-center gap-2 bg-al-primary text-white font-semibold text-sm px-6 py-3 rounded-xl hover:bg-al-primary-hover transition-colors"
         >
           Contact Support
         </a>

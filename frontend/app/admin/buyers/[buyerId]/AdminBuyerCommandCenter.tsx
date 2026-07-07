@@ -21,6 +21,7 @@ import {
 import type {
   BuyerActionAvailability,
 } from "@/lib/services/admin/admin-buyer-command-center.service";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -205,7 +206,7 @@ function ConfirmModal({
     if (requireReason && !reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
     try { await onConfirm(reason); }
-    catch (err) { setError(err instanceof Error ? err.message : "Action failed"); }
+    catch (err) { setError(apiErrorMessage(err, "Action failed")); }
     finally { setLoading(false); }
   }
 
@@ -230,7 +231,7 @@ function ConfirmModal({
           )}
           <div className="flex gap-3">
             <button type="button" onClick={onCancel} className="flex-1 border border-slate-200 text-slate-600 rounded-xl py-2.5 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
-            <button type="submit" disabled={loading} className={"flex-1 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (destructive ? "bg-red-600 hover:bg-red-700" : "bg-[#0B5FD1] hover:bg-purple-800")}>
+            <button type="submit" disabled={loading} className={"flex-1 rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition-colors " + (destructive ? "bg-red-600 hover:bg-red-700" : "bg-al-primary hover:bg-purple-800")}>
               {loading ? "Processing..." : submitLabel}
             </button>
           </div>
@@ -256,14 +257,14 @@ function EditProfileModal({ buyer, onClose, onSuccess }: {
     e.preventDefault();
     if (!form.reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/buyers/" + buyer.id, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
-    setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Update failed"); return; }
-    onSuccess();
+    try {
+      await api.patch("/api/admin/buyers/" + buyer.id, form);
+      onSuccess();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Update failed"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -313,7 +314,7 @@ function EditProfileModal({ buyer, onClose, onSuccess }: {
           </div>
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 transition-colors">{loading ? "Saving..." : "Save Changes"}</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50 transition-colors">{loading ? "Saving..." : "Save Changes"}</button>
           </div>
         </form>
       </div>
@@ -333,14 +334,14 @@ function AddNoteModal({ buyerId, onClose, onSuccess }: {
     e.preventDefault();
     if (!content.trim()) { setError("Note content is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/buyers/" + buyerId + "/note", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: content.trim(), type }),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
-    setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Failed to add note"); return; }
-    onSuccess();
+    try {
+      await api.post("/api/admin/buyers/" + buyerId + "/note", { content: content.trim(), type });
+      onSuccess();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to add note"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -363,7 +364,7 @@ function AddNoteModal({ buyerId, onClose, onSuccess }: {
           <p className="text-[10px] text-slate-400 text-right">{content.length}/2000</p>
           <div className="flex gap-3">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">{loading ? "Saving..." : "Add Note"}</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">{loading ? "Saving..." : "Add Note"}</button>
           </div>
         </form>
       </div>
@@ -386,14 +387,14 @@ function MoveWorkflowModal({ buyerId, dealId, currentStatus, onClose, onSuccess 
     if (!targetStatus) { setError("Select a target stage"); return; }
     if (!reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
-    const res = await fetch("/api/admin/buyers/" + buyerId + "/workflow/move", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dealId, targetStatus, reason }),
-    });
-    const data = await res.json() as { success?: boolean; error?: { message: string } };
-    setLoading(false);
-    if (!res.ok) { setError(data.error?.message ?? "Stage move failed"); return; }
-    onSuccess();
+    try {
+      await api.post("/api/admin/buyers/" + buyerId + "/workflow/move", { dealId, targetStatus, reason });
+      onSuccess();
+    } catch (err) {
+      setError(apiErrorMessage(err, "Stage move failed"));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -421,7 +422,7 @@ function MoveWorkflowModal({ buyerId, dealId, currentStatus, onClose, onSuccess 
           <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Reason for stage change (required)" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-slate-800 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500" />
           <div className="flex gap-3">
             <button type="button" onClick={onClose} className="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2.5 text-sm hover:bg-slate-50">Cancel</button>
-            <button type="submit" disabled={loading} className="flex-1 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">{loading ? "Moving..." : "Move Stage"}</button>
+            <button type="submit" disabled={loading} className="flex-1 bg-al-primary hover:bg-purple-800 text-white rounded-lg py-2.5 text-sm font-semibold disabled:opacity-50">{loading ? "Moving..." : "Move Stage"}</button>
           </div>
         </form>
       </div>
@@ -449,11 +450,9 @@ function DeleteConfirmModal({
   async function checkEligibility() {
     setChecking(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/delete-eligibility`);
-      const d = await res.json() as { data?: { eligible: boolean; hardDeleteSafe: boolean; blockers: string[] }; error?: { message: string } };
-      if (!res.ok) throw new Error(d.error?.message ?? "Check failed");
-      setEligibility(d.data!);
-    } catch (err) { setError(err instanceof Error ? err.message : "Check failed"); }
+      const data = await api.get<{ eligible: boolean; hardDeleteSafe: boolean; blockers: string[] }>(`/api/admin/buyers/${buyerId}/delete-eligibility`);
+      setEligibility(data);
+    } catch (err) { setError(apiErrorMessage(err, "Check failed")); }
     finally { setChecking(false); }
   }
 
@@ -464,15 +463,10 @@ function DeleteConfirmModal({
     if (!eligibility?.hardDeleteSafe) { setError("Hard delete not allowed — use Privacy Purge instead"); return; }
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}`, {
-        method: "DELETE", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason, confirmation }),
-      });
-      const d = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok) throw new Error(d.error?.message ?? "Delete failed");
+      await api.del(`/api/admin/buyers/${buyerId}`, { json: { reason, confirmation } });
       onSuccess();
       setTimeout(onRedirect, 1500);
-    } catch (err) { setError(err instanceof Error ? err.message : "Delete failed"); }
+    } catch (err) { setError(apiErrorMessage(err, "Delete failed")); }
     finally { setLoading(false); }
   }
 
@@ -585,14 +579,9 @@ function PrivacyPurgeModal({
     if (!reason.trim()) { setError("Reason is required"); return; }
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/privacy-purge`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason, confirmation }),
-      });
-      const d = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok) throw new Error(d.error?.message ?? "Purge failed");
+      await api.post(`/api/admin/buyers/${buyerId}/privacy-purge`, { reason, confirmation });
       onSuccess();
-    } catch (err) { setError(err instanceof Error ? err.message : "Purge failed"); }
+    } catch (err) { setError(apiErrorMessage(err, "Purge failed")); }
     finally { setLoading(false); }
   }
 
@@ -840,12 +829,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
   };
 
   async function doAction(endpoint: string, body: Record<string, string>, successMsg: string) {
-    const res = await fetch("/api/admin/buyers/" + buyer.id + "/" + endpoint, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const d = await res.json() as { success?: boolean; data?: unknown; error?: { message: string } };
-    if (!res.ok) throw new Error(d.error?.message ?? "Action failed");
+    await api.post("/api/admin/buyers/" + buyer.id + "/" + endpoint, body);
     handleSuccess(successMsg);
   }
 
@@ -1092,7 +1076,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
 
         <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-[#0B5FD1] flex items-center justify-center flex-shrink-0 shadow-md">
+            <div className="w-12 h-12 rounded-2xl bg-al-primary flex items-center justify-center flex-shrink-0 shadow-md">
               <span className="text-white text-lg font-bold">{buyer.firstName[0]}{buyer.lastName[0]}</span>
             </div>
             <div>
@@ -1225,7 +1209,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
-              className={"px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors " + (activeTab === t.id ? "border-[#0B5FD1] text-[#0B5FD1]" : "border-transparent text-slate-500 hover:text-slate-700")}
+              className={"px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors " + (activeTab === t.id ? "border-al-primary text-al-primary" : "border-transparent text-slate-500 hover:text-slate-700")}
             >
               {t.label}
             </button>
@@ -1781,7 +1765,7 @@ export default function AdminBuyerCommandCenter({ data, availability, initialTab
           <div>
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-sm font-semibold text-slate-700">Internal Notes</h3>
-              <button onClick={() => setModal("addNote")} className="flex items-center gap-1.5 px-4 py-2 bg-[#0B5FD1] hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
+              <button onClick={() => setModal("addNote")} className="flex items-center gap-1.5 px-4 py-2 bg-al-primary hover:bg-purple-800 text-white rounded-xl text-xs font-semibold transition-colors">
                 <MessageSquare size={12} /> Add Note
               </button>
             </div>

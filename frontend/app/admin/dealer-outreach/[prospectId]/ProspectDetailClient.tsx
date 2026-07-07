@@ -12,6 +12,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { parseSource } from "@/lib/admin/buyer-source";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 export interface OutreachLogEntry {
   id: string;
@@ -236,20 +237,12 @@ export default function ProspectDetailClient({
     setBusy(action);
     setMessage(null);
     try {
-      const res = await fetch(`/api/admin/dealer-outreach/${prospect.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
-      }
+      await api.patch(`/api/admin/dealer-outreach/${prospect.id}`, payload);
       setMessage("Saved.");
       router.refresh();
       return true;
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Save failed");
+      setMessage(apiErrorMessage(err, "Save failed"));
       return false;
     } finally {
       setBusy(null);
@@ -260,19 +253,14 @@ export default function ProspectDetailClient({
     setBusy("regenerate");
     setMessage(null);
     try {
-      const res = await fetch(
+      const data = await api.post<{ script?: string }>(
         `/api/admin/dealer-outreach/${prospect.id}/regenerate-script`,
-        { method: "POST" },
       );
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
-      }
-      if (body?.data?.script) setScript(body.data.script);
+      if (data?.script) setScript(data.script);
       setMessage("Script regenerated.");
       router.refresh();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Regenerate failed");
+      setMessage(apiErrorMessage(err, "Regenerate failed"));
     } finally {
       setBusy(null);
     }
@@ -441,7 +429,7 @@ export default function ProspectDetailClient({
                     prospect.phone ? (
                       <a
                         href={`tel:${prospect.phone}`}
-                        className="text-[#0B5FD1] hover:underline"
+                        className="text-al-primary hover:underline"
                       >
                         {prospect.phone}
                       </a>
@@ -464,7 +452,7 @@ export default function ProspectDetailClient({
                         href={prospect.website}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[#0B5FD1] hover:underline break-all"
+                        className="text-al-primary hover:underline break-all"
                       >
                         {prospect.website}
                       </a>
@@ -482,7 +470,7 @@ export default function ProspectDetailClient({
                     href={prospect.sourceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[#0B5FD1] hover:underline break-all"
+                    className="text-al-primary hover:underline break-all"
                   >
                     Google Maps
                   </a>
@@ -633,14 +621,14 @@ export default function ProspectDetailClient({
           value={script}
           onChange={(e) => setScript(e.target.value)}
           rows={14}
-          className="w-full rounded-md border border-slate-300 p-3 text-sm font-mono focus:border-[#0B5FD1] focus:outline-none"
+          className="w-full rounded-md border border-slate-300 p-3 text-sm font-mono focus:border-al-primary focus:outline-none"
           placeholder="No script drafted yet. Click Regenerate Script to generate one."
         />
         <div className="mt-3 flex gap-2">
           <button
             onClick={() => patch({ outreachScript: script }, "save-script")}
             disabled={busy !== null}
-            className="rounded-xl bg-[#0B5FD1] px-4 py-2 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
+            className="rounded-xl bg-al-primary px-4 py-2 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
           >
             {busy === "save-script" ? "Saving…" : "Save Script Edits"}
           </button>
@@ -688,7 +676,7 @@ export default function ProspectDetailClient({
               }
             }}
             placeholder="Add tag…"
-            className="w-28 rounded-full border border-[#E2E8F0] px-3 py-0.5 text-xs focus:border-[#0B5FD1] focus:outline-none"
+            className="w-28 rounded-full border border-[#E2E8F0] px-3 py-0.5 text-xs focus:border-al-primary focus:outline-none"
             data-testid="tag-input"
           />
         </div>
@@ -696,13 +684,13 @@ export default function ProspectDetailClient({
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={6}
-          className="w-full rounded-md border border-slate-300 p-3 text-sm focus:border-[#0B5FD1] focus:outline-none"
+          className="w-full rounded-md border border-slate-300 p-3 text-sm focus:border-al-primary focus:outline-none"
           placeholder="Log call outcomes, follow-ups, objections…"
         />
         <button
           onClick={() => persistNotes(tags, notes)}
           disabled={busy !== null}
-          className="mt-3 rounded-xl bg-[#0B5FD1] px-4 py-2 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
+          className="mt-3 rounded-xl bg-al-primary px-4 py-2 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
         >
           {busy === "save-notes" ? "Saving…" : "Save Notes"}
         </button>
@@ -714,18 +702,13 @@ export default function ProspectDetailClient({
 // ─── Re-enrich + email helpers ───────────────────────────────────────────────
 async function reEnrich(prospectId: string, onDone: () => void) {
   try {
-    const res = await fetch(
+    const data = await api.post<{ email?: string | null }>(
       `/api/admin/dealer-outreach/${prospectId}/reenrich-email`,
-      { method: "POST" },
     );
-    const body = await res.json().catch(() => null);
-    if (!res.ok) {
-      throw new Error(body?.error?.message ?? `Request failed (${res.status})`);
-    }
-    if (!body?.data?.email) window.alert("No email found for this dealer.");
+    if (!data?.email) window.alert("No email found for this dealer.");
     onDone();
   } catch (err) {
-    window.alert(err instanceof Error ? err.message : "Re-enrich failed");
+    window.alert(apiErrorMessage(err, "Re-enrich failed"));
   }
 }
 
@@ -745,17 +728,13 @@ function EmailEdit({
   async function save() {
     setBusy(true);
     try {
-      const res = await fetch(`/api/admin/dealer-outreach/${prospectId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: draft.trim() }),
+      await api.patch(`/api/admin/dealer-outreach/${prospectId}`, {
+        email: draft.trim(),
       });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(body?.error?.message ?? `Failed (${res.status})`);
       setEditing(false);
       onRefresh();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Save failed");
+      window.alert(apiErrorMessage(err, "Save failed"));
     } finally {
       setBusy(false);
     }
@@ -795,7 +774,7 @@ function EmailEdit({
   return (
     <span className="group inline-flex items-center gap-2">
       {email ? (
-        <a href={`mailto:${email}`} className="text-[#0B5FD1] hover:underline break-all">
+        <a href={`mailto:${email}`} className="text-al-primary hover:underline break-all">
           {email}
         </a>
       ) : (
@@ -803,7 +782,7 @@ function EmailEdit({
       )}
       <button
         onClick={() => setEditing(true)}
-        className="text-slate-300 hover:text-[#0B5FD1] group-hover:text-slate-500"
+        className="text-slate-300 hover:text-al-primary group-hover:text-slate-500"
         aria-label="Edit email"
       >
         <Pencil size={12} />
@@ -876,7 +855,7 @@ function EditableField({
     return (
       <button
         onClick={() => setEditing(true)}
-        className="inline-flex items-center gap-1 text-xs text-[#0B5FD1] hover:underline"
+        className="inline-flex items-center gap-1 text-xs text-al-primary hover:underline"
         data-testid={`edit-${field}-add`}
       >
         <Pencil size={11} /> {addLabel}
@@ -889,7 +868,7 @@ function EditableField({
       {display ?? <span className="text-[#0F172A]">{value}</span>}
       <button
         onClick={() => setEditing(true)}
-        className="text-slate-300 hover:text-[#0B5FD1] group-hover:text-slate-500"
+        className="text-slate-300 hover:text-al-primary group-hover:text-slate-500"
         aria-label={`Edit ${field}`}
         data-testid={`edit-${field}`}
       >
@@ -933,20 +912,12 @@ function ComposeSection({
     setSending(true);
     setResult(null);
     try {
-      const res = await fetch("/api/admin/dealer-outreach/compose", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dealerProspectId: prospect.id,
-          subject: subject.trim(),
-          body: body.trim(),
-          emailType,
-        }),
+      await api.post("/api/admin/dealer-outreach/compose", {
+        dealerProspectId: prospect.id,
+        subject: subject.trim(),
+        body: body.trim(),
+        emailType,
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error?.message ?? `Failed (${res.status})`);
-      }
       setResult({ ok: true, msg: "Email sent — logged to communication history" });
       setSubject("");
       setBody("");
@@ -954,7 +925,7 @@ function ComposeSection({
     } catch (err) {
       setResult({
         ok: false,
-        msg: err instanceof Error ? err.message : "Send failed",
+        msg: apiErrorMessage(err, "Send failed"),
       });
     } finally {
       setSending(false);
@@ -994,7 +965,7 @@ function ComposeSection({
             <select
               value={emailType}
               onChange={(e) => setEmailType(e.target.value)}
-              className="rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#0F172A] focus:border-[#0B5FD1] focus:outline-none"
+              className="rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#0F172A] focus:border-al-primary focus:outline-none"
               data-testid="compose-email-type"
             >
               {EMAIL_TYPES.map((t) => (
@@ -1021,7 +992,7 @@ function ComposeSection({
             onChange={(e) => setSubject(e.target.value)}
             maxLength={200}
             placeholder="Subject line"
-            className="w-full rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm text-[#0F172A] focus:border-[#0B5FD1] focus:outline-none"
+            className="w-full rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm text-[#0F172A] focus:border-al-primary focus:outline-none"
             data-testid="compose-subject"
           />
         </label>
@@ -1034,7 +1005,7 @@ function ComposeSection({
             rows={8}
             maxLength={5000}
             placeholder="Write your message… (signature and CAN-SPAM footer are added automatically)"
-            className="w-full rounded-md border border-slate-300 p-3 text-sm focus:border-[#0B5FD1] focus:outline-none"
+            className="w-full rounded-md border border-slate-300 p-3 text-sm focus:border-al-primary focus:outline-none"
             data-testid="compose-body"
           />
         </label>
@@ -1044,7 +1015,7 @@ function ComposeSection({
             onClick={send}
             disabled={sending || noEmail}
             title={noEmail ? "No email on file" : "Send email"}
-            className="inline-flex items-center gap-2 rounded-xl bg-[#0B5FD1] px-4 py-2 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-xl bg-al-primary px-4 py-2 text-sm font-medium text-white hover:bg-[#0a52b5] disabled:opacity-50"
             data-testid="compose-send"
           >
             {sending ? (
@@ -1126,7 +1097,7 @@ function LogRow({ entry }: { entry: OutreachLogEntry }) {
         <td className="py-2 pr-3">
           <button
             onClick={() => setOpen((v) => !v)}
-            className="inline-flex items-center gap-1 text-xs text-[#64748B] hover:text-[#0B5FD1]"
+            className="inline-flex items-center gap-1 text-xs text-[#64748B] hover:text-al-primary"
           >
             {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             {entry.resendId ? entry.resendId.slice(0, 10) + "…" : "Show body"}
@@ -1244,7 +1215,7 @@ function PipelineStatus({
             value={deadReason}
             onChange={(e) => setDeadReason(e.target.value)}
             placeholder="Reason this prospect is dead…"
-            className="flex-1 min-w-[200px] rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm focus:border-[#0B5FD1] focus:outline-none"
+            className="flex-1 min-w-[200px] rounded-xl border border-[#E2E8F0] px-3 py-2 text-sm focus:border-al-primary focus:outline-none"
             data-testid="dead-reason-input"
           />
           <button

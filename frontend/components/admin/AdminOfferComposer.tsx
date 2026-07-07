@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 export default function AdminOfferComposer({
   requestId,
@@ -38,10 +39,8 @@ export default function AdminOfferComposer({
       return;
     }
     startTransition(async () => {
-      const res = await fetch(`/api/admin/requests/${requestId}/offer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      try {
+        await api.post(`/api/admin/requests/${requestId}/offer`, {
           vehicleInfo: {
             year: Number(year),
             make,
@@ -53,15 +52,12 @@ export default function AdminOfferComposer({
           },
           priceCents,
           notes: notes || undefined,
-        }),
-      });
-      const data = await res.json() as { error?: { message: string } };
-      if (!res.ok) {
-        setError(data.error?.message ?? "Unable to create offer");
-        return;
+        });
+        setOpen(false);
+        router.refresh();
+      } catch (err) {
+        setError(apiErrorMessage(err, "Unable to create offer"));
       }
-      setOpen(false);
-      router.refresh();
     });
   }
 

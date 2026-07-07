@@ -42,7 +42,7 @@ export default async function AdminPrequalListPage() {
         <p className="text-sm text-slate-500 mt-0.5">
           Every prequal on the platform, filterable by decision and searchable by buyer.
           For triage of MANUAL_REVIEW and OFAC cases use{" "}
-          <a href="/admin/manual-reviews" className="text-[#0B5FD1] hover:underline">Manual Reviews</a>.
+          <a href="/admin/manual-reviews" className="text-al-primary hover:underline">Manual Reviews</a>.
         </p>
       </div>
 

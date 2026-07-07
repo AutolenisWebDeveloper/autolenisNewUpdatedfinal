@@ -181,7 +181,7 @@ export default function VehicleGallery({ images, title, has360 = false }: Vehicl
               data-testid={`gallery-thumb-${i}`}
               className={`w-16 h-12 rounded-md overflow-hidden shrink-0 border-2 transition-colors ${
                 i === current
-                  ? "border-[#0B5FD1] ring-2 ring-[#0B5FD1]/20"
+                  ? "border-al-primary ring-2 ring-al-primary/20"
                   : "border-transparent hover:border-[#93C5FD]"
               }`}
             >

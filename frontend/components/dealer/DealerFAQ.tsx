@@ -27,11 +27,11 @@ export default function DealerFAQ({ items }: { items: DealerFaqItem[] }) {
                 aria-expanded={isOpen}
                 aria-controls={panelId}
                 onClick={() => setOpenIndex(isOpen ? -1 : i)}
-                className="flex w-full items-center justify-between gap-5 rounded-lg px-1 py-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0B5FD1] focus-visible:ring-offset-2"
+                className="flex w-full items-center justify-between gap-5 rounded-lg px-1 py-6 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-primary focus-visible:ring-offset-2"
               >
                 <span className="text-lg font-bold text-[#111827]">{item.q}</span>
                 <span
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#EEF4FF] text-[#0B5FD1]"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#EEF4FF] text-al-primary"
                   aria-hidden="true"
                 >
                   {isOpen ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}

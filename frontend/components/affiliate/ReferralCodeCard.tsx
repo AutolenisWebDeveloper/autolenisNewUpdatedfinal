@@ -48,7 +48,7 @@ export default function ReferralCodeCard({ referralCode, referralLink }: Props) 
 
   return (
     <div
-      className="bg-gradient-to-br from-[#0B5FD1] to-[#0A4DB8] rounded-xl p-6 mb-6 text-white relative overflow-hidden"
+      className="bg-gradient-to-br from-al-primary to-al-primary-hover rounded-xl p-6 mb-6 text-white relative overflow-hidden"
       data-testid="referral-code-card"
     >
       <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-32 translate-x-32 pointer-events-none" />
@@ -98,7 +98,7 @@ export default function ReferralCodeCard({ referralCode, referralLink }: Props) 
             <button
               type="button"
               onClick={copyLink}
-              className="inline-flex items-center gap-1 bg-white text-[#0A4DB8] hover:bg-[#F8F9FB] text-xs font-bold px-3 py-2 rounded-lg transition-colors shrink-0"
+              className="inline-flex items-center gap-1 bg-white text-al-primary-hover hover:bg-[#F8F9FB] text-xs font-bold px-3 py-2 rounded-lg transition-colors shrink-0"
               data-testid="copy-referral-link-btn"
             >
               {copiedLink ? (<><Check size={12} /> Copied</>) : (<><Copy size={12} /> Copy</>)}

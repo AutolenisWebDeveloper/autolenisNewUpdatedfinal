@@ -89,7 +89,7 @@ export function AdminESignActions({ dealId, envelopeStatus }: Props) {
             <h2 className="font-bold text-slate-900 mb-1">Void Envelope</h2>
             <p className="text-sm text-slate-500 mb-4">Provide a reason for voiding this envelope (min 10 characters).</p>
             <textarea
-              className="w-full border border-slate-300 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+              className="w-full border border-slate-300 rounded-lg p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-al-primary"
               rows={3}
               placeholder="e.g. Buyer requested changes to contract terms"
               value={voidReason}

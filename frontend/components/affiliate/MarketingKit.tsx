@@ -125,7 +125,7 @@ function CopyButton({ text, testId }: { text: string; testId: string }) {
       type="button"
       onClick={handleCopy}
       data-testid={testId}
-      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#0B5FD1]/10 text-[#0B5FD1] hover:bg-[#0B5FD1]/20 transition-colors shrink-0"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-al-primary/10 text-al-primary hover:bg-al-primary/20 transition-colors shrink-0"
     >
       {copied ? <Check size={12} /> : <Copy size={12} />}
       {copied ? "Copied!" : "Copy"}
@@ -157,22 +157,25 @@ export default function MarketingKit({ referralCode, referralLink }: Props) {
                     data-testid={`resource-item-${t.id}`}
                     className="bg-white border border-slate-200 rounded-xl overflow-hidden"
                   >
-                    {/* Header row */}
-                    <button
-                      type="button"
-                      onClick={() => setExpandedId(isOpen ? null : t.id)}
-                      data-testid={`resource-toggle-${t.id}`}
-                      className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="p-1.5 bg-[#0B5FD1]/8 rounded-lg">
-                          <t.icon size={14} className="text-[#0B5FD1]" />
+                    {/* Header row — toggle and Copy are SIBLING buttons: a
+                        button may not contain another button (invalid HTML,
+                        broken keyboard/AT semantics). */}
+                    <div className="flex items-center justify-between px-5 py-2 hover:bg-slate-50 transition-colors">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedId(isOpen ? null : t.id)}
+                        aria-expanded={isOpen}
+                        data-testid={`resource-toggle-${t.id}`}
+                        className="flex flex-1 items-center gap-3 py-2 text-left"
+                      >
+                        <div className="p-1.5 bg-al-primary/8 rounded-lg">
+                          <t.icon size={14} className="text-al-primary" />
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-slate-800">{t.title}</p>
                           <p className="text-xs text-slate-400">{t.desc}</p>
                         </div>
-                      </div>
+                      </button>
                       <div className="flex items-center gap-2 shrink-0 ml-3">
                         <CopyButton text={t.content} testId={`copy-btn-${t.id}`} />
                         {isOpen ? (
@@ -181,7 +184,7 @@ export default function MarketingKit({ referralCode, referralLink }: Props) {
                           <ChevronDown size={16} className="text-slate-400" />
                         )}
                       </div>
-                    </button>
+                    </div>
 
                     {/* Expanded content */}
                     {isOpen && (

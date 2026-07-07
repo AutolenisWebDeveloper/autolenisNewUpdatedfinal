@@ -19,13 +19,13 @@ export default async function UnsubscribedPage({ searchParams }: { searchParams:
           </h1>
           <p className="text-sm text-[#4B5563] leading-relaxed mb-6" data-testid="unsubscribed-message">
             Access to the affiliate portal is temporarily restricted. Please contact{" "}
-            <a href="mailto:support@autolenis.com" className="text-[#0B5FD1] font-semibold hover:underline">
+            <a href="mailto:support@autolenis.com" className="text-al-primary font-semibold hover:underline">
               support@autolenis.com
             </a>{" "}
             to discuss your account status.
           </p>
           <div className="flex flex-col gap-2 text-sm">
-            <Link href="/" className="text-[#94A3B8] hover:text-[#0B5FD1] transition-colors text-xs">Return to AutoLenis</Link>
+            <Link href="/" className="text-[#94A3B8] hover:text-al-primary transition-colors text-xs">Return to AutoLenis</Link>
           </div>
         </div>
       </div>
@@ -64,10 +64,10 @@ export default async function UnsubscribedPage({ searchParams }: { searchParams:
         <h1 className="text-xl font-bold text-[#111827] mb-2 tracking-tight" data-testid="unsubscribed-title">{c.title}</h1>
         <p className="text-sm text-[#4B5563] leading-relaxed mb-6" data-testid="unsubscribed-message">{c.message}</p>
         <div className="flex flex-col gap-2 text-sm">
-          <Link href="/affiliate/portal/dashboard" className="text-[#0B5FD1] font-semibold hover:underline" data-testid="back-to-dashboard-link">
+          <Link href="/affiliate/portal/dashboard" className="text-al-primary font-semibold hover:underline" data-testid="back-to-dashboard-link">
             Back to dashboard →
           </Link>
-          <Link href="/" className="text-[#94A3B8] hover:text-[#0B5FD1] transition-colors text-xs">Return to AutoLenis</Link>
+          <Link href="/" className="text-[#94A3B8] hover:text-al-primary transition-colors text-xs">Return to AutoLenis</Link>
         </div>
       </div>
     </div>

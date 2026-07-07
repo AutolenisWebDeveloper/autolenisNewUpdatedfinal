@@ -69,7 +69,7 @@ export default async function AdminRequestDetailPage({ params }: Props) {
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-request-detail-page">
       <div className="flex items-center gap-3 mb-2">
-        <ClipboardList size={20} className="text-[#0B5FD1]" />
+        <ClipboardList size={20} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Request #{requestId.slice(-8)}</h1>
         <Badge variant="secondary">{req.status}</Badge>
         {fin?.adminBadge && (
@@ -131,7 +131,7 @@ export default async function AdminRequestDetailPage({ params }: Props) {
                 <p className="text-slate-400 text-xs mb-1.5">Must-have features</p>
                 <div className="flex flex-wrap gap-1.5">
                   {meta.features.map(f => (
-                    <span key={f} className="rounded-full bg-[#F8F9FB] border border-[#E5E7EB] px-2 py-0.5 text-xs text-[#0B5FD1]">{f}</span>
+                    <span key={f} className="rounded-full bg-[#F8F9FB] border border-[#E5E7EB] px-2 py-0.5 text-xs text-al-primary">{f}</span>
                   ))}
                 </div>
               </div>
@@ -184,7 +184,7 @@ export default async function AdminRequestDetailPage({ params }: Props) {
                 {preApprovalLetterSignedUrl && (
                   <div className="mt-3 border-t border-slate-100 pt-3">
                     <a href={preApprovalLetterSignedUrl} target="_blank" rel="noopener noreferrer"
-                      className="text-xs text-[#0B5FD1] hover:underline" data-testid="pre-approval-letter-link">
+                      className="text-xs text-al-primary hover:underline" data-testid="pre-approval-letter-link">
                       View pre-approval letter →
                     </a>
                   </div>
@@ -254,7 +254,7 @@ export default async function AdminRequestDetailPage({ params }: Props) {
               <div className="space-y-2 max-h-40 overflow-y-auto">
                 {req.researchLogs.map(l => (
                   <div key={l.id} className="text-xs text-slate-600 bg-slate-50 rounded-lg p-2" data-testid={`research-log-${l.id}`}>
-                    {l.notes} {l.sourceUrl && <a href={l.sourceUrl} target="_blank" className="text-[#0B5FD1] hover:underline">→ Source</a>}
+                    {l.notes} {l.sourceUrl && <a href={l.sourceUrl} target="_blank" className="text-al-primary hover:underline">→ Source</a>}
                   </div>
                 ))}
               </div>

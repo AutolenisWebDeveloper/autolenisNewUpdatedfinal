@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { Copy, Check, Share2, Link2, Twitter, Linkedin, Mail, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { COMMISSION_RATES, PREMIUM_FEE_USD } from "@/lib/constants";
 
 interface Props {
   referralCode: string;
@@ -109,7 +110,7 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="referral-hub-page">
       <div className="flex items-center gap-3 mb-2">
-        <Share2 size={22} className="text-[#0B5FD1]" />
+        <Share2 size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Referral Hub</h1>
       </div>
       <p className="text-sm text-slate-500 mb-8">
@@ -123,7 +124,7 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
       )}
 
       {/* Referral code + link card */}
-      <div className="bg-gradient-to-br from-[#0B5FD1] to-[#0A4DB8] rounded-xl p-6 text-white mb-6 relative overflow-hidden"
+      <div className="bg-gradient-to-br from-al-primary to-al-primary-hover rounded-xl p-6 text-white mb-6 relative overflow-hidden"
         data-testid="referral-link-card">
         <div className="absolute top-0 right-0 w-56 h-56 bg-white/5 rounded-full -translate-y-28 translate-x-28 pointer-events-none" />
         <div className="relative">
@@ -185,7 +186,8 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
             </div>
           </div>
           <p className="text-[10px] text-slate-400 mt-auto">
-            15% / 3% / 2% of $499 fee. Rates set by platform constants.
+            {/* Derived from platform constants — never hardcode rates or the fee. */}
+            {Math.round(COMMISSION_RATES.LEVEL_1 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_2 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_3 * 100)}% of the {PREMIUM_FEE_USD} fee.
           </p>
         </div>
       </div>
@@ -197,16 +199,21 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
           {templates.map(t => (
             <div key={t.id} className="bg-white border border-slate-200 rounded-xl overflow-hidden"
               data-testid={`social-template-${t.id}`}>
-              <button
-                type="button"
-                onClick={() => setExpandedTemplate(expandedTemplate === t.id ? null : t.id)}
-                className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-slate-50 transition-colors"
-                data-testid={`template-toggle-${t.id}`}
-              >
-                <t.icon size={16} className="text-[#0B5FD1] shrink-0" />
-                <span className="flex-1 text-sm font-medium text-slate-700">{t.label}</span>
+              {/* Toggle and Copy are SIBLING buttons — a button may not contain
+                  another button (invalid HTML, broken keyboard/AT semantics). */}
+              <div className="flex items-center gap-3 px-5 py-2 hover:bg-slate-50 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => setExpandedTemplate(expandedTemplate === t.id ? null : t.id)}
+                  aria-expanded={expandedTemplate === t.id}
+                  className="flex flex-1 items-center gap-3 py-2 text-left"
+                  data-testid={`template-toggle-${t.id}`}
+                >
+                  <t.icon size={16} className="text-al-primary shrink-0" />
+                  <span className="flex-1 text-sm font-medium text-slate-700">{t.label}</span>
+                </button>
                 <CopyButton text={t.text} label="Copy" testId={`copy-template-${t.id}-btn`} />
-              </button>
+              </div>
               {expandedTemplate === t.id && (
                 <div className="border-t border-slate-100 px-5 py-4 bg-slate-50"
                   data-testid={`template-content-${t.id}`}>

@@ -6,6 +6,7 @@
 // the founder still needs to finish DNS / env warming setup.
 import { useEffect, useState } from "react";
 import { CheckCircle2, AlertTriangle, ExternalLink } from "lucide-react";
+import { api } from "@/lib/api/client";
 
 interface EmailHealth {
   configured: boolean;
@@ -22,13 +23,11 @@ export default function EmailHealthBanner() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/admin/dealer-outreach/email-health")
-      .then((res) => res.json())
-      .then((body) => {
+    api
+      .get<EmailHealth>("/api/admin/dealer-outreach/email-health")
+      .then((data) => {
         if (cancelled) return;
-        const data = body?.data as EmailHealth | undefined;
-        if (data) setHealth(data);
-        else setErrored(true);
+        setHealth(data);
       })
       .catch(() => {
         if (!cancelled) setErrored(true);

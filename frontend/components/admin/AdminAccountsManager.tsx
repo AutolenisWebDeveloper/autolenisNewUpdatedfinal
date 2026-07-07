@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { UserPlus, Loader2, AlertTriangle, CheckCircle2, ShieldCheck, ShieldAlert } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const ROLES = ["SUPER_ADMIN", "OPERATIONS_ADMIN", "COMPLIANCE_ADMIN", "FINANCE_ADMIN", "SUPPORT_ADMIN"] as const;
 
@@ -32,18 +33,12 @@ export default function AdminAccountsManager({
     if (!email.trim()) { setFeedback({ msg: "Email is required.", error: true }); return; }
     setInviting(true); setFeedback(null);
     try {
-      const res = await fetch("/api/admin/admins", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), role }),
-      });
-      const data = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok || !data.success) { setFeedback({ msg: data.error?.message ?? "Invite failed.", error: true }); setInviting(false); return; }
+      await api.post("/api/admin/admins", { email: email.trim(), role });
       setFeedback({ msg: `Invitation sent to ${email.trim()}.`, error: false });
       setEmail("");
       router.refresh();
-    } catch {
-      setFeedback({ msg: "Network error — please try again.", error: true });
+    } catch (err) {
+      setFeedback({ msg: apiErrorMessage(err, "Invite failed."), error: true });
     } finally {
       setInviting(false);
     }
@@ -53,13 +48,11 @@ export default function AdminAccountsManager({
     if (!confirm(`Deactivate ${row.email}? This revokes their admin access immediately.`)) return;
     setDeactivatingId(row.id); setFeedback(null);
     try {
-      const res = await fetch(`/api/admin/admins/${row.id}`, { method: "DELETE" });
-      const data = await res.json() as { success?: boolean; error?: { message: string } };
-      if (!res.ok || !data.success) { setFeedback({ msg: data.error?.message ?? "Deactivation failed.", error: true }); setDeactivatingId(null); return; }
+      await api.del(`/api/admin/admins/${row.id}`);
       setFeedback({ msg: `${row.email} deactivated.`, error: false });
       router.refresh();
-    } catch {
-      setFeedback({ msg: "Network error — please try again.", error: true });
+    } catch (err) {
+      setFeedback({ msg: apiErrorMessage(err, "Deactivation failed."), error: true });
     } finally {
       setDeactivatingId(null);
     }

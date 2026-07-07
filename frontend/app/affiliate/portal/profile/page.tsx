@@ -28,7 +28,7 @@ function formatMonthYear(date: Date | string | null) {
 
 export default async function AffiliateProfilePage() {
   const affiliate = await requireAffiliate();
-  let onboardingData: Awaited<ReturnType<typeof getOnboardingProfile>> = { review: null, profile: null, taxProfile: null, paymentProfile: null, documents: [] };
+  let onboardingData: Awaited<ReturnType<typeof getOnboardingProfile>> = { review: null, profile: null, taxProfile: null, paymentProfile: null, payoutMethod: null, documents: [] };
   try {
     onboardingData = await getOnboardingProfile(affiliate.id);
   } catch {
@@ -57,14 +57,14 @@ export default async function AffiliateProfilePage() {
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="affiliate-profile-page">
       <div className="flex items-center gap-3 mb-6">
-        <User size={22} className="text-[#0B5FD1]" />
+        <User size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Profile</h1>
       </div>
 
       {/* Avatar + identity row */}
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-4">
         <div className="flex items-start gap-4">
-          <div className="flex-shrink-0 w-14 h-14 rounded-full bg-[#0B5FD1] flex items-center justify-center text-white text-xl font-bold">
+          <div className="flex-shrink-0 w-14 h-14 rounded-full bg-al-primary flex items-center justify-center text-white text-xl font-bold">
             {initials}
           </div>
           <div className="flex-1 min-w-0">
@@ -86,7 +86,7 @@ export default async function AffiliateProfilePage() {
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-4">
         <div className="flex items-center justify-between mb-4">
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Payout Readiness</p>
-          <span className="text-xs font-semibold text-[#0B5FD1]">{completion.completedCount} / {completion.totalCount}</span>
+          <span className="text-xs font-semibold text-al-primary">{completion.completedCount} / {completion.totalCount}</span>
         </div>
         <div className="space-y-2">
           {READINESS_STEPS.map(s => (
@@ -99,7 +99,7 @@ export default async function AffiliateProfilePage() {
                 <span className="text-sm text-slate-700">{s.label}</span>
               </div>
               {!s.done && (
-                <Link href={s.href} className="text-xs font-semibold text-[#0B5FD1] hover:underline">
+                <Link href={s.href} className="text-xs font-semibold text-al-primary hover:underline">
                   Complete →
                 </Link>
               )}
@@ -151,7 +151,7 @@ export default async function AffiliateProfilePage() {
               <dt className="text-sm text-slate-500">Website</dt>
               <dd className="text-sm text-slate-900">
                 {/^https?:\/\//i.test(affiliate.website) ? (
-                  <a href={affiliate.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[#0B5FD1] hover:underline">
+                  <a href={affiliate.website} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-al-primary hover:underline">
                     {affiliate.website} <ExternalLink size={11} />
                   </a>
                 ) : (
@@ -206,14 +206,14 @@ export default async function AffiliateProfilePage() {
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Finance</p>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Wallet size={16} className="text-[#0B5FD1]" />
+            <Wallet size={16} className="text-al-primary" />
             <p className="text-sm text-slate-700">
               {paymentProfile?.payoutMethod
                 ? `Payout via ${paymentProfile.payoutMethod}${paymentProfile.accountLast4 ? ` ···${paymentProfile.accountLast4}` : ""}`
                 : "Set up your banking and tax information"}
             </p>
           </div>
-          <Link href="/affiliate/portal/finance" className="text-sm font-semibold text-[#0B5FD1] hover:underline flex items-center gap-1">
+          <Link href="/affiliate/portal/finance" className="text-sm font-semibold text-al-primary hover:underline flex items-center gap-1">
             Finance Hub <ExternalLink size={12} />
           </Link>
         </div>

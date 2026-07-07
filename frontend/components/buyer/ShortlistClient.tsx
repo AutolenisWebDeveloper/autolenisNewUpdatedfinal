@@ -69,7 +69,7 @@ export default function ShortlistClient({ initialItems, canActivate, hasPrequal 
             <button
               disabled
               data-testid="activate-auction-btn"
-              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold h-10 px-5 py-2 bg-[#0B5FD1] text-white opacity-50 cursor-not-allowed"
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold h-10 px-5 py-2 bg-al-primary text-white opacity-50 cursor-not-allowed"
             >
               Activate My Auction <ArrowRight size={15} />
             </button>
@@ -90,7 +90,7 @@ export default function ShortlistClient({ initialItems, canActivate, hasPrequal 
       <div className="mb-8">
         <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
           <div
-            className="h-full bg-[#0B5FD1] rounded-full transition-all duration-500"
+            className="h-full bg-al-primary rounded-full transition-all duration-500"
             style={{ width: `${pct}%` }}
             data-testid="shortlist-progress-bar"
           />
@@ -159,7 +159,7 @@ export default function ShortlistClient({ initialItems, canActivate, hasPrequal 
                     <h3 className="font-bold text-slate-900 text-sm leading-tight">
                       {item.year} {item.make} {item.model}{item.trim ? ` ${item.trim}` : ""}
                     </h3>
-                    <p className="text-lg font-bold text-[#0B5FD1] mt-1">
+                    <p className="text-lg font-bold text-al-primary mt-1">
                       ${(item.priceCents / 100).toLocaleString()}
                     </p>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">

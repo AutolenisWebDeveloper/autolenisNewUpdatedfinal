@@ -18,7 +18,7 @@ export default async function AdminRequestsAnalyticsPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="admin-requests-analytics-page">
-      <div className="flex items-center gap-3 mb-6"><BarChart2 size={20} className="text-[#0B5FD1]" /><h1 className="text-xl font-bold text-slate-900">System 4C Analytics</h1></div>
+      <div className="flex items-center gap-3 mb-6"><BarChart2 size={20} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">System 4C Analytics</h1></div>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {[
           { label: "Total Requests", value: total },
@@ -30,7 +30,7 @@ export default async function AdminRequestsAnalyticsPage() {
         ].map(s => (
           <div key={s.label} data-testid={`4c-stat-${s.label.toLowerCase().replace(/\s+/g, "-")}`}
             className="bg-white border border-slate-200 rounded-xl p-4 text-center">
-            <p className="text-2xl font-bold text-[#0B5FD1]">{s.value}</p>
+            <p className="text-2xl font-bold text-al-primary">{s.value}</p>
             <p className="text-xs text-slate-500 mt-0.5">{s.label}</p>
           </div>
         ))}

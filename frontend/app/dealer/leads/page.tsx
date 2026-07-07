@@ -17,7 +17,7 @@ export default async function DealerLeadsPage() {
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-leads-page">
       <div className="flex items-center gap-3 mb-6">
-        <Users size={22} className="text-[#0B5FD1]" />
+        <Users size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Leads</h1>
       </div>
       {leads.length === 0 ? (

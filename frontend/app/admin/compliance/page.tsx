@@ -43,7 +43,7 @@ export default async function AdminCompliancePage() {
   return (
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-compliance-page">
       <div className="flex items-center gap-3 mb-1">
-        <ShieldAlert size={22} className="text-[#0B5FD1]" />
+        <ShieldAlert size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Compliance</h1>
       </div>
       <p className="text-sm text-slate-500 mb-6">Active compliance issues across the platform.</p>
@@ -77,7 +77,7 @@ export default async function AdminCompliancePage() {
           <ul className="text-sm text-slate-600 space-y-1" data-testid="expired-licenses-list">
             {expiredLicenses.map(l => (
               <li key={l.id} className="flex items-center justify-between">
-                <Link href={`/admin/dealers/${l.dealerId}`} className="text-[#0B5FD1] hover:underline">
+                <Link href={`/admin/dealers/${l.dealerId}`} className="text-al-primary hover:underline">
                   {dealerName.get(l.dealerId) ?? `Dealer ${l.dealerId.slice(0, 8)}`}
                 </Link>
                 <span className="text-xs text-slate-400">
@@ -98,13 +98,13 @@ export default async function AdminCompliancePage() {
       >
         {totalSuspended > 0 && (
           <div className="flex flex-wrap gap-2 text-sm" data-testid="suspended-breakdown">
-            <Link href="/admin/buyers?suspended=1" className="px-3 py-1.5 rounded-lg border border-slate-200 hover:border-[#0B5FD1]/30">
+            <Link href="/admin/buyers?suspended=1" className="px-3 py-1.5 rounded-lg border border-slate-200 hover:border-al-primary/30">
               Buyers: <span className="font-semibold">{suspendedBuyers}</span>
             </Link>
-            <Link href="/admin/dealers?status=SUSPENDED" className="px-3 py-1.5 rounded-lg border border-slate-200 hover:border-[#0B5FD1]/30">
+            <Link href="/admin/dealers?status=SUSPENDED" className="px-3 py-1.5 rounded-lg border border-slate-200 hover:border-al-primary/30">
               Dealers: <span className="font-semibold">{suspendedDealers}</span>
             </Link>
-            <Link href="/admin/affiliates?status=SUSPENDED" className="px-3 py-1.5 rounded-lg border border-slate-200 hover:border-[#0B5FD1]/30">
+            <Link href="/admin/affiliates?status=SUSPENDED" className="px-3 py-1.5 rounded-lg border border-slate-200 hover:border-al-primary/30">
               Affiliates: <span className="font-semibold">{suspendedAffiliates}</span>
             </Link>
           </div>
@@ -152,7 +152,7 @@ function Section({
           </span>
         </div>
         {href && (
-          <Link href={href} className="text-xs font-medium text-[#0B5FD1] hover:underline inline-flex items-center gap-1">
+          <Link href={href} className="text-xs font-medium text-al-primary hover:underline inline-flex items-center gap-1">
             {linkLabel ?? "View"} <ArrowRight size={12} />
           </Link>
         )}

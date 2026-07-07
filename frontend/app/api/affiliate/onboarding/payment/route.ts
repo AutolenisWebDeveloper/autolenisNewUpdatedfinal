@@ -24,10 +24,30 @@ export async function POST(request: NextRequest) {
   const result = schema.safeParse(body);
   if (!result.success) return errorResponse("VALIDATION_ERROR", result.error.errors[0].message, 400);
 
+  // H-6 unification: AffiliatePayoutMethod (the Finance Hub model) is the
+  // canonical banking record — write it FIRST so banking set up during
+  // onboarding immediately appears in the Finance Hub and satisfies payout
+  // readiness. The legacy AffiliatePaymentProfile row is kept in sync for
+  // full fidelity (holderName / zellePhone have no canonical column yet) and
+  // reversibility; no schema change involved.
+  const d = result.data;
+  const canonical = {
+    method: d.payoutMethod,
+    accountType: d.accountType ?? null,
+    routingNumberLast4: d.routingLast4 ?? null,
+    accountNumberLast4: d.accountLast4 ?? null,
+    paypalEmail: d.paypalEmail ?? null,
+  };
+  await prisma.affiliatePayoutMethod.upsert({
+    where:  { affiliateId: affiliate.id },
+    create: { affiliateId: affiliate.id, ...canonical },
+    update: canonical,
+  });
+
   await prisma.affiliatePaymentProfile.upsert({
     where:  { affiliateId: affiliate.id },
-    create: { affiliateId: affiliate.id, ...result.data },
-    update: { ...result.data },
+    create: { affiliateId: affiliate.id, ...d },
+    update: { ...d },
   });
 
   await saveOnboardingStep(affiliate.id, 5);

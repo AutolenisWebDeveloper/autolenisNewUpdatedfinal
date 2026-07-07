@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { RefreshCw, Download, ExternalLink } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 type LeadRow = {
   id: string;
@@ -65,15 +66,10 @@ export default function AdminRefinanceLeadsPage() {
     if (status) params.set("status", status);
     params.set("page", String(page));
     try {
-      const res = await fetch(`/api/admin/refinance/leads?${params.toString()}`);
-      const json: LeadsResponse = await res.json();
-      if (!res.ok || !json.success || !json.data) {
-        setError(json.error?.message ?? "Unable to load leads");
-      } else {
-        setData(json.data);
-      }
-    } catch {
-      setError("Network error");
+      const data = await api.get<{ items: LeadRow[]; total: number; page: number; totalPages: number; pageSize: number }>(`/api/admin/refinance/leads?${params.toString()}`);
+      setData(data);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Unable to load leads"));
     } finally {
       setLoading(false);
     }
@@ -109,7 +105,7 @@ export default function AdminRefinanceLeadsPage() {
           <button
             onClick={handleExport}
             data-testid="leads-export-csv-btn"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#0B5FD1] rounded-md hover:bg-[#0A4DB8] transition-colors"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-al-primary rounded-md hover:bg-al-primary-hover transition-colors"
           >
             <Download size={13} /> Export CSV
           </button>
@@ -125,7 +121,7 @@ export default function AdminRefinanceLeadsPage() {
             onClick={() => { setPage(1); setStatus(f.value); }}
             className={`px-3 py-1.5 text-xs font-semibold rounded-full border transition-colors ${
               status === f.value
-                ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                ? "bg-al-primary text-white border-al-primary"
                 : "bg-white text-[#4B5563] border-[#E5E7EB] hover:border-[#93C5FD]"
             }`}
           >
@@ -171,7 +167,7 @@ export default function AdminRefinanceLeadsPage() {
                 </tr>
               )}
               {data?.items.map((row) => (
-                <tr key={row.id} className="border-b border-[#EFF6FF] last:border-0 hover:bg-[#FAF7FE] transition-colors" data-testid={`lead-row-${row.leadId}`}>
+                <tr key={row.id} className="border-b border-al-primary-subtle last:border-0 hover:bg-[#FAF7FE] transition-colors" data-testid={`lead-row-${row.leadId}`}>
                   <td className="px-4 py-3 text-[#111827] font-medium">{row.firstName} {row.lastName}</td>
                   <td className="px-4 py-3 text-[#4B5563]">{row.email}</td>
                   <td className="px-4 py-3 text-[#4B5563]">{row.state}</td>
@@ -188,7 +184,7 @@ export default function AdminRefinanceLeadsPage() {
                     <Link
                       href={`/admin/refinance/leads/${row.leadId}`}
                       data-testid={`lead-view-${row.leadId}`}
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8]"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-al-primary hover:text-al-primary-hover"
                     >
                       View <ExternalLink size={11} />
                     </Link>

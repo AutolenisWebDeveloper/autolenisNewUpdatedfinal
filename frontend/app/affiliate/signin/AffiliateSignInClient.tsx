@@ -64,7 +64,7 @@ export default function AffiliateSignInClient({ stats }: Props) {
     <div className="min-h-screen flex flex-col lg:flex-row bg-[#F8F9FB]">
 
       {/* LEFT PANEL — value proposition */}
-      <div className="hidden lg:flex lg:w-[45%] bg-[#0B5FD1] flex-col justify-between p-10 xl:p-14">
+      <div className="hidden lg:flex lg:w-[45%] bg-al-primary flex-col justify-between p-10 xl:p-14">
         <AutoLenisLogo size="md" variant="light" href="/" />
 
         <div>
@@ -142,7 +142,7 @@ export default function AffiliateSignInClient({ stats }: Props) {
                 onChange={e => setEmail(e.target.value)}
                 data-testid="affiliate-signin-email"
                 placeholder="you@example.com"
-                className="w-full px-3.5 py-2.5 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-sm focus:outline-none focus:border-[#0B5FD1]/60 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors"
+                className="w-full px-3.5 py-2.5 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-sm focus:outline-none focus:border-al-primary/60 focus:ring-2 focus:ring-al-primary/10 transition-colors"
               />
             </div>
 
@@ -154,7 +154,7 @@ export default function AffiliateSignInClient({ stats }: Props) {
                 </label>
                 <Link
                   href="/auth/forgot-password"
-                  className="text-xs text-[#0B5FD1] hover:underline"
+                  className="text-xs text-al-primary hover:underline"
                 >
                   Forgot password?
                 </Link>
@@ -169,7 +169,7 @@ export default function AffiliateSignInClient({ stats }: Props) {
                   onChange={e => setPassword(e.target.value)}
                   data-testid="affiliate-signin-password"
                   placeholder="••••••••"
-                  className="w-full px-3.5 py-2.5 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-sm focus:outline-none focus:border-[#0B5FD1]/60 focus:ring-2 focus:ring-[#0B5FD1]/10 transition-colors pr-10"
+                  className="w-full px-3.5 py-2.5 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-sm focus:outline-none focus:border-al-primary/60 focus:ring-2 focus:ring-al-primary/10 transition-colors pr-10"
                 />
                 <button
                   type="button"
@@ -187,7 +187,7 @@ export default function AffiliateSignInClient({ stats }: Props) {
               type="submit"
               disabled={loading || !email || !password}
               data-testid="affiliate-signin-submit"
-              className="w-full py-3 bg-[#0B5FD1] text-white font-bold text-sm rounded-md hover:bg-[#0A4DB8] transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-[#0B5FD1]/20 flex items-center justify-center gap-2 mt-2"
+              className="w-full py-3 bg-al-primary text-white font-bold text-sm rounded-md hover:bg-al-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-al-primary/20 flex items-center justify-center gap-2 mt-2"
             >
               {loading
                 ? <><Loader2 size={16} className="animate-spin" /> Signing in…</>
@@ -201,7 +201,7 @@ export default function AffiliateSignInClient({ stats }: Props) {
               Not an affiliate yet?{" "}
               <Link
                 href="/affiliate/register"
-                className="text-[#0B5FD1] font-semibold hover:underline"
+                className="text-al-primary font-semibold hover:underline"
                 data-testid="affiliate-signin-register-link"
               >
                 Apply to join →
@@ -209,13 +209,13 @@ export default function AffiliateSignInClient({ stats }: Props) {
             </p>
             <p className="text-xs text-[#9CA3AF]">
               Are you a buyer?{" "}
-              <Link href="/auth/signin" className="text-[#0B5FD1] hover:underline">
+              <Link href="/auth/signin" className="text-al-primary hover:underline">
                 Buyer sign in →
               </Link>
             </p>
             <p className="text-xs text-[#9CA3AF]">
               Are you a dealer?{" "}
-              <Link href="/dealer/sign-in" className="text-[#0B5FD1] hover:underline">
+              <Link href="/dealer/sign-in" className="text-al-primary hover:underline">
                 Dealer sign in →
               </Link>
             </p>

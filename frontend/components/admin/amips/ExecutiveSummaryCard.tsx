@@ -77,7 +77,7 @@ export default function ExecutiveSummaryCard() {
   }
 
   return (
-    <div className="bg-gradient-to-br from-[#0B5FD1] to-[#0A3D8F] rounded-2xl p-5 shadow-sm text-white">
+    <div className="bg-gradient-to-br from-al-primary to-[#0A3D8F] rounded-2xl p-5 shadow-sm text-white">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center">
@@ -94,7 +94,7 @@ export default function ExecutiveSummaryCard() {
           type="button"
           onClick={generate}
           disabled={state === "loading"}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-[#0B5FD1] hover:bg-white/90 transition-colors disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-al-primary hover:bg-white/90 transition-colors disabled:opacity-60"
         >
           {state === "loading" ? (
             <><Loader2 size={12} className="animate-spin" /> Analyzing…</>

@@ -6,6 +6,7 @@ import SessionExpiryWatcher from "@/components/buyer/SessionExpiryWatcher";
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
+import { computeJourney } from "@/lib/services/buyer/journey";
 import { jwtVerify } from "jose";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -84,7 +85,7 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
           <h1 className="text-xl font-semibold text-slate-900 mb-2">Account Access Suspended</h1>
           <p className="text-sm text-slate-500 leading-relaxed">
             Your account access has been suspended. Please contact{" "}
-            <a href="mailto:support@autolenis.com" className="text-[#0B5FD1] hover:underline">
+            <a href="mailto:support@autolenis.com" className="text-al-primary hover:underline">
               support@autolenis.com
             </a>{" "}
             if you believe this is an error.
@@ -161,86 +162,65 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
     }
   }
 
-  // Fetch active deal for later-stage progression
-  let activeDeal: { status: string } | null = null;
+  // Fetch active deal for later-stage progression. Select the deal FACTS the
+  // shared journey machine keys on (not just status), plus the deposit/auction
+  // records — so this layout and /api/buyer/journey-status compute the SAME
+  // stage from the same facts (M-3).
+  let activeDeal:
+    | { status: string; financingPath: string | null; feePaidAt: Date | null; insuranceStatus: string; contractShieldStatus: string | null }
+    | null = null;
+  let depositPaid = false;
+  let activeAuction = false;
   if (shortlistCount > 0) {
     try {
-      activeDeal = await prisma.deal.findFirst({
-        where: { buyerId: buyer.id },
-        orderBy: { createdAt: "desc" },
-        select: { status: true },
-      });
+      const [deal, deposit, auction] = await Promise.all([
+        prisma.deal.findFirst({
+          where: { buyerId: buyer.id },
+          orderBy: { createdAt: "desc" },
+          select: { status: true, financingPath: true, feePaidAt: true, insuranceStatus: true, contractShieldStatus: true },
+        }),
+        prisma.deposit.findFirst({ where: { buyerId: buyer.id, status: "PAID" }, select: { id: true } }),
+        prisma.auction.findFirst({ where: { buyerId: buyer.id, status: "ACTIVE" }, select: { id: true } }),
+      ]);
+      activeDeal = deal;
+      depositPaid = !!deposit;
+      activeAuction = !!auction;
     } catch {
       // Non-fatal: treat as no active deal
       activeDeal = null;
     }
   }
 
-  // Build completed stages and current stage
-  const completedStages: string[] = ["account"];
-  let currentStage: string;
-
-  if (!onboardingComplete) {
-    currentStage = "onboarding";
-  } else if (!prequalApproved) {
-    completedStages.push("onboarding");
-    currentStage = "prequal";
-  } else if (shortlistCount === 0) {
-    completedStages.push("onboarding", "prequal");
-    currentStage = "search";
-  } else if (!activeDeal) {
-    completedStages.push("onboarding", "prequal", "search");
-    currentStage = "shortlist";
-  } else {
-    // Map deal status to journey stage
-    completedStages.push("onboarding", "prequal", "search", "shortlist");
-    const s = activeDeal.status;
-    if (s === "PENDING" || s === "ACTIVE") {
-      currentStage = "deposit";
-    } else if (s === "FINANCING_PENDING") {
-      completedStages.push("deposit", "auction", "select-deal");
-      currentStage = "financing";
-    } else if (s === "FEE_PENDING" || s === "FEE_PAID") {
-      completedStages.push("deposit", "auction", "select-deal", "financing");
-      currentStage = "fee";
-    } else if (s === "INSURANCE_PENDING") {
-      completedStages.push("deposit", "auction", "select-deal", "financing", "fee");
-      currentStage = "insurance";
-    } else if (s === "CONTRACT_PENDING" || s === "CONTRACT_REVIEW" || s === "CONTRACT_APPROVED") {
-      completedStages.push("deposit", "auction", "select-deal", "financing", "fee", "insurance");
-      currentStage = "contract";
-    } else if (s === "SIGNING_PENDING" || s === "SIGNED") {
-      completedStages.push("deposit", "auction", "select-deal", "financing", "fee", "insurance", "contract");
-      currentStage = "sign";
-    } else if (s === "PICKUP_SCHEDULED" || s === "PICKUP_COMPLETE" || s === "COMPLETED") {
-      completedStages.push("deposit", "auction", "select-deal", "financing", "fee", "insurance", "contract", "sign");
-      currentStage = "pickup";
-    } else {
-      currentStage = "deposit";
-    }
-  }
-
-  // ── Admin journey unlocks ─────────────────────────────────────────────────
-  // SKIP overrides count as organically complete — buyer proceeds past this stage.
-  // UNLOCK overrides grant access but the buyer still needs to complete the step.
-  const unlockedStages: string[] = [];
+  // ── Journey stage (shared machine) ────────────────────────────────────────
+  // Admin SKIP/UNLOCK overrides are merged inside computeJourney.
+  let adminOverrides: Array<{ stageId: string; type: "SKIP" | "UNLOCK" }> = [];
   try {
-    const adminOverrides = await prisma.adminJourneyUnlock.findMany({
+    adminOverrides = await prisma.adminJourneyUnlock.findMany({
       where: { buyerId: buyer.id },
       select: { stageId: true, type: true },
     });
-    for (const override of adminOverrides) {
-      if (override.type === "SKIP") {
-        if (!completedStages.includes(override.stageId)) {
-          completedStages.push(override.stageId);
-        }
-      } else if (override.type === "UNLOCK") {
-        unlockedStages.push(override.stageId);
-      }
-    }
   } catch {
-    // Non-fatal: unlockedStages remains [] on DB error
+    // Non-fatal: no overrides on DB error
   }
+
+  const journey = computeJourney({
+    onboardingComplete,
+    prequalValid: prequalApproved,
+    shortlistCount,
+    depositPaid,
+    activeAuction,
+    deal: activeDeal
+      ? {
+          status: activeDeal.status,
+          hasFinancingPath: !!activeDeal.financingPath,
+          feePaid: !!activeDeal.feePaidAt,
+          insuranceStatus: activeDeal.insuranceStatus,
+          contractShieldPassed: activeDeal.contractShieldStatus === "PASS",
+        }
+      : null,
+    overrides: adminOverrides,
+  });
+  const { currentStage, completedStages, unlockedStages } = journey;
 
   return (
     <div className="min-h-screen">

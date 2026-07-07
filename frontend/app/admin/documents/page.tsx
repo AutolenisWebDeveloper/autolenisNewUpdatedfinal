@@ -34,7 +34,7 @@ export default async function AdminDocumentsPage() {
   return (
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-documents-page">
       <div className="flex items-center gap-3 mb-6">
-        <FolderOpen size={22} className="text-[#0B5FD1]" />
+        <FolderOpen size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-[#111827]">Documents</h1>
       </div>
 
@@ -74,7 +74,7 @@ export default async function AdminDocumentsPage() {
                       </td>
                       <td className="px-5 py-3">
                         <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
-                          doc.isVerified ? "bg-[#ECFDF5] text-[#065F46]" : "bg-[#EFF6FF] text-[#0B5FD1]"
+                          doc.isVerified ? "bg-[#ECFDF5] text-[#065F46]" : "bg-al-primary-subtle text-al-primary"
                         }`}>
                           {doc.isVerified ? "VERIFIED" : "UPLOADED"}
                         </span>
@@ -122,7 +122,7 @@ export default async function AdminDocumentsPage() {
                       <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
                         doc.status === "APPROVED"  ? "bg-[#ECFDF5] text-[#065F46]"  :
                         doc.status === "REJECTED"  ? "bg-red-50 text-red-700"        :
-                        "bg-[#EFF6FF] text-[#0B5FD1]"
+                        "bg-al-primary-subtle text-al-primary"
                       }`}>
                         {doc.status ?? "PENDING"}
                       </span>

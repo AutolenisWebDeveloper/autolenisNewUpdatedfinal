@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { PenLine, Loader2 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   dealId: string;
@@ -19,25 +20,17 @@ export default function ESignLaunchButton({ dealId, signingUrl }: Props) {  cons
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/buyer/esign/${dealId}`, { method: "POST" });
-      const data = await res.json() as {
-        success: boolean;
-        data?: { signingUrl?: string };
-        error?: { message: string };
-      };
-      if (!data.success) {
-        setError(data.error?.message ?? "Failed to create signing session");
-        return;
-      }
-      const newUrl = data.data?.signingUrl;
+      const data = await api.post<{ signingUrl?: string }>(`/api/buyer/esign/${dealId}`);
+      const newUrl = data?.signingUrl;
       if (newUrl && newUrl.startsWith("https://")) {
         setUrl(newUrl);
         window.open(newUrl, "_blank", "noopener,noreferrer");
       } else {
         setError("Signing session unavailable. Please try again or contact support.");
       }
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to create signing session"));
+      return;
     } finally {
       setLoading(false);
     }
@@ -49,7 +42,7 @@ export default function ESignLaunchButton({ dealId, signingUrl }: Props) {  cons
         onClick={handleLaunch}
         disabled={loading}
         data-testid="open-docusign-btn"
-        className="w-full flex items-center justify-center gap-2 py-4 px-6 bg-[#0B5FD1] text-white font-semibold rounded-xl hover:bg-[#0A4DB8] disabled:opacity-60 disabled:cursor-not-allowed transition-colors text-sm"
+        className="w-full flex items-center justify-center gap-2 py-4 px-6 bg-al-primary text-white font-semibold rounded-xl hover:bg-al-primary-hover disabled:opacity-60 disabled:cursor-not-allowed transition-colors text-sm"
       >
         {loading ? (
           <><Loader2 size={15} className="animate-spin" /> Preparing session…</>

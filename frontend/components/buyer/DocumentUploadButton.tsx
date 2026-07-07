@@ -69,7 +69,7 @@ export default function DocumentUploadButton() {
       {!expanded ? (
         <button
           onClick={() => { setExpanded(true); setSuccess(null); }}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
           data-testid="upload-doc-btn"
         >
           <Upload size={14} /> Upload Document
@@ -80,7 +80,7 @@ export default function DocumentUploadButton() {
           <select
             value={docType}
             onChange={e => setDocType(e.target.value)}
-            className="w-full border border-[#D1D5DB] rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]"
+            className="w-full border border-[#D1D5DB] rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary"
             data-testid="doc-type-select"
           >
             {DOCUMENT_TYPES.map(t => (
@@ -99,7 +99,7 @@ export default function DocumentUploadButton() {
             <button
               onClick={() => inputRef.current?.click()}
               disabled={loading}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] disabled:opacity-60 transition-colors"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover disabled:opacity-60 transition-colors"
               data-testid="doc-select-file-btn"
             >
               {loading ? (

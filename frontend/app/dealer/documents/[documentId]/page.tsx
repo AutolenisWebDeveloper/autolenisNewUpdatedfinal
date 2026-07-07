@@ -25,13 +25,13 @@ export default async function DocumentDetailPage({ params }: Props) {
     <div className="p-6 md:p-8 max-w-3xl" data-testid="document-detail-page">
       <Link
         href="/dealer/documents"
-        className="text-sm text-slate-400 hover:text-[#0B5FD1] transition-colors mb-6 flex items-center gap-1"
+        className="text-sm text-slate-400 hover:text-al-primary transition-colors mb-6 flex items-center gap-1"
       >
         ← Back to Documents
       </Link>
 
       <div className="flex items-center gap-3 mb-6">
-        <FileText size={22} className="text-[#0B5FD1]" />
+        <FileText size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900 truncate">
           {doc.name}
         </h1>

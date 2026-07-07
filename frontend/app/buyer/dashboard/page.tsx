@@ -6,9 +6,9 @@ import PlanUpgradeCard, { type DepositStatus } from "@/components/buyer/PlanUpgr
 import ProactiveNudgesPanel, { type BuyerNudge } from "@/components/buyer/ProactiveNudgesPanel";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
-import PageContainer from "@/components/dashboard/PageContainer";
-import PageHeader from "@/components/dashboard/PageHeader";
-import { CARD, EYEBROW, FIGURE } from "@/components/dashboard/tokens";
+import PageContainer from "@/components/ui/patterns/PageContainer";
+import PageHeader from "@/components/ui/patterns/PageHeader";
+import { CARD, EYEBROW, FIGURE } from "@/components/ui/patterns/tokens";
 import {
   MapPin, Wallet, Search, Heart, ClipboardList, Bell, MessageSquare,
   Gavel, CheckCircle2, ArrowRight, FileText, Sparkles,
@@ -243,7 +243,7 @@ export default async function BuyerDashboard() {
               </p>
               <Link
                 href="/buyer/requests/new"
-                className="inline-flex items-center gap-2 bg-[#0B5FD1] text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-[#0A4DB8] transition-colors"
+                className="inline-flex items-center gap-2 bg-al-primary text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-al-primary-hover transition-colors"
               >
                 Submit a Vehicle Request <ArrowRight size={14} />
               </Link>
@@ -257,7 +257,7 @@ export default async function BuyerDashboard() {
         eyebrow={
           <>
             <span
-              className="text-xs font-semibold text-[#0B5FD1] bg-[#EFF6FF] border border-[#DBEAFE] px-3 py-1 rounded-full"
+              className="text-xs font-semibold text-al-primary bg-al-primary-subtle border border-[#DBEAFE] px-3 py-1 rounded-full"
               data-testid="dashboard-step-label"
             >
               Step {stepNum} of {TOTAL_STEPS} — {stepLabel}
@@ -288,8 +288,8 @@ export default async function BuyerDashboard() {
         {prequalApproved && prequal ? (
           <div className={`${CARD} p-5`} data-testid="kpi-buying-power">
             <div className="flex items-start justify-between mb-4">
-              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center">
-                <Wallet size={16} className="text-[#0B5FD1]" />
+              <div className="w-9 h-9 rounded-xl bg-al-primary-subtle flex items-center justify-center">
+                <Wallet size={16} className="text-al-primary" />
               </div>
             </div>
             <p className={`text-[1.65rem] leading-none ${FIGURE}`}>
@@ -309,11 +309,11 @@ export default async function BuyerDashboard() {
           </div>
         ) : (
           <div
-            className="bg-[#EFF6FF] border border-[#DBEAFE] rounded-2xl p-5"
+            className="bg-al-primary-subtle border border-[#DBEAFE] rounded-2xl p-5"
             data-testid="kpi-prequal-cta"
           >
             <div className="w-9 h-9 rounded-xl bg-white/70 flex items-center justify-center mb-4">
-              <Wallet size={16} className="text-[#0B5FD1]" />
+              <Wallet size={16} className="text-al-primary" />
             </div>
             <p className="text-lg font-bold text-slate-900 mb-1">Get pre-qualified</p>
             <p className="text-sm text-slate-600 mb-4">
@@ -321,7 +321,7 @@ export default async function BuyerDashboard() {
             </p>
             <Link
               href="/buyer/prequal"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#0B5FD1] hover:text-[#0A4DB8] transition-colors"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-al-primary hover:text-al-primary-hover transition-colors"
               data-testid="kpi-start-prequal"
             >
               Check my buying power <ArrowRight size={14} />
@@ -351,7 +351,7 @@ export default async function BuyerDashboard() {
               aria-label={`Journey progress: step ${stepNum} of ${TOTAL_STEPS}`}
             >
               <div
-                className="h-full bg-gradient-to-r from-[#0B5FD1] to-[#4DA3FF] rounded-full transition-all duration-500"
+                className="h-full bg-gradient-to-r from-al-primary to-[#4DA3FF] rounded-full transition-all duration-500"
                 style={{ width: `${progressPct}%` }}
               />
             </div>
@@ -394,8 +394,8 @@ export default async function BuyerDashboard() {
         ) : activeDeal ? (
           <div className={`${CARD} p-5`} data-testid="kpi-deal-status">
             <div className="flex items-start justify-between mb-4">
-              <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] flex items-center justify-center">
-                <FileText size={16} className="text-[#0B5FD1]" />
+              <div className="w-9 h-9 rounded-xl bg-al-primary-subtle flex items-center justify-center">
+                <FileText size={16} className="text-al-primary" />
               </div>
             </div>
             <p className="text-lg font-bold text-slate-900">
@@ -404,7 +404,7 @@ export default async function BuyerDashboard() {
             <p className="text-xs font-medium text-slate-500 mt-2">Deal Status</p>
             <Link
               href="/buyer/deal"
-              className="inline-flex items-center gap-1 mt-3 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8]"
+              className="inline-flex items-center gap-1 mt-3 text-xs font-semibold text-al-primary hover:text-al-primary-hover"
             >
               View deal details <ArrowRight size={12} />
             </Link>
@@ -420,7 +420,7 @@ export default async function BuyerDashboard() {
             <p className="text-xs font-medium text-slate-500 mt-2">Purchase Complete</p>
             <Link
               href="/buyer/deal"
-              className="inline-flex items-center gap-1 mt-3 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8]"
+              className="inline-flex items-center gap-1 mt-3 text-xs font-semibold text-al-primary hover:text-al-primary-hover"
             >
               View deal summary <ArrowRight size={12} />
             </Link>
@@ -439,7 +439,7 @@ export default async function BuyerDashboard() {
             </p>
             <Link
               href="/buyer/search"
-              className="inline-flex items-center gap-1 mt-3 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8]"
+              className="inline-flex items-center gap-1 mt-3 text-xs font-semibold text-al-primary hover:text-al-primary-hover"
             >
               Browse inventory <ArrowRight size={12} />
             </Link>
@@ -468,7 +468,7 @@ export default async function BuyerDashboard() {
                 Takes about 3 minutes. We&apos;ll personalize your search and buying experience.
               </p>
               <Link href="/buyer/onboarding"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
                 data-testid="next-step-onboarding">
                 Complete onboarding <ArrowRight size={15} />
               </Link>
@@ -488,7 +488,7 @@ export default async function BuyerDashboard() {
                 <span className="flex items-center gap-1"><CheckCircle2 size={13} className="text-emerald-500" /> No commitment</span>
               </div>
               <Link href="/buyer/prequal"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
                 data-testid="next-step-prequal">
                 Get pre-qualified <ArrowRight size={15} />
               </Link>
@@ -503,7 +503,7 @@ export default async function BuyerDashboard() {
                 Browse vehicles within your ${((prequal?.maxOtdAmountCents ?? 0) / 100).toLocaleString()} approved budget. Save up to 5 to your shortlist.
               </p>
               <Link href="/buyer/search"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
                 data-testid="next-step-search">
                 Search vehicles <ArrowRight size={15} />
               </Link>
@@ -523,7 +523,7 @@ export default async function BuyerDashboard() {
                 <span className="flex items-center gap-1"><CheckCircle2 size={13} className="text-emerald-500" /> 48-hour window</span>
               </div>
               <Link href="/buyer/deposit"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
                 data-testid="next-step-deposit">
                 Pay ${DEPOSIT_AMOUNT_CENTS / 100} Auction Access Fee <ArrowRight size={15} />
               </Link>
@@ -540,7 +540,7 @@ export default async function BuyerDashboard() {
                   : `You have ${latestAuction._count.offers} offer${latestAuction._count.offers !== 1 ? "s" : ""} waiting. Review and compare them now.`}
               </p>
               <Link href="/buyer/auctions"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
                 data-testid="next-step-auction">
                 {latestAuction._count.offers > 0 ? "Review offers" : "View auction"} <ArrowRight size={15} />
               </Link>
@@ -555,7 +555,7 @@ export default async function BuyerDashboard() {
                 Your deal is in progress. Current stage: <strong>{activeDeal.status.replace(/_/g, " ")}</strong>
               </p>
               <Link href="/buyer/deal"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
                 data-testid="next-step-deal">
                 Continue deal <ArrowRight size={15} />
               </Link>
@@ -570,7 +570,7 @@ export default async function BuyerDashboard() {
                 Congratulations on your new vehicle. You can review your final paperwork and receipt anytime.
               </p>
               <Link href="/buyer/deal"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-[#0B5FD1] text-white font-semibold text-sm rounded-xl hover:bg-[#0A4DB8] transition-colors"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
                 data-testid="next-step-complete">
                 View deal summary <ArrowRight size={15} />
               </Link>
@@ -586,14 +586,14 @@ export default async function BuyerDashboard() {
               <Link
                 key={action.href}
                 href={action.href}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-700 hover:bg-slate-50 hover:text-[#0B5FD1] transition-colors group"
+                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-700 hover:bg-slate-50 hover:text-al-primary transition-colors group"
                 data-testid={`qa-${action.label.toLowerCase().replace(/\s+/g, "-")}`}
               >
-                <span className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center group-hover:bg-[#EFF6FF] group-hover:border-[#DBEAFE] transition-colors">
-                  <action.icon size={14} className="text-slate-500 group-hover:text-[#0B5FD1] transition-colors" />
+                <span className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center group-hover:bg-al-primary-subtle group-hover:border-[#DBEAFE] transition-colors">
+                  <action.icon size={14} className="text-slate-500 group-hover:text-al-primary transition-colors" />
                 </span>
                 <span className="flex-1 font-medium">{action.label}</span>
-                <ArrowRight size={13} className="text-slate-300 group-hover:text-[#0B5FD1] group-hover:translate-x-0.5 transition-all" />
+                <ArrowRight size={13} className="text-slate-300 group-hover:text-al-primary group-hover:translate-x-0.5 transition-all" />
               </Link>
             ))}
           </div>

@@ -118,16 +118,14 @@ export async function getCommissionSummary(affiliateId: string) {
   };
 }
 
-// Network tree size — max 3 levels
+// Network tree size — max 3 levels. Three bounded queries total: the previous
+// version also issued one count() PER L1 child (N+1) whose results were fully
+// redundant with the L2 `in` query below.
 export async function getNetworkSize(affiliateId: string): Promise<{ l1: number; l2: number; l3: number }> {
   const l1 = await prisma.affiliate.findMany({
     where: { parentId: affiliateId },
     select: { id: true },
   });
-
-  const l2Promises = l1.map(a => prisma.affiliate.count({ where: { parentId: a.id } }));
-  const l2Counts = await Promise.all(l2Promises);
-  const l2Total = l2Counts.reduce((s, c) => s + c, 0);
 
   const l2Ids = await prisma.affiliate.findMany({
     where: { parentId: { in: l1.map(a => a.id) } },
@@ -135,5 +133,5 @@ export async function getNetworkSize(affiliateId: string): Promise<{ l1: number;
   });
   const l3 = await prisma.affiliate.count({ where: { parentId: { in: l2Ids.map(a => a.id) } } });
 
-  return { l1: l1.length, l2: l2Total, l3 };
+  return { l1: l1.length, l2: l2Ids.length, l3 };
 }

@@ -16,6 +16,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { DollarSign, TrendingUp, TrendingDown, RefreshCw, Loader2, AlertTriangle } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface MonthPoint {
   month: string;
@@ -59,7 +60,7 @@ function MetricCard({
   const colors = {
     green:  { ring: "border-green-200",  bg: "bg-green-50",  text: "text-green-700",  icon: "text-green-600"  },
     red:    { ring: "border-red-200",    bg: "bg-red-50",    text: "text-red-700",    icon: "text-red-500"    },
-    blue:   { ring: "border-[#DBEAFE]",  bg: "bg-[#EFF6FF]", text: "text-[#0B5FD1]", icon: "text-[#0B5FD1]"  },
+    blue:   { ring: "border-[#DBEAFE]",  bg: "bg-al-primary-subtle", text: "text-al-primary", icon: "text-al-primary"  },
   };
   const c = colors[accent];
   return (
@@ -101,15 +102,10 @@ export default function AdminFinancePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/reports/financial-summary");
-      const json = await res.json() as { success?: boolean; data?: { summary: FinancialSummary }; error?: { message: string } };
-      if (json.success && json.data?.summary) {
-        setData(json.data.summary);
-      } else {
-        setError(json.error?.message ?? "Failed to load summary");
-      }
-    } catch {
-      setError("Network error — please refresh");
+      const data = await api.get<{ summary: FinancialSummary }>("/api/admin/reports/financial-summary");
+      setData(data.summary);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to load summary"));
     }
     setLoading(false);
   }, []);
@@ -129,7 +125,7 @@ export default function AdminFinancePage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <DollarSign size={22} className="text-[#0B5FD1]" />
+          <DollarSign size={22} className="text-al-primary" />
           <div>
             <h1 className="text-xl font-bold text-slate-900">Finance Dashboard</h1>
             {data?.generatedAt && (
@@ -158,7 +154,7 @@ export default function AdminFinancePage() {
       {/* Loading skeleton */}
       {loading && !data && (
         <div className="flex items-center justify-center py-24" data-testid="finance-loading">
-          <Loader2 size={28} className="animate-spin text-[#0B5FD1]" />
+          <Loader2 size={28} className="animate-spin text-al-primary" />
         </div>
       )}
 

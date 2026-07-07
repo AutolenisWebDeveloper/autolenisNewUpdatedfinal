@@ -31,13 +31,13 @@ const ICON_MAP: Record<BuyerNudge["icon"], React.ElementType> = {
 
 const URGENCY_STYLE: Record<BuyerNudge["urgency"], string> = {
   high:   "border-orange-200 bg-orange-50",
-  medium: "border-[#0B5FD1]/20 bg-[#0B5FD1]/4",
+  medium: "border-al-primary/20 bg-al-primary/4",
   low:    "border-slate-200 bg-white",
 };
 
 const URGENCY_ICON_STYLE: Record<BuyerNudge["urgency"], string> = {
   high:   "bg-orange-100 text-orange-600",
-  medium: "bg-[#0B5FD1]/10 text-[#0B5FD1]",
+  medium: "bg-al-primary/10 text-al-primary",
   low:    "bg-slate-100 text-slate-500",
 };
 
@@ -78,7 +78,7 @@ export default function ProactiveNudgesPanel({ nudges: initialNudges }: Props) {
               <Link
                 href={nudge.actionHref}
                 data-testid={`nudge-action-${nudge.stage}`}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:underline mt-2"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-al-primary hover:underline mt-2"
               >
                 {nudge.actionLabel} <ArrowRight size={11} />
               </Link>

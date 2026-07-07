@@ -233,7 +233,7 @@ export default function BulkUploadClient() {
   }
 
   const labelCls = "text-xs font-semibold text-slate-700 mb-1 block";
-  const inputCls = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30 focus:border-[#0B5FD1]";
+  const inputCls = "w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary";
 
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-inventory-upload-page">
@@ -254,7 +254,7 @@ export default function BulkUploadClient() {
             onClick={downloadTemplate}
             disabled={downloadingTemplate}
             data-testid="download-template-btn"
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#0B5FD1] hover:bg-[#0A4DB8] disabled:bg-slate-300 text-white rounded-lg text-xs font-semibold"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-al-primary hover:bg-al-primary-hover disabled:bg-slate-300 text-white rounded-lg text-xs font-semibold"
           >
             {downloadingTemplate ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             Download Template
@@ -278,7 +278,7 @@ export default function BulkUploadClient() {
             onClick={() => fileRef.current?.click()}
             disabled={validating}
             data-testid="select-csv-btn"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white rounded-lg text-sm font-semibold"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-al-primary hover:bg-al-primary-hover text-white rounded-lg text-sm font-semibold"
           >
             {validating ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
             Select CSV File
@@ -333,7 +333,7 @@ export default function BulkUploadClient() {
                   {selectedCount} of {parsed.rows.length} selected · <span className="text-green-600 font-semibold">{selectedValidCount} valid</span> · <span className="text-red-600 font-semibold">{selectedCount - selectedValidCount} with issues</span>
                 </p>
               </div>
-              <button onClick={toggleAll} className="text-xs text-[#0B5FD1] hover:underline font-semibold" data-testid="toggle-all-rows">
+              <button onClick={toggleAll} className="text-xs text-al-primary hover:underline font-semibold" data-testid="toggle-all-rows">
                 {selectedRows.size === parsed.rows.length ? "Deselect All" : "Select All"}
               </button>
             </div>
@@ -391,7 +391,7 @@ export default function BulkUploadClient() {
               onClick={submitImport}
               disabled={submitting || selectedValidCount === 0 || missingRequiredMap.length > 0}
               data-testid="import-rows-btn"
-              className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#0B5FD1] hover:bg-[#0A4DB8] disabled:bg-slate-300 text-white rounded-lg text-sm font-semibold"
+              className="inline-flex items-center gap-2 px-6 py-2.5 bg-al-primary hover:bg-al-primary-hover disabled:bg-slate-300 text-white rounded-lg text-sm font-semibold"
             >
               {submitting && <Loader2 size={14} className="animate-spin" />}
               Import {selectedValidCount} valid row{selectedValidCount !== 1 ? "s" : ""}
@@ -442,7 +442,7 @@ export default function BulkUploadClient() {
           )}
 
           <div className="flex items-center gap-3">
-            <Link href="/admin/inventory" data-testid="goto-inventory-btn" className="px-5 py-2 bg-[#0B5FD1] hover:bg-[#0A4DB8] text-white rounded-lg text-sm font-semibold">View Inventory</Link>
+            <Link href="/admin/inventory" data-testid="goto-inventory-btn" className="px-5 py-2 bg-al-primary hover:bg-al-primary-hover text-white rounded-lg text-sm font-semibold">View Inventory</Link>
             <button onClick={reset} className="px-5 py-2 border border-slate-300 hover:bg-slate-100 rounded-lg text-sm font-semibold text-slate-700" data-testid="upload-another-btn">Upload Another</button>
           </div>
         </section>

@@ -69,7 +69,7 @@ export default async function AdminNotificationsPage() {
     <div className="p-6 md:p-8 max-w-5xl" data-testid="admin-notifications-page">
       <div className="mb-6">
         <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-          <Bell size={20} className="text-[#0B5FD1]" />
+          <Bell size={20} className="text-al-primary" />
           Notifications
         </h1>
         <p className="text-sm text-slate-500 mt-0.5">

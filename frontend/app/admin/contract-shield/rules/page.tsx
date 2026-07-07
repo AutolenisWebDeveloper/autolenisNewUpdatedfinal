@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Shield, Plus, Edit2, Trash2, CheckCircle2, XCircle } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 type Severity = "HIGH" | "MEDIUM" | "LOW";
 
@@ -51,12 +52,6 @@ const SEVERITY_COLORS: Record<string, string> = {
   LOW: "bg-slate-100 text-slate-600",
 };
 
-interface ApiResponse<T> {
-  success?: boolean;
-  data?: T;
-  error?: { code: string; message: string };
-}
-
 function getThreshold(rule: ScanRule): number | undefined {
   const t = (rule.config as { threshold?: unknown })?.threshold;
   return typeof t === "number" ? t : undefined;
@@ -74,15 +69,11 @@ export default function AdminContractShieldRulesPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/contract-shield/rules");
-      const json = (await res.json()) as ApiResponse<{ rules: ScanRule[] }>;
-      if (!res.ok || !json.data) {
-        setError(json.error?.message ?? "Failed to load rules");
-        return;
-      }
-      setRules(json.data.rules);
-    } catch {
-      setError("Network error loading rules");
+      const data = await api.get<{ rules: ScanRule[] }>("/api/admin/contract-shield/rules");
+      setRules(data.rules);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to load rules"));
+      return;
     } finally {
       setLoading(false);
     }
@@ -93,12 +84,9 @@ export default function AdminContractShieldRulesPage() {
   async function toggleRule(rule: ScanRule) {
     const updated = rules.map(r => r.id === rule.id ? { ...r, isActive: !r.isActive } : r);
     setRules(updated);
-    const res = await fetch(`/api/admin/contract-shield/rules/${rule.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !rule.isActive }),
-    });
-    if (!res.ok) {
+    try {
+      await api.patch<unknown>(`/api/admin/contract-shield/rules/${rule.id}`, { isActive: !rule.isActive });
+    } catch {
       setError("Failed to update rule");
       await loadRules();
     }
@@ -106,10 +94,10 @@ export default function AdminContractShieldRulesPage() {
 
   async function deleteRule(id: string) {
     if (!confirm("Delete this scan rule? This cannot be undone.")) return;
-    const res = await fetch(`/api/admin/contract-shield/rules/${id}`, { method: "DELETE" });
-    if (!res.ok) {
-      const json = (await res.json().catch(() => ({}))) as ApiResponse<unknown>;
-      setError(json.error?.message ?? "Failed to delete rule");
+    try {
+      await api.del<unknown>(`/api/admin/contract-shield/rules/${id}`);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to delete rule"));
       return;
     }
     setRules(rules.filter(r => r.id !== id));
@@ -129,14 +117,10 @@ export default function AdminContractShieldRulesPage() {
       const t = parseInt(newRule.threshold, 10);
       if (!Number.isNaN(t)) payload.threshold = t;
     }
-    const res = await fetch("/api/admin/contract-shield/rules", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const json = (await res.json().catch(() => ({}))) as ApiResponse<unknown>;
-      setError(json.error?.message ?? "Failed to create rule");
+    try {
+      await api.post<unknown>("/api/admin/contract-shield/rules", payload);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Failed to create rule"));
       return;
     }
     setNewRule({ name: "", ruleType: "JUNK_FEE_KEYWORD", severity: "MEDIUM", description: "", threshold: "" });
@@ -173,7 +157,7 @@ export default function AdminContractShieldRulesPage() {
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-contract-rules-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Shield size={22} className="text-[#0B5FD1]" />
+          <Shield size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Contract Scan Rules</h1>
           <Badge variant="secondary">{activeCount}/{rules.length} active</Badge>
         </div>
@@ -190,7 +174,7 @@ export default function AdminContractShieldRulesPage() {
 
       {/* Add rule form */}
       {showAdd && (
-        <div className="bg-white border-2 border-[#0B5FD1]/20 rounded-xl p-5 mb-5" data-testid="add-rule-form">
+        <div className="bg-white border-2 border-al-primary/20 rounded-xl p-5 mb-5" data-testid="add-rule-form">
           <p className="font-semibold text-slate-800 text-sm mb-4">New Scan Rule</p>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
@@ -241,7 +225,7 @@ export default function AdminContractShieldRulesPage() {
             onClick={handleSeedDefaults}
             disabled={seeding}
             data-testid="seed-rules-btn"
-            className="px-4 py-2 bg-[#0B5FD1] text-white text-sm rounded-xl font-semibold hover:bg-[#0A4DB8] disabled:opacity-50">
+            className="px-4 py-2 bg-al-primary text-white text-sm rounded-xl font-semibold hover:bg-al-primary-hover disabled:opacity-50">
             {seeding ? "Loading…" : "Load Default Rules"}
           </button>
         </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface Props {
   dealershipName: string;
@@ -29,26 +30,17 @@ export default function DealerProfileClient(props: Props) {
     setError(null);
     setSaved(false);
     try {
-      const res = await fetch("/api/dealer/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dealershipName: dealershipName.trim() || undefined,
-          phone: phone.trim() || undefined,
-          address: address.trim() || undefined,
-          city: city.trim() || undefined,
-          state: stateVal.trim() || undefined,
-          zip: zip.trim() || undefined,
-        }),
+      await api.patch("/api/dealer/profile", {
+        dealershipName: dealershipName.trim() || undefined,
+        phone: phone.trim() || undefined,
+        address: address.trim() || undefined,
+        city: city.trim() || undefined,
+        state: stateVal.trim() || undefined,
+        zip: zip.trim() || undefined,
       });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: { message?: string } };
-        setError(data.error?.message ?? "Failed to save profile.");
-        return;
-      }
       setSaved(true);
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Network error. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -63,7 +55,7 @@ export default function DealerProfileClient(props: Props) {
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1.5">Dealership name</label>
         <input
-          className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/30"
           value={dealershipName}
           onChange={(e) => setDealershipName(e.target.value)}
           data-testid="profile-name"
@@ -83,7 +75,7 @@ export default function DealerProfileClient(props: Props) {
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1.5">Phone</label>
         <input
-          className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/30"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
           placeholder="e.g. +1 555 000 1234"
@@ -94,7 +86,7 @@ export default function DealerProfileClient(props: Props) {
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1.5">Address</label>
         <input
-          className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+          className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/30"
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           placeholder="Street address"
@@ -106,7 +98,7 @@ export default function DealerProfileClient(props: Props) {
         <div className="col-span-1">
           <label className="block text-sm font-medium text-slate-700 mb-1.5">City</label>
           <input
-            className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/30"
             value={city}
             onChange={(e) => setCity(e.target.value)}
             data-testid="profile-city"
@@ -115,7 +107,7 @@ export default function DealerProfileClient(props: Props) {
         <div className="col-span-1">
           <label className="block text-sm font-medium text-slate-700 mb-1.5">State</label>
           <input
-            className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/30"
             value={stateVal}
             onChange={(e) => setStateVal(e.target.value)}
             data-testid="profile-state"
@@ -124,7 +116,7 @@ export default function DealerProfileClient(props: Props) {
         <div className="col-span-1">
           <label className="block text-sm font-medium text-slate-700 mb-1.5">ZIP</label>
           <input
-            className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/30"
             value={zip}
             onChange={(e) => setZip(e.target.value)}
             data-testid="profile-zip"
@@ -142,7 +134,7 @@ export default function DealerProfileClient(props: Props) {
       <button
         type="submit"
         disabled={saving}
-        className="w-full bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"
+        className="w-full bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"
         data-testid="save-profile-btn"
       >
         {saving ? "Saving..." : "Save Profile"}

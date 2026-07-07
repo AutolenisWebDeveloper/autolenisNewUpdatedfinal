@@ -28,7 +28,7 @@ export default async function DealerDealsPage() {
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-deals-page">
       <div className="flex items-center gap-3 mb-6">
-        <Handshake size={22} className="text-[#0B5FD1]" />
+        <Handshake size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">My Deals</h1>
         <Badge variant="secondary">{deals.length}</Badge>
       </div>
@@ -54,7 +54,7 @@ export default async function DealerDealsPage() {
               key={deal.id}
               href={`/dealer/deals/${deal.id}`}
               data-testid={`deal-item-${deal.id}`}
-              className="grid grid-cols-3 items-center bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-[#0B5FD1]/30 transition-colors"
+              className="grid grid-cols-3 items-center bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-al-primary/30 transition-colors"
             >
               <span className="font-semibold text-slate-900 text-sm font-mono truncate pr-2">
                 #{deal.id.slice(0, 8)}

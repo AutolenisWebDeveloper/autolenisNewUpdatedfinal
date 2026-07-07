@@ -3,12 +3,12 @@ import { requireDealer } from "@/lib/auth/dealer-session";
 import { getDealerDashboardData } from "@/lib/services/dealer/dealer-dashboard.service";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import PageContainer from "@/components/dashboard/PageContainer";
-import PageHeader from "@/components/dashboard/PageHeader";
-import StatCard from "@/components/dashboard/StatCard";
-import Panel from "@/components/dashboard/Panel";
-import EmptyState from "@/components/dashboard/EmptyState";
-import { CARD, FIGURE } from "@/components/dashboard/tokens";
+import PageContainer from "@/components/ui/patterns/PageContainer";
+import PageHeader from "@/components/ui/patterns/PageHeader";
+import StatCard from "@/components/ui/patterns/StatCard";
+import Panel from "@/components/ui/patterns/Panel";
+import EmptyState from "@/components/ui/patterns/EmptyState";
+import { CARD, FIGURE } from "@/components/ui/patterns/tokens";
 import {
   Gavel, Package, TrendingUp, ArrowRight, Star, Handshake,
   Truck, Lightbulb, CheckCircle2, Inbox, FileText,
@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 // ── helpers ──────────────────────────────────────────────────────────────────
 function offerStatusColor(status: string) {
   if (status === "ACCEPTED") return "bg-emerald-500";
-  if (status === "SUBMITTED") return "bg-[#0B5FD1]";
+  if (status === "SUBMITTED") return "bg-al-primary";
   return "bg-slate-300";
 }
 
@@ -33,7 +33,7 @@ function dealStatusVariant(status: string): "green" | "blue" | "secondary" {
 
 function paymentTypeColor(type: string) {
   if (type === "COMMISSION") return "text-emerald-600";
-  if (type === "BONUS") return "text-[#0B5FD1]";
+  if (type === "BONUS") return "text-al-primary";
   if (type === "CLAWBACK") return "text-red-600";
   return "text-slate-600";
 }
@@ -79,7 +79,7 @@ export default async function DealerDashboard() {
       {/* ── 7. Active auction invitation alert — the money moment, so it leads ── */}
       {data.activeAuctionCount > 0 && (
         <div
-          className="relative overflow-hidden bg-gradient-to-r from-[#0B5FD1] to-[#0A4DB8] rounded-2xl p-6 text-white mb-6 shadow-md shadow-[#0B5FD1]/20"
+          className="relative overflow-hidden bg-gradient-to-r from-al-primary to-al-primary-hover rounded-2xl p-6 text-white mb-6 shadow-md shadow-al-primary/20"
           data-testid="active-auctions-banner"
         >
           <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -98,7 +98,7 @@ export default async function DealerDashboard() {
               </div>
             </div>
             <Button
-              className="bg-white text-[#0B5FD1] hover:bg-white/90 shrink-0 font-semibold"
+              className="bg-white text-al-primary hover:bg-white/90 shrink-0 font-semibold"
               href="/dealer/auctions"
               data-testid="view-auctions-btn"
             >
@@ -296,7 +296,7 @@ export default async function DealerDashboard() {
           <ul className="space-y-2 pt-1">
             {data.improvementTips.map((tip, i) => (
               <li key={i} data-testid={`improvement-tip-${i}`} className="flex items-start gap-2 text-sm text-slate-600 leading-relaxed">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#0B5FD1]/40 shrink-0 mt-1.5" />
+                <span className="w-1.5 h-1.5 rounded-full bg-al-primary/40 shrink-0 mt-1.5" />
                 {tip}
               </li>
             ))}

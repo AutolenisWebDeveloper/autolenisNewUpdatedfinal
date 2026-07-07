@@ -28,7 +28,7 @@ export default async function DealerContractsPage() {
     <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-contracts-page">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Shield size={22} className="text-[#0B5FD1]" />
+          <Shield size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">Contracts</h1>
           {contracts.length > 0 && <Badge variant="secondary">{contracts.length}</Badge>}
         </div>
@@ -53,7 +53,7 @@ export default async function DealerContractsPage() {
               key={cv.id}
               href={`/dealer/contracts/${cv.id}`}
               data-testid={`contract-item-${cv.id}`}
-              className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-[#0B5FD1]/30 transition-colors"
+              className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-al-primary/30 transition-colors"
             >
               <div>
                 <p className="text-sm font-semibold text-slate-900 font-mono">

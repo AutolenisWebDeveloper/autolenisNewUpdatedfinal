@@ -134,7 +134,7 @@ function domainOnly(url: string): string {
 }
 
 const SELECT_CLS =
-  "rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#0F172A] focus:border-[#0B5FD1] focus:outline-none";
+  "rounded-xl border border-[#E2E8F0] bg-white px-3 py-2 text-sm text-[#0F172A] focus:border-al-primary focus:outline-none";
 
 export default function DealerPipelineClient({
   prospects,
@@ -226,7 +226,7 @@ export default function DealerPipelineClient({
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search dealer name, city, email..."
             data-testid="dealer-search-input"
-            className="w-full rounded-xl border border-[#E2E8F0] bg-white py-2 pl-9 pr-3 text-sm text-[#0F172A] focus:border-[#0B5FD1] focus:outline-none"
+            className="w-full rounded-xl border border-[#E2E8F0] bg-white py-2 pl-9 pr-3 text-sm text-[#0F172A] focus:border-al-primary focus:outline-none"
           />
         </div>
 
@@ -305,7 +305,7 @@ export default function DealerPipelineClient({
           <button
             onClick={clearFilters}
             data-testid="dealer-clear-filters"
-            className="inline-flex items-center gap-1 px-2 py-2 text-sm font-medium text-[#0B5FD1] hover:underline"
+            className="inline-flex items-center gap-1 px-2 py-2 text-sm font-medium text-al-primary hover:underline"
           >
             <X size={14} /> Clear filters
           </button>
@@ -383,7 +383,7 @@ export default function DealerPipelineClient({
                       href={p.website}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[#0B5FD1] hover:underline truncate inline-block max-w-full"
+                      className="text-al-primary hover:underline truncate inline-block max-w-full"
                       title={p.website}
                     >
                       {domainOnly(p.website)}
@@ -423,7 +423,7 @@ export default function DealerPipelineClient({
                 <td className="px-3 py-3">
                   <Link
                     href={`/admin/dealer-outreach/${p.id}`}
-                    className="rounded-xl bg-[#0B5FD1] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#0a52b5]"
+                    className="rounded-xl bg-al-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-[#0a52b5]"
                     data-testid={`dealer-view-${p.id}`}
                   >
                     View

@@ -22,7 +22,7 @@ export default async function AffiliateReferralsPage() {
   return (
     <div className="p-6 md:p-8 max-w-3xl" data-testid="affiliate-referrals-page">
       <div className="flex items-center gap-3 mb-6">
-        <Users size={22} className="text-[#0B5FD1]" />
+        <Users size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">My Referrals</h1>
         <Badge variant="secondary">{referrals.length}</Badge>
       </div>

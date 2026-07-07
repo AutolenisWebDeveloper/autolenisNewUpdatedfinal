@@ -60,7 +60,7 @@ export default async function AuctionDetailPage({ params }: Props) {
       )}
 
       {isClosed && offerCount > 0 && (
-        <div className="bg-white border-2 border-[#0B5FD1] rounded-2xl p-8 text-center" data-testid="auction-closed-offers-ready">
+        <div className="bg-white border-2 border-al-primary rounded-2xl p-8 text-center" data-testid="auction-closed-offers-ready">
           <h2 className="text-xl font-bold text-slate-900 mb-2">Your offers are ready</h2>
           <p className="text-slate-500 text-sm mb-6">{offerCount} dealer{offerCount !== 1 ? "s" : ""} submitted an offer. Review and select your best deal.</p>
           <Button href={`/buyer/auction/${auctionId}/offers`} data-testid="review-offers-btn">

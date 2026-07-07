@@ -41,7 +41,7 @@ export default async function AdminSeoHealthPage() {
                 <td className="px-5 py-3 font-mono text-xs text-slate-500">{key}</td>
                 <td className="px-5 py-3 text-slate-700 max-w-xs truncate">{meta.title}</td>
                 <td className="px-5 py-3 text-slate-500 max-w-sm truncate text-xs">{meta.description}</td>
-                <td className="px-5 py-3 font-mono text-xs text-[#0B5FD1]">{meta.path}</td>
+                <td className="px-5 py-3 font-mono text-xs text-al-primary">{meta.path}</td>
                 <td className="px-5 py-3 text-xs text-slate-500">{meta.keywords?.length ?? 0}</td>
               </tr>
             ))}

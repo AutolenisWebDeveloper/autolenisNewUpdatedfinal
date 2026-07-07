@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 const INPUT_CLASS =
-  "w-full border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/30";
+  "w-full border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30";
 
 export default function NewMessagePage() {
   const router = useRouter();
@@ -19,19 +20,10 @@ export default function NewMessagePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/dealer/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealId, content }),
-      });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: { message?: string } };
-        setError(data.error?.message ?? "Something went wrong");
-        return;
-      }
+      await api.post("/api/dealer/messages", { dealId, content });
       router.push("/dealer/messages");
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Network error. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -42,7 +34,7 @@ export default function NewMessagePage() {
       <div className="flex items-center gap-3 mb-6">
         <Link
           href="/dealer/messages"
-          className="text-sm text-slate-400 hover:text-[#0B5FD1] transition-colors"
+          className="text-sm text-slate-400 hover:text-al-primary transition-colors"
         >
           ← Messages
         </Link>
@@ -93,7 +85,7 @@ export default function NewMessagePage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full bg-[#0B5FD1] hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
+          className="w-full bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
           data-testid="send-message-btn"
         >
           {loading ? "Sending..." : "Send Message"}

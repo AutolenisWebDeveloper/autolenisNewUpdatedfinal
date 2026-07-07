@@ -25,7 +25,7 @@ export default function DealerMarkAllReadButton() {
       type="button"
       onClick={handleClick}
       disabled={loading || done}
-      className="flex items-center gap-1.5 text-sm text-[#0B5FD1] hover:text-[#1A6FE0] disabled:opacity-50 transition-colors font-medium"
+      className="flex items-center gap-1.5 text-sm text-al-primary hover:text-[#1A6FE0] disabled:opacity-50 transition-colors font-medium"
       data-testid="mark-all-read-btn"
     >
       <CheckCheck size={15} />

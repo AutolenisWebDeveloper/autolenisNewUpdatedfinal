@@ -17,7 +17,7 @@ export default async function AdminRefinancePartnerPage() {
     <div className="p-6 md:p-10 max-w-3xl" data-testid="admin-refinance-partner-page">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-[#111827] tracking-tight flex items-center gap-2">
-          <Handshake size={22} className="text-[#0B5FD1]" /> Partner Info
+          <Handshake size={22} className="text-al-primary" /> Partner Info
         </h1>
         <p className="text-sm text-[#4B5563] mt-1">
           The lender all qualified refinance leads are referred to.
@@ -44,7 +44,7 @@ export default async function AdminRefinancePartnerPage() {
         </dl>
         <p className="text-xs text-[#4B5563] leading-relaxed mt-4">
           Each qualified lead is appended as the{" "}
-          <code className="text-[#0B5FD1] font-[family-name:var(--font-mono)]">opt_1</code> subid, making every referral traceable back to the originating AutoLenis user.
+          <code className="text-al-primary font-[family-name:var(--font-mono)]">opt_1</code> subid, making every referral traceable back to the originating AutoLenis user.
         </p>
       </section>
 
@@ -77,7 +77,7 @@ export default async function AdminRefinancePartnerPage() {
         target="_blank"
         rel="noopener noreferrer"
         data-testid="partner-site-link"
-        className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5FD1] hover:text-[#0A4DB8]"
+        className="inline-flex items-center gap-1.5 text-xs font-semibold text-al-primary hover:text-al-primary-hover"
       >
         Visit OpenRoad Lending <ExternalLink size={11} />
       </a>

@@ -5,6 +5,7 @@ import {
   Gavel, Search, Loader2, CheckCircle2, AlertCircle, X, Clock, ExternalLink,
   ChevronDown, ChevronRight, Plus, Trash2, Car,
 } from "lucide-react";
+import { api, apiErrorMessage } from "@/lib/api/client";
 
 interface ActiveDealer {
   id: string;
@@ -99,34 +100,24 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
     let cancelled = false;
     setShortlistLoading(true);
     setShortlistError(null);
-    fetch(`/api/admin/buyers/${buyerId}/shortlist`)
-      .then(async r => {
-        const json = await r.json() as {
-          success?: boolean;
-          data?: {
-            shortlist?: {
-              items: Array<{
-                inventoryItemId: string;
-                inventoryItem: {
-                  id: string;
-                  year: number;
-                  make: string;
-                  model: string;
-                  trim: string | null;
-                  mileage: number | null;
-                } | null;
-              }>;
-            } | null;
-          };
-          error?: { message: string };
-        };
+    api.get<{
+      shortlist?: {
+        items: Array<{
+          inventoryItemId: string;
+          inventoryItem: {
+            id: string;
+            year: number;
+            make: string;
+            model: string;
+            trim: string | null;
+            mileage: number | null;
+          } | null;
+        }>;
+      } | null;
+    }>(`/api/admin/buyers/${buyerId}/shortlist`)
+      .then(data => {
         if (cancelled) return;
-        if (!json.success) {
-          setShortlistError(json.error?.message ?? "Failed to load shortlist");
-          setShortlist([]);
-          return;
-        }
-        const items = json.data?.shortlist?.items ?? [];
+        const items = data.shortlist?.items ?? [];
         setShortlist(items.map(i => ({
           inventoryItemId: i.inventoryItemId,
           year:    i.inventoryItem?.year    ?? 0,
@@ -138,7 +129,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
       })
       .catch(err => {
         if (cancelled) return;
-        setShortlistError(err instanceof Error ? err.message : "Network error");
+        setShortlistError(apiErrorMessage(err, "Failed to load shortlist"));
         setShortlist([]);
       })
       .finally(() => { if (!cancelled) setShortlistLoading(false); });
@@ -179,24 +170,14 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
     setLoadingDealers(true);
     setDealerError(null);
     const url = `/api/admin/dealers/active${query ? `?q=${encodeURIComponent(query)}` : ""}`;
-    fetch(url)
-      .then(async r => {
-        const json = await r.json() as {
-          success?: boolean;
-          data?: { dealers: ActiveDealer[] };
-          error?: { message: string };
-        };
+    api.get<{ dealers: ActiveDealer[] }>(url)
+      .then(data => {
         if (cancelled) return;
-        if (!json.success) {
-          setDealerError(json.error?.message ?? "Failed to load dealers");
-          setDealers([]);
-        } else {
-          setDealers(json.data?.dealers ?? []);
-        }
+        setDealers(data.dealers ?? []);
       })
       .catch(err => {
         if (cancelled) return;
-        setDealerError(err instanceof Error ? err.message : "Network error");
+        setDealerError(apiErrorMessage(err, "Failed to load dealers"));
         setDealers([]);
       })
       .finally(() => { if (!cancelled) setLoadingDealers(false); });
@@ -284,37 +265,27 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await fetch(`/api/admin/buyers/${buyerId}/launch-auction`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await api.post<{ auctionId: string; dealerCount: number; outsideDealerCount?: number; vehicleCount?: number; endsAt: string | null }>(
+        `/api/admin/buyers/${buyerId}/launch-auction`,
+        {
           dealerIds: Array.from(selectedIds),
           reason: reason.trim(),
           hours: effectiveHours,
           notes: notes.trim() || undefined,
           outsideDealers: outsidePayload.length > 0 ? outsidePayload : undefined,
           vehicles:       vehiclesPayload.length > 0 ? vehiclesPayload : undefined,
-        }),
-      });
-      const json = await res.json() as {
-        success?: boolean;
-        data?: { auctionId: string; dealerCount: number; outsideDealerCount?: number; vehicleCount?: number; endsAt: string | null };
-        error?: { message: string };
-      };
-      if (!json.success || !json.data) {
-        setSubmitError(json.error?.message ?? "Launch failed");
-        return;
-      }
+        },
+      );
       setResult({
-        auctionId: json.data.auctionId,
-        dealerCount: json.data.dealerCount,
-        outsideDealerCount: json.data.outsideDealerCount ?? 0,
-        vehicleCount: json.data.vehicleCount ?? 0,
-        endsAt: json.data.endsAt,
+        auctionId: data.auctionId,
+        dealerCount: data.dealerCount,
+        outsideDealerCount: data.outsideDealerCount ?? 0,
+        vehicleCount: data.vehicleCount ?? 0,
+        endsAt: data.endsAt,
       });
-      onLaunched?.(json.data.auctionId);
+      onLaunched?.(data.auctionId);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Network error");
+      setSubmitError(apiErrorMessage(err, "Launch failed"));
     } finally {
       setSubmitting(false);
     }
@@ -337,7 +308,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
         </div>
         <a
           href={`/admin/auctions/${result.auctionId}`}
-          className="inline-flex items-center gap-1.5 bg-[#0B5FD1] text-white text-xs font-semibold px-4 py-2 rounded-xl hover:bg-[#0944a8]"
+          className="inline-flex items-center gap-1.5 bg-al-primary text-white text-xs font-semibold px-4 py-2 rounded-xl hover:bg-[#0944a8]"
         >
           <ExternalLink size={12} /> Open auction
         </a>
@@ -348,7 +319,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-5">
       <div className="flex items-center gap-2 mb-1">
-        <Gavel size={16} className="text-[#0B5FD1]" />
+        <Gavel size={16} className="text-al-primary" />
         <h3 className="text-sm font-bold text-slate-900">Launch auction for {buyerName}</h3>
       </div>
       <p className="text-xs text-slate-500 mb-5">
@@ -358,7 +329,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
 
       {/* Dealer search */}
       <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide block mb-1.5">
-        Invite dealers {selectedIds.size > 0 && <span className="text-[#0B5FD1] normal-case">· {selectedIds.size} selected</span>}
+        Invite dealers {selectedIds.size > 0 && <span className="text-al-primary normal-case">· {selectedIds.size} selected</span>}
       </label>
       <div className="relative mb-2">
         <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
@@ -367,7 +338,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder="Search dealership name, city, or state…"
-          className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+          className="w-full pl-8 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20"
         />
         {loadingDealers && (
           <Loader2 size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 animate-spin" />
@@ -404,7 +375,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                       type="checkbox"
                       readOnly
                       checked={checked}
-                      className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B5FD1] focus:ring-0 pointer-events-none"
+                      className="h-3.5 w-3.5 rounded border-slate-300 text-al-primary focus:ring-0 pointer-events-none"
                     />
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-slate-800 truncate">{d.dealershipName}</p>
@@ -431,7 +402,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
             {outsideOpen ? <ChevronDown size={13} className="text-slate-400" /> : <ChevronRight size={13} className="text-slate-400" />}
             <span className="text-xs font-semibold text-slate-700">
               Invite Outside Dealers <span className="text-slate-400 font-normal">(optional)</span>
-              {outsideDealers.length > 0 && <span className="text-[#0B5FD1]"> · {outsideDealers.length}</span>}
+              {outsideDealers.length > 0 && <span className="text-al-primary"> · {outsideDealers.length}</span>}
             </span>
           </div>
         </button>
@@ -457,7 +428,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                     onChange={e => updateOutsideDealer(idx, { dealershipName: e.target.value })}
                     placeholder="Dealership name *"
                     data-testid={`outside-dealer-${idx}-dealership`}
-                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                   />
                   <input
                     type="text"
@@ -465,7 +436,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                     onChange={e => updateOutsideDealer(idx, { contactName: e.target.value })}
                     placeholder="Contact name *"
                     data-testid={`outside-dealer-${idx}-contact`}
-                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                   />
                   <input
                     type="email"
@@ -473,7 +444,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                     onChange={e => updateOutsideDealer(idx, { email: e.target.value })}
                     placeholder="Email *"
                     data-testid={`outside-dealer-${idx}-email`}
-                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                   />
                   <input
                     type="tel"
@@ -481,7 +452,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                     onChange={e => updateOutsideDealer(idx, { phone: e.target.value })}
                     placeholder="Phone"
                     data-testid={`outside-dealer-${idx}-phone`}
-                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                   />
                 </div>
               </div>
@@ -491,7 +462,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
               onClick={addOutsideDealer}
               disabled={outsideDealers.length >= 8}
               data-testid="outside-dealer-add-btn"
-              className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:text-[#0944a8] disabled:text-slate-300"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-al-primary hover:text-[#0944a8] disabled:text-slate-300"
             >
               <Plus size={12} /> Add outside dealer{outsideDealers.length >= 8 ? " (max 8)" : ""}
             </button>
@@ -518,7 +489,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
               data-testid={`vehicle-mode-${opt.id}`}
               className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border ${
                 vehicleMode === opt.id
-                  ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                  ? "bg-al-primary text-white border-al-primary"
                   : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
               }`}
             >
@@ -547,7 +518,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                       checked={checked}
                       onChange={() => toggleShortlistVehicle(v.inventoryItemId)}
                       data-testid={`shortlist-vehicle-${v.inventoryItemId}`}
-                      className="h-3.5 w-3.5 rounded border-slate-300 text-[#0B5FD1] focus:ring-0"
+                      className="h-3.5 w-3.5 rounded border-slate-300 text-al-primary focus:ring-0"
                     />
                     <span className="text-xs text-slate-700 truncate">
                       {v.year || "—"} {v.make} {v.model}{v.trim ? ` ${v.trim}` : ""}
@@ -579,7 +550,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                     onChange={e => updateManualVehicle(idx, { year: e.target.value })}
                     placeholder="Year *"
                     data-testid={`manual-vehicle-${idx}-year`}
-                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                   />
                   <input
                     type="text"
@@ -587,7 +558,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                     onChange={e => updateManualVehicle(idx, { make: e.target.value })}
                     placeholder="Make *"
                     data-testid={`manual-vehicle-${idx}-make`}
-                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                   />
                   <input
                     type="text"
@@ -595,7 +566,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                     onChange={e => updateManualVehicle(idx, { model: e.target.value })}
                     placeholder="Model *"
                     data-testid={`manual-vehicle-${idx}-model`}
-                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                   />
                   <input
                     type="text"
@@ -603,7 +574,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                     onChange={e => updateManualVehicle(idx, { trim: e.target.value })}
                     placeholder="Trim"
                     data-testid={`manual-vehicle-${idx}-trim`}
-                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -613,7 +584,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                     onChange={e => updateManualVehicle(idx, { mileage: e.target.value })}
                     placeholder="Mileage"
                     data-testid={`manual-vehicle-${idx}-mileage`}
-                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                   />
                   <input
                     type="text"
@@ -621,7 +592,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
                     onChange={e => updateManualVehicle(idx, { notes: e.target.value })}
                     placeholder="Notes"
                     data-testid={`manual-vehicle-${idx}-notes`}
-                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+                    className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-al-primary/20"
                   />
                 </div>
               </div>
@@ -631,7 +602,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
               onClick={addManualVehicle}
               disabled={manualVehicles.length >= 10}
               data-testid="manual-vehicle-add-btn"
-              className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5FD1] hover:text-[#0944a8] disabled:text-slate-300"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-al-primary hover:text-[#0944a8] disabled:text-slate-300"
             >
               <Plus size={12} /> Add vehicle{manualVehicles.length >= 10 ? " (max 10)" : ""}
             </button>
@@ -655,7 +626,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
             onClick={() => { setHours(h); setCustomHours(""); }}
             className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
               !customHours && hours === h
-                ? "bg-[#0B5FD1] text-white border-[#0B5FD1]"
+                ? "bg-al-primary text-white border-al-primary"
                 : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
             }`}
           >
@@ -671,7 +642,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
             placeholder="Custom"
             value={customHours}
             onChange={e => setCustomHours(e.target.value)}
-            className="w-20 px-2 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+            className="w-20 px-2 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-al-primary/20"
           />
           <span className="text-[11px] text-slate-400">hours</span>
         </div>
@@ -686,7 +657,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
         value={reason}
         onChange={e => setReason(e.target.value)}
         placeholder="Why is the admin launching this auction?"
-        className="w-full px-3 py-2 mb-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+        className="w-full px-3 py-2 mb-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20"
       />
 
       {/* Notes */}
@@ -698,7 +669,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
         onChange={e => setNotes(e.target.value)}
         rows={2}
         placeholder="Internal notes captured in the audit log"
-        className="w-full px-3 py-2 mb-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5FD1]/20"
+        className="w-full px-3 py-2 mb-4 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20"
       />
 
       {submitError && (
@@ -715,7 +686,7 @@ export default function LaunchAuctionPanel({ buyerId, buyerName, onLaunched }: P
         type="button"
         onClick={launch}
         disabled={!canSubmit || submitting}
-        className="w-full bg-[#0B5FD1] text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0944a8] disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        className="w-full bg-al-primary text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-[#0944a8] disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
       >
         {submitting ? <Loader2 size={13} className="animate-spin" /> : <Gavel size={13} />}
         {submitting ? "Launching…" : `Launch auction${selectedIds.size > 0 ? ` (${selectedIds.size} dealer${selectedIds.size !== 1 ? "s" : ""})` : ""}`}

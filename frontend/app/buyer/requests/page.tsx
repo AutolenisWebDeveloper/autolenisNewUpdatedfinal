@@ -25,7 +25,7 @@ export default async function RequestsListPage() {
       {/* Journey navigator is suppressed here by JourneyNavigator component itself */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <ClipboardList size={22} className="text-[#0B5FD1]" />
+          <ClipboardList size={22} className="text-al-primary" />
           <h1 className="text-xl font-bold text-slate-900">My Vehicle Requests</h1>
         </div>
         <Button size="sm" href="/buyer/requests/new" data-testid="new-request-btn">
@@ -49,7 +49,7 @@ export default async function RequestsListPage() {
         <div className="space-y-3">
           {requests.map((req) => (
             <Link key={req.id} href={`/buyer/requests/${req.id}`} data-testid={`request-item-${req.id}`}
-              className="block bg-white border border-slate-200 rounded-xl p-5 hover:border-[#0B5FD1] hover:shadow-sm transition-all">
+              className="block bg-white border border-slate-200 rounded-xl p-5 hover:border-al-primary hover:shadow-sm transition-all">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <Badge variant={req.status === "OFFER_SENT" ? "blue" : req.status === "CANCELLED" ? "gray" : "secondary"}>
@@ -57,7 +57,7 @@ export default async function RequestsListPage() {
                     {toBuyerLabel(req.status)}
                   </Badge>
                   {req.status === "OFFER_SENT" && (
-                    <span className="text-xs font-semibold text-[#0B5FD1] animate-pulse">New Offer!</span>
+                    <span className="text-xs font-semibold text-al-primary animate-pulse">New Offer!</span>
                   )}
                 </div>
                 <p className="text-xs text-slate-400">{req.createdAt.toLocaleDateString()}</p>

@@ -30,7 +30,7 @@ export default async function AdminFunnelPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-4xl" data-testid="admin-funnel-page">
-      <div className="flex items-center gap-3 mb-6"><BarChart2 size={22} className="text-[#0B5FD1]" /><h1 className="text-xl font-bold text-slate-900">Conversion Funnel</h1></div>
+      <div className="flex items-center gap-3 mb-6"><BarChart2 size={22} className="text-al-primary" /><h1 className="text-xl font-bold text-slate-900">Conversion Funnel</h1></div>
       <div className="space-y-3">
         {stages.map((stage, i) => {
           const prev = stages[i - 1];
@@ -43,7 +43,7 @@ export default async function AdminFunnelPage() {
                 <span className="text-slate-500">{stage.count.toLocaleString()}</span>
               </div>
               <div className="h-8 bg-slate-100 rounded-lg overflow-hidden">
-                <div className="h-full bg-[#0B5FD1] rounded-lg flex items-center px-3" style={{ width: `${width}%` }}>
+                <div className="h-full bg-al-primary rounded-lg flex items-center px-3" style={{ width: `${width}%` }}>
                   <span className="text-xs text-white font-semibold">{stage.count}</span>
                 </div>
               </div>
