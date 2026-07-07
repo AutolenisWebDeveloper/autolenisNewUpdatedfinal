@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 import { Select } from "@/components/ui/select";
 import { ArrowLeft, ClipboardList, Phone, Mail, MapPin, Car, DollarSign, Wallet, FileText, ExternalLink } from "lucide-react";
 
@@ -140,7 +141,15 @@ export default function VehicleRequestDetailClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requestStatus: newStatus }),
       });
-      if (res.ok) setStatus(newStatus);
+      if (res.ok) {
+        setStatus(newStatus);
+        toast.success(`Status updated to ${newStatus.replace(/_/g, " ")}`);
+      } else {
+        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        toast.error(body?.error?.message ?? `Failed to update status (${res.status})`);
+      }
+    } catch {
+      toast.error("Failed to update status — network error");
     } finally {
       setUpdating(false);
     }

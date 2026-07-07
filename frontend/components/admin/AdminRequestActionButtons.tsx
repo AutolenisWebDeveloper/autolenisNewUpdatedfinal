@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
 export default function AdminRequestActionButtons({
@@ -16,12 +17,21 @@ export default function AdminRequestActionButtons({
 
   function patch(action: string) {
     startTransition(async () => {
-      await fetch(`/api/admin/requests/${requestId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
-      router.refresh();
+      try {
+        const res = await fetch(`/api/admin/requests/${requestId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        const json = (await res.json().catch(() => null)) as { success?: boolean; error?: { message?: string } } | null;
+        if (!res.ok || json?.success === false) {
+          throw new Error(json?.error?.message ?? `Action failed (${res.status})`);
+        }
+        toast.success("Action completed");
+        router.refresh();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Action failed");
+      }
     });
   }
 

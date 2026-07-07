@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Wand2 } from "lucide-react";
 
 export default function BackfillSourceButton({ nullCount }: { nullCount: number }) {
@@ -25,16 +26,16 @@ export default function BackfillSourceButton({ nullCount }: { nullCount: number 
         const rules = Object.entries(data.ruleBreakdown)
           .map(([k, v]) => `${k}: ${v}`)
           .join(", ");
-        window.alert(
+        toast.success(
           `Backfill complete — updated ${data.updated}, remaining ${data.remaining}.` +
-            (rules ? `\nInference: ${rules}` : ""),
+            (rules ? ` Inference: ${rules}` : ""),
         );
       } else {
-        window.alert("Backfill complete.");
+        toast.success("Backfill complete.");
       }
       router.refresh();
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "Backfill failed");
+      toast.error(err instanceof Error ? err.message : "Backfill failed");
     } finally {
       setBusy(false);
     }
