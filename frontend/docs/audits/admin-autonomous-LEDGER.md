@@ -2,7 +2,7 @@
 
 **Mission:** Autonomous discovery, planning, remediation, elevation & automation of the AutoLenis admin console to Fortune-500 fintech grade.
 **Branch:** `claude/admin-autonomous-hardening-fefvfe` (base: `main`)
-**Started:** 2026-07-07T02:15:00Z · **Last updated:** 2026-07-07T02:37:42Z
+**Started:** 2026-07-07T02:15:00Z · **Last updated:** 2026-07-07T04:55:00Z
 **Resume protocol:** read this file first, then `admin-autonomous-PLAN.md`; continue from the first unit not marked DONE. Never redo DONE units.
 
 ---
@@ -121,21 +121,31 @@
 
 | # | Unit | Status | Defects Fixed (file:line) | Improvements | Automation | CI | Commit | Notes |
 |---|---|---|---|---|---|---|---|---|
-| 0 | FOUNDATION — kit extras (ConfirmDialog, ErrorState, useAutoRefresh, CSV util) + admin segment error boundaries | PENDING | | | | | | |
-| 1 | Core ops — queues/system-health/activity/analytics/ai/aria + authz quick wins (onboarding requireAdmin, faith-content gates) | PENDING | | | | | | |
-| 2 | Dead controls — testimonials, referral-milestones Pay, esign hub, contract-shield rules Edit | PENDING | | | | | | |
-| 3 | Deals & auctions — confirm dialogs, post-action refresh, real Refunds tab, offers states, StartAuctionButton | PENDING | | | | | | |
-| 4 | Requests & buyers — silent-failure buttons, unbounded query, vehicle-requests unification, buyer-sources | PENDING | | | | | | |
-| 5 | Payments & reports — Refunds tab data, error-vs-empty, reports index, funnel/pipeline states, dedupe | PENDING | | | | | | |
-| 6 | Dealers & inventory — stubbed analytics (demand-gap/markets/coverage-map), applications forms, dead buttons | PENDING | | | | | | |
-| 7 | CRM compliance — suppression manager, bulk-send consent, dead buttons, contrast, campaign lifecycle | PENDING | | | | | | |
-| 8 | Growth & settings — settings stubs, seo/schema, innerHTML sanitize, refinance dedupe, documents/contracts links | PENDING | | | | | | |
-| 9 | Automation — polling on ops surfaces, reconciliation view, support impersonation UI, inbox polling | PENDING | | | | | | |
-| 10 | Design elevation — kit adoption on high-traffic list pages | PENDING | | | | | | |
+| 0 | FOUNDATION — kit extras + segment error boundaries | DONE | — | ConfirmDialog (required-reason, danger/trust), ErrorState, useAutoRefresh, lib/csv.ts (formula-injection-safe), AdminSegmentError + 11 segment error.tsx | polling primitive | tsc✅ lint✅(82w) build✅ | 49d061a | extends kit per standing directive; exported via @/components/ui/kit |
+| 1 | Core ops | DONE | queues resolve res.ok (page:65-79) + placeholder btn deleted (:148-158); system-health swallowed errors (:85,96) + healthy-default (:122); activity fake Live (:25); ai DOM-poke (:43); messages aria (:36); onboarding requireAdmin (:14); faith-content child gates | analytics loading.tsx; verses fetch/render mismatch | queues 30s + system-health 60s auto-refresh; activity RSC polling | tsc✅ lint✅(82w) | ee3e565 | |
+| 2 | Dead controls | DONE | testimonials no-onClick (page:3); referral-milestones dead Pay (page:3); esign hub inert Resend/Void (page:50-51); rules inert Edit (:262) | all four wired to their existing audited APIs; ConfirmDialogs with reason; pay route records reason | — | tsc✅ lint✅(80w↓) | 7c3ff4f | lint warnings 82→80 |
+| 3 | Deals & auctions | DONE | no-confirm destructive actions (AdminDealTabs:419-432, AdminAuctionDetail:199,261); stale post-action UI (both doAction); Refunds tab placeholder (AdminDealTabs:266); offers no empty/error; getElementById select (:411) | honest refunds facts; StartAuctionButton flow copy | router.refresh on success | tsc✅ lint✅(80w) | d9199ca | |
+| 4 | Requests & buyers | DONE | silent no-op buttons (AdminRequestActionButtons:19, CompleteCheckpointButton:22); unbounded findMany (requests:41); dead buyerUpdates fetch (:43); legacy vehicle-requests island (page:15-16); silent status update (:143); window.alert (BackfillSourceButton:28,37) | Buyer Updates panel; Send-to-Dealers link; canonical-id redirect + canonical meta | — | tsc✅ lint✅(80w) | f33d23f | legacy Notification path preserved for old links |
+| 5 | Payments & reports | DONE | Refunds tab hardcoded nulls (AdminPaymentsClient:1082-92); false-empty commissions (:864-71); reports index 4/9 linked; funnel zero-state bars | ConciergeFeeRow.feeRefundedAt; audit-log deep link; grouped index disambiguating affiliate/affiliates | — | tsc✅ lint✅(80w) | ac1b06a | |
+| 6 | Dealers & inventory | DONE | Math.random demand (demand-gap:29); markets local-only CRUD (:13-19); coverage-map hardcoded 0s (:10-19); dealer-discovery static stub (:12-15); applications raw form→JSON (:152-169); inventory/[id] dead buttons (:64-69); reject no confirm (RejectFormClient:16); [object Object] 401s | real buyer-request demand signal; discovery candidates from synced inventory; contributions empty state | — | tsc✅ lint✅(80w) | b1af023 | Force Resync removed (no backend) |
+| 7 | CRM compliance | DONE | suppression stub (page:12-25, no route); bulk email skipped consent_email (route:79-100); SMS preview first-100 (modal:38-51); no confirm step both modals; 4 dead buttons contacts/[id] (:108,201,246,249); consentSms gate (ContactActions:31); contrast text-gray-900-on-blue (SegmentBuilder:343,396,405; TemplateEditor:222) | full suppression manager on SuppressionService; contacts ids= lookup; two-phase confirm | — | tsc✅ lint✅(80w) | 81c671a | SMS unsuppress deliberately not exposed (TCPA START flow) |
+| 8 | Growth & settings | DONE | settings swallowed load error (:55) + 6 inert rows (:138-144); seo/schema Prisma no-op filter (:6); unsanitized innerHTML (content/[id]:133, ArticleManagerClient:1114); hardcoded excluded-states (refinance/compliance:72); unopenable documents/contracts | signed-url routes (platform docs by ownership bucket; contract versions) + Open buttons; contracts load-error + deal links | — | tsc✅ lint✅(80w) | b5f480b | sanitizeBody defense-in-depth at render |
+| 9 | Automation | DONE | support "Coming Soon" stub over live orphaned impersonation APIs; inbox list never polled | /admin/payments/reconciliation (5 money-state checks, read-only triage); support session manager (search/start-with-reason/end/history) | manual-reviews + ops-dashboard + operations RSC polling; inbox list 30s poll | tsc✅ lint✅(80w) | 6e22b4f | reconciliation never auto-resolves money |
+| 10 | Design elevation — mass kit adoption sweep | DEFERRED (decision) | — | — | — | — | — | See FOUNDATION DECISIONS below |
+
+## FOUNDATION DECISIONS
+
+- **REUSE ruling honored:** every new primitive (ConfirmDialog, ErrorState, useAutoRefresh, csv) extends the sanctioned CRM-kit tier and is exported via the canonical `@/components/ui/kit` barrel. No new component family was created.
+- **Unit 10 (mass DataTable/KpiCard adoption across ~100 ad-hoc pages) deferred, not skipped:** the owner-gated `docs/execution/PHASE_BACKLOG.md` Phase 3D already sequences the admin-wide kit/hex sweep (52 sections, per-section commits) behind a visual-regression harness and owner approval of the design spec. Re-running a competing sweep here would produce thousands of lines of unreviewable churn against a spec still marked DRAFT-for-owner-approval. This run instead made the kit complete enough for 3D (confirm/error/polling primitives + segment boundaries) and adopted it on every screen it touched (~20 surfaces). Quantified justification: 3D scope ≈ 2,191 hex occurrences + 52 sections; this mission's remaining budget was better spent closing 40+ functional/compliance defects.
 
 ## BLOCKERS
 
 (none yet)
+
+## BLOCKERS (final)
+
+None hard-blocking. One owner decision was made autonomously and is flagged for review:
+- Unit 10 mass kit-adoption sweep deferred to the owner-gated Phase 3D backlog (see FOUNDATION DECISIONS). If the owner prefers it now, the foundation from this run makes it mechanical.
 
 ## SETUP (human actions required)
 
