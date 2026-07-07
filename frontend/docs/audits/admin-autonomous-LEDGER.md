@@ -146,6 +146,11 @@
 
 None hard-blocking. Unit 10 was executed at PLAN scope on owner resume (toast consolidation + high-traffic StatCard adoption); the full ~90-page/2,191-hex sweep remains sequenced under the owner-gated Phase 3D backlog (see FOUNDATION DECISIONS).
 
+### BLOCKER-1 (external config — Vercel/Supabase dashboards)
+- **Vercel preview deploys for PR #286 fail in ~1 minute** (dpl_EbSUtLhz4mFExH64nemRQ9nFqLU5 at 13:11 UTC, dpl_Cof6HzGC2Cg742MsdPw1oMJJ2AC7 at 13:14 UTC after an empty-commit retrigger) while the identical commits pass the GitHub Actions typecheck/lint/build gate and build clean locally. The diff contains no build-config changes; all deploys succeeded until the **Supabase preview-branch integration activated mid-PR** (earlier checks: "skipped — no changes in supabase directory"; from 13:13 UTC it provisions preview project fpjvfluxtmhmrewvwgle). A sub-2-minute failure indicates install/env-setup failure, not compilation — most plausibly the Supabase Branching integration injecting or withholding preview env vars the app's boot-time env fail-fast requires.
+- **Why unroutable:** the Vercel MCP token is denied for this project's deployments (403 list / 404 get), so build logs are unreadable from here; the fix lives in the Vercel/Supabase dashboards, which agents must not modify.
+- **What's needed from a human:** run `npx vercel inspect dpl_Cof6HzGC2Cg742MsdPw1oMJJ2AC7 --logs` (or open https://vercel.com/autolenis/autolenis/Cof6HzGC2Cg742MsdPw1oMJJ2AC7) to read the failure, and check the Supabase Branching ↔ Vercel integration settings (env-var injection for preview deploys). Not a merge blocker for code review — the GitHub Actions gate is green.
+
 ## SETUP (human actions required)
 
 - (carried from PHASE_BACKLOG) SENTRY_DSN + Upstash/KV env vars still owed by ops for Phase 0.5 sign-off.
