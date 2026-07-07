@@ -1,8 +1,10 @@
 import { requireDealer } from "@/lib/auth/dealer-session";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
+import { PageContainer, PageHeader, EmptyState, CARD, CARD_HOVER, FIGURE } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { Gavel, Clock, ArrowRight } from "lucide-react";
+import { Clock, ArrowRight } from "lucide-react";
 import { bucketBudgetCents } from "@/lib/utils/buyer-budget";
 
 export const dynamic = "force-dynamic";
@@ -103,12 +105,12 @@ export default async function DealerAuctionsPage() {
     });
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-auctions-page">
-      <div className="flex items-center gap-3 mb-6">
-        <Gavel size={22} className="text-al-primary" />
-        <h1 className="text-xl font-bold text-slate-900">Auction Invitations</h1>
-        {active.length > 0 && <Badge>{active.length} active</Badge>}
-      </div>
+    <PageContainer testId="dealer-auctions-page">
+      <PageHeader
+        title="Auction Invitations"
+        subtitle="Buyer auctions you've been invited to — active first, sorted by deadline."
+        actions={active.length > 0 ? <Badge>{active.length} active</Badge> : undefined}
+      />
 
       {active.length > 0 && (
         <div className="mb-8">
@@ -124,11 +126,14 @@ export default async function DealerAuctionsPage() {
                   key={inv.id}
                   href={`/dealer/auctions/${inv.auction.id}`}
                   data-testid={`active-auction-${inv.id}`}
-                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border-2 border-al-primary/20 rounded-xl p-5 hover:border-al-primary transition-colors min-h-[44px]"
+                  className={cn(CARD, CARD_HOVER, "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-5 min-h-[44px]")}
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-1">
-                      <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                      </span>
                       <Badge variant={submitted ? "secondary" : "green"}>
                         {submitted ? "Bid Submitted" : "Awaiting Bid"}
                       </Badge>
@@ -146,7 +151,7 @@ export default async function DealerAuctionsPage() {
                     {submitted && offer ? (
                       <div className="text-right">
                         <p className="text-xs text-slate-500">Your OTD</p>
-                        <p className="text-sm font-semibold text-slate-900">
+                        <p className={cn("text-sm", FIGURE)}>
                           ${(offer.otdPriceCents / 100).toLocaleString()}
                         </p>
                       </div>
@@ -181,12 +186,12 @@ export default async function DealerAuctionsPage() {
                 <div
                   key={inv.id}
                   data-testid={`past-auction-${inv.id}`}
-                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-white border border-slate-200 rounded-xl px-5 py-4 min-h-[44px]"
+                  className={cn(CARD, "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-5 py-4 min-h-[44px]")}
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <Badge variant={meta.variant}>{meta.label}</Badge>
-                      <span className="text-xs text-slate-400">
+                      <span className="text-xs text-slate-500 tabular-nums">
                         {(inv.auction.endsAt ?? inv.sentAt).toLocaleDateString()}
                       </span>
                     </div>
@@ -200,7 +205,7 @@ export default async function DealerAuctionsPage() {
                       Open Deal →
                     </Link>
                   ) : state === "declined" ? (
-                    <span className="text-xs text-slate-400 shrink-0">You declined this invitation</span>
+                    <span className="text-xs text-slate-500 shrink-0">You declined this invitation</span>
                   ) : (
                     <Link
                       href={`/dealer/auctions/${inv.auction.id}/insights`}
@@ -218,15 +223,13 @@ export default async function DealerAuctionsPage() {
       )}
 
       {invitations.length === 0 && (
-        <div className="text-center py-20 bg-white border border-slate-200 rounded-xl" data-testid="no-auctions">
-          <Clock size={32} className="text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500">No auction invitations yet</p>
-          <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-            Invitations are sent based on your inventory match, tier, and capacity. They&apos;ll appear
-            here as soon as a buyer auction matches your profile.
-          </p>
-        </div>
+        <EmptyState
+          icon={Clock}
+          title="No auction invitations yet"
+          body="Invitations are sent based on your inventory match, tier, and capacity. They'll appear here as soon as a buyer auction matches your profile."
+          testId="no-auctions"
+        />
       )}
-    </div>
+    </PageContainer>
   );
 }

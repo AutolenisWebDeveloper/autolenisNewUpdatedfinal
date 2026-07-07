@@ -1,6 +1,8 @@
 import { requireDealer } from "@/lib/auth/dealer-session";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
+import { PageContainer, PageHeader, EmptyState, CARD, CARD_HOVER, FIGURE } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { FileText } from "lucide-react";
 
@@ -19,30 +21,34 @@ export default async function DealerOffersPage() {
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-offers-page">
-      <div className="flex items-center gap-3 mb-6">
-        <FileText size={22} className="text-al-primary" />
-        <h1 className="text-xl font-bold text-slate-900">My Offers</h1>
-        <Badge variant="secondary">{offers.length}</Badge>
-      </div>
+    <PageContainer testId="dealer-offers-page">
+      <PageHeader
+        title="My Offers"
+        subtitle="Every out-the-door offer you've submitted, newest first."
+        actions={<Badge variant="secondary">{offers.length}</Badge>}
+      />
       {offers.length === 0 ? (
-        <div className="text-center py-20 text-slate-400" data-testid="no-offers">
-          <p>No offers submitted yet</p>
-        </div>
+        <EmptyState
+          icon={FileText}
+          title="No offers submitted yet"
+          body="When you submit an out-the-door offer on an auction, it appears here with its status."
+          action={{ label: "Browse opportunities", href: "/dealer/opportunities", testId: "offers-empty-cta" }}
+          testId="no-offers"
+        />
       ) : (
         <div className="space-y-2">
           {offers.map(offer => (
             <Link key={offer.id} href={`/dealer/offers/${offer.id}`} data-testid={`offer-item-${offer.id}`}
-              className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-al-primary/30 transition-colors">
+              className={cn(CARD, CARD_HOVER, "flex items-center justify-between px-5 py-4")}>
               <div className="flex items-center gap-3">
                 <Badge variant={statusVariant[offer.status] ?? "gray"} className="text-xs">{offer.status}</Badge>
-                <span className="font-semibold text-slate-900 text-sm">${(offer.otdPriceCents / 100).toLocaleString()}</span>
+                <span className={cn("text-sm", FIGURE)}>${(offer.otdPriceCents / 100).toLocaleString()}</span>
               </div>
-              <span className="text-xs text-slate-400">{offer.createdAt.toLocaleDateString()}</span>
+              <span className="text-xs text-slate-500 tabular-nums">{offer.createdAt.toLocaleDateString()}</span>
             </Link>
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }
