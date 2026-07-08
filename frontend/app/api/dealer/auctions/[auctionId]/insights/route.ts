@@ -32,9 +32,14 @@ export async function GET(request: NextRequest, { params }: Props) {
     select: { otdPriceCents: true, feesCents: true },
   });
 
-  const medianOtd = allOffers.length > 0
+  // Anonymization guard: with too few offers the "median" is a specific
+  // competitor's exact price (at n=2 the median is the other losing dealer's
+  // OTD). Only surface a median once the sample is large enough that it cannot
+  // be attributed to any single competitor.
+  const MIN_MEDIAN_SAMPLE = 4;
+  const medianOtd = allOffers.length >= MIN_MEDIAN_SAMPLE
     ? allOffers.map(o => o.otdPriceCents).sort((a, b) => a - b)[Math.floor(allOffers.length / 2)]
-    : 0;
+    : null;
 
   const myRank = myOffer
     ? allOffers.filter(o => o.otdPriceCents < myOffer.otdPriceCents).length + 1
@@ -44,6 +49,7 @@ export async function GET(request: NextRequest, { params }: Props) {
     offerCount: allOffers.length,
     myRank, myOffer: myOffer ? { otdPriceCents: myOffer.otdPriceCents, feesCents: myOffer.feesCents } : null,
     segmentMedianCents: medianOtd,
-    // No competitor amounts, no competitor identity — anonymized medians only
+    // No competitor amounts, no competitor identity — anonymized medians only,
+    // and only when the sample is large enough to stay anonymous.
   });
 }

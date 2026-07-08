@@ -3,8 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Shield, AlertTriangle, CheckCircle2, Info } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { CARD } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -62,21 +64,20 @@ export default async function ContractDetailPage({ params }: Props) {
   const fixItems: FixItem[] = Array.isArray(latestScan?.fixList) ? (latestScan.fixList as FixItem[]) : [];
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl" data-testid="contract-detail-page">
+    <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 md:p-8" data-testid="contract-detail-page">
       <Link
         href="/dealer/contracts"
-        className="text-sm text-slate-400 hover:text-al-primary transition-colors mb-6 flex items-center gap-1"
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors mb-6 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-al-primary/40"
       >
-        ← Back to Contracts
+        <ArrowLeft size={15} /> Back to Contracts
       </Link>
 
       <div className="flex items-center gap-3 mb-6">
-        <Shield size={22} className="text-al-primary" />
-        <h1 className="text-xl font-bold text-slate-900">Contract Shield Review</h1>
+        <h1 className="text-2xl sm:text-[1.75rem] font-bold text-slate-900 tracking-tight">Contract Shield Review</h1>
       </div>
 
       {/* Metadata */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-5" data-testid="contract-metadata">
+      <div className={cn(CARD, "p-5 mb-5")} data-testid="contract-metadata">
         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">
           Contract Details
         </p>
@@ -88,12 +89,12 @@ export default async function ContractDetailPage({ params }: Props) {
             { label: "Version", value: `v${contractVersion.version}` },
           ].map(({ label, value }) => (
             <div key={label} className="flex gap-4">
-              <dt className="text-sm text-slate-400 w-28 shrink-0">{label}</dt>
+              <dt className="text-sm text-slate-500 w-28 shrink-0">{label}</dt>
               <dd className="text-sm font-medium text-slate-900">{value}</dd>
             </div>
           ))}
           <div className="flex gap-4">
-            <dt className="text-sm text-slate-400 w-28 shrink-0">Status</dt>
+            <dt className="text-sm text-slate-500 w-28 shrink-0">Status</dt>
             <dd>
               <Badge variant="secondary" className="text-xs">
                 {contractVersion.status}
@@ -111,40 +112,40 @@ export default async function ContractDetailPage({ params }: Props) {
           </div>
         )}
         {latestScan && (scanStatus === "PASS" || scanStatus === "APPROVED") && (
-          <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl px-5 py-4">
-            <CheckCircle2 size={18} className="text-green-600" />
+          <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-4">
+            <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
             <div>
-              <span className="font-semibold text-green-700 text-sm">
-                ✓ Contract Shield: PASSED
+              <span className="font-semibold text-emerald-700 text-sm">
+                Contract Shield: PASSED
               </span>
               {latestScan.score != null && (
-                <p className="text-xs text-green-600 mt-0.5">Score: {latestScan.score}/100</p>
+                <p className="text-xs text-emerald-600 mt-0.5 tabular-nums">Score: {latestScan.score}/100</p>
               )}
             </div>
           </div>
         )}
         {latestScan && scanStatus === "WARNING" && (
-          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
-            <AlertTriangle size={18} className="text-amber-600" />
+          <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4">
+            <AlertTriangle size={18} className="text-amber-600 shrink-0" />
             <div>
               <span className="font-semibold text-amber-700 text-sm">
-                ⚠ Contract Shield: WARNING
+                Contract Shield: WARNING
               </span>
               {latestScan.score != null && (
-                <p className="text-xs text-amber-600 mt-0.5">Score: {latestScan.score}/100</p>
+                <p className="text-xs text-amber-600 mt-0.5 tabular-nums">Score: {latestScan.score}/100</p>
               )}
             </div>
           </div>
         )}
         {latestScan && (scanStatus === "FAIL" || scanStatus === "FAILED") && (
-          <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-5 py-4">
-            <AlertTriangle size={18} className="text-red-600" />
+          <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-2xl px-5 py-4">
+            <AlertTriangle size={18} className="text-red-600 shrink-0" />
             <div>
               <span className="font-semibold text-red-700 text-sm">
-                ✗ Contract Shield: Issues Found
+                Contract Shield: Issues Found
               </span>
               {latestScan.score != null && (
-                <p className="text-xs text-red-600 mt-0.5">Score: {latestScan.score}/100</p>
+                <p className="text-xs text-red-600 mt-0.5 tabular-nums">Score: {latestScan.score}/100</p>
               )}
             </div>
           </div>
@@ -152,10 +153,10 @@ export default async function ContractDetailPage({ params }: Props) {
       </div>
 
       {/* Fix List */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-5" data-testid="fix-list">
+      <div className={cn(CARD, "p-5 mb-5")} data-testid="fix-list">
         <p className="text-sm font-semibold text-slate-800 mb-3">Review Items</p>
         {passed || fixItems.length === 0 ? (
-          <p className="text-sm text-green-600">No issues found.</p>
+          <p className="text-sm text-emerald-600">No issues found.</p>
         ) : (
           <div className="space-y-2">
             {fixItems.map((issue, idx) => {
@@ -171,7 +172,7 @@ export default async function ContractDetailPage({ params }: Props) {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-slate-700 font-medium">{label}</p>
                     {issue.reason && <p className="text-xs text-slate-500 mt-0.5">{issue.reason}</p>}
-                    {issue.howToFix && <p className="text-xs text-blue-600 mt-1">{issue.howToFix}</p>}
+                    {issue.howToFix && <p className="text-xs text-al-primary mt-1">{issue.howToFix}</p>}
                   </div>
                   <Badge variant={severityVariant(sev)} className="text-xs shrink-0">
                     {sev}

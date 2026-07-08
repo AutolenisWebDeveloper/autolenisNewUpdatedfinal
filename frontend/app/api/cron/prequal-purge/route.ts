@@ -34,5 +34,20 @@ export async function GET(request: NextRequest) {
       decision: { in: ["DECLINED", "MANUAL_REVIEW"] },
     },
   });
-  return NextResponse.json({ success: true, data: { purged: count } });
+
+  // Data-minimization: scrub the encrypted raw bureau payload from APPROVED
+  // rows older than 90 days (owner-set retention window). The decision fields
+  // (score / DTI / reason codes) are kept permanently for the renewable
+  // approval history; only the raw consumer-report blob is dropped.
+  const rawResponseCutoff = new Date(Date.now() - 90 * 24 * 3600000);
+  const { count: scrubbed } = await prisma.preQualification.updateMany({
+    where: {
+      decision: "APPROVED",
+      createdAt: { lt: rawResponseCutoff },
+      rawResponse: { not: null },
+    },
+    data: { rawResponse: null },
+  });
+
+  return NextResponse.json({ success: true, data: { purged: count, rawResponseScrubbed: scrubbed } });
 }

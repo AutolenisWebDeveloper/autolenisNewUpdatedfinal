@@ -11,6 +11,10 @@ const schema = z.object({
   apr: z.number().min(0).max(50, "APR must be between 0 and 50%"),
   termMonths: z.number().int().min(12).max(96, "Term must be between 12 and 96 months"),
   expiresAt: z.string().optional(),
+  // Private-bucket storage path of the uploaded lender letter (from
+  // /api/buyer/requests/financing/upload-letter). Persisted so the reviewing
+  // admin can actually open the document being "verified".
+  documentUrl: z.string().max(500).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -26,7 +30,7 @@ export async function POST(request: NextRequest) {
     return errorResponse("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
   }
 
-  const { lenderName, approvedAmountCents, apr, termMonths, expiresAt } = parsed.data;
+  const { lenderName, approvedAmountCents, apr, termMonths, expiresAt, documentUrl } = parsed.data;
 
   const submission = await prisma.externalPreApproval.create({
     data: {
@@ -36,15 +40,19 @@ export async function POST(request: NextRequest) {
       aprRate: apr,
       termMonths,
       expiryDate: expiresAt ? new Date(expiresAt) : null,
+      documentUrl: documentUrl ?? null,
     },
   });
 
   await prisma.notification.create({
     data: {
       buyerId: buyer.id,
-      type: "DEAL_STAGE_CHANGED",
+      // REQUEST_STATUS_UPDATE (existing enum) accurately marks a status update
+      // on the buyer's submission — replaces the mislabeled DEAL_STAGE_CHANGED.
+      type: "REQUEST_STATUS_UPDATE",
       title: "Pre-approval submitted",
       body: `Your ${lenderName} pre-approval has been submitted for review. Our team will verify and update your profile within 1 business day.`,
+      actionUrl: "/buyer/prequal/manual-preapproval/status",
     },
   }).catch((err: unknown) => { logger.error("[ExternalPrequal] Failed to create notification:", err); });
 

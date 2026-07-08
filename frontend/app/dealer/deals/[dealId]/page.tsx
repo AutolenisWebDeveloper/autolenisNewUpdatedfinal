@@ -3,8 +3,10 @@ import { getDealerDealById } from "@/lib/services/dealer/dealer-deals.service";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Handshake, Mail, Phone, MapPin } from "lucide-react";
+import { Mail, Phone, MapPin, ArrowLeft, Check } from "lucide-react";
 import Link from "next/link";
+import { CARD, FIGURE } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -58,18 +60,17 @@ export default async function DealerDealDetailPage({ params }: Props) {
   })();
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-deal-detail-page">
+    <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 md:p-8" data-testid="dealer-deal-detail-page">
       <Link
         href="/dealer/deals"
-        className="text-sm text-slate-400 hover:text-al-primary transition-colors mb-6 flex items-center gap-1"
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors mb-6 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-al-primary/40"
       >
-        ← Back to Deals
+        <ArrowLeft size={15} /> Back to Deals
       </Link>
 
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        <Handshake size={22} className="text-al-primary" />
-        <h1 className="text-xl font-bold text-slate-900">Deal Progress</h1>
-        <Badge variant="secondary" className="text-xs font-mono">
+        <h1 className="text-2xl sm:text-[1.75rem] font-bold text-slate-900 tracking-tight">Deal Progress</h1>
+        <Badge variant="secondary" className="text-xs font-mono tabular-nums">
           #{deal.id.slice(0, 8)}
         </Badge>
         <Badge variant={deal.status === "COMPLETED" ? "green" : "secondary"}>
@@ -79,7 +80,7 @@ export default async function DealerDealDetailPage({ params }: Props) {
 
       {nextAction && (
         <div
-          className="bg-al-primary/5 border border-al-primary/20 rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+          className="bg-al-primary-subtle border border-al-primary/20 rounded-2xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
           data-testid="deal-next-action"
         >
           <div>
@@ -93,8 +94,8 @@ export default async function DealerDealDetailPage({ params }: Props) {
       )}
 
       {/* Stage Timeline */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="stage-timeline">
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">
+      <div className={cn(CARD, "p-5 mb-6")} data-testid="stage-timeline">
+        <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.14em] mb-4">
           Deal Timeline
         </p>
         <div className="flex flex-wrap gap-y-3">
@@ -106,17 +107,17 @@ export default async function DealerDealDetailPage({ params }: Props) {
                 <div className="flex flex-col items-center">
                   <div
                     className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors
-                      ${isCompleted ? "bg-green-500 text-white" : isCurrent ? "bg-al-primary text-white" : "bg-slate-100 text-slate-400"}`}
+                      ${isCompleted ? "bg-emerald-500 text-white" : isCurrent ? "bg-al-primary text-white" : "bg-slate-100 text-slate-400"}`}
                     data-testid={`stage-step-${stage}`}
                   >
-                    {isCompleted ? "✓" : i + 1}
+                    {isCompleted ? <Check size={13} /> : i + 1}
                   </div>
                   <span
                     className={`text-[9px] mt-1 text-center leading-tight max-w-[52px] ${
                       isCurrent
                         ? "text-al-primary font-semibold"
                         : isCompleted
-                        ? "text-green-600"
+                        ? "text-emerald-600"
                         : "text-slate-400"
                     }`}
                   >
@@ -125,7 +126,7 @@ export default async function DealerDealDetailPage({ params }: Props) {
                 </div>
                 {i < STAGES.length - 1 && (
                   <div
-                    className={`h-px w-4 mx-1 mt-[-10px] ${isCompleted ? "bg-green-400" : "bg-slate-200"}`}
+                    className={`h-px w-4 mx-1 mt-[-10px] ${isCompleted ? "bg-emerald-400" : "bg-slate-200"}`}
                   />
                 )}
               </div>
@@ -136,24 +137,24 @@ export default async function DealerDealDetailPage({ params }: Props) {
 
       {/* Agreed price */}
       {offer && (
-        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="agreed-price-section">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+        <div className={cn(CARD, "p-5 mb-6")} data-testid="agreed-price-section">
+          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-[0.14em] mb-3">
             Agreed Price
           </p>
-          <p className="text-3xl font-bold text-slate-900 mb-3">
-            ${(offer.otdPriceCents / 100).toLocaleString()} OTD
+          <p className={cn("text-3xl mb-3", FIGURE)}>
+            ${(offer.otdPriceCents / 100).toLocaleString()} <span className="text-lg text-slate-400">OTD</span>
           </p>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
             <dt className="text-slate-500">Vehicle</dt>
-            <dd className="text-slate-900">${(offer.vehiclePriceCents / 100).toLocaleString()}</dd>
+            <dd className="text-slate-900 font-mono tabular-nums">${(offer.vehiclePriceCents / 100).toLocaleString()}</dd>
             <dt className="text-slate-500">Tax</dt>
-            <dd className="text-slate-900">${(offer.taxCents / 100).toLocaleString()}</dd>
+            <dd className="text-slate-900 font-mono tabular-nums">${(offer.taxCents / 100).toLocaleString()}</dd>
             <dt className="text-slate-500">Fees</dt>
-            <dd className="text-slate-900">${(offer.feesCents / 100).toLocaleString()}</dd>
+            <dd className="text-slate-900 font-mono tabular-nums">${(offer.feesCents / 100).toLocaleString()}</dd>
             {offer.includesFinancing && offer.aprRate != null && offer.termMonths != null && (
               <>
                 <dt className="text-slate-500">Financing</dt>
-                <dd className="text-slate-900">{offer.aprRate.toFixed(2)}% / {offer.termMonths} mo</dd>
+                <dd className="text-slate-900 font-mono tabular-nums">{offer.aprRate.toFixed(2)}% / {offer.termMonths} mo</dd>
               </>
             )}
           </dl>
@@ -162,7 +163,7 @@ export default async function DealerDealDetailPage({ params }: Props) {
 
       {/* Contract Shield (read-only) */}
       {(deal.contractShieldStatus || deal.contractShieldScore != null) && (
-        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="contract-shield-status">
+        <div className={cn(CARD, "p-5 mb-6")} data-testid="contract-shield-status">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
             Contract Shield review (read-only)
           </p>
@@ -172,7 +173,7 @@ export default async function DealerDealDetailPage({ params }: Props) {
             )}
             {deal.contractShieldScore != null && (
               <span className="text-sm text-slate-700">
-                Score: <span className="font-semibold">{deal.contractShieldScore}</span>
+                Score: <span className="font-mono tabular-nums font-semibold">{deal.contractShieldScore}</span>
               </span>
             )}
           </div>
@@ -183,7 +184,7 @@ export default async function DealerDealDetailPage({ params }: Props) {
       )}
 
       {/* Document Upload */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6" data-testid="document-upload-section">
+      <div className={cn(CARD, "p-5 mb-6")} data-testid="document-upload-section">
         <p className="text-sm font-semibold text-slate-800 mb-3">Documents</p>
         <Button href="/dealer/contracts" variant="secondary" className="text-sm min-h-[44px]">
           Manage contracts & documents
@@ -191,7 +192,7 @@ export default async function DealerDealDetailPage({ params }: Props) {
       </div>
 
       {/* Buyer Contact */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="buyer-contact-section">
+      <div className={cn(CARD, "p-5")} data-testid="buyer-contact-section">
         <p className="text-sm font-semibold text-slate-800 mb-3">Buyer Contact</p>
         {contactVisible && buyer ? (
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">

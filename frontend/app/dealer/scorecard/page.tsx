@@ -8,11 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { Star, TrendingUp, CheckCircle2, Clock, AlertTriangle, Lightbulb, Trophy, Zap, Target, Award } from "lucide-react";
 import ScorecardChart from "@/components/dealer/ScorecardChart";
 import { getDealerViolationSummary } from "@/lib/services/contract-shield/violation-pattern.service";
+import { PageContainer, PageHeader, FIGURE } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
+// Sanctioned tones only (indigo/amber/slate/red) — no off-system purple.
 const TIER_COLORS: Record<string, string> = {
-  PLATINUM: "bg-purple-100 text-purple-800 border-purple-200",
+  PLATINUM: "bg-indigo-100 text-indigo-800 border-indigo-200",
   GOLD: "bg-amber-100 text-amber-800 border-amber-200",
   STANDARD: "bg-slate-100 text-slate-700 border-slate-200",
   PROBATION: "bg-red-100 text-red-700 border-red-200",
@@ -112,11 +115,11 @@ export default async function DealerScorecardPage() {
   }));
 
   return (
-    <div className="p-6 md:p-8 max-w-4xl" data-testid="dealer-scorecard-page">
-      <div className="flex items-center gap-3 mb-6">
-        <Star size={22} className="text-al-primary" />
-        <h1 className="text-xl font-bold text-slate-900">Performance Scorecard</h1>
-      </div>
+    <PageContainer testId="dealer-scorecard-page">
+      <PageHeader
+        title="Performance Scorecard"
+        subtitle="Your tier, composite score, and 90-day performance — your data only."
+      />
 
       {/* Tier badge + composite score */}
       <div className="flex flex-col sm:flex-row gap-4 mb-8">
@@ -139,20 +142,20 @@ export default async function DealerScorecardPage() {
                 strokeDasharray={`${compositeScore} ${100 - compositeScore}`}
                 strokeLinecap="round" />
             </svg>
-            <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-al-primary">
+            <span className="absolute inset-0 flex items-center justify-center text-sm font-mono tabular-nums font-bold text-al-primary">
               {compositeScore}
             </span>
           </div>
           <div>
             <p className="text-xs text-slate-500 font-medium">Performance Score</p>
-            <p className="text-lg font-bold text-slate-900">{compositeScore}/100</p>
-            <p className="text-xs text-slate-400">Based on your 90-day metrics</p>
+            <p className={cn("text-lg", FIGURE)}>{compositeScore}/100</p>
+            <p className="text-xs text-slate-500">Based on your 90-day metrics</p>
           </div>
         </div>
       </div>
 
       {/* Tier progression */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-8" data-testid="tier-progression">
+      <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-5 mb-8" data-testid="tier-progression">
         <p className="text-sm font-semibold text-slate-800 mb-4 flex items-center gap-2">
           <Trophy size={15} className="text-amber-500" />Tier Progression
         </p>
@@ -165,14 +168,14 @@ export default async function DealerScorecardPage() {
               <div key={tier} className="flex items-center gap-2 flex-1">
                 <div className={`flex-1 flex flex-col items-center gap-1 px-2 py-2 rounded-xl border-2 transition-colors ${
                   isCurrent ? "border-al-primary bg-al-primary/5" :
-                  isPast ? "border-green-300 bg-green-50" :
+                  isPast ? "border-emerald-300 bg-emerald-50" :
                   "border-slate-200 bg-slate-50"
                 }`} data-testid={`tier-step-${tier.toLowerCase()}`}>
-                  <span className={`text-xs font-bold uppercase ${isCurrent ? "text-al-primary" : isPast ? "text-green-700" : "text-slate-400"}`}>
+                  <span className={`text-xs font-bold uppercase ${isCurrent ? "text-al-primary" : isPast ? "text-emerald-700" : "text-slate-400"}`}>
                     {tier}
                   </span>
                   {isCurrent && <span className="text-[10px] text-al-primary font-semibold">← You are here</span>}
-                  {isPast && <CheckCircle2 size={12} className="text-green-500" />}
+                  {isPast && <CheckCircle2 size={12} className="text-emerald-500" />}
                 </div>
                 {i < 2 && <div className={`w-4 h-0.5 ${isPast || isCurrent ? "bg-al-primary" : "bg-slate-200"}`} />}
               </div>
@@ -191,19 +194,19 @@ export default async function DealerScorecardPage() {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
         {metrics.map((m, i) => (
           <div key={i} data-testid={`scorecard-metric-${m.label.toLowerCase().replace(/\s+/g, "-")}`}
-            className="bg-white border border-slate-200 rounded-xl p-5">
+            className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-5">
             <div className="flex items-center gap-2 mb-2">
               <m.icon size={16} className="text-al-primary" />
               <p className="text-xs text-slate-500 font-medium">{m.label}</p>
             </div>
-            <p className="text-2xl font-bold text-slate-900 mb-1">{m.value}</p>
-            <p className="text-xs text-slate-400">{m.benchmark}</p>
+            <p className={cn("text-2xl mb-1", FIGURE)}>{m.value}</p>
+            <p className="text-xs text-slate-500">{m.benchmark}</p>
           </div>
         ))}
       </div>
 
       {/* Achievements */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 mb-8" data-testid="achievements-section">
+      <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-5 mb-8" data-testid="achievements-section">
         <p className="font-semibold text-slate-800 text-sm mb-4 flex items-center gap-2">
           <Award size={15} className="text-al-primary" />
           Achievements
@@ -229,7 +232,7 @@ export default async function DealerScorecardPage() {
 
       {/* 90-day trend chart */}
       {chartData.length > 1 && (
-        <div className="bg-white border border-slate-200 rounded-xl p-5 mb-8" data-testid="scorecard-trend-chart">
+        <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-5 mb-8" data-testid="scorecard-trend-chart">
           <p className="font-semibold text-slate-800 text-sm mb-4">90-Day Performance Trend</p>
         <ScorecardChart data={chartData} />
         </div>
@@ -262,10 +265,10 @@ export default async function DealerScorecardPage() {
                 className={`flex items-center justify-between px-4 py-3 rounded-xl border text-sm ${p.flagged ? "bg-red-50 border-red-200" : "bg-slate-50 border-slate-200"}`}>
                 <div>
                   <p className={`font-semibold ${p.flagged ? "text-red-800" : "text-slate-700"}`}>{p.ruleName}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">First seen: {p.firstSeen.toLocaleDateString()}</p>
+                  <p className="text-xs text-slate-500 mt-0.5 tabular-nums">First seen: {p.firstSeen.toLocaleDateString()}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${p.flagged ? "bg-red-200 text-red-800" : "bg-slate-200 text-slate-600"}`}>
+                  <span className={`text-xs font-bold tabular-nums px-2 py-0.5 rounded-full ${p.flagged ? "bg-red-200 text-red-800" : "bg-slate-200 text-slate-600"}`}>
                     {p.count}x
                   </span>
                   {p.flagged && <span className="text-xs text-red-600 font-bold">PATTERN VIOLATION</span>}
@@ -275,6 +278,6 @@ export default async function DealerScorecardPage() {
           </div>
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }

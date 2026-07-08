@@ -1,9 +1,9 @@
 "use client";
 
+import { toast } from "sonner";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, AlertTriangle } from "lucide-react";
 
 interface Props {
   dealId: string;
@@ -16,7 +16,6 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [scheduleModal, setScheduleModal] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{ action: string; label: string; requiresReason?: boolean } | null>(null);
   const [confirmReason, setConfirmReason] = useState("");
@@ -26,8 +25,9 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
   });
 
   function showToast(msg: string, type: "success" | "error") {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 4000);
+    // sonner toast — global Toaster in app/layout.tsx
+    if (type === "success") toast.success(msg);
+    else toast.error(msg);
   }
 
   async function post(path: string, body?: Record<string, unknown>) {
@@ -86,13 +86,6 @@ export function AdminPickupActions({ dealId, pickupStatus, scheduledAt, location
 
   return (
     <>
-      {toast && (
-        <div className={"fixed top-4 right-4 z-50 px-4 py-3 rounded-xl text-sm shadow-xl font-medium flex items-center gap-2 max-w-sm " + (toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white")}>
-          {toast.type === "success" ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
-          <span>{toast.msg}</span>
-        </div>
-      )}
-
       {scheduleModal && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm mx-4">

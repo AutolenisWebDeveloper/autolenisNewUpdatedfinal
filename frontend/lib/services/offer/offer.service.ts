@@ -22,6 +22,14 @@ function assertOtdComponentsMatch(input: {
   feesCents: number;
   junkFeeItems?: Array<{ name: string; amount: number }>;
 }) {
+  // Reject negative junk-fee line items. Without this a dealer can inflate
+  // vehiclePriceCents while holding OTD constant by carrying a negative "fee",
+  // recording a misrepresented breakdown that still reconciles to OTD.
+  for (const item of input.junkFeeItems ?? []) {
+    if ((item.amount ?? 0) < 0) {
+      throw new Error(`Junk fee "${item.name}" cannot be negative`);
+    }
+  }
   const junkFeeCents = (input.junkFeeItems ?? []).reduce(
     (sum, item) => sum + Math.round((item.amount ?? 0) * 100),
     0,

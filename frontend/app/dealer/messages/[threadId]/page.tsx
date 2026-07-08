@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api, apiErrorMessage } from "@/lib/api/client";
+import { Button } from "@/components/ui/button";
+import { ArrowLeft } from "lucide-react";
 
 interface Message {
   id: string;
@@ -72,19 +74,19 @@ export default function MessageThreadPage() {
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl flex flex-col h-full" data-testid="message-thread-page">
+    <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 md:p-8 flex flex-col h-full" data-testid="message-thread-page">
       <div className="flex items-center gap-3 mb-6">
         <Link
           href="/dealer/messages"
-          className="text-sm text-slate-400 hover:text-al-primary transition-colors"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors rounded-md outline-none focus-visible:ring-2 focus-visible:ring-al-primary/40"
         >
-          ← Messages
+          <ArrowLeft size={15} /> Messages
         </Link>
-        <h1 className="text-xl font-bold text-slate-900">Message Thread</h1>
+        <h1 className="text-2xl sm:text-[1.75rem] font-bold text-slate-900 tracking-tight">Message Thread</h1>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-4 text-sm">
+        <div className="bg-al-danger-subtle border border-al-danger/20 text-al-danger-fg rounded-xl px-4 py-3 mb-4 text-sm" role="alert">
           {error}
         </div>
       )}
@@ -95,10 +97,10 @@ export default function MessageThreadPage() {
         data-testid="messages-list"
       >
         {loading && (
-          <p className="text-slate-400 text-sm text-center py-10">Loading messages...</p>
+          <p className="text-slate-500 text-sm text-center py-10">Loading messages...</p>
         )}
         {!loading && messages.length === 0 && (
-          <p className="text-slate-400 text-sm text-center py-10">No messages yet.</p>
+          <p className="text-slate-500 text-sm text-center py-10">No messages yet.</p>
         )}
         {messages.map((msg) => (
           <div
@@ -115,8 +117,8 @@ export default function MessageThreadPage() {
             >
               <p>{msg.content}</p>
               <p
-                className={`text-[10px] mt-1 ${
-                  isDealer(msg) ? "text-blue-100" : "text-slate-400"
+                className={`text-[10px] mt-1 tabular-nums ${
+                  isDealer(msg) ? "text-white/70" : "text-slate-500"
                 }`}
               >
                 {formatTime(msg)}
@@ -134,7 +136,7 @@ export default function MessageThreadPage() {
           onChange={(e) => setCompose(e.target.value)}
           placeholder="Type a message..."
           rows={2}
-          className="flex-1 border border-slate-200 rounded-lg px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/30 resize-none"
+          className="flex-1 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-al-primary/20 focus:border-al-primary resize-none"
           data-testid="compose-input"
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -143,14 +145,14 @@ export default function MessageThreadPage() {
             }
           }}
         />
-        <button
+        <Button
           type="submit"
+          size="lg"
           disabled={sending || !compose.trim()}
-          className="px-5 py-3 bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold rounded-lg transition-colors text-sm"
           data-testid="send-btn"
         >
           {sending ? "..." : "Send"}
-        </button>
+        </Button>
       </form>
     </div>
   );

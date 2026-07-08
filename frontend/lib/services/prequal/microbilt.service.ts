@@ -495,8 +495,11 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   }
 
   if (!res.ok) {
-    const errBody = await res.text().catch(() => "");
-    logger.error(`[microbilt] iPredict HTTP ${res.status}: ${errBody}`);
+    // Do NOT log the response body: on some errors MicroBilt echoes the request
+    // (name/address/DOB) back, which would write consumer PII to app logs in
+    // cleartext. The status code is enough to triage; the encrypted rawResponse
+    // (below, on parseable bodies) holds detail for authorized inspection.
+    logger.error(`[microbilt] iPredict HTTP ${res.status} (body suppressed — may contain PII)`);
     return errorResult(`HTTP_${res.status}`);
   }
 

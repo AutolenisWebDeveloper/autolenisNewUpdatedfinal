@@ -8,6 +8,8 @@ export async function POST(request: NextRequest, { params }: Props) {
   const { id } = await params;
   const admin = await getAdminWithRole(request, ["SUPER_ADMIN", "FINANCE_ADMIN"]);
   if (!admin) return adminError("FORBIDDEN", "Insufficient permissions", 403);
+  const body = (await request.json().catch(() => ({}))) as { reason?: unknown };
+  const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : undefined;
   const before = await prisma.referralMilestone.findUnique({ where: { id } });
   if (!before) return adminError("NOT_FOUND", "Milestone not found", 404);
   if (before.paidAt) return adminError("ALREADY_PAID", "Milestone already marked paid", 400);
@@ -16,6 +18,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     action: "REFERRAL_MILESTONE_PAID",
     entityType: "ReferralMilestone",
     entityId: id,
+    reason,
     metadata: {
       buyerId: before.buyerId,
       milestone: before.milestone,

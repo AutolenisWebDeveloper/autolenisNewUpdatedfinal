@@ -6,7 +6,6 @@ import {
   Globe,
   Calendar,
   AlertTriangle,
-  Pencil,
   Plus,
   Clock,
   ChevronLeft,
@@ -104,15 +103,7 @@ export default async function ContactDetailPage({
         <div className="space-y-4">
           {/* Identity */}
           <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-            <div className="flex justify-end -mt-1 -mr-1">
-              <button
-                className="p-1.5 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100"
-                aria-label="Edit contact"
-              >
-                <Pencil className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div className="flex flex-col items-center text-center -mt-4">
+            <div className="flex flex-col items-center text-center pt-1">
               <div className="w-20 h-20 rounded-full bg-blue-600 flex items-center justify-center text-2xl font-bold text-white">
                 {initials}
               </div>
@@ -198,9 +189,9 @@ export default async function ContactDetailPage({
                 <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   Open Tasks
                 </h3>
-                <button className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-0.5">
-                  <Plus className="w-3 h-3" /> Add
-                </button>
+                <Link href="/admin/crm/tasks" className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-0.5">
+                  <Plus className="w-3 h-3" aria-hidden /> Add
+                </Link>
               </div>
               <div className="space-y-2">
                 {tasks.map((task) => {
@@ -242,14 +233,9 @@ export default async function ContactDetailPage({
           <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold text-gray-900">Activity Timeline</h2>
-              <div className="flex items-center gap-2">
-                <button className="text-xs text-gray-700 hover:text-gray-900 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-2.5 py-1 transition-colors">
-                  Add Note
-                </button>
-                <button className="text-xs text-gray-700 hover:text-gray-900 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-2.5 py-1 transition-colors">
-                  Add Task
-                </button>
-              </div>
+              <Link href="/admin/crm/tasks" className="text-xs text-gray-700 hover:text-gray-900 bg-white border border-gray-300 hover:bg-gray-50 rounded-md px-2.5 py-1 transition-colors">
+                Add Task
+              </Link>
             </div>
 
             {timeline.length === 0 ? (

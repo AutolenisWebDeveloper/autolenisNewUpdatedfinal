@@ -4,6 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Shield, Upload } from "lucide-react";
 import Link from "next/link";
+import { PageContainer, PageHeader, EmptyState, CARD, CARD_HOVER } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -25,27 +27,26 @@ export default async function DealerContractsPage() {
   });
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-contracts-page">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <Shield size={22} className="text-al-primary" />
-          <h1 className="text-xl font-bold text-slate-900">Contracts</h1>
-          {contracts.length > 0 && <Badge variant="secondary">{contracts.length}</Badge>}
-        </div>
-        <Button size="sm" href="/dealer/contracts/upload" data-testid="upload-contract-btn">
-          <Upload size={14} /> Upload Contract
-        </Button>
-      </div>
+    <PageContainer testId="dealer-contracts-page">
+      <PageHeader
+        title="Contracts"
+        subtitle="Sale contracts submitted for automated Contract Shield review."
+        eyebrow={contracts.length > 0 ? <Badge variant="secondary">{contracts.length}</Badge> : undefined}
+        actions={
+          <Button size="sm" href="/dealer/contracts/upload" data-testid="upload-contract-btn">
+            <Upload size={14} /> Upload Contract
+          </Button>
+        }
+      />
 
       {contracts.length === 0 ? (
-        <div className="text-center py-20 bg-white border border-slate-200 rounded-xl text-slate-400" data-testid="no-contracts">
-          <Shield size={32} className="mx-auto mb-3 opacity-30" />
-          <p className="font-medium text-slate-600 mb-1">No contracts yet</p>
-          <p className="text-sm max-w-sm mx-auto">
-            Upload a sale contract for Contract Shield review. Contracts are scanned automatically for
-            junk fees and compliance issues.
-          </p>
-        </div>
+        <EmptyState
+          icon={Shield}
+          title="No contracts yet"
+          body="Upload a sale contract for Contract Shield review. Contracts are scanned automatically for junk fees and compliance issues."
+          action={{ label: "Upload a contract", href: "/dealer/contracts/upload", testId: "contracts-empty-cta" }}
+          testId="no-contracts"
+        />
       ) : (
         <div className="space-y-2">
           {contracts.map((cv) => (
@@ -53,13 +54,13 @@ export default async function DealerContractsPage() {
               key={cv.id}
               href={`/dealer/contracts/${cv.id}`}
               data-testid={`contract-item-${cv.id}`}
-              className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-al-primary/30 transition-colors"
+              className={cn(CARD, CARD_HOVER, "flex items-center justify-between px-5 py-4")}
             >
               <div>
-                <p className="text-sm font-semibold text-slate-900 font-mono">
+                <p className="text-sm font-semibold text-slate-900 font-mono tabular-nums">
                   Contract v{cv.version} · Deal #{cv.dealId.slice(0, 8)}
                 </p>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
                   Uploaded {cv.uploadedAt.toLocaleDateString()}
                 </p>
               </div>
@@ -70,6 +71,6 @@ export default async function DealerContractsPage() {
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }

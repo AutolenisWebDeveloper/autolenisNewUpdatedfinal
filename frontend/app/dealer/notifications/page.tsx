@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
 import { Bell } from "lucide-react";
 import DealerMarkAllReadButton from "@/components/dealer/DealerMarkAllReadButton";
+import { PageContainer, PageHeader, EmptyState } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -17,36 +19,39 @@ export default async function DealerNotificationsPage() {
   const unreadCount = notifications.filter((n) => !n.readAt).length;
 
   return (
-    <div className="p-6 md:p-8 max-w-2xl" data-testid="dealer-notifications-page">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <Bell size={22} className="text-al-primary" />
-          <h1 className="text-xl font-bold text-slate-900">Notifications</h1>
-          {unreadCount > 0 && <Badge>{unreadCount} new</Badge>}
-        </div>
-        {unreadCount > 0 && <DealerMarkAllReadButton />}
-      </div>
+    <PageContainer testId="dealer-notifications-page">
+      <PageHeader
+        title="Notifications"
+        subtitle="Auction, offer, deal, and account updates."
+        eyebrow={unreadCount > 0 ? <Badge>{unreadCount} new</Badge> : undefined}
+        actions={unreadCount > 0 ? <DealerMarkAllReadButton /> : undefined}
+      />
       {notifications.length === 0 ? (
-        <div className="text-center py-16 text-slate-400" data-testid="no-dealer-notifications">
-          <Bell size={28} className="mx-auto mb-3 opacity-30" />
-          <p>No notifications yet</p>
-        </div>
+        <EmptyState
+          icon={Bell}
+          title="No notifications yet"
+          body="Updates about your auctions, offers, and deals will appear here."
+          testId="no-dealer-notifications"
+        />
       ) : (
         <div className="space-y-2">
           {notifications.map((n) => (
             <div
               key={n.id}
               data-testid={`dealer-notification-${n.id}`}
-              className={`bg-white border rounded-xl p-4 ${!n.readAt ? "border-al-primary/20" : "border-slate-200"}`}
+              className={cn(
+                "bg-white rounded-2xl shadow-sm p-4 border",
+                !n.readAt ? "border-al-primary/25 bg-al-primary-subtle/30" : "border-slate-200/80",
+              )}
             >
               {!n.readAt && <div className="w-2 h-2 rounded-full bg-al-primary mb-2" />}
               <p className="font-semibold text-slate-900 text-sm">{n.title}</p>
               <p className="text-sm text-slate-500 mt-0.5">{n.body}</p>
-              <p className="text-xs text-slate-400 mt-1">{n.createdAt.toLocaleDateString()}</p>
+              <p className="text-xs text-slate-500 mt-1 tabular-nums">{n.createdAt.toLocaleDateString()}</p>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }

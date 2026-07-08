@@ -860,14 +860,20 @@ function AffiliatePayoutsTab() {
   const [payMethod, setPayMethod] = useState("");
   const [payRef, setPayRef] = useState("");
   const [payNote, setPayNote] = useState("");
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     api.get<{ commissions?: CommissionRow[] }>("/api/admin/payments/commissions")
       .then((d) => {
         setCommissions(d.commissions ?? []);
+        setLoadError(false);
         setLoadingData(false);
       })
-      .catch(() => setLoadingData(false));
+      .catch(() => {
+        // Error must not render as "no commissions" — that is a false empty.
+        setLoadError(true);
+        setLoadingData(false);
+      });
   }, []);
 
   const filtered = commissions.filter(c =>
@@ -920,6 +926,10 @@ function AffiliatePayoutsTab() {
         {loadingData ? (
           <div className="py-12 text-center text-slate-400 text-sm flex items-center justify-center gap-2">
             <Loader2 size={16} className="animate-spin" /> Loading commissions…
+          </div>
+        ) : loadError ? (
+          <div className="py-12 text-center text-sm text-red-600" data-testid="commissions-load-error">
+            Commissions could not be loaded — refresh the page to retry.
           </div>
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-slate-400 text-sm">No commissions match this filter.</div>
@@ -1079,16 +1089,14 @@ function RefundsTab({ deposits, conciergeFees }: {
     id: d.depositId, type: "Deposit" as const, buyerName: d.buyerName,
     buyerEmail: d.buyerEmail, amountCents: d.amountCents,
     refundedAt: d.refundedAt ?? null,
-    reason: null as string | null,
-    stripeId: null as string | null,
+    stripeId: d.stripePaymentIntentId,
   }));
 
   const refundedFees = conciergeFees.filter(f => f.feeStatus === "REFUNDED").map(f => ({
     id: f.dealId, type: "Service Fee" as const, buyerName: f.buyerName,
     buyerEmail: f.buyerEmail, amountCents: f.amountCents,
-    refundedAt: null as string | null,
-    reason: null as string | null,
-    stripeId: null as string | null,
+    refundedAt: f.feeRefundedAt,
+    stripeId: f.stripeFeePIId,
   }));
 
   const all = [...refundedDeposits, ...refundedFees]
@@ -1108,7 +1116,7 @@ function RefundsTab({ deposits, conciergeFees }: {
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <div className="hidden md:grid grid-cols-[2fr_100px_100px_1fr_2fr_1.5fr] gap-4 px-5 py-3 bg-slate-50 border-b text-[10px] font-bold text-slate-400 uppercase tracking-wider">
           <span>Buyer</span><span>Type</span><span>Amount</span>
-          <span>Date</span><span>Reason</span><span>Stripe Refund ID</span>
+          <span>Date</span><span>Reason</span><span>Stripe Payment Ref</span>
         </div>
         {all.length === 0 ? (
           <div className="py-12 text-center text-slate-400 text-sm">No refunds processed yet.</div>
@@ -1126,7 +1134,9 @@ function RefundsTab({ deposits, conciergeFees }: {
             <span className="text-xs text-slate-400">
               {r.refundedAt ? new Date(r.refundedAt).toLocaleDateString() : "—"}
             </span>
-            <span className="text-xs text-slate-600">{r.reason ?? "—"}</span>
+            <span className="text-xs text-slate-600">
+              <a href={`/admin/audit-log?q=${r.id}`} className="text-al-primary hover:underline">View in audit log</a>
+            </span>
             <span className="text-[10px] font-mono text-slate-400 truncate">{r.stripeId ?? "—"}</span>
           </div>
         ))}

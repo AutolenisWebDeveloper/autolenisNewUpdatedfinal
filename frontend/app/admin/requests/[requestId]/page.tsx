@@ -1,6 +1,7 @@
 // /admin/requests/[requestId] — System 4C admin case management
 // Tabs: Research Log | Due Diligence | Offer Creation (gated) | Buyer Updates | Status
 
+import Link from "next/link";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import { createSignedDocumentUrl } from "@/lib/services/documents/storage-links";
@@ -261,6 +262,26 @@ export default async function AdminRequestDetailPage({ params }: Props) {
             )}
           </div>
 
+          {/* Buyer updates sent for this request */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="buyer-updates">
+            <p className="font-semibold text-slate-800 text-sm mb-3">Buyer Updates ({req.buyerUpdates.length})</p>
+            {req.buyerUpdates.length === 0 ? (
+              <p className="text-sm text-slate-400">No updates sent to the buyer yet</p>
+            ) : (
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {req.buyerUpdates.map(u => (
+                  <div key={u.id} className="text-xs bg-slate-50 rounded-lg p-2" data-testid={`buyer-update-${u.id}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium text-slate-700">{u.title}</span>
+                      <span className="text-slate-400 shrink-0">{u.createdAt.toLocaleDateString()}{u.isRead ? " · Read" : ""}</span>
+                    </div>
+                    <p className="text-slate-500 mt-0.5">{u.body}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Audit trail */}
           <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="audit-trail">
             <p className="font-semibold text-slate-800 text-sm mb-3">Audit Trail</p>
@@ -278,6 +299,13 @@ export default async function AdminRequestDetailPage({ params }: Props) {
           <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-2" data-testid="admin-actions">
             <p className="font-semibold text-slate-800 text-sm mb-2">Actions</p>
             <AdminRequestActionButtons requestId={req.id} status={req.status} />
+            <Link
+              href={`/admin/vehicle-requests/${req.id}/send-to-dealers`}
+              className="block w-full text-center text-sm font-medium border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 hover:border-al-primary/40 hover:text-al-primary transition-colors"
+              data-testid="send-to-dealers-link"
+            >
+              Send to Dealers →
+            </Link>
           </div>
         </div>
       </div>

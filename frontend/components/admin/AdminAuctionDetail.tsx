@@ -4,11 +4,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ConfirmDialog } from "@/components/ui/kit";
 import { CheckCircle2, AlertTriangle, Loader2, Gavel, Users, Clock, TrendingUp } from "lucide-react";
 import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
 import { api, apiErrorMessage } from "@/lib/api/client";
@@ -40,10 +42,17 @@ function computeBestPrice(offers: Offer[]): { bestCash: Offer | null; bestMonthl
 }
 
 export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminEmail }: Props) {
+  const router = useRouter();
   const [reason, setReason] = useState("");
   const [extendHours, setExtendHours] = useState("24");
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; isError: boolean } | null>(null);
+  // Irreversible actions confirm via dialog with their own required reason.
+  const [confirm, setConfirm] = useState<
+    | { kind: "refund" }
+    | { kind: "remove-dealer"; dealerId: string; dealerName: string }
+    | null
+  >(null);
   const [remaining, setRemaining] = useState(auction.endsAt ? new Date(auction.endsAt).getTime() - Date.now() : 0);
 
   useEffect(() => {
@@ -52,14 +61,18 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
     return () => clearInterval(iv);
   }, [auction.endsAt, auction.status]);
 
-  async function doAction(action: string, extra: Record<string, unknown> = {}) {
-    if (!reason.trim()) { setFeedback({ message: "Reason is required", isError: true }); return; }
+  async function doAction(action: string, extra: Record<string, unknown> = {}, reasonOverride?: string): Promise<boolean> {
+    const actionReason = (reasonOverride ?? reason).trim();
+    if (!actionReason) { setFeedback({ message: "Reason is required", isError: true }); return false; }
     setLoading(true); setFeedback(null);
     try {
-      await api.post(`/api/admin/auctions/${auction.id}/action`, { action, reason, ...extra });
+      await api.post(`/api/admin/auctions/${auction.id}/action`, { action, reason: actionReason, ...extra });
       setFeedback({ message: `${action} completed`, isError: false }); setReason("");
+      router.refresh(); // offers/invitations/status reflect the mutation immediately
+      return true;
     } catch (err) {
       setFeedback({ message: apiErrorMessage(err, "Action failed"), isError: true });
+      return false;
     } finally {
       setLoading(false);
     }
@@ -198,7 +211,7 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
                     {inv.respondedAt && <Badge variant="green" className="text-xs">Responded</Badge>}
                     <Button size="sm" variant="ghost" className="text-xs text-red-500 h-6"
                       data-testid={`remove-dealer-${inv.dealer.id}`}
-                      onClick={() => doAction("DEALER_REMOVED", { dealerId: inv.dealer.id })}>
+                      onClick={() => setConfirm({ kind: "remove-dealer", dealerId: inv.dealer.id, dealerName: inv.dealer.dealershipName })}>
                       Remove
                     </Button>
                   </div>
@@ -259,13 +272,35 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
               </div>
 
               <Button className="w-full" size="sm" variant="destructive" disabled={loading}
-                data-testid="auction-refund-btn" onClick={() => doAction("AUCTION_REFUND_TRIGGERED")}>
+                data-testid="auction-refund-btn" onClick={() => setConfirm({ kind: "refund" })}>
                 Trigger Refund (No Offers)
               </Button>
             </div>
           </div>
         </div>
       </div>
+
+      {confirm && (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open) setConfirm(null); }}
+          title={confirm.kind === "refund" ? "Trigger deposit refund?" : `Remove ${confirm.dealerName} from this auction?`}
+          description={confirm.kind === "refund"
+            ? "This initiates a real Stripe refund of the buyer's deposit. The server enforces idempotency and double-refund guards; the action is audit-logged."
+            : "The dealer loses access to this auction and their invitation is revoked. This is audit-logged and cannot be undone from this screen."}
+          confirmLabel={confirm.kind === "refund" ? "Trigger refund" : "Remove dealer"}
+          variant="danger"
+          requireReason
+          onConfirm={async (dialogReason) => {
+            const ok = confirm.kind === "refund"
+              ? await doAction("AUCTION_REFUND_TRIGGERED", {}, dialogReason)
+              : await doAction("DEALER_REMOVED", { dealerId: confirm.dealerId }, dialogReason);
+            if (!ok) throw new Error("action failed");
+            setConfirm(null);
+          }}
+          data-testid="auction-confirm-dialog"
+        />
+      )}
     </div>
   );
 }

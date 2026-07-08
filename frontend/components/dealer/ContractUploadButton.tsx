@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Upload } from "lucide-react";
+import { Upload, CheckCircle2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   dealId: string;
@@ -57,22 +58,23 @@ export default function ContractUploadButton({ dealId }: Props) {
 
       {state === "done" ? (
         <div
-          className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3 text-sm text-green-700"
+          className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm text-emerald-700"
           data-testid="contract-upload-success"
         >
-          <span>✓ Uploaded: {fileName}</span>
+          <CheckCircle2 size={15} className="shrink-0" /> Uploaded: {fileName}
         </div>
       ) : (
-        <button
+        <Button
           type="button"
           onClick={() => fileRef.current?.click()}
           disabled={state === "uploading"}
-          className="w-full flex items-center justify-center gap-2 bg-al-primary hover:bg-[#1A6FE0] disabled:opacity-50 text-white font-semibold py-3 px-6 rounded-lg transition-colors text-sm"
+          size="lg"
+          className="w-full"
           data-testid="upload-contract-btn"
         >
           <Upload size={16} />
           {state === "uploading" ? "Uploading..." : "Upload & Submit for Review"}
-        </button>
+        </Button>
       )}
 
       <input

@@ -18,6 +18,12 @@ interface Props { params: Promise<{ id: string }> }
 
 const schema = z.object({
   reason: z.string().min(10, "Reason must be at least 10 characters"),
+  // Sanctions gate: external pre-approvals skip the MicroBilt OFAC screen that
+  // every iPredict approval runs, so the approving admin must explicitly attest
+  // an OFAC/sanctions check was performed. Recorded as a ComplianceEvent.
+  ofacAttested: z.literal(true, {
+    errorMap: () => ({ message: "You must confirm an OFAC/sanctions check was completed before approving" }),
+  }),
 });
 
 export async function POST(request: NextRequest, { params }: Props) {
@@ -39,6 +45,22 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const { reason } = parsed.data;
   const now = new Date();
+
+  // Record the admin's OFAC attestation as a compliance event before the
+  // approval takes effect — this is the sanctions-screening audit trail for the
+  // external path (which has no automated bureau OFAC screen).
+  await prisma.complianceEvent.create({
+    data: {
+      eventType: "EXTERNAL_PREQUAL_OFAC_ATTESTED",
+      buyerId: submission.buyerId,
+      metadata: {
+        adminId: admin.adminId,
+        adminEmail: admin.email,
+        externalPreApprovalId: id,
+        attestedAt: now.toISOString(),
+      },
+    },
+  }).catch((err) => logger.error("[external-preapprovals/approve] OFAC attestation event failed:", err));
 
   // Update external pre-approval status
   await prisma.externalPreApproval.update({

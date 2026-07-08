@@ -1,3 +1,4 @@
+import AutoRefresh from '@/components/admin/AutoRefresh';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -83,7 +84,7 @@ export default async function OperationsPage({
         title="Operations"
         subtitle="System health, queue failures, workflow exits, and the admin audit log."
         data-testid="crm-operations-header"
-        actions={<RefreshAnalyticsButton />}
+        actions={<><AutoRefresh intervalMs={60_000} showTimestamp={false} /><RefreshAnalyticsButton /></>}
       />
 
       <div

@@ -1,3 +1,11 @@
+import { EXCLUDED_STATES } from "@/lib/services/refinance/refinance-lead.service";
+
+// Display names for the canonical excluded-state codes — the code list itself
+// has ONE source of truth in the refinance service (no drift).
+const STATE_NAMES: Record<(typeof EXCLUDED_STATES)[number], string> = {
+  AK: "Alaska", HI: "Hawaii", MT: "Montana", NV: "Nevada",
+  NH: "New Hampshire", ND: "North Dakota", WI: "Wisconsin",
+};
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { CheckCircle2, XCircle, ShieldCheck } from "lucide-react";
 
@@ -69,7 +77,7 @@ export default async function AdminRefinanceCompliancePage() {
           The OpenRoad Lending refinance program is not available to residents of the following states. The eligibility form blocks submissions from these states at both the UI and API layers.
         </p>
         <div className="flex flex-wrap gap-1.5">
-          {["Alaska", "Hawaii", "Montana", "Nevada", "New Hampshire", "North Dakota", "Wisconsin"].map((s) => (
+          {EXCLUDED_STATES.map((code) => STATE_NAMES[code]).map((s) => (
             <span key={s} className="px-2.5 py-1 text-xs font-semibold bg-[#F8F9FB] border border-[#E5E7EB] text-[#4B5563] rounded-full">
               {s}
             </span>

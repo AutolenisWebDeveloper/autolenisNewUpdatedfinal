@@ -7,8 +7,13 @@ export async function processRefund(depositId: string, reason: string): Promise<
   const deposit = await prisma.deposit.findUnique({ where: { id: depositId } });
   if (!deposit || deposit.status !== "PAID" || !deposit.stripePaymentIntentId) return false;
 
-  await refundPaymentIntent(deposit.stripePaymentIntentId, reason);
-  await prisma.deposit.update({ where: { id: depositId }, data: { status: "REFUNDED", refundedAt: new Date() } });
+  await refundPaymentIntent(deposit.stripePaymentIntentId, reason, `refund-deposit-${depositId}`);
+  // Status-guarded flip so a concurrent refund path can't double-write.
+  const flipped = await prisma.deposit.updateMany({
+    where: { id: depositId, status: "PAID" },
+    data: { status: "REFUNDED", refundedAt: new Date() },
+  });
+  if (flipped.count === 0) return false;
 
   await prisma.notification.create({ data: {
     buyerId: deposit.buyerId, type: "DEAL_STAGE_CHANGED",

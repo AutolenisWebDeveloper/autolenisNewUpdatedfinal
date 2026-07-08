@@ -12,10 +12,31 @@ export default async function SendToDealersPage({ params }: Props) {
   const { id } = await params;
   await requireAdmin();
 
-  const req = await prisma.notification.findUnique({ where: { id } });
-  if (!req || !req.title?.startsWith("Vehicle Request:")) notFound();
-
-  const meta = (req.metadata ?? {}) as Record<string, unknown>;
+  // Canonical pipeline first: build the buyer meta the client expects from the
+  // VehicleRequest record so canonical requests can use send-to-dealers too.
+  // Legacy Notification-based requests fall through to their stored metadata.
+  let meta: Record<string, unknown>;
+  const canonical = await prisma.vehicleRequest.findUnique({
+    where: { id },
+    include: { buyer: { include: { user: { select: { email: true } } } } },
+  });
+  if (canonical) {
+    meta = {
+      firstName: canonical.buyer.firstName,
+      lastName: canonical.buyer.lastName,
+      email: canonical.buyer.user.email,
+      preferredMake: canonical.makePreference ?? undefined,
+      preferredModel: canonical.modelPreference ?? undefined,
+      minYear: canonical.yearMin ?? undefined,
+      maxYear: canonical.yearMax ?? undefined,
+      budget: canonical.maxBudgetCents != null ? `$${Math.round(canonical.maxBudgetCents / 100).toLocaleString()}` : undefined,
+      mustHaveFeatures: canonical.notes ?? undefined,
+    };
+  } else {
+    const req = await prisma.notification.findUnique({ where: { id } });
+    if (!req || !req.title?.startsWith("Vehicle Request:")) notFound();
+    meta = (req.metadata ?? {}) as Record<string, unknown>;
+  }
 
   const offer = await prisma.vehicleOffer.findFirst({
     where: { referenceId: id },

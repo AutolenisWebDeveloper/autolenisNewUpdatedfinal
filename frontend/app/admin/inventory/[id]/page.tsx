@@ -4,7 +4,7 @@ import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import InventoryItemActions from "@/components/admin/InventoryItemActions";
 
 interface Props { params: Promise<{ id: string }> }
 export const dynamic = "force-dynamic";
@@ -61,12 +61,7 @@ export default async function AdminInventoryDetailPage({ params }: Props) {
         </div>
       )}
 
-      <div className="flex gap-2 mt-4">
-        <Button size="sm" variant="secondary" data-testid="toggle-active-btn">
-          {item.isActive ? "Deactivate" : "Activate"}
-        </Button>
-        <Button size="sm" variant="ghost" data-testid="force-resync-btn">Force Resync</Button>
-      </div>
+      <InventoryItemActions itemId={item.id} isActive={item.isActive} />
     </div>
   );
 }

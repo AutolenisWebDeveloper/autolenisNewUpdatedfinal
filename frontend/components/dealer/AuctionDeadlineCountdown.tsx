@@ -31,7 +31,7 @@ export default function AuctionDeadlineCountdown({ endsAtIso, serverNowIso }: Pr
   if (ms <= 0) {
     return (
       <div
-        className="bg-slate-100 border border-slate-200 rounded-xl p-4 mb-6 flex items-center gap-3"
+        className="bg-slate-100 border border-slate-200 rounded-2xl p-4 mb-6 flex items-center gap-3"
         data-testid="auction-deadline-expired"
       >
         <Clock size={18} className="text-slate-400" />
@@ -60,15 +60,15 @@ export default function AuctionDeadlineCountdown({ endsAtIso, serverNowIso }: Pr
     <div
       className={
         isUrgent
-          ? "bg-red-50 border border-red-200 rounded-xl p-4 mb-6 flex items-center gap-3"
-          : "bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-center gap-3"
+          ? "bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 flex items-center gap-3"
+          : "bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-6 flex items-center gap-3"
       }
       data-testid="auction-deadline-alert"
     >
       <Clock size={18} className={isUrgent ? "text-red-500" : "text-amber-500"} />
       <div>
         <p className={isUrgent ? "font-semibold text-red-800 text-sm" : "font-semibold text-amber-800 text-sm"}>
-          {display} remaining
+          <span className="font-mono tabular-nums">{display}</span> remaining
         </p>
         <p className={isUrgent ? "text-xs text-red-700" : "text-xs text-amber-700"}>
           Submit your offer before the auction closes

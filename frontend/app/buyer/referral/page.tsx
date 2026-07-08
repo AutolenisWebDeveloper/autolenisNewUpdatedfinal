@@ -9,22 +9,16 @@ import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
 import { Share2, Users, DollarSign } from "lucide-react";
 import ReferralLinkCopy from "@/components/buyer/ReferralLinkCopy";
+import { evaluateBuyerReferralMilestones } from "@/lib/services/referral/referral-milestone.service";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReferralPage() {
   const buyer = await requireBuyer();
-  // affiliate + milestones are independent — fetch concurrently.
-  const [affiliate, milestones] = await Promise.all([
-    prisma.affiliate.findFirst({ where: { userId: buyer.userId } }),
-    prisma.referralMilestone.findMany({
-      where: { buyerId: buyer.id },
-      orderBy: { createdAt: "asc" },
-    }),
-  ]);
+  const affiliate = await prisma.affiliate.findFirst({ where: { userId: buyer.userId } });
 
   // Referral count + approved-commission sum both depend on the affiliate, so
-  // they form a second concurrent wave (run together, not one after the other).
+  // they run together as one concurrent wave.
   const [referralCount, earnedResult] = affiliate
     ? await Promise.all([
         // Count buyers referred via this affiliate's referral code
@@ -36,6 +30,15 @@ export default async function ReferralPage() {
         }),
       ])
     : [0, null];
+
+  // Award any newly-crossed configured milestones before rendering. Idempotent
+  // (unique per buyer+milestone) and best-effort — never blocks the page.
+  if (affiliate) await evaluateBuyerReferralMilestones(buyer.id);
+
+  const milestones = await prisma.referralMilestone.findMany({
+    where: { buyerId: buyer.id },
+    orderBy: { createdAt: "asc" },
+  });
 
   const totalEarnedCents = earnedResult?._sum?.amountCents ?? 0;
 

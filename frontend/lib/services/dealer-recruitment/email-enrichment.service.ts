@@ -467,6 +467,33 @@ export async function enrichDealerEmail(
   // Persist via the pure builder so the decoupling is unit-tested in isolation.
   const data = buildPersistData(parsed, now)
 
+  // No-clobber guard: a forced re-enrich (reenrich-email / backfill force:true)
+  // must never overwrite a manually-entered address, nor downgrade a
+  // higher-confidence address with a lower-confidence guess. Fetch the current
+  // provenance and drop the email block from the update when the incoming
+  // address is weaker.
+  if (data.email) {
+    const current = await prisma.dealerProspect.findUnique({
+      where: { id: input.dealerProspectId },
+      select: { email: true, emailSource: true },
+    })
+    if (current?.email && current.emailSource) {
+      const RANK: Record<string, number> = {
+        manual: 5,
+        gemini_search_high_confidence: 4,
+        fallback_info_email: 3,
+        gemini_search_medium_confidence: 2,
+        gemini_search_inferred: 1,
+      }
+      const currentRank = RANK[current.emailSource] ?? 0
+      const newRank = data.emailSource ? RANK[data.emailSource] ?? 0 : 0
+      if (current.emailSource === "manual" || newRank < currentRank) {
+        delete data.email
+        delete data.emailSource
+      }
+    }
+  }
+
   try {
     await prisma.dealerProspect.update({
       where: { id: input.dealerProspectId },

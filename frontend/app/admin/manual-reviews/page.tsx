@@ -1,8 +1,10 @@
 // /admin/manual-reviews — Manual prequal review queue (MANUAL_REVIEW + OFAC decisions)
+import StatCard from "@/components/ui/patterns/StatCard";
+import AutoRefresh from "@/components/admin/AutoRefresh";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import { ShieldAlert, Clock, ArrowRight } from "lucide-react";
+import { ShieldAlert, Clock, ArrowRight, ClipboardCheck } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -78,33 +80,21 @@ export default async function AdminManualReviewsPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-manual-reviews-page">
-      <div className="mb-6">
-        <h1 className="text-xl font-bold text-slate-900">Manual Reviews</h1>
-        <p className="text-sm text-slate-500 mt-0.5">
-          Prequalifications and OFAC alerts awaiting compliance decision
-        </p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">Manual Reviews</h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Prequalifications and OFAC alerts awaiting compliance decision
+          </p>
+        </div>
+        <AutoRefresh intervalMs={30_000} />
       </div>
 
-      {/* Stat tiles */}
+      {/* Stat tiles — canonical StatCard pattern */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white border border-slate-200 rounded-xl p-4" data-testid="stat-total-reviews">
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1">
-            Awaiting Review
-          </p>
-          <p className="text-2xl font-bold text-slate-900">{reviews.length}</p>
-        </div>
-        <div className="bg-white border border-red-200 rounded-xl p-4" data-testid="stat-ofac-reviews">
-          <p className="text-[11px] font-semibold text-red-500 uppercase tracking-wide mb-1">
-            OFAC Escalations
-          </p>
-          <p className="text-2xl font-bold text-red-700">{ofacCount}</p>
-        </div>
-        <div className="bg-white border border-amber-200 rounded-xl p-4" data-testid="stat-manual-reviews">
-          <p className="text-[11px] font-semibold text-amber-600 uppercase tracking-wide mb-1">
-            Manual Review
-          </p>
-          <p className="text-2xl font-bold text-amber-700">{manualCount}</p>
-        </div>
+        <StatCard icon={ClipboardCheck} label="Awaiting Review" value={String(reviews.length)} tone="neutral" testId="stat-total-reviews" />
+        <StatCard icon={ShieldAlert} label="OFAC Escalations" value={String(ofacCount)} tone="danger" testId="stat-ofac-reviews" />
+        <StatCard icon={Clock} label="Manual Review" value={String(manualCount)} tone="warning" testId="stat-manual-reviews" />
       </div>
 
       {/* Queue */}

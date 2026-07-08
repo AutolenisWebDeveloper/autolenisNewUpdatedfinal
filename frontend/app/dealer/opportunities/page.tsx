@@ -7,6 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { Sparkles, Clock, ArrowRight, Gavel } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { PageContainer, PageHeader, EmptyState, CARD, CARD_HOVER } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -111,40 +113,39 @@ export default async function DealerOpportunitiesPage() {
     const hrs = (endsAt.getTime() - Date.now()) / 3600000;
     if (hrs < 6) return "text-red-600";
     if (hrs < 12) return "text-amber-600";
-    return "text-green-600";
+    return "text-emerald-600";
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-opportunities-page">
-      <div className="flex items-center gap-3 mb-6">
-        <Sparkles size={22} className="text-al-primary" />
-        <h1 className="text-xl font-bold text-slate-900">Buyer Opportunities</h1>
-        {opportunities.length > 0 && (
-          <Badge>{opportunities.length} open</Badge>
-        )}
-      </div>
+    <PageContainer testId="dealer-opportunities-page">
+      <PageHeader
+        title="Buyer Opportunities"
+        subtitle="Active auctions matched to your profile that you haven't bid on yet."
+        actions={opportunities.length > 0 ? <Badge>{opportunities.length} open</Badge> : undefined}
+      />
 
       {opportunities.length === 0 ? (
-        <div className="text-center py-20 text-slate-400" data-testid="no-opportunities">
-          <Sparkles size={40} className="mx-auto mb-4 text-slate-300" />
-          <p className="font-semibold text-slate-600">No open opportunities right now</p>
-          <p className="text-sm mt-1 max-w-sm mx-auto">
-            You&apos;ve responded to all active invitations, or no new auctions match your profile yet.
-            Check back soon — new buyer requests are matched daily.
-          </p>
-        </div>
+        <EmptyState
+          icon={Sparkles}
+          title="No open opportunities right now"
+          body="You've responded to all active invitations, or no new auctions match your profile yet. Check back soon — new buyer requests are matched daily."
+          testId="no-opportunities"
+        />
       ) : (
         <div className="space-y-4">
           {opportunities.map(inv => (
             <div
               key={inv.id}
               data-testid={`opportunity-${inv.id}`}
-              className="bg-white border-2 border-al-primary/20 rounded-xl p-5 hover:border-al-primary/40 transition-colors"
+              className={cn(CARD, CARD_HOVER, "p-5")}
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2">
-                    <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                    </span>
                     <Badge variant="green">Active Auction</Badge>
                   </div>
                   <div className="flex items-center gap-2 mb-1">
@@ -155,7 +156,7 @@ export default async function DealerOpportunitiesPage() {
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
                     {budgetLabel(inv) && (
-                      <span className="text-xs font-semibold text-al-primary" data-testid={`opportunity-budget-${inv.id}`}>
+                      <span className="text-xs font-semibold text-al-primary tabular-nums" data-testid={`opportunity-budget-${inv.id}`}>
                         {budgetLabel(inv)}
                       </span>
                     )}
@@ -166,8 +167,8 @@ export default async function DealerOpportunitiesPage() {
                     <Clock size={13} />
                     {timeRemainingLabel(inv.auction.endsAt)}
                   </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Auction #{inv.auctionId.slice(0, 8)} &middot; Invitation received {inv.sentAt.toLocaleDateString()}
+                  <p className="text-xs text-slate-500 mt-1">
+                    <span className="font-mono tabular-nums">Auction #{inv.auctionId.slice(0, 8)}</span> &middot; Invitation received {inv.sentAt.toLocaleDateString()}
                   </p>
                 </div>
                 <Button
@@ -183,9 +184,9 @@ export default async function DealerOpportunitiesPage() {
         </div>
       )}
 
-      <p className="text-xs text-slate-400 mt-6">
+      <p className="text-xs text-slate-500 mt-6">
         Opportunities are matched to your inventory, location, and tier. Invitations expire when the auction closes.
       </p>
-    </div>
+    </PageContainer>
   );
 }

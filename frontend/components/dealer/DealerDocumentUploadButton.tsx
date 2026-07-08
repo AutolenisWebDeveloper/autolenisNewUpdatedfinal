@@ -3,6 +3,8 @@
 import { useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Upload } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 
 type UploadState = "idle" | "uploading" | "done" | "error";
 
@@ -79,31 +81,31 @@ export default function DealerDocumentUploadButton({ deals = [] }: { deals?: Dea
   return (
     <div className="flex flex-col items-end gap-1.5" data-testid="dealer-doc-upload-button">
       {error && (
-        <p className="text-xs text-red-600" data-testid="dealer-doc-upload-error">
+        <p className="text-xs text-al-danger" role="alert" data-testid="dealer-doc-upload-error">
           {error}
         </p>
       )}
 
       <div className="flex items-center gap-2">
-        <select
+        <Select
           value={docType}
           onChange={(e) => setDocType(e.target.value)}
           disabled={state === "uploading"}
-          className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 bg-white disabled:opacity-50"
+          className="text-sm"
           data-testid="dealer-doc-type-select"
           aria-label="Document type"
         >
           {DOC_TYPES.map((t) => (
             <option key={t.value} value={t.value}>{t.label}</option>
           ))}
-        </select>
+        </Select>
 
         {deals.length > 0 && (
-          <select
+          <Select
             value={dealId}
             onChange={(e) => setDealId(e.target.value)}
             disabled={state === "uploading"}
-            className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 text-slate-700 bg-white max-w-[16rem] disabled:opacity-50"
+            className="text-sm max-w-[16rem]"
             data-testid="dealer-doc-deal-select"
             aria-label="Associate with deal"
           >
@@ -111,19 +113,19 @@ export default function DealerDocumentUploadButton({ deals = [] }: { deals?: Dea
             {deals.map((d) => (
               <option key={d.id} value={d.id}>{d.label}</option>
             ))}
-          </select>
+          </Select>
         )}
 
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={() => fileRef.current?.click()}
           disabled={state === "uploading"}
-          className="flex items-center gap-1.5 text-sm bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 font-medium px-3 py-1.5 rounded-lg transition-colors"
           data-testid="dealer-upload-doc-btn"
         >
           <Upload size={14} />
           {state === "uploading" ? "Uploading..." : state === "done" ? "Uploaded!" : "Upload"}
-        </button>
+        </Button>
       </div>
 
       <input

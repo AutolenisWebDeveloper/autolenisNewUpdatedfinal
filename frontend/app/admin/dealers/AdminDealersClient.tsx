@@ -1,5 +1,6 @@
 "use client";
 
+import StatCard from "@/components/ui/patterns/StatCard";
 import { useState, useCallback } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -75,22 +76,6 @@ function TierBadge({ tier }: { tier: string }) {
 }
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
-
-function KpiCard({ icon, label, value, color }: {
-  icon: React.ReactNode; label: string; value: number; color: string;
-}) {
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4 flex items-start gap-3 shadow-sm hover:shadow-md transition-shadow">
-      <div className={"w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 " + color}>
-        {icon}
-      </div>
-      <div className="min-w-0">
-        <p className="text-2xl font-bold text-slate-900 leading-none">{value.toLocaleString()}</p>
-        <p className="text-xs text-slate-500 mt-1 leading-snug">{label}</p>
-      </div>
-    </div>
-  );
-}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -300,18 +285,18 @@ export function AdminDealersClient({ initialDealers, initialTotal, kpis }: Props
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
-        <KpiCard icon={<Users size={16} className="text-purple-700" />} label="Total Dealers" value={kpis.total} color="bg-purple-50" />
-        <KpiCard icon={<Clock size={16} className="text-amber-700" />} label="Pending Applications" value={kpis.pending} color="bg-amber-50" />
-        <KpiCard icon={<CheckCircle2 size={16} className="text-green-700" />} label="Active Dealers" value={kpis.active} color="bg-green-50" />
-        <KpiCard icon={<Ban size={16} className="text-red-700" />} label="Suspended" value={kpis.suspended} color="bg-red-50" />
-        <KpiCard icon={<XCircle size={16} className="text-slate-500" />} label="Terminated" value={kpis.terminated} color="bg-slate-100" />
+        <StatCard icon={Users} label="Total Dealers" value={kpis.total.toLocaleString()} tone="indigo" testId="kpi-dealers-total" />
+        <StatCard icon={Clock} label="Pending Applications" value={kpis.pending.toLocaleString()} tone="warning" testId="kpi-dealers-pending" />
+        <StatCard icon={CheckCircle2} label="Active Dealers" value={kpis.active.toLocaleString()} tone="success" testId="kpi-dealers-active" />
+        <StatCard icon={Ban} label="Suspended" value={kpis.suspended.toLocaleString()} tone="danger" testId="kpi-dealers-suspended" />
+        <StatCard icon={XCircle} label="Terminated" value={kpis.terminated.toLocaleString()} tone="neutral" testId="kpi-dealers-terminated" />
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
-        <KpiCard icon={<Gavel size={16} className="text-blue-700" />} label="Active Auctions" value={kpis.withActiveAuctions} color="bg-blue-50" />
-        <KpiCard icon={<FileText size={16} className="text-indigo-700" />} label="Submitted Offers" value={kpis.withSubmittedOffers} color="bg-indigo-50" />
-        <KpiCard icon={<Trophy size={16} className="text-emerald-700" />} label="Won Deals" value={kpis.withWonDeals} color="bg-emerald-50" />
-        <KpiCard icon={<Package size={16} className="text-cyan-700" />} label="Total Inventory" value={kpis.totalInventory} color="bg-cyan-50" />
-        <KpiCard icon={<ShieldAlert size={16} className="text-orange-700" />} label="Compliance Issues" value={kpis.complianceIssues} color="bg-orange-50" />
+        <StatCard icon={Gavel} label="Active Auctions" value={kpis.withActiveAuctions.toLocaleString()} tone="brand" testId="kpi-dealers-auctions" />
+        <StatCard icon={FileText} label="Submitted Offers" value={kpis.withSubmittedOffers.toLocaleString()} tone="indigo" testId="kpi-dealers-offers" />
+        <StatCard icon={Trophy} label="Won Deals" value={kpis.withWonDeals.toLocaleString()} tone="success" testId="kpi-dealers-won" />
+        <StatCard icon={Package} label="Total Inventory" value={kpis.totalInventory.toLocaleString()} tone="brand" testId="kpi-dealers-inventory" />
+        <StatCard icon={ShieldAlert} label="Compliance Issues" value={kpis.complianceIssues.toLocaleString()} tone="warning" testId="kpi-dealers-compliance" />
       </div>
 
       {/* Search + Filter Bar */}

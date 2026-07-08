@@ -10,9 +10,16 @@ interface Props { params: Promise<{ buyerId: string }> }
 const PREQUAL_AUDIT_ACTIONS = [
   "PREQUAL_IPREDICT_RUN",
   "PREQUAL_MANUAL_OVERRIDE",
+  // Decisions made on the /admin/prequal/[id] decide rail — previously
+  // omitted, so detail-page approvals/declines never appeared in this history.
+  "PREQUAL_MANUAL_APPROVE",
+  "PREQUAL_MANUAL_DECLINE",
   "PREQUAL_IPREDICT_RUN_BLOCKED_NO_CONSENT",
   "PREQUAL_APPROVAL_EMAIL_RESENT",
   "PREQUAL_ADVERSE_ACTION_EMAIL_RESENT",
+  // OFAC dispositions are part of the prequal story too.
+  "OFAC_CLEAR",
+  "OFAC_ESCALATE",
 ];
 
 export async function GET(request: NextRequest, { params }: Props) {

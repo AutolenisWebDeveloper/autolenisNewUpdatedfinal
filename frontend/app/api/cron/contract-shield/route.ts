@@ -2,35 +2,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
-import { scanContract } from "@/lib/services/contract-shield/contract-shield.service";
+import { scanContractVersion } from "@/lib/services/dealer/dealer-contract.service";
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get(CRON_AUTH_HEADER);
   const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-  const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
+  const isValidSecret =
+    !!process.env.CRON_SECRET &&
+    auth?.length === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`.length &&
+    auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
   if (!isVercelCron && !isValidSecret) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  // Find deals pending contract review with a contract version uploaded
+  // Find contract versions awaiting a scan (or reset to UPLOADED after a
+  // transient extraction failure on a prior pass).
   const pendingVersions = await prisma.contractVersion.findMany({
     where: { status: "UPLOADED" },
-    include: { deal: { include: { offer: { select: { dealerId: true } } } } },
+    select: { id: true },
     take: 20,
   });
 
-  let scanned = 0;
+  // Scan each against the REAL extracted PDF text. scanContractVersion converges
+  // the status (PASS→APPROVED, WARNING/FAIL→REJECTED, error→retryable UPLOADED)
+  // and fails closed — it never auto-approves a document it could not read.
   for (const cv of pendingVersions) {
-    try {
-      await prisma.contractVersion.update({ where: { id: cv.id }, data: { status: "SCANNING", scanRunAt: new Date() } });
-      // Contract text would be fetched from documentUrl in production
-      await scanContract(cv.dealId, `Contract version ${cv.version}`, cv.deal.offer?.dealerId ?? "");
-      await prisma.contractVersion.update({ where: { id: cv.id }, data: { status: "APPROVED" } });
-      scanned++;
-    } catch (err) {
-      await prisma.contractVersion.update({ where: { id: cv.id }, data: { status: "REJECTED", rejectionReason: String(err) } }).catch(() => {});
-    }
+    await scanContractVersion(cv.id).catch(() => {});
   }
 
-  return NextResponse.json({ success: true, data: { scanned, timestamp: new Date().toISOString() } });
+  return NextResponse.json({ success: true, data: { scanned: pendingVersions.length, timestamp: new Date().toISOString() } });
 }

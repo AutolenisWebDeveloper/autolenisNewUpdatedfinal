@@ -102,7 +102,7 @@ export default function PrequalBudgetCalculator({
         </div>
         <button
           onClick={reset}
-          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 transition-colors"
+          className="flex items-center gap-1.5 -mr-2 px-2 py-2 text-xs text-slate-500 hover:text-slate-700 transition-colors"
           aria-label="Reset calculator to defaults"
         >
           <RotateCcw size={12} />
@@ -120,7 +120,7 @@ export default function PrequalBudgetCalculator({
             <Lock size={14} className="text-al-primary" />
             <span className="text-sm font-semibold text-al-primary">Approved Max Budget — locked</span>
           </div>
-          <span className="text-lg font-bold text-al-primary">
+          <span className="text-lg font-mono tabular-nums font-bold text-al-primary">
             {formatCents(maxOtdAmountCents)}
           </span>
         </div>
@@ -139,7 +139,7 @@ export default function PrequalBudgetCalculator({
                 inputMode="numeric"
                 value={vehicleDollars.toLocaleString()}
                 onChange={(e) => handleVehicleInput(e.target.value)}
-                className="w-full pl-7 pr-3 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
+                className="w-full pl-7 pr-3 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/20 focus:border-al-primary"
                 data-testid="calc-vehicle-amount"
                 aria-label="Vehicle or budget amount in dollars"
               />
@@ -168,7 +168,7 @@ export default function PrequalBudgetCalculator({
                 inputMode="numeric"
                 value={downPaymentDollars.toLocaleString()}
                 onChange={(e) => handleDownPaymentInput(e.target.value)}
-                className="w-full pl-7 pr-3 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
+                className="w-full pl-7 pr-3 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/20 focus:border-al-primary"
                 data-testid="calc-down-payment"
                 aria-label="Down payment in dollars"
               />
@@ -197,7 +197,7 @@ export default function PrequalBudgetCalculator({
                 inputMode="numeric"
                 value={taxesFeesDollars.toLocaleString()}
                 onChange={(e) => handleTaxesFeesInput(e.target.value)}
-                className="w-full pl-7 pr-3 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
+                className="w-full pl-7 pr-3 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/20 focus:border-al-primary"
                 data-testid="calc-taxes-fees"
                 aria-label="Estimated taxes, fees and add-ons in dollars"
               />
@@ -228,7 +228,7 @@ export default function PrequalBudgetCalculator({
                 step={0.1}
                 value={apr}
                 onChange={(e) => handleAprInput(e.target.value)}
-                className="w-full pr-8 pl-3 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/30 focus:border-al-primary"
+                className="w-full pr-8 pl-3 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-al-primary/20 focus:border-al-primary"
                 data-testid="calc-apr"
                 aria-label="Estimated APR percentage"
               />
@@ -259,7 +259,7 @@ export default function PrequalBudgetCalculator({
                 onClick={() => setTermMonths(t)}
                 data-testid={`calc-term-${t}`}
                 aria-pressed={termMonths === t}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${
+                className={`px-4 py-2.5 min-h-[44px] rounded-lg text-sm font-medium transition-colors border ${
                   termMonths === t
                     ? "bg-al-primary text-white border-al-primary"
                     : "bg-white text-slate-600 border-slate-200 hover:border-al-primary/40 hover:text-al-primary"
@@ -376,7 +376,7 @@ function ResultRow({
     >
       <span className="text-xs text-slate-500">{label}</span>
       <span
-        className={`text-base font-bold ${highlight ? "text-al-primary" : warn ? "text-amber-700" : "text-slate-900"}`}
+        className={`text-base font-mono tabular-nums font-bold ${highlight ? "text-al-primary" : warn ? "text-amber-700" : "text-slate-900"}`}
         data-testid={testId}
       >
         {value}

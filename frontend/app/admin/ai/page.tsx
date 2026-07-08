@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Brain, Loader2, MessageCircle, RefreshCw } from "lucide-react";
 import { isAiEnabled } from "@/lib/ai/kill-switch";
 import { api, apiErrorMessage } from "@/lib/api/client";
+import { toast } from "sonner";
 
 export default function AdminAiPage() {
   const [briefing, setBriefing] = useState<string | null>(null);
@@ -40,11 +41,15 @@ export default function AdminAiPage() {
       {aiOn && (
         <div className="mb-6">
           <button
-            onClick={() => document.querySelector<HTMLButtonElement>("[data-testid='chat-toggle-btn']")?.click()}
+            onClick={() => {
+              const toggle = document.querySelector<HTMLButtonElement>("[data-testid='chat-toggle-btn']");
+              if (toggle) toggle.click();
+              else toast.info("The chat widget isn't available on this screen — it opens from the bubble in the corner of any admin page.");
+            }}
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
             data-testid="open-zura-btn"
           >
-            <MessageCircle size={14} /> Chat with Zura
+            <MessageCircle size={14} aria-hidden /> Chat with Zura
           </button>
         </div>
       )}

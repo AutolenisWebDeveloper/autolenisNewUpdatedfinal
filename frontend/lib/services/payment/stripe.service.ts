@@ -12,8 +12,18 @@ export async function createPaymentIntent(
   );
 }
 
-export async function refundPaymentIntent(paymentIntentId: string, reason: string) {
-  return getStripe().refunds.create({ payment_intent: paymentIntentId, metadata: { reason } });
+export async function refundPaymentIntent(
+  paymentIntentId: string,
+  reason: string,
+  idempotencyKey?: string,
+) {
+  // Idempotency key prevents a retry / double-invocation from issuing a SECOND
+  // real refund. Callers refunding a deposit should pass the deposit-scoped key
+  // so every refund path for the same deposit collapses to one Stripe refund.
+  return getStripe().refunds.create(
+    { payment_intent: paymentIntentId, metadata: { reason } },
+    { idempotencyKey: idempotencyKey ?? `refund-${paymentIntentId}` },
+  );
 }
 
 export async function retrievePaymentIntent(paymentIntentId: string) {

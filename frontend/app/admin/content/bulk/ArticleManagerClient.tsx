@@ -11,6 +11,7 @@
 // Vocabulary note: the platform's terminal status is ARCHIVED; this tool labels
 // that state "Retired" per the ops spec. Both refer to the same DB value.
 
+import { sanitizeBody } from "@/lib/content/sanitize";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { api, apiErrorMessage } from "@/lib/api/client";
@@ -1111,7 +1112,7 @@ function DrawerBody({ article }: { article: FullArticle }) {
       )}
       <div
         className="content-article-preview text-sm text-slate-700 leading-relaxed [&_h2]:text-base [&_h2]:font-bold [&_h2]:text-slate-900 [&_h2]:mt-5 [&_h2]:mb-2 [&_h3]:font-semibold [&_h3]:text-slate-800 [&_h3]:mt-4 [&_p]:mb-3 [&_a]:text-al-primary [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_li]:mb-1"
-        dangerouslySetInnerHTML={{ __html: article.body }}
+        dangerouslySetInnerHTML={{ __html: sanitizeBody(article.body) }}
       />
       {faqs.length > 0 && (
         <div className="mt-6 pt-5 border-t border-[#E2E8F0]" data-testid="drawer-faqs">

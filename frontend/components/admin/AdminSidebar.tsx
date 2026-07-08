@@ -39,6 +39,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Dealers",           href: "/admin/dealers",     icon: Building2 },
     { label: "Dealer Recruitment", href: "/admin/dealer-outreach", icon: Phone },
     { label: "Affiliates",        href: "/admin/affiliates",  icon: Share2 },
+    { label: "Affiliate Onboarding", href: "/admin/affiliates/onboarding", icon: ClipboardCheck },
   ]},
   { label: "CRM & Communications", items: [
     { label: "CRM", href: "/admin/crm", icon: Inbox },
@@ -48,6 +49,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Deals", href: "/admin/deals", icon: FileText },
     { label: "Offers", href: "/admin/offers", icon: DollarSign },
     { label: "Payment Hub", href: "/admin/payments", icon: CreditCard },
+    { label: "Reconciliation", href: "/admin/payments/reconciliation", icon: CreditCard, visibleTo: ["SUPER_ADMIN", "FINANCE_ADMIN", "OPERATIONS_ADMIN"] },
   ]},
   { label: "Operations", items: [
     { label: "Queues", href: "/admin/queues", icon: AlertOctagon },

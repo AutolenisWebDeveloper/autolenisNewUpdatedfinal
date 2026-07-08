@@ -28,7 +28,7 @@ export function ContactActions({
   const [smsOpen, setSmsOpen] = useState(false);
 
   const emailDisabled = !email || !consentEmail || doNotContact;
-  const smsDisabled = !phone || doNotContact;
+  const smsDisabled = !phone || !consentSms || doNotContact;
 
   return (
     <>

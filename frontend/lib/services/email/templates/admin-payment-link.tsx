@@ -31,7 +31,7 @@ export function renderDepositPaymentLinkEmail({
   checkoutUrl,
   appUrl = "https://autolenis.com",
 }: DepositPaymentLinkEmailProps): string {
-  const prefsUrl = `${appUrl}/buyer/notifications/preferences`;
+  const prefsUrl = `${appUrl}/buyer/settings`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -91,7 +91,7 @@ export function renderConciergeFeePaymentLinkEmail({
   checkoutUrl,
   appUrl = "https://autolenis.com",
 }: ConciergeFeePaymentLinkEmailProps): string {
-  const prefsUrl = `${appUrl}/buyer/notifications/preferences`;
+  const prefsUrl = `${appUrl}/buyer/settings`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>

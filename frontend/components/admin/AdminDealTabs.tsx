@@ -5,9 +5,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { ConfirmDialog } from "@/components/ui/kit";
 import { CheckCircle2, Clock, AlertTriangle, Loader2, StickyNote } from "lucide-react";
 import AdminPaymentActionsClient from "@/components/admin/AdminPaymentActionsClient";
 import { PREMIUM_FEE_CENTS } from "@/lib/constants";
@@ -31,9 +33,33 @@ interface AuditLogItem { id: string; action: string; adminEmail: string; reason:
 
 interface Props { deal: DealRecord; timeline: TimelineItem[]; auditLogs: AuditLogItem[]; adminId: string; adminEmail: string }
 
+// Destructive/financial actions gate behind an explicit ConfirmDialog with
+// its own required reason (forwarded to the audit log) — single-click firing
+// of refunds/cancellations/overrides is not allowed.
+const CONFIRMED_ACTIONS: Record<string, { title: string; description: string; confirmLabel: string }> = {
+  CONTRACT_SHIELD_OVERRIDDEN: {
+    title: "Override Contract Shield?",
+    description: "The deal advances past contract review despite the current scan result. The override is written to the audit log and visible on the deal history.",
+    confirmLabel: "Override",
+  },
+  DEAL_CANCELLED: {
+    title: "Cancel this deal?",
+    description: "The deal is cancelled for both buyer and dealer. This cannot be undone from this screen.",
+    confirmLabel: "Cancel deal",
+  },
+  REFUND_TRIGGERED: {
+    title: "Trigger a refund?",
+    description: "This initiates a real Stripe refund for this deal's payment. The server enforces idempotency and double-refund guards, and the action is audit-logged.",
+    confirmLabel: "Trigger refund",
+  },
+};
+
 export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, adminEmail }: Props) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("Overview");
   const [actionReason, setActionReason] = useState("");
+  const [nextStage, setNextStage] = useState("");
+  const [confirmAction, setConfirmAction] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; isError: boolean } | null>(null);
 
@@ -61,17 +87,23 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
     }
   }, [activeTab, loadNotes]);
 
-  async function doAction(action: string, extra: Record<string, unknown> = {}) {
-    if (!actionReason.trim() && action !== "VIEW") {
+  async function doAction(action: string, extra: Record<string, unknown> = {}, reasonOverride?: string): Promise<boolean> {
+    const reason = (reasonOverride ?? actionReason).trim();
+    if (!reason && action !== "VIEW") {
       setFeedback({ message: "Please provide a reason for this action", isError: true });
-      return;
+      return false;
     }
     setLoading(true);
     setFeedback(null);
     try {
-      await api.post(`/api/admin/deals/${deal.id}/action`, { action, reason: actionReason, ...extra });
+      await api.post(`/api/admin/deals/${deal.id}/action`, { action, reason, ...extra });
       setFeedback({ message: `Action '${action}' completed`, isError: false }); setActionReason("");
-    } catch (err) { setFeedback({ message: apiErrorMessage(err, "Action failed"), isError: true }); }
+      router.refresh(); // reflect the new deal status/badges immediately
+      return true;
+    } catch (err) {
+      setFeedback({ message: apiErrorMessage(err, "Action failed"), isError: true });
+      return false;
+    }
     finally { setLoading(false); }
   }
 
@@ -260,12 +292,42 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
           </div>
         )}
 
-        {activeTab === "Refunds" && (
-          <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="tab-refunds">
-            <h3 className="font-semibold text-slate-800 text-sm mb-4">Refund History</h3>
-            <p className="text-sm text-slate-500">No refunds issued for this deal.</p>
-          </div>
-        )}
+        {activeTab === "Refunds" && (() => {
+          const deposit = deal.offer.auction?.deposit ?? null;
+          const refunds: Array<{ id: string; label: string; amountCents: number; ref: string | null; when: string | null }> = [];
+          if (deposit && deposit.status === "REFUNDED") {
+            refunds.push({ id: `dep-${deposit.id}`, label: "Deposit refunded", amountCents: deposit.amountCents, ref: deposit.stripePaymentIntentId, when: null });
+          }
+          if (deal.feeRefundedAt) {
+            refunds.push({ id: "fee", label: "Premium fee refunded", amountCents: deal.feeAmountCents ?? PREMIUM_FEE_CENTS, ref: null, when: deal.feeRefundedAt });
+          }
+          return (
+            <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="tab-refunds">
+              <h3 className="font-semibold text-slate-800 text-sm mb-4">Refund History</h3>
+              {refunds.length === 0 ? (
+                <p className="text-sm text-slate-500" data-testid="refunds-empty">No refunds issued for this deal.</p>
+              ) : (
+                <div className="space-y-2" data-testid="refunds-list">
+                  {refunds.map(r => (
+                    <div key={r.id} className="flex items-center justify-between bg-slate-50 rounded-lg px-4 py-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">{r.label}</p>
+                        <p className="text-xs text-slate-400">
+                          {r.when ? new Date(r.when).toLocaleString() : "See audit log for timestamp"}
+                          {r.ref ? ` · Stripe ref …${r.ref.slice(-8)}` : ""}
+                        </p>
+                      </div>
+                      <p className="text-sm font-bold text-red-600">−${(r.amountCents / 100).toLocaleString()}</p>
+                    </div>
+                  ))}
+                  <p className="text-xs text-slate-400 pt-1">
+                    Full refund detail (reason, actor, Stripe reference) is recorded in the audit log below and on the Payments → Refunds page.
+                  </p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {activeTab === "Notes" && (
           <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="tab-notes">
@@ -400,7 +462,9 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
             <div>
               <label className="text-xs text-slate-500 font-medium mb-1 block">Advance to stage</label>
               <select className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-700"
-                id="next-stage-select" data-testid="advance-stage-select">
+                id="next-stage-select" data-testid="advance-stage-select"
+                value={nextStage || DEAL_STAGES.filter(s => s !== deal.status)[0]}
+                onChange={e => setNextStage(e.target.value)}>
                 {DEAL_STAGES.filter(s => s !== deal.status).map(s => (
                   <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
                 ))}
@@ -408,8 +472,8 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
               <Button className="w-full mt-1.5" size="sm" variant="secondary" disabled={loading}
                 data-testid="advance-stage-btn"
                 onClick={() => {
-                  const sel = (document.getElementById("next-stage-select") as HTMLSelectElement)?.value;
-                  doAction("DEAL_STAGE_ADVANCED", { newStatus: sel });
+                  const sel = nextStage || DEAL_STAGES.filter(s => s !== deal.status)[0];
+                  void doAction("DEAL_STAGE_ADVANCED", { newStatus: sel });
                 }}>
                 {loading ? <Loader2 size={12} className="animate-spin" /> : "Advance Stage"}
               </Button>
@@ -417,22 +481,40 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
 
             {/* Override contract shield */}
             <Button className="w-full" size="sm" variant="secondary" disabled={loading} data-testid="override-shield-btn"
-              onClick={() => doAction("CONTRACT_SHIELD_OVERRIDDEN")}>
+              onClick={() => setConfirmAction("CONTRACT_SHIELD_OVERRIDDEN")}>
               Override Contract Shield
             </Button>
 
             {/* Cancel deal */}
             <Button className="w-full" size="sm" variant="destructive" disabled={loading} data-testid="cancel-deal-btn"
-              onClick={() => doAction("DEAL_CANCELLED")}>
+              onClick={() => setConfirmAction("DEAL_CANCELLED")}>
               Cancel Deal
             </Button>
 
             {/* Trigger refund */}
             <Button className="w-full" size="sm" variant="destructive" disabled={loading} data-testid="trigger-refund-btn"
-              onClick={() => doAction("REFUND_TRIGGERED")}>
+              onClick={() => setConfirmAction("REFUND_TRIGGERED")}>
               Trigger Refund
             </Button>
           </div>
+
+          {confirmAction && CONFIRMED_ACTIONS[confirmAction] && (
+            <ConfirmDialog
+              open
+              onOpenChange={(open) => { if (!open) setConfirmAction(null); }}
+              title={CONFIRMED_ACTIONS[confirmAction].title}
+              description={CONFIRMED_ACTIONS[confirmAction].description}
+              confirmLabel={CONFIRMED_ACTIONS[confirmAction].confirmLabel}
+              variant="danger"
+              requireReason
+              onConfirm={async (reason) => {
+                const ok = await doAction(confirmAction, {}, reason);
+                if (!ok) throw new Error("action failed"); // keep the dialog open; feedback banner shows the error
+                setConfirmAction(null);
+              }}
+              data-testid={`confirm-${confirmAction.toLowerCase()}`}
+            />
+          )}
         </div>
       </div>
     </div>

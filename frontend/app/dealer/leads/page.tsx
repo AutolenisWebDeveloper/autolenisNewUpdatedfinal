@@ -1,40 +1,57 @@
 import { requireDealer } from "@/lib/auth/dealer-session";
 import { Users } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { Badge } from "@/components/ui/badge";
+import { PageContainer, PageHeader, EmptyState, CARD } from "@/components/ui/patterns";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function DealerLeadsPage() {
   const dealer = await requireDealer();
   // Leads = auction invitations with buyer context
+  // Select only the anonymized fields this view renders — never the full
+  // auction row (which carries internal FKs like buyerId/depositId).
   const leads = await prisma.auctionInvitation.findMany({
     where: { dealerId: dealer.id },
-    include: { auction: { include: { _count: { select: { offers: true } } } } },
+    select: {
+      id: true,
+      auctionId: true,
+      sentAt: true,
+      auction: { select: { status: true } },
+    },
     orderBy: { sentAt: "desc" },
     take: 20,
   });
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl" data-testid="dealer-leads-page">
-      <div className="flex items-center gap-3 mb-6">
-        <Users size={22} className="text-al-primary" />
-        <h1 className="text-xl font-bold text-slate-900">Leads</h1>
-      </div>
+    <PageContainer testId="dealer-leads-page">
+      <PageHeader
+        title="Leads"
+        subtitle="Buyer auctions you've been invited to compete in."
+        actions={<Badge variant="secondary">{leads.length}</Badge>}
+      />
       {leads.length === 0 ? (
-        <div className="text-center py-16 text-slate-400" data-testid="no-leads"><p>No leads yet</p></div>
+        <EmptyState
+          icon={Users}
+          title="No leads yet"
+          body="When you're invited to a buyer auction, it appears here as a lead."
+          action={{ label: "View opportunities", href: "/dealer/opportunities", testId: "leads-empty-cta" }}
+          testId="no-leads"
+        />
       ) : (
         <div className="space-y-2">
           {leads.map((lead, i) => (
-            <div key={lead.id} data-testid={`lead-item-${i}`} className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4">
+            <div key={lead.id} data-testid={`lead-item-${i}`} className={cn(CARD, "flex items-center justify-between px-5 py-4")}>
               <div>
-                <p className="text-sm font-medium text-slate-800">Auction Lead #{lead.auctionId.slice(-6)}</p>
-                <p className="text-xs text-slate-400">{lead.sentAt.toLocaleDateString()}</p>
+                <p className="text-sm font-medium text-slate-800 font-mono tabular-nums">Auction Lead #{lead.auctionId.slice(-6)}</p>
+                <p className="text-xs text-slate-500 tabular-nums">{lead.sentAt.toLocaleDateString()}</p>
               </div>
-              <span className="text-xs text-slate-500">{lead.auction.status}</span>
+              <Badge variant={lead.auction.status === "ACTIVE" ? "green" : "secondary"} className="text-xs">{lead.auction.status}</Badge>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </PageContainer>
   );
 }

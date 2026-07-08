@@ -28,7 +28,9 @@ import {
   sendAdverseActionEmail,
 } from "@/lib/services/email/resend.service";
 
-const APPROVAL_EMAIL_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
+// 90-day validity, matching the manual-override path so both admin decision
+// rails stamp the same expiry window (the record AND the email agree).
+const APPROVAL_VALIDITY_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_OTD_MIN_CENTS = 800000;   // $8,000
 const MAX_OTD_MAX_CENTS = 8500000;  // $85,000
 
@@ -47,6 +49,11 @@ const schema = z.object({
     }
   }
 });
+
+/** Thrown when a concurrent decide already changed the record's state. */
+class DecisionConflictError extends Error {
+  constructor() { super("DECISION_CONFLICT"); }
+}
 
 interface Props { params: Promise<{ id: string }> }
 
@@ -73,8 +80,23 @@ export async function POST(request: NextRequest, { params }: Props) {
   });
   if (!existing) return adminError("NOT_FOUND", "Prequalification not found", 404);
 
-  // Only the four review states are eligible for manual decision via this route.
-  const ACTIONABLE: PreQualDecision[] = ["MANUAL_REVIEW", "OFAC_REVIEW", "OFAC_ESCALATED", "PENDING"];
+  // OFAC hard gate: records with an uncleared OFAC alert (flag or state) are
+  // NOT decidable here — neither approval (sanctions risk) nor decline (an
+  // adverse-action notice could tip off a flagged individual). They must go
+  // through the dedicated OFAC Review queue (CLEAR or ESCALATE) first; CLEAR
+  // resets the flag and returns the record to this queue as approvable.
+  const inOfacState =
+    existing.decision === "OFAC_REVIEW" || existing.decision === "OFAC_ESCALATED";
+  if (existing.checkOfacAlert || inOfacState) {
+    return adminError(
+      "OFAC_REVIEW_REQUIRED",
+      "This record has an uncleared OFAC alert. Resolve it in Compliance → OFAC Review before making a decision.",
+      409,
+    );
+  }
+
+  // Only the review states are eligible for manual decision via this route.
+  const ACTIONABLE: PreQualDecision[] = ["MANUAL_REVIEW", "PENDING"];
   if (!ACTIONABLE.includes(existing.decision)) {
     return adminError(
       "CONFLICT",
@@ -114,15 +136,29 @@ export async function POST(request: NextRequest, { params }: Props) {
     maxOtdAmountCents: existing.maxOtdAmountCents,
   };
 
+  // Approvals get a fresh 90-day validity window; previously this route left
+  // expiresAt untouched, so a just-approved record could read as "Expired".
+  const newExpiresAt =
+    newDecision === PreQualDecision.APPROVED
+      ? new Date(Date.now() + APPROVAL_VALIDITY_MS)
+      : existing.expiresAt;
+
   const updated = await prisma.$transaction(async (tx) => {
-    const next = await tx.preQualification.update({
-      where: { id },
+    // Race-safe: the update is conditional on the decision we validated above,
+    // so two concurrent decides can't both apply (the loser matches 0 rows).
+    const applied = await tx.preQualification.updateMany({
+      where: { id, decision: existing.decision },
       data: {
         decision: newDecision,
         tier: newTier,
         maxOtdAmountCents: newMaxCents,
+        expiresAt: newExpiresAt,
       },
     });
+    if (applied.count === 0) {
+      throw new DecisionConflictError();
+    }
+    const next = await tx.preQualification.findUniqueOrThrow({ where: { id } });
 
     await tx.adminAuditLog.create({
       data: {
@@ -156,7 +192,18 @@ export async function POST(request: NextRequest, { params }: Props) {
     });
 
     return next;
+  }).catch((err) => {
+    if (err instanceof DecisionConflictError) return null;
+    throw err;
   });
+
+  if (!updated) {
+    return adminError(
+      "CONFLICT",
+      "This record was decided by another admin a moment ago. Refresh to see the current state.",
+      409,
+    );
+  }
 
   // Email side effects — outside the transaction so a transient email failure
   // never rolls back the decision.
@@ -168,22 +215,55 @@ export async function POST(request: NextRequest, { params }: Props) {
         maxOtdAmountCents: newMaxCents,
         tier: newTier,
         decisionDate: new Date(),
-        expiryDate: new Date(Date.now() + APPROVAL_EMAIL_EXPIRY_MS),
+        expiryDate: newExpiresAt,
       });
     } catch (err) {
       logger.error("[admin/prequal/decide] approval email failed:", err);
     }
   } else if (newDecision === PreQualDecision.DECLINED) {
+    // FCRA § 615 adverse-action notice with the record's principal-reason
+    // codes, and an honest send-outcome ComplianceEvent — parity with the
+    // manual-override rail (SENT / SUPPRESSED_DUPLICATE / SEND_FAILED).
+    let outcome: "SENT" | "DUPLICATE" | "FAILED" | "DEV_SKIPPED" | "THREW" = "THREW";
+    let sendErrorMessage: string | null = null;
     try {
-      await sendAdverseActionEmail({
+      const sendResult = await sendAdverseActionEmail({
         to: existing.buyer.user.email,
         firstName: existing.buyer.firstName,
         decisionDate: new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
         prequalApplicationId: id,
         decisionTimestamp: updated.updatedAt.toISOString(),
+        adverseReasonCodes: existing.adverseReasonCodes,
       });
+      outcome = sendResult.outcome;
     } catch (err) {
       logger.error("[admin/prequal/decide] adverse-action email failed:", err);
+      sendErrorMessage = err instanceof Error ? err.message : String(err);
+    }
+    try {
+      const eventType =
+        outcome === "SENT"
+          ? "ADVERSE_ACTION_NOTICE_SENT"
+          : outcome === "DUPLICATE"
+            ? "ADVERSE_ACTION_NOTICE_SUPPRESSED_DUPLICATE"
+            : "ADVERSE_ACTION_NOTICE_SEND_FAILED";
+      await prisma.complianceEvent.create({
+        data: {
+          eventType,
+          buyerId: existing.buyerId,
+          prequalApplicationId: id,
+          metadata: {
+            sentTo: existing.buyer.user.email,
+            sentAt: new Date().toISOString(),
+            decisionTimestamp: updated.updatedAt.toISOString(),
+            sendOutcome: outcome,
+            source: "admin_decide",
+            ...(sendErrorMessage ? { errorMessage: sendErrorMessage } : {}),
+          },
+        },
+      });
+    } catch (logErr) {
+      logger.error("[admin/prequal/decide] failed to log adverse-action event:", logErr);
     }
   }
 

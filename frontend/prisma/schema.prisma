@@ -618,6 +618,11 @@ model ESignEnvelope {
   dealId             String      @unique @map("deal_id")
   docusignEnvelopeId String?     @unique @map("docusign_envelope_id")
   status             ESignStatus @default(PENDING)
+  // Storage key of the executed/combined signed PDF in the private "contracts"
+  // bucket, populated on envelope-completed so the buyer can download their
+  // executed contract. Null until DocuSign reports completion (or if retrieval
+  // is still pending).
+  documentKey        String?     @map("document_key")
   sentAt             DateTime?   @map("sent_at")
   completedAt        DateTime?   @map("completed_at")
   voidedAt           DateTime?   @map("voided_at")
@@ -1078,7 +1083,26 @@ model ReferralMilestone {
   paidAt      DateTime? @map("paid_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
+  // A buyer earns each configured milestone at most once (idempotent awarding).
+  @@unique([buyerId, milestone])
   @@map("referral_milestones")
+}
+
+// Admin-configurable referral milestone thresholds. Instead of hardcoded
+// thresholds/amounts, admins define the tiers here (# of referrals → reward).
+// The evaluation engine awards a ReferralMilestone when a buyer's referral count
+// crosses an active threshold; payout stays a manual admin action.
+model ReferralMilestoneConfig {
+  id          String   @id @default(uuid())
+  threshold   Int      @unique // number of referrals required to earn this milestone
+  label       String            // milestone name (stored on the awarded ReferralMilestone.milestone)
+  rewardType  String   @default("CASH") @map("reward_type")
+  rewardValue Int      @map("reward_value") // reward amount in cents
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("referral_milestone_configs")
 }
 
 model BuyerActivityEvent {

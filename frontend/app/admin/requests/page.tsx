@@ -45,6 +45,7 @@ export default async function AdminRequestsPage() {
         _count: { select: { checkpoints: true, offers: true } },
       },
       orderBy: { createdAt: "desc" },
+      take: 200, // bounded — the queue view is triage, not an archive
     });
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Unknown error loading requests";
