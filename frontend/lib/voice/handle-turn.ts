@@ -131,7 +131,9 @@ Return ONLY a JSON object with these keys:
     "callerName": string | null,
     "callerEmail": string | null,
     "reason": string | null,
-    "bestCallbackTime": string | null
+    "bestCallbackTime": string | null,
+    "dealership": string | null,
+    "location": string | null
   },
 
   "complete": boolean
@@ -141,6 +143,15 @@ Rules:
 - callReason is REQUIRED — always classify
 - If callReason = "vehicle_request", populate vehicleRequest fields
 - If callReason is anything else, populate messageDetails
+- ALWAYS write messageDetails.reason as a one-line plain-English summary of WHY
+  the caller phoned in, for EVERY non-vehicle callReason (question, status_check,
+  message, dealer_inquiry, transfer_request, other). This is the single most
+  important field — never leave it null when the caller has said anything about
+  their purpose. E.g. "Asking whether the $99 deposit is refundable",
+  "Wants a status update on their Honda Accord request", "Dealer wants to join
+  the network".
+- For dealer_inquiry, also populate messageDetails.dealership (the dealership's
+  business name) and messageDetails.location (city/state) when mentioned.
 - complete = true if you have enough to fulfill the request
 - For vehicle_request: complete requires firstName, email, make, model, zip, budget at minimum
 - For others: complete requires callerName, callerEmail, reason
@@ -220,10 +231,14 @@ function toMessageDetails(raw: Record<string, unknown> | undefined): MessageDeta
   const email = str(raw.callerEmail);
   const reason = str(raw.reason);
   const time = str(raw.bestCallbackTime);
+  const dealership = str(raw.dealership);
+  const location = str(raw.location);
   if (name) details.callerName = name;
   if (email) details.callerEmail = email;
   if (reason) details.reason = reason;
   if (time) details.bestCallbackTime = time;
+  if (dealership) details.dealership = dealership;
+  if (location) details.location = location;
   return details;
 }
 

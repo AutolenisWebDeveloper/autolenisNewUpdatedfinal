@@ -6,6 +6,7 @@ import {
   updateConversation,
   clearConversation,
   type VehicleRequestDraft,
+  type VoiceConversation,
 } from "@/lib/voice/conversation-store";
 import {
   dispatchVehicleRequest,
@@ -24,6 +25,28 @@ const PATH = "/api/twilio/voice/status";
 // Twilio call statuses that mean the call has ended.
 const TERMINAL_STATUSES = new Set(["completed", "failed", "no-answer", "busy", "canceled"]);
 
+// Dual-number tracking — mirror dispatch-request.ts so the summary email can
+// name which line the caller dialed.
+const TWILIO_TOLLFREE = "+18662803328";
+const TWILIO_LOCAL = "+14695359785";
+
+// Human-readable label for each classified call reason.
+const CALL_REASON_LABELS: Record<string, string> = {
+  vehicle_request: "Vehicle request",
+  question: "Question",
+  status_check: "Status check",
+  message: "Callback request",
+  dealer_inquiry: "Dealer inquiry",
+  transfer_request: "Wants to talk to Marc",
+  other: "Other",
+};
+
+function lineLabel(inboundNumber: string | undefined): string {
+  if (inboundNumber === TWILIO_TOLLFREE) return "toll-free line";
+  if (inboundNumber === TWILIO_LOCAL) return "local line";
+  return "unknown line";
+}
+
 // Merge new tags onto the contact row without clobbering existing ones.
 async function tagContact(
   supabase: import("@supabase/supabase-js").SupabaseClient,
@@ -35,7 +58,7 @@ async function tagContact(
   await supabase.from("contacts").update({ tags: [...tags] }).eq("id", contactId);
 }
 
-async function sendInternalAlert(body: string): Promise<void> {
+async function sendInternalAlert(subject: string, body: string): Promise<void> {
   const to = process.env.ADMIN_NOTIFICATION_EMAIL;
   const apiKey = process.env.RESEND_API_KEY;
   if (!to || !apiKey || apiKey.includes("placeholder")) return;
@@ -45,12 +68,106 @@ async function sendInternalAlert(body: string): Promise<void> {
     await resend.emails.send({
       from: `${process.env.FROM_NAME ?? "AutoLenis"} <noreply@autolenis.com>`,
       to,
-      subject: "AutoLenis — inbound call summary",
-      html: `<pre style="font-family:ui-monospace,monospace;font-size:13px">${body}</pre>`,
+      subject,
+      html: `<pre style="font-family:ui-monospace,monospace;font-size:13px;white-space:pre-wrap">${escapeHtml(
+        body,
+      )}</pre>`,
     });
   } catch (err) {
     logger.error("[voice/status] internal alert failed:", err);
   }
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// Render the full call transcript (caller + Zura turns) so the founder can read
+// exactly what was said. Returns a "(no conversation captured)" placeholder for
+// calls that ended before the caller spoke.
+function formatTranscript(conv: VoiceConversation | null): string {
+  const history = conv?.history ?? [];
+  if (history.length === 0) return "(no conversation captured)";
+  return history
+    .map((m) => `${m.role === "user" ? "Caller" : "Zura"}: ${m.content}`)
+    .join("\n");
+}
+
+// Build the complete inbound-call summary the founder receives by email. Unlike
+// the old five-field version, this surfaces the call reason, every vehicle and
+// message field that was captured, and the full transcript, so the reason for
+// the call is always clear — even for questions, dealer inquiries, and
+// callbacks that never touched the vehicle pipeline.
+function buildCallSummary(
+  conv: VoiceConversation | null,
+  callerPhone: string,
+  callDuration: string,
+  callStatus: string,
+): { subject: string; body: string } {
+  const vr = conv?.vehicleRequest ?? null;
+  const md = conv?.messageDetails ?? {};
+  const reason = conv?.callReason;
+  const reasonLabel = reason ? CALL_REASON_LABELS[reason] ?? "Call" : "Uncategorized call";
+
+  const name = [vr?.firstName, vr?.lastName].filter(Boolean).join(" ") || md.callerName || "";
+  const email = vr?.email || md.callerEmail || "";
+  const vehicle = [vr?.yearMin, vr?.yearMax && vr?.yearMax !== vr?.yearMin ? vr?.yearMax : null, vr?.make, vr?.model]
+    .filter(Boolean)
+    .join(" ");
+
+  const lines: string[] = [
+    `Call reason: ${reasonLabel}`,
+    `From: ${callerPhone || "unknown"} (${lineLabel(conv?.inboundNumber)})`,
+    `Duration: ${callDuration}s`,
+    `Call status: ${callStatus}`,
+    "",
+    "── Caller ──",
+    `Name: ${fieldOrDash(name)}`,
+    `Email: ${fieldOrDash(email)}`,
+  ];
+
+  // Vehicle block — shown when there's a vehicle intent or any vehicle field.
+  const hasVehicleData =
+    reason === "vehicle_request" ||
+    !reason ||
+    !!(vr && (vr.make || vr.model || vr.budget || vr.timeline || vr.zip || vr.vehicleType));
+  if (hasVehicleData) {
+    lines.push(
+      "",
+      "── Vehicle request ──",
+      `Vehicle: ${fieldOrDash(vehicle)}`,
+      `Type: ${fieldOrDash(vr?.vehicleType)}`,
+      `Condition: ${fieldOrDash(vr?.newOrUsed)}`,
+      `Budget: ${fieldOrDash(vr?.budget)}`,
+      `Timeline: ${fieldOrDash(vr?.timeline)}`,
+      `ZIP: ${fieldOrDash(vr?.zip)}`,
+      `Trade-in: ${fieldOrDash(vr?.hasTradeIn)}`,
+      `Financing: ${fieldOrDash(vr?.financing)}`,
+    );
+  }
+
+  // Message block — shown for non-vehicle calls or whenever details exist.
+  const hasMessageData = !!(md.reason || md.bestCallbackTime || md.dealership || md.location);
+  if (hasMessageData) {
+    lines.push(
+      "",
+      "── Message details ──",
+      `Reason: ${fieldOrDash(md.reason ?? undefined)}`,
+      `Dealership: ${fieldOrDash(md.dealership ?? undefined)}`,
+      `Location: ${fieldOrDash(md.location ?? undefined)}`,
+      `Best callback time: ${fieldOrDash(md.bestCallbackTime ?? undefined)}`,
+    );
+  }
+
+  lines.push("", "── Transcript ──", formatTranscript(conv));
+
+  return {
+    subject: `AutoLenis — inbound call: ${reasonLabel}${name ? ` from ${name}` : ""}`,
+    body: lines.join("\n"),
+  };
 }
 
 // Confirmation email to a caller who left an email address before hanging up.
@@ -200,19 +317,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // FIX 4 — internal alert to admin with the full set of collected data.
-    await sendInternalAlert(
-      [
-        `Inbound call from ${callerPhone || from || "unknown"}`,
-        `Duration: ${callDuration}s`,
-        `Data collected:`,
-        `Name: ${fieldOrDash([vr?.firstName, vr?.lastName].filter(Boolean).join(" "))}`,
-        `Email: ${fieldOrDash(vr?.email)}`,
-        `Vehicle: ${fieldOrDash([vr?.make, vr?.model].filter(Boolean).join(" "))}`,
-        `Budget: ${fieldOrDash(vr?.budget)}`,
-        `Timeline: ${fieldOrDash(vr?.timeline)}`,
-      ].join("\n"),
-    );
+    // FIX 4 — internal alert to admin with the full set of collected data:
+    // call reason, every captured vehicle/message field, and the transcript.
+    const summary = buildCallSummary(conv, callerPhone || from, callDuration, callStatus);
+    await sendInternalAlert(summary.subject, summary.body);
 
     if (callSid) clearConversation(callSid);
 

@@ -321,6 +321,8 @@ export interface FounderMessageAlertInput {
     callerEmail?: string | null;
     reason?: string | null;
     bestCallbackTime?: string | null;
+    dealership?: string | null;
+    location?: string | null;
   };
 }
 
@@ -351,6 +353,8 @@ export async function sendFounderMessageAlert(
     `From: ${input.messageDetails.callerName ?? "Unknown"}`,
     `Phone: ${input.callerPhone}`,
     input.messageDetails.callerEmail && `Email: ${input.messageDetails.callerEmail}`,
+    input.messageDetails.dealership && `Dealership: ${input.messageDetails.dealership}`,
+    input.messageDetails.location && `Location: ${input.messageDetails.location}`,
     input.messageDetails.reason && `Reason: ${input.messageDetails.reason}`,
     input.messageDetails.bestCallbackTime &&
       `Best time: ${input.messageDetails.bestCallbackTime}`,
