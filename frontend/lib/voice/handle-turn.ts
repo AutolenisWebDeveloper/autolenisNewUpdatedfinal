@@ -14,6 +14,7 @@ import {
   updateConversation,
   type VehicleRequestDraft,
   type VoiceMessage,
+  type VoiceConversation,
   type CallReason,
   type MessageDetails,
 } from "@/lib/voice/conversation-store";
@@ -131,7 +132,9 @@ Return ONLY a JSON object with these keys:
     "callerName": string | null,
     "callerEmail": string | null,
     "reason": string | null,
-    "bestCallbackTime": string | null
+    "bestCallbackTime": string | null,
+    "dealership": string | null,
+    "location": string | null
   },
 
   "complete": boolean
@@ -139,8 +142,27 @@ Return ONLY a JSON object with these keys:
 
 Rules:
 - callReason is REQUIRED — always classify
+- Classify from the ENTIRE conversation, not just the last line, and re-evaluate
+  it each turn as more is said.
+- Do NOT default to vehicle_request. Only choose vehicle_request when the caller
+  clearly wants to find, price, or buy a specific vehicle for themselves.
+  * Merely mentioning a car brand/model does NOT make it a vehicle_request —
+    "Do you work with Honda?" is a "question"; a Honda dealer is a "dealer_inquiry".
+  * A caller asking pricing/how-it-works is a "question", even if a car comes up.
+  * Someone checking on offers they already submitted is a "status_check".
+- If you genuinely cannot tell why they are calling yet, use "other" — never
+  guess vehicle_request just to fill the gap.
 - If callReason = "vehicle_request", populate vehicleRequest fields
 - If callReason is anything else, populate messageDetails
+- ALWAYS write messageDetails.reason as a one-line plain-English summary of WHY
+  the caller phoned in, for EVERY non-vehicle callReason (question, status_check,
+  message, dealer_inquiry, transfer_request, other). This is the single most
+  important field — never leave it null when the caller has said anything about
+  their purpose. E.g. "Asking whether the $99 deposit is refundable",
+  "Wants a status update on their Honda Accord request", "Dealer wants to join
+  the network".
+- For dealer_inquiry, also populate messageDetails.dealership (the dealership's
+  business name) and messageDetails.location (city/state) when mentioned.
 - complete = true if you have enough to fulfill the request
 - For vehicle_request: complete requires firstName, email, make, model, zip, budget at minimum
 - For others: complete requires callerName, callerEmail, reason
@@ -220,10 +242,14 @@ function toMessageDetails(raw: Record<string, unknown> | undefined): MessageDeta
   const email = str(raw.callerEmail);
   const reason = str(raw.reason);
   const time = str(raw.bestCallbackTime);
+  const dealership = str(raw.dealership);
+  const location = str(raw.location);
   if (name) details.callerName = name;
   if (email) details.callerEmail = email;
   if (reason) details.reason = reason;
   if (time) details.bestCallbackTime = time;
+  if (dealership) details.dealership = dealership;
+  if (location) details.location = location;
   return details;
 }
 
@@ -508,17 +534,28 @@ export async function handleVoiceTurn(input: VoiceTurnInput): Promise<string> {
   }
 
   // Classify intent and update the structured draft. The model-based extractor
-  // runs first; for vehicle requests the lightweight string extractor then
-  // backfills any fields it missed without overwriting confirmed values.
+  // reclassifies every turn from the full conversation, so an intent that only
+  // becomes clear later (a "question" that turns into a real vehicle request, or
+  // vice-versa) is corrected rather than locked in.
   const extracted = await extractCallData([...history, { role: "user", content: speech }]);
   if (extracted) {
-    updateConversation(callSid, {
-      callReason: extracted.callReason,
+    const updates: Partial<VoiceConversation> = {
       messageDetails: extracted.messageDetails,
-      vehicleRequest: Object.keys(extracted.vehicleRequest).length
-        ? extracted.vehicleRequest
-        : undefined,
-    });
+    };
+    // Never overwrite a known reason with an undefined one — a single garbled
+    // extraction shouldn't erase a caller's classification (which would then
+    // silently fall back to the vehicle-request assumption below).
+    if (extracted.callReason) updates.callReason = extracted.callReason;
+
+    // Only fold the extractor's vehicle fields into the draft when the call
+    // actually looks like a vehicle request. A dealer or a question-caller who
+    // happens to name a car brand must not be recorded as a buyer.
+    const reasonNow = extracted.callReason ?? getConversation(callSid).callReason;
+    const vehicleIntentNow = !reasonNow || reasonNow === "vehicle_request";
+    if (vehicleIntentNow && Object.keys(extracted.vehicleRequest).length) {
+      updates.vehicleRequest = extracted.vehicleRequest;
+    }
+    updateConversation(callSid, updates);
 
     // Zura Phase 3 — escalate to a live transfer when the extractor classifies
     // the call as a human-now request, or a dealer with high urgency wanting to
@@ -538,19 +575,25 @@ export async function handleVoiceTurn(input: VoiceTurnInput): Promise<string> {
   }
 
   const afterModel = getConversation(callSid);
-  const stringDraft = extractFieldsFromHistory(afterModel.history);
-  const gapFill: VehicleRequestDraft = {};
-  for (const key of FIELD_KEYS) {
-    if (!afterModel.vehicleRequest?.[key] && stringDraft[key]) {
-      gapFill[key] = stringDraft[key];
+  const callReason = afterModel.callReason;
+  const isVehicleIntent = !callReason || callReason === "vehicle_request";
+
+  // Lightweight string backfill runs ONLY for vehicle-intent calls, so it can
+  // never inject make/model/budget/timeline into a question, dealer, status, or
+  // message call and distort the reason + data reported to the founder.
+  let refreshed = afterModel;
+  if (isVehicleIntent) {
+    const stringDraft = extractFieldsFromHistory(afterModel.history);
+    const gapFill: VehicleRequestDraft = {};
+    for (const key of FIELD_KEYS) {
+      if (!afterModel.vehicleRequest?.[key] && stringDraft[key]) {
+        gapFill[key] = stringDraft[key];
+      }
+    }
+    if (Object.keys(gapFill).length) {
+      refreshed = updateConversation(callSid, { vehicleRequest: gapFill });
     }
   }
-  const refreshed = Object.keys(gapFill).length
-    ? updateConversation(callSid, { vehicleRequest: gapFill })
-    : afterModel;
-
-  const callReason = refreshed.callReason;
-  const isVehicleIntent = !callReason || callReason === "vehicle_request";
 
   if (isVehicleIntent) {
     // Vehicle path — full request collected → run the complete intake once.

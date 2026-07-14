@@ -55,6 +55,11 @@ export interface MessageDetails {
   // What the caller wants help with.
   reason?: string;
   bestCallbackTime?: string;
+  // Dealer-inquiry specifics (callReason = "dealer_inquiry"): the dealership's
+  // business name and its city/state, so the founder can qualify the partner
+  // before calling back.
+  dealership?: string;
+  location?: string;
 }
 
 export interface VoiceConversation {
