@@ -32,7 +32,7 @@ build). The correct, safe, and reversible actions are:
 | # | Requested skill | Present in this environment? | Location | External deps to install |
 | - | --------------- | ---------------------------- | -------- | ------------------------ |
 | 1 | **Impeccable** | ✅ **Installed** (vendored) | `.claude/skills/impeccable/` | Full plugin v3.9.1 vendored from the public GitHub source; self-contained, no `npm install` needed (see §2.1). |
-| 2 | **Superpowers** | ❌ **Not found** | — | Third-party Claude Code plugin collection; install via its plugin marketplace (see §2.2). |
+| 2 | **Superpowers** | ✅ **Installed** (plugin) | project settings + `~/.claude/plugins/` | Plugin v6.1.1 from `obra/superpowers-marketplace`; declared in project `.claude/settings.json` so it re-fetches on fresh containers (see §2.2). |
 | 3 | **Frontend Design** | ✅ Present | `/mnt/skills/public/frontend-design/` | **None** — pure guidance. Optional: Playwright (screenshots). |
 | 4 | **MCP Server Skills** (`mcp-builder`) | ✅ Present | `~/.claude/skills/mcp-builder/` | Python `anthropic>=0.39.0`, `mcp>=1.1.0`; Node MCP SDK for Node servers. |
 | 5 | **Skill Creator** (`skill-creator`) | ✅ Present | `~/.claude/skills/skill-creator/` | `claude` CLI for the eval loop; Python `pyyaml` (present). |
@@ -106,22 +106,44 @@ offline. The 23 `/impeccable *` commands (`polish`, `audit`, `critique`, `craft`
   update is pending.
 - No `frontend/` files were touched; the production build is unaffected.
 
-### 2.2 Superpowers — ❌ not present
+### 2.2 Superpowers — ✅ installed (plugin v6.1.1, project scope)
 
-"Superpowers" is a well-known **third-party open-source Claude Code plugin collection**
-(a marketplace of skills), not a first-party skill and not present in this container.
-It is installed at the Claude Code CLI level, not into the app:
+"Superpowers" is a **third-party open-source Claude Code plugin** by Jesse Vincent
+(`obra`). It is installed at the Claude Code CLI/plugin level, not into the app.
+
+**Marketplace-name correction.** The requested command was
+`claude plugin install superpowers@claude-plugins-official`, but **`claude-plugins-official`
+is not a real/configured marketplace** (the CLI confirms:
+`Marketplace 'claude-plugins-official' not found. Available marketplaces:`), and Superpowers
+is not in any official Anthropic catalog. Its actual home is **`obra/superpowers-marketplace`**
+(verified live; `superpowers` v6.1.1 plus `superpowers-chrome`, `elements-of-style`,
+`episodic-memory`, `superpowers-lab`). GitHub is allowed by the egress policy, so it was
+installed from there:
 
 ```bash
-# In an interactive Claude Code session (not available in this headless run):
-/plugin marketplace add obra/superpowers-marketplace
-/plugin install superpowers@superpowers-marketplace
+claude plugin marketplace add obra/superpowers-marketplace --scope project
+claude plugin install superpowers@superpowers-marketplace --scope project
 ```
 
-**Dependencies it brings:** the plugin ships its own skills (brainstorming, TDD,
-worktrees, etc.); its heavier skills expect `git`, a POSIX shell, and Node — all ✅ present.
-**Action required:** run the two commands above in an interactive session; they cannot be
-executed from this non-interactive environment.
+**Persisted in the repo.** Project `.claude/settings.json` now declares:
+- `extraKnownMarketplaces.superpowers-marketplace` → `github:obra/superpowers-marketplace`
+- `enabledPlugins["superpowers@superpowers-marketplace"] = true`
+
+So a fresh container re-fetches and enables the plugin automatically from GitHub (the plugin
+*files* live in the ephemeral `~/.claude/plugins/`; the repo carries the declaration — the
+standard Claude Code plugin-sharing model).
+
+**Component inventory (from `claude plugin details`):** 14 skills — `brainstorming`,
+`test-driven-development`, `systematic-debugging`, `using-git-worktrees`,
+`subagent-driven-development`, `dispatching-parallel-agents`, `writing-plans`,
+`executing-plans`, `writing-skills`, `verification-before-completion`,
+`requesting-code-review`, `receiving-code-review`, `finishing-a-development-branch`,
+`using-superpowers` — plus **1 harness-only `SessionStart` hook** (no model-context cost).
+0 MCP servers, 0 agents. ~715 always-on tokens.
+
+**Dependencies:** `git`, a POSIX shell, and Node — all ✅ present. The SessionStart hook
+(`hooks/run-hook.cmd session-start`) makes **no network calls** and installs nothing
+(verified). **Status: installed and enabled**; skills load next session.
 
 ### 2.3 Frontend Design — ✅ present, zero external dependencies
 
@@ -293,7 +315,7 @@ Because skills are not app packages, the brief's app-level checks (production bu
 | File | Change |
 | ---- | ------ |
 | `.mcp.json` | Added `filesystem`, `sequential-thinking`, `memory`, `playwright`, `context7` servers alongside existing `buffer`. |
-| `.claude/settings.json` | New — enables the project MCP servers **and** registers the Impeccable `PostToolUse` design hook. |
+| `.claude/settings.json` | New — enables the project MCP servers, registers the Impeccable `PostToolUse` design hook, **and** declares the Superpowers marketplace + enabled plugin. |
 | `.claude/skills/impeccable/` | New — vendored Impeccable skill v3.9.1 (SKILL.md + 32 references + 34 scripts). |
 | `.claude/agents/impeccable-manual-edit-applier.md` | New — Impeccable sub-agent. |
 | `.claude/memory/.gitkeep` | New — persistent store dir for the Memory MCP server. |
