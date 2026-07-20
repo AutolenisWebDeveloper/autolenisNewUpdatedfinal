@@ -31,7 +31,7 @@ build). The correct, safe, and reversible actions are:
 
 | # | Requested skill | Present in this environment? | Location | External deps to install |
 | - | --------------- | ---------------------------- | -------- | ------------------------ |
-| 1 | **Impeccable** | ❌ **Not found** | — | Third-party skill; not part of the first-party Claude skill set. Must be sourced from its publisher (see §2.1). |
+| 1 | **Impeccable** | ✅ **Installed** (vendored) | `.claude/skills/impeccable/` | Full plugin v3.9.1 vendored from the public GitHub source; self-contained, no `npm install` needed (see §2.1). |
 | 2 | **Superpowers** | ❌ **Not found** | — | Third-party Claude Code plugin collection; install via its plugin marketplace (see §2.2). |
 | 3 | **Frontend Design** | ✅ Present | `/mnt/skills/public/frontend-design/` | **None** — pure guidance. Optional: Playwright (screenshots). |
 | 4 | **MCP Server Skills** (`mcp-builder`) | ✅ Present | `~/.claude/skills/mcp-builder/` | Python `anthropic>=0.39.0`, `mcp>=1.1.0`; Node MCP SDK for Node servers. |
@@ -65,15 +65,46 @@ Python packages checked: `pyyaml` ✅ 6.0.1, `requests` ✅ 2.33.1, `jinja2` ✅
 
 ## 2. Per-skill dependency analysis
 
-### 2.1 Impeccable — ❌ not present
+### 2.1 Impeccable — ✅ installed (full plugin, vendored from source)
 
-No `SKILL.md` matching "impeccable" exists anywhere in `/mnt/skills`, `~/.claude/skills`,
-or the repo. "Impeccable" is **not** part of Anthropic's first-party skill set shipped
-to this environment. If a specific "Impeccable" skill is intended, it must be supplied by
-its author (as a `SKILL.md` + assets folder) and dropped into `~/.claude/skills/impeccable/`
-or a project `.claude/skills/impeccable/` directory, or installed from its plugin
-marketplace. **Action required from the user:** provide the source/marketplace for this
-skill — it cannot be installed from information available in this environment.
+"Impeccable" **is** a real published tool: npm package `impeccable` (v3.2.1 CLI),
+"Design skills, commands, and anti-pattern detection for AI coding agents" by Paul Bakaus
+(<https://impeccable.style>, <https://github.com/pbakaus/impeccable>). It was not
+pre-installed in this environment, so it was installed at the user's request.
+
+**Distribution-host blocked.** The npm CLI installs fine (the npm registry is allowlisted),
+but `npx impeccable install` / `update` download the skill bundle from `impeccable.style`,
+which **your organization's egress policy blocks** (confirmed HTTP 403 to CONNECT for
+`impeccable.style:443`). Per the proxy rules a policy denial must not be routed around
+through that host.
+
+**Legitimate install path used.** The skills are open-source in the public GitHub repo
+(which *is* allowed by policy) and the CLI ships a first-class `link`/local-bundle path for
+checkouts. The repo was cloned and its prebuilt `.claude/` layout (identical to what
+`npx impeccable install` deploys for the Claude Code harness) was vendored into the
+project at **version 3.9.1**:
+
+| Installed into repo | What it is |
+| ------------------- | ---------- |
+| `.claude/skills/impeccable/` | The skill: `SKILL.md`, 32 `reference/*.md` command guides, 34 `scripts/*` (hook + detector + live-browser tooling). Self-contained — no `npm install`. |
+| `.claude/agents/impeccable-manual-edit-applier.md` | Sub-agent that applies live copy-edit batches. |
+| `.claude/settings.json` → `hooks.PostToolUse` | Runs `node .claude/skills/impeccable/scripts/hook.mjs` after every `Edit`/`Write`/`MultiEdit` (5s timeout) to surface design-quality findings. |
+
+**Validated (offline):** the skill and the `impeccable-manual-edit-applier` agent register
+in Claude Code; `scripts/context.mjs` runs (reports `NO_PRODUCT_MD` — expected until
+`/impeccable init` writes `PRODUCT.md`); the `PostToolUse` hook executes and returns a
+valid `hookSpecificOutput` with **no network calls**; `npx impeccable detect <file>` scans
+offline. The 23 `/impeccable *` commands (`polish`, `audit`, `critique`, `craft`, `shape`,
+`init`, …) are invocable via the skill.
+
+**Notes / caveats:**
+- `/impeccable init` is a skill sub-command — run it in an interactive Claude Code session
+  against this repo to generate `PRODUCT.md`/`DESIGN.md`. It cannot be triggered from this
+  non-interactive run.
+- `npx impeccable update` will keep failing until `impeccable.style` is allowlisted; until
+  then, refresh by re-vendoring from the GitHub repo. 3.9.1 is the current release, so no
+  update is pending.
+- No `frontend/` files were touched; the production build is unaffected.
 
 ### 2.2 Superpowers — ❌ not present
 
@@ -262,7 +293,9 @@ Because skills are not app packages, the brief's app-level checks (production bu
 | File | Change |
 | ---- | ------ |
 | `.mcp.json` | Added `filesystem`, `sequential-thinking`, `memory`, `playwright`, `context7` servers alongside existing `buffer`. |
-| `.claude/settings.json` | New — enables the project MCP servers. |
+| `.claude/settings.json` | New — enables the project MCP servers **and** registers the Impeccable `PostToolUse` design hook. |
+| `.claude/skills/impeccable/` | New — vendored Impeccable skill v3.9.1 (SKILL.md + 32 references + 34 scripts). |
+| `.claude/agents/impeccable-manual-edit-applier.md` | New — Impeccable sub-agent. |
 | `.claude/memory/.gitkeep` | New — persistent store dir for the Memory MCP server. |
 | `.claude/README.md` | New — explains the skills-vs-app distinction and server table. |
 | `SKILLS_DEPENDENCY_AUDIT_2026-07.md` | New — this report. |
