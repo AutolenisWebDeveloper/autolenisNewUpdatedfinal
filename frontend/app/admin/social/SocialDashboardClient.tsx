@@ -1,6 +1,5 @@
 "use client";
 
-import { logger } from "@/lib/logger";
 // /admin/social — Social Intelligence & Media Engine dashboard (client).
 // Six tabs: Overview, Content Calendar, Pending Review, Publishing Queue,
 // Performance, Settings — plus a shared post-detail drawer and a fixed
@@ -10,188 +9,28 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import {
   Radio, Search, Sparkles, CheckCircle2, RefreshCw, Calendar, ClipboardCheck,
   Send, BarChart2, Settings as SettingsIcon, X, Copy, AlertTriangle, Check,
-  Facebook, Instagram, Youtube, Linkedin, Music2, ThumbsUp, Eye, MousePointerClick,
+  Linkedin, ThumbsUp, Eye, MousePointerClick,
   Clock, Film, Loader2, Newspaper, ExternalLink, Video, Users, Flame, DollarSign,
   Wand2, Zap, Shield, ImageIcon, ChevronDown, TrendingUp, FlaskConical,
   UploadCloud, Trash2, Plus,
 } from "lucide-react";
 import { PLATFORM_BENCHMARKS } from "@/lib/social/config";
 
-// ─── Shared types ────────────────────────────────────────────────────────────
-export interface FranchiseRow {
-  id: string;
-  slug: string;
-  name: string;
-  platforms: string[];
-  cadence: string;
-  requiresReview: boolean;
-  active: boolean;
-  avgLeadScore: number | null;
-  postsGenerated: number;
-}
-export interface PlatformConnection {
-  platform: string;
-  connected: boolean;
-}
-interface ProviderConnections {
-  buffer: { connected: boolean; channelCount: number };
-  linkedin: { connected: boolean; pageId: string };
-  runway: { connected: boolean };
-  automationMode: string;
-}
-interface BufferTestResult {
-  enabled: boolean;
-  apiKeyPresent: boolean;
-  apiKeyValid: boolean;
-  organizations: { id: string; name: string }[];
-  channels: { id: string; name: string; service: string }[];
-  configured: {
-    platform: string;
-    profileId: string;
-    present: boolean;
-    matched: boolean;
-    channelName?: string;
-    autoResolved?: boolean;
-  }[];
-  error?: string;
-}
-interface MarketIndexLast {
-  title: string | null;
-  summary: string | null;
-  publishedAt: string | null;
-  platformPostId: string | null;
-  linkedInUrl: string | null;
-  status: string | null;
-}
-type AutomationMode = "MANUAL_REVIEW" | "HYBRID_AUTO" | "FULL_AUTO";
+// ─── Shared types, helpers, and presentational primitives live in ./_shared ────
+// (extracted from this file to begin the social-dashboard decomposition — no
+// behavior change). Types are re-exported so ./page.tsx keeps importing them
+// from this module.
+import type {
+  FranchiseRow, PlatformConnection, ProviderConnections, BufferTestResult,
+  MarketIndexLast, AutomationMode, Post, Signal, Stats, TrendingData,
+  SocialLead, LeadsResponse, CreatorsResponse,
+} from "./_shared/types";
+export type { FranchiseRow, PlatformConnection };
+import { fetchJson } from "./_shared/fetchJson";
+import { fmtDateTime, fmtNum } from "./_shared/format";
+import { PLATFORMS, platformIcon, StatusBadge, VideoBadge, LeadStatusBadge } from "./_shared/ui";
 
-interface VideoLite {
-  status: string;
-  videoUrl: string | null;
-  thumbnailUrl: string | null;
-}
-interface Post {
-  id: string;
-  platform: string;
-  contentType: string;
-  hookType: string | null;
-  hook: string;
-  script: string;
-  caption: string;
-  hashtags: string[];
-  ctaText: string | null;
-  funnelDestination: string | null;
-  trackedUrl: string | null;
-  complianceNotes: string | null;
-  status: string;
-  scheduledAt: string | null;
-  publishedAt: string | null;
-  leadScore: number;
-  make: string | null;
-  model: string | null;
-  metro: string | null;
-  franchise: { slug: string; name: string } | null;
-  video: VideoLite | null;
-}
-interface Signal {
-  id: string;
-  signalType: string;
-  make: string | null;
-  model: string | null;
-  city: string | null;
-  signalValue: number | null;
-  assetsGenerated: boolean;
-  assetCount: number;
-  detectedAt: string;
-}
-interface Stats {
-  posts: { draft: number; pending: number; approved: number; scheduled: number; published: number; failed: number };
-  videos: { queued: number; generating: number; ready: number; failed: number };
-  performance: { totalReach: number; totalClicks: number; totalRequests: number; totalLeadScore: number };
-  topFranchise: string;
-  topHook: string;
-  topPlatform: string;
-  revenue?: {
-    totalCents: number;
-    dealsWon: number;
-    byFranchise: { franchise: string; revenueCents: number }[];
-    byPlatform: { platform: string; revenueCents: number }[];
-    topPost: { hook: string; revenueCents: number } | null;
-  };
-}
-interface TrendingData {
-  tiktokHashtags?: string[];
-  redditTopics?: string[];
-  googleTrends?: string[];
-}
-interface SocialLead {
-  id: string;
-  platform: string | null;
-  franchise: string | null;
-  utmSource: string | null;
-  utmCampaign: string | null;
-  utmContent: string | null;
-  utmHook: string | null;
-  landingPage: string | null;
-  firstName: string;
-  lastName: string | null;
-  email: string;
-  phone: string | null;
-  zip: string | null;
-  city: string | null;
-  state: string | null;
-  vehicleInterest: string | null;
-  make: string | null;
-  model: string | null;
-  budget: string | null;
-  timeline: string | null;
-  status: string;
-  nurtureSequence: string | null;
-  nurtureStep: number;
-  lastEmailSentAt: string | null;
-  convertedAt: string | null;
-  createdAt: string;
-}
-interface LeadsResponse {
-  leads: SocialLead[];
-  total: number;
-  stats: {
-    thisWeek: number;
-    today: number;
-    topPlatform: string;
-    conversionRate: number;
-    byPlatform: { platform: string; count: number }[];
-    byLandingPage: { page: string; count: number }[];
-  };
-}
-interface Creator {
-  id: string;
-  name: string;
-  email: string | null;
-  platform: string;
-  handle: string | null;
-  status: string;
-  followerCount: number | null;
-  commissionRate: number | null;
-  affiliateId: string | null;
-  packagesSent: number;
-  clicks: number;
-  leads: number;
-  revenueCents: number;
-  createdAt: string;
-}
-interface CreatorsResponse {
-  creators: Creator[];
-  stats: {
-    total: number;
-    active: number;
-    totalClicks: number;
-    revenueAttributedCents: number;
-  };
-}
-
-// ─── Constants / helpers ─────────────────────────────────────────────────────
-const PLATFORMS = ["facebook", "instagram", "tiktok", "youtube", "linkedin"] as const;
+// ─── Tabs (shell-coupled: icon + order) ──────────────────────────────────────
 const TABS = [
   { key: "overview", label: "Overview", icon: BarChart2 },
   { key: "calendar", label: "Content Calendar", icon: Calendar },
@@ -208,101 +47,6 @@ const TABS = [
   { key: "settings", label: "Settings", icon: SettingsIcon },
 ] as const;
 type TabKey = (typeof TABS)[number]["key"];
-
-function platformIcon(platform: string, size = 14) {
-  switch (platform) {
-    case "facebook": return <Facebook size={size} />;
-    case "instagram": return <Instagram size={size} />;
-    case "youtube": return <Youtube size={size} />;
-    case "linkedin": return <Linkedin size={size} />;
-    case "tiktok": return <Music2 size={size} />;
-    default: return <Radio size={size} />;
-  }
-}
-
-const STATUS_STYLES: Record<string, string> = {
-  DRAFT: "bg-slate-100 text-slate-600",
-  PENDING_REVIEW: "bg-amber-100 text-amber-700",
-  APPROVED: "bg-blue-100 text-blue-700",
-  SCHEDULED: "bg-indigo-100 text-indigo-700",
-  PUBLISHING: "bg-cyan-100 text-cyan-700",
-  PUBLISHED: "bg-emerald-100 text-emerald-700",
-  FAILED: "bg-red-100 text-red-700",
-  SKIPPED: "bg-slate-100 text-slate-500",
-  REJECTED: "bg-rose-100 text-rose-700",
-};
-const VIDEO_STYLES: Record<string, string> = {
-  SCRIPT_READY: "bg-slate-100 text-slate-600",
-  VIDEO_QUEUED: "bg-amber-100 text-amber-700",
-  VIDEO_GENERATING: "bg-blue-100 text-blue-700",
-  VIDEO_READY: "bg-emerald-100 text-emerald-700",
-  VIDEO_FAILED: "bg-red-100 text-red-700",
-  PUBLISH_READY: "bg-emerald-100 text-emerald-700",
-};
-
-const LEAD_STATUS_STYLES: Record<string, string> = {
-  NEW: "bg-blue-100 text-blue-700",
-  NURTURING: "bg-amber-100 text-amber-700",
-  CONVERTED: "bg-emerald-100 text-emerald-700",
-  DEAD: "bg-slate-100 text-slate-500",
-};
-function LeadStatusBadge({ status }: { status: string }) {
-  return (
-    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${LEAD_STATUS_STYLES[status] ?? "bg-slate-100 text-slate-600"}`}>
-      {status}
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  return (
-    <span className={`inline-flex px-2 py-0.5 rounded-md text-[10px] font-semibold ${STATUS_STYLES[status] ?? "bg-slate-100 text-slate-600"}`}>
-      {status.replace(/_/g, " ")}
-    </span>
-  );
-}
-function VideoBadge({ status }: { status: string }) {
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold ${VIDEO_STYLES[status] ?? "bg-slate-100 text-slate-600"}`}>
-      {status === "VIDEO_GENERATING" && <Loader2 size={10} className="animate-spin" />}
-      {status.replace(/_/g, " ")}
-    </span>
-  );
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { credentials: "include", ...init });
-
-  // Read the raw body first so an empty or non-JSON response (e.g. a crashed
-  // route returning a blank 500) surfaces a real error instead of throwing
-  // "Unexpected end of JSON input".
-  const text = await res.text();
-  if (!text) {
-    logger.error(`[fetchJson] empty response body from ${url} (${res.status})`);
-    throw new Error(`Server returned an empty response (${res.status})`);
-  }
-
-  let json: { success?: boolean; data?: T; error?: { message?: string } };
-  try {
-    json = JSON.parse(text) as typeof json;
-  } catch {
-    logger.error(`[fetchJson] invalid JSON from ${url}:`, text.slice(0, 200));
-    throw new Error(`Server returned an invalid response (${res.status})`);
-  }
-
-  if (!res.ok || json.success === false) {
-    throw new Error(json.error?.message ?? `Request failed (${res.status})`);
-  }
-  return json.data as T;
-}
-
-function fmtDateTime(iso: string | null): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-}
-function fmtNum(n: number): string {
-  return n.toLocaleString("en-US");
-}
 
 // ─── Root component ──────────────────────────────────────────────────────────
 export default function SocialDashboardClient({
