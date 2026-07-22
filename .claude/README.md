@@ -9,7 +9,7 @@ AutoLenis repository. See the full audit at
 | Path | Purpose |
 | --- | --- |
 | `settings.json` | Enables the project MCP servers declared in `../.mcp.json`, the Impeccable `PostToolUse` hook, and the Superpowers plugin. |
-| `skills/` | **Project skills** (see below): the vendored `impeccable/` plugin plus the 17 authoritative `autolenis-*` domain skills. |
+| `skills/` | **Project skills** (see below): the vendored `impeccable/` plugin plus 36 authoritative `autolenis-*` skills (17 core domain + 8 social + 11 dealer-intelligence). |
 | `agents/` | Sub-agents (`impeccable-manual-edit-applier`). |
 | `memory/` | Persistent knowledge-graph store for the Memory MCP server. |
 | `MCP_INVENTORY.md` | Full MCP server inventory, provenance, and least-privilege policy. |
@@ -27,6 +27,36 @@ AutoLenis repository. See the full audit at
 `autolenis-communications-consent` · `autolenis-ai-safety-and-orchestration` ·
 `autolenis-testing-quality-gates` · `autolenis-observability-sre` ·
 `autolenis-accessibility-performance-seo`.
+
+### Social media operating skills (8)
+
+Govern the **existing Social Engine** (`frontend/lib/social/*`, `app/api/admin/social/*`,
+`app/api/cron/social-*`) — they orchestrate third-party providers (Buffer/BlackTwist), never
+duplicate them. Load `autolenis-social-media-command-center` first:
+
+`autolenis-social-media-command-center` · `autolenis-social-content-strategy` ·
+`autolenis-social-content-creator` · `autolenis-social-content-calendar` ·
+`autolenis-social-publishing-and-scheduling` · `autolenis-social-engagement-management` ·
+`autolenis-social-analytics-and-attribution` · `autolenis-social-content-repurposing`.
+
+### Dealer-intelligence skills (11)
+
+Govern the **existing AMIPS + dealer-recruitment platform** (`frontend/lib/services/acquisition/*`,
+`frontend/lib/services/dealer-recruitment/*`, and the `DealerProspect`/`DealerDiscovery`/
+`DealerIntelligence`/`DealerOutreachLog` models). Third-party prospecting skills (Apollo/Firecrawl/
+Sales-Do) act as capability providers only and never write production records directly — all writes
+go through `autolenis-dealer-database-ingestion`. Load `autolenis-dealer-prospecting-orchestrator`
+first:
+
+`autolenis-dealer-prospecting-orchestrator` · `autolenis-dealership-discovery` ·
+`autolenis-youtube-dealer-research` · `autolenis-dealer-decision-maker-discovery` ·
+`autolenis-public-business-contact-enrichment` · `autolenis-contact-verification` ·
+`autolenis-dealer-deduplication-and-entity-resolution` · `autolenis-dealer-lead-scoring` ·
+`autolenis-dealer-database-ingestion` · `autolenis-dealer-prospect-review-queue` ·
+`autolenis-dealer-outreach-governance`.
+
+> Full audit + third-party security-review: [`AUTOLENIS_SKILL_STACK_SOCIAL_DEALER_AUDIT_2026-07.md`](../AUTOLENIS_SKILL_STACK_SOCIAL_DEALER_AUDIT_2026-07.md).
+> **Publishing and dealer outreach stay disabled by default** until reviewed and explicitly enabled.
 
 > The user-level skills `autolenis-master` / `autolenis-tier-1` (in `~/.claude/skills`, ephemeral)
 > are a high-level overview + revenue-phase playbook. The repo `autolenis-*` skills above are the
