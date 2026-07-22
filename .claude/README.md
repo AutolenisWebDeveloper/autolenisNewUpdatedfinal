@@ -8,8 +8,29 @@ AutoLenis repository. See the full audit at
 
 | Path | Purpose |
 | --- | --- |
-| `settings.json` | Enables the project MCP servers declared in `../.mcp.json`. |
+| `settings.json` | Enables the project MCP servers declared in `../.mcp.json`, the Impeccable `PostToolUse` hook, and the Superpowers plugin. |
+| `skills/` | **Project skills** (see below): the vendored `impeccable/` plugin plus the 17 authoritative `autolenis-*` domain skills. |
+| `agents/` | Sub-agents (`impeccable-manual-edit-applier`). |
 | `memory/` | Persistent knowledge-graph store for the Memory MCP server. |
+| `MCP_INVENTORY.md` | Full MCP server inventory, provenance, and least-privilege policy. |
+
+## Project skills (`skills/autolenis-*`)
+
+`../CLAUDE.md` routes Claude to these repo-local, version-controlled skills, which are the
+**authoritative** guidance for their domains and override generic advice. Load
+`autolenis-system-architecture` first, then `autolenis-domain-model`, then the matching domain skill:
+
+`autolenis-system-architecture` · `autolenis-domain-model` · `autolenis-buyer-journey` ·
+`autolenis-dealer-marketplace` · `autolenis-auction-engine` · `autolenis-best-price-report` ·
+`autolenis-payments-and-ledger` · `autolenis-contract-shield` · `autolenis-auth-security-privacy` ·
+`autolenis-supabase-postgres` · `autolenis-nextjs-react` · `autolenis-integrations` ·
+`autolenis-communications-consent` · `autolenis-ai-safety-and-orchestration` ·
+`autolenis-testing-quality-gates` · `autolenis-observability-sre` ·
+`autolenis-accessibility-performance-seo`.
+
+> The user-level skills `autolenis-master` / `autolenis-tier-1` (in `~/.claude/skills`, ephemeral)
+> are a high-level overview + revenue-phase playbook. The repo `autolenis-*` skills above are the
+> durable, domain-scoped source of truth and do not duplicate them.
 
 ## Important distinction — skills vs. app dependencies
 
