@@ -50,6 +50,31 @@ domain skill(s) matching the task:
 | Test matrix, E2E paths, quality gates | `autolenis-testing-quality-gates` |
 | Logging, metrics, alerts, cron/job monitoring, runbooks | `autolenis-observability-sre` |
 | Accessibility, Core Web Vitals, SEO | `autolenis-accessibility-performance-seo` |
+| **Social media** orchestration, calendar, publishing, approvals, attribution | `autolenis-social-media-command-center` (load first) |
+| Social strategy / content pillars / measurement | `autolenis-social-content-strategy` |
+| Social content creation (scripts, hooks, captions, carousels) | `autolenis-social-content-creator` |
+| Social content calendar / scheduling state | `autolenis-social-content-calendar` |
+| Social API/browser publishing, tokens, retries, kill switch | `autolenis-social-publishing-and-scheduling` |
+| Social comments/DMs, sentiment, lead-intent, escalation | `autolenis-social-engagement-management` |
+| Social analytics, UTM attribution, ROI | `autolenis-social-analytics-and-attribution` |
+| Content repurposing / derivatives / lineage | `autolenis-social-content-repurposing` |
+| **Dealer prospecting** discovery→enrichment→ingestion pipeline | `autolenis-dealer-prospecting-orchestrator` (load first) |
+| Dealership discovery (Places/Maps/Search, filters) | `autolenis-dealership-discovery` |
+| YouTube dealership channel research | `autolenis-youtube-dealer-research` |
+| Dealer decision-maker / staff discovery | `autolenis-dealer-decision-maker-discovery` |
+| Public business-contact enrichment (Apollo/verify adapters) | `autolenis-public-business-contact-enrichment` |
+| Contact verification + status machine | `autolenis-contact-verification` |
+| Dealer dedup / entity resolution | `autolenis-dealer-deduplication-and-entity-resolution` |
+| Dealer lead scoring (transparent, non-discriminatory) | `autolenis-dealer-lead-scoring` |
+| Writing dealer/contact records to production (only path) | `autolenis-dealer-database-ingestion` |
+| Human review of uncertain dealer records | `autolenis-dealer-prospect-review-queue` |
+| Dealer outreach eligibility + consent governance | `autolenis-dealer-outreach-governance` |
+
+> **Social & dealer-intelligence skills govern the EXISTING systems** (`lib/social/*`,
+> `lib/services/acquisition/*`, `lib/services/dealer-recruitment/*`, and the AMIPS models). They
+> orchestrate third-party capability providers (Buffer/BlackTwist/Apollo/Firecrawl/Sales-Do) as
+> subordinates — those providers never write production records directly, and publishing/outreach
+> stay disabled by default until reviewed and explicitly enabled.
 
 **UI work** additionally uses the **Impeccable** skill (`.claude/skills/impeccable/`) as the UI/UX
 quality reviewer, and the **Frontend Design** skill as the default implementation guide.
