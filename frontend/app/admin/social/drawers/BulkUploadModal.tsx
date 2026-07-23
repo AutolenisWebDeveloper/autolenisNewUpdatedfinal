@@ -1,6 +1,6 @@
 "use client";
 // Bulk Upload modal — extracted from SocialDashboardClient.tsx (lazy-loaded).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X, AlertTriangle, ImageIcon, UploadCloud, Trash2, Plus } from "lucide-react";
 import { fetchJson } from "../_shared/fetchJson";
 import { uploadComposeImage } from "../_shared/upload";
@@ -199,8 +199,14 @@ function BulkUploadModal({
     return n && imageFiles[n];
   }).length;
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" data-testid="bulk-modal">
+    <div role="dialog" aria-modal="true" aria-label="Bulk upload posts" className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" data-testid="bulk-modal">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#E2E8F0]">
           <div>

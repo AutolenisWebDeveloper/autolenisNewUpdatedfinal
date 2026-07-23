@@ -335,8 +335,14 @@ function ComposeDrawer({
     { value: "negotiator", label: "⚡ The Negotiator" },
   ];
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" data-testid="compose-drawer">
+    <div role="dialog" aria-modal="true" aria-label="Compose post" className="fixed inset-0 z-50 flex justify-end" data-testid="compose-drawer">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <div className="relative w-full max-w-[620px] bg-white h-full overflow-y-auto shadow-2xl">
 
