@@ -5,7 +5,7 @@
 // Performance, Settings — plus a shared post-detail drawer and a fixed
 // automation-mode badge. Data is read from /api/admin/social/* endpoints.
 
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   Radio, Sparkles, Calendar, ClipboardCheck, Send, BarChart2, Film,
   Newspaper, Users, TrendingUp, FlaskConical, UploadCloud,
@@ -79,6 +79,9 @@ export default function SocialDashboardClient({
   const [bulkOpen, setBulkOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Roving-tabindex focus targets for the accessible tablist (arrow-key nav).
+  const tabRefs = useRef<Partial<Record<TabKey, HTMLButtonElement | null>>>({});
+
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3500);
@@ -139,26 +142,51 @@ export default function SocialDashboardClient({
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 overflow-x-auto border-b border-[#E2E8F0]">
+      <div
+        role="tablist"
+        aria-label="Social Engine sections"
+        className="flex gap-1 mb-6 overflow-x-auto border-b border-[#E2E8F0]"
+        onKeyDown={(e) => {
+          const keys = TABS.map((t) => t.key);
+          const idx = keys.indexOf(tab);
+          let next: TabKey | null = null;
+          if (e.key === "ArrowRight" || e.key === "ArrowDown") next = keys[(idx + 1) % keys.length];
+          else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = keys[(idx - 1 + keys.length) % keys.length];
+          else if (e.key === "Home") next = keys[0];
+          else if (e.key === "End") next = keys[keys.length - 1];
+          if (next) {
+            e.preventDefault();
+            setTab(next);
+            tabRefs.current[next]?.focus();
+          }
+        }}
+      >
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
           return (
             <button
               key={t.key}
+              ref={(el) => { tabRefs.current[t.key] = el; }}
+              role="tab"
+              id={`social-tab-${t.key}`}
+              aria-selected={active}
+              aria-controls="social-tabpanel"
+              tabIndex={active ? 0 : -1}
               data-testid={`social-tab-${t.key}`}
               onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold whitespace-nowrap border-b-2 transition-colors ${
+              className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-semibold whitespace-nowrap border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-primary focus-visible:ring-inset ${
                 active ? "border-al-primary text-al-primary" : "border-transparent text-[#64748B] hover:text-[#0F172A]"
               }`}
             >
-              <Icon size={14} />
+              <Icon size={14} aria-hidden="true" />
               {t.label}
             </button>
           );
         })}
       </div>
 
+      <div role="tabpanel" id="social-tabpanel" aria-labelledby={`social-tab-${tab}`} tabIndex={0} className="focus-visible:outline-none">
       <Suspense fallback={<div className="py-16 text-center text-sm text-[#64748B]">Loading…</div>}>
         {tab === "overview" && (
           <OverviewTab stats={stats} onRefresh={loadStats} showToast={showToast} />
@@ -212,6 +240,7 @@ export default function SocialDashboardClient({
           />
         )}
       </Suspense>
+      </div>
 
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#0F172A] text-white text-xs px-4 py-2.5 rounded-lg shadow-lg" data-testid="social-toast">
