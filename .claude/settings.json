@@ -21,6 +21,29 @@
             "statusMessage": "Checking UI changes"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/verification/track.mjs\"",
+            "timeout": 5,
+            "statusMessage": "Tracking verification evidence"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/verification/gate.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checking verification loop"
+          }
+        ]
       }
     ]
   },
