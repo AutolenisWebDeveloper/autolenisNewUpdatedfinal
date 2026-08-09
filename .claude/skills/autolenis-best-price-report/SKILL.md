@@ -183,4 +183,4 @@ await prisma.bestPriceCalculationLog.create({
 - `autolenis-buyer-journey` — where the buyer views the report (auction stage).
 - `autolenis-payments-and-ledger` — OTD/fee money handling conventions.
 - `autolenis-domain-model` — `Offer`, `BestPrice*` models and enums.
-- `autolenis-master` — platform-wide standards.
+- `autolenis-system-architecture` — platform-wide standards (with `CLAUDE.md`).

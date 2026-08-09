@@ -216,7 +216,8 @@ out-of-order refuses resurrection/downgrade, crash rolls back the claim, missing
 
 ## Cross-skill links
 
-- `autolenis-master` — repo-wide engineering standards (source of these money rules).
+- `autolenis-system-architecture` — repo-wide engineering standards (source of these money rules).
+- `autolenis-deal-lifecycle` — the concierge service fee and its refund pair.
 - `autolenis-domain-model` — Prisma enums (`DepositStatus`, `DealStatus`, `CommissionStatus`,
   `PayoutStatus`) and model relations.
 - `autolenis-buyer-journey` — where deposit/fee payment fits the buyer flow.

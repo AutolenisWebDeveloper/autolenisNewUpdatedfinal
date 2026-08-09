@@ -209,4 +209,4 @@ await prisma.emailSendLog.create({ data: { idempotencyKey, to, template } });
 - `autolenis-observability-sre` — logging providers and delivery outcomes.
 - `autolenis-domain-model` — `EmailSendLog`, suppression tables, `Contact`,
   consent fields.
-- `autolenis-master` — platform-wide standards.
+- `autolenis-system-architecture` — platform-wide standards (with `CLAUDE.md`).

@@ -194,7 +194,7 @@ export const metadata = { robots: { index: false, follow: false } }; // new priv
 - `autolenis-nextjs-react` — Server/Client boundaries, caching, streaming that
   drive CWV and bundle size.
 - `autolenis-testing-quality-gates` — `test:seo` + Playwright visual gates.
-- `autolenis-content` / AMIPS work — location/content generation feeding the
+- `lib/services/content` + AMIPS work — location/content generation feeding the
   sitemaps.
 - `autolenis-observability-sre` — sitemap/robots cron behavior and monitoring.
-- Frontend Design skill (build UI) and `impeccable` (a11y + UX audit).
+- `autolenis-ui-design-system` (tokens + component kit) and `impeccable` (a11y + UX audit).

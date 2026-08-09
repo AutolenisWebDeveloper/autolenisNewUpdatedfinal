@@ -104,7 +104,7 @@ Respect these — add to them, do not fork them.
    JSON-LD from `lib/seo/jsonld.tsx`; ensure a canonical.
 3. Fetch cacheable data server-side with `revalidate`; add `loading.tsx`.
 4. Confirm the route is reachable from `sitemap.ts` and not in `robots.ts`
-   disallow. Hand visual polish to the Frontend Design skill; audit with
+   disallow. Hand visual polish to `autolenis-ui-design-system`; audit with
    `impeccable`.
 
 **Add an authenticated portal page (buyer/dealer/admin)**
@@ -216,4 +216,4 @@ export async function acceptOffer(dealId: string) {
 - `autolenis-observability-sre` — logging, cron/webhook handlers, error boundaries.
 - `autolenis-system-architecture` / `autolenis-domain-model` — service layer,
   Prisma models, state machines.
-- Frontend Design skill (build UI) and `impeccable` (audit UI).
+- `autolenis-ui-design-system` (tokens + component kit) and `impeccable` (audit UI).
