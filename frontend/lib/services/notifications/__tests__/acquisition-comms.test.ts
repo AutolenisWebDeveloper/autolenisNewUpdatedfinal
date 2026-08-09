@@ -190,6 +190,12 @@ test("auctionSmsPlan: offers-ready pluralizes and links to the offers page", () 
   assert.equal(many.actionUrl, "/buyer/auction/auc-123/offers");
 });
 
+test("auctionSmsPlan: auction-started confirms the deposit and links to the live auction", () => {
+  const p = auctionSmsPlan("AUCTION_STARTED", 0, "auc-77");
+  assert.match(p.sms, /deposit was received/i);
+  assert.equal(p.actionUrl, "/buyer/auction/auc-77");
+});
+
 test("auctionSmsPlan: no-match points the buyer at a new request", () => {
   const p = auctionSmsPlan("NO_MATCH", 0, "auc-9");
   assert.match(p.sms, /without dealer offers/i);
@@ -197,7 +203,7 @@ test("auctionSmsPlan: no-match points the buyer at a new request", () => {
 });
 
 test("auctionSmsPlan bodies exclude URL and opt-out disclosure (added downstream)", () => {
-  for (const kind of ["OFFERS_READY", "NO_MATCH"] as const) {
+  for (const kind of ["AUCTION_STARTED", "OFFERS_READY", "NO_MATCH"] as const) {
     const p = auctionSmsPlan(kind, 2, "auc-x");
     assert.doesNotMatch(p.sms, /https?:\/\//);
     assert.doesNotMatch(p.sms, /reply stop/i);

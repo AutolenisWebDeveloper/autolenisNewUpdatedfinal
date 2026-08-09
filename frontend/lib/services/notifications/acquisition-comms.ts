@@ -342,7 +342,7 @@ export function smsFeatureEnabled(): boolean {
 // duplicate an existing message.
 // ───────────────────────────────────────────────────────────────────────────
 
-export type AuctionCommKind = "OFFERS_READY" | "NO_MATCH";
+export type AuctionCommKind = "AUCTION_STARTED" | "OFFERS_READY" | "NO_MATCH";
 
 export interface AuctionSmsPlan {
   /** SMS body (without URL or opt-out disclosure — both appended downstream). */
@@ -352,15 +352,23 @@ export interface AuctionSmsPlan {
 }
 
 /**
- * Pure SMS plan for an auction-close outcome. `OFFERS_READY` drives the buyer to
- * choose; `NO_MATCH` points them at starting a new request. Total over
- * AuctionCommKind.
+ * Pure SMS plan for an auction lifecycle moment.
+ * - `AUCTION_STARTED`: deposit received, private auction is live, dealers competing.
+ * - `OFFERS_READY`: auction closed with offers — drive the buyer to choose.
+ * - `NO_MATCH`: auction closed with no offers — point at starting a new request.
+ * Total over AuctionCommKind.
  */
 export function auctionSmsPlan(
   kind: AuctionCommKind,
   offerCount: number,
   auctionId: string,
 ): AuctionSmsPlan {
+  if (kind === "AUCTION_STARTED") {
+    return {
+      sms: "Your $99 deposit was received and your private AutoLenis auction is live — verified dealers are competing for your business. Track it here:",
+      actionUrl: `/buyer/auction/${auctionId}`,
+    };
+  }
   if (kind === "OFFERS_READY") {
     return {
       sms: `Your AutoLenis auction closed with ${offerCount} offer${offerCount !== 1 ? "s" : ""} — review your ranked offers and choose your best deal:`,

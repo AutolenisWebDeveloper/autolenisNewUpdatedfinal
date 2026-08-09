@@ -13,6 +13,7 @@ import {
 import { walkCommissionTree } from "@/lib/services/affiliate/commission.service";
 import { launchAuction } from "@/lib/services/auction/auction.service";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
+import { emitAuctionComms } from "@/lib/services/notifications/acquisition-comms";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { dispatch } from "@/lib/qstash/dispatch";
@@ -166,6 +167,12 @@ export async function POST(request: NextRequest) {
               );
               await inviteDealersToAuction(createdAuction.id, deposit.buyerId).catch((err: unknown) =>
                 logger.error("[stripe/webhook] inviteDealersToAuction failed:", err)
+              );
+              // Additive SMS nudge (in-app AUCTION_STARTED + activation email are
+              // already sent for this first-time processing). SMS is off by default
+              // and fully consent/suppression/quiet-hours gated; best-effort.
+              await emitAuctionComms(createdAuction.id, "AUCTION_STARTED", 0).catch((err: unknown) =>
+                logger.error("[stripe/webhook] auction-started SMS failed:", err)
               );
             }
 
