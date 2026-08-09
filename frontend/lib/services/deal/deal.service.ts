@@ -5,6 +5,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { DealStatus, InsuranceStatus, Prisma } from "@prisma/client";
+import { emitDealStatusComms } from "../notifications/acquisition-comms";
 
 // Valid forward state transitions. CANCELLED/REFUNDED are handled separately in
 // canTransition() because they are reachable from (almost) any state.
@@ -131,6 +132,14 @@ export async function advanceDealStatus(
       metadata: { from: deal.status, to: newStatus },
     },
   }).catch(() => {});
+
+  // Proactive, consent-aware customer communication for this transition. This is
+  // the single seam that keeps the buyer informed across the entire post-acceptance
+  // lifecycle (financing → fee → insurance → contract → signing → pickup →
+  // completion / refund). Best-effort and idempotent: emitDealStatusComms never
+  // throws and de-dupes per (deal, status, buyer), so a retried or concurrent
+  // transition cannot double-message the customer.
+  await emitDealStatusComms(dealId, newStatus);
 }
 
 export async function createDealFromOffer(buyerId: string, offerId: string) {
