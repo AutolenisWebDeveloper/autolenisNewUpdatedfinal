@@ -16,6 +16,7 @@ import {
   isInAppOwnedByCaller,
   INAPP_OWNED_BY_CALLERS,
   auctionSmsPlan,
+  dealersContactedSms,
   type DealCommPlan,
 } from "../acquisition-comms";
 import { DealStatus, NotificationType } from "@prisma/client";
@@ -208,6 +209,19 @@ test("auctionSmsPlan bodies exclude URL and opt-out disclosure (added downstream
     assert.doesNotMatch(p.sms, /https?:\/\//);
     assert.doesNotMatch(p.sms, /reply stop/i);
   }
+});
+
+test("dealersContactedSms: pluralizes, drives to the deposit, no embedded URL/disclosure", () => {
+  const one = dealersContactedSms(1);
+  assert.match(one.sms, /\b1 verified dealer\b/);
+  assert.doesNotMatch(one.sms, /\b1 verified dealers\b/);
+  assert.equal(one.actionUrl, "/buyer/deposit");
+
+  const many = dealersContactedSms(5);
+  assert.match(many.sms, /\b5 verified dealers\b/);
+  assert.match(many.sms, /\$99/);
+  assert.doesNotMatch(many.sms, /https?:\/\//);
+  assert.doesNotMatch(many.sms, /reply stop/i);
 });
 
 test("a plan's SMS body excludes the URL and opt-out disclosure (added downstream)", () => {

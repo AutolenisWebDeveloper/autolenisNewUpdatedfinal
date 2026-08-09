@@ -19,6 +19,7 @@ import {
 } from "@/lib/services/acquisition/unified-buyer-intake.service";
 import { runPostIntakeOutreach } from "@/lib/services/acquisition/post-intake-outreach.service";
 import { sendDealersContactedEmail } from "@/lib/services/email/buyer-notifications.service";
+import { emitDealersContactedComms } from "@/lib/services/notifications/acquisition-comms";
 import type { VehicleRequestDraft } from "@/lib/voice/conversation-store";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -241,6 +242,14 @@ export async function dispatchVehicleRequest(
               dealerCount: outreach.dealersContacted,
               depositUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://www.autolenis.com"}/buyer/deposit`,
             });
+            // Additive SMS nudge (email above is the primary touch). Off by default,
+            // consent/suppression/quiet-hours gated, idempotent per opportunity.
+            await emitDealersContactedComms({
+              email,
+              firstName,
+              dealerCount: outreach.dealersContacted,
+              dedupeKey: opportunityId,
+            }).catch(() => {});
           }
         } catch (err) {
           logger.error("[post-intake] outreach or notification failed:", err);

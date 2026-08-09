@@ -387,6 +387,85 @@ export interface AuctionEmitResult {
 }
 
 /**
+ * Pure SMS plan for the pre-payment "we contacted N dealers — activate your
+ * auction with the $99 deposit" conversion nudge. The transactional email for
+ * this moment is already sent by `sendDealersContactedEmail`; this adds ONLY SMS.
+ */
+export function dealersContactedSms(dealerCount: number): AuctionSmsPlan {
+  return {
+    sms: `We've contacted ${dealerCount} verified dealer${dealerCount !== 1 ? "s" : ""} for your vehicle — activate your 48-hour AutoLenis auction with your $99 deposit to see their competing offers:`,
+    actionUrl: "/buyer/deposit",
+  };
+}
+
+export interface DealersContactedInput {
+  /** Buyer email — the natural key used to resolve the CRM consent record. */
+  email: string | null;
+  firstName: string | null;
+  dealerCount: number;
+  /** Stable per-request token (vehicleRequestId / buyerOpportunityId) for idempotency. */
+  dedupeKey: string;
+}
+
+/**
+ * Emit the SMS-only "dealers contacted → pay $99" nudge. Best-effort and
+ * non-throwing. Off by default; fully consent/suppression/quiet-hours gated
+ * inside `sendCrmSms`. Idempotent per request via the shared guard so a webhook
+ * retry or a re-run of the post-intake `after()` hook cannot double-text.
+ */
+export async function emitDealersContactedComms(
+  input: DealersContactedInput,
+): Promise<AuctionEmitResult> {
+  try {
+    if (!smsFeatureEnabled()) return { status: "skipped", sms: "disabled" };
+    if (!input.email) return { status: "no_buyer", sms: "no_contact" };
+
+    const key = `acq-comms:dealers-contacted:${input.dedupeKey}`;
+    const guardSupabase = await getGuardSupabase();
+    if (guardSupabase) {
+      try {
+        const { acquireIdempotencyGuard } = await import("@/lib/inngest/idempotency");
+        const claimed = await acquireIdempotencyGuard(guardSupabase, key);
+        if (!claimed) return { status: "deduped", sms: "disabled" };
+      } catch (err) {
+        logger.error("[acq-comms] dealers-contacted guard failed — proceeding:", err);
+      }
+    }
+
+    const plan = dealersContactedSms(input.dealerCount);
+    const smsOutcome = await dispatchSms({
+      buyer: {
+        firstName: input.firstName,
+        phone: null,
+        state: null,
+        zip: null,
+        user: { email: input.email },
+      },
+      smsBody: plan.sms,
+      actionUrl: plan.actionUrl,
+      idempotencyKey: key,
+    });
+
+    if (guardSupabase) {
+      try {
+        const { updateIdempotencyState } = await import("@/lib/inngest/idempotency");
+        await updateIdempotencyState(guardSupabase, key, "completed", {
+          dealersContacted: input.dealerCount,
+          sms: smsOutcome,
+        });
+      } catch {
+        /* ledger update is best-effort */
+      }
+    }
+
+    return { status: "sent", sms: smsOutcome };
+  } catch (err) {
+    logger.error("[acq-comms] emitDealersContactedComms failed:", err);
+    return { status: "skipped", sms: "failed" };
+  }
+}
+
+/**
  * Emit the SMS-only auction-close communication. Best-effort and non-throwing —
  * safe to await inside the auction-close cron seam. Idempotent per
  * (auction, kind) via the shared guard, on top of processAuctionClose's own

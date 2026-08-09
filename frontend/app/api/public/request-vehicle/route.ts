@@ -15,6 +15,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { runPostIntakeOutreach } from "@/lib/services/acquisition/post-intake-outreach.service";
 import { sendDealersContactedEmail } from "@/lib/services/email/buyer-notifications.service";
+import { emitDealersContactedComms } from "@/lib/services/notifications/acquisition-comms";
 import {
   sendVehicleRequestAdminNotification,
   sendVehicleRequestConfirmation,
@@ -460,6 +461,14 @@ export async function POST(request: NextRequest) {
             dealerCount: result.dealersContacted,
             depositUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? APP_URL}/buyer/deposit`,
           });
+          // Additive SMS nudge (email above is the primary touch). Off by default,
+          // consent/suppression/quiet-hours gated, idempotent per opportunity.
+          await emitDealersContactedComms({
+            email: data.email,
+            firstName: data.firstName,
+            dealerCount: result.dealersContacted,
+            dedupeKey: buyerOpportunityId,
+          }).catch(() => {});
         }
       } catch (err) {
         logger.error("[post-intake] outreach or notification failed:", err);

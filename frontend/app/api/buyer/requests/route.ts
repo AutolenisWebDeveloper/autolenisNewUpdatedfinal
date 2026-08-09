@@ -5,6 +5,7 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import { runPostIntakeOutreach } from "@/lib/services/acquisition/post-intake-outreach.service";
 import { sendDealersContactedEmail } from "@/lib/services/email/buyer-notifications.service";
+import { emitDealersContactedComms } from "@/lib/services/notifications/acquisition-comms";
 import {
   checkRateLimit,
   toBuyerLabel,
@@ -219,6 +220,14 @@ export async function POST(request: NextRequest) {
             dealerCount: result.dealersContacted,
             depositUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://www.autolenis.com"}/buyer/deposit`,
           });
+          // Additive SMS nudge (email above is the primary touch). Off by default,
+          // consent/suppression/quiet-hours gated, idempotent per opportunity.
+          await emitDealersContactedComms({
+            email: buyerEmail,
+            firstName: buyer.firstName ?? "there",
+            dealerCount: result.dealersContacted,
+            dedupeKey: buyerOpportunityId,
+          }).catch(() => {});
         }
       } catch (err) {
         logger.error("[post-intake] outreach or notification failed:", err);
