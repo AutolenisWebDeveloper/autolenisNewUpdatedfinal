@@ -26,6 +26,10 @@ If `DIRECT_URL` is unset, `prisma validate` and `prisma migrate` fail with
 Project Settings → Database: use the **Connection pooler** string for
 `DATABASE_URL` and the **direct connection** string for `DIRECT_URL`.
 
+For the AutoLenis project's exact coordinates and copy-paste connection-string
+templates (project ref, pooler vs. direct host/port, IPv4 notes), see
+[`docs/SUPABASE_CONNECTION.md`](docs/SUPABASE_CONNECTION.md).
+
 ---
 
 ## Getting Started with Create React App
