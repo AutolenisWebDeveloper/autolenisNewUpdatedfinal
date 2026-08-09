@@ -167,6 +167,14 @@ unavailable services, environment limits, or missing test infrastructure is repo
 > you back to the appropriate earlier stage. **The process ends when the implementation is
 > verified — not when the code has been written.**
 
+**This loop is enforced mechanically.** `.claude/hooks/verification/` tracks which material
+`frontend/` files a session changed and which verification commands actually ran (with pass/fail
+parsed from real output), and a `Stop` hook blocks the end of the turn while required checks are
+unrun or red, or while the closing message lacks a verdict. It never blocks more than twice and
+degrades to *allow* on any internal error; `AUTOLENIS_VERIFICATION_HOOK=off` disables it. The gate
+is a floor — it cannot see whether you truly re-reviewed or tested the workflow, so satisfying the
+hook is not satisfying the loop.
+
 ## Commands (run from `frontend/`)
 
 ```

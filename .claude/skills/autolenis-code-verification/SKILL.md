@@ -266,6 +266,34 @@ if (otd === null) { logger.warn({ offerId: offer.id }, "offer missing OTD"); con
 - [ ] The report lists executed/passed/failed checks and an explicit verdict.
 - [ ] Everything unverifiable here is labeled **NOT VERIFIED** with what it needs.
 
+## Mechanical enforcement (this loop is not advisory)
+
+The loop is enforced by hooks in `.claude/hooks/verification/`, wired in
+`.claude/settings.json`. Prompts persuade; these block.
+
+- **`track.mjs`** (PostToolUse on `Edit|Write|MultiEdit|NotebookEdit|Bash`) records every material
+  `frontend/` file you touch and every verification command you run, classifying each run
+  **pass / fail / unknown** from its real output. An interrupted run counts as a failure. Silence
+  is never a pass.
+- **`gate.mjs`** (Stop) blocks the end of the turn when material code changed and any required
+  check is unrun or red, when your closing message claims completion while checks are missing or
+  failing, or when there is no verdict (`PASS` / `PASS WITH CONDITIONS` / `BLOCKED` /
+  `NOT VERIFIED`) in it. The block message names the exact commands still owed.
+- State lives in `.claude/.verification-state/<session>.json` (gitignored).
+
+**Safety rails** — a gate that traps the agent is worse than no gate: it never blocks when
+`stop_hook_active` is set, never blocks more than `AUTOLENIS_VERIFICATION_MAX_BLOCKS` times
+(default 2), and any internal error or unwritable state directory degrades to *allow*.
+`AUTOLENIS_VERIFICATION_HOOK=off` disables it entirely; `AUTOLENIS_VERIFICATION_DEBUG=1` traces it.
+
+The gate is a floor, not the loop. It can confirm that commands ran and a verdict exists; it
+cannot confirm that you reviewed the surrounding code (Step 2), fixed root causes rather than
+symptoms (Step 4), exercised the real workflow (Step 5), or genuinely re-reviewed from scratch
+(Step 6). **Satisfying the hook is not satisfying this skill.** Never route around it by writing a
+verdict you have not earned — that is the exact behavior this skill exists to prevent.
+
+Tests: `node --test .claude/hooks/verification/__tests__/lib.test.mjs`.
+
 ## Cross-skill links
 
 - `autolenis-system-architecture` — architectural damage check (Step 2, Step 8).
