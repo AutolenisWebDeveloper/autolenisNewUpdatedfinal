@@ -15,6 +15,7 @@ import {
   resolveChannels,
   isInAppOwnedByCaller,
   INAPP_OWNED_BY_CALLERS,
+  auctionSmsPlan,
   type DealCommPlan,
 } from "../acquisition-comms";
 import { DealStatus, NotificationType } from "@prisma/client";
@@ -176,6 +177,31 @@ test("caller-owned statuses still receive SMS candidacy where action is required
   assert.equal(isInAppOwnedByCaller("PICKUP_SCHEDULED"), true);
   assert.notEqual(pickup.sms, null);
   assert.equal(resolveChannels({ plan: pickup, inAppEnabled: false, smsFeatureEnabled: true }).sms, true);
+});
+
+test("auctionSmsPlan: offers-ready pluralizes and links to the offers page", () => {
+  const one = auctionSmsPlan("OFFERS_READY", 1, "auc-123");
+  assert.match(one.sms, /\b1 offer\b/);
+  assert.doesNotMatch(one.sms, /\b1 offers\b/); // singular count, not "1 offers"
+  assert.equal(one.actionUrl, "/buyer/auction/auc-123/offers");
+
+  const many = auctionSmsPlan("OFFERS_READY", 3, "auc-123");
+  assert.match(many.sms, /3 offers\b/);
+  assert.equal(many.actionUrl, "/buyer/auction/auc-123/offers");
+});
+
+test("auctionSmsPlan: no-match points the buyer at a new request", () => {
+  const p = auctionSmsPlan("NO_MATCH", 0, "auc-9");
+  assert.match(p.sms, /without dealer offers/i);
+  assert.equal(p.actionUrl, "/buyer/requests");
+});
+
+test("auctionSmsPlan bodies exclude URL and opt-out disclosure (added downstream)", () => {
+  for (const kind of ["OFFERS_READY", "NO_MATCH"] as const) {
+    const p = auctionSmsPlan(kind, 2, "auc-x");
+    assert.doesNotMatch(p.sms, /https?:\/\//);
+    assert.doesNotMatch(p.sms, /reply stop/i);
+  }
 });
 
 test("a plan's SMS body excludes the URL and opt-out disclosure (added downstream)", () => {

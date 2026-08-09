@@ -335,6 +335,116 @@ export function smsFeatureEnabled(): boolean {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// AUCTION lifecycle (pre-deal) — SMS-ONLY.
+// `processAuctionClose` already creates the buyer in-app notification AND sends
+// the email for both branches (offers ready / no match). SMS is the one channel
+// that moment lacks, so the orchestrator adds ONLY SMS here — it can never
+// duplicate an existing message.
+// ───────────────────────────────────────────────────────────────────────────
+
+export type AuctionCommKind = "OFFERS_READY" | "NO_MATCH";
+
+export interface AuctionSmsPlan {
+  /** SMS body (without URL or opt-out disclosure — both appended downstream). */
+  sms: string;
+  /** Buyer portal deep-link (relative path). */
+  actionUrl: string;
+}
+
+/**
+ * Pure SMS plan for an auction-close outcome. `OFFERS_READY` drives the buyer to
+ * choose; `NO_MATCH` points them at starting a new request. Total over
+ * AuctionCommKind.
+ */
+export function auctionSmsPlan(
+  kind: AuctionCommKind,
+  offerCount: number,
+  auctionId: string,
+): AuctionSmsPlan {
+  if (kind === "OFFERS_READY") {
+    return {
+      sms: `Your AutoLenis auction closed with ${offerCount} offer${offerCount !== 1 ? "s" : ""} — review your ranked offers and choose your best deal:`,
+      actionUrl: `/buyer/auction/${auctionId}/offers`,
+    };
+  }
+  return {
+    sms: "Your AutoLenis auction closed without dealer offers. Start a new request or request a specific vehicle:",
+    actionUrl: "/buyer/requests",
+  };
+}
+
+export interface AuctionEmitResult {
+  status: "sent" | "deduped" | "skipped" | "no_buyer";
+  sms: SmsOutcome;
+}
+
+/**
+ * Emit the SMS-only auction-close communication. Best-effort and non-throwing —
+ * safe to await inside the auction-close cron seam. Idempotent per
+ * (auction, kind) via the shared guard, on top of processAuctionClose's own
+ * post-close claim.
+ */
+export async function emitAuctionComms(
+  auctionId: string,
+  kind: AuctionCommKind,
+  offerCount: number,
+): Promise<AuctionEmitResult> {
+  try {
+    if (!smsFeatureEnabled()) return { status: "skipped", sms: "disabled" };
+
+    const auction = await prisma.auction.findUnique({
+      where: { id: auctionId },
+      select: {
+        buyer: {
+          select: {
+            firstName: true,
+            phone: true,
+            state: true,
+            zip: true,
+            user: { select: { email: true } },
+          },
+        },
+      },
+    });
+    if (!auction?.buyer) return { status: "no_buyer", sms: "no_contact" };
+
+    const key = `acq-comms:auction:${auctionId}:${kind}`;
+    const guardSupabase = await getGuardSupabase();
+    if (guardSupabase) {
+      try {
+        const { acquireIdempotencyGuard } = await import("@/lib/inngest/idempotency");
+        const claimed = await acquireIdempotencyGuard(guardSupabase, key);
+        if (!claimed) return { status: "deduped", sms: "disabled" };
+      } catch (err) {
+        logger.error("[acq-comms] auction idempotency guard failed — proceeding:", err);
+      }
+    }
+
+    const plan = auctionSmsPlan(kind, offerCount, auctionId);
+    const smsOutcome = await dispatchSms({
+      buyer: auction.buyer,
+      smsBody: plan.sms,
+      actionUrl: plan.actionUrl,
+      idempotencyKey: key,
+    });
+
+    if (guardSupabase) {
+      try {
+        const { updateIdempotencyState } = await import("@/lib/inngest/idempotency");
+        await updateIdempotencyState(guardSupabase, key, "completed", { auctionId, kind, sms: smsOutcome });
+      } catch {
+        /* ledger update is best-effort */
+      }
+    }
+
+    return { status: "sent", sms: smsOutcome };
+  } catch (err) {
+    logger.error("[acq-comms] emitAuctionComms failed:", err);
+    return { status: "skipped", sms: "failed" };
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // DISPATCH SHELL  (impure — best-effort, never throws to the caller)
 // ───────────────────────────────────────────────────────────────────────────
 

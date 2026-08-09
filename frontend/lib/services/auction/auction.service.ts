@@ -11,6 +11,7 @@ import {
   sendOffersReadyEmail,
   sendDealerAuctionClosedNoWinnerEmail,
 } from "@/lib/services/email/resend.service";
+import { emitAuctionComms } from "@/lib/services/notifications/acquisition-comms";
 
 export async function createAuction(buyerId: string, depositId: string) {
   return prisma.auction.create({
@@ -144,6 +145,11 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
         auction._count.offers,
       ).catch(err => logger.error(`[processAuctionClose] buyer email failed for ${auctionId}:`, err));
     }
+
+    // Additive SMS nudge (in-app + email already sent above). SMS is off by
+    // default and fully consent/suppression/quiet-hours gated inside the
+    // orchestrator; best-effort, never throws.
+    await emitAuctionComms(auctionId, "OFFERS_READY", auction._count.offers).catch(() => {});
   } else {
     // NO AUTO-REFUND. The $99 Auction Access Deposit is a non-refundable
     // access fee and is retained when an auction closes with no
@@ -174,6 +180,9 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
         auctionId,
       }).catch(() => {});
     }
+
+    // Additive SMS nudge for the no-offers outcome (in-app already sent above).
+    await emitAuctionComms(auctionId, "NO_MATCH", 0).catch(() => {});
   }
 
   return { offers: auction._count.offers };
