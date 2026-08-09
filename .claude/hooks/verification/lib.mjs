@@ -33,34 +33,17 @@ const EXEMPT_PATTERNS = [
 const CHECKS = [
   { id: 'typecheck', cmd: 'pnpm typecheck', when: () => true, why: 'types' },
   { id: 'lint', cmd: 'pnpm lint', when: () => true, why: 'lint' },
-  { id: 'test', cmd: 'pnpm test', when: () => true, why: 'core service suite' },
   {
-    id: 'test:webhooks', cmd: 'pnpm test:webhooks', why: 'webhook signature + replay',
-    when: (f) => f.includes('app/api/webhooks/'),
+    id: 'test:coverage-check', cmd: 'pnpm test:coverage-check', when: () => true,
+    why: 'no test file unreachable from a test:* script',
   },
+  // `test:all` is the repo's gate and chains all 18 unit suites, so the
+  // per-domain suites are deliberately not listed separately — requiring both
+  // would duplicate the gate rather than extend it. Visual and build are not in
+  // `test:all`, so they stay conditional below.
   {
-    id: 'test:payments', cmd: 'pnpm test:payments', why: 'money paths',
-    when: (f) => /lib\/payments\/|lib\/services\/(payment|deposit)\/|lib\/stripe/.test(f),
-  },
-  {
-    id: 'test:security', cmd: 'pnpm test:security', why: 'authz / PII / rate limits',
-    when: (f) => /lib\/security\/|lib\/auth\/|lib\/(admin|dealer)-auth|proxy\.ts$/.test(f),
-  },
-  {
-    id: 'test:buyer-journey', cmd: 'pnpm test:buyer-journey', why: 'buyer stage machine',
-    when: (f) => f.includes('lib/services/buyer/'),
-  },
-  {
-    id: 'test:content', cmd: 'pnpm test:content', why: 'content pipeline',
-    when: (f) => /lib\/content\/|lib\/services\/content\//.test(f),
-  },
-  {
-    id: 'test:seo', cmd: 'pnpm test:seo', why: 'metadata / JSON-LD / sitemap',
-    when: (f) => /lib\/seo\/|app\/sitemap|app\/robots/.test(f),
-  },
-  {
-    id: 'test:crm', cmd: 'pnpm test:crm', why: 'CRM surfaces',
-    when: (f) => /lib\/crm\/|components\/admin\/crm\//.test(f),
+    id: 'test:all', cmd: 'pnpm test:all', when: () => true,
+    why: 'full 18-suite matrix — `pnpm test` alone is ~a third of it',
   },
   {
     id: 'test:visual', cmd: 'pnpm test:visual', why: 'public UI visual regression',

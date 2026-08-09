@@ -39,19 +39,23 @@ test('backend python is out of gate scope (pnpm checks cannot verify it)', () =>
 
 /* ------------------------------------------------------- required checks --- */
 
-test('every material change requires typecheck, lint and the core suite', () => {
+test('every material change requires typecheck, lint, coverage-check and the full matrix', () => {
   const ids = requiredChecks(['frontend/lib/services/deal/deal.service.ts']).map((c) => c.id);
-  assert.deepEqual(ids, ['typecheck', 'lint', 'test']);
+  assert.deepEqual(ids, ['typecheck', 'lint', 'test:coverage-check', 'test:all']);
 });
 
-test('webhook and payment changes pull in their domain suites', () => {
+test('the gate requires test:all, not the per-domain suites it already chains', () => {
+  // `test:all` runs all 18 unit suites, so requiring test:webhooks/test:payments
+  // alongside it would duplicate the repo's gate instead of extending it.
   const ids = requiredChecks([
     'frontend/app/api/webhooks/stripe/route.ts',
     'frontend/lib/payments/deposit.ts',
   ]).map((c) => c.id);
-  assert.ok(ids.includes('test:webhooks'));
-  assert.ok(ids.includes('test:payments'));
+  assert.ok(ids.includes('test:all'));
+  assert.ok(!ids.includes('test:webhooks'));
+  assert.ok(!ids.includes('test:payments'));
 });
+
 
 test('a public component change requires the visual suite', () => {
   const ids = requiredChecks(['frontend/components/marketing/Hero.tsx']).map((c) => c.id);
@@ -157,8 +161,23 @@ test('completion overclaim detection', () => {
 
 const S = (over = {}) => ({ materialFiles: [], checks: {}, blockCount: 0, ...over });
 const green = {
-  typecheck: { outcome: 'pass' }, lint: { outcome: 'pass' }, test: { outcome: 'pass' },
+  typecheck: { outcome: 'pass' },
+  lint: { outcome: 'pass' },
+  'test:coverage-check': { outcome: 'pass' },
+  'test:all': { outcome: 'pass' },
 };
+
+test('running only the fast subset does not satisfy the gate', () => {
+  const r = evaluate(
+    S({
+      materialFiles: ['frontend/lib/x.ts'],
+      checks: { typecheck: { outcome: 'pass' }, lint: { outcome: 'pass' }, test: { outcome: 'pass' } },
+    }),
+    { finalMessage: 'Verdict: PASS' },
+  );
+  assert.equal(r.block, true);
+  assert.match(r.reason, /pnpm test:all/);
+});
 
 test('a session with no material change is never blocked', () => {
   assert.equal(evaluate(S(), { finalMessage: 'done' }).block, false);
@@ -174,7 +193,7 @@ test('material change with no checks is blocked and names the commands', () => {
 
 test('a red check blocks even when every check has been run', () => {
   const r = evaluate(
-    S({ materialFiles: ['frontend/lib/x.ts'], checks: { ...green, test: { outcome: 'fail' } } }),
+    S({ materialFiles: ['frontend/lib/x.ts'], checks: { ...green, 'test:all': { outcome: 'fail' } } }),
     { finalMessage: 'Verdict: PASS' },
   );
   assert.equal(r.block, true);
@@ -195,9 +214,9 @@ test('green checks plus a verdict pass the gate', () => {
 });
 
 test('unknown-outcome runs satisfy the gate — only explicit failure blocks', () => {
-  const unknown = {
-    typecheck: { outcome: 'unknown' }, lint: { outcome: 'unknown' }, test: { outcome: 'unknown' },
-  };
+  const unknown = Object.fromEntries(
+    Object.keys(green).map((k) => [k, { outcome: 'unknown' }]),
+  );
   const r = evaluate(S({ materialFiles: ['frontend/lib/x.ts'], checks: unknown }),
     { finalMessage: 'Verdict: PASS WITH CONDITIONS' });
   assert.equal(r.block, false);

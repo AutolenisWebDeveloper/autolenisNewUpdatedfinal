@@ -28,7 +28,7 @@ copy, polls, community posts, dealer-recruitment posts, buyer-education posts, r
 ## Core rules — claim safety (non-negotiable)
 Never fabricate: prices · savings · customer results · dealer participation · financing outcomes ·
 approval rates · testimonials · vehicle availability · market statistics. Every quantitative or
-outcome claim must be substantiated (FTC substantiation — see `autolenis-tier-1`); when unproven,
+outcome claim must be substantiated (FTC substantiation); when unproven,
 write educational framing ("how the process works"), not a promise. Sanitize any untrusted signal/
 competitor/Reddit text before it enters a Groq prompt (SOCIAL_ENGINE_AUDIT follow-up).
 
@@ -50,4 +50,4 @@ the gate, and is attribution-ready.
 
 ## Cross-skill links
 `autolenis-social-media-command-center` · `-content-strategy` · `-content-repurposing`;
-`autolenis-ai-safety-and-orchestration` · `autolenis-integrations` · `autolenis-tier-1`.
+`autolenis-ai-safety-and-orchestration` · `autolenis-integrations`.

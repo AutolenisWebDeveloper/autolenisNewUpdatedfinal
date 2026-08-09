@@ -74,9 +74,11 @@ app/**            → thin route handlers & Server Components (no business logic
 
 ## Core rules & invariants
 
-1. **Extend, don't fork.** Before creating a service/table/route, search for an existing one
-   (`grep -ri <concept> frontend/lib/services`). Reuse and extend it. A parallel implementation is
-   a defect even if it works.
+1. **Extend, don't fork.** Before creating a service, table, route, component, hook, utility,
+   queue, worker, job, agent, workflow, integration, or abstraction, run the **reuse-before-create
+   protocol** in [`reference/capability-index.md`](reference/capability-index.md). Reuse or extend
+   what you find. A parallel implementation is a defect even if it works — and if you do create
+   something new, state in the PR what you searched for and why nothing matched.
 2. **Read before write.** Read the current implementation and its callers before changing it. Never
    overwrite a system you have not read.
 3. **Business logic lives in `lib/services/**`.** Route handlers and components stay thin. No raw
@@ -107,14 +109,17 @@ app/**            → thin route handlers & Server Components (no business logic
 **Standard change pipeline (the AutoLenis execution order):**
 
 1. Load this skill, then the relevant `autolenis-<domain>` skill(s).
-2. Inspect the existing implementation (service, models, routes, tests) — read before write.
-3. Plan the change (Superpowers `brainstorming` → `writing-plans` for non-trivial work).
+2. Run the reuse-before-create protocol ([`reference/capability-index.md`](reference/capability-index.md))
+   and inspect the existing implementation (service, models, routes, tests) — read before write.
+3. Produce a written plan for non-trivial work: the owning service, the models touched, the
+   transitions affected, the tests that will prove it, and the rollback.
 4. Write/adjust tests first (see `autolenis-testing-quality-gates`).
 5. Implement inside the existing service layer.
-6. `pnpm typecheck` → `pnpm lint` → `pnpm test` (relevant suites) → browser/E2E where UI changed.
-7. Impeccable audit for UI; Code Review; Security Review for sensitive surfaces.
+6. `pnpm typecheck` → `pnpm lint` → `pnpm test:all` → browser/E2E where UI changed.
+7. Impeccable audit for UI; `/code-review`; `/security-review` for sensitive surfaces.
 8. Validate migrations + RLS + rollback (see `autolenis-supabase-postgres`).
-9. Open a **draft** PR.
+9. `autolenis-production-readiness` gate → explicit PASS / PASS WITH CONDITIONS / BLOCKED.
+10. Open a **draft** PR.
 
 **Adding a new capability:** identify the owning domain → extend that `lib/services/<domain>`
 service → expose it through the matching `app/api/<portal>` route handler → gate it in `proxy.ts`
@@ -172,4 +177,9 @@ if it needs a new protected surface → add the Prisma model/enum via a migratio
 - `autolenis-supabase-postgres` — schema, migrations, RLS.
 - `autolenis-integrations` — third-party adapter rules.
 - `autolenis-nextjs-react` — App Router / RSC conventions.
-- `autolenis-testing-quality-gates` and `autolenis-observability-sre` — verification & production readiness.
+- `autolenis-testing-quality-gates` and `autolenis-observability-sre` — verification & operability.
+- `autolenis-production-readiness` — the completion gate (PASS / CONDITIONS / BLOCKED).
+- `autolenis-debugging` — root-cause loop when something is broken.
+- `autolenis-deal-lifecycle` — the post-acceptance `DealStatus` state machine.
+- `autolenis-inventory-intelligence` — inventory adapters, lanes, freshness.
+- `autolenis-ui-design-system` — the token layer and the promoted component kit.

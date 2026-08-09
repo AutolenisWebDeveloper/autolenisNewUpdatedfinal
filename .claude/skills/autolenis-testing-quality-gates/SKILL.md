@@ -44,10 +44,24 @@ Runner: **`node:test` via `tsx`** (not Jest/Vitest). Visual: **Playwright**
 - `test:content`, `test:admin-content`, `test:buyer-insurance`,
   `test:buyer-plan`, `test:security`, `test:webhooks`, `test:payments`,
   `test:format`, `test:api-client`, `test:buyer-journey`, `test:buyer-nav`,
-  `test:crm-audit`, `test:seo`, `test:crm` — targeted suites (several use
+  `test:crm-audit`, `test:seo`, `test:crm`, `test:dealer`, `test:amips`,
+  `test:admin-deals` — targeted suites (several use
   `--experimental-test-module-mocks` for module mocking).
+- **`test:all` — the aggregate gate.** Runs all 18 suites (315 assertions as of
+  2026-08). `pnpm test` alone is roughly a third of the matrix; a readiness
+  claim based on it is incomplete.
+- **`test:coverage-check`** — `scripts/check-test-coverage.ts`. Fails if any
+  `*.test.ts(x)` in the tree is unreachable from every `test*` script. This
+  guard exists because the 2026-08 audit found three orphaned suites (20
+  passing assertions that no script invoked). **A test nothing runs is not
+  coverage.**
 - `test:visual` / `test:visual:update` — Playwright visual regression.
 - `typecheck` (`tsc --noEmit`) and `lint` (`eslint`) — necessary, not sufficient.
+
+**CI** (`.github/workflows/ci.yml`) runs typecheck → lint → `test:coverage-check`
+→ `test:all` → build, plus a `dependency-audit` job that blocks on **critical**
+advisories and reports **high** ones. Before 2026-08, CI ran only `pnpm test`,
+so 14 of 15 suites were written but never enforced on a PR.
 
 Existing `__tests__` directories (extend the nearest one; do not invent a new
 harness): `lib/services/{prequal,dealer-recruitment,deal,auction,affiliate,
@@ -56,6 +70,10 @@ content/__tests__,seo/__tests__,payments/__tests__,social/__tests__,
 security/__tests__,crm/__tests__}`, `lib/amips/intelligence/__tests__`,
 `app/api/{admin/deals,admin/content,buyer/insurance,buyer/plan,webhooks}/__tests__`,
 `components/admin/crm/__tests__`.
+
+**Adding a test file to a new location also means adding/extending a `test:*`
+script and adding it to `test:all`** — otherwise `test:coverage-check` fails the
+build, by design.
 
 ## Core rules & invariants
 
@@ -141,8 +159,9 @@ security/__tests__,crm/__tests__}`, `lib/amips/intelligence/__tests__`,
    the test passes and the surrounding suite stays green.
 
 **Before merge (gate)**
-`pnpm typecheck` && `pnpm lint` && the affected `pnpm test*` suites green &&
-(`pnpm test:visual` for public UI) && required buyer/dealer paths green.
+`pnpm typecheck` && `pnpm lint` && `pnpm test:coverage-check` && `pnpm test:all`
+green && (`pnpm test:visual` for public UI) && required buyer/dealer paths
+green. Then issue the verdict via `autolenis-production-readiness`.
 
 ## Boundaries — do / never
 
@@ -154,6 +173,8 @@ security/__tests__,crm/__tests__}`, `lib/amips/intelligence/__tests__`,
 - Update visual snapshots deliberately with review.
 
 **Never**
+- Add a test file without a `test:*` script that runs it (`test:coverage-check`
+  will fail the build).
 - Treat `tsc --noEmit`/build success or manual clicking as sufficient.
 - Make live external calls or hit a real DB/model in tests.
 - Assert only the happy path on a state machine or money flow.
@@ -201,8 +222,10 @@ test("replayed stripe deposit webhook does not double-credit", async () => {
 - [ ] AI changes test output validation + disabled-kill-switch fallback.
 - [ ] Public UI changes have an intentional Playwright visual snapshot.
 - [ ] Required buyer and dealer critical paths remain green.
-- [ ] `pnpm typecheck` + `pnpm lint` + affected `pnpm test*` suites all pass —
-      and this is understood as necessary but not, by itself, "done".
+- [ ] Every new test file is reachable from a `test:*` script and included in
+      `test:all` (`pnpm test:coverage-check` passes).
+- [ ] `pnpm typecheck` + `pnpm lint` + `pnpm test:all` all pass — and this is
+      understood as necessary but not, by itself, "done".
 
 ## Cross-skill links
 
@@ -214,3 +237,6 @@ test("replayed stripe deposit webhook does not double-credit", async () => {
   machines the E2E paths exercise.
 - `autolenis-observability-sre` — post-deploy verification and rollback.
 - `autolenis-domain-model` — exact enum values under test.
+- `autolenis-deal-lifecycle` — the `DealStatus` guard tests and the deal E2E path.
+- `autolenis-debugging` — the failing-first regression loop for bug fixes.
+- `autolenis-production-readiness` — the verdict this gate feeds.

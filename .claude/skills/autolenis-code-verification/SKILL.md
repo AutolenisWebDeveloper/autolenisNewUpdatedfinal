@@ -1,17 +1,15 @@
 ---
 name: autolenis-code-verification
 description: >-
-  The mandatory review → fix → test → independent re-review loop that decides when AutoLenis
-  work is actually finished. Owns first-pass code review of changed and materially affected code,
-  executable verification (typecheck, lint, unit/integration/API/security/webhook/visual suites,
-  build), root-cause remediation, full-workflow E2E verification, a from-scratch second review
-  performed as if another engineer wrote the code, regression verification, the production-readiness
-  verdict (PASS / PASS WITH CONDITIONS / BLOCKED), and the evidence-based completion report.
-  Use this skill at the end of EVERY material implementation, modification, bug fix, refactor,
-  workflow change, schema/migration change, API change, AI change, integration change, or frontend
-  change — and whenever you are about to tell the user something works, is done, or is production
-  ready. It overrides any impulse to declare completion after writing code, a single review, or one
-  green build.
+  The iterative review → fix → retest → independent re-review loop that must run before AutoLenis
+  work can be called finished, plus the hooks that enforce it mechanically. Owns the first-pass
+  review of changed and materially affected code, the second from-scratch review performed as if
+  another engineer wrote it, the regression pass between them, full-workflow end-to-end exercise,
+  and the completion report. Delegates root-cause work to autolenis-debugging and the final
+  ship/no-ship gate to autolenis-production-readiness rather than restating either. Use this skill
+  when an implementation, fix, refactor, schema/API/AI/integration/frontend change is written but
+  not yet proven, and whenever you are about to write "done", "works", "fixed", or "ready". It
+  overrides any impulse to stop after one review pass or one green build.
 ---
 
 # AutoLenis — Code Verification Loop
@@ -93,7 +91,9 @@ evidence.** From `frontend/`:
 | --- | --- | --- |
 | Types | `pnpm typecheck` | always |
 | Lint | `pnpm lint` | always |
-| Core services | `pnpm test` | always |
+| Test reachability | `pnpm test:coverage-check` | always |
+| **Full matrix (the gate)** | `pnpm test:all` | always — all 18 suites |
+| Core services (subset) | `pnpm test` | fast inner loop only; ~⅓ of `test:all` |
 | Payments / money | `pnpm test:payments` | deposits, fees, refunds, ledger |
 | Security / authz | `pnpm test:security` | auth, roles, CSRF, rate limits, PII |
 | Webhooks | `pnpm test:webhooks` | any `app/api/webhooks/*` change |
@@ -111,10 +111,12 @@ Browser/E2E work uses the **Playwright MCP** to actually exercise workflows. `pn
 
 ### STEP 4 — FIX ALL MATERIAL DEFECTS
 
-For each finding: **(1)** identify the root cause — not the symptom; **(2)** determine the blast
-radius; **(3)** correct the root cause; **(4)** update affected implementation; **(5)** add or
-improve regression coverage; **(6)** re-run the failed verification; **(7)** re-run materially
-related verification.
+**Load `autolenis-debugging` and follow it** — it owns the reproduce → evidence → trace → root
+cause → blast radius → fix-at-cause → failing-first regression test discipline. This step's job is
+only to insist it happens: for each finding, **(1)** root cause, not symptom; **(2)** blast radius;
+**(3)** fix the cause; **(4)** update affected implementation; **(5)** add regression coverage that
+would have caught it; **(6)** re-run the failed verification; **(7)** re-run materially related
+verification.
 
 Never bypass or weaken a test to obtain a pass. Never suppress an error instead of fixing it.
 Never remove validation, authorization, or a security control to make a workflow succeed.
@@ -171,7 +173,9 @@ components, shared adapters).
 
 ### STEP 8 — PRODUCTION-READINESS CHECK
 
-Run the applicable governance passes before declaring completion:
+**`autolenis-production-readiness` is the gate — load it and follow it.** Its six review lenses
+and conditional check table decide the verdict; do not re-derive them here. `/autolenis-verify`
+runs that gate end-to-end. The passes it draws on:
 
 - **Security** — `autolenis-auth-security-privacy` + the `security-review` capability for auth,
   PII, payments, webhooks, migrations, or AI-tool changes.
@@ -296,6 +300,9 @@ Tests: `node --test .claude/hooks/verification/__tests__/lib.test.mjs`.
 
 ## Cross-skill links
 
+- `autolenis-debugging` — root-cause discipline and failing-first regression tests (Step 4).
+- `autolenis-production-readiness` — the completion gate and verdict (Step 8); the verify slash
+  command in `.claude/commands/` runs that gate end-to-end.
 - `autolenis-system-architecture` — architectural damage check (Step 2, Step 8).
 - `autolenis-testing-quality-gates` — the test matrix, critical paths, and merge gate (Step 3, 5).
 - `autolenis-auth-security-privacy` + `security-review` — security review (Step 8).
@@ -305,9 +312,14 @@ Tests: `node --test .claude/hooks/verification/__tests__/lib.test.mjs`.
 - `/code-review` capability — line-level review (Step 2, Step 6).
 - Playwright MCP — real browser/workflow execution (Step 3, Step 5).
 
-> **Naming note.** Debugging, test-engineering, security-audit, self-review, production-readiness,
-> and architecture-governance are *responsibilities of this loop plus the skills above*, not
-> separate skills in this repo. Root-cause debugging is Step 4; test engineering is
-> `autolenis-testing-quality-gates`; security audit is `autolenis-auth-security-privacy` +
-> `security-review`; self-review is Step 6; production readiness is Step 8; architecture governance
-> is `autolenis-system-architecture`. Do not create duplicate skills under those names.
+> **Boundary with `autolenis-production-readiness`.** That skill is the *gate*: six review lenses
+> and a conditional check table, run once at the end, producing the verdict. This skill is the
+> *loop* that gets you there — two distinct reviews with fixes and a regression pass between them,
+> plus the mechanical enforcement below. Step 8 hands off to it rather than restating it; the
+> verdict vocabulary is shared deliberately. Likewise Step 4 hands root-cause work to
+> `autolenis-debugging`. Do not fork either skill's content back into this one.
+>
+> Self-review (Step 6) and the iteration discipline are what this skill uniquely owns. Test
+> engineering lives in `autolenis-testing-quality-gates`, security audit in
+> `autolenis-auth-security-privacy` + `/security-review`, architecture governance in
+> `autolenis-system-architecture`.

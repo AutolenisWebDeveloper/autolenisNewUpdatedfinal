@@ -205,7 +205,7 @@ Classify only through the constant thresholds — PASS ≥ 85, WARNING 70–84, 
 
 ## Cross-skill links
 
-- `autolenis-master` / `autolenis-system-architecture` — repo-wide standards and the
+- `autolenis-system-architecture` — repo-wide standards and the
   service/portal boundaries this scanner lives within.
 - `autolenis-domain-model` — `ContractScanRuleType`, `ContractVersionStatus`, `DealStatus`
   and model relations.
