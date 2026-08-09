@@ -226,5 +226,5 @@ audit trails. Any new PII table must declare its retention and deletion path.
   on-call paging from the limiter.
 - `autolenis-communications-consent` — Twilio/Resend consent, suppression, and
   anti-circumvention on messaging.
-- `autolenis-system-architecture` / `autolenis-master` — cross-cutting
+- `autolenis-system-architecture` — cross-cutting
   standards and the DO-NOT-MODIFY perimeter.

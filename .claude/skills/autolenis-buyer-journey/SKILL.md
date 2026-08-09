@@ -207,7 +207,8 @@ const { currentStage, unlockedStages } = computeJourney(facts); // journey.ts
 
 ## Cross-skill links
 
-- `autolenis-master` — platform-wide context and engineering standards.
+- `autolenis-system-architecture` — platform-wide context and engineering standards.
+- `autolenis-deal-lifecycle` — the stages after an offer is accepted.
 - `autolenis-auction-engine` — deposit → auction → offer flow the journey feeds.
 - `autolenis-best-price-report` — how buyers see ranked offers post-auction.
 - `autolenis-payments-and-ledger` — `$99` deposit / concierge fee mechanics.
