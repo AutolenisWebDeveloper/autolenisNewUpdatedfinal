@@ -25,6 +25,9 @@ Inngest/QStash · Sentry. **App root: `frontend/`.**
 3. **Server-side authorization always** — frontend role checks are UX only.
 4. **Money is integer minor units; never trust client payment status; webhooks are verified + idempotent.**
 5. **"TypeScript compiles" is never "done."** Ship only through the pipeline below.
+6. **Writing the code is not finishing the work.** Every material change runs the
+   review → fix → test → independent re-review loop (`autolenis-code-verification`) and ends with
+   an evidence-based verdict. Never claim something works without executable evidence.
 
 ## Skill routing — load these before touching code
 
@@ -48,6 +51,7 @@ domain skill(s) matching the task:
 | SMS/email consent, A2P 10DLC, STOP/HELP, templates | `autolenis-communications-consent` |
 | AI actions, guardrails, prompt-injection, kill switch | `autolenis-ai-safety-and-orchestration` |
 | Test matrix, E2E paths, quality gates | `autolenis-testing-quality-gates` |
+| **Verifying finished work** — review, fix, retest, re-review, sign-off | `autolenis-code-verification` (load last, always) |
 | Logging, metrics, alerts, cron/job monitoring, runbooks | `autolenis-observability-sre` |
 | Accessibility, Core Web Vitals, SEO | `autolenis-accessibility-performance-seo` |
 | **Social media** orchestration, calendar, publishing, approvals, attribution | `autolenis-social-media-command-center` (load first) |
@@ -95,11 +99,73 @@ provides the disciplined planning/TDD/review workflow.
 10. `pnpm lint`
 11. `pnpm test` (+ the relevant `pnpm test:*` suites for the domain).
 12. Browser E2E / visual tests where UI changed (`pnpm test:visual`, Playwright / Webapp Testing).
-13. Impeccable audit for UI work.
-14. Code Review.
-15. Security Review for auth / PII / payments / webhooks / migrations / AI-tool changes.
-16. Validate migrations, RLS, and rollback safety (`autolenis-supabase-postgres`).
-17. Open a **draft** Pull Request.
+13. **Run the mandatory verification loop below (`autolenis-code-verification`) — steps 1–9.**
+14. Open a **draft** Pull Request, attaching the verification report and verdict.
+
+## Mandatory code review → fix → test → re-review loop
+
+`autolenis-code-verification` is the terminal authority on completion. Load it at the end of every
+material change and before writing any completion language ("done", "works", "fixed", "ready",
+"production ready"). **No material implementation is complete immediately after code is written.**
+
+Applies to every significant implementation, modification, bug fix, refactor, workflow change,
+database change, API change, AI change, integration change, or frontend change.
+
+**STEP 1 — IMPLEMENT.** Build inside the existing architecture using the skills above. Do not stop
+after implementation.
+
+**STEP 2 — FIRST CODE REVIEW.** Review the changed code *and all materially affected surrounding
+code* — trace callers, dependencies, consumers, database relationships, workflows, and downstream
+effects. Inspect for incorrect logic, incomplete implementation, regressions, broken imports, bad
+types, invalid assumptions, duplicated functionality, architectural inconsistency, race conditions,
+concurrency and state-management defects, transaction/database/RLS problems, authorization
+weaknesses, security vulnerabilities, validation gaps, weak error handling, silent failures, API
+contract violations, integration failures, accessibility and responsive regressions, performance
+regressions, dead code, placeholders, TODOs, and mocks/stubs left in production paths.
+
+**STEP 3 — RUN VERIFICATION.** Run every applicable executable check: typecheck, lint, unit,
+integration, API, database, RLS/security, component, browser/E2E, workflow, regression, build,
+accessibility. **Never claim something works because the code looks correct.**
+
+**STEP 4 — FIX ALL MATERIAL DEFECTS.** Root-cause it, size the blast radius, fix the cause, update
+affected code, add regression coverage, re-run the failed check and everything materially related.
+Never weaken or bypass a test, suppress an error instead of fixing it, or remove validation or a
+security control to make a workflow pass.
+
+**STEP 5 — TEST THE ACTUAL USER WORKFLOW.** Verify the complete path end-to-end (e.g. buyer request
+→ persistence → acquisition intake → inventory discovery → normalization → scoring → dealer routing
+→ outreach → dealer response → offer normalization → negotiation → recommendations → buyer results
+→ selection → downstream transaction), covering happy path, failure path, empty state, invalid
+input, duplicate request, retry, timeout, partial provider failure, stale data, authorization
+failure, concurrency, and recovery.
+
+**STEP 6 — INDEPENDENT SECOND REVIEW.** Re-read the final implementation as though another engineer
+wrote it. Do not rely on the first review's conclusions — your own fixes are new, unreviewed code.
+Ask whether it is actually correct, whether a fix introduced a defect, whether existing architecture
+should have been reused, and whether state transitions, database writes, retry idempotency, authz
+boundaries, PII protection, observability, recovery, and frontend/backend state agreement hold under
+realistic production conditions. Fix what you find.
+
+**STEP 7 — REGRESSION VERIFICATION.** Re-run the applicable suites *after* the final fix. A fix that
+repairs the feature while breaking another part of AutoLenis is not complete — check neighboring
+systems and shared dependencies.
+
+**STEP 8 — PRODUCTION-READINESS CHECK.** Run the security, testing, architecture, data/RLS,
+UI, and observability passes. Verdict is evidence-based: **PASS** · **PASS WITH CONDITIONS** ·
+**BLOCKED**.
+
+**STEP 9 — EVIDENCE-BASED COMPLETION.** Report files changed, root causes corrected, tests executed
+/ passed / failed, failures corrected, E2E workflows verified, security checks performed,
+second-review findings, regression checks, unresolved issues, and the final verdict. Never write
+"Everything is working" without executable evidence. Anything blocked by missing credentials,
+unavailable services, environment limits, or missing test infrastructure is reported as
+**NOT VERIFIED**, naming exactly what is needed to verify it.
+
+> The loop is iterative: PLAN → IMPLEMENT → REVIEW → TEST → FIND DEFECTS → FIX → RETEST →
+> INDEPENDENT RE-REVIEW → FIND REMAINING DEFECTS → FIX → REGRESSION TEST → E2E VERIFY →
+> SECURITY REVIEW → PRODUCTION-READINESS REVIEW → COMPLETE. Any material defect found late sends
+> you back to the appropriate earlier stage. **The process ends when the implementation is
+> verified — not when the code has been written.**
 
 ## Commands (run from `frontend/`)
 
@@ -129,3 +195,5 @@ least-privilege rules (production DB / payments / messaging default to read-only
 - Install unverified "mega skill packs," skills that auto-run shell commands or auto-install deps,
   or duplicate architecture skills.
 - Expose environment variables or service-role keys to the client.
+- Declare work complete, working, or production ready without executable evidence — or weaken a
+  test, suppress an error, or remove a validation/security control to obtain a passing result.
