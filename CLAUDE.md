@@ -101,6 +101,18 @@ environment. Never treat an unavailable capability as a completed pipeline step 
 `.claude/skills/autolenis-*` skills are the only guaranteed-present guidance, and step 4 below
 stands on its own without any plugin.
 
+## Continuous skill observation (Task Observer)
+
+At the start of any task-oriented session — any interaction where you will use tools and produce
+deliverables — invoke the `task-observer` skill before beginning work. This ensures skill
+improvement opportunities (user corrections, workflow gaps, new/improved-skill candidates) are
+captured throughout the session into the observation log.
+
+When loading any skill, check the observation log for OPEN observations relevant to it. Load
+`task-observer` independently from configuration — never chain its activation through another
+skill; a broken chain silences all observation activity. Task Observer logs and defers by default:
+it does not modify existing skills automatically.
+
 ## Mandatory development pipeline
 
 1. Read this file (`CLAUDE.md`).
