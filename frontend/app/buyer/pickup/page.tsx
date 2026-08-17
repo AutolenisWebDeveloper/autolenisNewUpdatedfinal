@@ -5,9 +5,10 @@ export const metadata: Metadata = { title: "Vehicle Pickup", robots: { index: fa
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
-import { MapPin, QrCode, CheckCircle2 } from "lucide-react";
+import { MapPin, QrCode, CheckCircle2, FileSignature } from "lucide-react";
 import PickupScheduleForm from "@/components/buyer/PickupScheduleForm";
 import PickupRescheduleButton from "@/components/buyer/PickupRescheduleButton";
+import { resolveDealerAvailability } from "@/lib/services/pickup/availability.service";
 
 export const dynamic = "force-dynamic";
 
@@ -15,12 +16,13 @@ export default async function PickupPage() {
   const buyer = await requireBuyer();
   const deal = await prisma.deal.findFirst({
     where: { buyerId: buyer.id },
-    include: { pickup: true, eSignEnvelope: true },
+    include: { pickup: true, eSignEnvelope: true, offer: { select: { dealerId: true } } },
     orderBy: { createdAt: "desc" },
   });
 
   const pickup = deal?.pickup;
   const eSignCompleted = deal?.eSignEnvelope?.status === "COMPLETED";
+  const availability = resolveDealerAvailability(deal?.offer?.dealerId ?? null);
 
   const now = new Date();
   const expiresAt = pickup?.qrExpiresAt ? new Date(pickup.qrExpiresAt) : null;
@@ -37,14 +39,27 @@ export default async function PickupPage() {
       </div>
 
       {!pickup ? (
-        <div className="text-center py-12" data-testid="pickup-not-scheduled">
-          {eSignCompleted ? (
-            <div className="bg-white border border-slate-200 rounded-xl p-6 text-left" data-testid="pickup-schedule-container">
-              <h2 className="font-semibold text-slate-800 mb-4">Schedule Your Pickup</h2>
-              {deal && <PickupScheduleForm dealId={deal.id} />}
+        <div data-testid="pickup-not-scheduled">
+          {eSignCompleted && deal ? (
+            <div className="bg-al-surface border border-al-border rounded-al-lg p-6 shadow-al-1" data-testid="pickup-schedule-container">
+              <h2 className="font-display text-lg font-semibold text-al-text mb-1">Schedule your pickup</h2>
+              <p className="text-sm text-al-text-muted mb-5">
+                Pick a time that works for you — no waiting on us. You&apos;ll get a single-use QR code to present at the lot.
+              </p>
+              <PickupScheduleForm dealId={deal.id} availability={availability} />
             </div>
           ) : (
-            <p className="text-slate-500 text-sm mb-4">Pickup scheduling will be available once your contract is signed.</p>
+            <div
+              className="flex flex-col items-center text-center bg-al-surface border border-al-border rounded-al-lg p-10"
+              data-testid="pickup-blocked-unsigned"
+            >
+              <FileSignature size={28} className="text-al-text-subtle mb-3" aria-hidden="true" />
+              <h2 className="font-display text-base font-semibold text-al-text mb-1">Almost there</h2>
+              <p className="text-sm text-al-text-muted max-w-sm mb-5">
+                Pickup scheduling opens as soon as your documents are signed. Finish signing and this step unlocks automatically.
+              </p>
+              <Button href="/buyer/esign" variant="secondary" size="sm">Go to signing</Button>
+            </div>
           )}
         </div>
       ) : pickup.status === "COMPLETED" ? (
