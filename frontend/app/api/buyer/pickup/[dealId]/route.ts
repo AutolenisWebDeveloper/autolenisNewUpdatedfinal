@@ -3,7 +3,9 @@ import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { scheduleVehiclePickup, reschedulePickup } from "@/lib/services/pickup/scheduling.service";
+import { scheduleVehiclePickup } from "@/lib/services/pickup/scheduling.service";
+import { resolveDealerAvailability, isWithinAvailability } from "@/lib/services/pickup/availability.service";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -29,7 +31,7 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id },
-    include: { eSignEnvelope: true },
+    include: { eSignEnvelope: true, offer: { select: { dealerId: true } } },
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
@@ -38,6 +40,16 @@ export async function POST(request: NextRequest, { params }: Props) {
       "PREREQUISITE_NOT_MET",
       "Pickup can only be scheduled after all documents have been signed.",
       400
+    );
+  }
+
+  // Only a signed (or already-scheduled, i.e. re-scheduling) deal may book a
+  // pickup — never a completed, cancelled, or refunded one.
+  if (deal.status !== "SIGNED" && deal.status !== "PICKUP_SCHEDULED") {
+    return errorResponse(
+      "INVALID_STATE",
+      "This deal isn't ready for pickup scheduling.",
+      409
     );
   }
 
@@ -50,18 +62,38 @@ export async function POST(request: NextRequest, { params }: Props) {
     return errorResponse("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
   }
 
-  const pickup = await scheduleVehiclePickup(
-    dealId,
-    new Date(parsed.data.scheduledAt),
-    parsed.data.location,
-  );
+  // Buyer self-scheduling is bounded by the dealer's availability window. This is
+  // the server-authoritative gate; the UI shows the same limits (single seam) but
+  // the check here is what actually rejects an out-of-window slot.
+  const scheduledAt = new Date(parsed.data.scheduledAt);
+  const availability = resolveDealerAvailability(deal.offer?.dealerId ?? null);
+  const within = isWithinAvailability(availability, scheduledAt, new Date());
+  if (!within.ok) {
+    return errorResponse("VALIDATION_ERROR", within.reason, 400);
+  }
+
+  const pickup = await scheduleVehiclePickup(dealId, scheduledAt, parsed.data.location);
+
+  // Automated scheduling: the buyer's own slot selection drives the deal forward
+  // through the guarded (non-forced) seam — no admin action required. Only a deal
+  // still in SIGNED transitions; a re-schedule of an already-scheduled deal skips
+  // the (now illegal) transition. advanceDealStatus records DealStatusHistory and
+  // fires the caller-aware buyer comms for PICKUP_SCHEDULED.
+  if (deal.status === "SIGNED") {
+    await advanceDealStatus(dealId, "PICKUP_SCHEDULED", {
+      actorId: buyer.id,
+      actorRole: "BUYER",
+      reason: "Buyer self-scheduled vehicle pickup",
+    });
+  }
 
   await prisma.notification.create({
     data: {
       buyerId: buyer.id,
-      type: "DEAL_STAGE_CHANGED",
+      type: "PICKUP_SCHEDULED",
       title: "Pickup scheduled",
-      body: `Your vehicle pickup is confirmed for ${new Date(parsed.data.scheduledAt).toLocaleDateString()}.`,
+      body: `Your vehicle pickup is confirmed for ${scheduledAt.toLocaleDateString()}.`,
+      actionUrl: "/buyer/pickup",
     },
   }).catch((err: unknown) => { logger.error("[PickupSchedule] Failed to create notification:", err); });
 

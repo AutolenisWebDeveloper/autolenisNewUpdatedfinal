@@ -2,16 +2,11 @@ import { logger } from "@/lib/logger";
 import { NextRequest, after } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
-import {
-  sendDealSelectedEmail,
-  sendDealerOfferWonEmail,
-  sendDealerOfferLostEmail,
-} from "@/lib/services/email/resend.service";
+import { sendDealSelectedEmail } from "@/lib/services/email/resend.service";
+import { emitDealerAwardOutcomes } from "@/lib/services/notifications/dealer-award";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { recordMarketplaceFromAuction } from "@/lib/amips/pipelines/marketplace-intelligence.recorder";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
-
-const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 interface Props { params: Promise<{ auctionId: string }> }
 
@@ -117,47 +112,14 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
   syncGhlTag(buyerWithEmail?.user?.email, "offer-selected");
 
-  // Notify every dealer that submitted an offer — winner vs lost — non-blocking.
-  const allOffers = await prisma.offer.findMany({
-    where: { auctionId },
-    include: { dealer: { include: { user: { select: { email: true } } } } },
-  }).catch(() => []);
-  const vehicleRef = `Auction ${auctionId.slice(0, 8)}`;
-  const buyerFirstName = buyerWithEmail?.firstName ?? "Buyer";
-  const buyerLastInitial = (buyerWithEmail?.lastName ?? "").charAt(0) || "";
-  const totalOffers = allOffers.length;
-  // Position assigned by rank in submitted offers (1 = lowest OTD).
-  const sortedByOtd = [...allOffers].sort((a, b) => a.otdPriceCents - b.otdPriceCents);
-  for (let i = 0; i < sortedByOtd.length; i++) {
-    const offerRow = sortedByOtd[i];
-    // Outside / unregistered dealer offers share the system placeholder Dealer,
-    // so prefer the real external contact captured on the offer itself.
-    const dealerEmail = offerRow.externalDealerEmail ?? offerRow.dealer?.user?.email;
-    if (!dealerEmail) continue;
-    const dealershipName = offerRow.externalDealerName ?? offerRow.dealer?.dealershipName ?? "Dealer";
-    if (offerRow.id === offer.id) {
-      await sendDealerOfferWonEmail({
-        to: dealerEmail,
-        contactName: dealershipName,
-        vehicleRef,
-        buyerFirstName,
-        buyerLastInitial,
-        dealUrl: `${APP_URL}/dealer/deals/${deal.id}`,
-        dealId: deal.id,
-      }).catch(err => logger.error("[select-offer] dealer won email failed:", err));
-      syncGhlTag(dealerEmail, "dealer-won");
-    } else {
-      await sendDealerOfferLostEmail({
-        to: dealerEmail,
-        contactName: dealershipName,
-        vehicleRef,
-        yourPosition: i + 1,
-        totalOffers,
-        insightsUrl: `${APP_URL}/dealer/opportunities`,
-        auctionId,
-      }).catch(err => logger.error("[select-offer] dealer lost email failed:", err));
-    }
-  }
+  // G1 — notify every dealer that competed: the winner gets an award notification
+  // (email + in-app) with a buyer-safe handoff, and each other bidder gets a
+  // non-award close-out. Single tested seam (planner + dispatcher), idempotent and
+  // self-contained; runs off the request path so it never affects the committed
+  // selection. Outside/placeholder dealers get email only (no dealer account).
+  after(() =>
+    emitDealerAwardOutcomes({ auctionId, winningOfferId: offer.id, dealId: deal.id }),
+  );
 
   // CRM event spine — emit offer_selected for the buyer after the deal has
   // formed. Additive tail call: a failure never affects the selection, which

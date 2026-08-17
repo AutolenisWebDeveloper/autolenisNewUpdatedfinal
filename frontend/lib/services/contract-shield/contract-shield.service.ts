@@ -3,8 +3,12 @@
 // Integrates with violation-pattern.service for repeat tracking
 
 import { prisma } from "@/lib/prisma";
+import { DealStatus } from "@prisma/client";
+import { logger } from "@/lib/logger";
 import { getContractShieldResult } from "@/lib/constants";
 import { trackViolationPattern } from "./violation-pattern.service";
+import { advanceDealStatus } from "@/lib/services/deal/deal.service";
+import { createEnvelope } from "@/lib/services/esign/esign.service";
 import {
   sendContractShieldAlertEmail,
   sendContractApprovedEmail,
@@ -187,7 +191,144 @@ export async function scanContract(dealId: string, contractText: string, dealerI
   // Notify buyer via email based on scan result
   notifyBuyerContractScan(dealId, status, fixList.length).catch(() => {});
 
+  // G2 — on a high-confidence PASS, auto-advance the deal to CONTRACT_APPROVED
+  // through the guarded seam and fire the DocuSign envelope, removing the manual
+  // admin approve click. WARNING/FAIL still hold for human review. Self-contained
+  // and idempotent — it never breaks the scan result.
+  await autoAdvanceContractOnPass(dealId, status);
+
   return { score, status, fixList };
+}
+
+/**
+ * Pure decision core for Contract Shield auto-advance. Given the deal's current
+ * status and the scan classification, return the ordered legal transitions to
+ * apply and whether to fire the DocuSign envelope.
+ *
+ * - Only a PASS advances anything (WARNING/FAIL hold for human review).
+ * - The deal is walked forward only from the contract-review states along the
+ *   legal path (CONTRACT_PENDING → CONTRACT_REVIEW → CONTRACT_APPROVED).
+ * - A deal already at/after CONTRACT_APPROVED is a no-op (idempotent re-scan),
+ *   and a deal not yet in the contract stage is never force-jumped.
+ */
+export function planContractAutoAdvance(
+  current: DealStatus,
+  scanStatus: string,
+): { transitions: DealStatus[]; fireEnvelope: boolean } {
+  if (scanStatus !== "PASS") return { transitions: [], fireEnvelope: false };
+  if (current === DealStatus.CONTRACT_PENDING) {
+    return { transitions: [DealStatus.CONTRACT_REVIEW, DealStatus.CONTRACT_APPROVED], fireEnvelope: true };
+  }
+  if (current === DealStatus.CONTRACT_REVIEW) {
+    return { transitions: [DealStatus.CONTRACT_APPROVED], fireEnvelope: true };
+  }
+  return { transitions: [], fireEnvelope: false };
+}
+
+/**
+ * Impure auto-approval seam: on PASS, walk the deal to CONTRACT_APPROVED through
+ * the guarded (non-forced) `advanceDealStatus` seam, fire the DocuSign envelope
+ * once (dealId-unique upsert makes `createEnvelope` safe under re-scan), and
+ * create the caller-owned buyer/dealer CONTRACT_APPROVED in-app notifications
+ * (the comms orchestrator treats CONTRACT_APPROVED as caller-owned, so this seam
+ * must write them). Self-contained: swallows its own errors so a notification or
+ * envelope failure never corrupts the scan.
+ */
+export async function autoAdvanceContractOnPass(dealId: string, scanStatus: string): Promise<void> {
+  try {
+    if (scanStatus !== "PASS") return;
+
+    const deal = await prisma.deal.findUnique({
+      where: { id: dealId },
+      include: {
+        buyer: { include: { user: { select: { email: true } } } },
+        offer: { include: { dealer: { include: { user: { select: { email: true } } } } } },
+      },
+    });
+    if (!deal) return;
+
+    const plan = planContractAutoAdvance(deal.status, scanStatus);
+    if (plan.transitions.length === 0) return;
+
+    for (const to of plan.transitions) {
+      await advanceDealStatus(dealId, to, {
+        actorRole: "SYSTEM",
+        reason: "Contract Shield auto-approval (PASS ≥ 85)",
+      });
+    }
+
+    if (plan.fireEnvelope) {
+      const buyerEmail = deal.buyer?.user?.email ?? undefined;
+      const buyerName =
+        `${deal.buyer?.firstName ?? ""} ${deal.buyer?.lastName ?? ""}`.trim() || undefined;
+      if (buyerEmail) {
+        await createEnvelope(dealId, buyerEmail, buyerName).catch((err) =>
+          logger.error("[contract-shield] auto createEnvelope failed:", err),
+        );
+      } else {
+        logger.error(`[contract-shield] auto-approve: no buyer email for deal ${dealId}; envelope not sent`);
+      }
+
+      await createContractApprovedNotifications(dealId, deal.buyerId, deal.offer?.dealer?.id ?? null);
+    }
+  } catch (err) {
+    logger.error("[contract-shield] autoAdvanceContractOnPass failed:", err);
+  }
+}
+
+/**
+ * Caller-owned CONTRACT_APPROVED in-app notifications (buyer + dealer), deduped
+ * on a stable metadata key so a retried/re-scanned approval cannot double-notify.
+ */
+async function createContractApprovedNotifications(
+  dealId: string,
+  buyerId: string,
+  dealerId: string | null,
+): Promise<void> {
+  const buyerKey = `contract-approved:${dealId}`;
+  try {
+    const existing = await prisma.notification.findFirst({
+      where: { buyerId, metadata: { path: ["key"], equals: buyerKey } },
+      select: { id: true },
+    });
+    if (!existing) {
+      await prisma.notification.create({
+        data: {
+          buyerId,
+          type: "CONTRACT_APPROVED",
+          title: "Contract approved",
+          body: "Your purchase agreement passed review. Your signing link is ready.",
+          actionUrl: `/buyer/deal/${dealId}/sign`,
+          metadata: { key: buyerKey },
+        },
+      });
+    }
+  } catch (err) {
+    logger.error("[contract-shield] buyer approved notification failed:", err);
+  }
+
+  if (!dealerId) return;
+  const dealerKey = `contract-approved-dealer:${dealId}`;
+  try {
+    const existing = await prisma.notification.findFirst({
+      where: { dealerId, metadata: { path: ["key"], equals: dealerKey } },
+      select: { id: true },
+    });
+    if (!existing) {
+      await prisma.notification.create({
+        data: {
+          dealerId,
+          type: "CONTRACT_APPROVED",
+          channel: "IN_APP",
+          title: "Contract approved",
+          body: `Your agreement for Deal ${dealId.slice(0, 8)} was approved by AutoLenis and sent to the buyer for signing.`,
+          metadata: { key: dealerKey },
+        },
+      });
+    }
+  } catch (err) {
+    logger.error("[contract-shield] dealer approved notification failed:", err);
+  }
 }
 
 async function notifyBuyerContractScan(
