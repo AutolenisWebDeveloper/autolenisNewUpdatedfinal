@@ -12,8 +12,12 @@
 //   • `emitDealerAwardOutcomes` loads the auction/offers, runs the planner, and
 //     performs the sends via the existing transactional email rail
 //     (`resend.service` — idempotent via EmailSendLog) plus in-app Notification
-//     rows. It runs off the request path (`after()`), swallows its own errors,
-//     and never throws into the caller.
+//     rows. It runs inside the durable `dealerAwardFn` Inngest worker, so it is
+//     built to be RE-RUN: every channel is idempotent, and it therefore
+//     PROPAGATES transient failures (load-phase DB error, any recipient dispatch
+//     failure) so the worker retries and ultimately dead-letters instead of
+//     silently marking the dispatch complete and blocking re-drive. Only a
+//     terminal missing-auction returns quietly (retrying can't help).
 //
 // Scope note: this covers the reverse-auction acceptance path only. The
 // concierge / vehicle-request track (`VehicleRequestOffer`) carries no dealer
@@ -177,9 +181,12 @@ const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").tri
 /**
  * Impure dispatcher: notify the winning + non-winning dealers for a just-accepted
  * auction offer. Idempotent (email via EmailSendLog keys; in-app rows deduped on
- * a stable metadata key) and self-contained — it swallows its own errors so a
- * notification failure never affects the deal that already committed. Intended to
- * run off the request path via `after()`.
+ * a stable metadata key), so it is safe to re-run. It runs inside the durable
+ * `dealerAwardFn` worker and PROPAGATES transient failures — a load-phase DB
+ * error, or any recipient dispatch failure — so the worker retries and
+ * dead-letters rather than losing the notifications silently. Every recipient is
+ * attempted before a batch failure is raised, so one bad address never starves
+ * the rest on a given run. A terminal missing-auction returns quietly.
  */
 export async function emitDealerAwardOutcomes(args: {
   auctionId: string;
@@ -187,67 +194,76 @@ export async function emitDealerAwardOutcomes(args: {
   dealId: string;
 }): Promise<void> {
   const { auctionId, winningOfferId, dealId } = args;
-  try {
-    const auction = await prisma.auction.findUnique({
-      where: { id: auctionId },
-      select: { buyerId: true },
-    });
-    if (!auction) {
-      logger.error(`[dealer-award] auction ${auctionId} not found`);
-      return;
-    }
 
-    const [buyer, offers] = await Promise.all([
-      prisma.buyer.findUnique({
-        where: { id: auction.buyerId },
-        select: { firstName: true, lastName: true },
-      }),
-      prisma.offer.findMany({
-        // Only dealers who actually bid: the ACCEPTED winner plus every other
-        // SUBMITTED offer. DRAFT / WITHDRAWN / EXPIRED offers are not "bids" and
-        // must not receive a non-award close-out.
-        where: { auctionId, status: { in: ["SUBMITTED", "ACCEPTED"] } },
-        select: {
-          id: true,
-          dealerId: true,
-          otdPriceCents: true,
-          externalDealerName: true,
-          externalDealerEmail: true,
-          dealer: {
-            select: {
-              isSystemPlaceholder: true,
-              dealershipName: true,
-              user: { select: { email: true } },
-            },
+  // ── Load / plan phase — failures PROPAGATE so the worker retries. ───────────
+  const auction = await prisma.auction.findUnique({
+    where: { id: auctionId },
+    select: { buyerId: true },
+  });
+  if (!auction) {
+    // Terminal, not transient: retrying a ghost auction id can never succeed, so
+    // return quietly instead of spinning the worker's retries to dead-letter.
+    logger.error(`[dealer-award] auction ${auctionId} not found`);
+    return;
+  }
+
+  const [buyer, offers] = await Promise.all([
+    prisma.buyer.findUnique({
+      where: { id: auction.buyerId },
+      select: { firstName: true, lastName: true },
+    }),
+    prisma.offer.findMany({
+      // Only dealers who actually bid: the ACCEPTED winner plus every other
+      // SUBMITTED offer. DRAFT / WITHDRAWN / EXPIRED offers are not "bids" and
+      // must not receive a non-award close-out.
+      where: { auctionId, status: { in: ["SUBMITTED", "ACCEPTED"] } },
+      select: {
+        id: true,
+        dealerId: true,
+        otdPriceCents: true,
+        externalDealerName: true,
+        externalDealerEmail: true,
+        dealer: {
+          select: {
+            isSystemPlaceholder: true,
+            dealershipName: true,
+            user: { select: { email: true } },
           },
         },
-      }),
-    ]);
+      },
+    }),
+  ]);
 
-    const buyerFirstName = buyer?.firstName ?? "Buyer";
-    const buyerLastInitial = (buyer?.lastName ?? "").charAt(0) || "";
+  const buyerFirstName = buyer?.firstName ?? "Buyer";
+  const buyerLastInitial = (buyer?.lastName ?? "").charAt(0) || "";
 
-    const bidders: DealerAwardBidder[] = offers.map((o) => ({
-      offerId: o.id,
-      dealerId: o.dealerId,
-      isSystemPlaceholder: o.dealer?.isSystemPlaceholder ?? false,
-      email: o.externalDealerEmail ?? o.dealer?.user?.email ?? null,
-      dealershipName: o.externalDealerName ?? o.dealer?.dealershipName ?? "Dealer",
-      otdPriceCents: o.otdPriceCents,
-    }));
+  const bidders: DealerAwardBidder[] = offers.map((o) => ({
+    offerId: o.id,
+    dealerId: o.dealerId,
+    isSystemPlaceholder: o.dealer?.isSystemPlaceholder ?? false,
+    email: o.externalDealerEmail ?? o.dealer?.user?.email ?? null,
+    dealershipName: o.externalDealerName ?? o.dealer?.dealershipName ?? "Dealer",
+    otdPriceCents: o.otdPriceCents,
+  }));
 
-    const outcomes = planDealerAwardOutcomes({
-      bidders,
-      winningOfferId,
-      dealId,
-      auctionId,
-      vehicleRef: `Auction ${auctionId.slice(0, 8)}`,
-      buyerFirstName,
-      buyerLastInitial,
-      appUrl: APP_URL,
-    });
+  const outcomes = planDealerAwardOutcomes({
+    bidders,
+    winningOfferId,
+    dealId,
+    auctionId,
+    vehicleRef: `Auction ${auctionId.slice(0, 8)}`,
+    buyerFirstName,
+    buyerLastInitial,
+    appUrl: APP_URL,
+  });
 
-    for (const o of outcomes) {
+  // ── Dispatch phase — attempt EVERY recipient, collect failures, then raise a
+  // single batch error if any failed. Because every channel is idempotent, the
+  // worker's retry re-runs the whole batch and the already-delivered recipients
+  // are skipped (EmailSendLog SENT-precheck + in-app dedupe key). ──────────────
+  const errors: unknown[] = [];
+  for (const o of outcomes) {
+    try {
       // Email channel — existing idempotent transactional wrappers.
       if (o.email) {
         if (o.kind === "WON") {
@@ -259,8 +275,14 @@ export async function emitDealerAwardOutcomes(args: {
             buyerLastInitial: o.buyerLastInitial,
             dealUrl: o.dealUrl,
             dealId,
-          }).catch((err) => logger.error("[dealer-award] won email failed:", err));
-          syncGhlTag(o.email, "dealer-won");
+          });
+          // GHL tag sync is non-critical CRM bookkeeping — never let it fail the
+          // award batch or trigger a retry of the (already-sent) email.
+          try {
+            syncGhlTag(o.email, "dealer-won");
+          } catch (ghlErr) {
+            logger.error("[dealer-award] ghl tag sync failed:", ghlErr);
+          }
         } else {
           await sendDealerOfferLostEmail({
             to: o.email,
@@ -270,45 +292,50 @@ export async function emitDealerAwardOutcomes(args: {
             totalOffers: o.totalOffers,
             insightsUrl: o.dealUrl,
             auctionId,
-          }).catch((err) => logger.error("[dealer-award] lost email failed:", err));
+          });
         }
       }
 
       // In-app channel — registered dealers only; deduped on a stable key so a
       // retried dispatch cannot create a second row for the same outcome.
       if (o.inAppDealerId) {
-        try {
-          const existing = await prisma.notification.findFirst({
-            where: {
+        const existing = await prisma.notification.findFirst({
+          where: {
+            dealerId: o.inAppDealerId,
+            metadata: { path: ["key"], equals: o.dedupeKey },
+          },
+          select: { id: true },
+        });
+        if (!existing) {
+          await prisma.notification.create({
+            data: {
               dealerId: o.inAppDealerId,
-              metadata: { path: ["key"], equals: o.dedupeKey },
-            },
-            select: { id: true },
-          });
-          if (!existing) {
-            await prisma.notification.create({
-              data: {
-                dealerId: o.inAppDealerId,
-                type: o.notification.type,
-                title: o.notification.title,
-                body: o.notification.body,
-                actionUrl: o.notification.actionUrl,
-                metadata: {
-                  key: o.dedupeKey,
-                  offerId: o.offerId,
-                  dealId,
-                  auctionId,
-                  kind: o.kind,
-                },
+              type: o.notification.type,
+              title: o.notification.title,
+              body: o.notification.body,
+              actionUrl: o.notification.actionUrl,
+              metadata: {
+                key: o.dedupeKey,
+                offerId: o.offerId,
+                dealId,
+                auctionId,
+                kind: o.kind,
               },
-            });
-          }
-        } catch (err) {
-          logger.error("[dealer-award] in-app notification failed:", err);
+            },
+          });
         }
       }
+    } catch (err) {
+      // Isolate this recipient's failure so the rest of the batch still goes out
+      // on this run; the collected error forces a whole-batch retry afterwards.
+      logger.error(`[dealer-award] outcome dispatch failed for offer ${o.offerId}:`, err);
+      errors.push(err);
     }
-  } catch (err) {
-    logger.error("[dealer-award] emitDealerAwardOutcomes failed:", err);
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      `[dealer-award] ${errors.length}/${outcomes.length} dispatch(es) failed for deal ${dealId} — worker will retry`,
+    );
   }
 }

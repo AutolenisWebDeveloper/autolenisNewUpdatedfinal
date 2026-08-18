@@ -3,7 +3,7 @@ import { NextRequest, after } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { sendDealSelectedEmail } from "@/lib/services/email/resend.service";
-import { emitDealerAwardOutcomes } from "@/lib/services/notifications/dealer-award";
+import { inngest } from "@/lib/inngest/client";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { recordMarketplaceFromAuction } from "@/lib/amips/pipelines/marketplace-intelligence.recorder";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
@@ -112,13 +112,17 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
   syncGhlTag(buyerWithEmail?.user?.email, "offer-selected");
 
-  // G1 — notify every dealer that competed: the winner gets an award notification
-  // (email + in-app) with a buyer-safe handoff, and each other bidder gets a
-  // non-award close-out. Single tested seam (planner + dispatcher), idempotent and
-  // self-contained; runs off the request path so it never affects the committed
-  // selection. Outside/placeholder dealers get email only (no dealer account).
+  // G1 (S3) — dispatch dealer award/non-award notifications through the durable
+  // dealer-award worker (autolenis/dealer.award), not a fire-and-forget after().
+  // The worker runs the planner, writes in-app Notification rows, and enqueues
+  // each award/non-award email onto the Inngest spine — idempotent and re-drivable
+  // if the request context ends. after() only enqueues the event (fast, off the
+  // committed-selection path).
   after(() =>
-    emitDealerAwardOutcomes({ auctionId, winningOfferId: offer.id, dealId: deal.id }),
+    inngest.send({
+      name: "autolenis/dealer.award",
+      data: { auctionId, winningOfferId: offer.id, dealId: deal.id },
+    }),
   );
 
   // CRM event spine — emit offer_selected for the buyer after the deal has
