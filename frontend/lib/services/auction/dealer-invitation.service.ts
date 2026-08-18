@@ -8,14 +8,15 @@ import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { AUCTION_DURATION_HOURS } from "@/lib/constants";
 import { dispatch } from "@/lib/qstash/dispatch";
 import { geocodeZip } from "@/lib/services/integrations/geocoding.service";
+import { lookupCity, type LatLng } from "@/lib/utils/zip-coords";
 import { getPreferredMakes } from "@/lib/services/auction/auction-capacity.service";
 import { selectCoverageRadius } from "@/lib/services/auction/coverage.service";
 
 const MAX_INVITATIONS_PER_AUCTION = 8;
-// Nominal radius reported when the buyer can't be geocoded. In that branch the
-// geo-filter is skipped entirely (all active dealers are considered), matching
-// pre-Block-A behavior — so this value isn't applied as a cutoff, it's just the
-// reported radius. Registered invites therefore never regress on a geocode miss.
+// Widest invite radius, applied as a real cutoff when we have buyer coordinates
+// but no ZIP to run the coverage ladder (city-only buyer). NOT a fail-open
+// bypass: an unplaceable buyer invites zero (see the fail-closed early return in
+// inviteDealersToAuction), and this radius still filters coordless dealers out.
 const MAX_DISTANCE_MILES = 150;
 // Y4 — ranking BONUS when a dealer's declared makes intersect the auction's
 // requested make(s). A bonus ONLY: a non-matching dealer is never excluded.
@@ -86,6 +87,26 @@ export function makeMatchBonus(dealerMakes: string[], auctionMakes: string[]): n
   return dealerMakes.some((m) => wanted.has(m.trim().toLowerCase())) ? MAKE_MATCH_BONUS : 0;
 }
 
+// Pure geo-filter for invitations — FAIL CLOSED. Returns only entries whose
+// coordinates lie within `radiusMiles` of the buyer. Two invariants encode
+// "never invite everyone": (1) if the buyer has no coordinates we return [] —
+// an unplaceable buyer means we can't confirm anyone is in range, so we invite
+// no one rather than fall back to the whole active roster; (2) an entry with no
+// coordinates is EXCLUDED — an unplaceable dealer can't be confirmed local, and
+// inviting one is the reputation/geographic-relevance risk Block A closes.
+export function pickNearbyDealers<T extends { coords: LatLng | null }>(
+  entries: T[],
+  buyerCoords: LatLng | null,
+  radiusMiles: number,
+): T[] {
+  if (!buyerCoords) return [];
+  return entries.filter(
+    (e) =>
+      e.coords != null &&
+      haversineMiles(buyerCoords.lat, buyerCoords.lng, e.coords.lat, e.coords.lng) <= radiusMiles,
+  );
+}
+
 // A4 — ensure the auction carries the buyer's requested vehicle (the make signal)
 // so scoring can make-match and the invite email names the real vehicle.
 // Idempotent: if an AuctionVehicle already exists (e.g. admin-provided), it is
@@ -152,13 +173,40 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
   // area still widens to reach distant registered dealers rather than under-filling.
   // includeProspects:false — this ladder reads only `registered`, so it must not
   // pay for prospect resolution (that's Block C / Y2's job).
-  const buyerCoords = buyerZip ? await geocodeZip(buyerZip) : null;
-  const radiusMiles = buyerCoords
+  // Buyer coordinates, FAIL CLOSED: ZIP geocode first, then static city+state
+  // (no API key needed). If neither resolves, buyerCoords stays null and NO
+  // dealers are invited below (pickNearbyDealers returns []) — we never fall
+  // back to inviting the whole active roster.
+  const zipCoords = buyerZip ? await geocodeZip(buyerZip) : null;
+  const buyerCity = auctionForBuyer?.buyer?.city ?? null;
+  const buyerState = auctionForBuyer?.buyer?.state ?? null;
+  const buyerCoords: LatLng | null =
+    (zipCoords ? { lat: zipCoords.lat, lng: zipCoords.lng } : null) ??
+    (buyerCity && buyerState ? lookupCity(buyerCity, buyerState) : null);
+
+  // Radius: the coverage ladder assesses by the buyer's ZIP, so only run it when
+  // we have ZIP coords. A city-only buyer can still be geo-filtered (via the
+  // static city coords) but at the widest nominal radius, since the ladder can't
+  // meaningfully assess tiers without the ZIP.
+  const radiusMiles = zipCoords
     ? (await selectCoverageRadius(auctionId, {
         includeProspects: false,
         stopWhen: (c) => c.registered >= MAX_INVITATIONS_PER_AUCTION,
       })).radiusMiles
-    : MAX_DISTANCE_MILES; // no buyer coords → can't geo-filter; all dealers included below
+    : MAX_DISTANCE_MILES;
+
+  if (!buyerCoords) {
+    // Fail closed: with no buyer location we can't confirm any dealer is in range,
+    // so we invite NO ONE (never the whole active roster). Return early — the
+    // outcome is already fixed, so skip the dealer query and the per-dealer
+    // geocode calls that would otherwise run and be discarded.
+    logger.warn(
+      `[dealer-invitation] buyer for auction ${auctionId} is not geocodable ` +
+        `(zip=${buyerZip ?? "none"}, city=${buyerCity ?? "none"}, state=${buyerState ?? "none"}) — ` +
+        `no dealers invited (fail closed). Set GOOGLE_GEOCODING_API_KEY to widen geocoding coverage.`,
+    );
+    return 0;
+  }
 
   // Get active dealers. Exclude the system "Outside Dealer" placeholder.
   const dealers = await prisma.dealer.findMany({
@@ -166,29 +214,22 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
     select: { id: true, zip: true, latitude: true, longitude: true },
   });
 
-  // Filter by proximity within the chosen radius, using Y5 persisted coordinates
-  // (falling back to a live geocode of the dealer's ZIP). Dealers with no
-  // resolvable coords, or when the buyer can't be geocoded, are NOT excluded
-  // (fail open toward inclusion — matches the pre-Block-A behavior).
-  let nearbyDealers = dealers;
-  if (buyerCoords) {
-    const withCoords = await Promise.all(
-      dealers.map(async (d) => {
-        let coords: { lat: number; lng: number } | null =
-          d.latitude != null && d.longitude != null ? { lat: d.latitude, lng: d.longitude } : null;
-        if (!coords && d.zip) {
-          const g = await geocodeZip(d.zip);
-          coords = g ? { lat: g.lat, lng: g.lng } : null;
-        }
-        return { d, coords };
-      }),
-    );
-    nearbyDealers = withCoords
-      .filter(({ coords }) =>
-        !coords ? true : haversineMiles(buyerCoords.lat, buyerCoords.lng, coords.lat, coords.lng) <= radiusMiles,
-      )
-      .map(({ d }) => d);
-  }
+  // Resolve each dealer's coordinates (Y5 persisted coords first, then a live
+  // ZIP geocode), then geo-filter FAIL CLOSED via pickNearbyDealers: a dealer
+  // with no resolvable coords is excluded, and if the buyer is unplaceable no
+  // dealers pass at all.
+  const withCoords = await Promise.all(
+    dealers.map(async (d) => {
+      let coords: LatLng | null =
+        d.latitude != null && d.longitude != null ? { lat: d.latitude, lng: d.longitude } : null;
+      if (!coords && d.zip) {
+        const g = await geocodeZip(d.zip);
+        coords = g ? { lat: g.lat, lng: g.lng } : null;
+      }
+      return { dealer: d, coords };
+    }),
+  );
+  const nearbyDealers = pickNearbyDealers(withCoords, buyerCoords, radiusMiles).map((e) => e.dealer);
 
   const scores: InvitationScore[] = await Promise.all(
     nearbyDealers.map(async (d) => ({
