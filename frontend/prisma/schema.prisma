@@ -3474,6 +3474,7 @@ model DealerRooftop {
   updatedAt        DateTime         @updatedAt @map("updated_at")
   dealers          Dealer[]
   prospects        DealerProspect[]
+  contacts         DealerContactProfile[]
 
   // websiteHost lookups are served by its @unique index (above) — no separate
   // @@index (that would drift from the migration, which creates only the unique).
@@ -3481,6 +3482,51 @@ model DealerRooftop {
   @@index([nameZipKey])
   @@index([nameCityStateKey])
   @@map("dealer_rooftops")
+}
+
+// Block B / B1 — person-level dealer contact identity, keyed to the canonical A2
+// DealerRooftop so a registered Dealer and its prospect twin share ONE contact
+// history (not a per-Dealer / per-Prospect re-split). Reconciled from the
+// denormalized DealerProspect contact.* fields; the single home for the contact
+// waterfall's results, staleness re-checks (lastVerifiedAt), and Block B
+// shared-inbox collapse (emailKey). Cascade-deleted with its rooftop.
+model DealerContactProfile {
+  id        String        @id @default(cuid())
+  rooftopId String        @map("rooftop_id")
+  rooftop   DealerRooftop @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
+
+  // Person identity
+  name    String?
+  nameKey String? @map("name_key") // normalizeDealerName(name) — in-rooftop dedup
+  title   String?
+
+  // Contact channels (original value kept for display; *Key normalized for match)
+  email    String?
+  emailKey String? @map("email_key") // normalizeEmail(email) — dedup + shared-inbox anchor (B2)
+  phone    String?
+  phoneKey String? @map("phone_key") // normalizePhone(phone)
+
+  // Provenance + verification — mirrors the DealerProspect taxonomy so the
+  // contact waterfall's SEND_SAFE_STATUSES ({VERIFIED, ROLE_DERIVED}) reads the
+  // same labels. emailVerificationStatus is never written down from a stronger
+  // value (see the service merge rules).
+  emailSource             String?   @map("email_source")
+  emailVerificationStatus String?   @map("email_verification_status")
+  emailVerifiedAt         DateTime? @map("email_verified_at")
+  contactSource           String?   @map("contact_source")
+  contactConfidence       String?   @map("contact_confidence")
+
+  // Staleness anchor for the Block B CONTACT_STALE_MONTHS re-check.
+  lastVerifiedAt DateTime? @map("last_verified_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Composite serves both the FK (rooftopId prefix) and the in-rooftop
+  // email-dedup lookup; emailKey alone serves cross-rooftop shared-inbox scans.
+  @@index([rooftopId, emailKey])
+  @@index([emailKey])
+  @@map("dealer_contact_profiles")
 }
 
 model DealerProspect {
