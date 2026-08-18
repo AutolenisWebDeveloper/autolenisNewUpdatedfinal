@@ -1,9 +1,20 @@
 import { logger } from "@/lib/logger";
-import crypto from 'crypto';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
 import twilio from 'twilio';
 import { inngest } from './client';
+// #8 — use the SHARED idempotency/DLQ toolkit (fixed isFinalAttempt) instead of
+// this file's former inline copies, whose isFinalAttempt probed the wrong ctx
+// fields and returned false on every attempt — so the non-transactional DLQ path
+// (email/SMS/workflow-resume) never fired.
+import {
+  getSupabase,
+  acquireIdempotencyGuard,
+  updateIdempotencyState,
+  moveJobToDeadLetter,
+  releaseIdempotencyGuard,
+  isFinalAttempt,
+} from './idempotency';
 import { SuppressionService } from '../services/suppression.service';
 import { TemplateService } from '../services/template.service';
 import { recordTransactionalEmailSend, transactionalEmailAlreadySent } from '../services/email/email-send-log';
@@ -11,13 +22,6 @@ import { normalizePhone } from '../utils/phone';
 import { prisma } from '../prisma';
 import { Prisma } from '@prisma/client';
 import type { TemplateVariable, ContactSource } from '../types/crm';
-
-function getSupabase(): SupabaseClient {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
 
 // Lazy-init these clients so module load (e.g. Next.js page-data collection at
 // build time) doesn't crash when env vars are absent. They're only invoked
@@ -36,62 +40,22 @@ function getTwilio(): ReturnType<typeof twilio> {
   return _twilioClient;
 }
 
-async function acquireIdempotencyGuard(supabase: SupabaseClient, key: string): Promise<boolean> {
-  const hash = crypto.createHash('sha256').update(key).digest('hex');
-  const { error } = await supabase
-    .from('idempotency_keys')
-    .insert({ key_hash: hash, execution_status: 'processing' });
-  // 23505 = unique_violation → another worker already owns this key
-  if (error && (error as { code?: string }).code === '23505') return false;
-  if (error) throw error;
-  return true;
-}
-
-async function updateIdempotencyState(
-  supabase: SupabaseClient,
-  key: string,
-  status: 'completed' | 'failed',
-  payload: Record<string, unknown> = {}
-): Promise<void> {
-  const hash = crypto.createHash('sha256').update(key).digest('hex');
-  await supabase
-    .from('idempotency_keys')
-    .update({ execution_status: status, response_payload: payload })
-    .eq('key_hash', hash);
-}
-
-async function moveJobToDeadLetter(
-  supabase: SupabaseClient,
-  jobId: string,
-  eventName: string,
-  payload: unknown,
-  errorMessage: string
-): Promise<void> {
-  await supabase.from('jobs_dead_letter').insert({
-    job_id: jobId,
-    event_name: eventName,
-    payload: payload as Record<string, unknown>,
-    error_message: errorMessage,
-  });
-}
-
-// Inngest v3 exposes attempt count on the function context. The exact name has
-// shifted across SDK minor versions, so probe both shapes safely.
-function isFinalAttempt(ctx: Record<string, unknown>): boolean {
-  const attempt = (ctx.attempt ?? ctx.currentRetry) as number | undefined;
-  const max = (ctx.maxAttempt ?? ctx.maxRetries) as number | undefined;
-  if (typeof attempt !== 'number' || typeof max !== 'number') return false;
-  return attempt >= max;
+// Minimal structural context shared by the extracted worker handlers, so each is
+// unit-testable in isolation (the createFunction wrapper forwards the Inngest
+// ctx). isFinalAttempt reads `attempt`/`maxAttempts` off this same object.
+interface WorkerCtx {
+  event: { data: unknown };
+  step: { run<T>(name: string, fn: () => Promise<T>): Promise<T> };
+  attempt?: number;
+  maxAttempts?: number;
+  runId?: string;
 }
 
 // ---------------------------------------------------------------------------
 // EMAIL SEND WORKER — transactional + direct-payload marketing
 // Phase 1 deliberately does NOT couple to campaigns/templates (Phase 3).
 // ---------------------------------------------------------------------------
-export const emailSendFn = inngest.createFunction(
-  { id: 'email-send-worker', name: 'Email Dispatcher', retries: 3 },
-  { event: 'autolenis/email.send' },
-  async (ctx) => {
+export async function runEmailSend(ctx: WorkerCtx) {
     const { event, step } = ctx;
     const data = event.data as {
       contactId?: string;
@@ -304,20 +268,25 @@ export const emailSendFn = inngest.createFunction(
             data,
             message
           );
+          // Release the guard on terminal failure so a re-emitted event can
+          // re-drive the dead-lettered job (else it 23505s → DUPLICATE_BLOCKED).
+          await releaseIdempotencyGuard(supabase, uniqueKey);
         }
       }
       throw err;
     }
-  }
+}
+
+export const emailSendFn = inngest.createFunction(
+  { id: 'email-send-worker', name: 'Email Dispatcher', retries: 3 },
+  { event: 'autolenis/email.send' },
+  (ctx) => runEmailSend(ctx as unknown as WorkerCtx),
 );
 
 // ---------------------------------------------------------------------------
 // SMS SEND WORKER — TCPA hard-gated (consent_sms + !do_not_contact)
 // ---------------------------------------------------------------------------
-export const smsSendFn = inngest.createFunction(
-  { id: 'sms-send-worker', name: 'SMS Dispatcher', retries: 3 },
-  { event: 'autolenis/sms.send' },
-  async (ctx) => {
+export async function runSmsSend(ctx: WorkerCtx) {
     const { event, step } = ctx;
     const data = event.data as {
       contactId?: string;
@@ -398,10 +367,18 @@ export const smsSendFn = inngest.createFunction(
           data,
           message
         );
+        // Release the guard on terminal failure so a re-emitted event can
+        // re-drive the dead-lettered job (else it 23505s → DUPLICATE_BLOCKED).
+        await releaseIdempotencyGuard(supabase, uniqueKey);
       }
       throw err;
     }
-  }
+}
+
+export const smsSendFn = inngest.createFunction(
+  { id: 'sms-send-worker', name: 'SMS Dispatcher', retries: 3 },
+  { event: 'autolenis/sms.send' },
+  (ctx) => runSmsSend(ctx as unknown as WorkerCtx),
 );
 
 // ---------------------------------------------------------------------------
@@ -665,10 +642,7 @@ export const scheduledCampaignCronFn = inngest.createFunction(
 // Inngest holds the event until then, then dispatches it here. The handler
 // is a thin shell — all the logic lives in WorkflowEngine so the same code
 // path is exercised by initial enrollment and by post-delay resumption.
-export const workflowResumeFn = inngest.createFunction(
-  { id: 'workflow-resume-worker', name: 'Workflow Resume', retries: 3 },
-  { event: 'autolenis/workflow.resume' },
-  async (ctx) => {
+export async function runWorkflowResume(ctx: WorkerCtx) {
     const { event, step } = ctx;
     const data = event.data as { enrollment_id: string; node_id: string };
     const supabase = getSupabase();
@@ -696,7 +670,12 @@ export const workflowResumeFn = inngest.createFunction(
       }
       throw err;
     }
-  },
+}
+
+export const workflowResumeFn = inngest.createFunction(
+  { id: 'workflow-resume-worker', name: 'Workflow Resume', retries: 3 },
+  { event: 'autolenis/workflow.resume' },
+  (ctx) => runWorkflowResume(ctx as unknown as WorkerCtx),
 );
 
 // ---------------------------------------------------------------------------
