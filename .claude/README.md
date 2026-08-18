@@ -13,7 +13,7 @@ Prior: [`SKILLS_DEPENDENCY_AUDIT_2026-07.md`](../SKILLS_DEPENDENCY_AUDIT_2026-07
 | Path | Purpose |
 | --- | --- |
 | `settings.json` | Enables the project MCP servers from `../.mcp.json` and the Impeccable `PostToolUse` hook. |
-| `skills/` | **42 project skills**: 41 authoritative `autolenis-*` skills + the vendored `impeccable/` plugin. |
+| `skills/` | **45 project skills**: 42 authoritative `autolenis-*` skills + the vendored `impeccable/`, `task-observer/`, and `skill-creator/` skills. |
 | `commands/` | Slash commands (`/autolenis-verify` — the full quality gate + verdict). |
 | `agents/` | Sub-agents (`impeccable-manual-edit-applier`). |
 | `memory/` | Persistent knowledge-graph store for the Memory MCP server. |
@@ -79,6 +79,10 @@ Only `.claude/skills/**` is guaranteed present. Everything else is environment-p
   unavailable in non-interactive sessions.
 - **Impeccable** is vendored into this repo, so it is always available — including its
   `PostToolUse` hook (`skills/impeccable/scripts/hook.mjs`), verified working.
+- **Skill-creator** is vendored (`skills/skill-creator/`), so the skill-authoring/eval
+  workflow is guaranteed present in every session rather than depending on the
+  environment-provided copy. It is a meta-skill (not an `autolenis-*` domain skill), so it is
+  intentionally absent from the `CLAUDE.md` routing table.
 
 ## Important distinction — skills vs. app dependencies
 
