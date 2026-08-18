@@ -3535,13 +3535,15 @@ model DealerProspect {
   // address came from and when enrichment last ran.
   // emailSource values: "gemini_search_high_confidence" |
   // "gemini_search_medium_confidence" | "gemini_search_inferred" |
-  // "fallback_info_email" | "manual"
+  // "fallback_info_email" | "role_derived" (A3 — inferred role inbox) | "manual"
   emailSource           String?   @map("email_source")
   emailEnrichedAt       DateTime? @map("email_enriched_at")
   // Y1 — verify-before-persist email acquisition. `emailVerifiedAt` is stamped
   // only when an address passed MX-deliverability AND was not hard-suppressed.
   // emailVerificationStatus values (plain string, not an enum):
-  //   VERIFIED | UNVERIFIED | SUPPRESSED | DUPLICATE | NONE
+  //   VERIFIED | ROLE_DERIVED (A3 — MX-deliverable but inferred, NOT person-verified) |
+  //   UNVERIFIED | SUPPRESSED | DUPLICATE | NONE
+  //   {VERIFIED, ROLE_DERIVED} == send-safe / contactable for coverage + mint.
   emailVerifiedAt         DateTime? @map("email_verified_at")
   emailVerificationStatus String?   @map("email_verification_status")
   // Contact person behind the email (Internet Sales Manager, etc.) — captured

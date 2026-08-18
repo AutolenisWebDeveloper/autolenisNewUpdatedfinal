@@ -56,38 +56,15 @@ const MAX_PER_HOUR = 50
 const MAX_PER_DAY = 200
 const FROM_NAME = process.env.FROM_NAME ?? "Markist Athelus"
 
-// Phase 4B-2 — env vars that MUST be present before any dealer outreach send.
-// A cold/misconfigured sending domain torches deliverability, so we refuse to
-// dispatch until the founder has wired these up in Vercel (and verified the
-// domain in Resend). AUTOLENIS_PHYSICAL_ADDRESS is a CAN-SPAM requirement.
-export const REQUIRED_EMAIL_ENV_VARS = [
-  "DEALER_OUTREACH_FROM_EMAIL",
-  "DEALER_OUTREACH_REPLY_TO",
-  "AUTOLENIS_PHYSICAL_ADDRESS",
-  "RESEND_API_KEY",
-] as const
-
-// Returns the subset of required email env vars that are unset/empty. Empty
-// array means the channel is configured.
-export function missingEmailEnvVars(): string[] {
-  return REQUIRED_EMAIL_ENV_VARS.filter((k) => {
-    const v = process.env[k]
-    return !v || v.trim().length === 0
-  })
-}
-
-// Throws when the sending domain isn't fully configured. Exported for callers
-// that prefer fail-fast semantics (e.g. scripts / tests); the send path below
-// uses missingEmailEnvVars() directly to return a structured result instead.
-export function assertEmailEnvVars(): void {
-  const missing = missingEmailEnvVars()
-  if (missing.length > 0) {
-    throw new Error(
-      `[phase-4b2] Missing required email env vars: ${missing.join(", ")}. ` +
-        "Domain warming not configured. Set in Vercel before sending.",
-    )
-  }
-}
+// Phase 4B-2 — the required-env checks now live in a server-only-free module so
+// coverage.service (and tests) can read them without pulling in this file's
+// Supabase/`server-only` imports. Re-exported here for existing importers.
+export {
+  REQUIRED_EMAIL_ENV_VARS,
+  missingEmailEnvVars,
+  assertEmailEnvVars,
+} from "./email-channel-config"
+import { missingEmailEnvVars } from "./email-channel-config"
 
 let resendInstance: Resend | null = null
 function getResend(): Resend | null {
