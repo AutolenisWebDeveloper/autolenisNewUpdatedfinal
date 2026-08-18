@@ -8,6 +8,17 @@ export async function getDealerCapacity(dealerId: string): Promise<number> {
   return config?.maxAuctionLoad ?? DEFAULT_MAX_LOAD;
 }
 
+// A2 — read-only accessor for a registered dealer's self-declared makes.
+// upsertCapacityConfig remains the SOLE writer of preferredMakes; the rooftop
+// make-signal reads through here and never mutates it. Returns [] when unset.
+export async function getPreferredMakes(dealerId: string): Promise<string[]> {
+  const config = await prisma.dealerCapacityConfig.findUnique({
+    where: { dealerId },
+    select: { preferredMakes: true },
+  });
+  return config?.preferredMakes ?? [];
+}
+
 export async function isDealerAtCapacity(dealerId: string): Promise<boolean> {
   const [dealer, maxLoad] = await Promise.all([
     prisma.dealer.findUnique({ where: { id: dealerId }, select: { currentAuctionLoad: true } }),

@@ -26,6 +26,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 import { SuppressionService } from "@/lib/services/suppression.service";
 import { verifyEmailDeliverability } from "@/lib/services/integrations/email-deliverability.service";
+// A2 consolidation — one canonical set of dealership matching primitives.
+import { normalizeWebsiteHost, nameZipKey } from "@/lib/services/dealer/dealer-identity.service";
 import { enrichDealerEmail } from "./email-enrichment.service";
 
 // Bounded per pass so a single intake never fans out an unbounded number of
@@ -52,29 +54,6 @@ export interface ProspectEnrichmentCounts {
   suppressed: number;
   /** Transient enrichment-provider failures — left untouched for a later retry. */
   errored: number;
-}
-
-// Normalize a website into a bare host key: strip protocol, `www.`, path,
-// query/fragment, and trailing slash; lowercase. Returns null when nothing
-// usable remains.
-export function normalizeWebsiteHost(website?: string | null): string | null {
-  if (!website) return null;
-  let h = website.trim().toLowerCase();
-  if (!h) return null;
-  h = h.replace(/^https?:\/\//, "");
-  h = h.replace(/^www\./, "");
-  h = h.split("/")[0];
-  h = h.split("?")[0].split("#")[0];
-  h = h.replace(/\/+$/, "");
-  return h || null;
-}
-
-// name+zip fallback key when a host can't be derived.
-function nameZipKey(name?: string | null, zip?: string | null): string | null {
-  const n = (name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-  const z = (zip ?? "").trim();
-  if (!n || !z) return null;
-  return `${n}|${z}`;
 }
 
 type CandidateRow = {

@@ -152,6 +152,10 @@ model Dealer {
   // backfilled; used by the unified-sourcing geo filter instead of static ZIP maps.
   latitude           Float?                    @map("latitude")
   longitude          Float?                    @map("longitude")
+  // A2 — resolved canonical rooftop (cross-pool dedup). Nullable; a Dealer maps
+  // to at most one physical rooftop. SetNull so deleting a rooftop never cascades.
+  rooftopId          String?                   @map("rooftop_id")
+  rooftop            DealerRooftop?            @relation(fields: [rooftopId], references: [id], onDelete: SetNull)
   status             DealerStatus              @default(PENDING)
   tier               String                    @default("STANDARD")
   // System placeholder used to satisfy Offer.dealerId for outside /
@@ -183,6 +187,7 @@ model Dealer {
   // In-house electronic signature for the dealer network participation agreement.
   agreementSignature DealerAgreementSignature?
 
+  @@index([rooftopId])
   @@map("dealers")
 }
 
@@ -3439,6 +3444,45 @@ model BuyerOpportunity {
   @@map("buyer_opportunities")
 }
 
+// A2 (Block A / unified sourcing) — canonical physical rooftop. One row per real
+// dealership location; registered Dealers and DealerProspects both resolve to it
+// via the shared dealer-identity keys, so the same dealership is never
+// double-invited (internal AuctionInvitation + outside token). Normalized
+// identity keys are persisted so lookup is a direct indexed query. `makes` is a
+// READ-ONLY signal (from DealerCapacityConfig.preferredMakes for registered
+// dealers, brand/discovery for prospects) — the rooftop never writes preferredMakes.
+model DealerRooftop {
+  id               String           @id @default(cuid())
+  displayName      String           @map("display_name")
+  nameKey          String           @map("name_key")
+  // Strongest identity key — unique so two candidates on the same real domain
+  // can never create two rooftops (Postgres treats NULLs as distinct, so
+  // host-less rooftops are unconstrained). name+zip races are a noted follow-up.
+  websiteHost      String?          @unique @map("website_host")
+  phoneKey         String?          @map("phone_key")
+  nameZipKey       String?          @map("name_zip_key")
+  nameCityStateKey String?          @map("name_city_state_key")
+  zip              String?
+  city             String?
+  state            String?
+  latitude         Float?
+  longitude        Float?
+  makes            String[]         @default([])
+  // Provenance of `makes`: "preferred_makes" (registered dealer) | "prospect_brand" | null
+  makesSource      String?          @map("makes_source")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  dealers          Dealer[]
+  prospects        DealerProspect[]
+
+  // websiteHost lookups are served by its @unique index (above) — no separate
+  // @@index (that would drift from the migration, which creates only the unique).
+  @@index([phoneKey])
+  @@index([nameZipKey])
+  @@index([nameCityStateKey])
+  @@map("dealer_rooftops")
+}
+
 model DealerProspect {
   id              String   @id @default(cuid())
 
@@ -3470,6 +3514,9 @@ model DealerProspect {
   // backfilled; used by unified-sourcing distance math instead of static ZIP maps.
   latitude        Float?   @map("latitude")
   longitude       Float?   @map("longitude")
+  // A2 — resolved canonical rooftop (cross-pool dedup). Nullable; SetNull on delete.
+  rooftopId       String?  @map("rooftop_id")
+  rooftop         DealerRooftop? @relation(fields: [rooftopId], references: [id], onDelete: SetNull)
 
   // Recruitment workflow
   status          DealerProspectStatus @default(DISCOVERED)
@@ -3549,6 +3596,7 @@ model DealerProspect {
   @@index([status])
   @@index([zip])
   @@index([email])
+  @@index([rooftopId])
   @@map("dealer_prospects")
 }
 
