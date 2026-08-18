@@ -16,24 +16,9 @@
 // phases 5.2-5.4, so nothing here is invoked by existing routes yet.
 
 import { logger } from "@/lib/logger";
-import { after } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import {
-  enrichMarketData,
-  discoverDealers,
-} from "./compound-search.service";
-import { scoreLeadFromConversation } from "./scoring.service";
-import { draftAndSaveScript } from "../dealer-recruitment/phone-script-drafter.service";
-import {
-  notifyFounderHotLead,
-  sendHotLeadBuyerSms,
-  type HotLeadData,
-} from "./twilio.service";
-import {
-  sendBuyerOpportunityConfirmationEmail,
-  sendFounderHotLeadAlertEmail,
-} from "@/lib/services/email/resend.service";
+import { inngest } from "@/lib/inngest/client";
 
 export type IntakeSource =
   | "zura_widget"
@@ -93,36 +78,6 @@ export interface UnifiedIntakeInput {
 export interface UnifiedIntakeResult {
   buyerOpportunityId: string;
   vehicleRequestId: string | null;
-}
-
-// The scoring service expects the conversation ExtractedData timeline enum.
-// Structured submissions carry free-form timeline strings, so map the common
-// values and fall back to null (scoring treats unknown timelines as no signal).
-function coerceTimeline(
-  timeline: string | undefined,
-): "this_week" | "1_to_3_months" | "researching" | null {
-  if (!timeline) return null;
-  const t = timeline.toLowerCase();
-  if (t === "this_week" || t === "1_to_3_months" || t === "researching") {
-    return t;
-  }
-  if (t.includes("asap") || t.includes("week")) return "this_week";
-  if (t.includes("30") || t.includes("60") || t.includes("month")) {
-    return "1_to_3_months";
-  }
-  if (t.includes("research") || t.includes("just")) return "researching";
-  return null;
-}
-
-function coerceVehicleType(
-  vehicleType: string | undefined,
-): "new" | "used" | "open" | null {
-  if (!vehicleType) return null;
-  const v = vehicleType.toLowerCase();
-  if (v === "new") return "new";
-  if (v === "used") return "used";
-  if (v === "open" || v === "either") return "open";
-  return null;
 }
 
 /**
@@ -330,299 +285,32 @@ export async function intakeBuyerRequest(
     );
   }
 
-  // 4. Fire the Group 3 + 4A pipeline in the background. after() keeps the
-  //    serverless function alive until this completes without blocking the
-  //    caller's response. Stages 1-2 (extraction + record creation) are
-  //    already done above, so we resume at 3b.
-  after(async () => {
-    // Stage 3b — compound searches in parallel (best effort).
-    logger.info("[unified-intake] STAGE 3b — firing compound searches");
-
-    const enrichmentPromise = (async () => {
-      if (!input.make || !input.model || !input.zip) {
-        logger.info(
-          "[unified-intake] Skipping market enrichment — missing fields",
-        );
-        return;
-      }
-      try {
-        const enrichment = await enrichMarketData({
-          vehicleType: input.vehicleType ?? null,
-          make: input.make,
-          model: input.model,
-          trim: input.trim ?? null,
-          yearMin: input.yearMin ?? null,
-          yearMax: input.yearMax ?? null,
-          zip: input.zip,
-        });
-
-        if (enrichment) {
-          await prisma.buyerOpportunity.update({
-            where: { id: opportunityId },
-            data: {
-              marketMsrpEstimate: enrichment.msrpEstimate,
-              marketAvgPaidPrice: enrichment.avgPaidPrice,
-              marketTypicalMarkup: enrichment.typicalMarkup,
-              marketGoodDealTarget: enrichment.goodDealTarget,
-              marketNotes: enrichment.notes,
-              marketEnrichedAt: new Date(),
-            },
-          });
-          logger.info("[unified-intake] Market enrichment saved");
-        }
-      } catch (err) {
-        logger.error("[unified-intake] Market enrichment FAILED:", err);
-      }
-    })();
-
-    const dealerPromise = (async () => {
-      if (!input.make || !input.zip) {
-        logger.info(
-          "[unified-intake] Skipping dealer discovery — missing fields",
-        );
-        return;
-      }
-      try {
-        const dealers = await discoverDealers({
-          make: input.make,
-          zip: input.zip,
-          radiusMiles: 25,
-        });
-
-        if (dealers.length > 0) {
-          await prisma.dealerProspect.createMany({
-            data: dealers.map((d) => ({
-              buyerOppId: opportunityId,
-              name: d.name,
-              address: d.address,
-              city: d.city,
-              state: d.state,
-              zip: d.zip,
-              phone: d.phone,
-              email: d.email,
-              website: d.website,
-              brand: d.brand,
-              sourceUrl: d.sourceUrl,
-              searchScore: d.searchScore,
-              status: "DISCOVERED",
-            })),
-            skipDuplicates: true,
-          });
-          logger.info(
-            `[unified-intake] Dealer discovery saved ${dealers.length} prospects`,
-          );
-
-          // Background phone-script drafting for each new prospect.
-          const insertedProspects = await prisma.dealerProspect.findMany({
-            where: {
-              buyerOppId: opportunityId,
-              status: "DISCOVERED",
-              scriptDraftedAt: null,
-            },
-            select: { id: true },
-          });
-
-          logger.info(
-            `[unified-intake] Drafting phone scripts for ${insertedProspects.length} prospects`,
-          );
-
-          for (const p of insertedProspects) {
-            try {
-              const ok = await draftAndSaveScript(p.id);
-              logger.info(
-                `[unified-intake] Phone script for ${p.id}: ${ok ? "OK" : "FAILED"}`,
-              );
-              // 12s between gpt-oss-120b calls — respects the free-tier TPM
-              // budget, matching the concierge pipeline pacing.
-              await new Promise((resolve) => setTimeout(resolve, 12000));
-            } catch (err) {
-              logger.error(
-                `[unified-intake] Script drafting threw for ${p.id}:`,
-                err,
-              );
-            }
-          }
-        }
-      } catch (err) {
-        logger.error("[unified-intake] Dealer discovery FAILED:", err);
-      }
-    })();
-
-    await Promise.allSettled([enrichmentPromise, dealerPromise]);
-
-    // Stage 4 — lead scoring + hot-lead notifications. Only meaningful once we
-    // have a phone number to act on, mirroring the concierge gate.
-    if (input.phone) {
-      try {
-        await scoreAndAlert(opportunityId, input);
-        logger.info("[unified-intake] STAGE 4 (scoring + notifications) OK");
-      } catch (err) {
-        logger.error(
-          "[unified-intake] STAGE 4 (scoring + notifications) FAILED:",
-          err,
-        );
-      }
-    }
-  });
+  // 4. Enqueue the durable intake pipeline. The heavy background sequence
+  //    (market enrichment, dealer discovery, phone-script drafting, lead
+  //    scoring/alerts, dealer outreach) runs in the Inngest worker
+  //    `intakeProcessFn`, keyed on buyerOpportunityId — inheriting retry/backoff,
+  //    concurrency, and dead-letter, and re-drivable by the intake-reconcile
+  //    cron. Best-effort emit: if the enqueue fails, the intake-reconcile cron
+  //    re-drives the un-processed opportunity (intakeProcessedAt IS NULL) —
+  //    whether or not it has a linked VehicleRequest.
+  try {
+    await inngest.send({
+      name: "autolenis/intake.process",
+      data: { buyerOpportunityId: opportunityId },
+    });
+    logger.info("[unified-intake] intake.process enqueued", { opportunityId });
+  } catch (err) {
+    logger.error(
+      "[unified-intake] intake.process emit failed (reconciler will recover):",
+      err,
+    );
+  }
 
   // 5. Return both IDs.
   return { buyerOpportunityId: opportunityId, vehicleRequestId };
 }
 
-/**
- * Score the lead and, when hot, fire the four notification channels — the same
- * pattern used by /api/concierge's scoreAndAlert.
- */
-async function scoreAndAlert(
-  opportunityId: string,
-  input: UnifiedIntakeInput,
-): Promise<void> {
-  try {
-    const extractedData = {
-      vehicleType: coerceVehicleType(input.vehicleType),
-      make: input.make ?? null,
-      model: input.model ?? null,
-      // Convert cents → dollars for the scoring AI. Input
-      // contract is cents; ExtractedData uses dollars per
-      // legacy concierge convention.
-      budgetTotal: input.budgetAmount != null
-        ? Math.round(input.budgetAmount / 100)
-        : null,
-      monthlyPayment: input.monthlyPayment != null
-        ? Math.round(input.monthlyPayment / 100)
-        : null,
-      tradeIn: input.hasTradeIn ?? null,
-      timeline: coerceTimeline(input.timeline),
-      zip: input.zip ?? null,
-      phone: input.phone ?? null,
-    };
-
-    const scoreResult = await scoreLeadFromConversation(extractedData);
-
-    await prisma.buyerOpportunity.update({
-      where: { id: opportunityId },
-      data: {
-        leadScore: scoreResult.score,
-        leadTemperature: scoreResult.temperature,
-        scoringReason: scoreResult.reasoning,
-      },
-    });
-
-    await prisma.leadScore.create({
-      data: {
-        sessionId: opportunityId,
-        score: scoreResult.score,
-        temperature: scoreResult.temperature,
-        signals: scoreResult.signals as unknown as Prisma.JsonObject,
-        reasoning: scoreResult.reasoning,
-      },
-    });
-
-    if (scoreResult.temperature === "hot" && input.phone) {
-      const vehicle =
-        [input.make, input.model].filter(Boolean).join(" ") || "vehicle";
-
-      // budgetAmount and monthlyPayment are in CENTS per the
-      // unified intake contract; convert to dollars for the
-      // user-facing hot-lead notifications.
-      const budgetDisplay = input.budgetAmount != null
-        ? `$${Math.round(input.budgetAmount / 100).toLocaleString()}`
-        : input.monthlyPayment != null
-          ? `$${Math.round(input.monthlyPayment / 100).toLocaleString()}/mo`
-          : "not specified";
-
-      const lead: HotLeadData = {
-        firstName: input.firstName ?? undefined,
-        vehicle,
-        budget: budgetDisplay,
-        timeline: input.timeline ?? "unknown",
-        zip: input.zip ?? "unknown",
-        score: scoreResult.score,
-        sessionId: opportunityId,
-        phone: input.phone,
-      };
-
-      logger.info("[unified-intake] Hot lead detected — firing notifications", {
-        opportunityId,
-        phone: input.phone,
-        email: input.email,
-        vehicle,
-        score: scoreResult.score,
-      });
-
-      const founderEmail = process.env.FOUNDER_EMAIL;
-      const email = input.email ?? null;
-
-      const results = await Promise.allSettled([
-        // SMS channel
-        notifyFounderHotLead(lead),
-        sendHotLeadBuyerSms(lead),
-        // Email channel — buyer
-        email
-          ? sendBuyerOpportunityConfirmationEmail({
-              to: email,
-              firstName: input.firstName ?? "there",
-              vehicle,
-              budget: budgetDisplay,
-              timeline: input.timeline ?? "unknown",
-              zip: input.zip ?? "unknown",
-              sessionId: opportunityId,
-            })
-          : Promise.resolve({ sent: false, skipped: "no email" }),
-        // Email channel — founder
-        founderEmail
-          ? sendFounderHotLeadAlertEmail({
-              to: founderEmail,
-              firstName: input.firstName ?? "Anonymous",
-              email: email ?? "no email captured",
-              phone: input.phone,
-              vehicle,
-              budget: budgetDisplay,
-              timeline: input.timeline ?? "unknown",
-              zip: input.zip ?? "unknown",
-              score: scoreResult.score,
-              scoringReason: scoreResult.reasoning,
-              sessionId: opportunityId,
-            })
-          : Promise.resolve({ sent: false, skipped: "no founder email" }),
-      ]);
-
-      const [
-        founderSmsResult,
-        buyerSmsResult,
-        buyerEmailResult,
-        founderEmailResult,
-      ] = results;
-
-      const channels = [
-        { name: "notifyFounderHotLead (SMS)", result: founderSmsResult },
-        { name: "sendHotLeadBuyerSms (SMS)", result: buyerSmsResult },
-        {
-          name: "sendBuyerOpportunityConfirmationEmail",
-          result: buyerEmailResult,
-        },
-        { name: "sendFounderHotLeadAlertEmail", result: founderEmailResult },
-      ];
-
-      channels.forEach(({ name, result }) => {
-        if (result.status === "rejected") {
-          logger.error(`[unified-intake] ${name} FAILED:`, result.reason);
-        } else {
-          logger.info(`[unified-intake] ${name} succeeded`);
-        }
-      });
-
-      await prisma.buyerOpportunity.update({
-        where: { id: opportunityId },
-        data: {
-          founderNotified: founderSmsResult.status === "fulfilled",
-          buyerSmsSent: buyerSmsResult.status === "fulfilled",
-          buyerEmailSent: buyerEmailResult.status === "fulfilled",
-          founderEmailSent: founderEmailResult.status === "fulfilled",
-        },
-      });
-    }
-  } catch (err) {
-    logger.error("[unified-intake] scoreAndAlert error:", err);
-  }
-}
+// NOTE: lead scoring + hot-lead alerts (scoreAndAlert) and the market-enrichment
+// / dealer-discovery / outreach sequence moved to intake-pipeline.service.ts,
+// where they run inside the durable Inngest worker (S1). This service now only
+// creates the records and enqueues autolenis/intake.process.

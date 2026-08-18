@@ -3381,6 +3381,12 @@ model BuyerOpportunity {
   marketNotes           String?  @db.Text @map("market_notes")
   marketEnrichedAt      DateTime? @map("market_enriched_at")
 
+  // S1/S2 — set when the durable intake pipeline (autolenis/intake.process)
+  // completes. NULL = never finished; the intake-reconcile cron re-drives such
+  // rows. Distinct from marketEnrichedAt (a legit intake can enrich yet find
+  // zero dealers), so this is the unambiguous "intake done" marker.
+  intakeProcessedAt     DateTime? @map("intake_processed_at")
+
   // Dealer discovery (relation)
   dealerProspects       DealerProspect[]
 

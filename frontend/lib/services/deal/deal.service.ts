@@ -142,25 +142,6 @@ export async function advanceDealStatus(
   await emitDealStatusComms(dealId, newStatus);
 }
 
-export async function createDealFromOffer(buyerId: string, offerId: string) {
-  const deal = await prisma.deal.create({
-    data: { buyerId, offerId, status: DealStatus.FINANCING_PENDING },
-  });
-
-  await prisma.offer.update({ where: { id: offerId }, data: { status: "ACCEPTED" } });
-
-  await prisma.buyerActivityEvent.create({
-    data: {
-      buyerId,
-      eventType: "DEAL_CREATED",
-      title: "You selected your best deal",
-      metadata: { offerId, dealId: deal.id },
-    },
-  }).catch(() => {});
-
-  return deal;
-}
-
 export async function getDealForBuyer(buyerId: string, dealId?: string) {
   if (dealId) {
     return prisma.deal.findFirst({

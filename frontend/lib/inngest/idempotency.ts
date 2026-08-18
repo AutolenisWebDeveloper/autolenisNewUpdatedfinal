@@ -73,13 +73,25 @@ export async function moveJobToDeadLetter(
   });
 }
 
-// Inngest v3 exposes attempt count on the function context under shifting names
-// across SDK minors — probe both shapes safely.
+// Inngest exposes a ZERO-INDEXED `attempt` (first attempt = 0) and, on v3,
+// `maxAttempts` (the total allowed attempts) on the function context. The final
+// attempt is therefore `maxAttempts - 1`. We probe a couple of legacy shapes
+// defensively, but the primary keys are `attempt` + `maxAttempts`.
 export function isFinalAttempt(ctx: Record<string, unknown>): boolean {
   const attempt = (ctx.attempt ?? ctx.currentRetry) as number | undefined;
-  const max = (ctx.maxAttempt ?? ctx.maxRetries) as number | undefined;
-  if (typeof attempt !== "number" || typeof max !== "number") return false;
-  return attempt >= max;
+  if (typeof attempt !== "number") return false;
+
+  const maxAttempts = (ctx.maxAttempts ?? ctx.maxAttempt) as number | undefined;
+  if (typeof maxAttempts === "number") {
+    // attempt is zero-indexed → the last attempt is maxAttempts - 1.
+    return attempt >= maxAttempts - 1;
+  }
+
+  // Fallback: a retries-remaining style counter (retries after the first).
+  const maxRetries = ctx.maxRetries as number | undefined;
+  if (typeof maxRetries === "number") return attempt >= maxRetries;
+
+  return false;
 }
 
 // Stable content identity → idempotency key. Keyed on the slug, which is itself
