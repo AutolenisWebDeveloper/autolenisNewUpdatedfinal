@@ -9,6 +9,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/intake-reconcile",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/deposit-activation-reconcile",
       "schedule": "*/5 * * * *"
     },
