@@ -32,7 +32,11 @@ mock.module("@/lib/prisma", {
         create: async () => ({ id: "user_1" }),
       },
       buyer: { create: async () => ({ id: "buyer_1" }) },
-      vehicleRequest: { create: async () => ({ id: "vr_1" }) },
+      vehicleRequest: {
+        // promoteOpportunity now guards idempotency with a findFirst before create.
+        findFirst: async () => null,
+        create: async () => ({ id: "vr_1" }),
+      },
     },
   },
 });

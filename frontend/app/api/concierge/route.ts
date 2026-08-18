@@ -26,21 +26,9 @@ import {
   type BuyerProfile,
 } from "@/lib/ai/acquisition";
 import { CONCIERGE_SYSTEM_PROMPT } from "@/lib/ai/concierge-prompt";
-import { scoreLeadFromConversation } from "@/lib/services/acquisition/scoring.service";
-import {
-  notifyFounderHotLead,
-  sendHotLeadBuyerSms,
-  type HotLeadData,
-} from "@/lib/services/acquisition/twilio.service";
-import {
-  sendBuyerOpportunityConfirmationEmail,
-  sendFounderHotLeadAlertEmail,
-} from "@/lib/services/email/resend.service";
-import {
-  enrichMarketData,
-  discoverDealers,
-} from "@/lib/services/acquisition/compound-search.service";
-import { draftAndSaveScript } from "@/lib/services/dealer-recruitment/phone-script-drafter.service";
+import { promoteOpportunity } from "@/lib/services/acquisition/unified-buyer-intake.service";
+import { decideIntakeTurnActions } from "@/lib/services/acquisition/intake-turn";
+import { inngest } from "@/lib/inngest/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -313,7 +301,8 @@ CRITICAL RULES:
       // the in-memory profile not the DB
     }
 
-    // Stage 3: Completion detection + compound searches
+    // Completion + this-turn side-effect decision (the durable pipeline owns
+    // the heavy background work; the chat only decides when to trigger it).
     const allCaptured = !!(
       (updated.make || updated.bodyStyle) &&
       (updated.budgetAmount || updated.monthlyPayment) &&
@@ -322,138 +311,68 @@ CRITICAL RULES:
       updated.phone
     );
 
-    if (allCaptured && !opportunitySnapshot.completed) {
+    const phoneJustCaptured = !opportunitySnapshot.phone && !!updated.phone;
+    const actions = decideIntakeTurnActions({
+      allCaptured,
+      alreadyCompleted: opportunitySnapshot.completed,
+      phoneJustCaptured,
+    });
+
+    // Stage 3: completion → mark completed, promote to a sourceable
+    // VehicleRequest, and enqueue the durable pipeline. The pipeline
+    // (intakeProcessFn) is the single owner of market enrichment, dealer
+    // discovery, phone-scripts, scoring, alerts, and outreach — the inline
+    // compound searches were retired so there is one discovery path.
+    if (actions.promote) {
       try {
         await prisma.buyerOpportunity.update({
           where: { id: opportunitySnapshot.id },
           data: { completed: true },
         });
-        logger.info("[concierge] STAGE 3a (completion flag) OK");
+        logger.info("[concierge] STAGE 3 (completion flag) OK");
       } catch (err) {
-        logger.error("[concierge] STAGE 3a (completion flag) FAILED:", err);
+        logger.error("[concierge] STAGE 3 (completion flag) FAILED:", err);
       }
-
-      // Compound searches in parallel — best effort
-      logger.info("[concierge] STAGE 3b — firing compound searches");
-
-      const enrichmentPromise = (async () => {
-        if (!updated!.make || !updated!.model || !updated!.zip) {
-          logger.info("[concierge] Skipping market enrichment — missing fields");
-          return null;
-        }
-        try {
-          const enrichment = await enrichMarketData({
-            vehicleType: updated!.vehicleType,
-            make: updated!.make,
-            model: updated!.model,
-            trim: updated!.trim,
-            yearMin: updated!.yearMin,
-            yearMax: updated!.yearMax,
-            zip: updated!.zip,
-          });
-
-          if (enrichment) {
-            await prisma.buyerOpportunity.update({
-              where: { id: opportunitySnapshot.id },
-              data: {
-                marketMsrpEstimate: enrichment.msrpEstimate,
-                marketAvgPaidPrice: enrichment.avgPaidPrice,
-                marketTypicalMarkup: enrichment.typicalMarkup,
-                marketGoodDealTarget: enrichment.goodDealTarget,
-                marketNotes: enrichment.notes,
-                marketEnrichedAt: new Date(),
-              },
-            });
-            logger.info("[concierge] Market enrichment saved");
-          }
-        } catch (err) {
-          logger.error("[concierge] Market enrichment FAILED:", err);
-        }
-      })();
-
-      const dealerPromise = (async () => {
-        if (!updated!.make || !updated!.zip) {
-          logger.info("[concierge] Skipping dealer discovery — missing fields");
-          return null;
-        }
-        try {
-          const dealers = await discoverDealers({
-            make: updated!.make,
-            zip: updated!.zip,
-            radiusMiles: 25,
-          });
-
-          if (dealers.length > 0) {
-            await prisma.dealerProspect.createMany({
-              data: dealers.map((d) => ({
-                buyerOppId: opportunitySnapshot.id,
-                name: d.name,
-                address: d.address,
-                city: d.city,
-                state: d.state,
-                zip: d.zip,
-                phone: d.phone,
-                email: d.email,
-                website: d.website,
-                brand: d.brand,
-                sourceUrl: d.sourceUrl,
-                searchScore: d.searchScore,
-                status: "DISCOVERED",
-              })),
-              skipDuplicates: true,
-            });
-            logger.info(`[concierge] Dealer discovery saved ${dealers.length} prospects`);
-
-            // Background script drafting for each newly-discovered prospect
-            const insertedProspects = await prisma.dealerProspect.findMany({
-              where: {
-                buyerOppId: opportunitySnapshot.id,
-                status: "DISCOVERED",
-                scriptDraftedAt: null,
-              },
-              select: { id: true },
-            });
-
-            logger.info(
-              `[concierge] Drafting phone scripts for ${insertedProspects.length} prospects`,
-            );
-
-            for (const p of insertedProspects) {
-              try {
-                const ok = await draftAndSaveScript(p.id);
-                logger.info(`[concierge] Phone script for ${p.id}: ${ok ? "OK" : "FAILED"}`);
-                // 12s between gpt-oss-120b calls — respects 8K TPM on free
-                // tier (1500-2000 tokens per call, need most of the minute
-                // budget to recover). Once Groq Developer tier is enabled
-                // this can be reduced to 500ms.
-                await new Promise((resolve) => setTimeout(resolve, 12000));
-              } catch (err) {
-                logger.error(`[concierge] Script drafting threw for ${p.id}:`, err);
-              }
-            }
-          }
-        } catch (err) {
-          logger.error("[concierge] Dealer discovery FAILED:", err);
-        }
-      })();
-
-      await Promise.allSettled([enrichmentPromise, dealerPromise]);
+      try {
+        await promoteOpportunity(opportunitySnapshot.id, {
+          firstName: updated.firstName ?? undefined,
+          email: opportunitySnapshot.email ?? undefined,
+          phone: updated.phone ?? undefined,
+          zip: updated.zip ?? undefined,
+          make: updated.make ?? undefined,
+          model: updated.model ?? undefined,
+          yearMin: updated.yearMin ?? undefined,
+          yearMax: updated.yearMax ?? undefined,
+          // BuyerOpportunity stores budget in DOLLARS; VehicleRequest wants CENTS.
+          budgetAmount:
+            updated.budgetAmount != null ? updated.budgetAmount * 100 : undefined,
+        });
+        logger.info("[concierge] STAGE 3 (promote → VehicleRequest + pipeline) OK");
+      } catch (err) {
+        logger.error("[concierge] STAGE 3 (promote) FAILED:", err);
+      }
     }
 
-    // Stage 4: Hot-lead notifications
-    const phoneJustCaptured = !opportunitySnapshot.phone && updated.phone;
-    if (phoneJustCaptured) {
+    // Stage 4: an early contactable lead (phone captured before the request is
+    // complete) — enqueue the durable pipeline for scoring + hot-lead alerts
+    // (retired the inline scoreAndAlert). decideIntakeTurnActions guarantees this
+    // never runs on a turn that promoted, so there is no concurrent double
+    // enqueue (which would double-notify the founder).
+    if (actions.enqueuePipeline) {
       try {
-        await scoreAndAlert(
-          opportunitySnapshot.id,
-          updated,
-          opportunitySnapshot.email,
-        );
-        logger.info("[concierge] STAGE 4 (scoring + notifications) OK");
+        await inngest.send({
+          name: "autolenis/intake.process",
+          data: { buyerOpportunityId: opportunitySnapshot.id },
+        });
+        logger.info("[concierge] STAGE 4 (pipeline enqueue for scoring/alerts) OK");
       } catch (err) {
-        logger.error("[concierge] STAGE 4 (scoring + notifications) FAILED:", err);
+        logger.error("[concierge] STAGE 4 (pipeline enqueue) FAILED:", err);
       }
+    }
 
+    // The lead just became contactable this turn — mirror it onto the CRM
+    // contact plane (additive; the durable pipeline does not own this).
+    if (actions.crmCapture) {
       // Stage 5: CRM contact-plane capture (additive, non-blocking).
       // Phone just transitioned null→value, so we now hold a fully contactable
       // lead (gate name/email + in-conversation phone). Mirror it onto the
@@ -522,145 +441,4 @@ CRITICAL RULES:
       "X-Content-Type-Options": "nosniff",
     },
   });
-}
-
-async function scoreAndAlert(
-  opportunityId: string,
-  profile: BuyerProfile,
-  email: string | null,
-): Promise<void> {
-  try {
-    const extractedData = {
-      vehicleType: profile.vehicleType,
-      make: profile.make,
-      model: profile.model,
-      budgetTotal: profile.budgetAmount,
-      monthlyPayment: profile.monthlyPayment,
-      tradeIn: profile.hasTradeIn,
-      timeline: profile.timeline,
-      zip: profile.zip,
-      phone: profile.phone,
-    };
-
-    const scoreResult = await scoreLeadFromConversation(extractedData);
-
-    await prisma.buyerOpportunity.update({
-      where: { id: opportunityId },
-      data: {
-        leadScore: scoreResult.score,
-        leadTemperature: scoreResult.temperature,
-        scoringReason: scoreResult.reasoning,
-      },
-    });
-
-    await prisma.leadScore.create({
-      data: {
-        sessionId: opportunityId,
-        score: scoreResult.score,
-        temperature: scoreResult.temperature,
-        signals: scoreResult.signals as unknown as Prisma.JsonObject,
-        reasoning: scoreResult.reasoning,
-      },
-    });
-
-    if (scoreResult.temperature === "hot" && profile.phone) {
-      const vehicle =
-        [profile.make, profile.model].filter(Boolean).join(" ") ||
-        profile.bodyStyle ||
-        "vehicle";
-
-      const budget = profile.budgetAmount
-        ? `$${profile.budgetAmount.toLocaleString()}`
-        : profile.monthlyPayment
-          ? `$${profile.monthlyPayment}/mo`
-          : "not specified";
-
-      const lead: HotLeadData = {
-        firstName: profile.firstName ?? undefined,
-        vehicle,
-        budget,
-        timeline: profile.timeline ?? "unknown",
-        zip: profile.zip ?? "unknown",
-        score: scoreResult.score,
-        sessionId: opportunityId,
-        phone: profile.phone,
-      };
-
-      logger.info("[concierge] Hot lead detected — firing notifications", {
-        opportunityId,
-        phone: profile.phone,
-        email,
-        vehicle,
-        score: scoreResult.score,
-      });
-
-      // Fire all four notification channels in parallel
-      const founderEmail = process.env.FOUNDER_EMAIL;
-
-      const results = await Promise.allSettled([
-        // SMS channel
-        notifyFounderHotLead(lead),
-        sendHotLeadBuyerSms(lead),
-        // Email channel — buyer
-        email
-          ? sendBuyerOpportunityConfirmationEmail({
-              to: email,
-              firstName: profile.firstName ?? "there",
-              vehicle,
-              budget,
-              timeline: profile.timeline ?? "unknown",
-              zip: profile.zip ?? "unknown",
-              sessionId: opportunityId,
-            })
-          : Promise.resolve({ sent: false, skipped: "no email" }),
-        // Email channel — founder
-        founderEmail
-          ? sendFounderHotLeadAlertEmail({
-              to: founderEmail,
-              firstName: profile.firstName ?? "Anonymous",
-              email: email ?? "no email captured",
-              phone: profile.phone,
-              vehicle,
-              budget,
-              timeline: profile.timeline ?? "unknown",
-              zip: profile.zip ?? "unknown",
-              score: scoreResult.score,
-              scoringReason: scoreResult.reasoning,
-              sessionId: opportunityId,
-            })
-          : Promise.resolve({ sent: false, skipped: "no founder email" }),
-      ]);
-
-      const [founderSmsResult, buyerSmsResult, buyerEmailResult, founderEmailResult] = results;
-
-      // Log per-channel outcomes
-      const channels = [
-        { name: "notifyFounderHotLead (SMS)", result: founderSmsResult },
-        { name: "sendHotLeadBuyerSms (SMS)", result: buyerSmsResult },
-        { name: "sendBuyerOpportunityConfirmationEmail", result: buyerEmailResult },
-        { name: "sendFounderHotLeadAlertEmail", result: founderEmailResult },
-      ];
-
-      channels.forEach(({ name, result }) => {
-        if (result.status === "rejected") {
-          logger.error(`[concierge] ${name} FAILED:`, result.reason);
-        } else {
-          logger.info(`[concierge] ${name} succeeded`);
-        }
-      });
-
-      // Update flags — separate flag per channel for accurate tracking
-      await prisma.buyerOpportunity.update({
-        where: { id: opportunityId },
-        data: {
-          founderNotified: founderSmsResult.status === "fulfilled",
-          buyerSmsSent: buyerSmsResult.status === "fulfilled",
-          buyerEmailSent: buyerEmailResult.status === "fulfilled",
-          founderEmailSent: founderEmailResult.status === "fulfilled",
-        },
-      });
-    }
-  } catch (err) {
-    logger.error("[concierge] scoreAndAlert error:", err);
-  }
 }
