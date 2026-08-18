@@ -32,6 +32,11 @@ const DEALER_MAX_AUCTION_LOAD = 5;
 // dealer density, so it lives here for one-line tuning.
 export const MIN_COVERAGE_DEALERS = 3;
 
+// Y3 radius-escalation ladder tiers (miles), tried tightest-first. Named
+// constants because the right radii depend on live dealer density. The ladder
+// concentrates invites locally when supply is dense and widens only when sparse.
+export const RADIUS_TIERS = [25, 50, 100, 150] as const;
+
 // Cap prospects scanned per assessment so a dense metro can't fan out unbounded
 // resolution work (each unresolved prospect may cost an MX lookup / LLM call).
 const MAX_PROSPECTS_PER_ASSESS = 60;
@@ -53,6 +58,11 @@ export interface CoverageDeps {
   // Block C would populate to zero.
   channelConfigured: () => boolean;
   boundingBox: (center: LatLng, radiusMiles: number) => { minLat: number; maxLat: number; minLng: number; maxLng: number };
+  // When false, skip the prospect query + contact resolution entirely (prospects
+  // = 0). The A4 invite ladder passes false because it only reads `registered`,
+  // so it must not pay for (or repeat, per tier) prospect resolution it discards.
+  // Y2 (total-coverage gate) leaves this true. Same helper, not a second path.
+  includeProspects: boolean;
   resolveContact: typeof resolveContactableEmail;
   haversine: (a: LatLng, b: LatLng) => number;
 }
@@ -116,9 +126,11 @@ export async function assessAuctionCoverage(
     if (d.rooftopId) countedRooftops.add(d.rooftopId);
   }
 
-  // Prospects can only count if the outreach channel is actually configured —
-  // otherwise every prospect send would fail and coverage would lie (M3).
-  const prospectsSendable = channelConfigured();
+  // Prospects can only count if the caller wants them (the invite ladder doesn't)
+  // AND the outreach channel is actually configured — otherwise every prospect
+  // send would fail and coverage would lie.
+  const includeProspects = deps?.includeProspects ?? true;
+  const prospectsSendable = includeProspects && channelConfigured();
   if (!prospectsSendable) {
     logger.warn(
       `[coverage] outreach channel not configured — excluding all prospects from coverage for auction ${auctionId}`,
@@ -188,4 +200,41 @@ export async function assessAuctionCoverage(
       `(registered=${registered} prospects=${prospects}) buyerGeocoded=${result.buyerGeocoded}`,
   );
   return result;
+}
+
+export interface CoverageLadderDeps extends CoverageDeps {
+  // Injectable for tests; defaults to the real assessAuctionCoverage bound to deps.
+  assess: (auctionId: string, radiusMiles: number) => Promise<CoverageResult>;
+  // The stop predicate. Defaults to TOTAL coverage ≥ MIN (the end-state / Y2
+  // gate). The A4 invite path passes a REGISTERED-based predicate, because only
+  // registered dealers are invitable before Block C — so the ladder must widen
+  // until enough INVITABLE-NOW dealers exist rather than stopping early on
+  // not-yet-invitable prospects (which would regress distant-registered reach).
+  stopWhen?: (c: CoverageResult) => boolean;
+}
+
+/**
+ * Y3 radius-escalation ladder. Assesses coverage tightest-first and returns the
+ * FIRST tier that satisfies `stopWhen` (concentrating invites locally), or the
+ * widest tier's result if none does. Uses the ONE shared assessAuctionCoverage —
+ * there is no second radius-aware coverage path (Y2's request-time gate consumes
+ * the same primitive; only the stop predicate differs).
+ */
+export async function selectCoverageRadius(
+  auctionId: string,
+  deps?: Partial<CoverageLadderDeps>,
+): Promise<CoverageResult> {
+  const assess =
+    deps?.assess ?? ((id: string, r: number) => assessAuctionCoverage(id, r, deps));
+  const meets = deps?.stopWhen ?? ((c: CoverageResult) => c.coverage >= MIN_COVERAGE_DEALERS);
+  let last: CoverageResult | null = null;
+  for (const tier of RADIUS_TIERS) {
+    const cov = await assess(auctionId, tier);
+    last = cov;
+    if (meets(cov)) return cov;
+  }
+  // No tier met the threshold — return the widest assessment (best effort; the
+  // caller still invites who it can, and the deposit-activation no-dealer grace
+  // owns the terminal soft-hold/close decision).
+  return last ?? { coverage: 0, registered: 0, prospects: 0, radiusMiles: RADIUS_TIERS[RADIUS_TIERS.length - 1], buyerGeocoded: false };
 }

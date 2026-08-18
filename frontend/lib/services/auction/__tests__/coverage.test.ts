@@ -11,8 +11,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assessAuctionCoverage,
+  selectCoverageRadius,
   MIN_COVERAGE_DEALERS,
+  RADIUS_TIERS,
   type CoverageDeps,
+  type CoverageResult,
 } from "../coverage.service";
 
 type Dealer = { id: string; latitude: number | null; longitude: number | null; rooftopId: string | null; currentAuctionLoad?: number };
@@ -141,6 +144,28 @@ test("M1: the take is applied AFTER geo-scoping — in-box prospects aren't crow
   assert.equal(r.prospects, 1);
 });
 
+// ─── M4: includeProspects:false skips prospect resolution entirely ───────────
+
+test("includeProspects:false counts only registered and never resolves prospects", async () => {
+  const prisma = fakePrisma({
+    dealers: [{ id: "d1", latitude: 10, longitude: 0, rooftopId: null }],
+    prospects: [prospect({ id: "p1", latitude: 10 })],
+  });
+  let resolveCalls = 0;
+  const d = {
+    ...deps(prisma),
+    includeProspects: false,
+    resolveContact: (async () => {
+      resolveCalls += 1;
+      return { contactable: true };
+    }) as never,
+  };
+  const r = await assessAuctionCoverage("a1", 50, d);
+  assert.equal(r.registered, 1);
+  assert.equal(r.prospects, 0);
+  assert.equal(resolveCalls, 0); // no prospect resolution work on the invite path
+});
+
 // ─── INVARIANT: only send-safe prospects count ───────────────────────────────
 
 test("INVARIANT: a non-contactable (unsafe) prospect is NOT counted", async () => {
@@ -191,6 +216,52 @@ test("a prospect whose resolution throws is skipped, not fatal", async () => {
 });
 
 // ─── buyer not geocodable → fail open ────────────────────────────────────────
+
+// ─── Y3 radius-escalation ladder ─────────────────────────────────────────────
+
+const cov = (radiusMiles: number, coverage: number): CoverageResult => ({
+  coverage, registered: coverage, prospects: 0, radiusMiles, buyerGeocoded: true,
+});
+
+test("RADIUS_TIERS is tightest-first", () => {
+  assert.deepEqual([...RADIUS_TIERS], [25, 50, 100, 150]);
+});
+
+test("ladder returns the FIRST tier that meets MIN_COVERAGE_DEALERS (early stop)", async () => {
+  const seen: number[] = [];
+  const assess = async (_id: string, r: number) => {
+    seen.push(r);
+    return cov(r, r >= 50 ? 3 : 1); // 25→1, 50→3
+  };
+  const r = await selectCoverageRadius("a1", { assess });
+  assert.equal(r.radiusMiles, 50);
+  assert.equal(r.coverage, 3);
+  assert.deepEqual(seen, [25, 50]); // stopped at 50, never assessed 100/150
+});
+
+test("ladder with a registered-based stopWhen ignores prospect-only coverage (A4 invite path)", async () => {
+  // 25mi: total 3 but only 1 registered (2 prospects, not invitable in A4) → keep going.
+  // 50mi: 3 registered → stop. Proves the invite ladder widens for invitable-now supply.
+  const seen: number[] = [];
+  const assess = async (_id: string, r: number): Promise<CoverageResult> => {
+    seen.push(r);
+    return { coverage: 3, registered: r >= 50 ? 3 : 1, prospects: r >= 50 ? 0 : 2, radiusMiles: r, buyerGeocoded: true };
+  };
+  const r = await selectCoverageRadius("a1", { assess, stopWhen: (c) => c.registered >= MIN_COVERAGE_DEALERS });
+  assert.equal(r.radiusMiles, 50);
+  assert.deepEqual(seen, [25, 50]);
+});
+
+test("ladder escalates to the widest tier when no tier meets the threshold", async () => {
+  const seen: number[] = [];
+  const assess = async (_id: string, r: number) => {
+    seen.push(r);
+    return cov(r, 1); // never reaches 3
+  };
+  const r = await selectCoverageRadius("a1", { assess });
+  assert.equal(r.radiusMiles, 150);
+  assert.deepEqual(seen, [25, 50, 100, 150]); // tried all, returns widest
+});
 
 test("when the buyer can't be geocoded, all contactable candidates count (fail open)", async () => {
   const prisma = fakePrisma({
