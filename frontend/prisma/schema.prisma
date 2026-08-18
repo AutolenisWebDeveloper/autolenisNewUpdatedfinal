@@ -148,6 +148,10 @@ model Dealer {
   city               String?
   state              String?
   zip                String?
+  // Y5 — geocoded coordinates (from ZIP via the geocoding adapter). Nullable +
+  // backfilled; used by the unified-sourcing geo filter instead of static ZIP maps.
+  latitude           Float?                    @map("latitude")
+  longitude          Float?                    @map("longitude")
   status             DealerStatus              @default(PENDING)
   tier               String                    @default("STANDARD")
   // System placeholder used to satisfy Offer.dealerId for outside /
@@ -3462,6 +3466,10 @@ model DealerProspect {
   sourceUrl       String?  @map("source_url")
   searchScore     Float?   @map("search_score")
   distanceMiles   Float?   @map("distance_miles")
+  // Y5 — geocoded coordinates (from ZIP via the geocoding adapter). Nullable +
+  // backfilled; used by unified-sourcing distance math instead of static ZIP maps.
+  latitude        Float?   @map("latitude")
+  longitude       Float?   @map("longitude")
 
   // Recruitment workflow
   status          DealerProspectStatus @default(DISCOVERED)
