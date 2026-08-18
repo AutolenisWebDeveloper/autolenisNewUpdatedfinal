@@ -55,6 +55,14 @@ export interface EmailEnrichmentInput {
   website?: string | null
   /** Bypass the 30-day recency guard (used by the manual "Re-Enrich" action). */
   force?: boolean
+  /**
+   * When false, run the recency guard + Gemini call + parse but perform NO DB
+   * writes (no failure-path timestamp stamp, no no-clobber read, no success
+   * update) — just return the parsed result. Used by Y1's verify-before-persist
+   * flow, which decides itself what to write. Defaults to true (unchanged
+   * behavior for existing admin-route and script callers).
+   */
+  persist?: boolean
 }
 
 export interface EmailEnrichmentResult {
@@ -73,6 +81,14 @@ export interface EmailEnrichmentResult {
   contactSourceUrl: string | null
   /** True when the call was short-circuited by the 30-day recency guard. */
   skipped?: boolean
+  /**
+   * True when the Gemini call itself FAILED (transient 429/503/network after
+   * retries) — as opposed to a genuine "no email found". Only set in
+   * `persist:false` mode so the caller can distinguish a transient provider
+   * failure (retry later; don't burn the recency window) from a real empty
+   * result. The persist:true path is unchanged (it stamps + returns empty).
+   */
+  errored?: boolean
 }
 
 export interface GeminiResponse {
@@ -418,6 +434,10 @@ function emptyResult(
 export async function enrichDealerEmail(
   input: EmailEnrichmentInput,
 ): Promise<EmailEnrichmentResult> {
+  // Y1 — when false, this call is read-only: it computes the enrichment result
+  // but leaves every DB write to the caller (verify-before-persist).
+  const persist = input.persist !== false
+
   // Recency guard — skip if we already tried within the TTL window.
   if (!input.force) {
     const existing = await prisma.dealerProspect.findUnique({
@@ -447,22 +467,41 @@ export async function enrichDealerEmail(
     logger.error(
       `[phase-4b1] Gemini enrichment failed for ${input.dealerProspectId}: ${err instanceof Error ? err.message : String(err)}`,
     )
-    await prisma.dealerProspect
-      .update({
-        where: { id: input.dealerProspectId },
-        data: { emailEnrichedAt: now, contactEnrichedAt: now },
-      })
-      .catch((updateErr) => {
-        logger.error(
-          `[phase-4b1] Failed to stamp enrichment timestamps for ${input.dealerProspectId}:`,
-          updateErr,
-        )
-      })
-    return emptyResult()
+    // Stamp the attempt timestamp even on hard failure so we don't hammer a
+    // persistently-failing dealer on every backfill run — but only when we own
+    // persistence. In persist:false mode the caller stamps its own timestamps.
+    if (persist) {
+      await prisma.dealerProspect
+        .update({
+          where: { id: input.dealerProspectId },
+          data: { emailEnrichedAt: now, contactEnrichedAt: now },
+        })
+        .catch((updateErr) => {
+          logger.error(
+            `[phase-4b1] Failed to stamp enrichment timestamps for ${input.dealerProspectId}:`,
+            updateErr,
+          )
+        })
+    }
+    // In persist:false mode, signal the transient failure so the caller can
+    // retry later instead of recording it as a genuine "no email" (which would
+    // burn the recency window). persist:true callers are unaffected (empty).
+    return emptyResult(persist ? {} : { errored: true })
   }
 
   const source = confidenceToSource(parsed.confidence)
   const contactSource = contactConfidenceToSource(parsed.contactConfidence)
+
+  // Y1 — read-only mode: return the parsed result and let the caller decide what
+  // to persist (verify-before-persist). No no-clobber read, no update.
+  if (!persist) {
+    logger.info(
+      `[phase-4b1] Enriched (persist:false) ${input.dealerName} (${input.dealerProspectId}) → ` +
+        `email=${parsed.email ?? "none"} [${source ?? "—"}], ` +
+        `contact=${parsed.contactName ?? "none"} [${contactSource ?? "—"}]`,
+    )
+    return { ...parsed, source, contactSource }
+  }
 
   // Persist via the pure builder so the decoupling is unit-tested in isolation.
   const data = buildPersistData(parsed, now)
