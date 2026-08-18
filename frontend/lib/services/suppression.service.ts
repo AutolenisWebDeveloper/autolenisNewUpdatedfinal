@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { logger } from '../logger';
 import { normalizeEmail, normalizePhone } from '../utils/phone';
 import type { EmailSuppressionReason, SmsSuppressionReason } from '../types/crm';
 import { writeCrmAuditLog, type CrmAuditActor } from './admin/crm-audit';
@@ -7,11 +8,23 @@ export class SuppressionService {
   static async isEmailSuppressed(supabase: SupabaseClient, email: string): Promise<boolean> {
     const clean = normalizeEmail(email);
     if (!clean) return true;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('email_suppression')
       .select('id')
       .eq('email', clean)
       .maybeSingle();
+    // Fail closed on a returned (non-thrown) query error. Every caller is a bare
+    // `if (suppressed) skip` (bulk campaign send, CRM dispatch route, qstash
+    // notify, nurture/lead-magnet sequences, the dealer cold-send wrapper, the
+    // marketing branch of the email worker), so returning `true` on a lookup
+    // outage skips the send rather than risk cold-emailing a bounced/complained
+    // address. Unlike isEmailHardSuppressed (2 callers, both retry/throw-safe),
+    // these callers do not handle a throw — a thrown error would 500 routes and
+    // abort batches — so this sibling returns `true` instead of throwing.
+    if (error) {
+      logger.error('[suppression] isEmailSuppressed lookup failed (failing closed):', error);
+      return true;
+    }
     return !!data;
   }
 
@@ -32,12 +45,25 @@ export class SuppressionService {
   static async isEmailHardSuppressed(supabase: SupabaseClient, email: string): Promise<boolean> {
     const clean = normalizeEmail(email);
     if (!clean) return true; // unparseable address — fail closed
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('email_suppression')
       .select('id')
       .eq('email', clean)
       .in('reason', SuppressionService.HARD_EMAIL_SUPPRESSION_REASONS)
       .maybeSingle();
+    // Fail closed on a returned (non-thrown) query error, but do it LOUDLY: the
+    // Supabase client resolves with { data:null, error } instead of throwing, so
+    // if we swallowed it and returned a boolean, the transactional email worker
+    // would treat a lookup outage as a definitive answer — either sending to a
+    // possibly-suppressed address (return false) or silently dropping a
+    // legitimate deal email with no retry (return true, status:'SUPPRESSED').
+    // Throwing routes it into the worker's existing retry → FAILED-audit / DLQ
+    // path (same as a Resend outage), and callers that must fail-closed-and-skip
+    // (dealer cold outreach's isSuppressed) already wrap this in try/catch.
+    if (error) {
+      logger.error('[suppression] isEmailHardSuppressed lookup failed:', error);
+      throw new Error(`SUPPRESSION_LOOKUP_FAILED: ${error.message ?? 'unknown error'}`);
+    }
     return !!data;
   }
 

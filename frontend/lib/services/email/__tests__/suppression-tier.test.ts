@@ -68,6 +68,49 @@ test("an unparseable address fails closed (hard-suppressed)", async () => {
   assert.equal(await SuppressionService.isEmailHardSuppressed(sb as never, ""), true);
 });
 
+// MEDIUM-4 — a returned (non-thrown) Supabase error must fail CLOSED, and it
+// does so by THROWING rather than returning a boolean. The client resolves with
+// { data: null, error } instead of rejecting; if we read only `data` we'd treat a
+// lookup outage as "not suppressed" (and cold-email a possibly-bounced address),
+// while returning `true` would silently drop a legitimate transactional email
+// with no retry. Throwing routes it into the email worker's retry → FAILED-audit
+// / DLQ path, and the dealer cold-send wrapper (isSuppressed) catches it to skip.
+function erroringSupabase() {
+  return {
+    from(_table: string) {
+      const builder: Record<string, unknown> = {
+        select: () => builder,
+        eq: () => builder,
+        in: () => builder,
+        maybeSingle: async () => ({ data: null, error: { message: "connection reset" } }),
+      };
+      return builder;
+    },
+  };
+}
+
+test("a returned query error throws (fails closed, retriable) — never silently answers", async () => {
+  const sb = erroringSupabase();
+  await assert.rejects(
+    () => SuppressionService.isEmailHardSuppressed(sb as never, "clean@x.com"),
+    /SUPPRESSION_LOOKUP_FAILED/,
+    "a non-thrown Supabase error must throw so the caller retries or fail-closed-skips",
+  );
+});
+
+// MEDIUM-2 — the marketing/cold sibling fails closed too, but by RETURNING true
+// (not throwing): its ~12 callers are all bare `if (suppressed) skip`, so a throw
+// would 500 routes / abort batches. On a returned error it must treat the address
+// as suppressed so a DB blip never lets a bounced/complained address be cold-emailed.
+test("isEmailSuppressed returns true (fails closed) on a returned query error", async () => {
+  const sb = erroringSupabase();
+  assert.equal(
+    await SuppressionService.isEmailSuppressed(sb as never, "clean@x.com"),
+    true,
+    "a non-thrown Supabase error must be treated as suppressed",
+  );
+});
+
 test("the hard-reason set matches the reasons that flag do_not_contact", () => {
   assert.deepEqual(
     [...SuppressionService.HARD_EMAIL_SUPPRESSION_REASONS].sort(),

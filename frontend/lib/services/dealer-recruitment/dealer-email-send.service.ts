@@ -13,6 +13,7 @@ import { Resend } from "resend"
 import { prisma } from "@/lib/prisma"
 import { getServiceSupabase } from "@/lib/supabase-service"
 import { SuppressionService } from "@/lib/services/suppression.service"
+import { verifyEmailDeliverability } from "@/lib/services/integrations/email-deliverability.service"
 import {
   generateEmailTemplate,
   type EmailTemplate,
@@ -249,6 +250,20 @@ export async function sendDealerEmail(
   if (await isSuppressed(prospect.email)) {
     logger.warn(`[phase-4b3] Skipping suppressed address ${prospect.email}`)
     return { success: false, error: "Recipient is suppressed (bounced/unsubscribed)" }
+  }
+
+  // 2b. Deliverability gate (Y1) — system-wide "never cold-email an unverified
+  // address". Verify the domain has a live MX record regardless of how `email`
+  // was populated (Y1 enrichment, admin backfill/re-enrich, manual entry). Y1's
+  // enrichment path already MX-verifies before persist, but this is the single
+  // send chokepoint, so it also covers the pre-existing paths that write emails
+  // without an MX check. Fail-closed: an unverifiable domain is never sent to.
+  const deliverability = await verifyEmailDeliverability(prospect.email)
+  if (!deliverability.deliverable) {
+    logger.warn(
+      `[phase-4b3] Skipping undeliverable address ${prospect.email} (${deliverability.reason})`,
+    )
+    return { success: false, error: `Recipient address is not deliverable (${deliverability.reason})` }
   }
 
   // 3. Rate limit.
