@@ -12,7 +12,7 @@ Prior: [`SKILLS_DEPENDENCY_AUDIT_2026-07.md`](../SKILLS_DEPENDENCY_AUDIT_2026-07
 
 | Path | Purpose |
 | --- | --- |
-| `settings.json` | Enables the project MCP servers from `../.mcp.json`, the Impeccable `PostToolUse` hook, and declares the Superpowers plugin (see caveat below). |
+| `settings.json` | Enables the project MCP servers from `../.mcp.json` and the Impeccable `PostToolUse` hook. |
 | `skills/` | **42 project skills**: 41 authoritative `autolenis-*` skills + the vendored `impeccable/` plugin. |
 | `commands/` | Slash commands (`/autolenis-verify` — the full quality gate + verdict). |
 | `agents/` | Sub-agents (`impeccable-manual-edit-applier`). |
@@ -71,10 +71,10 @@ records — every write goes through `autolenis-dealer-database-ingestion`. Load
 
 Only `.claude/skills/**` is guaranteed present. Everything else is environment-provided:
 
-- **Superpowers** is declared in `settings.json` via the `obra/superpowers-marketplace`
-  marketplace, but resolves only where that marketplace is installed. It was **absent** in the
+- **Superpowers** was previously declared in `settings.json` via the `obra/superpowers-marketplace`
+  marketplace, but resolved only where that marketplace was installed. It was **absent** in the
   hosted Claude Code environment during the 2026-08 audit (`~/.claude/plugins/installed_plugins.json`
-  was empty). `CLAUDE.md`'s pipeline no longer depends on it.
+  was empty), so the declaration was removed. `CLAUDE.md`'s pipeline does not depend on it.
 - **`buffer` and `context7` MCP servers** need interactive OAuth / `CONTEXT7_API_KEY` and are
   unavailable in non-interactive sessions.
 - **Impeccable** is vendored into this repo, so it is always available — including its

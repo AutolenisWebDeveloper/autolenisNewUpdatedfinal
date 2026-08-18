@@ -7,8 +7,7 @@
     "sequential-thinking",
     "memory",
     "playwright",
-    "context7",
-    "graphify"
+    "context7"
   ],
   "hooks": {
     "PostToolUse": [
@@ -47,16 +46,5 @@
         ]
       }
     ]
-  },
-  "extraKnownMarketplaces": {
-    "superpowers-marketplace": {
-      "source": {
-        "source": "github",
-        "repo": "obra/superpowers-marketplace"
-      }
-    }
-  },
-  "enabledPlugins": {
-    "superpowers@superpowers-marketplace": true
   }
 }

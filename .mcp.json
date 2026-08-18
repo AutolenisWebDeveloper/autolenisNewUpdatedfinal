@@ -33,10 +33,6 @@
       "headers": {
         "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}"
       }
-    },
-    "graphify": {
-      "type": "http",
-      "url": "https://api.graphify.com/mcp"
     }
   }
 }

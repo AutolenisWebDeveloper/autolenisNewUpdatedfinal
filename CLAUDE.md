@@ -95,9 +95,10 @@ token/component source of truth.
 
 **Availability caveat — verify before you rely on it.** Skills outside `.claude/skills/` are
 environment-provided and are **not guaranteed to be present in a given session**. The
-`superpowers` plugin is declared in `.claude/settings.json` but resolves only where that
-marketplace is installed; as of the 2026-08 audit it was **absent** in the hosted Claude Code
-environment. Never treat an unavailable capability as a completed pipeline step — the repo-local
+`superpowers` plugin was previously declared in `.claude/settings.json`, but it resolved only
+where the `obra/superpowers-marketplace` was installed and was **absent** in the hosted Claude
+Code environment; the declaration was removed in the 2026-08 audit because the pipeline never
+depended on it. Never treat an unavailable capability as a completed pipeline step — the repo-local
 `.claude/skills/autolenis-*` skills are the only guaranteed-present guidance, and step 4 below
 stands on its own without any plugin.
 
