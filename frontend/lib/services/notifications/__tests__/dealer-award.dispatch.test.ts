@@ -5,7 +5,10 @@
 // dispatcher wiring: it sends exactly one email per notifiable dealer, writes one
 // in-app Notification per registered dealer, is idempotent on the in-app channel
 // (deduped on the stable metadata key), gives outside/placeholder dealers email
-// only, and never throws (self-contained on failure).
+// only, returns quietly on a terminal missing-auction, and — because it now runs
+// inside the durable dealerAwardFn worker — PROPAGATES transient load/dispatch
+// failures (after attempting every recipient) so the worker retries + dead-letters
+// instead of silently dropping notifications.
 //
 // Needs module mocking — run with:
 //   npx tsx --test --experimental-test-module-mocks \
@@ -32,6 +35,9 @@ let offers: OfferRow[] = [];
 let buyer: { firstName: string | null; lastName: string | null } | null = null;
 let auctionRow: { buyerId: string } | null = { buyerId: "buyer_1" };
 let existingNotification: { id: string } | null = null;
+// Injectable failures (durable-worker retry semantics).
+let offerFindManyError: Error | null = null;
+let wonEmailError: Error | null = null;
 
 let wonCalls: Array<Record<string, unknown>> = [];
 let lostCalls: Array<Record<string, unknown>> = [];
@@ -58,7 +64,12 @@ mock.module("@/lib/prisma", {
     prisma: {
       auction: { findUnique: async () => auctionRow },
       buyer: { findUnique: async () => buyer },
-      offer: { findMany: async () => offers },
+      offer: {
+        findMany: async () => {
+          if (offerFindManyError) throw offerFindManyError;
+          return offers;
+        },
+      },
       notification: {
         findFirst: async () => existingNotification,
         create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -74,6 +85,7 @@ mock.module("@/lib/services/email/resend.service", {
   namedExports: {
     sendDealerOfferWonEmail: async (p: Record<string, unknown>) => {
       wonCalls.push(p);
+      if (wonEmailError) throw wonEmailError;
       return { sent: true, outcome: "SENT" };
     },
     sendDealerOfferLostEmail: async (p: Record<string, unknown>) => {
@@ -105,6 +117,8 @@ beforeEach(() => {
     registeredOffer({ id: "lose-b", otdPriceCents: 3_250_000 }),
   ];
   existingNotification = null;
+  offerFindManyError = null;
+  wonEmailError = null;
   wonCalls = [];
   lostCalls = [];
   createdNotifications = [];
@@ -179,7 +193,7 @@ test("outside/placeholder dealer gets an email but no in-app row", async () => {
   assert.equal(createdNotifications[0]!.dealerId, "d-win");
 });
 
-test("dispatcher never throws when the auction is missing (self-contained)", async () => {
+test("a terminal missing-auction returns quietly (no retry storm)", async () => {
   auctionRow = null;
   const emit = await loadDispatcher();
   await assert.doesNotReject(() =>
@@ -187,4 +201,42 @@ test("dispatcher never throws when the auction is missing (self-contained)", asy
   );
   assert.equal(wonCalls.length, 0);
   assert.equal(createdNotifications.length, 0);
+});
+
+// ── Finding #1 regression: durability was illusory when the dispatcher swallowed
+// its own errors — the worker marked the guard `completed`, blocking re-drive and
+// silently dropping every dealer notification. The dispatcher must now PROPAGATE
+// transient failures so dealerAwardFn retries + dead-letters. ──────────────────
+
+test("a load-phase DB failure PROPAGATES (worker will retry, not silently complete)", async () => {
+  offerFindManyError = new Error("db connection reset");
+  const emit = await loadDispatcher();
+  await assert.rejects(
+    () => emit({ auctionId: "a1", winningOfferId: "win", dealId: "deal1" }),
+    /db connection reset/,
+  );
+  // nothing dispatched — the whole batch retries from the top
+  assert.equal(wonCalls.length, 0);
+  assert.equal(lostCalls.length, 0);
+  assert.equal(createdNotifications.length, 0);
+});
+
+test("a recipient dispatch failure is raised AFTER every recipient is attempted", async () => {
+  wonEmailError = new Error("resend enqueue failed");
+  const emit = await loadDispatcher();
+  await assert.rejects(
+    () => emit({ auctionId: "a1", winningOfferId: "win", dealId: "deal1" }),
+    /1\/3 dispatch\(es\) failed/,
+  );
+  // the winner's email was attempted and failed…
+  assert.equal(wonCalls.length, 1);
+  // …but the two losing dealers were STILL notified on this run (batch isolation)
+  assert.equal(lostCalls.length, 2, "one bad recipient must not starve the rest");
+  // the winner's in-app row is skipped this run (its iteration threw before it);
+  // only the two losers' in-app rows are written — retry re-runs the winner.
+  assert.equal(createdNotifications.length, 2);
+  assert.ok(
+    createdNotifications.every((n) => n.type === "OFFER_DECLINED"),
+    "only losing dealers' in-app rows on the failing run",
+  );
 });

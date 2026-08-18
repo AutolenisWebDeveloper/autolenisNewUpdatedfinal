@@ -13,8 +13,6 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse, after } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { runPostIntakeOutreach } from "@/lib/services/acquisition/post-intake-outreach.service";
-import { sendDealersContactedEmail } from "@/lib/services/email/buyer-notifications.service";
 import {
   sendVehicleRequestAdminNotification,
   sendVehicleRequestConfirmation,
@@ -442,30 +440,11 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── Post-intake auto-outreach + buyer notification (non-blocking) ─────────
-  // Runs after the response is sent so it never blocks or fails the buyer's
-  // submission. Contacts discovered dealers (privacy-safe) and, when at least
-  // one is reached, emails the buyer the dealers-contacted count + $99 CTA.
-  if (buyerOpportunityId) {
-    after(async () => {
-      try {
-        const result = await runPostIntakeOutreach(buyerOpportunityId);
-
-        if (result.dealersContacted > 0) {
-          await sendDealersContactedEmail({
-            buyerEmail: data.email,
-            buyerFirstName: data.firstName,
-            vehicleMake: input.make ?? data.vehicleType,
-            vehicleModel: input.model ?? "",
-            dealerCount: result.dealersContacted,
-            depositUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? APP_URL}/buyer/deposit`,
-          });
-        }
-      } catch (err) {
-        logger.error("[post-intake] outreach or notification failed:", err);
-      }
-    });
-  }
+  // ── Post-intake pipeline (S1) ────────────────────────────────────────────
+  // Dealer outreach + the dealers-contacted buyer email now run inside the
+  // durable Inngest worker `intakeProcessFn`, enqueued by intakeBuyerRequest
+  // (autolenis/intake.process). No fire-and-forget after() here — the worker is
+  // retried/dead-lettered and re-drivable by the intake-reconcile cron.
 
   // Phase C-Attribution — if this request came from a buyer who read a
   // buying-guide article, link the opportunity to that article. No-op when

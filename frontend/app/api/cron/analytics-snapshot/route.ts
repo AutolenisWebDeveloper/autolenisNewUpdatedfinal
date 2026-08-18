@@ -1,7 +1,8 @@
-// analytics-snapshot — daily platform stats snapshot
+// analytics-snapshot — daily platform stats snapshot + funnel observability (S5)
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { snapshotPlatformStats } from "@/lib/services/analytics/analytics.service";
+import { snapshotAndAlertFunnel } from "@/lib/services/analytics/funnel-observability.service";
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get(CRON_AUTH_HEADER);
@@ -12,5 +13,12 @@ export async function GET(request: NextRequest) {
   }
 
   await snapshotPlatformStats();
-  return NextResponse.json({ success: true, data: { snapshot: true, timestamp: new Date().toISOString() } });
+  // S5 — derive-by-snapshot funnel counters + drop-off / no-match / zero-offer
+  // alerts, on the same daily cadence (no new cron).
+  const funnel = await snapshotAndAlertFunnel();
+
+  return NextResponse.json({
+    success: true,
+    data: { snapshot: true, funnel, timestamp: new Date().toISOString() },
+  });
 }

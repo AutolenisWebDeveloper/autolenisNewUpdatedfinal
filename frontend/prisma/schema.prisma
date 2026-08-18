@@ -1042,6 +1042,25 @@ model PlatformStatSnapshot {
   @@map("platform_stat_snapshots")
 }
 
+// S5 — derive-by-snapshot funnel observability. On the daily analytics-snapshot
+// cadence, each buyer-funnel stage is COUNTed from its authoritative domain
+// table and persisted here as a named counter (one row per metric per run), so
+// the funnel shape becomes a time series for drop-off alerting and the (deferred)
+// funnel dashboard. `windowHours` is null for cumulative funnel-stage counts and
+// set (e.g. 24) for windowed failure counters (requests_closed_no_match,
+// auctions_closed_zero_offers). This is a derived snapshot, NOT an
+// event-incremented counter table.
+model FunnelStageSnapshot {
+  id           String   @id @default(uuid())
+  snapshotDate DateTime @default(now()) @map("snapshot_date")
+  metric       String
+  count        Int
+  windowHours  Int?     @map("window_hours")
+
+  @@index([metric, snapshotDate])
+  @@map("funnel_stage_snapshots")
+}
+
 model SavedSearch {
   id          String    @id @default(uuid())
   buyerId     String    @map("buyer_id")
@@ -3380,6 +3399,12 @@ model BuyerOpportunity {
   marketGoodDealTarget  Int?     @map("market_good_deal_target")
   marketNotes           String?  @db.Text @map("market_notes")
   marketEnrichedAt      DateTime? @map("market_enriched_at")
+
+  // S1/S2 — set when the durable intake pipeline (autolenis/intake.process)
+  // completes. NULL = never finished; the intake-reconcile cron re-drives such
+  // rows. Distinct from marketEnrichedAt (a legit intake can enrich yet find
+  // zero dealers), so this is the unambiguous "intake done" marker.
+  intakeProcessedAt     DateTime? @map("intake_processed_at")
 
   // Dealer discovery (relation)
   dealerProspects       DealerProspect[]

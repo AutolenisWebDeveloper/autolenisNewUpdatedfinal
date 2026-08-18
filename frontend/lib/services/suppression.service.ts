@@ -15,6 +15,32 @@ export class SuppressionService {
     return !!data;
   }
 
+  // The "hard" email-suppression reasons — bounces, spam complaints, and
+  // spam-traps — the same set that flags contacts.do_not_contact (see
+  // suppressEmail below). Soft/marketing reasons ('unsubscribed', 'admin_added')
+  // are intentionally excluded so TRANSACTIONAL deal emails still reach a buyer
+  // who merely opted out of marketing, while a genuinely bad address is blocked.
+  static readonly HARD_EMAIL_SUPPRESSION_REASONS: EmailSuppressionReason[] = [
+    'bounced',
+    'complained',
+    'spam_trap',
+  ];
+
+  // Reason-aware suppression check for transactional sends: blocks ONLY on a
+  // hard reason. email is @unique in email_suppression, so this matches at most
+  // one row.
+  static async isEmailHardSuppressed(supabase: SupabaseClient, email: string): Promise<boolean> {
+    const clean = normalizeEmail(email);
+    if (!clean) return true; // unparseable address — fail closed
+    const { data } = await supabase
+      .from('email_suppression')
+      .select('id')
+      .eq('email', clean)
+      .in('reason', SuppressionService.HARD_EMAIL_SUPPRESSION_REASONS)
+      .maybeSingle();
+    return !!data;
+  }
+
   static async isSmsSuppressed(supabase: SupabaseClient, phone: string): Promise<boolean> {
     const standardized = normalizePhone(phone);
     if (!standardized) return true;
@@ -34,6 +60,30 @@ export class SuppressionService {
   ): Promise<void> {
     const clean = normalizeEmail(email);
     if (!clean) return;
+
+    // No-downgrade guard: email_suppression holds ONE row per address (onConflict
+    // 'email'), so a plain upsert would let a later SOFT reason (unsubscribed /
+    // admin_added) overwrite an existing HARD reason (bounced / complained /
+    // spam_trap). That would silently un-block transactional deal emails to a
+    // genuinely bad address (isEmailHardSuppressed reads `reason`). Hard reasons
+    // always win: if the incoming reason is soft and a hard reason is already on
+    // file, leave the row untouched.
+    const incomingIsHard = SuppressionService.HARD_EMAIL_SUPPRESSION_REASONS.includes(reason);
+    if (!incomingIsHard) {
+      const { data: existing } = await supabase
+        .from('email_suppression')
+        .select('reason')
+        .eq('email', clean)
+        .maybeSingle();
+      if (
+        existing &&
+        SuppressionService.HARD_EMAIL_SUPPRESSION_REASONS.includes(
+          existing.reason as EmailSuppressionReason,
+        )
+      ) {
+        return;
+      }
+    }
 
     const { data: contact } = await supabase
       .from('contacts')

@@ -1,10 +1,7 @@
-import { logger } from "@/lib/logger";
-import { NextRequest, after } from "next/server";
+import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
-import { runPostIntakeOutreach } from "@/lib/services/acquisition/post-intake-outreach.service";
-import { sendDealersContactedEmail } from "@/lib/services/email/buyer-notifications.service";
 import {
   checkRateLimit,
   toBuyerLabel,
@@ -199,32 +196,15 @@ export async function POST(request: NextRequest) {
     hasTradeIn: validatedFinancing?.tradeIn ?? false,
   };
 
-  const { buyerOpportunityId, vehicleRequestId } =
-    await intakeBuyerRequest(intakeInput);
+  // buyerOpportunityId is intentionally not read here — intakeBuyerRequest now
+  // enqueues autolenis/intake.process itself (S1).
+  const { vehicleRequestId } = await intakeBuyerRequest(intakeInput);
 
-  // ── Post-intake auto-outreach + buyer notification (non-blocking) ─────────
-  // Contacts discovered dealers (privacy-safe) after the response is sent, then
-  // emails the buyer the dealers-contacted count + $99 CTA. Never blocks intake.
-  if (buyerOpportunityId) {
-    after(async () => {
-      try {
-        const result = await runPostIntakeOutreach(buyerOpportunityId);
-
-        if (result.dealersContacted > 0 && buyerEmail) {
-          await sendDealersContactedEmail({
-            buyerEmail,
-            buyerFirstName: buyer.firstName ?? "there",
-            vehicleMake: intakeInput.make ?? "",
-            vehicleModel: intakeInput.model ?? "",
-            dealerCount: result.dealersContacted,
-            depositUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? "https://www.autolenis.com"}/buyer/deposit`,
-          });
-        }
-      } catch (err) {
-        logger.error("[post-intake] outreach or notification failed:", err);
-      }
-    });
-  }
+  // ── Post-intake pipeline (S1) ────────────────────────────────────────────
+  // Dealer outreach + the dealers-contacted buyer email now run inside the
+  // durable Inngest worker `intakeProcessFn`, enqueued by intakeBuyerRequest
+  // (autolenis/intake.process) — retried/dead-lettered and re-drivable by the
+  // intake-reconcile cron. No fire-and-forget after() here.
 
   // buyerId is always supplied here, so the service must have created a
   // VehicleRequest. If it didn't, surface a clear server error rather than

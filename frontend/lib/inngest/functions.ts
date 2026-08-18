@@ -6,6 +6,7 @@ import twilio from 'twilio';
 import { inngest } from './client';
 import { SuppressionService } from '../services/suppression.service';
 import { TemplateService } from '../services/template.service';
+import { recordTransactionalEmailSend, transactionalEmailAlreadySent } from '../services/email/email-send-log';
 import { normalizePhone } from '../utils/phone';
 import { prisma } from '../prisma';
 import { Prisma } from '@prisma/client';
@@ -112,14 +113,32 @@ export const emailSendFn = inngest.createFunction(
     };
     const supabase = getSupabase();
 
+    // Transactional lifecycle emails (deal-selected, offers-ready, dealer
+    // award/loss…) are migrated from the direct resend rail and MUST keep that
+    // rail's semantics: they carry a stable idempotencyKey, no contactId (they
+    // record on EmailSendLog only, never contact_timeline_events), and dedup on
+    // EmailSendLog's SENT-precheck — which is retriable after a transient
+    // failure. The idempotency_keys guard below is insert-once and never
+    // released in this worker, so routing transactional sends through it would
+    // permanently poison the key after a single first-attempt failure.
+    const isTransactional =
+      data.type === 'transactional' && !!data.idempotencyKey && !data.contactId;
+
     const uniqueKey =
       data.idempotencyKey ||
       `${data.contactId ?? data.email}:email_send:${new Date().toISOString().slice(0, 10)}`;
 
-    const proceed = await step.run('evaluate-idempotency', async () =>
-      acquireIdempotencyGuard(supabase, uniqueKey)
-    );
-    if (!proceed) return { status: 'DUPLICATE_BLOCKED' };
+    if (isTransactional) {
+      const alreadySent = await step.run('check-email-send-log', async () =>
+        transactionalEmailAlreadySent(data.idempotencyKey!)
+      );
+      if (alreadySent) return { status: 'DUPLICATE_BLOCKED' };
+    } else {
+      const proceed = await step.run('evaluate-idempotency', async () =>
+        acquireIdempotencyGuard(supabase, uniqueKey)
+      );
+      if (!proceed) return { status: 'DUPLICATE_BLOCKED' };
+    }
 
     try {
       const contact = data.contactId
@@ -140,11 +159,19 @@ export const emailSendFn = inngest.createFunction(
         return { status: 'GATED' };
       }
 
+      // Transactional lifecycle emails bypass the marketing/soft suppression
+      // tier (a buyer who unsubscribed from MARKETING must still receive their
+      // own deal emails) but still honor HARD suppression (bounce / complaint /
+      // spam-trap). Marketing sends keep the full lumped check.
       const suppressed = await step.run('check-suppression', async () =>
-        SuppressionService.isEmailSuppressed(supabase, data.email)
+        data.type === 'transactional'
+          ? SuppressionService.isEmailHardSuppressed(supabase, data.email)
+          : SuppressionService.isEmailSuppressed(supabase, data.email)
       );
       if (suppressed) {
-        await updateIdempotencyState(supabase, uniqueKey, 'completed', { reason: 'SUPPRESSED' });
+        if (!isTransactional) {
+          await updateIdempotencyState(supabase, uniqueKey, 'completed', { reason: 'SUPPRESSED' });
+        }
         return { status: 'SUPPRESSED' };
       }
 
@@ -224,21 +251,60 @@ export const emailSendFn = inngest.createFunction(
         });
       }
 
-      await updateIdempotencyState(supabase, uniqueKey, 'completed', {
-        resendId: sendResult?.id,
-      });
+      // S3 — EmailSendLog parity for migrated transactional lifecycle emails.
+      // isTransactional guarantees type:'transactional', a stable idempotencyKey,
+      // and NO contactId — so the audit row matches exactly what the direct
+      // resend rail wrote pre-migration (same key, no duplicate), and because
+      // contactId is absent the contact_timeline_events write above is skipped:
+      // the send is recorded on exactly ONE plane (EmailSendLog), never
+      // double-counted. status defaults to SENT.
+      if (isTransactional) {
+        await step.run('record-email-send-log', async () =>
+          recordTransactionalEmailSend({
+            idempotencyKey: data.idempotencyKey!,
+            recipient: data.email,
+            templateId: data.templateId ?? 'transactional',
+            resendId: sendResult?.id ?? null,
+          })
+        );
+      }
+
+      if (!isTransactional) {
+        await updateIdempotencyState(supabase, uniqueKey, 'completed', {
+          resendId: sendResult?.id,
+        });
+      }
       return { status: 'SUCCESS', resendId: sendResult?.id };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      await updateIdempotencyState(supabase, uniqueKey, 'failed', { error: message });
-      if (isFinalAttempt(ctx as unknown as Record<string, unknown>)) {
-        await moveJobToDeadLetter(
-          supabase,
-          (ctx as unknown as { runId?: string }).runId ?? 'unknown',
-          'autolenis/email.send',
-          data,
-          message
-        );
+      if (isTransactional) {
+        // Parity with the direct rail (sendIdempotent): record the failed
+        // attempt on EmailSendLog as FAILED — NOT SENT — so the audit trail
+        // shows the outage while the SENT-precheck keeps the key retriable on
+        // the next Inngest attempt. Best-effort: a logging failure must never
+        // mask the real send error that Inngest needs to drive the retry.
+        try {
+          await recordTransactionalEmailSend({
+            idempotencyKey: data.idempotencyKey!,
+            recipient: data.email,
+            templateId: data.templateId ?? 'transactional',
+            status: 'FAILED',
+            resendId: null,
+          });
+        } catch (logErr) {
+          logger.error('[email-send-worker] EmailSendLog FAILED write failed', logErr);
+        }
+      } else {
+        await updateIdempotencyState(supabase, uniqueKey, 'failed', { error: message });
+        if (isFinalAttempt(ctx as unknown as Record<string, unknown>)) {
+          await moveJobToDeadLetter(
+            supabase,
+            (ctx as unknown as { runId?: string }).runId ?? 'unknown',
+            'autolenis/email.send',
+            data,
+            message
+          );
+        }
       }
       throw err;
     }

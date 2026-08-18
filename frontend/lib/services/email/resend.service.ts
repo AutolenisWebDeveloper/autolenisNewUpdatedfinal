@@ -6,6 +6,7 @@
 import { logger } from "@/lib/logger";
 import { Resend } from "resend";
 import { prisma } from "@/lib/prisma";
+import { enqueueTransactionalEmail } from "./transactional-dispatch";
 import { PREMIUM_FEE_CENTS, PREMIUM_FEE_USD, COMMISSION_RATES, formatCentsAsUsd } from "@/lib/constants";
 
 // L1 affiliate commission on the Premium concierge fee.
@@ -420,7 +421,8 @@ export async function sendAuctionActivatedEmail(to: string, buyerName: string, a
 export async function sendOffersReadyEmail(to: string, buyerName: string, auctionId: string, offerCount: number) {
   void offerCount; // offer count not shown in email (buyers view in app)
   const offersUrl = `${APP_URL}/buyer/auctions/${auctionId}/offers`;
-  return sendIdempotent({
+  // S3 — migrated onto the durable Inngest spine (key/template parity).
+  return enqueueTransactionalEmail({
     idempotencyKey: `offers-ready-${auctionId}`,
     to,
     templateId: "offers-ready",
@@ -721,7 +723,9 @@ export async function sendAdverseActionEmail(params: {
 export async function sendDealSelectedEmail(to: string, buyerName: string, dealId: string) {
   void dealId; // used for idempotency key only
   const dashboardUrl = `${APP_URL}/buyer/dashboard`;
-  return sendIdempotent({
+  // S3 — migrated onto the durable Inngest spine (same idempotencyKey/templateId
+  // as the old direct rail → EmailSendLog parity).
+  return enqueueTransactionalEmail({
     idempotencyKey: `deal-selected-${dealId}`,
     to,
     templateId: "deal-selected",
@@ -1639,7 +1643,7 @@ export async function sendDealerOfferRevisionClosingEmail(params: {
 export async function sendDealerOfferWonEmail(params: {
   to: string; contactName: string; vehicleRef: string; buyerFirstName: string; buyerLastInitial: string; dealUrl: string; dealId: string;
 }) {
-  return sendIdempotent({
+  return enqueueTransactionalEmail({
     idempotencyKey: `dealer-offer-won-${params.dealId}`,
     to: params.to,
     templateId: "dealer-offer-won",
@@ -1651,7 +1655,7 @@ export async function sendDealerOfferWonEmail(params: {
 export async function sendDealerOfferLostEmail(params: {
   to: string; contactName: string; vehicleRef: string; yourPosition: number; totalOffers: number; insightsUrl: string; auctionId: string;
 }) {
-  return sendIdempotent({
+  return enqueueTransactionalEmail({
     idempotencyKey: `dealer-offer-lost-${params.auctionId}-${params.to}`,
     to: params.to,
     templateId: "dealer-offer-lost",
@@ -1663,7 +1667,7 @@ export async function sendDealerOfferLostEmail(params: {
 export async function sendDealerAuctionClosedNoWinnerEmail(params: {
   to: string; contactName: string; vehicleRef: string; auctionId: string;
 }) {
-  return sendIdempotent({
+  return enqueueTransactionalEmail({
     idempotencyKey: `dealer-auction-closed-no-winner-${params.auctionId}-${params.to}`,
     to: params.to,
     templateId: "dealer-auction-closed-no-winner",
