@@ -51,8 +51,8 @@
   "extraKnownMarketplaces": {
     "superpowers-marketplace": {
       "source": {
-        "source": "github",
-        "repo": "obra/superpowers-marketplace"
+        "source": "directory",
+        "path": ".claude/plugins/superpowers-marketplace"
       }
     }
   },
