@@ -845,6 +845,15 @@ model VehicleRequest {
   // this canonical request. Soft link: no cascade, application-enforced.
   buyerOpportunityId String?                             @map("buyer_opportunity_id")
   buyerOpportunity   BuyerOpportunity?                   @relation(fields: [buyerOpportunityId], references: [id])
+  // Y2 — request-time coverage gate. When the shared coverage primitive counts
+  // fewer than MIN_COVERAGE_DEALERS contactable rooftops around the buyer at
+  // request time, this request is SOFT-HELD (flag only — never a new status,
+  // never blocks the buyer) and recruitment is kicked in the background. Both
+  // clear once coverage recovers (the gate is idempotent set-or-clear). Reason
+  // is a short machine tag (e.g. "thin_coverage:1@150mi"). Added by migration
+  // add_vehicle_request_coverage_hold.
+  coverageHoldAt     DateTime?                           @map("coverage_hold_at")
+  coverageHoldReason String?                             @map("coverage_hold_reason")
   createdAt       DateTime                               @default(now()) @map("created_at")
   updatedAt       DateTime                               @updatedAt @map("updated_at")
   buyerUpdates    VehicleRequestBuyerUpdate[]
@@ -857,6 +866,7 @@ model VehicleRequest {
 
   @@index([buyerId, status])
   @@index([buyerOpportunityId])
+  @@index([coverageHoldAt])
   @@map("vehicle_requests")
 }
 

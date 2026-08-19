@@ -28,6 +28,7 @@ import {
 import { sendDealersContactedEmail } from "@/lib/services/email/buyer-notifications.service";
 import { runPostIntakeOutreach } from "./post-intake-outreach.service";
 import { enrichProspectEmailsForOpportunity } from "../dealer-recruitment/prospect-email-enrichment.service";
+import { applyRequestCoverageGate } from "./request-coverage-gate.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -347,6 +348,25 @@ export async function runIntakePipeline(buyerOpportunityId: string): Promise<Int
       dealerCount: dealersContacted,
       depositUrl: `${APP_URL}/buyer/deposit`,
     }).catch((err) => logger.error("[intake-pipeline] dealers-contacted email failed:", err));
+  }
+
+  // Stage 6 (Y2) — request-time coverage gate. Discovery + enrichment above have
+  // populated contactable prospects, so assess TOTAL coverage now and record a
+  // soft-hold on the linked request when it's still thin (a reconciler keeps
+  // recruiting until it recovers). Record-only here (recruitOnThin:false):
+  // enrichment already ran unconditionally this pass, so the gate must not fire a
+  // redundant second pass. Best-effort — never blocks or fails the pipeline.
+  try {
+    const linkedRequest = await prisma.vehicleRequest.findFirst({
+      where: { buyerOpportunityId },
+      select: { id: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (linkedRequest) {
+      await applyRequestCoverageGate(linkedRequest.id, { recruitOnThin: false });
+    }
+  } catch (err) {
+    logger.error("[intake-pipeline] coverage gate failed:", err);
   }
 
   return { dealersContacted };

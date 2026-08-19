@@ -78,17 +78,34 @@ export async function assessAuctionCoverage(
   deps?: Partial<CoverageDeps>,
 ): Promise<CoverageResult> {
   const prisma = deps?.prisma ?? defaultPrisma;
+  const auction = await prisma.auction.findUnique({
+    where: { id: auctionId },
+    select: { buyer: { select: { zip: true } } },
+  });
+  // Delegate to the shared zip-based core. Y2's request-time gate calls the same
+  // core directly (pre-auction), so there is ONE coverage primitive, not two.
+  return assessCoverageForZip(auction?.buyer?.zip ?? null, radiusMiles, deps, `auction ${auctionId}`);
+}
+
+/**
+ * Coverage for a buyer ZIP at a given radius — the shared counting core. Both
+ * assessAuctionCoverage (auction → buyer.zip) and the Y2 request-time gate
+ * (VehicleRequest/buyer zip, before any auction exists) call this; only the
+ * buyer-location source differs. `label` is for logging only.
+ */
+export async function assessCoverageForZip(
+  buyerZip: string | null,
+  radiusMiles: number,
+  deps?: Partial<CoverageDeps>,
+  label = `zip ${buyerZip ?? "unknown"}`,
+): Promise<CoverageResult> {
+  const prisma = deps?.prisma ?? defaultPrisma;
   const geocode = deps?.geocode ?? defaultGeocode;
   const resolveContact = deps?.resolveContact ?? resolveContactableEmail;
   const haversine = deps?.haversine ?? haversineMiles;
   const channelConfigured = deps?.channelConfigured ?? (() => missingEmailEnvVars().length === 0);
   const bbox = deps?.boundingBox ?? boundingBox;
 
-  const auction = await prisma.auction.findUnique({
-    where: { id: auctionId },
-    select: { buyer: { select: { zip: true } } },
-  });
-  const buyerZip = auction?.buyer?.zip ?? null;
   const buyerCoords = buyerZip ? await geocode(buyerZip) : null;
 
   // Fail OPEN toward inclusion when the buyer can't be geocoded: without coords we
@@ -133,7 +150,7 @@ export async function assessAuctionCoverage(
   const prospectsSendable = includeProspects && channelConfigured();
   if (!prospectsSendable) {
     logger.warn(
-      `[coverage] outreach channel not configured — excluding all prospects from coverage for auction ${auctionId}`,
+      `[coverage] outreach channel not configured — excluding all prospects from coverage for ${label}`,
     );
   }
 
@@ -198,7 +215,7 @@ export async function assessAuctionCoverage(
     buyerGeocoded: !!buyerCoords,
   };
   logger.info(
-    `[coverage] auction ${auctionId} @ ${radiusMiles}mi: coverage=${result.coverage} ` +
+    `[coverage] ${label} @ ${radiusMiles}mi: coverage=${result.coverage} ` +
       `(registered=${registered} prospects=${prospects}) buyerGeocoded=${result.buyerGeocoded}`,
   );
   return result;
@@ -238,5 +255,40 @@ export async function selectCoverageRadius(
   // No tier met the threshold — return the widest assessment (best effort; the
   // caller still invites who it can, and the deposit-activation no-dealer grace
   // owns the terminal soft-hold/close decision).
+  return last ?? { coverage: 0, registered: 0, prospects: 0, radiusMiles: RADIUS_TIERS[RADIUS_TIERS.length - 1], buyerGeocoded: false };
+}
+
+export interface ZipCoverageLadderDeps extends CoverageDeps {
+  // Injectable assessor for tests; defaults to assessCoverageForZip bound to the
+  // ZIP + deps. Takes only the radius (the ZIP is closed over) — the auction
+  // ladder's assess is (auctionId, radius); this pre-auction ladder has no id.
+  assessZip: (radiusMiles: number) => Promise<CoverageResult>;
+  // Stop predicate; defaults to TOTAL coverage ≥ MIN (the Y2 gate's threshold).
+  stopWhen: (c: CoverageResult) => boolean;
+  label: string;
+}
+
+/**
+ * Y2 radius-escalation ladder keyed on a buyer ZIP (pre-auction). Same tightest-
+ * first widen-only ladder as selectCoverageRadius, but assessing a ZIP directly
+ * via the shared assessCoverageForZip core — there is NO second radius-aware
+ * coverage path; only the buyer-location source (ZIP vs auction→buyer.zip)
+ * differs. Returns the first tier that satisfies `stopWhen` (default TOTAL
+ * coverage ≥ MIN), or the widest tier's result if none does.
+ */
+export async function selectCoverageRadiusForZip(
+  buyerZip: string | null,
+  deps?: Partial<ZipCoverageLadderDeps>,
+): Promise<CoverageResult> {
+  const label = deps?.label ?? `zip ${buyerZip ?? "unknown"}`;
+  const assessZip =
+    deps?.assessZip ?? ((r: number) => assessCoverageForZip(buyerZip, r, deps, label));
+  const meets = deps?.stopWhen ?? ((c: CoverageResult) => c.coverage >= MIN_COVERAGE_DEALERS);
+  let last: CoverageResult | null = null;
+  for (const tier of RADIUS_TIERS) {
+    const cov = await assessZip(tier);
+    last = cov;
+    if (meets(cov)) return cov;
+  }
   return last ?? { coverage: 0, registered: 0, prospects: 0, radiusMiles: RADIUS_TIERS[RADIUS_TIERS.length - 1], buyerGeocoded: false };
 }

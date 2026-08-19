@@ -18,6 +18,7 @@ const spy = {
   score: 0,
   outreach: 0,
   dealersContactedEmail: 0,
+  coverageGate: 0,
 };
 
 mock.module("@/lib/prisma", {
@@ -32,7 +33,23 @@ mock.module("@/lib/prisma", {
         createMany: async () => ({ count: 0 }),
         findMany: async () => [],
       },
+      vehicleRequest: {
+        findFirst: async () => ({ id: "vr_1" }),
+      },
       leadScore: { create: async () => ({}) },
+    },
+  },
+});
+
+// Y2 coverage gate runs as the pipeline's final stage; unit-mock it here so this
+// suite pins ORDERING (gate after outreach) without pulling in real coverage
+// assessment. The gate's own behavior is covered by request-coverage-gate.test.ts.
+mock.module("@/lib/services/acquisition/request-coverage-gate.service", {
+  namedExports: {
+    applyRequestCoverageGate: async () => {
+      spy.coverageGate += 1;
+      order.push("coverage-gate");
+      return { held: false };
     },
   },
 });
@@ -123,7 +140,7 @@ beforeEach(() => {
   opp = baseOpp();
   order.length = 0;
   spy.enrich = 0; spy.discover = 0; spy.score = 0; spy.outreach = 0;
-  spy.dealersContactedEmail = 0;
+  spy.dealersContactedEmail = 0; spy.coverageGate = 0;
   existingProspectCount = 0;
   outreachResult = { dealersContacted: 0 };
 });
@@ -137,6 +154,11 @@ test("runs enrichment + discovery, then outreach AFTER discovery", async () => {
   assert.ok(
     order.indexOf("outreach") > order.indexOf("discover"),
     "outreach must run after discovery",
+  );
+  assert.equal(spy.coverageGate, 1, "coverage gate runs once");
+  assert.ok(
+    order.indexOf("coverage-gate") > order.indexOf("outreach"),
+    "coverage gate must run after outreach (assesses post-enrichment coverage)",
   );
 });
 
