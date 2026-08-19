@@ -96,6 +96,18 @@ declare namespace NodeJS {
     GOOGLE_SEARCH_CONSOLE_KEY?: string;
     GSC_SITE_URL?: string;
 
+    // Apollo.io — dealer / decision-maker contact enrichment provider (REST:
+    // People Search, Organization Lookup, People Enrichment / Match). The key is
+    // read SERVER-SIDE ONLY and is never exposed to the client. The Apollo
+    // enrichment path no-ops when APOLLO_API_KEY is unset, and stays disabled
+    // unless ENABLE_APOLLO_ENRICHMENT is exactly "true" (dealer enrichment and
+    // outreach are off by default per the outreach-governance rules).
+    // APOLLO_API_BASE_URL overrides the REST base (defaults to
+    // https://api.apollo.io/api/v1).
+    APOLLO_API_KEY?: string;
+    APOLLO_API_BASE_URL?: string;
+    ENABLE_APOLLO_ENRICHMENT?: string; // "true" enables Apollo enrichment; default off
+
     // Platform
     NEXT_PUBLIC_APP_URL: string;
     MAINTENANCE_MODE: string;
