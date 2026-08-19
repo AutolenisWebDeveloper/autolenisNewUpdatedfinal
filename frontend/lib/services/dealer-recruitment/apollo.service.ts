@@ -61,6 +61,16 @@ export interface ApolloRevealed {
   title?: string | null;
 }
 
+// Outcome of a reveal attempt, carrying whether Apollo was (or may have been)
+// BILLED so the ledger only refunds a genuinely free no-op. Apollo charges a lead
+// credit when people/match MATCHES a person, even if it unlocks no email — so a
+// matched-but-emailless reveal is `billed:true` (do NOT refund; never undercount
+// spend / overspend the cap). A no-op that never reached a billable call (no org /
+// no people / no person matched) is `billed:false` (refund).
+export type ApolloRevealOutcome =
+  | { kind: "revealed"; email: string; name: string | null; title: string | null }
+  | { kind: "empty"; billed: boolean };
+
 // The seam the orchestration depends on — injectable so the 3-stage logic is
 // unit-tested without live HTTP.
 export interface ApolloClient {
@@ -86,48 +96,82 @@ export function apolloEnabled(): boolean {
 }
 
 /**
- * Resolve a dealer to a revealed internet-sales contact. Returns null on ANY
- * failure (fail-closed). Callers MUST have already drawn a credit — the reveal
- * (stage 3) is the paid call.
+ * Resolve a dealer to a revealed internet-sales contact. Never throws (fail-closed).
+ * Returns an ApolloRevealOutcome: `revealed` with the email, or `empty` carrying
+ * whether Apollo was billed (so the ledger refunds only a genuinely free no-op).
+ * Callers MUST have already drawn a credit — stage 3 (people/match) is the paid call.
  */
 export async function apolloResolveAndReveal(
   input: ApolloAdapterInput,
   deps?: Partial<ApolloAdapterDeps>,
-): Promise<ApolloRevealed | null> {
+): Promise<ApolloRevealOutcome> {
   const client = deps?.client ?? defaultApolloClient();
-  if (!client) return null; // no key / disabled → fail closed
+  if (!client) return { kind: "empty", billed: false }; // no key / disabled → fail closed, not billed
 
+  // Stages 1–2 are FREE (org lookup + people search). A failure here is never billed.
+  let target: ApolloPerson;
   try {
     // Stage 1 — canonical org (never trust a raw domain alone).
     const org = await client.organizationsLookup({
       name: input.name,
       domain: normalizeWebsiteHost(input.website),
     });
-    if (!org) return null;
+    if (!org) return { kind: "empty", billed: false };
 
-    // Stage 2 — people by org + ranked titles; among the flag-positive people,
-    // pick the best-title-ranked (Apollo doesn't guarantee title order, so we rank
-    // on our side rather than trusting the returned order).
+    // Stage 2 — people by org + ranked titles; pick the BEST-TITLE-ranked person
+    // and reveal that one. Selection is title-first and does NOT gate on the
+    // has_email flag: on some Apollo plans People Search returns has_email:false
+    // for real, revealable contacts (confirmed live — a genuine sales manager came
+    // back has_email:false), so gating on the flag would filter everyone out and
+    // the tier would silently reveal nothing. We accept that some reveals come back
+    // empty. The flag is used only as a tiebreaker among equal titles.
     const people = await client.peopleSearch({ organizationId: org.id, titles: APOLLO_SALES_TITLES });
-    const withEmail = people.filter((p) => p.hasEmail);
-    if (withEmail.length === 0) return null;
-    const target = withEmail.reduce((best, p) => (titleRank(p.title) < titleRank(best.title) ? p : best));
-
-    // Stage 3 — reveal ONLY the chosen person (the credit-spending call).
-    const revealed = await client.peopleMatch(target.id);
-    if (!revealed?.email) return null;
-    return revealed;
+    if (people.length === 0) return { kind: "empty", billed: false };
+    target = [...people].sort((a, b) => {
+      const byTitle = titleRank(a.title) - titleRank(b.title);
+      if (byTitle !== 0) return byTitle;
+      return (b.hasEmail ? 1 : 0) - (a.hasEmail ? 1 : 0); // tie → prefer a flagged email
+    })[0];
   } catch (err) {
-    logger.warn(`[apollo] resolveAndReveal failed for "${input.name}":`, err);
-    return null;
+    logger.warn(`[apollo] resolve (free stages) failed for "${input.name}":`, err);
+    return { kind: "empty", billed: false }; // never reached the paid call → not billed
+  }
+
+  // Stage 3 — the PAID people/match. Apollo charges a lead credit when it matches a
+  // person (email or not), so anything other than a clean "no person matched" is
+  // treated as billed → the ledger keeps the credit (conservative: never undercount).
+  try {
+    const revealed = await client.peopleMatch(target.id);
+    if (revealed === null) return { kind: "empty", billed: false }; // no person matched → not billed
+    if (!revealed.email) return { kind: "empty", billed: true }; // matched, no email → billed
+    return { kind: "revealed", email: revealed.email, name: revealed.name ?? null, title: revealed.title ?? null };
+  } catch (err) {
+    // The billable call errored — we cannot know whether Apollo charged, so assume
+    // it did (never undercount). Ledger keeps the credit; the cycle claim goes EMPTY.
+    logger.warn(`[apollo] people/match failed for "${input.name}":`, err);
+    return { kind: "empty", billed: true };
   }
 }
 
 // ─── default live client (isolated; verified in staging) ─────────────────────
 
-async function apolloFetch(path: string, body: Record<string, unknown>): Promise<unknown | null> {
+// throwOnError distinguishes the FREE stages (org lookup / people search) from the
+// PAID people/match call. Free stages fail closed to null (a transport error there
+// costs nothing, so treating it as "no result" is safe). The paid call passes
+// throwOnError:true so an HTTP/timeout/network error THROWS instead of collapsing
+// to null — otherwise the adapter couldn't tell an error (Apollo may have charged)
+// from a clean 200 "no person matched" (not charged), and would wrongly refund a
+// real charge, undercounting spend and breaking the conservative-billing invariant.
+async function apolloFetch(
+  path: string,
+  body: Record<string, unknown>,
+  opts?: { throwOnError?: boolean },
+): Promise<unknown | null> {
   const key = process.env.APOLLO_API_KEY;
-  if (!key) return null; // fail closed — never call without a key
+  if (!key) {
+    if (opts?.throwOnError) throw new Error(`[apollo] missing API key on ${path}`);
+    return null; // fail closed — never call without a key
+  }
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), APOLLO_TIMEOUT_MS);
   try {
@@ -139,11 +183,13 @@ async function apolloFetch(path: string, body: Record<string, unknown>): Promise
     });
     if (!res.ok) {
       logger.warn(`[apollo] HTTP ${res.status} on ${path}`);
+      if (opts?.throwOnError) throw new Error(`[apollo] HTTP ${res.status} on ${path}`);
       return null;
     }
     return await res.json();
   } catch (err) {
     logger.warn(`[apollo] request failed on ${path}:`, err);
+    if (opts?.throwOnError) throw err instanceof Error ? err : new Error(String(err));
     return null;
   } finally {
     clearTimeout(timer);
@@ -182,7 +228,18 @@ export function defaultApolloClient(): ApolloClient | null {
         }));
     },
     async peopleMatch(personId) {
-      const json = (await apolloFetch("/people/match", { id: personId, reveal_personal_emails: false })) as
+      // Deterministic single-lead-credit work-email enrichment. Reveal neither
+      // personal emails nor phone numbers (a phone reveal costs 8 credits), and pass
+      // NO waterfall params — Apollo only cascades to variable-cost partner providers
+      // when a waterfall param is present, so omitting them keeps the call to the
+      // synchronous work-email return at exactly REVEAL_COST_CREDITS (1).
+      // throwOnError: this is the PAID call — a transport/HTTP error must THROW so
+      // the adapter treats it as billed (conservative), not as a clean no-match.
+      const json = (await apolloFetch(
+        "/people/match",
+        { id: personId, reveal_personal_emails: false, reveal_phone_number: false },
+        { throwOnError: true },
+      )) as
         | { person?: { email?: string | null; name?: string; title?: string } }
         | null;
       const person = json?.person;

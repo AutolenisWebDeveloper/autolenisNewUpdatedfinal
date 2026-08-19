@@ -8,6 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { PrismaClient } from "@prisma/client";
 import { revealRooftopContact } from "../apollo-reveal.service";
+import { apolloResolveAndReveal, type ApolloClient } from "../apollo.service";
 
 const NOW = new Date("2026-08-10T00:00:00Z"); // cycle 2026-08, day 10, 31-day month
 
@@ -68,7 +69,7 @@ function fake(ledger: LedgerRow, reveals: RevealRow[] = []): { prisma: PrismaCli
 
 const on = () => true;
 const input = { rooftopId: "rt1", name: "Toyota of Dallas", website: "https://toyotaofdallas.com", city: "Dallas", state: "TX" };
-const hit = async () => ({ email: "ann@toyotaofdallas.com", name: "Ann", title: "ISM" });
+const hit = async () => ({ kind: "revealed" as const, email: "ann@toyotaofdallas.com", name: "Ann", title: "ISM" });
 
 test("returns null (tier off) when not enabled — no key / disabled", async () => {
   const { prisma, ledger } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 0 });
@@ -111,7 +112,7 @@ test("re-claimable after budget returns: a no-budget rooftop reveals once the ca
   assert.equal(reveals[reveals.length - 1]!.status, "REVEALED");
 });
 
-test("store failure after a paid draw: refunds + releases the claim, still returns the paid data", async () => {
+test("store failure after a paid draw: KEEPS the credit (Apollo charged), releases the claim, still returns the paid data", async () => {
   const { prisma, ledger, reveals } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 0 });
   // Make the REVEALED store update throw once.
   const realUpdate = (prisma as unknown as { apolloReveal: { update: (a: unknown) => Promise<unknown> } }).apolloReveal.update;
@@ -121,16 +122,47 @@ test("store failure after a paid draw: refunds + releases the claim, still retur
   };
   const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: hit as never });
   assert.equal(r?.email, "ann@toyotaofdallas.com"); // paid data still returned
-  assert.equal(ledger.spentCredits, 0); // drew 1, refunded 1 on store failure
-  assert.equal(reveals.length, 0); // claim released, not stuck PENDING
+  assert.equal(ledger.spentCredits, 1); // credit KEPT — the reveal really billed; refunding would undercount
+  assert.equal(reveals.length, 0); // claim released so the rooftop can re-resolve later
 });
 
-test("adapter miss: credit is refunded and the claim marked EMPTY", async () => {
+test("adapter miss NOT billed (no match): credit is refunded and the claim marked EMPTY", async () => {
   const { prisma, ledger, reveals } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 5 });
-  const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: (async () => null) as never });
+  const miss = (async () => ({ kind: "empty", billed: false })) as never;
+  const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: miss });
   assert.equal(r, null);
-  assert.equal(ledger.spentCredits, 5); // drew 1 then refunded 1
+  assert.equal(ledger.spentCredits, 5); // drew 1 then refunded 1 (Apollo not charged)
   assert.equal(reveals[0]!.status, "EMPTY");
+  assert.equal(reveals[0]!.creditsCost, 0);
+});
+
+test("adapter miss BILLED (matched, no email): credit is KEPT, claim EMPTY at cost 1", async () => {
+  const { prisma, ledger, reveals } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 5 });
+  const billedMiss = (async () => ({ kind: "empty", billed: true })) as never;
+  const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: billedMiss });
+  assert.equal(r, null);
+  assert.equal(ledger.spentCredits, 6); // drew 1, NOT refunded — Apollo charged for the match
+  assert.equal(reveals[0]!.status, "EMPTY");
+  assert.equal(reveals[0]!.creditsCost, 1);
+});
+
+test("END-TO-END: a matched-but-emailless reveal through the REAL adapter keeps the credit", async () => {
+  // Thread the real apolloResolveAndReveal (with a fake ApolloClient that matches a
+  // person but returns no email) through revealRooftopContact — proving the whole
+  // chain keeps the credit (Apollo charged) rather than refunding.
+  const { prisma, ledger, reveals } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 0 });
+  const matchedNoEmail: ApolloClient = {
+    organizationsLookup: async () => ({ id: "org1", domain: "toyotaofdallas.com" }),
+    peopleSearch: async () => [{ id: "p1", name: "Ann", title: "Internet Sales Manager", hasEmail: false }],
+    peopleMatch: async () => ({ email: null, name: "Ann", title: "ISM" }), // matched, no email → billed
+  };
+  const realAdapter = ((rin: Parameters<typeof apolloResolveAndReveal>[0]) =>
+    apolloResolveAndReveal(rin, { client: matchedNoEmail })) as typeof apolloResolveAndReveal;
+  const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: realAdapter });
+  assert.equal(r, null);
+  assert.equal(ledger.spentCredits, 1); // charged + kept (never refunded) end-to-end
+  assert.equal(reveals[0]!.status, "EMPTY");
+  assert.equal(reveals[0]!.creditsCost, 1);
 });
 
 test("idempotency: a concurrent claim (unique conflict) does not double-draw", async () => {
