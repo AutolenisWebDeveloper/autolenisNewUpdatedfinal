@@ -10,6 +10,9 @@ import {
   drawCredits,
   backfillReserveFloor,
   RESERVE_CREDITS,
+  ensureCurrentCycleLedger,
+  DEFAULT_CYCLE_CAP_CREDITS,
+  cycleKeyFor,
 } from "../apollo-credit-ledger.service";
 
 interface LedgerRow { id: string; cycleKey: string; capCredits: number; spentCredits: number }
@@ -80,4 +83,56 @@ test("no ledger row for the cycle → fail closed", async () => {
   const { prisma } = fakePrisma({ id: "l1", cycleKey: "2026-08", capCredits: 100, spentCredits: 0 });
   const r = await drawCredits({ cycleKey: "2099-01", cost: 1, consumer: "live", day: 10, daysInCycle: 31 }, { prisma });
   assert.equal(r.drawn, false);
+});
+
+// ─── ensureCurrentCycleLedger: idempotent monthly rollover (no manual seed) ────
+
+function rolloverFake(seed: LedgerRow[] = []): { prisma: PrismaClient; rows: LedgerRow[] } {
+  const rows = [...seed];
+  let idc = 0;
+  const prisma = {
+    apolloCreditLedger: {
+      findUnique: async ({ where }: { where: { cycleKey: string } }) => rows.find((r) => r.cycleKey === where.cycleKey) ?? null,
+      create: async ({ data }: { data: { cycleKey: string; capCredits: number; spentCredits: number } }) => {
+        if (rows.some((r) => r.cycleKey === data.cycleKey)) throw new Error("unique violation");
+        const row = { id: `l${++idc}`, ...data };
+        rows.push(row);
+        return row;
+      },
+    },
+  } as unknown as PrismaClient;
+  return { prisma, rows };
+}
+
+test("ensureCurrentCycleLedger creates THIS cycle's row at the default cap when absent", async () => {
+  const now = new Date("2026-09-01T00:10:00Z"); // rollover into 2026-09
+  const { prisma, rows } = rolloverFake();
+  const row = await ensureCurrentCycleLedger(now, { prisma });
+  assert.equal(row.cycleKey, cycleKeyFor(now)); // "2026-09"
+  assert.equal(row.capCredits, DEFAULT_CYCLE_CAP_CREDITS); // 2000
+  assert.equal(row.spentCredits, 0);
+  assert.equal(rows.length, 1);
+});
+
+test("ensureCurrentCycleLedger is idempotent — never changes an existing row's cap/spend", async () => {
+  const now = new Date("2026-08-19T00:10:00Z");
+  const existing: LedgerRow = { id: "seed", cycleKey: "2026-08", capCredits: 2000, spentCredits: 137 };
+  const { prisma, rows } = rolloverFake([existing]);
+  const row = await ensureCurrentCycleLedger(now, { prisma });
+  assert.equal(row.id, "seed");
+  assert.equal(row.capCredits, 2000);
+  assert.equal(row.spentCredits, 137); // untouched — re-running never resets spend
+  assert.equal(rows.length, 1); // no duplicate row
+});
+
+test("ensureCurrentCycleLedger honors APOLLO_CYCLE_CAP_CREDITS override on creation", async () => {
+  const prev = process.env.APOLLO_CYCLE_CAP_CREDITS;
+  process.env.APOLLO_CYCLE_CAP_CREDITS = "1500";
+  try {
+    const { prisma } = rolloverFake();
+    const row = await ensureCurrentCycleLedger(new Date("2026-10-01T00:10:00Z"), { prisma });
+    assert.equal(row.capCredits, 1500);
+  } finally {
+    if (prev === undefined) delete process.env.APOLLO_CYCLE_CAP_CREDITS; else process.env.APOLLO_CYCLE_CAP_CREDITS = prev;
+  }
 });

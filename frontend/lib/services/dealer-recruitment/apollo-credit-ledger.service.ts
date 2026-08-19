@@ -151,3 +151,28 @@ export async function getOrCreateCycle(
     throw new Error(`apollo ledger create/read failed for ${cycleKey}`);
   }
 }
+
+/**
+ * Default monthly cap for a new cycle: 2,000 lead credits — headroom under the
+ * account's 2,500 Apollo lead-credit plan limit so manual/dashboard use isn't
+ * starved. Overridable via APOLLO_CYCLE_CAP_CREDITS.
+ */
+export const DEFAULT_CYCLE_CAP_CREDITS = 2000;
+
+function resolveCycleCap(): number {
+  const raw = Number(process.env.APOLLO_CYCLE_CAP_CREDITS);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_CYCLE_CAP_CREDITS;
+}
+
+/**
+ * Ensure THIS cycle's ledger row exists (idempotent), so the paid tier never
+ * fails closed for a whole month just because nobody manually seeded the new
+ * calendar-month row. Safe to run on any cadence — getOrCreateCycle never changes
+ * an existing row's cap. Caller passes `now` (never new Date() here). Returns the row.
+ */
+export async function ensureCurrentCycleLedger(
+  now: Date,
+  deps?: Partial<LedgerDeps>,
+): Promise<{ id: string; cycleKey: string; capCredits: number; spentCredits: number }> {
+  return getOrCreateCycle(cycleKeyFor(now), resolveCycleCap(), deps);
+}
