@@ -82,26 +82,28 @@ test("role-derivation persists ROLE_DERIVED provenance — never VERIFIED — an
   assert.notEqual(updates[0].data.emailVerificationStatus, "VERIFIED");
 });
 
-test("role-derivation is skipped when the derived address is hard-suppressed", async () => {
+test("role walk-down: a suppressed first prefix skips to the next-ranked role inbox", async () => {
+  const enrich = mock.fn(async () => enrichResult());
   const { deps } = makeDeps({
     isEmailSuppressed: mock.fn(async (_sb: unknown, email: string) => email.startsWith("internetsales@")),
-    enrich: mock.fn(async () => enrichResult({ email: "jane@toyotaofdallas.com", source: "gemini_search_high_confidence" })),
+    enrich,
   });
   const r = await resolveContactableEmail(cand({ email: null }), deps);
-  // role-derive suppressed → Gemini tier resolves instead.
   assert.equal(r.contactable, true);
-  assert.equal(r.status, "VERIFIED");
+  assert.equal(r.status, "ROLE_DERIVED");
+  assert.equal(r.email, "internet@toyotaofdallas.com"); // skipped the suppressed internetsales@
+  assert.equal(enrich.mock.callCount(), 0); // resolved within the role tier, no Gemini
 });
 
-test("role-derivation is skipped when the domain has no MX", async () => {
+test("role-derivation exhausts (whole domain has no MX) → falls through to Gemini", async () => {
   const { deps } = makeDeps({
     verifyDeliverability: mock.fn(async (email: string) =>
-      email.startsWith("internetsales@") ? { deliverable: false, reason: "no_mx" } : { deliverable: true, reason: "mx_ok" },
+      email.endsWith("@toyotaofdallas.com") ? { deliverable: false, reason: "no_mx" } : { deliverable: true, reason: "mx_ok" },
     ),
-    enrich: mock.fn(async () => enrichResult({ email: "jane@toyotaofdallas.com", source: "gemini_search_high_confidence" })),
+    enrich: mock.fn(async () => enrichResult({ email: "jane@gmail.com", source: "gemini_search_high_confidence" })),
   });
   const r = await resolveContactableEmail(cand({ email: null }), deps);
-  assert.equal(r.status, "VERIFIED"); // fell through to Gemini
+  assert.equal(r.status, "VERIFIED"); // all role prefixes no-MX → Gemini resolved off-domain
 });
 
 // ─── tier 3: Gemini ──────────────────────────────────────────────────────────
@@ -200,4 +202,49 @@ test("M4b: Gemini found an unsafe email stamps emailEnrichedAt + UNVERIFIED, not
   assert.equal(updates.length, 1);
   assert.ok(updates[0].data.emailEnrichedAt instanceof Date);
   assert.equal(updates[0].data.emailVerificationStatus, "UNVERIFIED");
+});
+
+// ─── B2b: bounce → re-resolve (proof #5) ─────────────────────────────────────
+
+test("bounce→re-resolve: a VERIFIED person email that hard-bounced re-resolves down the waterfall", async () => {
+  const { deps, updates } = makeDeps({
+    isEmailSuppressed: mock.fn(async (_sb: unknown, email: string) => email === "jane@toyotaofdallas.com"),
+  });
+  const r = await resolveContactableEmail(
+    cand({ email: "jane@toyotaofdallas.com", emailVerificationStatus: "VERIFIED" }),
+    deps,
+  );
+  // reuse rejected (bounced/suppressed) → role walk-down resolves a fresh inbox;
+  // the rooftop is never stranded on a dead address.
+  assert.equal(r.contactable, true);
+  assert.equal(r.status, "ROLE_DERIVED");
+  assert.equal(r.email, "internetsales@toyotaofdallas.com");
+  // The stale person block is cleared — never greet a named person at a role inbox.
+  assert.equal(updates[0].data.contactName, null);
+  assert.equal(updates[0].data.contactTitle, null);
+});
+
+// ─── B2b: staleness re-check (CONTACT_STALE_MONTHS) ──────────────────────────
+
+test("staleness: a FRESH reused contact skips the MX re-check (suppression only)", async () => {
+  const verifyDeliverability = mock.fn(async () => ({ deliverable: true, reason: "mx_ok" }));
+  const { deps } = makeDeps({ verifyDeliverability });
+  const r = await resolveContactableEmail(
+    cand({ email: "sales@toyotaofdallas.com", emailVerificationStatus: "VERIFIED", emailVerifiedAt: new Date() }),
+    deps,
+  );
+  assert.equal(r.source, "reuse");
+  assert.equal(verifyDeliverability.mock.callCount(), 0); // fresh → no MX lookup
+});
+
+test("staleness: a STALE reused contact is MX re-checked before reuse", async () => {
+  const verifyDeliverability = mock.fn(async () => ({ deliverable: true, reason: "mx_ok" }));
+  const { deps } = makeDeps({ verifyDeliverability });
+  const stale = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000); // ~13 months old
+  const r = await resolveContactableEmail(
+    cand({ email: "sales@toyotaofdallas.com", emailVerificationStatus: "VERIFIED", emailVerifiedAt: stale }),
+    deps,
+  );
+  assert.equal(r.source, "reuse");
+  assert.ok(verifyDeliverability.mock.callCount() >= 1); // stale → MX re-checked
 });
