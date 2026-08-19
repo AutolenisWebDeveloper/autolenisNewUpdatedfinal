@@ -191,6 +191,79 @@ export async function notifyDealerConfirmed(dealId: string): Promise<void> {
   }
 }
 
+/** SLA nudge: the dealer still hasn't confirmed the buyer's proposal. */
+export async function notifyDealerProposalReminder(dealId: string): Promise<void> {
+  const p = await loadParties(dealId);
+  if (!p) return;
+
+  if (p.dealerId) {
+    await prisma.notification
+      .create({
+        data: {
+          dealerId: p.dealerId,
+          type: "PICKUP_PROPOSED",
+          title: "Reminder: confirm a pickup time",
+          body: "A buyer is still waiting for you to confirm or counter a proposed pickup time.",
+          actionUrl: "/dealer/pickups",
+        },
+      })
+      .catch((e: unknown) => logger.error("[pickup-notif] dealer in-app (reminder):", e));
+  }
+
+  if (p.dealerEmail) {
+    const vehicleRef = vehicleRefFor(dealId);
+    await enqueueTransactionalEmail({
+      to: p.dealerEmail,
+      templateId: "dealer-pickup-proposed",
+      subject: `Reminder — ${DEALER_PICKUP_PROPOSED_SUBJECT(vehicleRef)}`,
+      html: renderDealerPickupProposedEmail({
+        contactName: p.dealerName,
+        vehicleRef,
+        buyerCity: p.buyerCity,
+        buyerState: p.buyerState,
+        proposedWindow: formatWindow(p.proposedTime),
+        dealUrl: `${APP_URL}/dealer/pickups`,
+      }),
+      // Distinct key from the initial send so the reminder is NOT deduped against it.
+      idempotencyKey: `pickup-proposed-reminder-${dealId}-${roundKey(p)}`,
+    }).catch((e: unknown) => logger.error("[pickup-notif] dealer email (reminder):", e));
+  }
+}
+
+/** SLA nudge: the buyer still hasn't accepted/countered the dealer's counter. */
+export async function notifyBuyerCounterReminder(dealId: string): Promise<void> {
+  const p = await loadParties(dealId);
+  if (!p) return;
+
+  if (p.buyerId) {
+    await prisma.notification
+      .create({
+        data: {
+          buyerId: p.buyerId,
+          type: "PICKUP_COUNTERED",
+          title: "Reminder: a pickup time is waiting for you",
+          body: "The dealership proposed a pickup time. Accept it or suggest another.",
+          actionUrl: "/buyer/pickup",
+        },
+      })
+      .catch((e: unknown) => logger.error("[pickup-notif] buyer in-app (reminder):", e));
+  }
+
+  if (p.buyerEmail) {
+    await enqueueTransactionalEmail({
+      to: p.buyerEmail,
+      templateId: "buyer-pickup-countered",
+      subject: `Reminder — ${BUYER_PICKUP_COUNTERED_SUBJECT}`,
+      html: renderBuyerPickupCounteredEmail({
+        firstName: p.buyerFirstName,
+        proposedWindow: formatWindow(p.proposedTime),
+        pickupUrl: `${APP_URL}/buyer/pickup`,
+      }),
+      idempotencyKey: `pickup-countered-reminder-${dealId}-${roundKey(p)}`,
+    }).catch((e: unknown) => logger.error("[pickup-notif] buyer email (reminder):", e));
+  }
+}
+
 /** Counter cap reached → raise a SYSTEM_ALERT for admin follow-up. */
 export async function notifyPickupEscalated(dealId: string): Promise<void> {
   await prisma.notification

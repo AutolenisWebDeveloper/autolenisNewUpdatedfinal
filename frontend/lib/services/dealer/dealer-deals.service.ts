@@ -3,7 +3,7 @@
 // All queries scope by dealerId via offer.dealerId to ensure ownership.
 
 import { prisma } from "@/lib/prisma";
-import type { DealStatus } from "@prisma/client";
+import { PickupStatus, type DealStatus } from "@prisma/client";
 
 export interface DealerDealSummary {
   id: string;
@@ -54,23 +54,6 @@ export interface DealerDealDetail {
     status: "NOT_SCHEDULED" | "SCHEDULED" | "COMPLETE" | string;
     scheduledAt: Date | null;
     qrCodeData: string | null;
-  } | null;
-}
-
-export interface DealerPickupDeal {
-  id: string;
-  status: DealStatus;
-  createdAt: Date;
-  offer: {
-    id: string;
-    auctionId: string;
-  } | null;
-  pickup: {
-    id: string;
-    status: "NOT_SCHEDULED" | "SCHEDULED" | "COMPLETE" | string;
-    scheduledAt: Date | null;
-    qrCodeData: string | null;
-    qrCodeImage: string | null;
   } | null;
 }
 
@@ -165,28 +148,68 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
   };
 }
 
+
+// D2 — a dealer pickup awaiting or in the confirm/propose round-trip, or already
+// confirmed (ready to scan). Isolation: exposes buyer city/state ONLY — never
+// name/email/phone. `proposedAt` is the CAS token the client echoes on confirm/
+// counter so a stale action loses cleanly.
+export interface DealerPickupAction {
+  id: string; // dealId
+  createdAt: Date;
+  buyerCity: string | null;
+  buyerState: string | null;
+  pickup: {
+    status: PickupStatus;
+    scheduledAt: Date | null;
+    proposedTime: Date | null;
+    proposedAt: Date | null;
+    proposedBy: string | null;
+    counterCount: number;
+    qrCodeImage: string | null;
+  };
+}
+
+const DEALER_PICKUP_ACTION_STATUSES: PickupStatus[] = [
+  PickupStatus.PROPOSED,
+  PickupStatus.DEALER_COUNTERED,
+  PickupStatus.SCHEDULED,
+  PickupStatus.CHECKED_IN,
+];
+
 /**
- * Returns deals with PICKUP_SCHEDULED status for the given dealer,
- * including pickup details.
+ * Pickups needing the dealer's attention (PROPOSED / DEALER_COUNTERED) or ready
+ * for handoff (SCHEDULED / CHECKED_IN), scoped by the accepted offer's dealerId.
  */
-export async function getDealerPickupDeals(dealerId: string): Promise<DealerPickupDeal[]> {
-  return prisma.deal.findMany({
-    where: { offer: { dealerId }, status: "PICKUP_SCHEDULED" },
+export async function getDealerPickupActions(dealerId: string): Promise<DealerPickupAction[]> {
+  const deals = await prisma.deal.findMany({
+    where: { offer: { dealerId }, pickup: { status: { in: DEALER_PICKUP_ACTION_STATUSES } } },
     select: {
       id: true,
-      status: true,
       createdAt: true,
-      offer: { select: { id: true, auctionId: true } },
+      buyer: { select: { city: true, state: true } },
       pickup: {
         select: {
-          id: true,
           status: true,
           scheduledAt: true,
-          qrCodeData: true,
+          proposedTime: true,
+          proposedAt: true,
+          proposedBy: true,
+          counterCount: true,
           qrCodeImage: true,
         },
       },
     },
     orderBy: { createdAt: "desc" },
+    take: 50,
   });
+
+  return deals
+    .filter((d) => d.pickup)
+    .map((d) => ({
+      id: d.id,
+      createdAt: d.createdAt,
+      buyerCity: d.buyer?.city ?? null,
+      buyerState: d.buyer?.state ?? null,
+      pickup: d.pickup!,
+    }));
 }
