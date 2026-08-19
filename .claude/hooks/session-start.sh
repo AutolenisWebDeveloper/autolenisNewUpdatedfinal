@@ -1,7 +1,8 @@
 #!/bin/bash
 # AutoLenis SessionStart hook — installs frontend dependencies so tests,
 # linters, and typecheck work in Claude Code on the web sessions.
-# Idempotent and non-interactive. Runs synchronously by default.
+# Idempotent and non-interactive. Runs asynchronously (install proceeds in the
+# background while the session starts).
 set -euo pipefail
 
 # Only run in the remote (Claude Code on the web) environment. Local sessions
@@ -9,6 +10,12 @@ set -euo pipefail
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
+
+# Async mode: emit the control line first, then install in the background.
+# NOTE: because install runs in the background, Claude may briefly start before
+# dependencies are ready — a command run in the first moments of the session
+# could fail until the install completes.
+echo '{"async": true, "asyncTimeout": 600000}'
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$PROJECT_DIR/frontend"
