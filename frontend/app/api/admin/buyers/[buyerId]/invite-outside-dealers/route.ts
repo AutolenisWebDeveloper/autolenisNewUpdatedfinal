@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { AUCTION_DURATION_HOURS } from "@/lib/constants";
 import { sendDealerAuctionInvitationEmail } from "@/lib/services/email/resend.service";
+import { mintOutsideInvites } from "@/lib/services/auction/outside-invite.service";
 
 interface Props { params: Promise<{ buyerId: string }> }
 
@@ -47,34 +48,28 @@ export async function POST(request: NextRequest, { params }: Props) {
   });
   if (!auction) return adminError("NOT_FOUND", "Auction not found for this buyer", 404);
 
-  const created = await prisma.outsideAuctionInvite.createMany({
-    data: dealers.map(d => ({
-      auctionId,
+  // Single mint path with rooftop dedup + reliable token return (no fragile
+  // re-read-by-email). Deduped against any existing invites for this auction.
+  const minted = await mintOutsideInvites(
+    auctionId,
+    dealers.map(d => ({
       dealershipName: d.dealershipName,
       contactName:    d.contactName,
       email:          d.email,
       phone:          d.phone ?? null,
     })),
-  });
+    undefined,
+    { prisma },
+  );
 
-  // Re-read what we just inserted so we have the tokens for emails.
-  const inserted = await prisma.outsideAuctionInvite.findMany({
-    where: { auctionId, email: { in: dealers.map(d => d.email) } },
-    orderBy: { sentAt: "desc" },
-    take: dealers.length,
-  });
-
-  // Match each requested dealer to the freshest invite record by email.
   const buyerCity  = auction.buyer.city  ?? "Location";
   const buyerState = auction.buyer.state ?? "TBD";
   const expiryHours = hours ?? AUCTION_DURATION_HOURS;
 
-  for (const d of dealers) {
-    const invite = inserted.find(i => i.email === d.email);
-    if (!invite) continue;
+  for (const invite of minted) {
     void sendDealerAuctionInvitationEmail({
-      to: d.email,
-      contactName: d.contactName,
+      to: invite.email,
+      contactName: invite.contactName,
       vehicleMake: "Vehicle",
       vehicleModel: "Requested",
       vehicleYear: new Date().getFullYear(),
@@ -84,7 +79,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       auctionUrl: `${APP_URL}/dealer-offer-outside/${invite.token}`,
       expiryHours,
       auctionId,
-    }).catch(err => logger.error(`[invite-outside-dealers] email failed (${d.email}):`, err));
+    }).catch(err => logger.error(`[invite-outside-dealers] email failed (${invite.email}):`, err));
   }
 
   await prisma.adminAuditLog.create({
@@ -98,11 +93,13 @@ export async function POST(request: NextRequest, { params }: Props) {
       metadata: {
         buyerId,
         auctionId,
-        dealerCount: dealers.length,
-        emails: dealers.map(d => d.email),
+        // Actual minted count/emails after dedup (requested may be higher).
+        requestedCount: dealers.length,
+        dealerCount: minted.length,
+        emails: minted.map(i => i.email),
       },
     },
   }).catch(err => logger.error("[invite-outside-dealers] audit log failed:", err));
 
-  return adminSuccess({ invited: created.count, invites: inserted.map(i => ({ id: i.id, email: i.email, token: i.token })) });
+  return adminSuccess({ invited: minted.length, invites: minted.map(i => ({ id: i.id, email: i.email, token: i.token })) });
 }

@@ -448,6 +448,16 @@ model OutsideAuctionInvite {
   email           String
   phone           String?
   token           String    @unique @default(uuid())
+  // C — canonical A2 rooftop this invite targets (dedup key). Nullable: manual
+  // admin invites may not resolve a rooftop. A plain soft key (no FK) so deleting
+  // a rooftop never cascades into auction offer history. The mint service dedups
+  // on it so one physical rooftop is invited to an auction at most once, and never
+  // when its registered dealer is already invited.
+  rooftopId       String?   @map("rooftop_id")
+  // C — token expiry, enforced independently of auction status so a stale link
+  // can't be replayed even if the auction is briefly reopened. Set to the
+  // auction's endsAt at mint time.
+  expiresAt       DateTime? @map("expires_at")
   sentAt          DateTime  @default(now()) @map("sent_at")
   viewedAt        DateTime? @map("viewed_at")
   respondedAt     DateTime? @map("responded_at")
@@ -462,6 +472,11 @@ model OutsideAuctionInvite {
   auction         Auction   @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
   @@index([auctionId])
+  // C — DB backstop for the "one rooftop invited to an auction at most once" dedup
+  // invariant (mint's read-then-create is otherwise TOCTOU under concurrency).
+  // Postgres treats NULLs as distinct, so manual null-rooftop invites are never
+  // blocked; only a repeated non-null rooftop on the same auction collides.
+  @@unique([auctionId, rooftopId])
   @@map("outside_auction_invites")
 }
 
