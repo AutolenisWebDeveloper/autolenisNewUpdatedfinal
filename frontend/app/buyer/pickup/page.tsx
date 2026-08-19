@@ -22,7 +22,7 @@ export default async function PickupPage() {
 
   const pickup = deal?.pickup;
   const eSignCompleted = deal?.eSignEnvelope?.status === "COMPLETED";
-  const availability = resolveDealerAvailability(deal?.offer?.dealerId ?? null);
+  const availability = await resolveDealerAvailability(deal?.offer?.dealerId ?? null);
 
   const now = new Date();
   const expiresAt = pickup?.qrExpiresAt ? new Date(pickup.qrExpiresAt) : null;

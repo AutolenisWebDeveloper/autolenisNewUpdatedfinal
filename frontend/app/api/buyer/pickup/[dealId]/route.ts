@@ -3,8 +3,8 @@ import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { scheduleVehiclePickup } from "@/lib/services/pickup/scheduling.service";
-import { resolveDealerAvailability, isWithinAvailability } from "@/lib/services/pickup/availability.service";
+import { scheduleVehiclePickup, reschedulePickup } from "@/lib/services/pickup/scheduling.service";
+import { checkPickupTime } from "@/lib/services/pickup/availability.service";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 
 interface Props { params: Promise<{ dealId: string }> }
@@ -66,8 +66,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   // the server-authoritative gate; the UI shows the same limits (single seam) but
   // the check here is what actually rejects an out-of-window slot.
   const scheduledAt = new Date(parsed.data.scheduledAt);
-  const availability = resolveDealerAvailability(deal.offer?.dealerId ?? null);
-  const within = isWithinAvailability(availability, scheduledAt, new Date());
+  const within = await checkPickupTime(deal.offer?.dealerId ?? null, scheduledAt);
   if (!within.ok) {
     return errorResponse("VALIDATION_ERROR", within.reason, 400);
   }
@@ -133,13 +132,16 @@ export async function PATCH(request: NextRequest, { params }: Props) {
 
   const newScheduledAt = new Date(parsed.data.scheduledAt);
 
-  const pickup = await prisma.pickup.update({
-    where: { id: deal.pickup.id },
-    data:  {
-      scheduledAt: newScheduledAt,
-      location:    parsed.data.location,
-    },
+  // Route through the single gated seam — the buyer path enforces the dealer's
+  // real availability (no override). This closes the prior reschedule bypass
+  // where the slot was written unconditionally.
+  const result = await reschedulePickup(dealId, newScheduledAt, {
+    reason: parsed.data.reason,
+    location: parsed.data.location,
   });
+  if (!result.ok) {
+    return errorResponse("VALIDATION_ERROR", result.reason, 400);
+  }
 
   await prisma.notification.create({
     data: {
@@ -150,5 +152,5 @@ export async function PATCH(request: NextRequest, { params }: Props) {
     },
   }).catch((err: unknown) => logger.error("[pickup-reschedule] notification failed:", err));
 
-  return successResponse({ pickup });
+  return successResponse({ pickup: result.pickup });
 }

@@ -187,6 +187,9 @@ model Dealer {
   // In-house electronic signature for the dealer network participation agreement.
   agreementSignature DealerAgreementSignature?
 
+  // D1 — pickup scheduling availability (per-weekday hours, timezone, blackouts).
+  availability       DealerAvailability?
+
   @@index([rooftopId])
   @@map("dealers")
 }
@@ -2570,6 +2573,64 @@ model DealerCapacityConfig {
   preferredPriceMax   Int?    @map("preferred_price_max")
   updatedAt           DateTime @updatedAt @map("updated_at")
   @@map("dealer_capacity_configs")
+}
+
+// D1 — per-dealer pickup availability. One row per dealer holds the canonical
+// timezone (IANA) + lead/advance bounds; the actual bookable hours live in
+// per-weekday `windows` (supports split hours), and `blackouts` close whole
+// date ranges. Distinct from DealerCapacityConfig (auction load / makes), which
+// holds no scheduling data. Absent a row, the availability service derives the
+// timezone from the dealer's address ZIP and applies platform-default hours.
+model DealerAvailability {
+  id                 String   @id @default(uuid())
+  dealerId           String   @unique @map("dealer_id")
+  // Canonical IANA timezone the windows are expressed in (e.g. America/Chicago).
+  timezone           String
+  // false = derived from the dealer's ZIP; true = the dealer set it explicitly.
+  timezoneOverridden Boolean  @default(false) @map("timezone_overridden")
+  minLeadTimeHours   Int      @default(24) @map("min_lead_time_hours")
+  maxAdvanceDays     Int      @default(30) @map("max_advance_days")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  dealer    Dealer                     @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+  windows   DealerAvailabilityWindow[]
+  blackouts DealerBlackoutDate[]
+
+  @@map("dealer_availability")
+}
+
+// A bookable window on one weekday, in minutes-from-local-midnight. Multiple
+// rows per weekday express split hours (e.g. a lunch closure).
+model DealerAvailabilityWindow {
+  id             String @id @default(uuid())
+  availabilityId String @map("availability_id")
+  weekday        Int    // 0=Sun … 6=Sat
+  openMinute     Int    @map("open_minute")  // inclusive, 0–1439
+  closeMinute    Int    @map("close_minute") // exclusive, 0–1440
+
+  availability DealerAvailability @relation(fields: [availabilityId], references: [id], onDelete: Cascade)
+
+  @@index([availabilityId])
+  @@map("dealer_availability_windows")
+}
+
+// A closed date range (holidays, inventory events). Dealer-local calendar days,
+// inclusive. Capacity limits are intentionally deferred (D1-c).
+model DealerBlackoutDate {
+  id             String   @id @default(uuid())
+  availabilityId String   @map("availability_id")
+  // Date-only (@db.Date): a blackout is a dealer-local calendar day. Storing it
+  // as a bare DATE removes any time-of-day/timezone ambiguity at the boundary —
+  // the availability gate compares it as a plain YYYY-MM-DD.
+  startDate      DateTime @map("start_date") @db.Date
+  endDate        DateTime @map("end_date") @db.Date
+  reason         String?
+
+  availability DealerAvailability @relation(fields: [availabilityId], references: [id], onDelete: Cascade)
+
+  @@index([availabilityId])
+  @@map("dealer_blackout_dates")
 }
 
 model JunkFeePattern {

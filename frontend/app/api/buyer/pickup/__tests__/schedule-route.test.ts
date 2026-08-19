@@ -16,7 +16,11 @@
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest, NextResponse } from "next/server";
-import { resolveDealerAvailability, isWithinAvailability } from "@/lib/services/pickup/availability.service";
+// NOTE: availability.service is imported DYNAMICALLY (inside the slot helper),
+// never statically — a static import would load it (and its real @/lib/prisma)
+// before mock.module below registers the prisma mock, and the route's async
+// resolver would then hit a real DB. Loading it after the mocks binds the whole
+// tree to the mock.
 
 // ── Controllable state + spies ───────────────────────────────────────────────
 let dealStatus = "SIGNED";
@@ -48,6 +52,14 @@ mock.module("@/lib/prisma", {
       },
       notification: {
         create: async () => ({}),
+      },
+      // The POST route resolves availability via the real (now async) resolver;
+      // no stored row → it derives the tz from the dealer's ZIP (TX → Central).
+      dealerAvailability: {
+        findUnique: async () => null,
+      },
+      dealer: {
+        findUnique: async () => ({ zip: "75201", state: "TX" }),
       },
     },
   },
@@ -86,8 +98,12 @@ function post(body: unknown) {
 
 // A guaranteed-valid and guaranteed-invalid instant relative to the real "now"
 // used by the route, computed via the same pure validator the route uses.
-function nextValidSlotISO(): string {
-  const a = resolveDealerAvailability(null);
+async function nextValidSlotISO(): Promise<string> {
+  const { platformDefaultAvailability, isWithinAvailability } = await import(
+    "@/lib/services/pickup/availability.service"
+  );
+  // Match what the route resolves for the mocked TX dealer (Central).
+  const a = platformDefaultAvailability("America/Chicago");
   const now = new Date();
   for (let h = Math.ceil(a.minLeadTimeHours) + 1; h < 24 * 40; h++) {
     const cand = new Date(now.getTime() + h * 3600_000);
@@ -105,7 +121,7 @@ beforeEach(() => {
 
 test("valid buyer slot schedules the pickup AND advances SIGNED → PICKUP_SCHEDULED (no admin)", async () => {
   const POST = await loadPOST();
-  const res = await POST(post({ scheduledAt: nextValidSlotISO(), location: "123 Dealer Drive, Dallas TX" }), {
+  const res = await POST(post({ scheduledAt: await nextValidSlotISO(), location: "123 Dealer Drive, Dallas TX" }), {
     params: Promise.resolve({ dealId: "deal_1" }),
   });
 
@@ -134,7 +150,7 @@ test("an out-of-availability slot is rejected before anything is written", async
 test("scheduling is blocked until documents are signed (eSign prerequisite)", async () => {
   esignStatus = "SENT"; // not COMPLETED
   const POST = await loadPOST();
-  const res = await POST(post({ scheduledAt: nextValidSlotISO(), location: "123 Dealer Drive, Dallas TX" }), {
+  const res = await POST(post({ scheduledAt: await nextValidSlotISO(), location: "123 Dealer Drive, Dallas TX" }), {
     params: Promise.resolve({ dealId: "deal_1" }),
   });
 
@@ -148,7 +164,7 @@ test("scheduling is blocked until documents are signed (eSign prerequisite)", as
 test("re-scheduling a deal already past SIGNED does not attempt an illegal transition", async () => {
   dealStatus = "PICKUP_SCHEDULED"; // already advanced
   const POST = await loadPOST();
-  const res = await POST(post({ scheduledAt: nextValidSlotISO(), location: "123 Dealer Drive, Dallas TX" }), {
+  const res = await POST(post({ scheduledAt: await nextValidSlotISO(), location: "123 Dealer Drive, Dallas TX" }), {
     params: Promise.resolve({ dealId: "deal_1" }),
   });
 
