@@ -132,9 +132,11 @@ export async function revealRooftopContact(
   const revealed = outcome; // kind === "revealed"
 
   // 5. Store the reveal (reveal-cache) + return. If the store throws AFTER a
-  // successful paid draw, refund + release the claim so the credit isn't lost and
-  // the rooftop isn't blocked — but still return the paid data to this caller
-  // (it was already paid for; a future reveal will re-resolve cleanly).
+  // successful paid draw, KEEP the credit — Apollo already charged for this reveal,
+  // so refunding it would undercount real spend (the same invariant fix #3 enforces
+  // everywhere else). We only RELEASE the claim (delete) so the rooftop can
+  // re-resolve later; that re-resolve will draw + charge again, and the ledger will
+  // count both — accurate. The paid data is still returned to this caller.
   try {
     await prisma.apolloReveal.update({
       where: { id: claimId },
@@ -149,8 +151,7 @@ export async function revealRooftopContact(
       },
     });
   } catch (err) {
-    logger.warn(`[apollo-reveal] store failed after paid draw for rooftop ${input.rooftopId} — refunding + releasing:`, err);
-    await refundCredits(cycleKey, REVEAL_COST_CREDITS, { prisma });
+    logger.warn(`[apollo-reveal] store failed after paid draw for rooftop ${input.rooftopId} — keeping the credit (Apollo charged), releasing claim:`, err);
     await prisma.apolloReveal.delete({ where: { id: claimId } }).catch(() => {});
   }
   return { email: revealed.email, status: "VERIFIED", contactName: revealed.name ?? null, contactTitle: revealed.title ?? null };
