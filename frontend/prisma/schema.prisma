@@ -422,6 +422,9 @@ model Auction {
   extendedAt        DateTime?           @map("extended_at")
   extendedBy        String?             @map("extended_by")
   extendReason      String?             @map("extend_reason")
+  // Y6 — count of automatic anti-snipe extensions applied (capped). Distinct from
+  // manual admin extensions; drives the MAX_AUTO_EXTENSIONS cap atomically.
+  autoExtensionCount Int                @default(0) @map("auto_extension_count")
   originalAuctionId String?             @map("original_auction_id")
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
@@ -2511,11 +2514,21 @@ model ServiceFeePayment {
   @@map("service_fee_payments")
 }
 
+enum AuctionExtensionSource {
+  MANUAL_ADMIN
+  ANTI_SNIPE
+}
+
 model AuctionExtensionLog {
   id          String   @id @default(uuid())
   auctionId   String   @map("auction_id")
   extendedBy  String   @map("extended_by")
   hoursAdded  Int      @map("hours_added")
+  // Y6 — minute-granular extensions (anti-snipe adds +5 min; hoursAdded stays 0
+  // for those). The precise delta is always in originalEnd/newEnd regardless.
+  minutesAdded Int?    @map("minutes_added")
+  // Y6 — a proper typed source instead of overloading extendedBy.
+  source      AuctionExtensionSource @default(MANUAL_ADMIN)
   originalEnd DateTime @map("original_end")
   newEnd      DateTime @map("new_end")
   reason      String?
