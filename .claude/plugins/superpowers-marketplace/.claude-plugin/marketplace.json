@@ -1,0 +1,23 @@
+{
+  "name": "superpowers-marketplace",
+  "description": "Locally vendored Superpowers marketplace. Committed into this repo so the superpowers plugin resolves from disk with no network fetch (the hosted Claude Code environment does not fetch the upstream github marketplace).",
+  "owner": {
+    "name": "Jesse Vincent",
+    "email": "jesse@fsck.com"
+  },
+  "metadata": {
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "superpowers",
+      "description": "Core skills library for Claude Code: TDD, debugging, collaboration patterns, and proven techniques",
+      "version": "6.3.0",
+      "source": "./superpowers",
+      "author": {
+        "name": "Jesse Vincent",
+        "email": "jesse@fsck.com"
+      }
+    }
+  ]
+}
