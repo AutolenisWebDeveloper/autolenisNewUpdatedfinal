@@ -108,19 +108,28 @@ export async function revealRooftopContact(
     return null;
   }
 
-  // 4. Adapter reveal (the paid call already paid for by the draw). No hit /
-  // fail-closed → refund the credit + record EMPTY.
-  let revealed: Awaited<ReturnType<typeof apolloResolveAndReveal>> = null;
+  // 4. Adapter reveal (the paid call already paid for by the draw). The outcome
+  // carries whether Apollo was BILLED: refund ONLY a genuinely free no-op
+  // (billed:false). A matched-but-emailless reveal (billed:true) keeps the credit —
+  // Apollo charges for the match, so refunding it would let the ledger undercount
+  // real spend and overspend the cap.
+  let outcome: Awaited<ReturnType<typeof apolloResolveAndReveal>>;
   try {
-    revealed = await resolveAndReveal({ name: input.name, website: input.website, city: input.city, state: input.state });
+    outcome = await resolveAndReveal({ name: input.name, website: input.website, city: input.city, state: input.state });
   } catch (err) {
+    // The adapter is fail-closed and shouldn't throw; if it does we can't know
+    // whether the paid call billed, so assume it did (never undercount).
     logger.warn(`[apollo-reveal] adapter threw for rooftop ${input.rooftopId}:`, err);
+    outcome = { kind: "empty", billed: true };
   }
-  if (!revealed?.email) {
-    await refundCredits(cycleKey, REVEAL_COST_CREDITS, { prisma });
-    await prisma.apolloReveal.update({ where: { id: claimId }, data: { status: "EMPTY", creditsCost: 0 } }).catch(() => {});
+  if (outcome.kind === "empty") {
+    if (!outcome.billed) await refundCredits(cycleKey, REVEAL_COST_CREDITS, { prisma });
+    await prisma.apolloReveal
+      .update({ where: { id: claimId }, data: { status: "EMPTY", creditsCost: outcome.billed ? REVEAL_COST_CREDITS : 0 } })
+      .catch(() => {});
     return null;
   }
+  const revealed = outcome; // kind === "revealed"
 
   // 5. Store the reveal (reveal-cache) + return. If the store throws AFTER a
   // successful paid draw, refund + release the claim so the credit isn't lost and

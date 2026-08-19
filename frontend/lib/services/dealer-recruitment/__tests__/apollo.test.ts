@@ -1,5 +1,5 @@
-// Block B / Apollo — adapter 3-stage logic + fail-closed. Injected fake client;
-// live HTTP is isolated in defaultApolloClient (staging-verified).
+// Block B / Apollo — adapter 3-stage logic + fail-closed + billed/not-billed outcome.
+// Injected fake client; live HTTP is isolated in defaultApolloClient (staging-verified).
 //   npx tsx --test lib/services/dealer-recruitment/__tests__/apollo.test.ts
 
 import test from "node:test";
@@ -18,46 +18,76 @@ function client(over: Partial<ApolloClient> = {}): ApolloClient {
 }
 const input = { name: "Toyota of Dallas", website: "https://toyotaofdallas.com", city: "Dallas", state: "TX" };
 
-test("fails closed when no client is configured (no key / disabled)", async () => {
+test("no client (no key / disabled) → empty, NOT billed", async () => {
   const r = await apolloResolveAndReveal(input, { client: null });
-  assert.equal(r, null);
+  assert.deepEqual(r, { kind: "empty", billed: false });
 });
 
-test("3-stage happy path returns the revealed contact", async () => {
+test("3-stage happy path → revealed with the contact", async () => {
   const r = await apolloResolveAndReveal(input, { client: client() });
-  assert.equal(r?.email, "ann@toyotaofdallas.com");
+  assert.equal(r.kind, "revealed");
+  assert.equal(r.kind === "revealed" && r.email, "ann@toyotaofdallas.com");
 });
 
-test("fails closed when the org cannot be resolved", async () => {
+test("org not resolved → empty, NOT billed (never reached the paid call)", async () => {
   const r = await apolloResolveAndReveal(input, { client: client({ organizationsLookup: async () => null }) });
-  assert.equal(r, null);
+  assert.deepEqual(r, { kind: "empty", billed: false });
+});
+
+test("zero people → empty, NOT billed", async () => {
+  const r = await apolloResolveAndReveal(input, { client: client({ peopleSearch: async () => [] }) });
+  assert.deepEqual(r, { kind: "empty", billed: false });
 });
 
 test("reveals the best-title person even when search reports has_email:false (plan masks it)", async () => {
-  // Some Apollo plans return has_email:false in Search for real, revealable contacts.
-  // The adapter must NOT gate on the flag — it reveals the best-title person anyway.
   const r = await apolloResolveAndReveal(input, {
     client: client({
       peopleSearch: async () => [{ id: "p1", name: "Ann", title: "Internet Sales Manager", hasEmail: false }],
       peopleMatch: async (id) => ({ email: `${id}@toyotaofdallas.com`, name: "Ann", title: "ISM" }),
     }),
   });
-  assert.equal(r?.email, "p1@toyotaofdallas.com");
+  assert.equal(r.kind === "revealed" && r.email, "p1@toyotaofdallas.com");
 });
 
-test("returns null ONLY when the org has no people at all", async () => {
-  const r = await apolloResolveAndReveal(input, { client: client({ peopleSearch: async () => [] }) });
-  assert.equal(r, null);
+test("matched but NO email → empty and BILLED (Apollo charged for the match — do not refund)", async () => {
+  const r = await apolloResolveAndReveal(input, {
+    client: client({ peopleMatch: async () => ({ email: null }) }),
+  });
+  assert.deepEqual(r, { kind: "empty", billed: true });
 });
 
-test("an empty reveal on the best-title person (no email found) returns null", async () => {
+test("people/match returns NO person (no match) → empty, NOT billed (refundable)", async () => {
+  const r = await apolloResolveAndReveal(input, {
+    client: client({ peopleMatch: async () => null }),
+  });
+  assert.deepEqual(r, { kind: "empty", billed: false });
+});
+
+test("people/match throws → empty and BILLED (cannot know if charged → conservative)", async () => {
+  const r = await apolloResolveAndReveal(input, {
+    client: client({ peopleMatch: async () => { throw new Error("apollo 500 on match"); } }),
+  });
+  assert.deepEqual(r, { kind: "empty", billed: true });
+});
+
+test("a FREE-stage throw (people search) → empty, NOT billed", async () => {
+  const r = await apolloResolveAndReveal(input, {
+    client: client({ peopleSearch: async () => { throw new Error("apollo 500 on search"); } }),
+  });
+  assert.deepEqual(r, { kind: "empty", billed: false });
+});
+
+test("picks the best-title-ranked person (not Apollo's return order)", async () => {
   const r = await apolloResolveAndReveal(input, {
     client: client({
-      peopleSearch: async () => [{ id: "p1", name: "Ann", title: "Internet Sales Manager", hasEmail: false }],
-      peopleMatch: async () => ({ email: null }),
+      peopleSearch: async () => [
+        { id: "sales", name: "S", title: "Sales", hasEmail: true },
+        { id: "ism", name: "I", title: "Internet Sales Manager", hasEmail: true },
+      ],
+      peopleMatch: async (id) => ({ email: `${id}@toyotaofdallas.com`, name: id, title: id }),
     }),
   });
-  assert.equal(r, null);
+  assert.equal(r.kind === "revealed" && r.email, "ism@toyotaofdallas.com");
 });
 
 test("among equal-title people, the flagged (has_email) one is the tiebreak winner", async () => {
@@ -70,32 +100,7 @@ test("among equal-title people, the flagged (has_email) one is the tiebreak winn
       peopleMatch: async (id) => ({ email: `${id}@toyotaofdallas.com`, name: id, title: id }),
     }),
   });
-  assert.equal(r?.email, "flagged@toyotaofdallas.com");
-});
-
-test("fails closed when the reveal returns no email", async () => {
-  const r = await apolloResolveAndReveal(input, { client: client({ peopleMatch: async () => ({ email: null }) }) });
-  assert.equal(r, null);
-});
-
-test("picks the best-title-ranked flag-positive person (not Apollo's return order)", async () => {
-  const r = await apolloResolveAndReveal(input, {
-    client: client({
-      peopleSearch: async () => [
-        { id: "sales", name: "S", title: "Sales", hasEmail: true },
-        { id: "ism", name: "I", title: "Internet Sales Manager", hasEmail: true },
-      ],
-      peopleMatch: async (id) => ({ email: `${id}@toyotaofdallas.com`, name: id, title: id }),
-    }),
-  });
-  assert.equal(r?.email, "ism@toyotaofdallas.com"); // internet-sales outranks plain sales
-});
-
-test("fails closed (returns null) when a stage throws", async () => {
-  const r = await apolloResolveAndReveal(input, {
-    client: client({ peopleSearch: async () => { throw new Error("apollo 500"); } }),
-  });
-  assert.equal(r, null);
+  assert.equal(r.kind === "revealed" && r.email, "flagged@toyotaofdallas.com");
 });
 
 test("live client people/match sends deterministic-cost params and NO waterfall keys", async () => {
@@ -116,7 +121,6 @@ test("live client people/match sends deterministic-cost params and NO waterfall 
     assert.equal(sentBody.id, "person-1");
     assert.equal(sentBody.reveal_personal_emails, false);
     assert.equal(sentBody.reveal_phone_number, false); // never trigger the 8-credit phone reveal
-    // No waterfall params → Apollo returns synchronous work email only, never cascades.
     assert.equal("waterfall" in sentBody, false);
     assert.equal(Object.keys(sentBody).some((k) => k.toLowerCase().includes("waterfall")), false);
   } finally {

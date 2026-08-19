@@ -61,6 +61,16 @@ export interface ApolloRevealed {
   title?: string | null;
 }
 
+// Outcome of a reveal attempt, carrying whether Apollo was (or may have been)
+// BILLED so the ledger only refunds a genuinely free no-op. Apollo charges a lead
+// credit when people/match MATCHES a person, even if it unlocks no email — so a
+// matched-but-emailless reveal is `billed:true` (do NOT refund; never undercount
+// spend / overspend the cap). A no-op that never reached a billable call (no org /
+// no people / no person matched) is `billed:false` (refund).
+export type ApolloRevealOutcome =
+  | { kind: "revealed"; email: string; name: string | null; title: string | null }
+  | { kind: "empty"; billed: boolean };
+
 // The seam the orchestration depends on — injectable so the 3-stage logic is
 // unit-tested without live HTTP.
 export interface ApolloClient {
@@ -86,24 +96,27 @@ export function apolloEnabled(): boolean {
 }
 
 /**
- * Resolve a dealer to a revealed internet-sales contact. Returns null on ANY
- * failure (fail-closed). Callers MUST have already drawn a credit — the reveal
- * (stage 3) is the paid call.
+ * Resolve a dealer to a revealed internet-sales contact. Never throws (fail-closed).
+ * Returns an ApolloRevealOutcome: `revealed` with the email, or `empty` carrying
+ * whether Apollo was billed (so the ledger refunds only a genuinely free no-op).
+ * Callers MUST have already drawn a credit — stage 3 (people/match) is the paid call.
  */
 export async function apolloResolveAndReveal(
   input: ApolloAdapterInput,
   deps?: Partial<ApolloAdapterDeps>,
-): Promise<ApolloRevealed | null> {
+): Promise<ApolloRevealOutcome> {
   const client = deps?.client ?? defaultApolloClient();
-  if (!client) return null; // no key / disabled → fail closed
+  if (!client) return { kind: "empty", billed: false }; // no key / disabled → fail closed, not billed
 
+  // Stages 1–2 are FREE (org lookup + people search). A failure here is never billed.
+  let target: ApolloPerson;
   try {
     // Stage 1 — canonical org (never trust a raw domain alone).
     const org = await client.organizationsLookup({
       name: input.name,
       domain: normalizeWebsiteHost(input.website),
     });
-    if (!org) return null;
+    if (!org) return { kind: "empty", billed: false };
 
     // Stage 2 — people by org + ranked titles; pick the BEST-TITLE-ranked person
     // and reveal that one. Selection is title-first and does NOT gate on the
@@ -111,23 +124,32 @@ export async function apolloResolveAndReveal(
     // for real, revealable contacts (confirmed live — a genuine sales manager came
     // back has_email:false), so gating on the flag would filter everyone out and
     // the tier would silently reveal nothing. We accept that some reveals come back
-    // empty (the reveal-service refunds the credit, and Apollo does not charge for a
-    // no-hit match). The flag is used only as a tiebreaker among equal titles.
+    // empty. The flag is used only as a tiebreaker among equal titles.
     const people = await client.peopleSearch({ organizationId: org.id, titles: APOLLO_SALES_TITLES });
-    if (people.length === 0) return null;
-    const target = [...people].sort((a, b) => {
+    if (people.length === 0) return { kind: "empty", billed: false };
+    target = [...people].sort((a, b) => {
       const byTitle = titleRank(a.title) - titleRank(b.title);
       if (byTitle !== 0) return byTitle;
       return (b.hasEmail ? 1 : 0) - (a.hasEmail ? 1 : 0); // tie → prefer a flagged email
     })[0];
-
-    // Stage 3 — reveal ONLY the chosen person (the credit-spending call).
-    const revealed = await client.peopleMatch(target.id);
-    if (!revealed?.email) return null;
-    return revealed;
   } catch (err) {
-    logger.warn(`[apollo] resolveAndReveal failed for "${input.name}":`, err);
-    return null;
+    logger.warn(`[apollo] resolve (free stages) failed for "${input.name}":`, err);
+    return { kind: "empty", billed: false }; // never reached the paid call → not billed
+  }
+
+  // Stage 3 — the PAID people/match. Apollo charges a lead credit when it matches a
+  // person (email or not), so anything other than a clean "no person matched" is
+  // treated as billed → the ledger keeps the credit (conservative: never undercount).
+  try {
+    const revealed = await client.peopleMatch(target.id);
+    if (revealed === null) return { kind: "empty", billed: false }; // no person matched → not billed
+    if (!revealed.email) return { kind: "empty", billed: true }; // matched, no email → billed
+    return { kind: "revealed", email: revealed.email, name: revealed.name ?? null, title: revealed.title ?? null };
+  } catch (err) {
+    // The billable call errored — we cannot know whether Apollo charged, so assume
+    // it did (never undercount). Ledger keeps the credit; the cycle claim goes EMPTY.
+    logger.warn(`[apollo] people/match failed for "${input.name}":`, err);
+    return { kind: "empty", billed: true };
   }
 }
 

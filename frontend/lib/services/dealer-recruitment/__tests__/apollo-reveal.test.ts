@@ -68,7 +68,7 @@ function fake(ledger: LedgerRow, reveals: RevealRow[] = []): { prisma: PrismaCli
 
 const on = () => true;
 const input = { rooftopId: "rt1", name: "Toyota of Dallas", website: "https://toyotaofdallas.com", city: "Dallas", state: "TX" };
-const hit = async () => ({ email: "ann@toyotaofdallas.com", name: "Ann", title: "ISM" });
+const hit = async () => ({ kind: "revealed" as const, email: "ann@toyotaofdallas.com", name: "Ann", title: "ISM" });
 
 test("returns null (tier off) when not enabled — no key / disabled", async () => {
   const { prisma, ledger } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 0 });
@@ -125,12 +125,24 @@ test("store failure after a paid draw: refunds + releases the claim, still retur
   assert.equal(reveals.length, 0); // claim released, not stuck PENDING
 });
 
-test("adapter miss: credit is refunded and the claim marked EMPTY", async () => {
+test("adapter miss NOT billed (no match): credit is refunded and the claim marked EMPTY", async () => {
   const { prisma, ledger, reveals } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 5 });
-  const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: (async () => null) as never });
+  const miss = (async () => ({ kind: "empty", billed: false })) as never;
+  const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: miss });
   assert.equal(r, null);
-  assert.equal(ledger.spentCredits, 5); // drew 1 then refunded 1
+  assert.equal(ledger.spentCredits, 5); // drew 1 then refunded 1 (Apollo not charged)
   assert.equal(reveals[0]!.status, "EMPTY");
+  assert.equal(reveals[0]!.creditsCost, 0);
+});
+
+test("adapter miss BILLED (matched, no email): credit is KEPT, claim EMPTY at cost 1", async () => {
+  const { prisma, ledger, reveals } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 5 });
+  const billedMiss = (async () => ({ kind: "empty", billed: true })) as never;
+  const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: billedMiss });
+  assert.equal(r, null);
+  assert.equal(ledger.spentCredits, 6); // drew 1, NOT refunded — Apollo charged for the match
+  assert.equal(reveals[0]!.status, "EMPTY");
+  assert.equal(reveals[0]!.creditsCost, 1);
 });
 
 test("idempotency: a concurrent claim (unique conflict) does not double-draw", async () => {
