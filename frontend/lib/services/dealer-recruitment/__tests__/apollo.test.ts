@@ -129,3 +129,31 @@ test("live client people/match sends deterministic-cost params and NO waterfall 
     if (prevEnabled === undefined) delete process.env.APOLLO_REVEAL_ENABLED; else process.env.APOLLO_REVEAL_ENABLED = prevEnabled;
   }
 });
+
+test("live client people/match THROWS on an HTTP error (billable-call error must not collapse to null)", async () => {
+  const prevKey = process.env.APOLLO_API_KEY;
+  const prevEnabled = process.env.APOLLO_REVEAL_ENABLED;
+  const prevFetch = globalThis.fetch;
+  process.env.APOLLO_API_KEY = "test-key";
+  process.env.APOLLO_REVEAL_ENABLED = "true";
+  try {
+    // HTTP 500 on the paid call.
+    globalThis.fetch = (async () => ({ ok: false, status: 500, json: async () => ({}) }) as unknown as Response) as unknown as typeof fetch;
+    const c500 = defaultApolloClient();
+    await assert.rejects(() => c500!.peopleMatch("p1"), /HTTP 500/);
+
+    // Network/timeout throw on the paid call.
+    globalThis.fetch = (async () => { throw new Error("network down"); }) as unknown as typeof fetch;
+    const cNet = defaultApolloClient();
+    await assert.rejects(() => cNet!.peopleMatch("p1"));
+
+    // A clean 200 with no person still returns null (real no-match → not billed).
+    globalThis.fetch = (async () => ({ ok: true, status: 200, json: async () => ({}) }) as unknown as Response) as unknown as typeof fetch;
+    const cOk = defaultApolloClient();
+    assert.equal(await cOk!.peopleMatch("p1"), null);
+  } finally {
+    globalThis.fetch = prevFetch;
+    if (prevKey === undefined) delete process.env.APOLLO_API_KEY; else process.env.APOLLO_API_KEY = prevKey;
+    if (prevEnabled === undefined) delete process.env.APOLLO_REVEAL_ENABLED; else process.env.APOLLO_REVEAL_ENABLED = prevEnabled;
+  }
+});

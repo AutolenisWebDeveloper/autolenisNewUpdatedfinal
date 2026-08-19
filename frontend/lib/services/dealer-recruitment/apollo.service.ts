@@ -155,9 +155,23 @@ export async function apolloResolveAndReveal(
 
 // ─── default live client (isolated; verified in staging) ─────────────────────
 
-async function apolloFetch(path: string, body: Record<string, unknown>): Promise<unknown | null> {
+// throwOnError distinguishes the FREE stages (org lookup / people search) from the
+// PAID people/match call. Free stages fail closed to null (a transport error there
+// costs nothing, so treating it as "no result" is safe). The paid call passes
+// throwOnError:true so an HTTP/timeout/network error THROWS instead of collapsing
+// to null — otherwise the adapter couldn't tell an error (Apollo may have charged)
+// from a clean 200 "no person matched" (not charged), and would wrongly refund a
+// real charge, undercounting spend and breaking the conservative-billing invariant.
+async function apolloFetch(
+  path: string,
+  body: Record<string, unknown>,
+  opts?: { throwOnError?: boolean },
+): Promise<unknown | null> {
   const key = process.env.APOLLO_API_KEY;
-  if (!key) return null; // fail closed — never call without a key
+  if (!key) {
+    if (opts?.throwOnError) throw new Error(`[apollo] missing API key on ${path}`);
+    return null; // fail closed — never call without a key
+  }
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), APOLLO_TIMEOUT_MS);
   try {
@@ -169,11 +183,13 @@ async function apolloFetch(path: string, body: Record<string, unknown>): Promise
     });
     if (!res.ok) {
       logger.warn(`[apollo] HTTP ${res.status} on ${path}`);
+      if (opts?.throwOnError) throw new Error(`[apollo] HTTP ${res.status} on ${path}`);
       return null;
     }
     return await res.json();
   } catch (err) {
     logger.warn(`[apollo] request failed on ${path}:`, err);
+    if (opts?.throwOnError) throw err instanceof Error ? err : new Error(String(err));
     return null;
   } finally {
     clearTimeout(timer);
@@ -217,11 +233,13 @@ export function defaultApolloClient(): ApolloClient | null {
       // NO waterfall params — Apollo only cascades to variable-cost partner providers
       // when a waterfall param is present, so omitting them keeps the call to the
       // synchronous work-email return at exactly REVEAL_COST_CREDITS (1).
-      const json = (await apolloFetch("/people/match", {
-        id: personId,
-        reveal_personal_emails: false,
-        reveal_phone_number: false,
-      })) as
+      // throwOnError: this is the PAID call — a transport/HTTP error must THROW so
+      // the adapter treats it as billed (conservative), not as a clean no-match.
+      const json = (await apolloFetch(
+        "/people/match",
+        { id: personId, reveal_personal_emails: false, reveal_phone_number: false },
+        { throwOnError: true },
+      )) as
         | { person?: { email?: string | null; name?: string; title?: string } }
         | null;
       const person = json?.person;
