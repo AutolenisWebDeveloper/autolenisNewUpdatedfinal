@@ -29,7 +29,7 @@
     "test:admin-deals": "tsx --test --experimental-test-module-mocks app/api/admin/deals/__tests__/*.test.ts",
     "test:comms": "tsx --test --experimental-test-module-mocks lib/services/notifications/__tests__/*.test.ts",
     "test:contract-shield": "tsx --test --experimental-test-module-mocks lib/services/contract-shield/__tests__/*.test.ts",
-    "test:pickup": "tsx --test --experimental-test-module-mocks lib/services/pickup/__tests__/*.test.ts app/api/buyer/pickup/__tests__/*.test.ts",
+    "test:pickup": "tsx --test --experimental-test-module-mocks lib/services/pickup/__tests__/*.test.ts app/api/buyer/pickup/__tests__/*.test.ts app/api/dealer/pickup/__tests__/*.test.ts",
     "test:intake": "tsx --test --experimental-test-module-mocks lib/inngest/__tests__/*.test.ts lib/services/acquisition/__tests__/*.test.ts",
     "test:cron": "tsx --test --experimental-test-module-mocks app/api/cron/__tests__/*.test.ts",
     "test:email": "tsx --test --experimental-test-module-mocks lib/services/email/__tests__/*.test.ts",

@@ -1,17 +1,18 @@
 // lib/services/pickup/scheduling.service.ts
 import { prisma } from "@/lib/prisma";
 import { PickupStatus } from "@prisma/client";
-import { generatePickupQr } from "./qr.service";
 import { checkPickupTime } from "./availability.service";
 
-export async function scheduleVehiclePickup(dealId: string, date: Date, location: string) {
-  const { data: qrData, image: qrImage } = await generatePickupQr(dealId, "initial");
-  return prisma.pickup.upsert({
-    where: { dealId },
-    create: { dealId, scheduledAt: date, location, status: PickupStatus.SCHEDULED, qrCodeData: qrData, qrCodeImage: qrImage, qrExpiresAt: new Date(date.getTime() + 48 * 3600000) },
-    update: { scheduledAt: date, location, qrCodeData: qrData, qrCodeImage: qrImage, qrExpiresAt: new Date(date.getTime() + 48 * 3600000) },
-  });
-}
+// A reschedule (D1) applies only to a pickup that is ALREADY a confirmed booking.
+// It must never touch the D2 coordination round-trip (PROPOSED / DEALER_COUNTERED
+// / EXCEPTION) — those advance only through pickup-coordination.service, and a
+// raw reschedule would bypass dealer confirmation, the CAS token, and the counter
+// cap (and could revert an admin escalation).
+const RESCHEDULABLE_STATUSES: ReadonlySet<PickupStatus> = new Set<PickupStatus>([
+  PickupStatus.SCHEDULED,
+  PickupStatus.RESCHEDULED,
+  PickupStatus.CHECKED_IN,
+]);
 
 export interface RescheduleOptions {
   reason?: string;
@@ -51,6 +52,11 @@ export async function reschedulePickup(
   if (!deal?.pickup) return { ok: false, reason: "No pickup is scheduled for this deal." };
   if (deal.pickup.status === PickupStatus.COMPLETED) {
     return { ok: false, reason: "Cannot reschedule a completed pickup." };
+  }
+  if (!RESCHEDULABLE_STATUSES.has(deal.pickup.status)) {
+    // PROPOSED / DEALER_COUNTERED / EXCEPTION / NOT_SCHEDULED — still in (or not
+    // yet in) the coordination round-trip; reschedule is not a valid action.
+    return { ok: false, reason: "This pickup is still being coordinated with the dealership." };
   }
 
   // The gate: a reschedule must respect the dealer's real availability, exactly

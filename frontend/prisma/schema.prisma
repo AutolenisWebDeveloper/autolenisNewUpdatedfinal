@@ -674,10 +674,23 @@ model Pickup {
   qrCodeData  String?      @map("qr_code_data")
   qrCodeImage String?      @map("qr_code_image")
   qrExpiresAt DateTime?    @map("qr_expires_at")
+  // D2 — confirm/propose round-trip. `proposedTime` is the pending slot awaiting
+  // the other party; `proposedBy` is "BUYER" | "DEALER" (String, not an enum,
+  // mirroring Dealer.tier). `proposedAt` doubles as the compare-and-swap token
+  // for atomic transitions (anti-snipe idiom). On confirm/accept the agreed slot
+  // moves to `scheduledAt`. `counterCount` caps the ping-pong (2 → admin).
+  proposedTime           DateTime? @map("proposed_time")
+  proposedBy             String?   @map("proposed_by")
+  proposedAt             DateTime? @map("proposed_at")
+  counterCount           Int       @default(0) @map("counter_count")
+  // SLA-nudge markers (D2b cron): reset on each new proposal, one nudge per side.
+  proposedReminderSentAt DateTime? @map("proposed_reminder_sent_at")
+  counterReminderSentAt  DateTime? @map("counter_reminder_sent_at")
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
   deal        Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
+  @@index([status, proposedAt])
   @@map("pickups")
 }
 
@@ -1382,11 +1395,14 @@ enum ESignStatus {
 
 enum PickupStatus {
   NOT_SCHEDULED
-  SCHEDULED
+  // D2 — dealer confirm/propose round-trip (pending states):
+  PROPOSED         // buyer proposed a time; awaiting dealer confirm/counter
+  DEALER_COUNTERED // dealer proposed an alternative; awaiting buyer accept/counter
+  SCHEDULED        // confirmed by the other party
   CHECKED_IN
   COMPLETED
   RESCHEDULED
-  EXCEPTION
+  EXCEPTION        // round-trip escalated to admin (counter cap reached)
 }
 
 enum NotificationChannel {
@@ -1404,6 +1420,8 @@ enum NotificationType {
   CONTRACT_READY
   CONTRACT_APPROVED
   SIGNING_READY
+  PICKUP_PROPOSED
+  PICKUP_COUNTERED
   PICKUP_SCHEDULED
   PICKUP_READY
   PREQUAL_APPROVED

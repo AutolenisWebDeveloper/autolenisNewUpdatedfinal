@@ -53,7 +53,6 @@ mock.module("@/lib/prisma", {
 
 mock.module("@/lib/services/pickup/scheduling.service", {
   namedExports: {
-    scheduleVehiclePickup: async () => ({ id: "pickup_1" }),
     reschedulePickup: async (dealId: string, newDate: Date, opts: unknown) => {
       rescheduleCalls.push({ dealId, newDate, opts });
       return rescheduleResult;

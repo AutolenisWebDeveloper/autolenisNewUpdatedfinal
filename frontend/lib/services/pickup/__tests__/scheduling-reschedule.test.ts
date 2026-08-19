@@ -92,6 +92,19 @@ test("a completed pickup cannot be rescheduled", async () => {
   assert.equal(updateCalls, 0);
 });
 
+// D2 regression: reschedule must NOT touch the coordination round-trip states,
+// or a buyer could bypass dealer confirmation / the counter cap / an admin
+// escalation via the PATCH endpoint.
+for (const coordStatus of ["PROPOSED", "DEALER_COUNTERED", "EXCEPTION"]) {
+  test(`a pickup in ${coordStatus} (coordination round-trip) cannot be rescheduled`, async () => {
+    dealRow = { ...SCHEDULED_DEAL, pickup: { id: "pickup_1", status: coordStatus } };
+    const { reschedulePickup } = await loadService();
+    const res = await reschedulePickup("deal_1", WED_2PM_CST, { now: NOW });
+    assert.equal(res.ok, false, `${coordStatus} must not be reschedulable`);
+    assert.equal(updateCalls, 0, "no write on a coordination-state reschedule");
+  });
+}
+
 test("a valid reschedule records an audit activity event (buyer path — no override)", async () => {
   const { reschedulePickup } = await loadService();
   await reschedulePickup("deal_1", WED_2PM_CST, { now: NOW, reason: "work conflict" });
