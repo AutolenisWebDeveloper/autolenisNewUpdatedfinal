@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getOrCreateOutsideDealerId } from "@/lib/services/offer/outside-dealer";
 import { sendOutsideDealerAuctionOfferAdminNotification } from "@/lib/services/email/vehicle-offers.email";
 import { inviteRejection, type InviteRejectReason } from "@/lib/services/auction/outside-invite.service";
+import { maybeExtendForAntiSnipe } from "@/lib/services/auction/anti-snipe.service";
 import { limitGeneral, clientIpKey } from "@/lib/security/rate-limit";
 
 interface Props { params: Promise<{ token: string }> }
@@ -131,6 +132,13 @@ export async function POST(request: NextRequest, { params }: Props) {
   if (alreadySubmitted || !offer) {
     return err("ALREADY_SUBMITTED", "An offer has already been submitted for this invitation.", 400);
   }
+
+  // Y6 — an outside-dealer offer is a real competing bid, so a last-minute one must
+  // extend the auction too (parity with submitOffer/reviseOffer). Best-effort: an
+  // extension failure never fails the accepted submission.
+  await maybeExtendForAntiSnipe(invite.auction.id).catch((e) =>
+    logger.warn("[outside-dealer-offer] anti-snipe extend failed:", e),
+  );
 
   // Notify the buyer (count only — no amount/identity), matching the
   // registered-dealer offer flow. Non-blocking.
