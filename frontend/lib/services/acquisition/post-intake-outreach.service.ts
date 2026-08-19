@@ -18,6 +18,7 @@ import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma"
 import { generateBuyerOpportunityEmail } from "@/lib/services/dealer-recruitment/email-template.service"
 import { sendDealerEmail } from "@/lib/services/dealer-recruitment/dealer-email-send.service"
+import { collapseByInbox } from "@/lib/services/dealer-recruitment/shared-inbox"
 
 const APP_URL = (
   process.env.NEXT_PUBLIC_APP_URL ?? "https://www.autolenis.com"
@@ -147,7 +148,7 @@ export async function runPostIntakeOutreach(
     //    - not already contacted (no queued/sent/delivered outreach log row).
     //      DealerProspect is scoped to a single opportunity (buyerOppId), so a
     //      prior log on the prospect == already contacted for this opportunity.
-    const prospects = await prisma.dealerProspect.findMany({
+    const prospectRows = await prisma.dealerProspect.findMany({
       where: {
         buyerOppId: opportunity.id,
         email: { not: null },
@@ -157,7 +158,10 @@ export async function runPostIntakeOutreach(
         },
       },
       orderBy: [{ distanceMiles: "asc" }, { searchScore: "desc" }],
-      take: MAX_DEALERS,
+      // Over-fetch so shared-inbox collapse (below) doesn't shrink the send set
+      // below MAX_DEALERS when several top prospects share one mailbox — collapse
+      // first, THEN cap to MAX_DEALERS distinct mailboxes.
+      take: MAX_DEALERS * 4,
       select: {
         id: true,
         name: true,
@@ -167,6 +171,14 @@ export async function runPostIntakeOutreach(
         state: true,
       },
     })
+
+    // Send-path shared-inbox collapse: multiple prospects that resolved to the
+    // SAME mailbox (e.g. a shared internetsales@ role inbox on a group domain)
+    // get ONE outreach, not duplicate sends to the same inbox. Ordering is
+    // preserved, so the best-ranked prospect for a mailbox is the one kept.
+    // Collapse THEN cap to MAX_DEALERS distinct mailboxes. (Coverage still counts
+    // distinct rooftops — collapse is a send-path concern, never the coverage count.)
+    const prospects = collapseByInbox(prospectRows, (p) => p.email).slice(0, MAX_DEALERS)
 
     if (prospects.length === 0) {
       logger.info(

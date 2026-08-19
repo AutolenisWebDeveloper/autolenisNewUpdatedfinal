@@ -159,7 +159,8 @@ export async function assessAuctionCoverage(
         },
         select: {
           id: true, name: true, website: true, city: true, state: true,
-          email: true, emailVerificationStatus: true, latitude: true, longitude: true, rooftopId: true,
+          email: true, emailVerificationStatus: true, emailVerifiedAt: true,
+          latitude: true, longitude: true, rooftopId: true,
         },
         orderBy: [{ distanceMiles: "asc" }, { searchScore: "desc" }],
         take: MAX_PROSPECTS_PER_ASSESS,
@@ -177,6 +178,7 @@ export async function assessAuctionCoverage(
       resolved = await resolveContact({
         id: p.id, name: p.name, website: p.website, city: p.city, state: p.state,
         email: p.email, emailVerificationStatus: p.emailVerificationStatus,
+        emailVerifiedAt: p.emailVerifiedAt, rooftopId: p.rooftopId,
       });
     } catch (err) {
       logger.warn(`[coverage] contact resolution failed for prospect ${p.id}:`, err);

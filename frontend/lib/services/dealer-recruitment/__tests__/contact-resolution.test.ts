@@ -31,8 +31,10 @@ function makeDeps(over: Partial<ContactResolutionDeps> = {}) {
     isEmailSuppressed: mock.fn(async () => false),
     verifyDeliverability: mock.fn(async () => ({ deliverable: true, reason: "mx_ok" })),
     enrich: mock.fn(async () => enrichResult()),
+    getRooftopContacts: mock.fn(async () => [] as Array<Record<string, unknown>>),
+    upsertContactProfile: mock.fn(async () => ({ id: "dcp" })),
     ...over,
-  } as ContactResolutionDeps;
+  } as unknown as ContactResolutionDeps;
   return { deps, updates };
 }
 
@@ -202,6 +204,58 @@ test("M4b: Gemini found an unsafe email stamps emailEnrichedAt + UNVERIFIED, not
   assert.equal(updates.length, 1);
   assert.ok(updates[0].data.emailEnrichedAt instanceof Date);
   assert.equal(updates[0].data.emailVerificationStatus, "UNVERIFIED");
+});
+
+// ─── B2c: rooftop-shared reuse (tier 0) + write-through ──────────────────────
+
+test("rooftop-shared reuse: a send-safe rooftop contact is reused before any cold work", async () => {
+  const enrich = mock.fn(async () => enrichResult());
+  const getRooftopContacts = mock.fn(async () => [
+    { email: "sales@toyotaofdallas.com", emailVerificationStatus: "VERIFIED", emailVerifiedAt: new Date(), emailSource: "gemini_search_high_confidence" },
+  ]);
+  const { deps, updates } = makeDeps({ enrich, getRooftopContacts } as never);
+  const r = await resolveContactableEmail(cand({ email: null, rooftopId: "rt1" }), deps);
+  assert.equal(r.contactable, true);
+  assert.equal(r.source, "rooftop_reuse");
+  assert.equal(r.email, "sales@toyotaofdallas.com");
+  assert.equal(enrich.mock.callCount(), 0); // twin's contact reused — no cold work
+  // HIGH-fix: the reused address is persisted onto THIS prospect so the send
+  // path (prospect.email) can actually reach it — contactable must be sendable.
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].id, "p1");
+  assert.equal(updates[0].data.email, "sales@toyotaofdallas.com");
+});
+
+test("rooftop reuse skips a suppressed shared contact and falls through to role-derive", async () => {
+  const getRooftopContacts = mock.fn(async () => [
+    { email: "bounced@toyotaofdallas.com", emailVerificationStatus: "VERIFIED", emailVerifiedAt: new Date(), emailSource: "x" },
+  ]);
+  const { deps } = makeDeps({
+    getRooftopContacts,
+    isEmailSuppressed: mock.fn(async (_sb: unknown, email: string) => email === "bounced@toyotaofdallas.com"),
+  } as never);
+  const r = await resolveContactableEmail(cand({ email: null, rooftopId: "rt1" }), deps);
+  assert.equal(r.contactable, true);
+  assert.equal(r.status, "ROLE_DERIVED"); // suppressed shared contact skipped → role-derive
+});
+
+test("write-through: a role-derived resolution is written back to the rooftop profile", async () => {
+  const upsertContactProfile = mock.fn(async () => ({ id: "dcp" }));
+  const { deps } = makeDeps({ upsertContactProfile } as never);
+  await resolveContactableEmail(cand({ email: null, rooftopId: "rt1" }), deps);
+  assert.equal(upsertContactProfile.mock.callCount(), 1);
+  const [rooftopId, input] = upsertContactProfile.mock.calls[0]!.arguments as unknown as [string, Record<string, unknown>];
+  assert.equal(rooftopId, "rt1");
+  assert.equal(input.emailVerificationStatus, "ROLE_DERIVED");
+});
+
+test("no rooftopId → no rooftop read and no write-through (backward compatible)", async () => {
+  const getRooftopContacts = mock.fn(async () => []);
+  const upsertContactProfile = mock.fn(async () => ({ id: "dcp" }));
+  const { deps } = makeDeps({ getRooftopContacts, upsertContactProfile } as never);
+  await resolveContactableEmail(cand({ email: null }), deps); // no rooftopId
+  assert.equal(getRooftopContacts.mock.callCount(), 0);
+  assert.equal(upsertContactProfile.mock.callCount(), 0);
 });
 
 // ─── B2b: bounce → re-resolve (proof #5) ─────────────────────────────────────

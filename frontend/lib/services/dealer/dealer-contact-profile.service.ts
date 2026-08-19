@@ -201,3 +201,39 @@ export async function reconcileProspectContact(
     deps,
   );
 }
+
+export interface RooftopContact {
+  email: string | null;
+  emailVerificationStatus: string | null;
+  emailVerifiedAt: Date | null;
+  emailSource: string | null;
+}
+
+/**
+ * Read a rooftop's contact profiles that carry an email, best-provenance first
+ * (VERIFIED before ROLE_DERIVED before the rest). The caller applies its own
+ * send-safe re-check + SEND_SAFE_STATUSES filter — this only surfaces candidates
+ * so the contact waterfall can reuse a contact already resolved for the
+ * rooftop's twin (registered dealer ↔ prospect) at zero cost. Returns [] on any
+ * error (fail-open: reuse is an optimization, never load-bearing).
+ */
+export async function getRooftopContacts(
+  rooftopId: string,
+  deps?: Partial<ContactProfileDeps>,
+): Promise<RooftopContact[]> {
+  const prisma = deps?.prisma ?? defaultPrisma;
+  try {
+    const rows = await prisma.dealerContactProfile.findMany({
+      where: { rooftopId, email: { not: null } },
+      select: { email: true, emailVerificationStatus: true, emailVerifiedAt: true, emailSource: true },
+      take: 10,
+    });
+    // VERIFIED (3) > ROLE_DERIVED (2) > other (0), so the caller tries the
+    // strongest provenance first.
+    const rank = (s: string | null): number => (s === "VERIFIED" ? 3 : s === "ROLE_DERIVED" ? 2 : 0);
+    return rows.sort((a, b) => rank(b.emailVerificationStatus) - rank(a.emailVerificationStatus));
+  } catch (err) {
+    logger.warn("[dealer-contact-profile] getRooftopContacts failed:", err);
+    return [];
+  }
+}

@@ -24,6 +24,7 @@ import { prisma as defaultPrisma } from "@/lib/prisma";
 import { SuppressionService } from "@/lib/services/suppression.service";
 import { verifyEmailDeliverability } from "@/lib/services/integrations/email-deliverability.service";
 import { normalizeWebsiteHost } from "@/lib/services/dealer/dealer-identity.service";
+import { getRooftopContacts, upsertContactProfile } from "@/lib/services/dealer/dealer-contact-profile.service";
 import { enrichDealerEmail } from "./email-enrichment.service";
 
 // The emailVerificationStatus values that mean "has a send-safe address" —
@@ -68,6 +69,10 @@ export interface ContactCandidate {
   // than CONTACT_STALE_MONTHS) and re-checks only when stale. Absent → treated as
   // stale, so callers that don't supply it keep the always-re-check behavior.
   emailVerifiedAt?: Date | null;
+  // When set, the waterfall first tries a contact already resolved for this
+  // rooftop's twin (registered dealer ↔ prospect share one DealerContactProfile),
+  // and writes any newly-resolved contact back to it.
+  rooftopId?: string | null;
 }
 
 export type ContactStatus = "VERIFIED" | "ROLE_DERIVED";
@@ -90,6 +95,10 @@ export interface ContactResolutionDeps {
   isEmailSuppressed: typeof SuppressionService.isEmailSuppressed;
   verifyDeliverability: typeof verifyEmailDeliverability;
   enrich: typeof enrichDealerEmail;
+  // Rooftop-shared contact identity (B1/B2c). Reuse a contact already resolved
+  // for the rooftop's twin; write newly-resolved contacts back. Both fail-open.
+  getRooftopContacts: typeof getRooftopContacts;
+  upsertContactProfile: typeof upsertContactProfile;
 }
 
 export async function resolveContactableEmail(
@@ -100,6 +109,8 @@ export async function resolveContactableEmail(
   const verifyDeliverability = deps?.verifyDeliverability ?? verifyEmailDeliverability;
   const isEmailSuppressed = deps?.isEmailSuppressed ?? SuppressionService.isEmailSuppressed;
   const enrich = deps?.enrich ?? enrichDealerEmail;
+  const getRooftopContactsFn = deps?.getRooftopContacts ?? getRooftopContacts;
+  const upsertContactProfileFn = deps?.upsertContactProfile ?? upsertContactProfile;
 
   let supabase = deps?.supabase;
   const getSupabase = async (): Promise<SupabaseClient> => {
@@ -117,6 +128,71 @@ export async function resolveContactableEmail(
   };
 
   const now = new Date();
+
+  // Persist a resolved contact onto the rooftop-shared profile (B2c write-through)
+  // so the rooftop's twin reuses it next time. Fail-open — a profile write must
+  // never break resolution.
+  const writeThrough = async (
+    email: string,
+    status: ContactStatus,
+    source: string | null,
+    person?: { name?: string | null; title?: string | null; phone?: string | null; contactSource?: string | null; contactConfidence?: string | null },
+  ): Promise<void> => {
+    if (!candidate.rooftopId) return;
+    try {
+      await upsertContactProfileFn(candidate.rooftopId, {
+        email,
+        emailVerificationStatus: status,
+        emailSource: source,
+        emailVerifiedAt: now,
+        name: person?.name ?? null,
+        title: person?.title ?? null,
+        phone: person?.phone ?? null,
+        contactSource: person?.contactSource ?? null,
+        contactConfidence: person?.contactConfidence ?? null,
+      });
+    } catch (err) {
+      logger.warn(`[contact-resolution] rooftop profile write-through failed for ${candidate.id}:`, err);
+    }
+  };
+
+  // 0. Rooftop-shared reuse — a contact already resolved for this rooftop's twin
+  // (registered dealer ↔ prospect share one DealerContactProfile). Tried before
+  // any cold work, best-provenance first, and re-checked send-safe (suppression
+  // always; MX only when stale). Fail-open: profile-read errors just fall through.
+  if (candidate.rooftopId) {
+    const shared = await getRooftopContactsFn(candidate.rooftopId, { prisma });
+    for (const c of shared) {
+      if (!c.email) continue;
+      if (!(SEND_SAFE_STATUSES as readonly string[]).includes(c.emailVerificationStatus ?? "")) continue;
+      if (await isEmailSuppressed(await getSupabase(), c.email)) continue;
+      const deliverable = isContactStale(c.emailVerifiedAt, now)
+        ? (await verifyDeliverability(c.email)).deliverable
+        : true;
+      if (deliverable) {
+        // Persist the reused address onto THIS prospect so the send path (which
+        // reads prospect.email, not the rooftop profile) can actually reach it —
+        // otherwise coverage would count a prospect Block C can't send to. If the
+        // write throws it propagates to the caller (coverage skips the prospect →
+        // not counted): contactable must always be sendable (fail-closed).
+        await prisma.dealerProspect.update({
+          where: { id: candidate.id },
+          data: {
+            email: c.email,
+            emailSource: c.emailSource ?? "rooftop_reuse",
+            emailVerificationStatus: c.emailVerificationStatus,
+            emailVerifiedAt: now,
+          },
+        });
+        return {
+          contactable: true,
+          email: c.email,
+          status: c.emailVerificationStatus as ContactStatus,
+          source: "rooftop_reuse",
+        };
+      }
+    }
+  }
 
   // 1. Reuse — an existing send-safe address, re-checked. Suppression is ALWAYS
   // re-checked (a since-bounced address must never be reused → falls through to
@@ -172,6 +248,7 @@ export async function resolveContactableEmail(
             contactSourceUrl: null,
           },
         });
+        await writeThrough(derived, "ROLE_DERIVED", "role_derived");
         return { contactable: true, email: derived, status: "ROLE_DERIVED", source: "role_derived" };
       }
     }
@@ -208,6 +285,10 @@ export async function resolveContactableEmail(
           data.contactSourceUrl = r.contactSourceUrl;
         }
         await prisma.dealerProspect.update({ where: { id: candidate.id }, data });
+        await writeThrough(r.email, "VERIFIED", r.source, {
+          name: r.contactName, title: r.contactTitle, phone: r.contactPhone,
+          contactSource: r.contactSource, contactConfidence: r.contactConfidence,
+        });
         return { contactable: true, email: r.email, status: "VERIFIED", source: r.source };
       }
       // Gemini RAN but produced nothing send-safe. Record the attempt (stamp
