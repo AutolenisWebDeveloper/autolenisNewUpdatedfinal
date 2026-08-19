@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { inngest } from '@/lib/inngest/client';
 import { inngestFunctions } from '@/lib/inngest/functions';
 import { getStripe } from '@/lib/stripe';
-import { classifyCronLiveness } from './monitoring/cron-schedule';
+import { detectDeadCrons } from './monitoring/dead-cron.service';
 
 // ----------------------------------------------------------------------------
 // AutoLenis Phase 5 — Operations dashboard data layer.
@@ -239,13 +239,10 @@ export class OperationsService {
       completed_at: string | null;
     }>;
 
-    // Collapse to the most recent run per cron name (rows already DESC by time),
-    // then annotate each with dead-cron liveness from the CRON_STALENESS registry.
-    const now = new Date();
+    // Collapse to the most recent run per cron name (rows already DESC by time).
     const latest = new Map<string, CronJobRun>();
     for (const row of rows) {
       if (latest.has(row.cron_name)) continue;
-      const liveness = classifyCronLiveness(row.cron_name, new Date(row.started_at), now);
       latest.set(row.cron_name, {
         id: row.id,
         cron_name: row.cron_name,
@@ -254,10 +251,38 @@ export class OperationsService {
         error: row.error,
         started_at: row.started_at,
         completed_at: row.completed_at,
-        overdue: liveness.state === 'OVERDUE',
-        max_age_minutes: liveness.maxAgeMinutes || null,
+        overdue: false,
+        max_age_minutes: null,
       });
     }
+
+    // Authoritative dead-cron liveness comes from an UNBOUNDED groupBy (latest run
+    // per cron across all rows), not this recent-row window: a cron dead long
+    // enough for its last row to fall past the `limit` would otherwise vanish from
+    // the widget instead of showing Overdue — exactly the case this panel exists to
+    // surface. Override in-window rows, and add a synthetic row for any overdue cron
+    // whose last run is outside the window so it still appears.
+    for (const l of await detectDeadCrons()) {
+      if (l.state !== 'OVERDUE') continue;
+      const existing = latest.get(l.cronName);
+      if (existing) {
+        existing.overdue = true;
+        existing.max_age_minutes = l.maxAgeMinutes;
+      } else {
+        latest.set(l.cronName, {
+          id: `stale:${l.cronName}`,
+          cron_name: l.cronName,
+          status: 'STALE',
+          duration: null,
+          error: null,
+          started_at: l.lastRunAt ? l.lastRunAt.toISOString() : new Date(0).toISOString(),
+          completed_at: null,
+          overdue: true,
+          max_age_minutes: l.maxAgeMinutes,
+        });
+      }
+    }
+
     return [...latest.values()].sort((a, b) => a.cron_name.localeCompare(b.cron_name));
   }
 

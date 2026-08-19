@@ -14,7 +14,9 @@ type Group = { cronName: string; _max: { startedAt: Date | null } };
 const state = {
   groups: [] as Group[],
   groupByThrows: false,
-  recentNotification: null as { id: string } | null,
+  // Titles for which findFirst reports a recent alert already exists (per-cron
+  // idempotency). "*" means every title has a recent alert.
+  recentTitles: new Set<string>(),
   createdNotifications: [] as Array<Record<string, unknown>>,
   createThrows: false,
 };
@@ -29,7 +31,12 @@ mock.module("@/lib/prisma", {
         },
       },
       notification: {
-        findFirst: async () => state.recentNotification,
+        findFirst: async ({ where }: { where: { title: string } }) => {
+          if (state.recentTitles.has("*") || state.recentTitles.has(where.title)) {
+            return { id: "existing" };
+          }
+          return null;
+        },
         create: async ({ data }: { data: Record<string, unknown> }) => {
           if (state.createThrows) throw new Error("insert failed");
           state.createdNotifications.push(data);
@@ -53,7 +60,7 @@ const NOW = new Date("2026-08-19T12:00:00.000Z");
 beforeEach(() => {
   state.groups = [];
   state.groupByThrows = false;
-  state.recentNotification = null;
+  state.recentTitles = new Set<string>();
   state.createdNotifications = [];
   state.createThrows = false;
   oncallCalls.length = 0;
@@ -86,38 +93,55 @@ test("reportOverdueCrons raises one SYSTEM_ALERT + pages when none is recent", a
     { cronName: "auction-close", state: "OVERDUE" as const, lastRunAt: NOW, ageMinutes: 90, maxAgeMinutes: 20 },
   ];
   const res = await reportOverdueCrons(overdue, NOW);
-  assert.equal(res.alerted, true);
+  assert.equal(res.alerted, 1);
   assert.equal(state.createdNotifications.length, 1);
   assert.equal(state.createdNotifications[0]!.type, "SYSTEM_ALERT");
+  assert.equal(state.createdNotifications[0]!.title, "Dead cron: auction-close");
   assert.match(String(state.createdNotifications[0]!.body), /auction-close/);
   assert.equal(oncallCalls.length, 1, "on-call is notified");
 });
 
-test("reportOverdueCrons is idempotent — suppresses when a recent alert exists", async () => {
+test("reportOverdueCrons is per-cron idempotent — suppresses a cron with a recent alert", async () => {
   const { reportOverdueCrons } = await import("@/lib/services/monitoring/dead-cron.service");
-  state.recentNotification = { id: "existing" };
+  state.recentTitles = new Set(["*"]); // every cron already has a recent alert
   const overdue = [
     { cronName: "auction-close", state: "OVERDUE" as const, lastRunAt: NOW, ageMinutes: 90, maxAgeMinutes: 20 },
   ];
   const res = await reportOverdueCrons(overdue, NOW);
-  assert.equal(res.alerted, false);
+  assert.equal(res.alerted, 0);
   assert.equal(state.createdNotifications.length, 0, "no duplicate alert within the window");
   assert.equal(oncallCalls.length, 0, "no duplicate page");
+});
+
+test("a SECOND cron dying mid-window still alerts, even while the first's alert stands", async () => {
+  const { reportOverdueCrons } = await import("@/lib/services/monitoring/dead-cron.service");
+  // auction-close already alerted this window; health-check is newly overdue.
+  state.recentTitles = new Set(["Dead cron: auction-close"]);
+  const overdue = [
+    { cronName: "auction-close", state: "OVERDUE" as const, lastRunAt: NOW, ageMinutes: 90, maxAgeMinutes: 20 },
+    { cronName: "health-check", state: "OVERDUE" as const, lastRunAt: NOW, ageMinutes: 45, maxAgeMinutes: 20 },
+  ];
+  const res = await reportOverdueCrons(overdue, NOW);
+  assert.equal(res.alerted, 1, "only the newly-dead cron pages");
+  assert.equal(state.createdNotifications.length, 1);
+  assert.equal(state.createdNotifications[0]!.title, "Dead cron: health-check");
+  assert.equal(oncallCalls.length, 1);
+  assert.match(String(oncallCalls[0]!.message), /health-check/);
 });
 
 test("reportOverdueCrons is a no-op when nothing is overdue", async () => {
   const { reportOverdueCrons } = await import("@/lib/services/monitoring/dead-cron.service");
   const res = await reportOverdueCrons([], NOW);
-  assert.equal(res.alerted, false);
+  assert.equal(res.alerted, 0);
   assert.equal(state.createdNotifications.length, 0);
 });
 
-test("reportOverdueCrons swallows a notification insert failure (best-effort)", async () => {
+test("reportOverdueCrons swallows a per-cron insert failure without blocking the others", async () => {
   const { reportOverdueCrons } = await import("@/lib/services/monitoring/dead-cron.service");
   state.createThrows = true;
   const overdue = [
     { cronName: "auction-close", state: "OVERDUE" as const, lastRunAt: NOW, ageMinutes: 90, maxAgeMinutes: 20 },
   ];
   const res = await reportOverdueCrons(overdue, NOW); // must not throw
-  assert.equal(res.alerted, false);
+  assert.equal(res.alerted, 0);
 });

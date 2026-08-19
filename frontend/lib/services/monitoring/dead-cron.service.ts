@@ -11,17 +11,24 @@
 //
 // Everything here is BEST-EFFORT: a cron_job_logs / notification DB hiccup must
 // never throw into the health-check cron. Detection degrades to [] on error;
-// reporting degrades to { alerted: false }.
+// reporting degrades to alerted: 0.
 
 import { prisma } from "@/lib/prisma";
 import { logger } from "@/lib/logger";
 import { notifyOncall } from "@/lib/observability/alert";
 import { CRON_STALENESS, classifyCronLiveness, type CronLiveness } from "./cron-schedule";
 
-const DEAD_CRON_ALERT_TITLE = "Dead cron detected";
+// Per-cron alert title. Idempotency keys on the specific cron (not a constant
+// title) so a SECOND cron dying mid-window pages immediately instead of being
+// suppressed by the first cron's still-open alert — while a single dead cron
+// still alerts at most once per window (no 5-min re-page storm), and a recovering
+// cron simply stops without emitting anything.
+function deadCronAlertTitle(cronName: string): string {
+  return `Dead cron: ${cronName}`;
+}
 
 // health-check runs every 5m; without throttling a persistently-dead cron would
-// re-page 12×/hour. Suppress duplicate alerts within this window.
+// re-page 12×/hour. Suppress duplicate alerts for the SAME cron within this window.
 export const DEAD_CRON_ALERT_WINDOW_MINUTES = 60;
 
 /**
@@ -51,44 +58,54 @@ export function overdueCrons(list: CronLiveness[]): CronLiveness[] {
 }
 
 /**
- * Proactive-push surfacing for OVERDUE crons. Idempotent within
- * DEAD_CRON_ALERT_WINDOW_MINUTES so a still-dead cron does not re-page every tick.
- * Best-effort: swallows any DB error and reports it did not alert.
+ * Proactive-push surfacing for OVERDUE crons. Per-cron idempotent within
+ * DEAD_CRON_ALERT_WINDOW_MINUTES: each dead cron alerts at most once per window
+ * (no 5-min re-page storm), yet a newly-dead cron pages immediately regardless of
+ * other still-open alerts. Best-effort: a DB error on one cron is swallowed and
+ * does not block the others. Returns the count of fresh alerts raised.
+ *
+ * NOTE: the phrasing is deliberately "no run recorded" — this detects a cron that
+ * did not FIRE (its latest run is stale). A cron that fires but its handler throws
+ * still writes a recent (FAILED) run, so it reads as alive here; that failure mode
+ * surfaces via the FAILED status on the run itself, not via dead-cron detection.
  */
 export async function reportOverdueCrons(
   overdue: CronLiveness[],
   now: Date = new Date(),
-): Promise<{ alerted: boolean }> {
-  if (overdue.length === 0) return { alerted: false };
+): Promise<{ alerted: number }> {
+  if (overdue.length === 0) return { alerted: 0 };
 
-  const names = overdue.map((c) => c.cronName).sort();
-  const detail = overdue
-    .map((c) => `${c.cronName} (last run ${c.ageMinutes}m ago, expected within ${c.maxAgeMinutes}m)`)
-    .join("; ");
+  const windowStart = new Date(now.getTime() - DEAD_CRON_ALERT_WINDOW_MINUTES * 60_000);
+  let alerted = 0;
 
-  try {
-    const windowStart = new Date(now.getTime() - DEAD_CRON_ALERT_WINDOW_MINUTES * 60_000);
-    const recent = await prisma.notification.findFirst({
-      where: { title: DEAD_CRON_ALERT_TITLE, type: "SYSTEM_ALERT", createdAt: { gte: windowStart } },
-      select: { id: true },
-    });
-    if (recent) return { alerted: false };
+  for (const c of overdue) {
+    const title = deadCronAlertTitle(c.cronName);
+    try {
+      const recent = await prisma.notification.findFirst({
+        where: { title, type: "SYSTEM_ALERT", createdAt: { gte: windowStart } },
+        select: { id: true },
+      });
+      if (recent) continue;
 
-    await prisma.notification.create({
-      data: {
-        title: DEAD_CRON_ALERT_TITLE,
-        body: `Overdue cron(s): ${detail}. No run recorded within the expected window — the scheduler or handler may be failing. Review via /admin/operations.`,
-        type: "SYSTEM_ALERT",
-        actionUrl: "/admin/operations",
-      },
-    });
-    // Medium-severity notify (dashboard/Slack via Sentry rule); does not page.
-    notifyOncall(`Dead cron(s) detected: ${names.join(", ")}`, {
-      overdue: overdue.map((c) => ({ cron: c.cronName, ageMinutes: c.ageMinutes, maxAgeMinutes: c.maxAgeMinutes })),
-    });
-    return { alerted: true };
-  } catch (e) {
-    logger.error("[dead-cron] reportOverdueCrons failed (best-effort):", e);
-    return { alerted: false };
+      await prisma.notification.create({
+        data: {
+          title,
+          body: `Cron '${c.cronName}' is overdue — last run ${c.ageMinutes}m ago, expected within ${c.maxAgeMinutes}m. No run recorded within the expected window; the scheduled trigger may not be firing. Review via /admin/operations.`,
+          type: "SYSTEM_ALERT",
+          actionUrl: "/admin/operations",
+        },
+      });
+      // Medium-severity notify (dashboard/Slack via Sentry rule); does not page.
+      notifyOncall(`Dead cron detected: ${c.cronName}`, {
+        cron: c.cronName,
+        ageMinutes: c.ageMinutes,
+        maxAgeMinutes: c.maxAgeMinutes,
+      });
+      alerted += 1;
+    } catch (e) {
+      logger.error(`[dead-cron] reportOverdueCrons failed for ${c.cronName} (best-effort):`, e);
+    }
   }
+
+  return { alerted };
 }
