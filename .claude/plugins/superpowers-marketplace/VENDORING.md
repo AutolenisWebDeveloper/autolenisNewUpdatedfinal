@@ -61,6 +61,40 @@ rm -f .claude/plugins/superpowers-marketplace/superpowers/.claude-plugin/marketp
 # then update the version fields in marketplace.json and this file
 ```
 
+## Runtime status & the project-skill mirror
+
+A fresh-session self-test (hosted Claude Code `2.1.235`, `cloud_default` container) confirmed that
+the **hosted runtime does not activate project-scoped plugin marketplaces**: the `SessionStart`
+hook did not fire, no `superpowers:*` skills reached the `Skill` tool, and
+`Skill(skill="superpowers:brainstorming")` returned `Unknown skill` — even though everything here
+is vendored and enabled in `.claude/settings.json`. This matches the availability caveat in the
+repo `CLAUDE.md`. The plugin form is retained because a **local** (non-hosted) Claude Code CLI does
+honor it after the folder is trusted.
+
+To make superpowers usable **in the hosted runtime**, the additive skills are also mirrored as
+plain **project skills** under `.claude/skills/` (the mechanism the runtime does load — the same
+one `autolenis-*`, `impeccable`, and `task-observer` use). They are prefixed `superpowers-` to
+avoid shadowing any built-in skill, and are invoked via the `Skill` tool as, e.g.,
+`superpowers-brainstorming`.
+
+**Mirrored (7, additive general technique):** `superpowers-brainstorming`,
+`superpowers-writing-plans`, `superpowers-executing-plans`, `superpowers-using-git-worktrees`,
+`superpowers-dispatching-parallel-agents`, `superpowers-writing-skills`,
+`superpowers-finishing-a-development-branch`.
+
+**Deliberately NOT mirrored (7, duplicate AutoLenis architecture skills):** `systematic-debugging`
+(→ `autolenis-debugging`), `test-driven-development` (→ `autolenis-testing-quality-gates`),
+`verification-before-completion` (→ `autolenis-code-verification` / `autolenis-production-readiness`),
+`requesting-code-review` and `receiving-code-review` (→ `autolenis-code-verification`),
+`subagent-driven-development` (overlaps the review loop and depends on the skipped review skills),
+and `using-superpowers` (a plugin-only meta-primer). These remain available in the vendored plugin
+tree for a local CLI, but are kept out of `.claude/skills/` to respect the `CLAUDE.md`
+"no duplicate architecture skills" rule.
+
+> Prose inside the mirrored skills still refers to sibling skills as `superpowers:<name>` or by
+> relative path (e.g. `../requesting-code-review/code-reviewer.md`); those are informational and
+> some point at skills that were intentionally not mirrored.
+
 ## Note on precedence (AutoLenis)
 
 Several superpowers skills overlap in intent with this repo's own architecture skills
