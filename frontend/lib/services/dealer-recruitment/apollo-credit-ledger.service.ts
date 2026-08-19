@@ -102,6 +102,24 @@ export async function refundCredits(
   }
 }
 
+/**
+ * Credits a consumer may still draw this cycle (cap − spent − floor, ≥ 0). 0 when
+ * no ledger row exists. Used by the backfill (B′) to stop at budget exhaustion
+ * without claiming/releasing a reveal per exhausted rooftop.
+ */
+export async function remainingCredits(
+  cycleKey: string,
+  consumer: CreditConsumer,
+  now: Date,
+  deps?: Partial<LedgerDeps>,
+): Promise<number> {
+  const prisma = deps?.prisma ?? defaultPrisma;
+  const ledger = await prisma.apolloCreditLedger.findUnique({ where: { cycleKey } });
+  if (!ledger) return 0;
+  const floor = consumer === "backfill" ? backfillReserveFloor(now.getUTCDate(), daysInCycleFor(now)) : 0;
+  return Math.max(0, ledger.capCredits - ledger.spentCredits - floor);
+}
+
 /** "YYYY-MM" cycle key for a date. Caller passes the date (never new Date() here). */
 export function cycleKeyFor(date: Date): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
