@@ -3049,6 +3049,9 @@ model CronJobLog {
   error       String?
   startedAt   DateTime      @default(now()) @map("started_at")
   completedAt DateTime?     @map("completed_at")
+  // Dead-cron detection groups by cron_name and reads the latest started_at per
+  // cron; the ops widget and retention purge also scan by these columns.
+  @@index([cronName, startedAt], map: "cron_job_logs_cron_name_started_at_idx")
   @@map("cron_job_logs")
 }
 

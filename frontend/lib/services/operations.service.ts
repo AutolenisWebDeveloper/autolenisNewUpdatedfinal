@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { inngest } from '@/lib/inngest/client';
 import { inngestFunctions } from '@/lib/inngest/functions';
 import { getStripe } from '@/lib/stripe';
+import { classifyCronLiveness } from './monitoring/cron-schedule';
 
 // ----------------------------------------------------------------------------
 // AutoLenis Phase 5 — Operations dashboard data layer.
@@ -45,6 +46,11 @@ export interface CronJobRun {
   error: string | null;
   started_at: string;
   completed_at: string | null;
+  // D3a — dead-cron annotation from the CRON_STALENESS registry. `overdue` means
+  // the most recent run is older than the cron's expected cadence (it should have
+  // run again by now). null max_age_minutes = the cron is not staleness-monitored.
+  overdue: boolean;
+  max_age_minutes: number | null;
 }
 
 export interface DeadLetterJob {
@@ -233,10 +239,13 @@ export class OperationsService {
       completed_at: string | null;
     }>;
 
-    // Collapse to the most recent run per cron name (rows already DESC by time).
+    // Collapse to the most recent run per cron name (rows already DESC by time),
+    // then annotate each with dead-cron liveness from the CRON_STALENESS registry.
+    const now = new Date();
     const latest = new Map<string, CronJobRun>();
     for (const row of rows) {
       if (latest.has(row.cron_name)) continue;
+      const liveness = classifyCronLiveness(row.cron_name, new Date(row.started_at), now);
       latest.set(row.cron_name, {
         id: row.id,
         cron_name: row.cron_name,
@@ -245,6 +254,8 @@ export class OperationsService {
         error: row.error,
         started_at: row.started_at,
         completed_at: row.completed_at,
+        overdue: liveness.state === 'OVERDUE',
+        max_age_minutes: liveness.maxAgeMinutes || null,
       });
     }
     return [...latest.values()].sort((a, b) => a.cron_name.localeCompare(b.cron_name));

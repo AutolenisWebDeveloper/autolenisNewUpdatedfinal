@@ -3,6 +3,15 @@
 import { prisma } from "@/lib/prisma";
 import { INVENTORY_HEALTH_P1_THRESHOLD } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
+import { logger } from "@/lib/logger";
+import { detectDeadCrons, overdueCrons, reportOverdueCrons } from "./dead-cron.service";
+import type { CronLiveness } from "./cron-schedule";
+
+// Monitoring-log retention. health-check ticks every 5 minutes, so the purge is
+// throttled to run at most once/day (first tick of PURGE_HOUR_UTC).
+export const MONITORING_RETENTION_DAYS = 30;
+const PURGE_HOUR_UTC = 3;
+const HEALTH_CHECK_INTERVAL_MINUTES = 5;
 
 export interface IntegrationStatus {
   stripe: boolean;
@@ -88,6 +97,90 @@ export async function runHealthCheck(): Promise<HealthReport> {
   const status = !dbOk ? "down" : alerts.some(a => a.startsWith("P0")) ? "degraded" : "healthy";
 
   return { status, database: dbOk, inventoryHealth, activeAuctions, pendingOFAC, contractFails, integrations, alerts, timestamp: new Date() };
+}
+
+/**
+ * Persist a health report to health_check_logs (channel B — queryable log).
+ * The table has no columns for contractFails/integrations; those already surface
+ * as alert strings, so the alerts array is the folded record. BEST-EFFORT: a
+ * write failure is logged, never thrown, so it can't fail the health-check cron.
+ */
+export async function persistHealthReport(report: HealthReport): Promise<void> {
+  try {
+    await prisma.healthCheckLog.create({
+      data: {
+        status: report.status,
+        database: report.database,
+        inventoryHealth: report.inventoryHealth,
+        activeAuctions: report.activeAuctions,
+        pendingOFAC: report.pendingOFAC,
+        alerts: report.alerts,
+      },
+    });
+  } catch (e) {
+    logger.warn("[health] persistHealthReport failed (best-effort):", e);
+  }
+}
+
+/**
+ * Retention purge for the monitoring log tables, throttled to at most once/day.
+ * Guarded on hour-of-day: only the first health-check tick of PURGE_HOUR_UTC each
+ * day purges (health-check runs every 5m, so a minute-window of one interval
+ * selects exactly one tick). If that tick is missed the purge simply waits a day —
+ * retention is not time-critical. Deletes are best-effort at the call site.
+ */
+export async function maybeRunRetentionPurge(
+  now: Date = new Date(),
+): Promise<{ purged: boolean; healthDeleted?: number; cronDeleted?: number }> {
+  if (now.getUTCHours() !== PURGE_HOUR_UTC || now.getUTCMinutes() >= HEALTH_CHECK_INTERVAL_MINUTES) {
+    return { purged: false };
+  }
+  const cutoff = new Date(now.getTime() - MONITORING_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const [health, cron] = await Promise.all([
+    prisma.healthCheckLog.deleteMany({ where: { checkedAt: { lt: cutoff } } }),
+    prisma.cronJobLog.deleteMany({ where: { startedAt: { lt: cutoff } } }),
+  ]);
+  return { purged: true, healthDeleted: health.count, cronDeleted: cron.count };
+}
+
+/**
+ * One full health-check cycle, run by the health-check cron (through withCronRun):
+ *   1. compute the health report
+ *   2. detect dead crons, fold OVERDUE into report.alerts, and proactively push
+ *   3. persist the report (channel B)
+ *   4. throttled retention purge (≤ once/day)
+ * Steps 2–4 are best-effort and individually guarded so a monitoring-write hiccup
+ * never fails the cycle; step 1's own errors propagate (the health check genuinely
+ * couldn't run) and are recorded by withCronRun.
+ */
+export async function runHealthCheckCycle(
+  now: Date = new Date(),
+): Promise<{ report: HealthReport; deadCrons: CronLiveness[] }> {
+  const report = await runHealthCheck();
+
+  let deadCrons: CronLiveness[] = [];
+  try {
+    deadCrons = await detectDeadCrons(now);
+    const overdue = overdueCrons(deadCrons);
+    for (const c of overdue) {
+      report.alerts.push(
+        `P1: cron '${c.cronName}' overdue — last run ${c.ageMinutes}m ago (expected within ${c.maxAgeMinutes}m)`,
+      );
+    }
+    await reportOverdueCrons(overdue, now);
+  } catch (e) {
+    logger.warn("[health] dead-cron detection failed (best-effort):", e);
+  }
+
+  await persistHealthReport(report);
+
+  try {
+    await maybeRunRetentionPurge(now);
+  } catch (e) {
+    logger.warn("[health] retention purge failed (best-effort):", e);
+  }
+
+  return { report, deadCrons };
 }
 
 export async function checkSLAs(): Promise<{ breached: number; warnings: number }> {

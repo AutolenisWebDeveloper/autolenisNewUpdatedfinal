@@ -5,10 +5,10 @@
 // pickup within the SLA, nudge the buyer. One nudge per side per round (a marker
 // column, reset on each new proposal). Bounded per run; safe to re-run.
 
-import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { runPickupConfirmationNudges } from "@/lib/services/pickup/pickup-sla.service";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get(CRON_AUTH_HEADER);
@@ -18,11 +18,9 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  try {
-    const result = await runPickupConfirmationNudges();
-    return NextResponse.json({ success: true, data: { ...result, timestamp: new Date().toISOString() } });
-  } catch (err) {
-    logger.error("[pickup-confirmation-nudge] failed:", err);
+  const run = await withCronRun("pickup-confirmation-nudge", () => runPickupConfirmationNudges());
+  if (!run.ok) {
     return NextResponse.json({ success: false, error: "nudge_failed" }, { status: 500 });
   }
+  return NextResponse.json({ success: true, data: { ...run.result, timestamp: new Date().toISOString() } });
 }
