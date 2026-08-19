@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { inviteRejection } from "@/lib/services/auction/outside-invite.service";
 import OutsideDealerOfferClient from "./OutsideDealerOfferClient";
 
 export const dynamic = "force-dynamic";
@@ -28,8 +29,10 @@ export default async function OutsideDealerOfferPage({ params }: Props) {
     }).catch(() => {});
   }
 
-  const auctionExpired = invite.auction.endsAt ? invite.auction.endsAt < new Date() : false;
-  const auctionActive  = invite.auction.status === "ACTIVE" && !auctionExpired;
+  // Single source of truth for acceptability (auction active + not ended + token
+  // not expired). Mirrors the POST route so the form never renders for a link the
+  // API would reject.
+  const auctionActive = inviteRejection(invite, new Date()) === null;
 
   return (
     <OutsideDealerOfferClient

@@ -148,6 +148,14 @@ model Dealer {
   city               String?
   state              String?
   zip                String?
+  // Y5 — geocoded coordinates (from ZIP via the geocoding adapter). Nullable +
+  // backfilled; used by the unified-sourcing geo filter instead of static ZIP maps.
+  latitude           Float?                    @map("latitude")
+  longitude          Float?                    @map("longitude")
+  // A2 — resolved canonical rooftop (cross-pool dedup). Nullable; a Dealer maps
+  // to at most one physical rooftop. SetNull so deleting a rooftop never cascades.
+  rooftopId          String?                   @map("rooftop_id")
+  rooftop            DealerRooftop?            @relation(fields: [rooftopId], references: [id], onDelete: SetNull)
   status             DealerStatus              @default(PENDING)
   tier               String                    @default("STANDARD")
   // System placeholder used to satisfy Offer.dealerId for outside /
@@ -179,6 +187,7 @@ model Dealer {
   // In-house electronic signature for the dealer network participation agreement.
   agreementSignature DealerAgreementSignature?
 
+  @@index([rooftopId])
   @@map("dealers")
 }
 
@@ -413,6 +422,9 @@ model Auction {
   extendedAt        DateTime?           @map("extended_at")
   extendedBy        String?             @map("extended_by")
   extendReason      String?             @map("extend_reason")
+  // Y6 — count of automatic anti-snipe extensions applied (capped). Distinct from
+  // manual admin extensions; drives the MAX_AUTO_EXTENSIONS cap atomically.
+  autoExtensionCount Int                @default(0) @map("auto_extension_count")
   originalAuctionId String?             @map("original_auction_id")
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
@@ -436,6 +448,16 @@ model OutsideAuctionInvite {
   email           String
   phone           String?
   token           String    @unique @default(uuid())
+  // C — canonical A2 rooftop this invite targets (dedup key). Nullable: manual
+  // admin invites may not resolve a rooftop. A plain soft key (no FK) so deleting
+  // a rooftop never cascades into auction offer history. The mint service dedups
+  // on it so one physical rooftop is invited to an auction at most once, and never
+  // when its registered dealer is already invited.
+  rooftopId       String?   @map("rooftop_id")
+  // C — token expiry, enforced independently of auction status so a stale link
+  // can't be replayed even if the auction is briefly reopened. Set to the
+  // auction's endsAt at mint time.
+  expiresAt       DateTime? @map("expires_at")
   sentAt          DateTime  @default(now()) @map("sent_at")
   viewedAt        DateTime? @map("viewed_at")
   respondedAt     DateTime? @map("responded_at")
@@ -450,6 +472,11 @@ model OutsideAuctionInvite {
   auction         Auction   @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
   @@index([auctionId])
+  // C — DB backstop for the "one rooftop invited to an auction at most once" dedup
+  // invariant (mint's read-then-create is otherwise TOCTOU under concurrency).
+  // Postgres treats NULLs as distinct, so manual null-rooftop invites are never
+  // blocked; only a repeated non-null rooftop on the same auction collides.
+  @@unique([auctionId, rooftopId])
   @@map("outside_auction_invites")
 }
 
@@ -2502,11 +2529,21 @@ model ServiceFeePayment {
   @@map("service_fee_payments")
 }
 
+enum AuctionExtensionSource {
+  MANUAL_ADMIN
+  ANTI_SNIPE
+}
+
 model AuctionExtensionLog {
   id          String   @id @default(uuid())
   auctionId   String   @map("auction_id")
   extendedBy  String   @map("extended_by")
   hoursAdded  Int      @map("hours_added")
+  // Y6 — minute-granular extensions (anti-snipe adds +5 min; hoursAdded stays 0
+  // for those). The precise delta is always in originalEnd/newEnd regardless.
+  minutesAdded Int?    @map("minutes_added")
+  // Y6 — a proper typed source instead of overloading extendedBy.
+  source      AuctionExtensionSource @default(MANUAL_ADMIN)
   originalEnd DateTime @map("original_end")
   newEnd      DateTime @map("new_end")
   reason      String?
@@ -3435,6 +3472,130 @@ model BuyerOpportunity {
   @@map("buyer_opportunities")
 }
 
+// A2 (Block A / unified sourcing) — canonical physical rooftop. One row per real
+// dealership location; registered Dealers and DealerProspects both resolve to it
+// via the shared dealer-identity keys, so the same dealership is never
+// double-invited (internal AuctionInvitation + outside token). Normalized
+// identity keys are persisted so lookup is a direct indexed query. `makes` is a
+// READ-ONLY signal (from DealerCapacityConfig.preferredMakes for registered
+// dealers, brand/discovery for prospects) — the rooftop never writes preferredMakes.
+model DealerRooftop {
+  id               String           @id @default(cuid())
+  displayName      String           @map("display_name")
+  nameKey          String           @map("name_key")
+  // Strongest identity key — unique so two candidates on the same real domain
+  // can never create two rooftops (Postgres treats NULLs as distinct, so
+  // host-less rooftops are unconstrained). name+zip races are a noted follow-up.
+  websiteHost      String?          @unique @map("website_host")
+  phoneKey         String?          @map("phone_key")
+  nameZipKey       String?          @map("name_zip_key")
+  nameCityStateKey String?          @map("name_city_state_key")
+  zip              String?
+  city             String?
+  state            String?
+  latitude         Float?
+  longitude        Float?
+  makes            String[]         @default([])
+  // Provenance of `makes`: "preferred_makes" (registered dealer) | "prospect_brand" | null
+  makesSource      String?          @map("makes_source")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  dealers          Dealer[]
+  prospects        DealerProspect[]
+  contacts         DealerContactProfile[]
+
+  // websiteHost lookups are served by its @unique index (above) — no separate
+  // @@index (that would drift from the migration, which creates only the unique).
+  @@index([phoneKey])
+  @@index([nameZipKey])
+  @@index([nameCityStateKey])
+  @@map("dealer_rooftops")
+}
+
+// Block B / Apollo — reserve-and-release monthly credit ledger. One row per
+// billing cycle; the atomic draw is a conditional updateMany guarded on
+// spentCredits (no raw SQL), so two concurrent/retried reveals can never
+// overspend. reserve/release is computed from the cycle day at draw time.
+model ApolloCreditLedger {
+  id           String   @id @default(cuid())
+  cycleKey     String   @unique @map("cycle_key") // "YYYY-MM"
+  capCredits   Int      @map("cap_credits") // monthly cap (set from the live probe)
+  spentCredits Int      @default(0) @map("spent_credits")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("apollo_credit_ledger")
+}
+
+// Block B / Apollo — reveal cache + idempotency claim. Unique on
+// (rooftopId, cycleKey): a concurrent/retried reveal for the same rooftop in a
+// cycle cannot double-draw (only the INSERT winner proceeds to draw), and
+// revealedAt drives the freshness window (never re-reveal a fresh rooftop).
+model ApolloReveal {
+  id           String    @id @default(cuid())
+  rooftopId    String    @map("rooftop_id")
+  cycleKey     String    @map("cycle_key")
+  creditsCost  Int       @default(0) @map("credits_cost")
+  consumer     String    @default("live") // "live" | "backfill"
+  status       String    @default("PENDING") // PENDING | REVEALED | EMPTY
+  email        String?
+  emailStatus  String?   @map("email_status")
+  contactName  String?   @map("contact_name")
+  contactTitle String?   @map("contact_title")
+  revealedAt   DateTime  @default(now()) @map("revealed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@unique([rooftopId, cycleKey])
+  @@index([rooftopId])
+  @@map("apollo_reveals")
+}
+
+// Block B / B1 — person-level dealer contact identity, keyed to the canonical A2
+// DealerRooftop so a registered Dealer and its prospect twin share ONE contact
+// history (not a per-Dealer / per-Prospect re-split). Reconciled from the
+// denormalized DealerProspect contact.* fields; the single home for the contact
+// waterfall's results, staleness re-checks (lastVerifiedAt), and Block B
+// shared-inbox collapse (emailKey). Cascade-deleted with its rooftop.
+model DealerContactProfile {
+  id        String        @id @default(cuid())
+  rooftopId String        @map("rooftop_id")
+  rooftop   DealerRooftop @relation(fields: [rooftopId], references: [id], onDelete: Cascade)
+
+  // Person identity
+  name    String?
+  nameKey String? @map("name_key") // normalizeDealerName(name) — in-rooftop dedup
+  title   String?
+
+  // Contact channels (original value kept for display; *Key normalized for match)
+  email    String?
+  emailKey String? @map("email_key") // normalizeEmail(email) — dedup + shared-inbox anchor (B2)
+  phone    String?
+  phoneKey String? @map("phone_key") // normalizePhone(phone)
+
+  // Provenance + verification — mirrors the DealerProspect taxonomy so the
+  // contact waterfall's SEND_SAFE_STATUSES ({VERIFIED, ROLE_DERIVED}) reads the
+  // same labels. emailVerificationStatus is never written down from a stronger
+  // value (see the service merge rules).
+  emailSource             String?   @map("email_source")
+  emailVerificationStatus String?   @map("email_verification_status")
+  emailVerifiedAt         DateTime? @map("email_verified_at")
+  contactSource           String?   @map("contact_source")
+  contactConfidence       String?   @map("contact_confidence")
+
+  // Staleness anchor for the Block B CONTACT_STALE_MONTHS re-check.
+  lastVerifiedAt DateTime? @map("last_verified_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Composite serves both the FK (rooftopId prefix) and the in-rooftop
+  // email-dedup lookup; emailKey alone serves cross-rooftop shared-inbox scans.
+  @@index([rooftopId, emailKey])
+  @@index([emailKey])
+  @@map("dealer_contact_profiles")
+}
+
 model DealerProspect {
   id              String   @id @default(cuid())
 
@@ -3462,6 +3623,13 @@ model DealerProspect {
   sourceUrl       String?  @map("source_url")
   searchScore     Float?   @map("search_score")
   distanceMiles   Float?   @map("distance_miles")
+  // Y5 — geocoded coordinates (from ZIP via the geocoding adapter). Nullable +
+  // backfilled; used by unified-sourcing distance math instead of static ZIP maps.
+  latitude        Float?   @map("latitude")
+  longitude       Float?   @map("longitude")
+  // A2 — resolved canonical rooftop (cross-pool dedup). Nullable; SetNull on delete.
+  rooftopId       String?  @map("rooftop_id")
+  rooftop         DealerRooftop? @relation(fields: [rooftopId], references: [id], onDelete: SetNull)
 
   // Recruitment workflow
   status          DealerProspectStatus @default(DISCOVERED)
@@ -3480,9 +3648,17 @@ model DealerProspect {
   // address came from and when enrichment last ran.
   // emailSource values: "gemini_search_high_confidence" |
   // "gemini_search_medium_confidence" | "gemini_search_inferred" |
-  // "fallback_info_email" | "manual"
+  // "fallback_info_email" | "role_derived" (A3 — inferred role inbox) | "manual"
   emailSource           String?   @map("email_source")
   emailEnrichedAt       DateTime? @map("email_enriched_at")
+  // Y1 — verify-before-persist email acquisition. `emailVerifiedAt` is stamped
+  // only when an address passed MX-deliverability AND was not hard-suppressed.
+  // emailVerificationStatus values (plain string, not an enum):
+  //   VERIFIED | ROLE_DERIVED (A3 — MX-deliverable but inferred, NOT person-verified) |
+  //   UNVERIFIED | SUPPRESSED | DUPLICATE | NONE
+  //   {VERIFIED, ROLE_DERIVED} == send-safe / contactable for coverage + mint.
+  emailVerifiedAt         DateTime? @map("email_verified_at")
+  emailVerificationStatus String?   @map("email_verification_status")
   // Contact person behind the email (Internet Sales Manager, etc.) — captured
   // by the Phase 4B-1 enrichment and used to personalize outreach greetings.
   contactName           String?   @map("contact_name")
@@ -3535,6 +3711,7 @@ model DealerProspect {
   @@index([status])
   @@index([zip])
   @@index([email])
+  @@index([rooftopId])
   @@map("dealer_prospects")
 }
 

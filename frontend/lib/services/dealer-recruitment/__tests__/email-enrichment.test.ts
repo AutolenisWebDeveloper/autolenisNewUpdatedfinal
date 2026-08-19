@@ -3,11 +3,13 @@
 //
 // Run with:  npx tsx --test lib/services/dealer-recruitment/__tests__/email-enrichment.test.ts
 
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
+import { prisma } from "@/lib/prisma";
 import {
   parseEnrichment,
   buildPersistData,
+  enrichDealerEmail,
   type GeminiResponse,
 } from "../email-enrichment.service";
 
@@ -161,4 +163,63 @@ test("email emitted under confidence none is dropped", () => {
   assert.equal(data.email, undefined);
   assert.equal(data.contactName, "Pat Lee");
   assert.equal(data.contactSource, "gemini_search_medium_confidence");
+});
+
+// ─── Y1 — persist:false is read-only: parse + return, but NO DB write ────────
+
+test("enrichDealerEmail persist:false returns the parsed email WITHOUT writing to the DB", async () => {
+  process.env.GEMINI_API_KEY = "test-key";
+
+  // Spy on the two write/read paths. force:true skips the recency-guard read, so
+  // in persist:false mode NO prisma method should be touched at all.
+  const updateSpy = mock.fn(async () => ({}));
+  const findUniqueSpy = mock.fn(async () => null);
+  const origUpdate = prisma.dealerProspect.update;
+  const origFindUnique = prisma.dealerProspect.findUnique;
+  prisma.dealerProspect.update = updateSpy as unknown as typeof prisma.dealerProspect.update;
+  prisma.dealerProspect.findUnique =
+    findUniqueSpy as unknown as typeof prisma.dealerProspect.findUnique;
+
+  const origFetch = global.fetch;
+  global.fetch = mock.fn(async () =>
+    new Response(
+      JSON.stringify(
+        geminiResponse({
+          contactName: "Dana Ruiz",
+          contactTitle: "Internet Sales Manager",
+          contactPhone: null,
+          contactSourceUrl: "https://dealer.example.com/staff",
+          contactConfidence: "high",
+          email: "dana.ruiz@dealer.com",
+          sourceUrl: "https://dealer.example.com/staff",
+          confidence: "high",
+        }),
+      ),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ),
+  ) as unknown as typeof global.fetch;
+
+  try {
+    const result = await enrichDealerEmail({
+      dealerProspectId: "p_readonly",
+      dealerName: "Dealer Example",
+      city: "Dallas",
+      state: "TX",
+      website: "https://dealer.example.com",
+      force: true, // skip recency-guard read
+      persist: false, // read-only
+    });
+
+    // Parsed result is returned intact...
+    assert.equal(result.email, "dana.ruiz@dealer.com");
+    assert.equal(result.source, "gemini_search_high_confidence");
+    assert.equal(result.contactName, "Dana Ruiz");
+    // ...and NOTHING was persisted.
+    assert.equal(updateSpy.mock.callCount(), 0);
+    assert.equal(findUniqueSpy.mock.callCount(), 0);
+  } finally {
+    prisma.dealerProspect.update = origUpdate;
+    prisma.dealerProspect.findUnique = origFindUnique;
+    global.fetch = origFetch;
+  }
 });

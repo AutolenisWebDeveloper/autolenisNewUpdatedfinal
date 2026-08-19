@@ -10,6 +10,13 @@ import {
   sendAuctionActivatedEmail,
 } from "@/lib/services/email/resend.service";
 import { syncBuyerLifecycleToCrm } from "@/lib/services/admin/buyer-crm-sync";
+import {
+  mintOutsideInvites,
+  autoMintOutsideInvitesFromSourcing,
+  MAX_OUTSIDE_INVITES,
+  type MintedInvite,
+} from "@/lib/services/auction/outside-invite.service";
+import { lookupZip, lookupCity } from "@/lib/utils/zip-coords";
 
 interface Props { params: Promise<{ buyerId: string }> }
 
@@ -40,6 +47,10 @@ const schema = z.object({
   notes: z.string().max(2000).optional(),
   vehicleRequestId: z.string().min(1).optional(),
   outsideDealers: z.array(outsideDealerSchema).max(8).optional(),
+  // C — when true, top up outside invites from resolved rooftop contacts near the
+  // buyer (deduped against registered + explicit outside invites). Human-authorized
+  // per launch; off by default so automated outreach stays opt-in.
+  autoSourceOutside: z.boolean().optional(),
   vehicles: z.array(auctionVehicleSchema).max(10).optional(),
 });
 
@@ -62,6 +73,7 @@ export async function POST(request: NextRequest, { params }: Props) {
       firstName: true,
       city: true,
       state: true,
+      zip: true,
       user: { select: { email: true } },
     },
   });
@@ -75,7 +87,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   if (!parsed.success) {
     return adminError("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid input", 400);
   }
-  const { dealerIds, reason, hours, notes, vehicleRequestId, outsideDealers, vehicles } = parsed.data;
+  const { dealerIds, reason, hours, notes, vehicleRequestId, outsideDealers, autoSourceOutside, vehicles } = parsed.data;
 
   // Block if there is already a PENDING or ACTIVE auction for this buyer
   const openAuction = await prisma.auction.findFirst({
@@ -198,29 +210,41 @@ export async function POST(request: NextRequest, { params }: Props) {
     attachedVehicleCount = result.count;
   }
 
-  // Outside-dealer invitations (optional)
-  let outsideInviteCount = 0;
-  const outsideInvites: { id: string; email: string; token: string; contactName: string; dealershipName: string }[] = [];
+  // Outside-dealer invitations (optional). Single mint path with rooftop dedup so
+  // one physical rooftop is never invited twice (and never when its registered
+  // dealer is already invited), and each token is returned reliably.
+  let outsideInvites: MintedInvite[] = [];
   if (outsideDealers && outsideDealers.length > 0) {
-    await prisma.outsideAuctionInvite.createMany({
-      data: outsideDealers.map(d => ({
-        auctionId: launched.id,
+    outsideInvites = await mintOutsideInvites(
+      launched.id,
+      outsideDealers.map(d => ({
         dealershipName: d.dealershipName,
         contactName:    d.contactName,
         email:          d.email,
         phone:          d.phone ?? null,
       })),
-    });
-    const fresh = await prisma.outsideAuctionInvite.findMany({
-      where: { auctionId: launched.id, email: { in: outsideDealers.map(d => d.email) } },
-      orderBy: { sentAt: "desc" },
-    });
-    for (const d of outsideDealers) {
-      const inv = fresh.find(i => i.email === d.email);
-      if (inv) outsideInvites.push({ id: inv.id, email: inv.email, token: inv.token, contactName: d.contactName, dealershipName: d.dealershipName });
-    }
-    outsideInviteCount = outsideInvites.length;
+      undefined,
+      { prisma },
+    );
   }
+
+  // Optionally top up from resolved rooftop contacts near the buyer, deduped
+  // against the registered + explicit outside invites above. Fail-closed: skipped
+  // when the buyer can't be placed (we never blindly invite far-away rooftops).
+  if (autoSourceOutside) {
+    const buyerCoords = lookupZip(buyer.zip ?? "") ?? lookupCity(buyer.city, buyer.state);
+    if (buyerCoords) {
+      const sourced = await autoMintOutsideInvitesFromSourcing(
+        launched.id,
+        { buyerCoords, max: Math.max(0, MAX_OUTSIDE_INVITES - outsideInvites.length) },
+        { prisma },
+      );
+      outsideInvites = [...outsideInvites, ...sourced];
+    } else {
+      logger.warn(`[launch-auction] autoSourceOutside skipped — buyer ${buyerId} has no placeable location`);
+    }
+  }
+  const outsideInviteCount = outsideInvites.length;
 
   // Dealer invitation emails (non-blocking).
   // Use the first attached auction vehicle so the email shows concrete make/

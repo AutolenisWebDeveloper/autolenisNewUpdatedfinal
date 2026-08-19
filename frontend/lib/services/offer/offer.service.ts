@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { OfferStatus } from "@prisma/client";
 import { MAX_OFFER_REVISIONS } from "@/lib/constants";
 import { writeDealerAudit } from "@/lib/services/audit/dealer-audit.service";
+import { maybeExtendForAntiSnipe } from "@/lib/services/auction/anti-snipe.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { sendFirstOfferReceivedEmail } from "@/lib/services/email/buyer-notifications.service";
 
@@ -264,6 +265,12 @@ export async function submitOffer(input: OfferInput) {
     logger.error("[offer.service] offer_received emit failed:", err);
   }
 
+  // Y6 — a bid in the final window pushes the deadline out (best-effort; an
+  // extension failure must never fail the submission).
+  await maybeExtendForAntiSnipe(input.auctionId).catch((err) =>
+    logger.warn("[offer.service] anti-snipe extend failed:", err),
+  );
+
   return offer;
 }
 
@@ -340,6 +347,11 @@ export async function reviseOffer(offerId: string, dealerId: string, input: Part
       version: revised.version,
     },
   });
+
+  // Y6 — a last-minute REVISION (e.g. undercutting) is also a snipe; extend too.
+  await maybeExtendForAntiSnipe(original.auctionId).catch((err) =>
+    logger.warn("[offer.service] anti-snipe extend failed:", err),
+  );
 
   return revised;
 }

@@ -6,11 +6,21 @@ import { prisma } from "@/lib/prisma";
 import { sendDealerAuctionInvitationEmail } from "@/lib/services/email/resend.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { AUCTION_DURATION_HOURS } from "@/lib/constants";
-import { ZIP_COORDS } from "@/lib/utils/zip-coords";
 import { dispatch } from "@/lib/qstash/dispatch";
+import { geocodeZip } from "@/lib/services/integrations/geocoding.service";
+import { lookupCity, type LatLng } from "@/lib/utils/zip-coords";
+import { getPreferredMakes } from "@/lib/services/auction/auction-capacity.service";
+import { selectCoverageRadius } from "@/lib/services/auction/coverage.service";
 
 const MAX_INVITATIONS_PER_AUCTION = 8;
+// Widest invite radius, applied as a real cutoff when we have buyer coordinates
+// but no ZIP to run the coverage ladder (city-only buyer). NOT a fail-open
+// bypass: an unplaceable buyer invites zero (see the fail-closed early return in
+// inviteDealersToAuction), and this radius still filters coordless dealers out.
 const MAX_DISTANCE_MILES = 150;
+// Y4 — ranking BONUS when a dealer's declared makes intersect the auction's
+// requested make(s). A bonus ONLY: a non-matching dealer is never excluded.
+const MAKE_MATCH_BONUS = 25;
 
 function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 3958.8; // Earth radius in miles
@@ -56,7 +66,84 @@ async function scoreDealerForAuction(dealerId: string, vehicleTypes: string[]): 
     score -= snapshot.junkFeeRatio * 15;
   }
 
+  // Y4 — vehicle/make-match BONUS (never a gate). A dealer whose self-declared
+  // preferredMakes intersect the auction's requested make(s) ranks higher, but a
+  // non-matching dealer keeps its base score and can still be invited.
+  if (vehicleTypes.length > 0) {
+    const dealerMakes = await getPreferredMakes(dealerId);
+    score += makeMatchBonus(dealerMakes, vehicleTypes);
+  }
+
   return Math.max(0, Math.round(score));
+}
+
+// Pure Y4 make-match bonus: a positive bonus when the dealer's makes intersect
+// the auction's requested make(s) (case-insensitive), else 0. NEVER negative and
+// NEVER excludes — it can only raise a matching dealer's rank, never drop a
+// non-matching one below the field.
+export function makeMatchBonus(dealerMakes: string[], auctionMakes: string[]): number {
+  const wanted = new Set(auctionMakes.map((m) => m.trim().toLowerCase()).filter(Boolean));
+  if (wanted.size === 0) return 0;
+  return dealerMakes.some((m) => wanted.has(m.trim().toLowerCase())) ? MAKE_MATCH_BONUS : 0;
+}
+
+// Pure geo-filter for invitations — FAIL CLOSED. Returns only entries whose
+// coordinates lie within `radiusMiles` of the buyer. Two invariants encode
+// "never invite everyone": (1) if the buyer has no coordinates we return [] —
+// an unplaceable buyer means we can't confirm anyone is in range, so we invite
+// no one rather than fall back to the whole active roster; (2) an entry with no
+// coordinates is EXCLUDED — an unplaceable dealer can't be confirmed local, and
+// inviting one is the reputation/geographic-relevance risk Block A closes.
+export function pickNearbyDealers<T extends { coords: LatLng | null }>(
+  entries: T[],
+  buyerCoords: LatLng | null,
+  radiusMiles: number,
+): T[] {
+  if (!buyerCoords) return [];
+  return entries.filter(
+    (e) =>
+      e.coords != null &&
+      haversineMiles(buyerCoords.lat, buyerCoords.lng, e.coords.lat, e.coords.lng) <= radiusMiles,
+  );
+}
+
+// A4 — ensure the auction carries the buyer's requested vehicle (the make signal)
+// so scoring can make-match and the invite email names the real vehicle.
+// Idempotent: if an AuctionVehicle already exists (e.g. admin-provided), it is
+// used as-is and never overwritten. Degrades gracefully: no (non-cancelled)
+// VehicleRequest or no make → returns empty makes and the invite proceeds
+// make-agnostic (bonus simply doesn't apply).
+export async function ensureAuctionVehicleFromRequest(
+  auctionId: string,
+  buyerId: string,
+): Promise<{ makes: string[]; primary: { make: string | null; model: string | null; year: number | null } | null }> {
+  const existing = await prisma.auctionVehicle.findFirst({
+    where: { auctionId },
+    select: { make: true, model: true, year: true },
+  });
+  if (existing) {
+    return { makes: existing.make ? [existing.make] : [], primary: existing };
+  }
+  const req = await prisma.vehicleRequest.findFirst({
+    where: { buyerId, cancelledAt: null },
+    orderBy: { createdAt: "desc" },
+    select: { makePreference: true, modelPreference: true, yearMin: true },
+  });
+  if (!req || !req.makePreference) {
+    return { makes: [], primary: null };
+  }
+  await prisma.auctionVehicle.create({
+    data: {
+      auctionId,
+      make: req.makePreference,
+      model: req.modelPreference,
+      year: req.yearMin,
+    },
+  });
+  return {
+    makes: [req.makePreference],
+    primary: { make: req.makePreference, model: req.modelPreference, year: req.yearMin },
+  };
 }
 
 export async function inviteDealersToAuction(auctionId: string, _buyerId: string): Promise<number> {
@@ -67,34 +154,87 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
     where: { id: auctionId },
     select: {
       endsAt: true,
+      buyerId: true,
       buyer: { select: { zip: true, city: true, state: true } },
     },
   });
+  const buyerId = auctionForBuyer?.buyerId ?? _buyerId;
   const buyerZip = auctionForBuyer?.buyer?.zip ?? null;
-  const buyerCoords = buyerZip ? ZIP_COORDS[buyerZip] ?? null : null;
 
-  // Get active dealers (with zip for geographic pre-filter).
-  // Exclude the system "Outside Dealer" placeholder — it is never invited.
+  // A4 — make signal (idempotent): populate AuctionVehicle from the buyer's latest
+  // request so scoring can make-match and the email names the real vehicle.
+  const { makes: auctionMakes, primary } = await ensureAuctionVehicleFromRequest(auctionId, buyerId);
+
+  // Y3 — pick the invite radius via the ONE shared coverage ladder. Escalate on
+  // REGISTERED availability toward the invite CAP (not the soft-hold floor): widen
+  // until we can fill the competitive field (≥ MAX_INVITATIONS_PER_AUCTION
+  // registered) as locally as possible, else the widest tier. Only registered
+  // dealers are invitable pre-Block-C, so a prospect-dense/registered-sparse local
+  // area still widens to reach distant registered dealers rather than under-filling.
+  // includeProspects:false — this ladder reads only `registered`, so it must not
+  // pay for prospect resolution (that's Block C / Y2's job).
+  // Buyer coordinates, FAIL CLOSED: ZIP geocode first, then static city+state
+  // (no API key needed). If neither resolves, buyerCoords stays null and NO
+  // dealers are invited below (pickNearbyDealers returns []) — we never fall
+  // back to inviting the whole active roster.
+  const zipCoords = buyerZip ? await geocodeZip(buyerZip) : null;
+  const buyerCity = auctionForBuyer?.buyer?.city ?? null;
+  const buyerState = auctionForBuyer?.buyer?.state ?? null;
+  const buyerCoords: LatLng | null =
+    (zipCoords ? { lat: zipCoords.lat, lng: zipCoords.lng } : null) ??
+    (buyerCity && buyerState ? lookupCity(buyerCity, buyerState) : null);
+
+  // Radius: the coverage ladder assesses by the buyer's ZIP, so only run it when
+  // we have ZIP coords. A city-only buyer can still be geo-filtered (via the
+  // static city coords) but at the widest nominal radius, since the ladder can't
+  // meaningfully assess tiers without the ZIP.
+  const radiusMiles = zipCoords
+    ? (await selectCoverageRadius(auctionId, {
+        includeProspects: false,
+        stopWhen: (c) => c.registered >= MAX_INVITATIONS_PER_AUCTION,
+      })).radiusMiles
+    : MAX_DISTANCE_MILES;
+
+  if (!buyerCoords) {
+    // Fail closed: with no buyer location we can't confirm any dealer is in range,
+    // so we invite NO ONE (never the whole active roster). Return early — the
+    // outcome is already fixed, so skip the dealer query and the per-dealer
+    // geocode calls that would otherwise run and be discarded.
+    logger.warn(
+      `[dealer-invitation] buyer for auction ${auctionId} is not geocodable ` +
+        `(zip=${buyerZip ?? "none"}, city=${buyerCity ?? "none"}, state=${buyerState ?? "none"}) — ` +
+        `no dealers invited (fail closed). Set GOOGLE_GEOCODING_API_KEY to widen geocoding coverage.`,
+    );
+    return 0;
+  }
+
+  // Get active dealers. Exclude the system "Outside Dealer" placeholder.
   const dealers = await prisma.dealer.findMany({
     where: { status: "ACTIVE", isSystemPlaceholder: false },
-    select: { id: true, zip: true },
+    select: { id: true, zip: true, latitude: true, longitude: true },
   });
 
-  // Filter dealers by proximity (within MAX_DISTANCE_MILES of buyer).
-  // Dealers without coords or when buyer coords are unavailable are not excluded.
-  const nearbyDealers = buyerCoords
-    ? dealers.filter(d => {
-        const dealerCoords = d.zip ? ZIP_COORDS[d.zip] ?? null : null;
-        if (!dealerCoords) return true; // Include dealers without coords (don't exclude)
-        const miles = haversineMiles(buyerCoords.lat, buyerCoords.lng, dealerCoords.lat, dealerCoords.lng);
-        return miles <= MAX_DISTANCE_MILES;
-      })
-    : dealers;
+  // Resolve each dealer's coordinates (Y5 persisted coords first, then a live
+  // ZIP geocode), then geo-filter FAIL CLOSED via pickNearbyDealers: a dealer
+  // with no resolvable coords is excluded, and if the buyer is unplaceable no
+  // dealers pass at all.
+  const withCoords = await Promise.all(
+    dealers.map(async (d) => {
+      let coords: LatLng | null =
+        d.latitude != null && d.longitude != null ? { lat: d.latitude, lng: d.longitude } : null;
+      if (!coords && d.zip) {
+        const g = await geocodeZip(d.zip);
+        coords = g ? { lat: g.lat, lng: g.lng } : null;
+      }
+      return { dealer: d, coords };
+    }),
+  );
+  const nearbyDealers = pickNearbyDealers(withCoords, buyerCoords, radiusMiles).map((e) => e.dealer);
 
   const scores: InvitationScore[] = await Promise.all(
     nearbyDealers.map(async (d) => ({
       dealerId: d.id,
-      score: await scoreDealerForAuction(d.id, []),
+      score: await scoreDealerForAuction(d.id, auctionMakes),
       factors: {},
     }))
   );
@@ -147,9 +287,11 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
       await sendDealerAuctionInvitationEmail({
         to: dealer.user.email,
         contactName: dealer.dealershipName ?? "Dealer",
-        vehicleMake: "Vehicle",          // buyer hasn't selected specific vehicle yet
-        vehicleModel: "Requested",
-        vehicleYear: new Date().getFullYear(),
+        // A4 — name the real requested vehicle when we have it (falls back to the
+        // generic placeholders only when no make signal exists).
+        vehicleMake: primary?.make ?? "Vehicle",
+        vehicleModel: primary?.model ?? "Requested",
+        vehicleYear: primary?.year ?? new Date().getFullYear(),
         vehicleTrim: null,
         buyerCity: auctionForBuyer?.buyer?.city ?? "Location",
         buyerState: auctionForBuyer?.buyer?.state ?? "TBD",

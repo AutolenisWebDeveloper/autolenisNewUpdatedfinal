@@ -27,6 +27,7 @@ import {
 } from "@/lib/services/email/resend.service";
 import { sendDealersContactedEmail } from "@/lib/services/email/buyer-notifications.service";
 import { runPostIntakeOutreach } from "./post-intake-outreach.service";
+import { enrichProspectEmailsForOpportunity } from "../dealer-recruitment/prospect-email-enrichment.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -323,6 +324,15 @@ export async function runIntakePipeline(buyerOpportunityId: string): Promise<Int
   // already-scored opportunity never re-scores or re-notifies.
   if (fields.phone && !opp.leadTemperature) {
     await scoreAndAlert(buyerOpportunityId, fields);
+  }
+
+  // Stage 4.5 — enrich discovered prospects with a VERIFIED business email so the
+  // outreach stage (email:{not:null}) can actually reach them. Best-effort; never
+  // blocks the pipeline.
+  try {
+    await enrichProspectEmailsForOpportunity(buyerOpportunityId);
+  } catch (err) {
+    logger.error("[intake-pipeline] prospect email enrichment failed:", err);
   }
 
   // Stage 5 — dealer outreach (self-idempotent: skips prospects already

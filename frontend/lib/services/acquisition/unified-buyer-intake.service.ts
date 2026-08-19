@@ -80,6 +80,32 @@ export interface UnifiedIntakeResult {
   vehicleRequestId: string | null;
 }
 
+// The fields promoteOpportunity needs to resolve a buyer and map a
+// VehicleRequest. A subset of UnifiedIntakeInput (so intakeBuyerRequest can pass
+// its input verbatim), and the shape the Zura chat builds from a BuyerOpportunity
+// — with budgetAmount already in CENTS (the chat converts its stored dollars up
+// at the call site so the money boundary is explicit and integer-only).
+export interface PromoteOpportunityInput {
+  buyerId?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  zip?: string;
+  make?: string;
+  model?: string;
+  yearMin?: number;
+  yearMax?: number;
+  budgetAmount?: number; // in cents
+  notes?: string;
+  utmSource?: string | null;
+  utmMedium?: string | null;
+  utmCampaign?: string | null;
+  sourceUrl?: string | null;
+  landingSource?: string | null;
+  referrer?: string | null;
+}
+
 /**
  * Resolve a buyerId from the supplied input. Returns an already-resolved
  * buyerId verbatim, otherwise finds-or-creates a User + Buyer from the email
@@ -87,7 +113,7 @@ export interface UnifiedIntakeResult {
  * Returns null when there is not enough information to resolve a buyer.
  */
 async function resolveBuyerId(
-  input: UnifiedIntakeInput,
+  input: PromoteOpportunityInput,
 ): Promise<string | null> {
   if (input.buyerId) return input.buyerId;
 
@@ -212,87 +238,113 @@ export async function intakeBuyerRequest(
     source,
   });
 
-  // 3. Create the VehicleRequest if a buyer can be resolved, then link both
-  //    records together via buyerOpportunityId.
-  let vehicleRequestId: string | null = null;
-  const buyerId = await resolveBuyerId(input);
+  // 3. Resolve the buyer, create the linked VehicleRequest, and enqueue the
+  //    durable pipeline — the one promotion path, shared with the Zura chat.
+  const { vehicleRequestId } = await promoteOpportunity(opportunityId, input);
 
-  if (buyerId) {
-    try {
-      const baseData = {
-        buyerId,
-        status: "SUBMITTED" as const,
-        makePreference: input.make ?? null,
-        modelPreference: input.model ?? null,
-        yearMin: input.yearMin ?? null,
-        yearMax: input.yearMax ?? null,
-        maxBudgetCents: input.budgetAmount ?? null,
-        notes: input.notes ?? null,
-        utmSource: input.utmSource ?? null,
-        utmMedium: input.utmMedium ?? null,
-        utmCampaign: input.utmCampaign ?? null,
-        sourceUrl: input.sourceUrl ?? null,
-        buyerOpportunityId: opportunityId,
-      };
+  return { buyerOpportunityId: opportunityId, vehicleRequestId };
+}
 
-      // landingSource/referrer require the add_landing_source_referrer
-      // migration. Until it is applied, the create throws P2022; we retry
-      // WITHOUT those columns so a lead is never lost. Once applied, the first
-      // attempt succeeds and the SEO attribution persists.
+/**
+ * Promote an existing BuyerOpportunity into a sourceable VehicleRequest (when a
+ * buyer can be resolved) and enqueue the durable intake pipeline.
+ *
+ * Extracted from intakeBuyerRequest so the Zura concierge chat can reuse it
+ * against its OWN live BuyerOpportunity (no duplicate opportunity). Idempotent:
+ * a second call for an opportunity that already has a linked VehicleRequest
+ * creates no duplicate. The pipeline enqueue is best-effort and always fires
+ * (even when no buyer resolves, so lead enrichment/scoring still runs); the
+ * intake-reconcile cron recovers a dropped emit. The heavy background sequence
+ * (market enrichment, dealer discovery, phone-script drafting, lead
+ * scoring/alerts, dealer outreach) runs in the Inngest worker `intakeProcessFn`,
+ * keyed on buyerOpportunityId — the single owner of that work.
+ *
+ * `input.budgetAmount` is CENTS (callers convert at their boundary).
+ */
+export async function promoteOpportunity(
+  opportunityId: string,
+  input: PromoteOpportunityInput,
+): Promise<{ vehicleRequestId: string | null }> {
+  // Idempotency: exactly one request-signal VehicleRequest per opportunity.
+  const existing = await prisma.vehicleRequest.findFirst({
+    where: { buyerOpportunityId: opportunityId },
+    select: { id: true },
+  });
+  let vehicleRequestId: string | null = existing?.id ?? null;
+
+  if (!vehicleRequestId) {
+    const buyerId = await resolveBuyerId(input);
+    if (buyerId) {
       try {
-        const vehicleRequest = await prisma.vehicleRequest.create({
-          data: {
-            ...baseData,
-            landingSource: input.landingSource ?? null,
-            referrer: input.referrer ?? null,
-          },
-        });
-        vehicleRequestId = vehicleRequest.id;
-      } catch (err) {
-        if (isMissingColumnError(err)) {
-          logger.warn(
-            "[unified-intake] landingSource/referrer migration pending — retrying without",
-          );
-          const vehicleRequest = await prisma.vehicleRequest.create({
-            data: baseData,
+        const baseData = {
+          buyerId,
+          status: "SUBMITTED" as const,
+          makePreference: input.make ?? null,
+          modelPreference: input.model ?? null,
+          yearMin: input.yearMin ?? null,
+          yearMax: input.yearMax ?? null,
+          maxBudgetCents: input.budgetAmount ?? null,
+          notes: input.notes ?? null,
+          utmSource: input.utmSource ?? null,
+          utmMedium: input.utmMedium ?? null,
+          utmCampaign: input.utmCampaign ?? null,
+          sourceUrl: input.sourceUrl ?? null,
+          buyerOpportunityId: opportunityId,
+        };
+
+        // landingSource/referrer require the add_landing_source_referrer
+        // migration. Until it is applied, the create throws P2022; we retry
+        // WITHOUT those columns so a lead is never lost.
+        try {
+          const vr = await prisma.vehicleRequest.create({
+            data: {
+              ...baseData,
+              landingSource: input.landingSource ?? null,
+              referrer: input.referrer ?? null,
+            },
           });
-          vehicleRequestId = vehicleRequest.id;
-        } else {
-          throw err;
+          vehicleRequestId = vr.id;
+        } catch (err) {
+          if (isMissingColumnError(err)) {
+            logger.warn(
+              "[unified-intake] landingSource/referrer migration pending — retrying without",
+            );
+            const vr = await prisma.vehicleRequest.create({ data: baseData });
+            vehicleRequestId = vr.id;
+          } else {
+            throw err;
+          }
         }
-      }
 
-      // Backfill the opportunity's buyerId now that it is resolved, so the
-      // two records stay consistent (the input may not have supplied one).
-      if (!input.buyerId) {
-        await prisma.buyerOpportunity.update({
-          where: { id: opportunityId },
-          data: { buyerId },
+        // Backfill the opportunity's buyerId so the two records stay consistent
+        // (the input may not have supplied one).
+        if (!input.buyerId) {
+          await prisma.buyerOpportunity.update({
+            where: { id: opportunityId },
+            data: { buyerId },
+          });
+        }
+
+        logger.info("[unified-intake] VehicleRequest created + linked", {
+          opportunityId,
+          vehicleRequestId,
         });
+      } catch (err) {
+        logger.error("[unified-intake] VehicleRequest create failed:", err);
       }
-
-      logger.info("[unified-intake] VehicleRequest created + linked", {
+    } else {
+      logger.info("[unified-intake] No buyer resolved — skipping VehicleRequest", {
         opportunityId,
-        vehicleRequestId,
       });
-    } catch (err) {
-      logger.error("[unified-intake] VehicleRequest create failed:", err);
     }
   } else {
-    logger.info(
-      "[unified-intake] No buyer resolved — skipping VehicleRequest",
-      { opportunityId },
-    );
+    logger.info("[unified-intake] opportunity already promoted — reusing VehicleRequest", {
+      opportunityId,
+      vehicleRequestId,
+    });
   }
 
-  // 4. Enqueue the durable intake pipeline. The heavy background sequence
-  //    (market enrichment, dealer discovery, phone-script drafting, lead
-  //    scoring/alerts, dealer outreach) runs in the Inngest worker
-  //    `intakeProcessFn`, keyed on buyerOpportunityId — inheriting retry/backoff,
-  //    concurrency, and dead-letter, and re-drivable by the intake-reconcile
-  //    cron. Best-effort emit: if the enqueue fails, the intake-reconcile cron
-  //    re-drives the un-processed opportunity (intakeProcessedAt IS NULL) —
-  //    whether or not it has a linked VehicleRequest.
+  // Enqueue the durable pipeline (idempotent worker; reconciler recovers a drop).
   try {
     await inngest.send({
       name: "autolenis/intake.process",
@@ -306,8 +358,7 @@ export async function intakeBuyerRequest(
     );
   }
 
-  // 5. Return both IDs.
-  return { buyerOpportunityId: opportunityId, vehicleRequestId };
+  return { vehicleRequestId };
 }
 
 // NOTE: lead scoring + hot-lead alerts (scoreAndAlert) and the market-enrichment
