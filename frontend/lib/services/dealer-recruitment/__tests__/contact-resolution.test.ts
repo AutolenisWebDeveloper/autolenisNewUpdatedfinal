@@ -33,6 +33,7 @@ function makeDeps(over: Partial<ContactResolutionDeps> = {}) {
     enrich: mock.fn(async () => enrichResult()),
     getRooftopContacts: mock.fn(async () => [] as Array<Record<string, unknown>>),
     upsertContactProfile: mock.fn(async () => ({ id: "dcp" })),
+    revealRooftopContact: mock.fn(async () => null),
     ...over,
   } as unknown as ContactResolutionDeps;
   return { deps, updates };
@@ -256,6 +257,40 @@ test("no rooftopId → no rooftop read and no write-through (backward compatible
   await resolveContactableEmail(cand({ email: null }), deps); // no rooftopId
   assert.equal(getRooftopContacts.mock.callCount(), 0);
   assert.equal(upsertContactProfile.mock.callCount(), 0);
+});
+
+// ─── Apollo tier (4): gated, post-deposit only ───────────────────────────────
+
+test("Apollo tier does NOT fire on the pre-deposit path (no allowPaid) — leak closed", async () => {
+  const revealRooftopContact = mock.fn(async () => ({ email: "ism@toyotaofdallas.com", status: "VERIFIED" as const, contactName: "A", contactTitle: "ISM" }));
+  const { deps } = makeDeps({ revealRooftopContact } as never);
+  // no website (role-derive can't run), no enriched email, rooftopId present, allowPaid UNSET.
+  const r = await resolveContactableEmail(cand({ email: null, website: null, rooftopId: "rt1" }), deps);
+  assert.equal(r.contactable, false);
+  assert.equal(revealRooftopContact.mock.callCount(), 0); // paid reveal never attempted pre-deposit
+});
+
+test("Apollo tier fires when allowPaid + all free tiers failed → VERIFIED, persisted", async () => {
+  const revealRooftopContact = mock.fn(async () => ({ email: "ism@toyotaofdallas.com", status: "VERIFIED" as const, contactName: "Ann", contactTitle: "Internet Sales Manager" }));
+  const { deps, updates } = makeDeps({ revealRooftopContact } as never);
+  const r = await resolveContactableEmail(cand({ email: null, website: null, rooftopId: "rt1", allowPaid: true }), deps);
+  assert.equal(r.contactable, true);
+  assert.equal(r.status, "VERIFIED");
+  assert.equal(r.source, "apollo");
+  assert.equal(revealRooftopContact.mock.callCount(), 1);
+  // The Apollo persist is the LAST prospect update (Gemini's M4b stamp precedes it).
+  const last = updates[updates.length - 1];
+  assert.equal(last.data.email, "ism@toyotaofdallas.com"); // persisted so send path can reach it
+  assert.equal(last.data.emailSource, "apollo");
+});
+
+test("Apollo tier is skipped when a FREE tier already resolved (cheap-first)", async () => {
+  const revealRooftopContact = mock.fn(async () => ({ email: "paid@x.com", status: "VERIFIED" as const, contactName: null, contactTitle: null }));
+  const { deps } = makeDeps({ revealRooftopContact } as never);
+  // has website → role-derive succeeds; allowPaid true but must not be reached.
+  const r = await resolveContactableEmail(cand({ email: null, rooftopId: "rt1", allowPaid: true }), deps);
+  assert.equal(r.status, "ROLE_DERIVED");
+  assert.equal(revealRooftopContact.mock.callCount(), 0); // no paid work when a free tier wins
 });
 
 // ─── B2b: bounce → re-resolve (proof #5) ─────────────────────────────────────

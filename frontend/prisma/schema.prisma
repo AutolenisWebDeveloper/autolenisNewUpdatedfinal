@@ -3484,6 +3484,45 @@ model DealerRooftop {
   @@map("dealer_rooftops")
 }
 
+// Block B / Apollo — reserve-and-release monthly credit ledger. One row per
+// billing cycle; the atomic draw is a conditional updateMany guarded on
+// spentCredits (no raw SQL), so two concurrent/retried reveals can never
+// overspend. reserve/release is computed from the cycle day at draw time.
+model ApolloCreditLedger {
+  id           String   @id @default(cuid())
+  cycleKey     String   @unique @map("cycle_key") // "YYYY-MM"
+  capCredits   Int      @map("cap_credits") // monthly cap (set from the live probe)
+  spentCredits Int      @default(0) @map("spent_credits")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("apollo_credit_ledger")
+}
+
+// Block B / Apollo — reveal cache + idempotency claim. Unique on
+// (rooftopId, cycleKey): a concurrent/retried reveal for the same rooftop in a
+// cycle cannot double-draw (only the INSERT winner proceeds to draw), and
+// revealedAt drives the freshness window (never re-reveal a fresh rooftop).
+model ApolloReveal {
+  id           String    @id @default(cuid())
+  rooftopId    String    @map("rooftop_id")
+  cycleKey     String    @map("cycle_key")
+  creditsCost  Int       @default(0) @map("credits_cost")
+  consumer     String    @default("live") // "live" | "backfill"
+  status       String    @default("PENDING") // PENDING | REVEALED | EMPTY
+  email        String?
+  emailStatus  String?   @map("email_status")
+  contactName  String?   @map("contact_name")
+  contactTitle String?   @map("contact_title")
+  revealedAt   DateTime  @default(now()) @map("revealed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@unique([rooftopId, cycleKey])
+  @@index([rooftopId])
+  @@map("apollo_reveals")
+}
+
 // Block B / B1 — person-level dealer contact identity, keyed to the canonical A2
 // DealerRooftop so a registered Dealer and its prospect twin share ONE contact
 // history (not a per-Dealer / per-Prospect re-split). Reconciled from the

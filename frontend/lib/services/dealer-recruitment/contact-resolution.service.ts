@@ -25,6 +25,7 @@ import { SuppressionService } from "@/lib/services/suppression.service";
 import { verifyEmailDeliverability } from "@/lib/services/integrations/email-deliverability.service";
 import { normalizeWebsiteHost } from "@/lib/services/dealer/dealer-identity.service";
 import { getRooftopContacts, upsertContactProfile } from "@/lib/services/dealer/dealer-contact-profile.service";
+import { revealRooftopContact } from "./apollo-reveal.service";
 import { enrichDealerEmail } from "./email-enrichment.service";
 
 // The emailVerificationStatus values that mean "has a send-safe address" —
@@ -73,6 +74,10 @@ export interface ContactCandidate {
   // rooftop's twin (registered dealer ↔ prospect share one DealerContactProfile),
   // and writes any newly-resolved contact back to it.
   rooftopId?: string | null;
+  // Gate for the PAID Apollo tier (tier 4). Defaults false — the pre-deposit
+  // coverage / Y2 path never sets it, so a paid reveal can only fire when a
+  // caller (post-deposit, dealer selected for a live auction) opts in.
+  allowPaid?: boolean;
 }
 
 export type ContactStatus = "VERIFIED" | "ROLE_DERIVED";
@@ -99,6 +104,8 @@ export interface ContactResolutionDeps {
   // for the rooftop's twin; write newly-resolved contacts back. Both fail-open.
   getRooftopContacts: typeof getRooftopContacts;
   upsertContactProfile: typeof upsertContactProfile;
+  // Paid Apollo reveal (tier 4). Only invoked when candidate.allowPaid is true.
+  revealRooftopContact: typeof revealRooftopContact;
 }
 
 export async function resolveContactableEmail(
@@ -111,6 +118,7 @@ export async function resolveContactableEmail(
   const enrich = deps?.enrich ?? enrichDealerEmail;
   const getRooftopContactsFn = deps?.getRooftopContacts ?? getRooftopContacts;
   const upsertContactProfileFn = deps?.upsertContactProfile ?? upsertContactProfile;
+  const revealRooftopContactFn = deps?.revealRooftopContact ?? revealRooftopContact;
 
   let supabase = deps?.supabase;
   const getSupabase = async (): Promise<SupabaseClient> => {
@@ -311,6 +319,44 @@ export async function resolveContactableEmail(
     }
   } catch (err) {
     logger.warn(`[contact-resolution] enrich failed for ${candidate.id}:`, err);
+  }
+
+  // 4. Apollo (PAID) — gated. Fires ONLY when the caller opts in via
+  // candidate.allowPaid (post-deposit, dealer selected for a live auction), all
+  // free tiers above have failed, and we have a rooftop to key the reveal/cache
+  // + budget ledger to. The pre-deposit coverage / Y2 path never sets allowPaid,
+  // so a paid reveal can never fire there (the pre-deposit leak is closed). The
+  // reveal itself is off/capped until enabled + the probe sets the ledger cap.
+  if (candidate.allowPaid && candidate.rooftopId) {
+    const revealed = await revealRooftopContactFn(
+      {
+        rooftopId: candidate.rooftopId,
+        name: candidate.name,
+        website: candidate.website,
+        city: candidate.city,
+        state: candidate.state,
+        consumer: "live",
+      },
+      { prisma },
+    );
+    if (revealed?.email && (await sendSafe(revealed.email))) {
+      await prisma.dealerProspect.update({
+        where: { id: candidate.id },
+        data: {
+          email: revealed.email,
+          emailSource: "apollo",
+          emailVerificationStatus: "VERIFIED",
+          emailVerifiedAt: now,
+          contactName: revealed.contactName,
+          contactTitle: revealed.contactTitle,
+        },
+      });
+      await writeThrough(revealed.email, "VERIFIED", "apollo", {
+        name: revealed.contactName,
+        title: revealed.contactTitle,
+      });
+      return { contactable: true, email: revealed.email, status: "VERIFIED", source: "apollo" };
+    }
   }
 
   return { contactable: false };
