@@ -13,6 +13,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/coverage-hold-reconcile",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron/deposit-activation-reconcile",
       "schedule": "*/5 * * * *"
     },

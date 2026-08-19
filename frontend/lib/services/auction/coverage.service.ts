@@ -257,3 +257,38 @@ export async function selectCoverageRadius(
   // owns the terminal soft-hold/close decision).
   return last ?? { coverage: 0, registered: 0, prospects: 0, radiusMiles: RADIUS_TIERS[RADIUS_TIERS.length - 1], buyerGeocoded: false };
 }
+
+export interface ZipCoverageLadderDeps extends CoverageDeps {
+  // Injectable assessor for tests; defaults to assessCoverageForZip bound to the
+  // ZIP + deps. Takes only the radius (the ZIP is closed over) — the auction
+  // ladder's assess is (auctionId, radius); this pre-auction ladder has no id.
+  assessZip: (radiusMiles: number) => Promise<CoverageResult>;
+  // Stop predicate; defaults to TOTAL coverage ≥ MIN (the Y2 gate's threshold).
+  stopWhen: (c: CoverageResult) => boolean;
+  label: string;
+}
+
+/**
+ * Y2 radius-escalation ladder keyed on a buyer ZIP (pre-auction). Same tightest-
+ * first widen-only ladder as selectCoverageRadius, but assessing a ZIP directly
+ * via the shared assessCoverageForZip core — there is NO second radius-aware
+ * coverage path; only the buyer-location source (ZIP vs auction→buyer.zip)
+ * differs. Returns the first tier that satisfies `stopWhen` (default TOTAL
+ * coverage ≥ MIN), or the widest tier's result if none does.
+ */
+export async function selectCoverageRadiusForZip(
+  buyerZip: string | null,
+  deps?: Partial<ZipCoverageLadderDeps>,
+): Promise<CoverageResult> {
+  const label = deps?.label ?? `zip ${buyerZip ?? "unknown"}`;
+  const assessZip =
+    deps?.assessZip ?? ((r: number) => assessCoverageForZip(buyerZip, r, deps, label));
+  const meets = deps?.stopWhen ?? ((c: CoverageResult) => c.coverage >= MIN_COVERAGE_DEALERS);
+  let last: CoverageResult | null = null;
+  for (const tier of RADIUS_TIERS) {
+    const cov = await assessZip(tier);
+    last = cov;
+    if (meets(cov)) return cov;
+  }
+  return last ?? { coverage: 0, registered: 0, prospects: 0, radiusMiles: RADIUS_TIERS[RADIUS_TIERS.length - 1], buyerGeocoded: false };
+}

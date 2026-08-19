@@ -11,7 +11,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   assessAuctionCoverage,
+  assessCoverageForZip,
   selectCoverageRadius,
+  selectCoverageRadiusForZip,
   MIN_COVERAGE_DEALERS,
   RADIUS_TIERS,
   type CoverageDeps,
@@ -271,4 +273,51 @@ test("when the buyer can't be geocoded, all contactable candidates count (fail o
   const r = await assessAuctionCoverage("a1", 50, deps(prisma, { buyerCoords: null }));
   assert.equal(r.buyerGeocoded, false);
   assert.equal(r.coverage, 2);
+});
+
+// ─── Y2 ZIP-keyed coverage core + ladder (shared primitive, no second path) ───
+
+test("assessCoverageForZip counts the same way as the auction path (shared core)", async () => {
+  const prisma = fakePrisma({
+    dealers: [{ id: "d1", latitude: 10, longitude: 0, rooftopId: null }],
+    prospects: [prospect({ id: "p1", latitude: 20 })],
+  });
+  const r = await assessCoverageForZip("75201", 50, deps(prisma));
+  assert.equal(r.registered, 1);
+  assert.equal(r.prospects, 1);
+  assert.equal(r.coverage, 2);
+  assert.equal(r.buyerGeocoded, true);
+});
+
+test("assessCoverageForZip with a null zip fails OPEN (no geo filter, buyerGeocoded=false)", async () => {
+  const prisma = fakePrisma({
+    dealers: [{ id: "d1", latitude: 999, longitude: 0, rooftopId: null }],
+    prospects: [prospect({ id: "p1", latitude: 999 })],
+  });
+  const r = await assessCoverageForZip(null, 50, deps(prisma, { buyerCoords: null }));
+  assert.equal(r.buyerGeocoded, false);
+  assert.equal(r.coverage, 2); // all contactable candidates count
+});
+
+test("ZIP ladder returns the FIRST tier that meets MIN (early stop)", async () => {
+  const seen: number[] = [];
+  const assessZip = async (r: number) => {
+    seen.push(r);
+    return cov(r, r >= 50 ? 3 : 1);
+  };
+  const r = await selectCoverageRadiusForZip("75201", { assessZip });
+  assert.equal(r.radiusMiles, 50);
+  assert.equal(r.coverage, 3);
+  assert.deepEqual(seen, [25, 50]);
+});
+
+test("ZIP ladder escalates to the widest tier when no tier meets the threshold", async () => {
+  const seen: number[] = [];
+  const assessZip = async (r: number) => {
+    seen.push(r);
+    return cov(r, 1);
+  };
+  const r = await selectCoverageRadiusForZip("75201", { assessZip });
+  assert.equal(r.radiusMiles, 150);
+  assert.deepEqual(seen, [25, 50, 100, 150]);
 });
