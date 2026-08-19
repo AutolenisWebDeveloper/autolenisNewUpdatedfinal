@@ -105,13 +105,21 @@ export async function apolloResolveAndReveal(
     });
     if (!org) return null;
 
-    // Stage 2 — people by org + ranked titles; among the flag-positive people,
-    // pick the best-title-ranked (Apollo doesn't guarantee title order, so we rank
-    // on our side rather than trusting the returned order).
+    // Stage 2 — people by org + ranked titles; pick the BEST-TITLE-ranked person
+    // and reveal that one. Selection is title-first and does NOT gate on the
+    // has_email flag: on some Apollo plans People Search returns has_email:false
+    // for real, revealable contacts (confirmed live — a genuine sales manager came
+    // back has_email:false), so gating on the flag would filter everyone out and
+    // the tier would silently reveal nothing. We accept that some reveals come back
+    // empty (the reveal-service refunds the credit, and Apollo does not charge for a
+    // no-hit match). The flag is used only as a tiebreaker among equal titles.
     const people = await client.peopleSearch({ organizationId: org.id, titles: APOLLO_SALES_TITLES });
-    const withEmail = people.filter((p) => p.hasEmail);
-    if (withEmail.length === 0) return null;
-    const target = withEmail.reduce((best, p) => (titleRank(p.title) < titleRank(best.title) ? p : best));
+    if (people.length === 0) return null;
+    const target = [...people].sort((a, b) => {
+      const byTitle = titleRank(a.title) - titleRank(b.title);
+      if (byTitle !== 0) return byTitle;
+      return (b.hasEmail ? 1 : 0) - (a.hasEmail ? 1 : 0); // tie → prefer a flagged email
+    })[0];
 
     // Stage 3 — reveal ONLY the chosen person (the credit-spending call).
     const revealed = await client.peopleMatch(target.id);
@@ -182,7 +190,16 @@ export function defaultApolloClient(): ApolloClient | null {
         }));
     },
     async peopleMatch(personId) {
-      const json = (await apolloFetch("/people/match", { id: personId, reveal_personal_emails: false })) as
+      // Deterministic single-lead-credit work-email enrichment. Reveal neither
+      // personal emails nor phone numbers (a phone reveal costs 8 credits), and pass
+      // NO waterfall params — Apollo only cascades to variable-cost partner providers
+      // when a waterfall param is present, so omitting them keeps the call to the
+      // synchronous work-email return at exactly REVEAL_COST_CREDITS (1).
+      const json = (await apolloFetch("/people/match", {
+        id: personId,
+        reveal_personal_emails: false,
+        reveal_phone_number: false,
+      })) as
         | { person?: { email?: string | null; name?: string; title?: string } }
         | null;
       const person = json?.person;
