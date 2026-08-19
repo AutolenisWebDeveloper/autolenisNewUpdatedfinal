@@ -78,17 +78,34 @@ export async function assessAuctionCoverage(
   deps?: Partial<CoverageDeps>,
 ): Promise<CoverageResult> {
   const prisma = deps?.prisma ?? defaultPrisma;
+  const auction = await prisma.auction.findUnique({
+    where: { id: auctionId },
+    select: { buyer: { select: { zip: true } } },
+  });
+  // Delegate to the shared zip-based core. Y2's request-time gate calls the same
+  // core directly (pre-auction), so there is ONE coverage primitive, not two.
+  return assessCoverageForZip(auction?.buyer?.zip ?? null, radiusMiles, deps, `auction ${auctionId}`);
+}
+
+/**
+ * Coverage for a buyer ZIP at a given radius — the shared counting core. Both
+ * assessAuctionCoverage (auction → buyer.zip) and the Y2 request-time gate
+ * (VehicleRequest/buyer zip, before any auction exists) call this; only the
+ * buyer-location source differs. `label` is for logging only.
+ */
+export async function assessCoverageForZip(
+  buyerZip: string | null,
+  radiusMiles: number,
+  deps?: Partial<CoverageDeps>,
+  label = `zip ${buyerZip ?? "unknown"}`,
+): Promise<CoverageResult> {
+  const prisma = deps?.prisma ?? defaultPrisma;
   const geocode = deps?.geocode ?? defaultGeocode;
   const resolveContact = deps?.resolveContact ?? resolveContactableEmail;
   const haversine = deps?.haversine ?? haversineMiles;
   const channelConfigured = deps?.channelConfigured ?? (() => missingEmailEnvVars().length === 0);
   const bbox = deps?.boundingBox ?? boundingBox;
 
-  const auction = await prisma.auction.findUnique({
-    where: { id: auctionId },
-    select: { buyer: { select: { zip: true } } },
-  });
-  const buyerZip = auction?.buyer?.zip ?? null;
   const buyerCoords = buyerZip ? await geocode(buyerZip) : null;
 
   // Fail OPEN toward inclusion when the buyer can't be geocoded: without coords we
@@ -133,7 +150,7 @@ export async function assessAuctionCoverage(
   const prospectsSendable = includeProspects && channelConfigured();
   if (!prospectsSendable) {
     logger.warn(
-      `[coverage] outreach channel not configured — excluding all prospects from coverage for auction ${auctionId}`,
+      `[coverage] outreach channel not configured — excluding all prospects from coverage for ${label}`,
     );
   }
 
@@ -198,7 +215,7 @@ export async function assessAuctionCoverage(
     buyerGeocoded: !!buyerCoords,
   };
   logger.info(
-    `[coverage] auction ${auctionId} @ ${radiusMiles}mi: coverage=${result.coverage} ` +
+    `[coverage] ${label} @ ${radiusMiles}mi: coverage=${result.coverage} ` +
       `(registered=${registered} prospects=${prospects}) buyerGeocoded=${result.buyerGeocoded}`,
   );
   return result;
