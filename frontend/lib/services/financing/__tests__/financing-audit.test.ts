@@ -112,6 +112,11 @@ test("mirrors a non-PII breadcrumb into ComplianceEvent when the event concerns 
   // Event with no buyer → not mirrored.
   await appendFinancingAuditEvent({ eventType: "NOTICE_SENT" as never, actorType: "SYSTEM" as never, payload: { step: 2 } });
   assert.equal(state.compliance.length, 1, "no buyer ⇒ no compliance mirror");
+
+  // Internal plumbing (STATE_TRANSITION) is NOT mirrored even with a buyer — it
+  // duplicates the semantic event and would only add noise to the timeline.
+  await appendFinancingAuditEvent({ eventType: "STATE_TRANSITION" as never, actorType: "SYSTEM" as never, buyerId: "b1", payload: { from: "DRAFT", to: "SUBMITTED" } });
+  assert.equal(state.compliance.length, 1, "STATE_TRANSITION ⇒ no compliance mirror");
 });
 
 async function buildChain(): Promise<Record<string, unknown>[]> {

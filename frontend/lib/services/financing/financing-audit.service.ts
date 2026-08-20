@@ -16,6 +16,11 @@ import { prisma } from "@/lib/prisma";
 import { createHash } from "node:crypto";
 import type { FinancingAuditActorType, FinancingAuditEventType, FinancingAuditEvent } from "@prisma/client";
 
+// Event types that are internal plumbing — recorded in the tamper-evident chain but
+// NOT mirrored into the platform ComplianceEvent timeline (they duplicate the
+// semantic event they accompany and would only add noise).
+const MIRROR_EXCLUDED_EVENT_TYPES = new Set<FinancingAuditEventType>(["STATE_TRANSITION", "ADAPTER_CALL"]);
+
 // Deterministic, key-sorted serialization so the hash is independent of JS key
 // insertion order and handles nested objects, arrays, null, and unicode.
 function stableStringify(value: unknown): string {
@@ -142,7 +147,12 @@ export async function appendFinancingAuditEvent(input: AppendAuditInput): Promis
   // a mirror failure must never fail (or roll back) the audit append. The mirror
   // carries only structural identifiers + the chain anchor (sequence/hash) — never
   // the raw payload — so no financing PII crosses into the compliance table.
-  if (event.buyerId) {
+  //
+  // Internal plumbing events (the generic STATE_TRANSITION that every advance emits,
+  // and lender ADAPTER_CALL traffic) are NOT mirrored: they duplicate the semantic
+  // event that accompanies them (e.g. APPLICATION_SUBMITTED) and would only add noise
+  // to the compliance timeline. The tamper-evident chain still records them in full.
+  if (event.buyerId && !MIRROR_EXCLUDED_EVENT_TYPES.has(input.eventType)) {
     try {
       await prisma.complianceEvent.create({
         data: {

@@ -150,8 +150,14 @@ export async function resolveReviewTask(taskId: string, input: ResolveReviewInpu
   }
 }
 
+// Active = OPEN or IN_PROGRESS, matching routeToReview/resolveReviewTask semantics —
+// a claimed (IN_PROGRESS) task must stay visible in the queues, not vanish.
 export async function listOpenReviewTasks(limit = 100): Promise<FinancingReviewTask[]> {
-  return prisma.financingReviewTask.findMany({ where: { status: "OPEN" }, orderBy: { createdAt: "asc" }, take: limit });
+  return prisma.financingReviewTask.findMany({
+    where: { status: { in: ["OPEN", "IN_PROGRESS"] } },
+    orderBy: { createdAt: "asc" },
+    take: limit,
+  });
 }
 
 export async function claimReviewTask(taskId: string, adminId: string): Promise<void> {

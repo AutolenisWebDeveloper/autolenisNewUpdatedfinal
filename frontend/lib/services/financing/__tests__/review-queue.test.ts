@@ -45,7 +45,10 @@ mock.module("@/lib/prisma", {
           state.updateManyCalls.push({ where, data });
           return { count: state.updateManyResult };
         },
-        findMany: async () => state.tasks.filter((t) => t.status === "OPEN"),
+        findMany: async ({ where }: { where?: { status?: { in?: string[] } } }) => {
+          const wanted = where?.status?.in;
+          return wanted ? state.tasks.filter((t) => wanted.includes(t.status as string)) : state.tasks;
+        },
       },
     },
   },
@@ -158,4 +161,16 @@ test("resolveReviewTask throws a concurrency error when the task was already res
   state.tasks.push({ id: "task_1", creditApplicationId: "app_1", taskType: "STIP_REVIEW", status: "OPEN" });
   state.updateManyResult = 0;
   await assert.rejects(() => resolveReviewTask("task_1", { adminId: "a", resolution: "x" }), /concurren|already|conflict/i);
+});
+
+test("listOpenReviewTasks includes IN_PROGRESS (a claimed task must stay visible)", async () => {
+  const { listOpenReviewTasks } = await import("@/lib/services/financing/review-queue.service");
+  state.tasks.push({ id: "t_open", creditApplicationId: "app_1", taskType: "STIP_REVIEW", status: "OPEN" });
+  state.tasks.push({ id: "t_claimed", creditApplicationId: "app_2", taskType: "STIP_REVIEW", status: "IN_PROGRESS" });
+  state.tasks.push({ id: "t_done", creditApplicationId: "app_3", taskType: "STIP_REVIEW", status: "RESOLVED" });
+  const open = await listOpenReviewTasks();
+  const ids = open.map((t) => t.id);
+  assert.ok(ids.includes("t_open"), "OPEN listed");
+  assert.ok(ids.includes("t_claimed"), "IN_PROGRESS listed");
+  assert.equal(ids.includes("t_done"), false, "RESOLVED excluded");
 });

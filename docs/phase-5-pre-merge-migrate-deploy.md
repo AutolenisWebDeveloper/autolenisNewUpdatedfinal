@@ -21,6 +21,7 @@ cd frontend && pnpm exec prisma migrate deploy
 | 1 | `20261004000000_phase5_block1_rules_audit` | B1 | Tables `compliance_rules` (injected regulatory content — empty by default; partial-unique one ACTIVE per `rule_type`) and `financing_audit_events` (hash-chained, append-only via block UPDATE/DELETE/TRUNCATE trigger). Enums `ComplianceRuleType`, `ComplianceRuleStatus`, `FinancingAuditActorType`, `FinancingAuditEventType`. Both RLS deny-all. |
 | 2 | `20261005000000_phase5_block3_credit_application` | B3 | Table `credit_applications` (guarded status machine; PII columns store AES-256-GCM ciphertext only) + enum `CreditApplicationStatus`. FKs → `deals` (CASCADE), `buyers` (RESTRICT). RLS deny-all. **Reuses the existing `PREQUAL_ENCRYPTION_KEY` (64-char hex) already in prod env — no new key required** (financing PII and prequal consumer-report PII are the same security domain and share one platform key). |
 | 3 | `20261006000000_phase5_block4_review_queue` | B4 | Table `financing_review_tasks` (human-in-the-loop stip/adverse-action/decline queue) + enums `FinancingReviewTaskType`, `FinancingReviewTaskStatus`. FK → `credit_applications` (CASCADE). RLS deny-all. |
+| 4 | `20261007000000_phase5_credit_app_one_active_per_deal` | B5 | Partial-unique index `credit_applications_one_active_per_deal` on `(deal_id) WHERE status <> 'WITHDRAWN'` — at most one non-withdrawn credit application per deal (makes the buyer `apply` route idempotent against double-submit/retry). Index-only; no table/column/enum change. |
 
 ## Post-deploy verification
 
@@ -46,6 +47,9 @@ SELECT column_name FROM information_schema.columns
 WHERE table_name='credit_applications' AND column_name IN ('ssn_encrypted','annual_income_encrypted');
 SELECT column_name FROM information_schema.columns
 WHERE table_name='credit_applications' AND column_name IN ('ssn','annual_income');  -- expect 0 rows
+
+-- B5 idempotency: one-active-application-per-deal partial-unique index present
+SELECT indexname FROM pg_indexes WHERE indexname = 'credit_applications_one_active_per_deal';
 ```
 
 ## De-duplication with the existing prequal subsystem

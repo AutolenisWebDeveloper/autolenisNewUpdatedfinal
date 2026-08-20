@@ -14,9 +14,15 @@ const state = {
   encConfigured: true,
   prequal: { decision: "APPROVED", expiresAt: new Date(Date.now() + 86400000), maxOtdAmountCents: 3_000_000 } as Record<string, unknown> | null,
   prequalValid: true,
+  existingApp: null as Record<string, unknown> | null,
+  throwDuplicate: false,
   created: [] as Array<Record<string, unknown>>,
   submitted: [] as string[],
 };
+
+class DuplicateApplicationError extends Error {
+  constructor() { super("dup"); this.name = "DuplicateApplicationError"; }
+}
 
 mock.module("@/lib/auth/api", {
   namedExports: {
@@ -30,6 +36,7 @@ mock.module("@/lib/prisma", {
     prisma: {
       deal: { findFirst: async () => state.deal },
       preQualification: { findUnique: async () => state.prequal },
+      creditApplication: { findFirst: async () => state.existingApp },
     },
   },
 });
@@ -41,7 +48,12 @@ mock.module("@/lib/services/prequal/prequal.service", {
 });
 mock.module("@/lib/services/financing/credit-application.service", {
   namedExports: {
-    createCreditApplication: async (input: Record<string, unknown>) => { state.created.push(input); return { id: "app_1" }; },
+    DuplicateApplicationError,
+    createCreditApplication: async (input: Record<string, unknown>) => {
+      if (state.throwDuplicate) throw new DuplicateApplicationError();
+      state.created.push(input);
+      return { id: "app_1" };
+    },
     submitApplication: async (id: string) => { state.submitted.push(id); },
   },
 });
@@ -61,6 +73,8 @@ beforeEach(() => {
   state.encConfigured = true;
   state.prequal = { decision: "APPROVED", expiresAt: new Date(Date.now() + 86400000), maxOtdAmountCents: 3_000_000 };
   state.prequalValid = true;
+  state.existingApp = null;
+  state.throwDuplicate = false;
   state.created = [];
   state.submitted = [];
 });
@@ -116,6 +130,22 @@ test("400 BUDGET_EXCEEDED when the requested amount is over the approved budget"
   assert.equal(res.status, 400);
   assert.equal(res.code, "BUDGET_EXCEEDED");
   assert.equal(state.created.length, 0, "no application when over budget");
+});
+
+test("409 ALREADY_APPLIED when a non-withdrawn application already exists (pre-check)", async () => {
+  state.existingApp = { id: "app_existing", status: "SUBMITTED" };
+  const res = await POST(VALID);
+  assert.equal(res.status, 409);
+  assert.equal(res.code, "ALREADY_APPLIED");
+  assert.equal(state.created.length, 0, "no duplicate application created");
+});
+
+test("409 ALREADY_APPLIED on the create race (DB partial-unique → DuplicateApplicationError)", async () => {
+  state.throwDuplicate = true; // pre-check passes, but the unique index rejects the insert
+  const res = await POST(VALID);
+  assert.equal(res.status, 409);
+  assert.equal(res.code, "ALREADY_APPLIED");
+  assert.equal(state.submitted.length, 0, "nothing submitted when the create loses the race");
 });
 
 test("happy path creates + submits, hands PII to the service, returns no PII", async () => {

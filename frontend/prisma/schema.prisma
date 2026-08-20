@@ -5189,6 +5189,10 @@ model CreditApplication {
   @@index([dealId])
   @@index([buyerId, status])
   @@index([status])
+  // NOTE: a partial-unique index `credit_applications_one_active_per_deal` on
+  // (deal_id) WHERE status <> 'WITHDRAWN' is added in migration
+  // 20261007000000 — at most one non-withdrawn application per deal (idempotency).
+  // Prisma cannot express partial-unique, so it is not declared here.
   @@map("credit_applications")
 }
 

@@ -6,7 +6,7 @@ import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { createCreditApplication, submitApplication } from "@/lib/services/financing/credit-application.service";
+import { createCreditApplication, submitApplication, DuplicateApplicationError } from "@/lib/services/financing/credit-application.service";
 import { isFinancingEncryptionConfigured } from "@/lib/security/field-encryption";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 
@@ -65,16 +65,35 @@ export async function POST(request: NextRequest) {
     return errorResponse("BUDGET_EXCEEDED", "The requested amount exceeds your approved budget.", 400);
   }
 
-  const app = await createCreditApplication({
-    dealId: input.dealId,
-    buyerId: buyer.id,
-    amountRequestedCents: input.amountRequestedCents,
-    termMonths: input.termMonths,
-    ssn: input.ssn,
-    annualIncomeCents: input.annualIncomeCents,
-    employment: input.employment ?? undefined,
-    dob: input.dob ?? undefined,
+  // Idempotency: one non-withdrawn application per deal. Pre-check for the friendly
+  // path; the DB partial-unique index + DuplicateApplicationError catch below close
+  // the double-submit race.
+  const existing = await prisma.creditApplication.findFirst({
+    where: { dealId: input.dealId, status: { not: "WITHDRAWN" } },
+    select: { id: true, status: true },
   });
+  if (existing) {
+    return errorResponse("ALREADY_APPLIED", "An application already exists for this deal.", 409);
+  }
+
+  let app: { id: string };
+  try {
+    app = await createCreditApplication({
+      dealId: input.dealId,
+      buyerId: buyer.id,
+      amountRequestedCents: input.amountRequestedCents,
+      termMonths: input.termMonths,
+      ssn: input.ssn,
+      annualIncomeCents: input.annualIncomeCents,
+      employment: input.employment ?? undefined,
+      dob: input.dob ?? undefined,
+    });
+  } catch (e) {
+    if (e instanceof DuplicateApplicationError) {
+      return errorResponse("ALREADY_APPLIED", "An application already exists for this deal.", 409);
+    }
+    throw e;
+  }
   await submitApplication(app.id, { actorId: buyer.id });
 
   return successResponse({ applicationId: app.id, status: "SUBMITTED" });

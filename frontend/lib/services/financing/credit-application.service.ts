@@ -51,6 +51,37 @@ export class CreditApplicationConcurrencyError extends Error {
   }
 }
 
+/** A non-withdrawn application already exists for this deal (idempotency guard). */
+export class DuplicateApplicationError extends Error {
+  constructor(dealId: string) {
+    super(`A non-withdrawn credit application already exists for deal ${dealId}`);
+    this.name = "DuplicateApplicationError";
+  }
+}
+
+// Buyer-safe projection: the encrypted PII columns are NEVER selected into an
+// object that could reach a client. Anything read for a buyer surface uses this.
+const PUBLIC_APPLICATION_SELECT = {
+  id: true,
+  dealId: true,
+  buyerId: true,
+  status: true,
+  financingPath: true,
+  amountRequestedCents: true,
+  termMonths: true,
+  lenderName: true,
+  decisionOutcome: true,
+  approvedAmountCents: true,
+  aprRate: true,
+  monthlyPaymentCents: true,
+  submittedAt: true,
+  decidedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.CreditApplicationSelect;
+
+export type PublicCreditApplication = Prisma.CreditApplicationGetPayload<{ select: typeof PUBLIC_APPLICATION_SELECT }>;
+
 export interface CreateCreditApplicationInput {
   dealId: string;
   buyerId: string;
@@ -65,20 +96,30 @@ export interface CreateCreditApplicationInput {
 }
 
 export async function createCreditApplication(input: CreateCreditApplicationInput): Promise<CreditApplication> {
-  return prisma.creditApplication.create({
-    data: {
-      dealId: input.dealId,
-      buyerId: input.buyerId,
-      status: "DRAFT",
-      financingPath: input.financingPath ?? "DEALER",
-      amountRequestedCents: input.amountRequestedCents ?? null,
-      termMonths: input.termMonths ?? null,
-      ssnEncrypted: encryptOptionalField(input.ssn),
-      annualIncomeEncrypted: encryptOptionalField(input.annualIncomeCents != null ? String(input.annualIncomeCents) : null),
-      employmentEncrypted: encryptOptionalField(input.employment),
-      dobEncrypted: encryptOptionalField(input.dob),
-    },
-  });
+  try {
+    return await prisma.creditApplication.create({
+      data: {
+        dealId: input.dealId,
+        buyerId: input.buyerId,
+        status: "DRAFT",
+        financingPath: input.financingPath ?? "DEALER",
+        amountRequestedCents: input.amountRequestedCents ?? null,
+        termMonths: input.termMonths ?? null,
+        ssnEncrypted: encryptOptionalField(input.ssn),
+        annualIncomeEncrypted: encryptOptionalField(input.annualIncomeCents != null ? String(input.annualIncomeCents) : null),
+        employmentEncrypted: encryptOptionalField(input.employment),
+        dobEncrypted: encryptOptionalField(input.dob),
+      },
+    });
+  } catch (e) {
+    // The partial-unique index (one non-WITHDRAWN application per deal) rejected a
+    // duplicate — a double-submit / retry race. Surface a typed conflict so the
+    // route returns 409 rather than creating a second SUBMITTED application.
+    if ((e as { code?: string } | null)?.code === "P2002") {
+      throw new DuplicateApplicationError(input.dealId);
+    }
+    throw e;
+  }
 }
 
 /** Buyer submits their DRAFT application (DRAFT → SUBMITTED), audited as submitted. */
@@ -102,8 +143,8 @@ export async function submitApplication(appId: string, opts: { actorId?: string 
 }
 
 /** Buyer-scoped read (ownership enforced) — NEVER returns the encrypted PII columns. */
-export async function getApplicationForBuyer(buyerId: string, appId: string): Promise<CreditApplication | null> {
-  return prisma.creditApplication.findFirst({ where: { id: appId, buyerId } });
+export async function getApplicationForBuyer(buyerId: string, appId: string): Promise<PublicCreditApplication | null> {
+  return prisma.creditApplication.findFirst({ where: { id: appId, buyerId }, select: PUBLIC_APPLICATION_SELECT });
 }
 
 export interface AdvanceApplicationOpts {
