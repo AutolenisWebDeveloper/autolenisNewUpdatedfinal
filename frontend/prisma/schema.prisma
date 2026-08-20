@@ -429,6 +429,12 @@ model Auction {
   // manual admin extensions; drives the MAX_AUTO_EXTENSIONS cap atomically.
   autoExtensionCount Int                @default(0) @map("auto_extension_count")
   originalAuctionId String?             @map("original_auction_id")
+  // C1 — originating VehicleRequest (nullable). The admin launch path sets it
+  // (buyer-ownership validated); the deposit-activation reconciler leaves it null.
+  // No unique constraint: a retry auction legitimately shares its request.
+  // onDelete: SetNull — an auction is a historical/financial record and must
+  // survive its request being removed.
+  vehicleRequestId  String?             @map("vehicle_request_id")
   createdAt         DateTime            @default(now()) @map("created_at")
   updatedAt         DateTime            @updatedAt @map("updated_at")
   invitations       AuctionInvitation[]
@@ -436,10 +442,12 @@ model Auction {
   vehicles          AuctionVehicle[]
   buyer             Buyer               @relation(fields: [buyerId], references: [id])
   deposit           Deposit             @relation(fields: [depositId], references: [id])
+  vehicleRequest    VehicleRequest?     @relation(fields: [vehicleRequestId], references: [id], onDelete: SetNull)
   originalAuction   Auction?            @relation("AuctionRetry", fields: [originalAuctionId], references: [id])
   retryAuctions     Auction[]           @relation("AuctionRetry")
   offers            Offer[]
 
+  @@index([vehicleRequestId])
   @@map("auctions")
 }
 
@@ -878,6 +886,7 @@ model VehicleRequest {
   offers          VehicleRequestOffer[]
   researchLogs    VehicleRequestResearchLog[]
   financing       VehicleRequestFinancing?
+  auctions        Auction[]                              // C1 — auctions originated from this request (SetNull on delete)
   buyer           Buyer                                  @relation(fields: [buyerId], references: [id])
 
   @@index([buyerId, status])

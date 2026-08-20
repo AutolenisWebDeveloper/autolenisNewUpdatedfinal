@@ -22,6 +22,7 @@ re-run is a no-op. Each migration file carries its own documented rollback block
 | 1 | `20260930000000_add_dealer_availability` | D1 | Tables `dealer_availability`, `dealer_availability_windows`, `dealer_blackout_dates` (RLS deny-all, FK `ON DELETE CASCADE`, indexed FKs). Blackout dates are `@db.Date`. |
 | 2 | `20261001000000_pickup_confirm_roundtrip` | D2a | `PickupStatus` += `PROPOSED`, `DEALER_COUNTERED`; `NotificationType` += `PICKUP_PROPOSED`, `PICKUP_COUNTERED`; `pickups` columns `proposed_time`, `proposed_by`, `proposed_at`, `counter_count`, `proposed_reminder_sent_at`, `counter_reminder_sent_at`; index `(status, proposed_at)`. Enum values placed `BEFORE 'SCHEDULED'` / `BEFORE 'PICKUP_SCHEDULED'` to match schema order. |
 | 3 | `20261002000000_cron_job_logs_index` | D3a | Index `cron_job_logs(cron_name, started_at)` (`cron_job_logs_cron_name_started_at_idx`). Speeds the dead-cron `groupBy(cron_name) max(started_at)`, the ops-widget latest-per-cron read, and the retention purge scan as the table grows. Index-only, no columns/enums; `CREATE INDEX IF NOT EXISTS` (non-concurrent). |
+| 4 | `20261003000000_auction_vehicle_request_fk` | C1 | `auctions.vehicle_request_id` nullable FK → `vehicle_requests(id)` `ON DELETE SET NULL` (`auctions_vehicle_request_id_fkey`) + index `auctions_vehicle_request_id_idx`. Includes an **unambiguous-only backfill** (audit metadata → single-VR fallback with a `created_at` temporal guard → null); verified read-only against prod = 1 of 6 auctions links, 5 stay null (one single-VR candidate's request was created a month after its auction → correctly left null). No unique constraint, no RLS change. |
 
 ## Post-deploy verification (prod introspection)
 
@@ -45,6 +46,12 @@ WHERE t.typname = 'NotificationType' AND enumlabel IN ('PICKUP_PROPOSED','PICKUP
 -- D3a index present
 SELECT indexname FROM pg_indexes
 WHERE tablename = 'cron_job_logs' AND indexname = 'cron_job_logs_cron_name_started_at_idx';
+
+-- C1 column + FK + index present, and backfill applied (expect 1 of 6 linked)
+SELECT column_name FROM information_schema.columns
+WHERE table_name = 'auctions' AND column_name = 'vehicle_request_id';
+SELECT conname FROM pg_constraint WHERE conname = 'auctions_vehicle_request_id_fkey';
+SELECT count(*) FILTER (WHERE vehicle_request_id IS NOT NULL) AS linked, count(*) AS total FROM auctions;
 ```
 
 ## Related, pre-existing prod drift (separate audit — NOT introduced by Phase 4)

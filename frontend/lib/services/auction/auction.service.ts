@@ -12,14 +12,35 @@ import {
   sendDealerAuctionClosedNoWinnerEmail,
 } from "@/lib/services/email/resend.service";
 
-export async function createAuction(buyerId: string, depositId: string) {
+// C1 — an auction may carry the originating VehicleRequest (nullable): the admin
+// launch path supplies it; the deposit-activation reconciler has no request in
+// scope and omits it. Never pass an unvalidated id here — resolve ownership first
+// with resolveOwnedVehicleRequestId so an auction can't link to another buyer's
+// request.
+export async function createAuction(buyerId: string, depositId: string, vehicleRequestId?: string | null) {
   return prisma.auction.create({
     data: {
       buyerId,
       depositId,
       status: AuctionStatus.PENDING,
+      ...(vehicleRequestId ? { vehicleRequestId } : {}),
     },
   });
+}
+
+// Returns vehicleRequestId only when it belongs to buyerId; otherwise null. The
+// ownership scope lives in the query (id + buyerId), so a mistyped or hostile id
+// resolves to null rather than cross-linking another buyer's request.
+export async function resolveOwnedVehicleRequestId(
+  buyerId: string,
+  vehicleRequestId?: string | null,
+): Promise<string | null> {
+  if (!vehicleRequestId) return null;
+  const vr = await prisma.vehicleRequest.findFirst({
+    where: { id: vehicleRequestId, buyerId },
+    select: { id: true },
+  });
+  return vr?.id ?? null;
 }
 
 export async function launchAuction(auctionId: string) {
