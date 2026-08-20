@@ -5149,7 +5149,7 @@ enum CreditApplicationStatus {
   PENDING_LENDER
   CONDITIONAL              // approved with stipulations (needs human review)
   APPROVED                 // terminal positive
-  DECLINED                 // terminal negative
+  DECLINED                 // decline recorded — transitions on to ADVERSE_ACTION_PENDING
   ADVERSE_ACTION_PENDING   // decline needs an ECOA notice — fail-closed until rule injected
   HUMAN_REVIEW             // routed to a human
   WITHDRAWN

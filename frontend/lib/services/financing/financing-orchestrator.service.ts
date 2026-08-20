@@ -51,7 +51,13 @@ export async function requestLenderDecision(
     vehicle: { priceCents: app.amountRequestedCents ?? 0 },
     applicant: {
       ssn: decryptOptionalField(app.ssnEncrypted) ?? undefined,
-      annualIncomeCents: app.annualIncomeEncrypted ? Number(decryptOptionalField(app.annualIncomeEncrypted)) : undefined,
+      // Guard against a non-finite decrypt (corruption / wrong field): never send
+      // NaN to the lender — omit it and let the lender decide on what it has.
+      annualIncomeCents: (() => {
+        if (!app.annualIncomeEncrypted) return undefined;
+        const n = Number(decryptOptionalField(app.annualIncomeEncrypted));
+        return Number.isFinite(n) ? n : undefined;
+      })(),
     },
   };
 
@@ -93,6 +99,11 @@ export async function requestLenderDecision(
     case "APPROVED": {
       await advanceApplication(appId, "APPROVED", { actorType: "SYSTEM", data: decisionData });
       // Update the EXISTING Financing outcome (one-per-deal), never a parallel model.
+      // Best-effort like the deal advance: the approval is already durable (terminal
+      // APPROVED), so a failure here must not throw uncaught and strand the app — it
+      // leaves a reconciliation breadcrumb instead. (A future hardening threads a tx
+      // client through advanceApplication to make the app→APPROVED + upsert atomic.)
+      try {
       await prisma.financing.upsert({
         where: { dealId: app.dealId },
         create: {
@@ -114,6 +125,14 @@ export async function requestLenderDecision(
           monthlyPaymentCents: decision.monthlyPaymentCents ?? null,
         },
       });
+      } catch (e) {
+        await appendFinancingAuditEvent({
+          eventType: "STATE_TRANSITION",
+          actorType: "SYSTEM",
+          ...ctx,
+          payload: { financingUpsertFailed: true, error: e instanceof Error ? e.message : String(e), note: "financing APPROVED but Financing outcome update failed — needs reconciliation" },
+        });
+      }
       // Advance the Deal through the EXISTING guarded machine (FINANCING_PENDING →
       // FEE_PENDING). The financing approval is already durable; if the downstream
       // deal advance fails (e.g. the deal is not in the expected state), don't throw

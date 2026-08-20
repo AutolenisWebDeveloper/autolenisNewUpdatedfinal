@@ -22,13 +22,14 @@ const state = {
   financingUpserts: [] as Array<Record<string, unknown>>,
   audit: [] as Array<Record<string, unknown>>,
   reviews: [] as Array<Record<string, unknown>>,
+  financingUpsertThrows: false,
 };
 
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
       creditApplication: { findUnique: async () => state.app },
-      financing: { upsert: async (args: Record<string, unknown>) => { state.financingUpserts.push(args); return {}; } },
+      financing: { upsert: async (args: Record<string, unknown>) => { if (state.financingUpsertThrows) throw new Error("financing write failed"); state.financingUpserts.push(args); return {}; } },
     },
   },
 });
@@ -75,6 +76,7 @@ beforeEach(() => {
   state.financingUpserts = [];
   state.audit = [];
   state.reviews = [];
+  state.financingUpsertThrows = false;
 });
 
 test("APPROVED → outcome recorded, Financing upserted, Deal advanced to FEE_PENDING", async () => {
@@ -131,6 +133,17 @@ test("APPROVED but downstream deal-advance fails → financing stays APPROVED, g
   assert.ok(
     state.audit.some((e) => e.eventType === "STATE_TRANSITION" && (e.payload as Record<string, unknown>).dealAdvanceFailed === true),
     "the deal-advance failure is recorded for reconciliation",
+  );
+});
+
+test("APPROVED but Financing upsert fails → still APPROVED, breadcrumb audited, no uncaught throw", async () => {
+  const { requestLenderDecision } = await import("@/lib/services/financing/financing-orchestrator.service");
+  state.financingUpsertThrows = true;
+  const res = await requestLenderDecision("app_1");
+  assert.equal(res.finalStatus, "APPROVED", "approval is durable even when the Financing write fails");
+  assert.ok(
+    state.audit.some((e) => e.eventType === "STATE_TRANSITION" && (e.payload as Record<string, unknown>).financingUpsertFailed === true),
+    "the Financing-write failure is recorded for reconciliation",
   );
 });
 
