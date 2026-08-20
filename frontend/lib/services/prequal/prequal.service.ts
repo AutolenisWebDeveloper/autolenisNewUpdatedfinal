@@ -266,6 +266,20 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
       })
       .catch((err) => logger.error(`[prequal] OFAC alert notification failed for buyer ${buyer.id}:`, err));
   }
+  // Gate 1b: OFAC INDETERMINATE — the response carried no OFAC screening data
+  // (ofacFlagged === null). The OFAC gate is fail-closed: an approval requires an
+  // affirmative clear (=== false), so a would-be APPROVED with unknown OFAC is
+  // downgraded to MANUAL_REVIEW rather than granting credit without screening.
+  // Kept distinct from a positive hit — no checkOfacAlert is set (there is no
+  // alert, only missing data), and provider-error/timeout results (already
+  // MANUAL_REVIEW) are left as-is by scoping this to APPROVED.
+  else if (result.ofacFlagged == null && result.decision === PreQualDecision.APPROVED) {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    logger.warn(
+      `[prequal] OFAC screening data missing on an APPROVED result for buyer ${buyer.id} — ` +
+        `routing to MANUAL_REVIEW (never approve without an affirmative OFAC clear).`,
+    );
+  }
   // Gate 2: Deceased indicator → manual review.
   else if (result.deceasedFlag) {
     finalDecision = PreQualDecision.MANUAL_REVIEW;

@@ -284,6 +284,26 @@ function errorResult(reason: string): IPredicResult {
   };
 }
 
+// Tri-state OFAC screening result. Returns:
+//   true  — a sanctions hit (either signal is "Y")
+//   false — screening ran and did NOT hit (a signal is present and not "Y")
+//   null  — indeterminate: NEITHER signal was returned (no screening data)
+// Never returns false for a response that simply omitted OFAC data — that is the
+// difference between "screened, clear" and "we don't know", and the OFAC gate is
+// fail-closed on "we don't know".
+export function computeOfacFlag(
+  idvAlert: string | undefined | null,
+  ofacResult: string | undefined | null,
+): boolean | null {
+  const idvUp = idvAlert?.trim().toUpperCase();
+  const ofacUp = ofacResult?.trim().toUpperCase();
+  if (idvUp === "Y" || ofacUp === "Y") return true;
+  const idvPresent = idvUp !== undefined && idvUp !== "";
+  const ofacPresent = ofacUp !== undefined && ofacUp !== "";
+  if (idvPresent || ofacPresent) return false;
+  return null;
+}
+
 // Map iPredict decision code/value to canonical decision
 function mapDecision(code: string | undefined, value: string | undefined): PreQualDecision {
   const v = (value ?? code ?? "").toString().toUpperCase();
@@ -505,8 +525,21 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
 
   const raw = (await res.json().catch(() => ({}))) as IPredictResponse;
 
-  if (raw.RESPONSE?.STATUS?.type === "ERROR") {
-    logger.error("[microbilt] iPredict returned ERROR:", raw.RESPONSE?.STATUS);
+  // Detect ALL of iPredict's error shapes, not just RESPONSE.STATUS.type. A
+  // response can signal failure via the message header severity, a RESPONSE
+  // error object/code, or an action of "RESEND" (request must be resent). Any of
+  // these means we did NOT get a usable decision — route to MANUAL_REVIEW with a
+  // provider-error reason (which drives the admin alert) rather than silently
+  // parsing an empty CONTENT into a plain review.
+  const statusNode = raw.RESPONSE?.STATUS;
+  const isIpredictError =
+    statusNode?.type === "ERROR" ||
+    !!statusNode?.error?.code ||
+    !!statusNode?.error?.message ||
+    statusNode?.action === "RESEND" ||
+    raw.MsgRsHdr?.Status?.Severity === "Error";
+  if (isIpredictError) {
+    logger.error("[microbilt] iPredict returned ERROR:", statusNode ?? raw.MsgRsHdr?.Status);
     return { ...errorResult("IPREDICT_ERROR"), rawResponse: encryptRawResponse(JSON.stringify(raw)) };
   }
 
@@ -528,7 +561,12 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
     ? Math.round(parseFloat(decisionNode.maxLoanAmount) * 100)
     : null;
 
-  const ofacFlagged = idv?.OFACAlert === "Y" || ofac?.ofacresult === "Y";
+  // OFAC is a HARD, fail-closed gate. Distinguish three states, never collapsing
+  // "no data" into "cleared": a hit (Y) → true; an explicit screening result
+  // that is not a hit → false (screened & cleared); NEITHER signal present →
+  // null (indeterminate). The orchestrator routes a null to manual review so an
+  // approval can never be issued without an affirmative OFAC clear.
+  const ofacFlagged = computeOfacFlag(idv?.OFACAlert, ofac?.ofacresult);
   const decision    = mapDecision(decisionCode, decisionValue);
 
   // ── Credit score from SCORES array — spec: DECISION.SCORES[].Value ─────────
