@@ -429,6 +429,19 @@ export async function runAdminIPredictPrequalForBuyer(
       })
       .catch(() => {});
   }
+  // Gate 1b: OFAC INDETERMINATE — the response carried no (or no recognizable)
+  // OFAC screening data (ofacFlagged === null). Fail-closed, identical to the
+  // buyer path: a would-be APPROVED with unknown OFAC is downgraded to
+  // MANUAL_REVIEW so an approval is only ever issued on an affirmative clear.
+  // No checkOfacAlert is set (missing data, not a positive hit); provider-error
+  // results (already MANUAL_REVIEW, null) are unaffected by the APPROVED scope.
+  else if (result.ofacFlagged == null && result.decision === PreQualDecision.APPROVED) {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    logger.warn(
+      `[admin-prequal] OFAC screening data missing on an APPROVED result for buyer ${buyerId} — ` +
+        `routing to MANUAL_REVIEW (never approve without an affirmative OFAC clear).`,
+    );
+  }
   // Gate 2: Deceased indicator → manual review.
   else if (result.deceasedFlag) {
     finalDecision = PreQualDecision.MANUAL_REVIEW;

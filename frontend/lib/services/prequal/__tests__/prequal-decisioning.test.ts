@@ -175,6 +175,13 @@ test("MLA covered borrower ⇒ MANUAL_REVIEW", async () => {
   assert.equal(cap.upserts[0]!.decision, "MANUAL_REVIEW");
 });
 
+test("Credit-DECLINED with INDETERMINATE OFAC ⇒ stays DECLINED (Gate 1b is scoped to APPROVED)", async () => {
+  await run({ decision: PreQualDecision.DECLINED, ofacFlagged: null, maxOtdAmountCents: 0, tier: null, adverseReasonCodes: ["038"] });
+  const persisted = cap.upserts[0]!;
+  assert.equal(persisted.decision, "DECLINED", "an indeterminate OFAC must not silently upgrade a decline");
+  assert.equal(cap.adverseEmails, 1);
+});
+
 test("Provider error result (reason set) ⇒ admin PROVIDER_ERROR alert fires", async () => {
   await run({ decision: PreQualDecision.MANUAL_REVIEW, ofacFlagged: null, reason: "TIMEOUT", maxOtdAmountCents: 0, tier: null });
   assert.ok(cap.adminAlerts.some((a) => a.kind === "PROVIDER_ERROR"), "provider error routes an admin alert");

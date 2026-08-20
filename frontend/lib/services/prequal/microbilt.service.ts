@@ -285,22 +285,27 @@ function errorResult(reason: string): IPredicResult {
 }
 
 // Tri-state OFAC screening result. Returns:
-//   true  — a sanctions hit (either signal is "Y")
-//   false — screening ran and did NOT hit (a signal is present and not "Y")
-//   null  — indeterminate: NEITHER signal was returned (no screening data)
-// Never returns false for a response that simply omitted OFAC data — that is the
-// difference between "screened, clear" and "we don't know", and the OFAC gate is
-// fail-closed on "we don't know".
+//   true  — a sanctions hit (either signal is exactly "Y")
+//   false — screening ran and AFFIRMATIVELY cleared (a signal is exactly "N")
+//   null  — indeterminate: no signal returned, OR a signal we do not recognize
+//           as either a hit or a clear (e.g. "HIT" / "R" / "P" / "1" / "")
+// Fail-closed: we only assert "cleared" on an explicit "N". Any other present
+// value is treated as indeterminate (→ manual review) rather than a clear, so an
+// unexpected provider token can never flow through to an approval. A "Y" on
+// either signal is always a hit even if the other says "N".
 export function computeOfacFlag(
   idvAlert: string | undefined | null,
   ofacResult: string | undefined | null,
 ): boolean | null {
   const idvUp = idvAlert?.trim().toUpperCase();
   const ofacUp = ofacResult?.trim().toUpperCase();
+  // A hit on either signal wins outright.
   if (idvUp === "Y" || ofacUp === "Y") return true;
-  const idvPresent = idvUp !== undefined && idvUp !== "";
-  const ofacPresent = ofacUp !== undefined && ofacUp !== "";
-  if (idvPresent || ofacPresent) return false;
+  // Of the signals actually returned, clear ONLY if EVERY one is an explicit
+  // "N". No signal at all, or any unrecognized token (even alongside an "N"),
+  // is indeterminate → manual review.
+  const present = [idvUp, ofacUp].filter((v): v is string => v !== undefined && v !== "");
+  if (present.length > 0 && present.every((v) => v === "N")) return false;
   return null;
 }
 
@@ -463,7 +468,10 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
       maxOtdAmountCents:          0,
       recommendedLoanAmountCents: null,
       maxLoanAmountCents:         null,
-      ofacFlagged:                false,
+      // OFAC was NEVER screened here — the income gate declined before the
+      // MicroBilt call. null (indeterminate) honors the tri-state contract; we
+      // must not assert "screened & cleared" for a bureau call that never ran.
+      ofacFlagged:                null,
       expiresAt:                  new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       rawResponse: encryptRawResponse(
         JSON.stringify({ declined: true, reason: "INCOME_BELOW_MINIMUM" })

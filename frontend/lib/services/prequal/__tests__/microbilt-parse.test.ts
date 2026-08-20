@@ -152,6 +152,13 @@ test("OFAC hit (OFAC.ofacresult=Y) ⇒ flagged true even if IDV says N", async (
   assert.equal(res.ofacFlagged, true);
 });
 
+test("OFAC present but UNRECOGNIZED value (not Y/N) ⇒ indeterminate (null), fails closed", async () => {
+  // A provider token we don't recognize as a hit or a clear must NOT be treated
+  // as cleared — even when the other signal explicitly says N.
+  const res = await callWith(successBody({ idv: { OFACAlert: "N" }, ofac: { ofacresult: "REVIEW" } }));
+  assert.equal(res.ofacFlagged, null, "an unrecognized present value alongside an N is still indeterminate");
+});
+
 test("DECLINED response maps to DECLINED with FCRA reason codes + zero budget", async () => {
   const res = await callWith(
     successBody({
