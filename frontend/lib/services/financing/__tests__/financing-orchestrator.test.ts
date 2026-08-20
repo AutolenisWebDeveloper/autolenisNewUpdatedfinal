@@ -21,6 +21,7 @@ const state = {
   dealAdvances: [] as Array<{ dealId: string; to: string }>,
   financingUpserts: [] as Array<Record<string, unknown>>,
   audit: [] as Array<Record<string, unknown>>,
+  reviews: [] as Array<Record<string, unknown>>,
 };
 
 mock.module("@/lib/prisma", {
@@ -60,6 +61,9 @@ mock.module("@/lib/services/deal/deal.service", {
 mock.module("@/lib/services/financing/financing-audit.service", {
   namedExports: { appendFinancingAuditEvent: async (e: Record<string, unknown>) => { state.audit.push(e); return { id: "e" }; } },
 });
+mock.module("@/lib/services/financing/review-queue.service", {
+  namedExports: { routeToReview: async (input: Record<string, unknown>) => { state.reviews.push(input); return { id: "task_1" }; } },
+});
 
 beforeEach(() => {
   dealAdvance.throw = false;
@@ -70,6 +74,7 @@ beforeEach(() => {
   state.dealAdvances = [];
   state.financingUpserts = [];
   state.audit = [];
+  state.reviews = [];
 });
 
 test("APPROVED → outcome recorded, Financing upserted, Deal advanced to FEE_PENDING", async () => {
@@ -93,6 +98,7 @@ test("DECLINED + adverse-action rule EMPTY → FAILS CLOSED to human review, no 
   assert.equal(res.adverseAction, "BLOCKED_RULE_ABSENT");
   // No NOTICE_GENERATED / NOTICE_SENT event — the engine must not invent a notice.
   assert.equal(state.audit.some((e) => e.eventType === "NOTICE_SENT" || e.eventType === "NOTICE_GENERATED"), false);
+  assert.equal(state.reviews[0]!.taskType, "ADVERSE_ACTION_REVIEW", "routed to the adverse-action review queue");
 });
 
 test("adapter FAIL-CLOSED (missing creds/error) → human review, no decision, deal not advanced", async () => {
@@ -102,6 +108,7 @@ test("adapter FAIL-CLOSED (missing creds/error) → human review, no decision, d
   assert.deepEqual(state.advanceCalls.map((c) => c.to), ["PENDING_LENDER", "HUMAN_REVIEW"]);
   assert.equal(state.dealAdvances.length, 0);
   assert.equal(res.finalStatus, "HUMAN_REVIEW");
+  assert.equal(state.reviews[0]!.taskType, "LENDER_FAILURE_REVIEW");
 });
 
 test("CONDITIONAL → parked for human stip review; deal not advanced", async () => {
@@ -111,6 +118,7 @@ test("CONDITIONAL → parked for human stip review; deal not advanced", async ()
   assert.deepEqual(state.advanceCalls.map((c) => c.to), ["PENDING_LENDER", "CONDITIONAL"]);
   assert.equal(state.dealAdvances.length, 0);
   assert.equal(res.finalStatus, "CONDITIONAL");
+  assert.equal(state.reviews[0]!.taskType, "STIP_REVIEW");
 });
 
 test("APPROVED but downstream deal-advance fails → financing stays APPROVED, gap audited, dealAdvanced:false", async () => {

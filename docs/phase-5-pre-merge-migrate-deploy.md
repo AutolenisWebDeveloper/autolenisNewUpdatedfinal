@@ -20,6 +20,7 @@ cd frontend && pnpm exec prisma migrate deploy
 | - | --- | --- | --- |
 | 1 | `20261004000000_phase5_block1_rules_audit` | B1 | Tables `compliance_rules` (injected regulatory content — empty by default; partial-unique one ACTIVE per `rule_type`) and `financing_audit_events` (hash-chained, append-only via block UPDATE/DELETE/TRUNCATE trigger). Enums `ComplianceRuleType`, `ComplianceRuleStatus`, `FinancingAuditActorType`, `FinancingAuditEventType`. Both RLS deny-all. |
 | 2 | `20261005000000_phase5_block3_credit_application` | B3 | Table `credit_applications` (guarded status machine; PII columns store AES-256-GCM ciphertext only) + enum `CreditApplicationStatus`. FKs → `deals` (CASCADE), `buyers` (RESTRICT). RLS deny-all. **Requires `FINANCING_ENCRYPTION_KEY` (64-char hex) in prod env.** |
+| 3 | `20261006000000_phase5_block4_review_queue` | B4 | Table `financing_review_tasks` (human-in-the-loop stip/adverse-action/decline queue) + enums `FinancingReviewTaskType`, `FinancingReviewTaskStatus`. FK → `credit_applications` (CASCADE). RLS deny-all. |
 
 ## Post-deploy verification
 

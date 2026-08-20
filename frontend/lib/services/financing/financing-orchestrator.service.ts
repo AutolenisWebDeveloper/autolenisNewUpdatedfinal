@@ -15,6 +15,7 @@ import type { CreditApplicationSubmission } from "./lender/types";
 import { requireRuleOrFailClosed } from "./compliance-rule.service";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { appendFinancingAuditEvent } from "./financing-audit.service";
+import { routeToReview } from "./review-queue.service";
 
 export interface LenderDecisionResult {
   applicationId: string;
@@ -59,6 +60,7 @@ export async function requestLenderDecision(
 
   if (!result.ok) {
     await advanceApplication(appId, "HUMAN_REVIEW", { actorType: "SYSTEM", reason: `lender call failed: ${result.error.code}` });
+    await routeToReview({ ...ctx, taskType: "LENDER_FAILURE_REVIEW", reason: `lender call failed: ${result.error.code}` });
     return { applicationId: appId, finalStatus: "HUMAN_REVIEW", dealAdvanced: false };
   }
 
@@ -132,6 +134,7 @@ export async function requestLenderDecision(
     }
     case "CONDITIONAL": {
       await advanceApplication(appId, "CONDITIONAL", { actorType: "SYSTEM", data: decisionData });
+      await routeToReview({ ...ctx, taskType: "STIP_REVIEW", reason: "conditional approval — clear stipulations" });
       return { applicationId: appId, finalStatus: "CONDITIONAL", decisionOutcome: "CONDITIONAL", dealAdvanced: false };
     }
     case "DECLINED": {
@@ -142,6 +145,7 @@ export async function requestLenderDecision(
       const rule = await requireRuleOrFailClosed("ADVERSE_ACTION_NOTICE", { ...ctx, actorType: "SYSTEM" });
       if (!rule.ok) {
         await advanceApplication(appId, "HUMAN_REVIEW", { actorType: "SYSTEM", reason: "adverse-action notice rule absent (fail-closed)" });
+        await routeToReview({ ...ctx, taskType: "ADVERSE_ACTION_REVIEW", reason: "decline needs an ECOA adverse-action notice, but no rule is injected (fail-closed)" });
         return { applicationId: appId, finalStatus: "HUMAN_REVIEW", decisionOutcome: "DECLINED", dealAdvanced: false, adverseAction: "BLOCKED_RULE_ABSENT" };
       }
       // Rule present → the notice is rendered from the injected template (Block 4/5
@@ -150,6 +154,7 @@ export async function requestLenderDecision(
     }
     default: {
       await advanceApplication(appId, "HUMAN_REVIEW", { actorType: "SYSTEM", reason: `lender outcome ${decision.outcome} needs human review` });
+      await routeToReview({ ...ctx, taskType: "MANUAL_DECISION_REVIEW", reason: `lender outcome ${decision.outcome} needs human review` });
       return { applicationId: appId, finalStatus: "HUMAN_REVIEW", decisionOutcome: decision.outcome, dealAdvanced: false };
     }
   }

@@ -5184,9 +5184,50 @@ model CreditApplication {
 
   deal                       Deal                    @relation(fields: [dealId], references: [id], onDelete: Cascade)
   buyer                      Buyer                   @relation(fields: [buyerId], references: [id])
+  reviewTasks                FinancingReviewTask[]
 
   @@index([dealId])
   @@index([buyerId, status])
   @@index([status])
   @@map("credit_applications")
+}
+
+// Phase 5 Block 4 — human-in-the-loop review queue. Phase 5 ADDS human review
+// where regulation requires it (stips, adverse actions, edge declines, lender
+// failures). Reuses the admin manual-review idiom. RLS deny-all. Additive.
+enum FinancingReviewTaskType {
+  STIP_REVIEW            // CONDITIONAL approval — a human clears lender stipulations
+  ADVERSE_ACTION_REVIEW // decline needing an ECOA notice (rule absent → human)
+  EDGE_DECLINE_REVIEW   // edge-case decline
+  LENDER_FAILURE_REVIEW // lender call failed / could not decide
+  MANUAL_DECISION_REVIEW// generic human decision (e.g. unexpected/PENDING outcome)
+}
+
+enum FinancingReviewTaskStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+model FinancingReviewTask {
+  id                  String                    @id @default(uuid())
+  creditApplicationId String                    @map("credit_application_id")
+  dealId              String?                   @map("deal_id")
+  buyerId             String?                   @map("buyer_id")
+  taskType            FinancingReviewTaskType   @map("task_type")
+  status              FinancingReviewTaskStatus @default(OPEN)
+  reason              String?
+  assignedAdminId     String?                   @map("assigned_admin_id")
+  resolution          String?
+  resolutionOutcome   String?                   @map("resolution_outcome")
+  resolvedBy          String?                   @map("resolved_by")
+  resolvedAt          DateTime?                 @map("resolved_at")
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+
+  creditApplication   CreditApplication         @relation(fields: [creditApplicationId], references: [id], onDelete: Cascade)
+
+  @@index([status, taskType])
+  @@index([creditApplicationId])
+  @@map("financing_review_tasks")
 }
