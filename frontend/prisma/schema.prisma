@@ -75,6 +75,7 @@ model Buyer {
   shortlists         Shortlist?
   vehicleRequests       VehicleRequest[]
   externalPreApprovals  ExternalPreApproval[]
+  creditApplications    CreditApplication[] // Phase 5 — lender decisioning applications
   tradeInSubmissions    TradeInSubmission[]
   financingScenarios    FinancingScenario[]
   insuranceQuotes       InsuranceQuote[]
@@ -591,6 +592,7 @@ model Deal {
   eSignEnvelope         ESignEnvelope?
   pickup                Pickup?
   financing             Financing?
+  creditApplications    CreditApplication[] // Phase 5 — lender decisioning applications
   contractVersions      ContractVersion[]
   notes                 DealNote[]
 
@@ -5039,4 +5041,152 @@ model CompetitorInsight {
 
   @@index([weekOf])
   @@map("competitor_insights")
+}
+
+// ============================================================================
+// PHASE 5 — Financing / Lender Decisioning
+// Block 1: rule-injection layer + tamper-evident audit trail.
+// THE HARD RULE: no regulatory content is authored in code. Every regulated
+// point is a ComplianceRule row — EMPTY BY DEFAULT — injected later from a
+// qualified compliance source. The engine enforces whatever it is given; when
+// no ACTIVE, populated rule exists for a type, callers FAIL CLOSED.
+// ============================================================================
+
+enum ComplianceRuleType {
+  ADVERSE_ACTION_TRIGGER   // which decision outcomes require an ECOA adverse-action notice
+  ADVERSE_ACTION_NOTICE    // ECOA / Reg B adverse-action notice content + reason codes
+  TILA_DISCLOSURE          // Truth-in-Lending disclosure content + timing
+  FCRA_CONSENT             // FCRA consent language + gating
+  FCRA_RETENTION           // FCRA / ECOA record-retention periods
+  FAIR_LENDING_BOUNDARY    // fair-lending decisioning boundaries / prohibited bases
+}
+
+enum ComplianceRuleStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+model ComplianceRule {
+  id           String               @id @default(uuid())
+  ruleType     ComplianceRuleType   @map("rule_type")
+  version      Int                  @default(1)
+  status       ComplianceRuleStatus @default(DRAFT)
+  // INJECTED rule payload — EMPTY BY DEFAULT (null). Populated later from a
+  // qualified compliance source. No ACTIVE+populated rule ⇒ callers fail closed.
+  content      Json?
+  // Notice/disclosure template slot (adverse-action, TILA). Empty by default.
+  templateBody String?              @db.Text @map("template_body")
+  source       String?              // provenance of the injected content
+  effectiveAt  DateTime?            @map("effective_at")
+  createdBy    String?              @map("created_by")
+  activatedBy  String?              @map("activated_by")
+  activatedAt  DateTime?            @map("activated_at")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+
+  @@unique([ruleType, version])
+  @@index([ruleType, status])
+  @@map("compliance_rules")
+  // NOTE: a partial-unique index (one ACTIVE row per rule_type) is added in the
+  // migration — Prisma cannot express a partial unique.
+}
+
+enum FinancingAuditActorType {
+  SYSTEM
+  ADMIN
+  BUYER
+  LENDER
+}
+
+enum FinancingAuditEventType {
+  APPLICATION_SUBMITTED
+  ADAPTER_CALL
+  DECISION_RENDERED
+  NOTICE_GENERATED
+  NOTICE_SENT
+  RULE_APPLIED
+  RULE_ABSENT_FAIL_CLOSED
+  HUMAN_OVERRIDE
+  STATE_TRANSITION
+  REVIEW_ROUTED
+  REVIEW_RESOLVED
+}
+
+model FinancingAuditEvent {
+  id                  String                  @id @default(uuid())
+  // Monotonic sequence over the whole financing audit chain, assigned under a
+  // serialized append so the hash chain never forks or gaps.
+  sequence            Int                     @unique
+  eventType           FinancingAuditEventType @map("event_type")
+  actorType           FinancingAuditActorType @map("actor_type")
+  actorId             String?                 @map("actor_id")
+  creditApplicationId String?                 @map("credit_application_id")
+  dealId              String?                 @map("deal_id")
+  buyerId             String?                 @map("buyer_id")
+  ruleId              String?                 @map("rule_id")   // which ComplianceRule governed this event
+  payload             Json
+  // Tamper-evident chain: hash = sha256(prevHash|sequence|eventType|actorType|
+  // canonical(payload)|ruleId); prevHash = previous row's hash.
+  prevHash            String?                 @map("prev_hash")
+  hash                String
+  createdAt           DateTime                @default(now()) @map("created_at")
+
+  @@index([creditApplicationId])
+  @@index([dealId])
+  @@index([eventType])
+  @@map("financing_audit_events")
+}
+
+// Phase 5 Block 3 — credit application (lender decisioning) lifecycle. A NEW
+// guarded state machine that lives inside the Deal's FINANCING_PENDING window and
+// feeds the existing Financing outcome; it does NOT add DealStatus values. PII
+// (SSN/income/employment/DOB) is stored AES-256-GCM encrypted (field-encryption.ts),
+// never plaintext. RLS deny-all (server-only). Additive/nullable-first.
+enum CreditApplicationStatus {
+  DRAFT
+  SUBMITTED
+  PENDING_LENDER
+  CONDITIONAL              // approved with stipulations (needs human review)
+  APPROVED                 // terminal positive
+  DECLINED                 // terminal negative
+  ADVERSE_ACTION_PENDING   // decline needs an ECOA notice — fail-closed until rule injected
+  HUMAN_REVIEW             // routed to a human
+  WITHDRAWN
+}
+
+model CreditApplication {
+  id                         String                  @id @default(uuid())
+  dealId                     String                  @map("deal_id")
+  buyerId                    String                  @map("buyer_id")
+  status                     CreditApplicationStatus @default(DRAFT)
+  financingPath              FinancingPath           @default(DEALER) @map("financing_path")
+  amountRequestedCents       Int?                    @map("amount_requested_cents")
+  termMonths                 Int?                    @map("term_months")
+  // ENCRYPTED PII at rest (AES-256-GCM). Never plaintext, never logged.
+  ssnEncrypted               String?                 @map("ssn_encrypted")
+  annualIncomeEncrypted      String?                 @map("annual_income_encrypted")
+  employmentEncrypted        String?                 @map("employment_encrypted")
+  dobEncrypted               String?                 @map("dob_encrypted")
+  // Lender decision snapshot (non-PII data returned by the lender adapter).
+  lenderName                 String?                 @map("lender_name")
+  lenderReferenceId          String?                 @map("lender_reference_id")
+  decisionOutcome            String?                 @map("decision_outcome")
+  approvedAmountCents        Int?                    @map("approved_amount_cents")
+  aprRate                    Float?                  @map("apr_rate")
+  monthlyPaymentCents        Int?                    @map("monthly_payment_cents")
+  stipulations               Json?
+  declineReasonCodes         Json?                   @map("decline_reason_codes")
+  submittedAt                DateTime?               @map("submitted_at")
+  decidedAt                  DateTime?               @map("decided_at")
+  createdAt                  DateTime                @default(now()) @map("created_at")
+  updatedAt                  DateTime                @updatedAt @map("updated_at")
+
+  deal                       Deal                    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  buyer                      Buyer                   @relation(fields: [buyerId], references: [id])
+
+  @@index([dealId])
+  @@index([buyerId, status])
+  @@index([status])
+  @@map("credit_applications")
 }
