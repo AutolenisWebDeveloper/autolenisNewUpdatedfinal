@@ -159,6 +159,28 @@ test("OFAC present but UNRECOGNIZED value (not Y/N) ⇒ indeterminate (null), fa
   assert.equal(res.ofacFlagged, null, "an unrecognized present value alongside an N is still indeterminate");
 });
 
+test("mlaCovered is honest: absent MLA data ⇒ null (indeterminate), present N ⇒ false, present Y ⇒ true", async () => {
+  // Absent (no MLA block) — the successBody omits MLA unless provided.
+  const absent = await callWith(successBody({ ofac: { ofacresult: "N" }, idv: { OFACAlert: "N" } }));
+  assert.equal(absent.mlaCovered, null, "absent MLA data must not assert 'not covered'");
+  // Present + covered.
+  const covered = await callWith({
+    RESPONSE: {
+      STATUS: { type: "SUCCESS", action: "DONE" },
+      CONTENT: {
+        DECISION: { decision: { code: "A", Value: "APPROVED" }, recommendedLoanAmount: "42000.00", maxLoanAmount: "50000.00", SCORES: [{ Value: "712" }], REASONS: [] },
+        SERVICEDETAILS: { IDV: { OFACAlert: "N" }, OFAC: { ofacresult: "N" }, MLA: { STATUS: { Value: "Y" } } },
+      },
+    },
+  });
+  assert.equal(covered.mlaCovered, true);
+});
+
+test("high-risk address signal is parsed from IDV (no longer indeterminate-only)", async () => {
+  const res = await callWith(successBody({ ofac: { ofacresult: "N" }, idv: { OFACAlert: "N", suspiciousAddress: "Y" } }));
+  assert.equal(res.highRiskAddressFlag, true);
+});
+
 test("DECLINED response maps to DECLINED with FCRA reason codes + zero budget", async () => {
   const res = await callWith(
     successBody({

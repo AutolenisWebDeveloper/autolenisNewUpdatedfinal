@@ -175,6 +175,12 @@ test("MLA covered borrower ⇒ MANUAL_REVIEW", async () => {
   assert.equal(cap.upserts[0]!.decision, "MANUAL_REVIEW");
 });
 
+test("High-risk / suspicious address ⇒ MANUAL_REVIEW (fraud signal no longer discarded)", async () => {
+  await run({ decision: PreQualDecision.APPROVED, ofacFlagged: false, highRiskAddressFlag: true });
+  assert.equal(cap.upserts[0]!.decision, "MANUAL_REVIEW", "a flagged address routes to a human, not an auto-approve");
+  assert.equal(cap.approvedEmails, 0);
+});
+
 test("Credit-DECLINED with INDETERMINATE OFAC ⇒ stays DECLINED (Gate 1b is scoped to APPROVED)", async () => {
   await run({ decision: PreQualDecision.DECLINED, ofacFlagged: null, maxOtdAmountCents: 0, tier: null, adverseReasonCodes: ["038"] });
   const persisted = cap.upserts[0]!;

@@ -597,13 +597,21 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   const idvScoreParsed = idv?.score ? parseInt(idv.score, 10) : NaN;
   const idvScore = Number.isFinite(idvScoreParsed) ? idvScoreParsed : null;
 
-  // MLA Verify covered-borrower status — check both spec locations.
+  // MLA Verify covered-borrower status — check both spec locations. Honest
+  // tri-state: an ABSENT status is null (indeterminate), NOT false — we must not
+  // assert "not a covered borrower" when MLA was never screened (same failure
+  // class as the OFAC gate). NOTE: the fail-closed *gate* on an indeterminate MLA
+  // is intentionally deferred until a live iPredict Advantage pull confirms
+  // whether MLA Verify is bundled in the response (else every approval would be
+  // routed to review). Today Gate 3 keys on `=== true`, so null is a no-op.
   const mlaStatus =
     content?.SERVICEDETAILS?.MLA?.STATUS?.Value ?? content?.MLA?.STATUS?.Value ?? null;
   const mlaCovered =
-    mlaStatus === "Y" ||
-    (mlaStatus?.toUpperCase().includes("ACTIVE") ?? false) ||
-    mlaStatus?.toUpperCase() === "COVERED";
+    mlaStatus == null
+      ? null
+      : mlaStatus === "Y" ||
+        mlaStatus.toUpperCase().includes("ACTIVE") ||
+        mlaStatus.toUpperCase() === "COVERED";
 
   // Additional risk flags from IDV
   const deceasedFlag = idv?.deceasedIndicator === "Y";

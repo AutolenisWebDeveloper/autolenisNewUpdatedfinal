@@ -303,6 +303,13 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     finalDecision = PreQualDecision.MANUAL_REVIEW;
     logger.warn(`[prequal] Fraud warning ${result.fraudWarning} for buyer ${buyer.id}`);
   }
+  // Gate 5: High-risk / suspicious address (IDV) → manual review. This IDV
+  // fraud/identity signal was previously parsed but discarded; a flagged address
+  // now routes to a human instead of flowing through to an auto-approval.
+  else if (result.highRiskAddressFlag) {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    logger.warn(`[prequal] High-risk/suspicious address for buyer ${buyer.id} — manual review`);
+  }
 
   // ── maxOtdAmountCents assignment ───────────────────────────────────────────
   // Only set on APPROVED. callIPredict already applies the two-gate minimum

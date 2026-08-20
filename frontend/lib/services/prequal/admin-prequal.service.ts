@@ -465,6 +465,13 @@ export async function runAdminIPredictPrequalForBuyer(
     finalDecision = PreQualDecision.MANUAL_REVIEW;
     logger.warn(`[admin-prequal] Fraud warning ${result.fraudWarning} for buyer ${buyerId}`);
   }
+  // Gate 5: High-risk / suspicious address (IDV) → manual review. Mirrors the
+  // buyer path — this fraud/identity signal was parsed but discarded; a flagged
+  // address now routes to a human instead of an auto-approval.
+  else if (result.highRiskAddressFlag) {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    logger.warn(`[admin-prequal] High-risk/suspicious address for buyer ${buyerId} — manual review`);
+  }
 
   // ── maxOtdAmountCents — two-gate minimum already applied by callIPredict ────
   const maxOtdAmountCents =

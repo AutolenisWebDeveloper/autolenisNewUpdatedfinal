@@ -140,3 +140,10 @@ test("admin path: OFAC hit (true) ⇒ OFAC_REVIEW + ops notification, no budget"
   assert.equal(persisted.maxOtdAmountCents, 0);
   assert.ok(cap.notifications.some((n) => String(n.title).includes("OFAC")));
 });
+
+test("admin path: high-risk / suspicious address ⇒ MANUAL_REVIEW (fraud signal used, both pipelines)", async () => {
+  await run({ decision: PreQualDecision.APPROVED, ofacFlagged: false, highRiskAddressFlag: true });
+  const persisted = cap.upserts[0]!;
+  assert.equal(persisted.decision, "MANUAL_REVIEW");
+  assert.equal(persisted.maxOtdAmountCents, 0);
+});
