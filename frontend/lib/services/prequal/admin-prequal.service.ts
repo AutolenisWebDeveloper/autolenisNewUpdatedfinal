@@ -429,6 +429,19 @@ export async function runAdminIPredictPrequalForBuyer(
       })
       .catch(() => {});
   }
+  // Gate 1b: OFAC INDETERMINATE — the response carried no (or no recognizable)
+  // OFAC screening data (ofacFlagged === null). Fail-closed, identical to the
+  // buyer path: a would-be APPROVED with unknown OFAC is downgraded to
+  // MANUAL_REVIEW so an approval is only ever issued on an affirmative clear.
+  // No checkOfacAlert is set (missing data, not a positive hit); provider-error
+  // results (already MANUAL_REVIEW, null) are unaffected by the APPROVED scope.
+  else if (result.ofacFlagged == null && result.decision === PreQualDecision.APPROVED) {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    logger.warn(
+      `[admin-prequal] OFAC screening data missing on an APPROVED result for buyer ${buyerId} — ` +
+        `routing to MANUAL_REVIEW (never approve without an affirmative OFAC clear).`,
+    );
+  }
   // Gate 2: Deceased indicator → manual review.
   else if (result.deceasedFlag) {
     finalDecision = PreQualDecision.MANUAL_REVIEW;
@@ -451,6 +464,13 @@ export async function runAdminIPredictPrequalForBuyer(
   else if (result.fraudWarning && result.fraudWarning !== "N" && result.fraudWarning !== "") {
     finalDecision = PreQualDecision.MANUAL_REVIEW;
     logger.warn(`[admin-prequal] Fraud warning ${result.fraudWarning} for buyer ${buyerId}`);
+  }
+  // Gate 5: High-risk / suspicious address (IDV) → manual review. Mirrors the
+  // buyer path — this fraud/identity signal was parsed but discarded; a flagged
+  // address now routes to a human instead of an auto-approval.
+  else if (result.highRiskAddressFlag) {
+    finalDecision = PreQualDecision.MANUAL_REVIEW;
+    logger.warn(`[admin-prequal] High-risk/suspicious address for buyer ${buyerId} — manual review`);
   }
 
   // ── maxOtdAmountCents — two-gate minimum already applied by callIPredict ────

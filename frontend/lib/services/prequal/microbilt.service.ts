@@ -284,6 +284,31 @@ function errorResult(reason: string): IPredicResult {
   };
 }
 
+// Tri-state OFAC screening result. Returns:
+//   true  — a sanctions hit (either signal is exactly "Y")
+//   false — screening ran and AFFIRMATIVELY cleared (a signal is exactly "N")
+//   null  — indeterminate: no signal returned, OR a signal we do not recognize
+//           as either a hit or a clear (e.g. "HIT" / "R" / "P" / "1" / "")
+// Fail-closed: we only assert "cleared" on an explicit "N". Any other present
+// value is treated as indeterminate (→ manual review) rather than a clear, so an
+// unexpected provider token can never flow through to an approval. A "Y" on
+// either signal is always a hit even if the other says "N".
+export function computeOfacFlag(
+  idvAlert: string | undefined | null,
+  ofacResult: string | undefined | null,
+): boolean | null {
+  const idvUp = idvAlert?.trim().toUpperCase();
+  const ofacUp = ofacResult?.trim().toUpperCase();
+  // A hit on either signal wins outright.
+  if (idvUp === "Y" || ofacUp === "Y") return true;
+  // Of the signals actually returned, clear ONLY if EVERY one is an explicit
+  // "N". No signal at all, or any unrecognized token (even alongside an "N"),
+  // is indeterminate → manual review.
+  const present = [idvUp, ofacUp].filter((v): v is string => v !== undefined && v !== "");
+  if (present.length > 0 && present.every((v) => v === "N")) return false;
+  return null;
+}
+
 // Map iPredict decision code/value to canonical decision
 function mapDecision(code: string | undefined, value: string | undefined): PreQualDecision {
   const v = (value ?? code ?? "").toString().toUpperCase();
@@ -443,7 +468,10 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
       maxOtdAmountCents:          0,
       recommendedLoanAmountCents: null,
       maxLoanAmountCents:         null,
-      ofacFlagged:                false,
+      // OFAC was NEVER screened here — the income gate declined before the
+      // MicroBilt call. null (indeterminate) honors the tri-state contract; we
+      // must not assert "screened & cleared" for a bureau call that never ran.
+      ofacFlagged:                null,
       expiresAt:                  new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       rawResponse: encryptRawResponse(
         JSON.stringify({ declined: true, reason: "INCOME_BELOW_MINIMUM" })
@@ -505,8 +533,21 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
 
   const raw = (await res.json().catch(() => ({}))) as IPredictResponse;
 
-  if (raw.RESPONSE?.STATUS?.type === "ERROR") {
-    logger.error("[microbilt] iPredict returned ERROR:", raw.RESPONSE?.STATUS);
+  // Detect ALL of iPredict's error shapes, not just RESPONSE.STATUS.type. A
+  // response can signal failure via the message header severity, a RESPONSE
+  // error object/code, or an action of "RESEND" (request must be resent). Any of
+  // these means we did NOT get a usable decision — route to MANUAL_REVIEW with a
+  // provider-error reason (which drives the admin alert) rather than silently
+  // parsing an empty CONTENT into a plain review.
+  const statusNode = raw.RESPONSE?.STATUS;
+  const isIpredictError =
+    statusNode?.type === "ERROR" ||
+    !!statusNode?.error?.code ||
+    !!statusNode?.error?.message ||
+    statusNode?.action === "RESEND" ||
+    raw.MsgRsHdr?.Status?.Severity === "Error";
+  if (isIpredictError) {
+    logger.error("[microbilt] iPredict returned ERROR:", statusNode ?? raw.MsgRsHdr?.Status);
     return { ...errorResult("IPREDICT_ERROR"), rawResponse: encryptRawResponse(JSON.stringify(raw)) };
   }
 
@@ -528,7 +569,12 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
     ? Math.round(parseFloat(decisionNode.maxLoanAmount) * 100)
     : null;
 
-  const ofacFlagged = idv?.OFACAlert === "Y" || ofac?.ofacresult === "Y";
+  // OFAC is a HARD, fail-closed gate. Distinguish three states, never collapsing
+  // "no data" into "cleared": a hit (Y) → true; an explicit screening result
+  // that is not a hit → false (screened & cleared); NEITHER signal present →
+  // null (indeterminate). The orchestrator routes a null to manual review so an
+  // approval can never be issued without an affirmative OFAC clear.
+  const ofacFlagged = computeOfacFlag(idv?.OFACAlert, ofac?.ofacresult);
   const decision    = mapDecision(decisionCode, decisionValue);
 
   // ── Credit score from SCORES array — spec: DECISION.SCORES[].Value ─────────
@@ -551,13 +597,21 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   const idvScoreParsed = idv?.score ? parseInt(idv.score, 10) : NaN;
   const idvScore = Number.isFinite(idvScoreParsed) ? idvScoreParsed : null;
 
-  // MLA Verify covered-borrower status — check both spec locations.
+  // MLA Verify covered-borrower status — check both spec locations. Honest
+  // tri-state: an ABSENT status is null (indeterminate), NOT false — we must not
+  // assert "not a covered borrower" when MLA was never screened (same failure
+  // class as the OFAC gate). NOTE: the fail-closed *gate* on an indeterminate MLA
+  // is intentionally deferred until a live iPredict Advantage pull confirms
+  // whether MLA Verify is bundled in the response (else every approval would be
+  // routed to review). Today Gate 3 keys on `=== true`, so null is a no-op.
   const mlaStatus =
     content?.SERVICEDETAILS?.MLA?.STATUS?.Value ?? content?.MLA?.STATUS?.Value ?? null;
   const mlaCovered =
-    mlaStatus === "Y" ||
-    (mlaStatus?.toUpperCase().includes("ACTIVE") ?? false) ||
-    mlaStatus?.toUpperCase() === "COVERED";
+    mlaStatus == null
+      ? null
+      : mlaStatus === "Y" ||
+        mlaStatus.toUpperCase().includes("ACTIVE") ||
+        mlaStatus.toUpperCase() === "COVERED";
 
   // Additional risk flags from IDV
   const deceasedFlag = idv?.deceasedIndicator === "Y";
