@@ -4,7 +4,7 @@ export const metadata: Metadata = { title: "Documents" };
 
 import { requireBuyer } from "@/lib/auth/session";
 import { getBuyerDocuments } from "@/lib/services/documents/document.service";
-import { FolderOpen, FileText, CheckCircle2 } from "lucide-react";
+import { FolderOpen, FileText, CheckCircle2, ExternalLink } from "lucide-react";
 import DocumentUploadButton from "@/components/buyer/DocumentUploadButton";
 export const dynamic = "force-dynamic";
 export default async function DocumentsPage() {
@@ -20,10 +20,21 @@ export default async function DocumentsPage() {
         <div className="text-center py-16 bg-white border border-slate-200 rounded-xl" data-testid="no-documents"><FolderOpen size={32} className="text-slate-200 mx-auto mb-3" /><p className="text-slate-500 text-sm">No documents yet. Deal documents and contracts will appear here.</p></div>
       ) : (
         <div className="space-y-2">{documents.map((doc, i) => (
-          <div key={doc.id} data-testid={`document-${i}`} className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4">
+          <a
+            key={doc.id}
+            href={doc.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open ${doc.name}`}
+            data-testid={`document-${i}`}
+            className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4 hover:border-al-primary/40 hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus"
+          >
             <div className="flex items-center gap-3"><FileText size={18} className="text-slate-400" /><div><p className="font-semibold text-slate-800 text-sm">{doc.name}</p><p className="text-xs text-slate-400">{doc.type.replace(/_/g, " ")} · {doc.uploadedAt.toLocaleDateString()}</p></div></div>
-            {doc.isVerified && <CheckCircle2 size={16} className="text-green-500" />}
-          </div>
+            <div className="flex items-center gap-3 shrink-0">
+              {doc.isVerified && <CheckCircle2 size={16} className="text-green-500" aria-label="Verified" />}
+              <ExternalLink size={15} className="text-slate-400" aria-hidden="true" />
+            </div>
+          </a>
         ))}</div>
       )}
     </div>
