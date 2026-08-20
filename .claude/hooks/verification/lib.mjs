@@ -37,13 +37,13 @@ const CHECKS = [
     id: 'test:coverage-check', cmd: 'pnpm test:coverage-check', when: () => true,
     why: 'no test file unreachable from a test:* script',
   },
-  // `test:all` is the repo's gate and chains all 18 unit suites, so the
+  // `test:all` is the repo's gate and chains all 26 unit suites, so the
   // per-domain suites are deliberately not listed separately — requiring both
   // would duplicate the gate rather than extend it. Visual and build are not in
   // `test:all`, so they stay conditional below.
   {
     id: 'test:all', cmd: 'pnpm test:all', when: () => true,
-    why: 'full 18-suite matrix — `pnpm test` alone is ~a third of it',
+    why: 'full 26-suite matrix — `pnpm test` alone is ~a third of it',
   },
   {
     id: 'test:visual', cmd: 'pnpm test:visual', why: 'public UI visual regression',

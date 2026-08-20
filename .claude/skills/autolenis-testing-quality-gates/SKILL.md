@@ -47,7 +47,7 @@ Runner: **`node:test` via `tsx`** (not Jest/Vitest). Visual: **Playwright**
   `test:crm-audit`, `test:seo`, `test:crm`, `test:dealer`, `test:amips`,
   `test:admin-deals` — targeted suites (several use
   `--experimental-test-module-mocks` for module mocking).
-- **`test:all` — the aggregate gate.** Runs all 18 suites (315 assertions as of
+- **`test:all` — the aggregate gate.** Runs all 26 suites (315 assertions as of
   2026-08). `pnpm test` alone is roughly a third of the matrix; a readiness
   claim based on it is incomplete.
 - **`test:coverage-check`** — `scripts/check-test-coverage.ts`. Fails if any
