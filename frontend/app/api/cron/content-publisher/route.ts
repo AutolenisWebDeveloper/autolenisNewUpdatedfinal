@@ -7,6 +7,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { publishDueScheduled } from "@/lib/services/content/content-publishing.service";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export const maxDuration = 300;
 
@@ -20,7 +21,8 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  const summary = await publishDueScheduled(MAX_PER_RUN);
-  logger.info("[content-publisher]", JSON.stringify(summary));
-  return NextResponse.json({ success: true, data: summary });
+  const run = await withCronRun("content-publisher", () => publishDueScheduled(MAX_PER_RUN));
+  if (!run.ok) return NextResponse.json({ success: false, error: "content-publisher_failed" }, { status: 500 });
+  logger.info("[content-publisher]", JSON.stringify(run.result));
+  return NextResponse.json({ success: true, data: run.result });
 }

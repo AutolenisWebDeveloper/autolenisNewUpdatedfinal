@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { generateAndSaveBriefing } from "@/lib/services/admin/morning-briefing.service";
 import { prisma } from "@/lib/prisma";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const run = await withCronRun("morning-briefing", async () => {
   const content = await generateAndSaveBriefing(admin.id, admin.role);
 
   // Direct Resend send — non-blocking.
@@ -49,5 +51,9 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true, data: { emailedTo: adminEmail } });
+  return { emailedTo: adminEmail };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "morning-briefing_failed" }, { status: 500 });
+
+  return NextResponse.json({ success: true, data: run.result });
 }

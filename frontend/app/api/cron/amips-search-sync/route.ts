@@ -12,6 +12,7 @@ import {
   mondayOf,
 } from "@/lib/amips/pipelines/search-intelligence.pipeline";
 import { reprioritizeContentQueue } from "@/lib/amips/seed/content-queue.seed";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +39,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const run = await withCronRun("amips-search-sync", async () => {
   const search = await syncSearchIntelligence(siteUrl, weekOf);
   const reprioritized = await reprioritizeContentQueue();
 
@@ -45,12 +47,16 @@ export async function GET(request: NextRequest) {
     `[amips-cron] search-sync — synced ${search.synced}, reprioritized ${reprioritized.reprioritized} (${reprioritized.mode})`,
   );
 
+  return {
+    weekOf: weekOf.toISOString().slice(0, 10),
+    synced: search.synced,
+    reprioritized,
+  };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "amips-search-sync_failed" }, { status: 500 });
+
   return NextResponse.json({
     success: true,
-    data: {
-      weekOf: weekOf.toISOString().slice(0, 10),
-      synced: search.synced,
-      reprioritized,
-    },
+    data: run.result,
   });
 }

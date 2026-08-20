@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { runNudgeEngine } from "@/lib/services/nudge/nudge.service";
 import { updateAllDealRisks } from "@/lib/services/deal/deal-risk.service";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get(CRON_AUTH_HEADER);
@@ -15,10 +16,15 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("workflow-automation", async () => {
   const [nudged, risksUpdated] = await Promise.all([
     runNudgeEngine().catch(e => { logger.error("Nudge engine error:", e); return 0; }),
     updateAllDealRisks().catch(e => { logger.error("Risk update error:", e); return 0; }),
   ]);
 
-  return NextResponse.json({ success: true, data: { nudged, risksUpdated, timestamp: new Date().toISOString() } });
+  return { nudged, risksUpdated };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "workflow-automation_failed" }, { status: 500 });
+
+  return NextResponse.json({ success: true, data: { ...run.result, timestamp: new Date().toISOString() } });
 }

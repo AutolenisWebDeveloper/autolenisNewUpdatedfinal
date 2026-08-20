@@ -8,6 +8,7 @@
 // schedule pointing at it stays valid without moving money.
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get(CRON_AUTH_HEADER);
@@ -17,9 +18,13 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  // No automatic refunds are initiated. Deposits remain charged.
+  const run = await withCronRun("holds", async () => {
+    // No automatic refunds are initiated. Deposits remain charged.
+    return { released: 0, autoRefundsDisabled: true };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "holds_failed" }, { status: 500 });
   return NextResponse.json({
     success: true,
-    data: { released: 0, autoRefundsDisabled: true, timestamp: new Date().toISOString() },
+    data: { ...run.result, timestamp: new Date().toISOString() },
   });
 }

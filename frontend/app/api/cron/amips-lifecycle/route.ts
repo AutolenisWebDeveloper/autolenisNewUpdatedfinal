@@ -7,6 +7,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { runLifecycleReview } from "@/lib/amips/lifecycle-manager";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,9 +21,14 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("amips-lifecycle", async () => {
   const result = await runLifecycleReview();
   logger.info(
     `[amips-cron] lifecycle — refresh ${result.flaggedForRefresh}, review ${result.flaggedForReview}, retired ${result.retired}`,
   );
-  return NextResponse.json({ success: true, data: result });
+  return result;
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "amips-lifecycle_failed" }, { status: 500 });
+
+  return NextResponse.json({ success: true, data: run.result });
 }

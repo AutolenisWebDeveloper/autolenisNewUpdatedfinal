@@ -5,6 +5,7 @@
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 import { prisma } from "@/lib/prisma";
 import { scanForTopicSignals } from "@/lib/social/topic-signal.engine";
 
@@ -18,6 +19,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("social-signal-scan", async () => {
   // The core scan is the primary work; a throw here must not abort the whole
   // run (and skip the trending block below) with an unhandled 500. Degrade to
   // zero signals and let the trending pass still run.
@@ -117,5 +119,10 @@ export async function GET(request: NextRequest) {
     timestamp: new Date().toISOString(),
   };
   logger.info("[social-signal-scan]", JSON.stringify(summary));
-  return NextResponse.json({ success: true, data: summary });
+  return summary;
+  });
+  if (!run.ok) {
+    return NextResponse.json({ success: false, error: "social-signal-scan_failed" }, { status: 500 });
+  }
+  return NextResponse.json({ success: true, data: run.result });
 }

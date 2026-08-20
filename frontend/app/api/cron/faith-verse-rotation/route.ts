@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX, FAITH_VERSE_ENABLED_PAGES, FAITH_VERSE_ROTATION_WEEKS } from "@/lib/constants";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 // Cron: /api/cron/faith-verse-rotation — Schedule: 1 6 * * 1 (Monday 12:01 AM CST)
 // Rotates the NKJV verse assigned to each of the 9 enabled pages
@@ -16,6 +17,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("faith-verse-rotation", async () => {
   const now = new Date();
   const rotated: string[] = [];
   const skipped: string[] = [];
@@ -87,14 +89,18 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  return {
+    rotated: rotated.length,
+    skipped: skipped.length,
+    assignments: rotated,
+    executedAt: now.toISOString(),
+  };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "faith-verse-rotation_failed" }, { status: 500 });
+
   return NextResponse.json({
     success: true,
-    data: {
-      rotated: rotated.length,
-      skipped: skipped.length,
-      assignments: rotated,
-      executedAt: now.toISOString(),
-    },
+    data: run.result,
   });
 }
 

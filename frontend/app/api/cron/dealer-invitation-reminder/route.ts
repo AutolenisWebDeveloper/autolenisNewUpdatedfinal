@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { sendDealerAuctionReminderEmail } from "@/lib/services/email/resend.service";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -25,6 +26,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("dealer-invitation-reminder", async () => {
   const now = new Date();
   const windowStart = new Date(now.getTime() + REMINDER_WINDOW_START_HOURS * 3600_000);
   const windowEnd = new Date(now.getTime() + REMINDER_WINDOW_END_HOURS * 3600_000);
@@ -115,15 +117,19 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  return {
+    now: now.toISOString(),
+    auctionsInWindow: auctions.length,
+    remindersAttempted,
+    remindersSent,
+    remindersSkipped,
+    errors,
+  };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "dealer-invitation-reminder_failed" }, { status: 500 });
+
   return NextResponse.json({
     success: true,
-    data: {
-      now: now.toISOString(),
-      auctionsInWindow: auctions.length,
-      remindersAttempted,
-      remindersSent,
-      remindersSkipped,
-      errors,
-    },
+    data: run.result,
   });
 }

@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 // OFAC SLA escalation — flag OFAC-marked prequals that have been waiting on
 // compliance for longer than the SLA window.
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
   const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
   if (!isVercelCron && !isValidSecret) return new NextResponse("Unauthorized", { status: 401 });
 
+  const run = await withCronRun("prequal-sla-escalation", async () => {
   const slaCutoff = new Date(Date.now() - OFAC_SLA_HOURS * 60 * 60 * 1000);
   const aged = await prisma.preQualification.count({
     where: {
@@ -58,5 +60,9 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true, data: { escalated: aged, paged } });
+  return { escalated: aged, paged };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "prequal-sla-escalation_failed" }, { status: 500 });
+
+  return NextResponse.json({ success: true, data: run.result });
 }

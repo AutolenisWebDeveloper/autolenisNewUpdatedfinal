@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 // Prequal stale-cleanup
 //
@@ -21,9 +22,13 @@ export async function GET(request: NextRequest) {
   const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
   if (!isVercelCron && !isValidSecret) return new NextResponse("Unauthorized", { status: 401 });
 
+  const run = await withCronRun("prequal-stale-cleanup", async () => {
   const expiredCount = await prisma.preQualification.count({
     where: { expiresAt: { lt: new Date() } },
   });
+  return { expiredCount };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "prequal-stale-cleanup_failed" }, { status: 500 });
 
-  return NextResponse.json({ success: true, data: { expiredCount } });
+  return NextResponse.json({ success: true, data: run.result });
 }

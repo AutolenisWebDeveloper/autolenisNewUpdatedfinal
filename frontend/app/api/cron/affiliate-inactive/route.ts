@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { dispatch } from "@/lib/qstash/dispatch";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 // Up to 500 affiliates × a couple of activity lookups each.
 export const maxDuration = 180;
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("affiliate-inactive", async () => {
   const cutoff = new Date(Date.now() - INACTIVITY_WINDOW_MS);
 
   const affiliates = await prisma.affiliate.findMany({
@@ -95,14 +97,20 @@ export async function GET(request: NextRequest) {
     skippedNoEmail,
   });
 
+  return {
+    scanned: affiliates.length,
+    dispatched,
+    skippedActive,
+    skippedAlreadyNudged,
+    skippedNoEmail,
+  };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "affiliate-inactive_failed" }, { status: 500 });
+
   return NextResponse.json({
     success: true,
     data: {
-      scanned: affiliates.length,
-      dispatched,
-      skippedActive,
-      skippedAlreadyNudged,
-      skippedNoEmail,
+      ...run.result,
       timestamp: new Date().toISOString(),
     },
   });

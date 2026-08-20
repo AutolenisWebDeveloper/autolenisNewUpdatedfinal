@@ -9,6 +9,7 @@
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 import { prisma } from "@/lib/prisma";
 import { generateAndQueuePost, getOptimalSlot } from "@/lib/social/social-post.orchestrator";
 import { DAILY_POST_TARGETS } from "@/lib/social/config";
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("social-generate", async () => {
   // 2. Count today's posts per platform so we only generate what's still missing.
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -53,11 +55,10 @@ export async function GET(request: NextRequest) {
 
   if (platformsNeedingPosts.length === 0) {
     logger.info("[social-generate] daily cap reached for all platforms");
-    return NextResponse.json({
-      success: true,
-      message: "Daily cap reached",
+    return {
+      capReached: true as const,
       counts: platformCounts,
-    });
+    };
   }
 
   logger.info(
@@ -187,5 +188,17 @@ export async function GET(request: NextRequest) {
     message: `Generated ${created} posts across platforms`,
   };
   logger.info("[social-generate]", JSON.stringify(summary));
-  return NextResponse.json(summary);
+  return { capReached: false as const, summary };
+  });
+  if (!run.ok) {
+    return NextResponse.json({ success: false, error: "social-generate_failed" }, { status: 500 });
+  }
+  if (run.result.capReached) {
+    return NextResponse.json({
+      success: true,
+      message: "Daily cap reached",
+      counts: run.result.counts,
+    });
+  }
+  return NextResponse.json(run.result.summary);
 }

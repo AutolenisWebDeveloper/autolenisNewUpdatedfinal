@@ -7,6 +7,7 @@
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 import { prisma } from "@/lib/prisma";
 
 export const maxDuration = 300;
@@ -31,6 +32,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("social-optimize", async () => {
   const since = new Date(Date.now() - LOOKBACK_MS);
   const rows = await prisma.socialPerformance.findMany({
     where: { recordedAt: { gte: since } },
@@ -468,5 +470,10 @@ export async function GET(request: NextRequest) {
     timestamp: new Date().toISOString(),
   };
   logger.info("[social-optimize]", JSON.stringify(summary));
-  return NextResponse.json({ success: true, data: summary });
+  return summary;
+  });
+  if (!run.ok) {
+    return NextResponse.json({ success: false, error: "social-optimize_failed" }, { status: 500 });
+  }
+  return NextResponse.json({ success: true, data: run.result });
 }

@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get(CRON_AUTH_HEADER);
@@ -11,12 +12,10 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("trust-check", async () => {
   // Check for anti-circumvention flags
   const flaggedMessages = await prisma.message.count({ where: { antiCircumventionFlag: { not: null }, isRedacted: true } });
   const flaggedThreads = await prisma.messageThread.count({ where: { status: "FLAGGED", flaggedAt: { gte: new Date(Date.now() - 24 * 3600000) } } });
-
-  // Refresh platform stats cache by updating latest snapshot
-  const latestSnapshot = await prisma.platformStatSnapshot.findFirst({ orderBy: { snapshotDate: "desc" } });
 
   if (flaggedThreads > 0) {
     await prisma.notification.create({
@@ -24,5 +23,9 @@ export async function GET(request: NextRequest) {
     }).catch(() => {});
   }
 
-  return NextResponse.json({ success: true, data: { flaggedMessages, flaggedThreads, timestamp: new Date().toISOString() } });
+  return { flaggedMessages, flaggedThreads };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "trust-check_failed" }, { status: 500 });
+
+  return NextResponse.json({ success: true, data: { ...run.result, timestamp: new Date().toISOString() } });
 }

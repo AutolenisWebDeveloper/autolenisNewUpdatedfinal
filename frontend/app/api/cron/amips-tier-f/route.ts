@@ -10,6 +10,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { runTierFThresholdMonitor } from "@/lib/amips/pipelines/tier-f-threshold.pipeline";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,9 +24,14 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("amips-tier-f", async () => {
   const result = await runTierFThresholdMonitor();
   logger.info(
     `[amips-cron] tier-f — over-threshold ${result.combosOverThreshold}, unlocked ${result.unlocked}, queued ${result.queueItemsSeeded}, aggregated ${result.aggregated}`,
   );
-  return NextResponse.json({ success: true, data: result });
+  return result;
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "amips-tier-f_failed" }, { status: 500 });
+
+  return NextResponse.json({ success: true, data: run.result });
 }

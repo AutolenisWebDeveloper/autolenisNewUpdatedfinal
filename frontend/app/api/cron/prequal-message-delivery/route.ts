@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get(CRON_AUTH_HEADER);
   const isVercelCron = request.headers.get("x-vercel-cron") === "1";
   const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
   if (!isVercelCron && !isValidSecret) return new NextResponse("Unauthorized", { status: 401 });
+
+  const run = await withCronRun("prequal-message-delivery", async () => {
   // Process queued prequal decision notifications
   const pending = await prisma.preQualification.findMany({ where: { decision: "APPROVED", updatedAt: { gte: new Date(Date.now() - 4 * 3600000) } }, include: { buyer: true }, take: 50 });
   for (const pq of pending) {
@@ -15,5 +18,9 @@ export async function GET(request: NextRequest) {
       await prisma.notification.create({ data: { buyerId: pq.buyerId, type: "PREQUAL_APPROVED", title: "Pre-qualification approved", body: `Your approved budget is $${(pq.maxOtdAmountCents / 100).toLocaleString()}.`, actionUrl: "/buyer/prequal" } }).catch(() => {});
     }
   }
-  return NextResponse.json({ success: true, data: { delivered: pending.length } });
+  return { delivered: pending.length };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "prequal-message-delivery_failed" }, { status: 500 });
+
+  return NextResponse.json({ success: true, data: run.result });
 }

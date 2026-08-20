@@ -5,6 +5,7 @@
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 import { prisma } from "@/lib/prisma";
 import { getPublishingProvider } from "@/lib/social/providers/publishing.factory";
 
@@ -20,6 +21,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("social-status-sync", async () => {
   const provider = getPublishingProvider();
   const since = new Date(Date.now() - LOOKBACK_MS);
 
@@ -55,5 +57,10 @@ export async function GET(request: NextRequest) {
 
   const summary = { considered: posts.length, synced, transitioned, timestamp: new Date().toISOString() };
   logger.info("[social-status-sync]", JSON.stringify(summary));
-  return NextResponse.json({ success: true, data: summary });
+  return summary;
+  });
+  if (!run.ok) {
+    return NextResponse.json({ success: false, error: "social-status-sync_failed" }, { status: 500 });
+  }
+  return NextResponse.json({ success: true, data: run.result });
 }
