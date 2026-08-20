@@ -15,6 +15,7 @@
     "test:buyer-insurance": "tsx --test --experimental-test-module-mocks app/api/buyer/insurance/__tests__/*.test.ts",
     "test:buyer-plan": "tsx --test --experimental-test-module-mocks app/api/buyer/plan/__tests__/*.test.ts",
     "test:security": "tsx --test --experimental-test-module-mocks lib/security/__tests__/*.test.ts",
+    "test:auth": "tsx --test --experimental-test-module-mocks lib/auth/__tests__/*.test.ts",
     "test:webhooks": "tsx --test --experimental-test-module-mocks app/api/webhooks/__tests__/*.test.ts",
     "test:payments": "tsx --test lib/payments/__tests__/*.test.ts",
     "test:format": "tsx --test lib/__tests__/format.test.ts",

@@ -4,6 +4,7 @@ import JourneyNavigator from "@/components/buyer/JourneyNavigator";
 import ChatWidget from "@/components/public/ChatWidget";
 import SessionExpiryWatcher from "@/components/buyer/SessionExpiryWatcher";
 import { requireBuyer } from "@/lib/auth/session";
+import { isBuyerAccessDisabled } from "@/lib/auth/buyer-status";
 import { prisma } from "@/lib/prisma";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { computeJourney } from "@/lib/services/buyer/journey";
@@ -78,7 +79,7 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
   // If an admin has disabled login access for this buyer, render a clear
   // account-status screen instead of the full portal.  This prevents confusion
   // where a disabled buyer sees an operational UI.
-  if (!isAdminPreview && (buyer.disabledAt || buyer.purgedAt)) {
+  if (!isAdminPreview && isBuyerAccessDisabled(buyer)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F8F9FA] p-8">
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm max-w-md w-full p-8 text-center">

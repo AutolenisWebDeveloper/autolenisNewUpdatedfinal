@@ -4,6 +4,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { UserRole } from "@prisma/client";
 import { BUYER_BACKWARD_SAFE_SELECT } from "@/lib/auth/buyer-select";
+import { isBuyerAccessDisabled } from "@/lib/auth/buyer-status";
 
 // Standard API response shapes
 export function successResponse<T>(data: T, status = 200) {
@@ -55,26 +56,43 @@ export async function getRequestUser(request: NextRequest) {
 // columns (archived_at / disabled_at / purged_at) are not yet present in the
 // production database.  Required migration: 20260603000000_add_buyer_lifecycle_fields
 
-// Get buyer record from authenticated request
-export async function getRequestBuyer(request: NextRequest) {
-  const user = await getRequestUser(request);
-  if (!user) return null;
-
+// Load the buyer for a Supabase user id and apply the shared access-status gate.
+//
+// P0 authorization boundary: a buyer whose access an admin has disabled
+// (`disabledAt`) or whose PII was purged (`purgedAt`) is treated as
+// unauthorized here — the function returns null so every `/api/buyer/*` route
+// (all of which 401 on a null buyer) denies the request. This mirrors the
+// dealer `requireDealerFromRequest` BLOCKED_STATUSES precedent and is enforced
+// centrally rather than per-route.
+//
+// Exported so the invariant is unit-testable without the Supabase/next-headers
+// stack that `getRequestBuyer` needs to resolve the user.
+export async function resolveAuthorizedBuyer(supabaseUserId: string) {
   try {
-    return await prisma.buyer.findFirst({
-      where: { user: { supabaseId: user.id } },
+    const buyer = await prisma.buyer.findFirst({
+      where: { user: { supabaseId: supabaseUserId } },
       include: { user: true, preQualification: true },
     });
+    if (!buyer) return null;
+    // Deny disabled/purged buyers at the shared boundary.
+    if (isBuyerAccessDisabled(buyer)) return null;
+    return buyer;
   } catch (primaryErr) {
     // Migration 20260603000000_add_buyer_lifecycle_fields may not be applied yet.
     // Fall back to an explicit select that omits the lifecycle columns.
+    //
+    // NOTE (documented prod-dependency): in this degraded pre-migration state the
+    // disabled/purged columns are unreadable, so this path CANNOT enforce the
+    // disable gate and returns the buyer with null lifecycle fields. Full
+    // buyer-disable enforcement therefore REQUIRES the lifecycle migration to be
+    // applied in the target environment.
     logger.error(
       "[auth/api] buyer query failed — trying backward-safe fallback.",
       primaryErr,
     );
     try {
       const row = await prisma.buyer.findFirst({
-        where: { user: { supabaseId: user.id } },
+        where: { user: { supabaseId: supabaseUserId } },
         select: BUYER_BACKWARD_SAFE_SELECT,
       });
       if (!row) return null;
@@ -89,4 +107,11 @@ export async function getRequestBuyer(request: NextRequest) {
       return null;
     }
   }
+}
+
+// Get buyer record from authenticated request
+export async function getRequestBuyer(request: NextRequest) {
+  const user = await getRequestUser(request);
+  if (!user) return null;
+  return resolveAuthorizedBuyer(user.id);
 }
