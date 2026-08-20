@@ -144,8 +144,14 @@ function PostDrawer({
     finally { setGenerating(false); }
   };
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
-    <div className="fixed inset-0 z-40 flex justify-end" data-testid="post-drawer">
+    <div role="dialog" aria-modal="true" aria-label="Post details" className="fixed inset-0 z-40 flex justify-end" data-testid="post-drawer">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <div className="relative w-full max-w-[640px] bg-white h-full overflow-y-auto shadow-2xl">
         <div className="sticky top-0 bg-white border-b border-[#E2E8F0] px-5 py-4 flex items-center justify-between">
