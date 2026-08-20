@@ -306,6 +306,7 @@ export async function publishMarketIndex(): Promise<PublishMarketIndexResult> {
 
 export interface IntelligenceIndex {
   weekOf: string;
+  dataSufficient: boolean; // DEF-2: gate on real data before publishing
   buyerPowerIndex: number; // 0-100
   dealerCompetitionIndex: number; // 0-100
   vehiclePricingIndex: number; // 0-100
@@ -329,6 +330,10 @@ export interface IntelligenceIndex {
 
 export interface IntelligenceScores {
   weekOf: string;
+  // DEF-2: false when the underlying AMIPS tables are unprovisioned and the
+  // scores fell back to hardcoded defaults — such an index must NOT be published
+  // as real market intelligence.
+  dataSufficient: boolean;
   buyerPowerIndex: number;
   dealerCompetitionIndex: number;
   vehiclePricingIndex: number;
@@ -403,8 +408,14 @@ export async function computeIntelligenceScores(): Promise<IntelligenceScores> {
   const trend: IntelligenceScores["trend"] =
     negotiationIndex >= 65 ? "improving" : negotiationIndex <= 35 ? "declining" : "stable";
 
+  // The headline Buyer Power Index is only real when market leverage data
+  // exists; without it the score is a hardcoded default and the index must not
+  // be published as fact.
+  const dataSufficient = leverageScores.length > 0;
+
   return {
     weekOf,
+    dataSufficient,
     buyerPowerIndex,
     dealerCompetitionIndex,
     vehiclePricingIndex,
@@ -473,6 +484,7 @@ Be specific and professional. No guarantees.`,
 
   return {
     weekOf: scores.weekOf,
+    dataSufficient: scores.dataSufficient,
     buyerPowerIndex: scores.buyerPowerIndex,
     dealerCompetitionIndex: scores.dealerCompetitionIndex,
     vehiclePricingIndex: scores.vehiclePricingIndex,
@@ -492,6 +504,17 @@ Be specific and professional. No guarantees.`,
 // best-effort so a single failure never discards the index.
 export async function generateAndPublishMarketIndex(): Promise<IntelligenceIndex> {
   const index = await generateIntelligenceIndex();
+
+  // DEF-2: never publish a "Buyer Intelligence Index" whose scores are hardcoded
+  // defaults (unprovisioned AMIPS tables) as real market intelligence. Return the
+  // index for internal preview, but skip the public LinkedIn publish + SocialPost.
+  if (!index.dataSufficient) {
+    logger.warn(
+      "[intelligence-index] insufficient AMIPS data (no market leverage scores) — " +
+        "skipping publish so default scores are never presented as real intelligence.",
+    );
+    return index;
+  }
 
   // Publish to LinkedIn (best-effort, dynamic import to avoid circular deps).
   let platformPostId: string | null = null;
