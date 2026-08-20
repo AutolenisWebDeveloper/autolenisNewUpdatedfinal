@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { loadExecutiveIntelligence } from "@/lib/amips/intelligence/executive-intelligence";
 import { sendCustomAdminEmail } from "@/lib/services/email/resend.service";
-import { logger } from "@/lib/logger";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  try {
+  const run = await withCronRun("amips-digest", async () => {
     const intel = await loadExecutiveIntelligence();
     const weekKey = new Date().toISOString().slice(0, 10);
     const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -90,15 +90,16 @@ export async function GET(request: NextRequest) {
       idempotencyKey: `amips-digest-${weekKey}`,
     });
 
-    return NextResponse.json({
-      success: true,
-      data: { weekOf: weekKey, sent: result.sent, healthScore: intel.health.score },
-    });
-  } catch (err) {
-    logger.error("[amips-digest] failed:", err);
+    return { weekOf: weekKey, sent: result.sent, healthScore: intel.health.score };
+  });
+  if (!run.ok) {
     return NextResponse.json(
-      { success: false, error: (err as Error).message },
+      { success: false, error: (run.error as Error).message },
       { status: 200 },
     );
   }
+  return NextResponse.json({
+    success: true,
+    data: run.result,
+  });
 }

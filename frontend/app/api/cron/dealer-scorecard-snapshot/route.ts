@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { computeDealerScorecard } from "@/lib/services/dealer/dealer-scorecard.service";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { sendDealerWeeklyScorecardEmail } from "@/lib/services/email/resend.service";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest) {
   if (!isVercelCron && !isValidSecret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const run = await withCronRun("dealer-scorecard-snapshot", async () => {
   const dealers = await prisma.dealer.findMany({
     where: { status: "ACTIVE" },
     include: { user: { select: { email: true } } },
@@ -86,5 +88,9 @@ export async function POST(request: NextRequest) {
       errors.push(`${dealer.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  return NextResponse.json({ processed, skipped, errors: errors.length, details: errors.slice(0, 10) });
+  return { processed, skipped, errors: errors.length, details: errors.slice(0, 10) };
+  });
+  if (!run.ok) return NextResponse.json({ error: "dealer-scorecard-snapshot_failed" }, { status: 500 });
+
+  return NextResponse.json(run.result);
 }

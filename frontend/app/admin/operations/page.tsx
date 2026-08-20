@@ -285,9 +285,16 @@ export default async function OperationsPage({
               Most recent run of each scheduled job.
             </p>
           </div>
-          <span className="text-[12px] text-[var(--crm-text-tertiary)]">
-            {crons.length} job{crons.length === 1 ? '' : 's'}
-          </span>
+          <div className="flex items-center gap-2">
+            {crons.some((j) => j.overdue) && (
+              <Badge tone="danger" size="sm">
+                {crons.filter((j) => j.overdue).length} overdue
+              </Badge>
+            )}
+            <span className="text-[12px] text-[var(--crm-text-tertiary)]">
+              {crons.length} job{crons.length === 1 ? '' : 's'}
+            </span>
+          </div>
         </header>
         {crons.length === 0 ? (
           <EmptyState
@@ -463,11 +470,24 @@ function CronRow({ job }: { job: CronJobRun }) {
         {job.error && (
           <div className="mt-0.5 text-[11px] text-[var(--crm-danger)]">{job.error.slice(0, 120)}</div>
         )}
+        {job.overdue && (
+          <div className="mt-0.5 text-[11px] text-[var(--crm-danger)]">
+            Overdue — no run within the expected window
+            {job.max_age_minutes ? ` (${job.max_age_minutes}m)` : ''}
+          </div>
+        )}
       </td>
       <td className={TD_CLASS}>
-        <Badge tone={tone} size="sm">
-          {job.status}
-        </Badge>
+        <div className="flex items-center gap-1.5">
+          <Badge tone={tone} size="sm">
+            {job.status}
+          </Badge>
+          {job.overdue && (
+            <Badge tone="danger" size="sm">
+              Overdue
+            </Badge>
+          )}
+        </div>
       </td>
       <td className={`${TD_CLASS} text-[12px] tabular-nums text-[var(--crm-text-tertiary)]`}>
         {job.duration != null ? `${job.duration}ms` : '—'}

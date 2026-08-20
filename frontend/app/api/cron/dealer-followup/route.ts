@@ -14,6 +14,7 @@ import {
   findDealersDueForFollowup,
   sendFollowUp,
 } from "@/lib/services/dealer-recruitment/dealer-followup.service"
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service"
 
 export const dynamic = "force-dynamic"
 export const runtime = "nodejs"
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 })
   }
 
+  const run = await withCronRun("dealer-followup", async () => {
   const due = await findDealersDueForFollowup()
   logger.info(`[phase-4b4] Cron fired. ${due.length} dealers due for follow-up.`)
 
@@ -48,5 +50,9 @@ export async function GET(request: NextRequest) {
   }
 
   logger.info(`[phase-4b4] Cron complete. sent=${sent} failed=${failed}`)
-  return NextResponse.json({ due: due.length, sent, failed })
+  return { due: due.length, sent, failed }
+  })
+  if (!run.ok) return NextResponse.json({ success: false, error: "dealer-followup_failed" }, { status: 500 })
+
+  return NextResponse.json(run.result)
 }

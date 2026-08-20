@@ -41,7 +41,7 @@ skill answers — and its answers override improvised naming.
 | `Buyer` | root buyer identity | person requesting a vehicle |
 | `BuyerPreferences`, `BuyerInventoryPreference` | Buyer | search/preference data |
 | `VehicleRequest` | Buyer | a concrete request that drives an auction |
-| `Auction` | VehicleRequest | reverse auction dealers compete in (~48h) |
+| `Auction` | VehicleRequest | reverse auction dealers compete in (~48h). As of migration `20261003000000_auction_vehicle_request_fk`, `Auction.vehicleRequestId` is a real nullable FK (`onDelete: SetNull`) — no longer a documented-only convention; null when the deposit-activation reconciler created the auction with no request in scope. |
 | `AuctionInvitation` | Auction ↔ Dealer | dealer invited to bid |
 | `AuctionVehicle` | Auction | vehicle(s) in scope |
 | `Offer` (table `offers`) | Auction ↔ Dealer | a dealer's competing reverse-auction offer (the entity `OfferStatus` applies to). **Not** `DealerOfferSubmission`/`VehicleOffer`, which are the separate concierge track — never conflate them |

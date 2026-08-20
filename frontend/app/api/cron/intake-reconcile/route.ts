@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { inngest } from "@/lib/inngest/client";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 // A just-submitted intake's worker may still be running: enrichment + discovery +
 // phone-script drafting (12s per discovered prospect, which can be dozens) + Inngest
@@ -33,6 +34,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("intake-reconcile", async () => {
   const now = new Date();
   const threshold = new Date(now.getTime() - STUCK_INTAKE_THRESHOLD_MINUTES * 60 * 1000);
 
@@ -72,8 +74,11 @@ export async function GET(request: NextRequest) {
     logger.info(`[intake-reconcile] re-drove ${reEmitted}/${stuck.length} stuck intake(s)`);
   }
 
-  return NextResponse.json({
-    success: true,
-    data: { found: stuck.length, reEmitted, timestamp: now.toISOString() },
+    return { found: stuck.length, reEmitted, timestamp: now.toISOString() };
   });
+
+  if (!run.ok) {
+    return NextResponse.json({ success: false, error: "reconcile_failed" }, { status: 500 });
+  }
+  return NextResponse.json({ success: true, data: run.result });
 }

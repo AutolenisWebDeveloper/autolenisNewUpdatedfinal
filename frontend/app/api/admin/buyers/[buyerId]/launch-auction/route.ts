@@ -4,7 +4,7 @@ import { getAdminFromRequest, adminError, adminSuccess } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { AUCTION_DURATION_HOURS, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
-import { createAuction, launchAuction } from "@/lib/services/auction/auction.service";
+import { createAuction, launchAuction, resolveOwnedVehicleRequestId } from "@/lib/services/auction/auction.service";
 import {
   sendDealerAuctionInvitationEmail,
   sendAuctionActivatedEmail,
@@ -127,8 +127,11 @@ export async function POST(request: NextRequest, { params }: Props) {
     });
   }
 
-  // Create and launch the auction via existing service functions
-  const created = await createAuction(buyerId, deposit.id);
+  // Create and launch the auction via existing service functions. C1 — link the
+  // originating VehicleRequest onto the auction, but only after confirming it
+  // belongs to this buyer (never store a cross-buyer request id).
+  const ownedVehicleRequestId = await resolveOwnedVehicleRequestId(buyerId, vehicleRequestId);
+  const created = await createAuction(buyerId, deposit.id, ownedVehicleRequestId);
   const launched = await launchAuction(created.id);
 
   // Optional custom duration override
@@ -317,7 +320,9 @@ export async function POST(request: NextRequest, { params }: Props) {
         vehicleCount: attachedVehicleCount,
         hours: hours ?? AUCTION_DURATION_HOURS,
         notes: notes ?? null,
-        vehicleRequestId: vehicleRequestId ?? null,
+        // Record the RESOLVED (buyer-owned) id actually linked onto the auction,
+        // not the raw input — so the audit trail and the FK never disagree.
+        vehicleRequestId: ownedVehicleRequestId,
         depositId: deposit.id,
       },
     },

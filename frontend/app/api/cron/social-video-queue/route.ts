@@ -6,6 +6,7 @@
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 import { prisma } from "@/lib/prisma";
 import { getVideoProvider } from "@/lib/social/providers/video-generation.factory";
 import {
@@ -31,6 +32,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("social-video-queue", async () => {
   // ─── Trigger Runway video generation early ─────────────────────────────────
   // Fire before the main polling/backfill loops so a timeout later in this
   // handler cannot prevent video generation from being triggered. Tier 1 posts
@@ -312,5 +314,10 @@ export async function GET(request: NextRequest) {
     timestamp: new Date().toISOString(),
   };
   logger.info("[social-video-queue]", JSON.stringify(summary));
-  return NextResponse.json({ success: true, data: summary });
+  return summary;
+  });
+  if (!run.ok) {
+    return NextResponse.json({ success: false, error: "social-video-queue_failed" }, { status: 500 });
+  }
+  return NextResponse.json({ success: true, data: run.result });
 }

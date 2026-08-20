@@ -5,6 +5,7 @@ import {
   sendDealerStaleListingRemovalEmail,
   sendDealerInventorySyncFailureEmail,
 } from "@/lib/services/email/resend.service";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -20,6 +21,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("inventory-stale-sweep", async () => {
   const cutoff = new Date(Date.now() - 48 * 3600000);
 
   // Snapshot the soon-to-be-deactivated rows grouped by dealer so we can email
@@ -105,5 +107,9 @@ export async function GET(request: NextRequest) {
     }).catch(() => {});
   }
 
-  return NextResponse.json({ success: true, data: { deactivated, cutoff } });
+  return { deactivated, cutoff };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "inventory-stale-sweep_failed" }, { status: 500 });
+
+  return NextResponse.json({ success: true, data: run.result });
 }

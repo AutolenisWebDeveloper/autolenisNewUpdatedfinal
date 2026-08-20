@@ -7,10 +7,10 @@
 // self-healing — no manual owner touchpoint. Bounded per run; the remainder is
 // picked up next tick. Safe to re-run: the gate is idempotent set-or-clear.
 
-import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { reconcileCoverageHolds } from "@/lib/services/acquisition/request-coverage-gate.service";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get(CRON_AUTH_HEADER);
@@ -20,11 +20,10 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  try {
-    const result = await reconcileCoverageHolds();
-    return NextResponse.json({ success: true, data: { ...result, timestamp: new Date().toISOString() } });
-  } catch (err) {
-    logger.error("[coverage-hold-reconcile] failed:", err);
+  // withCronRun records the run in CronJobLog (best-effort) and logs failures.
+  const run = await withCronRun("coverage-hold-reconcile", () => reconcileCoverageHolds());
+  if (!run.ok) {
     return NextResponse.json({ success: false, error: "reconcile_failed" }, { status: 500 });
   }
+  return NextResponse.json({ success: true, data: { ...run.result, timestamp: new Date().toISOString() } });
 }

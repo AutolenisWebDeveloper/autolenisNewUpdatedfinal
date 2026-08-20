@@ -5,6 +5,7 @@
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 import { prisma } from "@/lib/prisma";
 import { publishApprovedPost } from "@/lib/social/social-post.orchestrator";
 
@@ -20,6 +21,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("social-publish-queue", async () => {
   const now = new Date();
 
   // Media-required platforms: only publish when VIDEO_READY (Buffer rejects
@@ -64,5 +66,10 @@ export async function GET(request: NextRequest) {
 
   const summary = { considered: posts.length, published, failed, timestamp: now.toISOString() };
   logger.info("[social-publish-queue]", JSON.stringify(summary));
-  return NextResponse.json({ success: true, data: summary });
+  return summary;
+  });
+  if (!run.ok) {
+    return NextResponse.json({ success: false, error: "social-publish-queue_failed" }, { status: 500 });
+  }
+  return NextResponse.json({ success: true, data: run.result });
 }

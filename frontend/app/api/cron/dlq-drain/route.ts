@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { OperationsService } from "@/lib/services/operations.service";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export const dynamic = "force-dynamic";
 
@@ -20,15 +21,15 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  try {
+  const run = await withCronRun("dlq-drain", () => {
     const ops = new OperationsService(getServiceSupabase());
-    const result = await ops.autoDrainDeadLetterJobs();
-    if (result.reemitted > 0 || result.failed > 0) {
-      logger.info(`[dlq-drain] ${JSON.stringify(result)}`);
-    }
-    return NextResponse.json({ success: true, data: result });
-  } catch (err) {
-    logger.error("[dlq-drain] failed:", err);
+    return ops.autoDrainDeadLetterJobs();
+  });
+  if (!run.ok) {
     return NextResponse.json({ success: false, error: "DRAIN_FAILED" }, { status: 500 });
   }
+  if (run.result.reemitted > 0 || run.result.failed > 0) {
+    logger.info(`[dlq-drain] ${JSON.stringify(run.result)}`);
+  }
+  return NextResponse.json({ success: true, data: run.result });
 }

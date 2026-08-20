@@ -10,6 +10,7 @@ import {
   sendDealerOfferRevisionClosingEmail,
 } from "@/lib/services/email/resend.service";
 import { prisma } from "@/lib/prisma";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -21,6 +22,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("auction-close", async () => {
   const now = new Date();
   const count = await closeExpiredAuctions();
 
@@ -103,5 +105,11 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true, data: { closed: count, processed: closedAuctions.length, timestamp: now.toISOString() } });
+    return { closed: count, processed: closedAuctions.length, timestamp: now.toISOString() };
+  });
+
+  if (!run.ok) {
+    return NextResponse.json({ success: false, error: "auction_close_failed" }, { status: 500 });
+  }
+  return NextResponse.json({ success: true, data: run.result });
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { captureIntelligenceSnapshot } from "@/lib/amips/intelligence/executive-intelligence";
-import { logger } from "@/lib/logger";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,17 +17,19 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  try {
+  const run = await withCronRun("amips-snapshot", async () => {
     const snapshot = await captureIntelligenceSnapshot();
-    return NextResponse.json({
-      success: true,
-      data: { id: snapshot.id, healthScore: snapshot.healthScore },
-    });
-  } catch (err) {
-    logger.error("[amips-snapshot] capture failed:", err);
+    return { id: snapshot.id, healthScore: snapshot.healthScore };
+  });
+  if (!run.ok) {
     return NextResponse.json(
-      { success: false, error: (err as Error).message },
+      { success: false, error: (run.error as Error).message },
       { status: 200 },
     );
   }
+
+  return NextResponse.json({
+    success: true,
+    data: run.result,
+  });
 }

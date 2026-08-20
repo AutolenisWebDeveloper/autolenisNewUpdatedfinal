@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { inngest } from '@/lib/inngest/client';
 import { inngestFunctions } from '@/lib/inngest/functions';
 import { getStripe } from '@/lib/stripe';
+import { detectDeadCrons } from './monitoring/dead-cron.service';
 
 // ----------------------------------------------------------------------------
 // AutoLenis Phase 5 — Operations dashboard data layer.
@@ -45,6 +46,11 @@ export interface CronJobRun {
   error: string | null;
   started_at: string;
   completed_at: string | null;
+  // D3a — dead-cron annotation from the CRON_STALENESS registry. `overdue` means
+  // the most recent run is older than the cron's expected cadence (it should have
+  // run again by now). null max_age_minutes = the cron is not staleness-monitored.
+  overdue: boolean;
+  max_age_minutes: number | null;
 }
 
 export interface DeadLetterJob {
@@ -245,8 +251,38 @@ export class OperationsService {
         error: row.error,
         started_at: row.started_at,
         completed_at: row.completed_at,
+        overdue: false,
+        max_age_minutes: null,
       });
     }
+
+    // Authoritative dead-cron liveness comes from an UNBOUNDED groupBy (latest run
+    // per cron across all rows), not this recent-row window: a cron dead long
+    // enough for its last row to fall past the `limit` would otherwise vanish from
+    // the widget instead of showing Overdue — exactly the case this panel exists to
+    // surface. Override in-window rows, and add a synthetic row for any overdue cron
+    // whose last run is outside the window so it still appears.
+    for (const l of await detectDeadCrons()) {
+      if (l.state !== 'OVERDUE') continue;
+      const existing = latest.get(l.cronName);
+      if (existing) {
+        existing.overdue = true;
+        existing.max_age_minutes = l.maxAgeMinutes;
+      } else {
+        latest.set(l.cronName, {
+          id: `stale:${l.cronName}`,
+          cron_name: l.cronName,
+          status: 'STALE',
+          duration: null,
+          error: null,
+          started_at: l.lastRunAt ? l.lastRunAt.toISOString() : new Date(0).toISOString(),
+          completed_at: null,
+          overdue: true,
+          max_age_minutes: l.maxAgeMinutes,
+        });
+      }
+    }
+
     return [...latest.values()].sort((a, b) => a.cron_name.localeCompare(b.cron_name));
   }
 

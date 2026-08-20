@@ -5,6 +5,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { runWeeklyDigestBatch } from "@/lib/services/affiliate/digest.service";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 // Long-ish cron — up to 500 affiliates @ ~250ms each ≈ 2 minutes
 export const maxDuration = 180;
@@ -17,15 +18,16 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  const summary = await runWeeklyDigestBatch(new Date());
-  logger.info("[cron/affiliate-digest]", summary);
+  const run = await withCronRun("affiliate-digest", () => runWeeklyDigestBatch(new Date()));
+  if (!run.ok) return NextResponse.json({ success: false, error: "affiliate-digest_failed" }, { status: 500 });
+  logger.info("[cron/affiliate-digest]", run.result);
   return NextResponse.json({
     success: true,
     data: {
-      total: summary.total,
-      sent: summary.sent,
-      skipped: summary.skipped,
-      failed: summary.failed,
+      total: run.result.total,
+      sent: run.result.sent,
+      skipped: run.result.skipped,
+      failed: run.result.failed,
       timestamp: new Date().toISOString(),
     },
   });

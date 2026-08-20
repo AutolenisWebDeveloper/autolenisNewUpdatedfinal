@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 // Prequal purge — hard-delete genuinely terminal, never-approved records.
 //
@@ -26,6 +27,8 @@ export async function GET(request: NextRequest) {
   const isVercelCron = request.headers.get("x-vercel-cron") === "1";
   const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
   if (!isVercelCron && !isValidSecret) return new NextResponse("Unauthorized", { status: 401 });
+
+  const run = await withCronRun("prequal-purge", async () => {
   // Purge terminal, never-approved pre-qualifications older than 30 days past expiry.
   const cutoff = new Date(Date.now() - 30 * 24 * 3600000);
   const { count } = await prisma.preQualification.deleteMany({
@@ -49,5 +52,9 @@ export async function GET(request: NextRequest) {
     data: { rawResponse: null },
   });
 
-  return NextResponse.json({ success: true, data: { purged: count, rawResponseScrubbed: scrubbed } });
+  return { purged: count, rawResponseScrubbed: scrubbed };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "prequal-purge_failed" }, { status: 500 });
+
+  return NextResponse.json({ success: true, data: run.result });
 }

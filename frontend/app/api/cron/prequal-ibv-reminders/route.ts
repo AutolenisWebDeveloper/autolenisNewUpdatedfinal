@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 // Daily reminders. Both branches are idempotent: an existing notification of
 // the same purpose for the buyer gates re-sends, so a buyer whose approval
@@ -13,6 +14,7 @@ export async function GET(request: NextRequest) {
   const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
   if (!isVercelCron && !isValidSecret) return new NextResponse("Unauthorized", { status: 401 });
 
+  const run = await withCronRun("prequal-ibv-reminders", async () => {
   // ── Pending-verification nudge (once per pending prequal) ──────────────────
   const pending = await prisma.preQualification.findMany({
     where: { decision: "PENDING", createdAt: { lt: new Date(Date.now() - 24 * 3600000) } },
@@ -104,5 +106,9 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true, data: { reminded: pendingReminded, expiryWarnings: expiryWarned } });
+  return { reminded: pendingReminded, expiryWarnings: expiryWarned };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "prequal-ibv-reminders_failed" }, { status: 500 });
+
+  return NextResponse.json({ success: true, data: run.result });
 }

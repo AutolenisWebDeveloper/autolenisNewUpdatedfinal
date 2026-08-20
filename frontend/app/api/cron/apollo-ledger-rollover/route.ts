@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { ensureCurrentCycleLedger } from "@/lib/services/dealer-recruitment/apollo-credit-ledger.service";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get(CRON_AUTH_HEADER);
@@ -20,16 +21,16 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  try {
-    const row = await ensureCurrentCycleLedger(new Date());
-    return NextResponse.json({
-      success: true,
-      cycleKey: row.cycleKey,
-      capCredits: row.capCredits,
-      spentCredits: row.spentCredits,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
+  const run = await withCronRun("apollo-ledger-rollover", () => ensureCurrentCycleLedger(new Date()));
+  if (!run.ok) {
+    return NextResponse.json({ success: false, error: String(run.error) }, { status: 500 });
   }
+  const row = run.result;
+  return NextResponse.json({
+    success: true,
+    cycleKey: row.cycleKey,
+    capCredits: row.capCredits,
+    spentCredits: row.spentCredits,
+    timestamp: new Date().toISOString(),
+  });
 }

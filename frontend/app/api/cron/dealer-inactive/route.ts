@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { emitDomainEvent } from "@/lib/events/emit";
+import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export const dynamic = "force-dynamic";
 // Up to 500 dealers × one activity lookup each.
@@ -28,6 +29,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const run = await withCronRun("dealer-inactive", async () => {
   const cutoff = new Date(Date.now() - INACTIVITY_WINDOW_MS);
 
   const dealers = await prisma.dealer.findMany({
@@ -86,8 +88,12 @@ export async function GET(request: NextRequest) {
     skippedNoEmail,
   });
 
+  return { scanned: dealers.length, emitted, skippedActive, skippedNoEmail };
+  });
+  if (!run.ok) return NextResponse.json({ success: false, error: "dealer-inactive_failed" }, { status: 500 });
+
   return NextResponse.json({
     success: true,
-    data: { scanned: dealers.length, emitted, skippedActive, skippedNoEmail, timestamp: new Date().toISOString() },
+    data: { ...run.result, timestamp: new Date().toISOString() },
   });
 }
