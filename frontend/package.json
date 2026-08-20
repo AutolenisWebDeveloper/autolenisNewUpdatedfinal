@@ -40,7 +40,7 @@
     "test:email": "tsx --test --experimental-test-module-mocks lib/services/email/__tests__/*.test.ts",
     "test:analytics": "tsx --test --experimental-test-module-mocks lib/services/analytics/__tests__/*.test.ts",
     "test:integrations": "tsx --test --experimental-test-module-mocks lib/services/integrations/__tests__/*.test.ts",
-    "test:all": "pnpm test && pnpm test:content && pnpm test:admin-content && pnpm test:buyer-insurance && pnpm test:buyer-plan && pnpm test:security && pnpm test:auth && pnpm test:webhooks && pnpm test:payments && pnpm test:format && pnpm test:api-client && pnpm test:buyer-journey && pnpm test:buyer-nav && pnpm test:crm-audit && pnpm test:seo && pnpm test:crm && pnpm test:dealer && pnpm test:amips && pnpm test:admin-deals && pnpm test:comms && pnpm test:contract-shield && pnpm test:pickup && pnpm test:intake && pnpm test:cron && pnpm test:email && pnpm test:analytics && pnpm test:integrations && pnpm test:monitoring && pnpm test:financing && pnpm test:financing-routes && pnpm test:refinance",
+    "test:all": "pnpm test && pnpm test:content && pnpm test:admin-content && pnpm test:buyer-insurance && pnpm test:buyer-plan && pnpm test:security && pnpm test:auth && pnpm test:webhooks && pnpm test:payments && pnpm test:format && pnpm test:api-client && pnpm test:buyer-journey && pnpm test:buyer-nav && pnpm test:crm-audit && pnpm test:seo && pnpm test:crm && pnpm test:dealer && pnpm test:amips && pnpm test:admin-deals && pnpm test:comms && pnpm test:contract-shield && pnpm test:pickup && pnpm test:intake && pnpm test:cron && pnpm test:email && pnpm test:analytics && pnpm test:integrations && pnpm test:monitoring && pnpm test:financing && pnpm test:financing-routes && pnpm test:refinance && pnpm test:domain",
     "test:coverage-check": "tsx scripts/check-test-coverage.ts",
     "test:visual": "playwright test --config playwright.visual.config.ts",
     "test:visual:update": "playwright test --config playwright.visual.config.ts --update-snapshots",
@@ -57,7 +57,8 @@
     "amips:sync-markets": "tsx scripts/amips-sync-markets.ts",
     "amips:compute-scores": "tsx scripts/amips-compute-scores.ts",
     "setup:storage": "tsx scripts/setup-storage-buckets.ts",
-    "test:refinance": "tsx --test lib/services/refinance/__tests__/*.test.ts"
+    "test:refinance": "tsx --test lib/services/refinance/__tests__/*.test.ts",
+    "test:domain": "tsx --test lib/domain/__tests__/*.test.ts"
   },
   "engines": {
     "node": ">=18.18"

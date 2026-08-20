@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { title: "My Deal" };
 
 import { requireBuyer } from "@/lib/auth/session";
+import { dealStatusLabel, dealStatusTone } from "@/lib/domain/status-labels";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -57,7 +58,7 @@ export default async function DealPage() {
             {dealerName}
           </p>
         </div>
-        <Badge variant={deal.status === "COMPLETED" ? "green" : "blue"}>{deal.status.replace(/_/g, " ")}</Badge>
+        <Badge variant={dealStatusTone(deal.status) === "success" ? "green" : dealStatusTone(deal.status) === "danger" ? "destructive" : "blue"}>{dealStatusLabel(deal.status)}</Badge>
       </div>
 
       {/* Price summary */}

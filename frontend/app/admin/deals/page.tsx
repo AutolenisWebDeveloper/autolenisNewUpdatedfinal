@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import { DealStatus } from "@prisma/client";
+import { dealStatusLabel, dealStatusTone } from "@/lib/domain/status-labels";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { FileText, PenLine, MapPin, AlertTriangle } from "lucide-react";
@@ -43,7 +44,7 @@ export default async function AdminDealsPage({ searchParams }: Props) {
           className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-700">
           <option value="ALL">All</option>
           {Object.values(DealStatus).map(s => (
-            <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+            <option key={s} value={s}>{dealStatusLabel(s)}</option>
           ))}
         </select>
         <button type="submit" className="text-xs font-medium px-3 py-1.5 rounded-lg bg-al-primary text-white" data-testid="deal-filter-apply">
@@ -62,7 +63,7 @@ export default async function AdminDealsPage({ searchParams }: Props) {
       )}
       {!loadError && deals.length === 0 && (
         <div className="text-center py-12 text-slate-400" data-testid="no-deals">
-          {statusFilter ? `No deals in "${status.replace(/_/g, " ").toLowerCase()}" status.` : "No deals found"}
+          {statusFilter ? `No deals in "${dealStatusLabel(statusFilter)}" status.` : "No deals found"}
         </div>
       )}
       <div className="space-y-2">
@@ -74,7 +75,7 @@ export default async function AdminDealsPage({ searchParams }: Props) {
               <p className="text-xs text-slate-400">${((d.offer?.otdPriceCents ?? 0) / 100).toLocaleString()} · {d.createdAt.toLocaleDateString()}</p>
             </Link>
             <div className="flex items-center gap-2 shrink-0">
-              <Badge variant={d.status === "COMPLETED" ? "green" : "secondary"} className="text-xs">{d.status.replace(/_/g, " ")}</Badge>
+              <Badge variant={dealStatusTone(d.status) === "success" ? "green" : dealStatusTone(d.status) === "danger" ? "destructive" : "blue"} className="text-xs">{dealStatusLabel(d.status)}</Badge>
               <Link href={`/admin/deals/${d.id}/esign`} className="p-1.5 text-slate-400 hover:text-al-primary" data-testid={`deal-esign-${d.id}`}><PenLine size={14} /></Link>
               <Link href={`/admin/deals/${d.id}/pickup`} className="p-1.5 text-slate-400 hover:text-al-primary" data-testid={`deal-pickup-${d.id}`}><MapPin size={14} /></Link>
             </div>

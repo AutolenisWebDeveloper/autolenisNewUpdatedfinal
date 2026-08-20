@@ -6,6 +6,7 @@
 import { prisma } from "@/lib/prisma";
 import { VehicleRequestStatus } from "@prisma/client";
 import { VEHICLE_REQUEST_MAX_PER_HOUR } from "@/lib/constants";
+import { vehicleRequestStatusLabel } from "@/lib/domain/status-labels";
 
 // Rate limiting: max 3 submissions per hour per buyer
 export async function checkRateLimit(buyerId: string): Promise<boolean> {
@@ -59,20 +60,9 @@ export async function createVehicleRequest(buyerId: string, data: {
   return request;
 }
 
-// Buyer-facing status labels (never internal states)
+// Buyer-facing status labels (never internal states). Delegates to the single
+// source of truth in lib/domain/status-labels so buyer/admin wording can never
+// silently drift apart again (UI-13).
 export function toBuyerLabel(status: VehicleRequestStatus): string {
-  const labels: Record<VehicleRequestStatus, string> = {
-    SUBMITTED: "Submitted",
-    INTAKE: "Under Review",
-    ACTIVE_SOURCING: "Sourcing Vehicles",
-    OFFER_READY: "Offer Pending",
-    OFFER_SENT: "Offer Sent",
-    OFFER_ACCEPTED: "Offer Accepted",
-    OFFER_DECLINED: "Offer Declined",
-    DEAL_CREATED: "Deal Created",
-    CLOSED_NO_MATCH: "Closed",
-    CANCELLED: "Cancelled",
-    EXPIRED: "Expired",
-  };
-  return labels[status] ?? status;
+  return vehicleRequestStatusLabel(status, "buyer");
 }
