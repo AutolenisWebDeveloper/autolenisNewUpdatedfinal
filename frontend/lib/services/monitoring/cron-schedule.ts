@@ -71,6 +71,9 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "analytics-snapshot": { intervalMinutes: DAY },
   "morning-briefing": { intervalMinutes: DAY },
   "amips-tier-f": { intervalMinutes: DAY },
+  // In-app nurture dispatchers scheduled in B-F5 (gated by CRM_INAPP_ENGINE_ENABLED).
+  "lead-magnet-sequence": { intervalMinutes: DAY },
+  "social-lead-nurture": { intervalMinutes: DAY },
   "amips-snapshot": { intervalMinutes: DAY },
   "social-signal-scan": { intervalMinutes: DAY },
   "social-generate": { intervalMinutes: DAY },

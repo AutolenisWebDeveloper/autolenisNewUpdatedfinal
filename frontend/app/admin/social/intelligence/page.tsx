@@ -32,6 +32,7 @@ export default async function IntelligencePage() {
   // Composite scores for the four gauges — pure DB math, no Groq on page load.
   const scores = await computeIntelligenceScores().catch(() => ({
     weekOf,
+    dataSufficient: false,
     buyerPowerIndex: 0,
     dealerCompetitionIndex: 0,
     vehiclePricingIndex: 0,
@@ -45,6 +46,10 @@ export default async function IntelligencePage() {
     <IntelligenceClient
       insights={insights}
       markets={markets}
+      // DEF-2: when the AMIPS tables are unprovisioned the index scores are
+      // hardcoded defaults; pass the flag so the client labels them as
+      // not-yet-real instead of presenting defaults as measured intelligence.
+      dataSufficient={scores.dataSufficient}
       scores={{
         buyerPowerIndex: scores.buyerPowerIndex,
         dealerCompetitionIndex: scores.dealerCompetitionIndex,

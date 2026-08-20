@@ -22,7 +22,7 @@ export default async function DocumentsPage() {
         <div className="space-y-2">{documents.map((doc, i) => (
           <a
             key={doc.id}
-            href={doc.url}
+            href={`/api/buyer/documents/${doc.id}/signed-url`}
             target="_blank"
             rel="noopener noreferrer"
             aria-label={`Open ${doc.name}`}

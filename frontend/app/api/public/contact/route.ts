@@ -106,5 +106,26 @@ export async function POST(request: NextRequest) {
     },
   }).catch(err => logger.error("[contact] DB log failed:", err));
 
+  // 4. Record SMS consent in the CANONICAL consent store (contacts.consent_sms),
+  //    which is the field the outbound SMS gate actually reads — otherwise the
+  //    consent captured here would be invisible to the compliance gate. Best-effort
+  //    and consent-only: upsertContact merges consent upward and never downgrades.
+  if (hasPhone && smsConsent === true) {
+    try {
+      const { getServiceSupabase } = await import("@/lib/supabase-service");
+      const { ContactService } = await import("@/lib/services/contact.service");
+      await ContactService.upsertContact(getServiceSupabase(), {
+        email,
+        phone,
+        source: "public_form",
+        consentSms: true,
+        consentEmail: false,
+        consentText: SMS_CONSENT_TEXT,
+      });
+    } catch (err) {
+      logger.error("[contact] consent upsert failed:", err);
+    }
+  }
+
   return NextResponse.json({ success: true, data: { message: "Message sent" } }, { status: 201 });
 }
