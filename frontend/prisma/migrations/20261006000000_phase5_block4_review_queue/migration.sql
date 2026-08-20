@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS "financing_review_tasks" (
 );
 CREATE INDEX IF NOT EXISTS "financing_review_tasks_status_task_type_idx" ON "financing_review_tasks"("status","task_type");
 CREATE INDEX IF NOT EXISTS "financing_review_tasks_credit_application_id_idx" ON "financing_review_tasks"("credit_application_id");
+-- Idempotency at the DB level: at most one OPEN/IN_PROGRESS task per (application,
+-- type). routeToReview catches the P2002 collision and returns the winner, so
+-- concurrent routes cannot duplicate. (Partial unique — Prisma cannot express it.)
+CREATE UNIQUE INDEX IF NOT EXISTS "financing_review_tasks_one_open_per_app_type"
+  ON "financing_review_tasks"("credit_application_id","task_type")
+  WHERE "status" IN ('OPEN','IN_PROGRESS');
 
 DO $$ BEGIN
   ALTER TABLE "financing_review_tasks" ADD CONSTRAINT "financing_review_tasks_credit_application_id_fkey"

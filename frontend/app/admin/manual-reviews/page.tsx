@@ -3,10 +3,19 @@ import StatCard from "@/components/ui/patterns/StatCard";
 import AutoRefresh from "@/components/admin/AutoRefresh";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
+import { listOpenReviewTasks } from "@/lib/services/financing/review-queue.service";
 import Link from "next/link";
-import { ShieldAlert, Clock, ArrowRight, ClipboardCheck } from "lucide-react";
+import { ShieldAlert, Clock, ArrowRight, ClipboardCheck, Banknote } from "lucide-react";
 
 export const dynamic = "force-dynamic";
+
+const FINANCING_TASK_LABEL: Record<string, string> = {
+  ADVERSE_ACTION_REVIEW: "Adverse action",
+  LENDER_FAILURE_REVIEW: "Lender failure",
+  STIP_REVIEW: "Stipulation",
+  EDGE_DECLINE_REVIEW: "Edge decline",
+  MANUAL_DECISION_REVIEW: "Manual decision",
+};
 
 const REVIEW_DECISIONS = ["MANUAL_REVIEW", "OFAC_ESCALATED", "OFAC_REVIEW"] as const;
 
@@ -56,6 +65,11 @@ export default async function AdminManualReviewsPage() {
     take: 200,
   });
 
+  // Open financing review tasks (adverse-action, lender failures, stips, edge
+  // declines) — surfaced in this same triage hub so admins have ONE place to see
+  // compliance decisions awaiting a human, not a wholly separate page.
+  const financingTasks = await listOpenReviewTasks(200);
+
   // OFAC-flagged buyers without a pending prequal (still need review)
   const ofacBuyers = await prisma.buyer.findMany({
     where: {
@@ -91,14 +105,64 @@ export default async function AdminManualReviewsPage() {
       </div>
 
       {/* Stat tiles — canonical StatCard pattern */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
         <StatCard icon={ClipboardCheck} label="Awaiting Review" value={String(reviews.length)} tone="neutral" testId="stat-total-reviews" />
         <StatCard icon={ShieldAlert} label="OFAC Escalations" value={String(ofacCount)} tone="danger" testId="stat-ofac-reviews" />
         <StatCard icon={Clock} label="Manual Review" value={String(manualCount)} tone="warning" testId="stat-manual-reviews" />
+        <StatCard icon={Banknote} label="Financing Reviews" value={String(financingTasks.length)} tone="warning" testId="stat-financing-reviews" />
       </div>
 
+      {/* Financing review tasks — links out to the financing resolve queue */}
+      {financingTasks.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-6" data-testid="financing-reviews-section">
+          <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-b border-slate-100">
+            <p className="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">
+              Financing reviews awaiting a decision
+            </p>
+            <Link
+              href="/admin/financing-reviews"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-al-primary hover:underline"
+              data-testid="financing-reviews-open-all"
+            >
+              Open queue
+              <ArrowRight size={11} />
+            </Link>
+          </div>
+          {financingTasks.slice(0, 10).map((t) => {
+            const age = ageInHours(t.createdAt);
+            const isStale = age > 24;
+            return (
+              <div
+                key={t.id}
+                className="grid md:grid-cols-[1.4fr_1.6fr_1.6fr_0.8fr] gap-3 px-5 py-3 items-center border-b border-slate-50 last:border-0 hover:bg-slate-50/60 transition-colors"
+                data-testid={`financing-review-row-${t.id}`}
+              >
+                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-amber-50 text-amber-700 border-amber-200 justify-self-start">
+                  {FINANCING_TASK_LABEL[t.taskType] ?? t.taskType.replace(/_/g, " ")}
+                </span>
+                <span className="text-xs text-slate-500 font-mono truncate">app {t.creditApplicationId.slice(0, 8)}</span>
+                <span className="text-xs text-slate-500 truncate">{t.reason ?? "—"}</span>
+                <span
+                  className={`inline-flex items-center gap-1 text-xs font-medium justify-self-end ${
+                    isStale ? "text-red-600" : "text-slate-500"
+                  }`}
+                >
+                  <Clock size={11} />
+                  {age}h
+                </span>
+              </div>
+            );
+          })}
+          {financingTasks.length > 10 && (
+            <div className="px-5 py-2 text-[11px] text-slate-400">
+              +{financingTasks.length - 10} more in the financing queue
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Queue */}
-      {reviews.length === 0 && ofacBuyers.length === 0 ? (
+      {reviews.length === 0 && ofacBuyers.length === 0 && financingTasks.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl p-12 text-center" data-testid="reviews-empty">
           <ShieldAlert size={32} className="text-slate-300 mx-auto mb-2" />
           <p className="text-sm font-medium text-slate-500">No reviews pending</p>

@@ -26,8 +26,14 @@ const CA_TRANSITIONS: Record<CreditApplicationStatus, CreditApplicationStatus[]>
   WITHDRAWN: [],
 };
 
+// Terminals may NEVER be left — not even with force. This bounds a human override:
+// an admin can drive a parked app to a decision, but cannot resurrect an APPROVED
+// or WITHDRAWN application.
+export const CA_TERMINAL: CreditApplicationStatus[] = ["APPROVED", "WITHDRAWN"];
+
 export function canTransitionApplication(from: CreditApplicationStatus, to: CreditApplicationStatus): boolean {
   if (from === to) return false;
+  if (CA_TERMINAL.includes(from)) return false;
   return CA_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
@@ -75,6 +81,31 @@ export async function createCreditApplication(input: CreateCreditApplicationInpu
   });
 }
 
+/** Buyer submits their DRAFT application (DRAFT → SUBMITTED), audited as submitted. */
+export async function submitApplication(appId: string, opts: { actorId?: string | null } = {}): Promise<void> {
+  await advanceApplication(appId, "SUBMITTED", {
+    actorType: "BUYER",
+    actorId: opts.actorId ?? null,
+    reason: "buyer submitted application",
+    data: { submittedAt: new Date() },
+  });
+  const app = await prisma.creditApplication.findUnique({ where: { id: appId }, select: { dealId: true, buyerId: true } });
+  await appendFinancingAuditEvent({
+    eventType: "APPLICATION_SUBMITTED",
+    actorType: "BUYER",
+    actorId: opts.actorId ?? null,
+    creditApplicationId: appId,
+    dealId: app?.dealId ?? null,
+    buyerId: app?.buyerId ?? null,
+    payload: { submitted: true },
+  });
+}
+
+/** Buyer-scoped read (ownership enforced) — NEVER returns the encrypted PII columns. */
+export async function getApplicationForBuyer(buyerId: string, appId: string): Promise<CreditApplication | null> {
+  return prisma.creditApplication.findFirst({ where: { id: appId, buyerId } });
+}
+
 export interface AdvanceApplicationOpts {
   actorType?: "SYSTEM" | "ADMIN" | "BUYER" | "LENDER";
   actorId?: string | null;
@@ -99,6 +130,11 @@ export async function advanceApplication(
   if (!app) throw new Error(`credit application ${appId} not found`);
   const from = app.status;
   if (from === to) return;
+  // A terminal is never left, even under force — force only relaxes the edge table
+  // for a deliberate human override between non-terminal states.
+  if (CA_TERMINAL.includes(from)) {
+    throw new CreditApplicationTransitionError(from, to);
+  }
   if (!opts.force && !canTransitionApplication(from, to)) {
     throw new CreditApplicationTransitionError(from, to);
   }

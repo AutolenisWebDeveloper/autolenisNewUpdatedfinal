@@ -8,7 +8,10 @@
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-const state = { rows: [] as Array<Record<string, unknown>> };
+const state = {
+  rows: [] as Array<Record<string, unknown>>,
+  compliance: [] as Array<Record<string, unknown>>,
+};
 
 mock.module("@/lib/prisma", {
   namedExports: {
@@ -22,6 +25,12 @@ mock.module("@/lib/prisma", {
         create: async ({ data }: { data: Record<string, unknown> }) => {
           state.rows.push(data);
           return { id: `evt_${data.sequence}`, ...data };
+        },
+      },
+      complianceEvent: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          state.compliance.push(data);
+          return { id: `ce_${state.compliance.length}`, ...data };
         },
       },
       $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
@@ -47,6 +56,7 @@ const FIXED = {
 
 beforeEach(() => {
   state.rows = [];
+  state.compliance = [];
 });
 
 test("computeEventHash is deterministic + order-independent, and covers nested/array/unicode payloads", async () => {
@@ -71,6 +81,37 @@ test("appendFinancingAuditEvent chains prevHash→hash and assigns a monotonic s
   assert.equal(e1.prevHash, null);
   assert.equal(e2.sequence, 2);
   assert.equal(e2.prevHash, e1.hash);
+});
+
+test("mirrors a non-PII breadcrumb into ComplianceEvent when the event concerns a buyer", async () => {
+  const { appendFinancingAuditEvent } = await import("@/lib/services/financing/financing-audit.service");
+  // Buyer-scoped event → mirrored.
+  const e1 = await appendFinancingAuditEvent({
+    eventType: "DECISION_RENDERED" as never,
+    actorType: "SYSTEM" as never,
+    buyerId: "b1",
+    creditApplicationId: "app1",
+    dealId: "deal1",
+    ruleId: "r1",
+    payload: { ssn: "123-45-6789", income: 90000 }, // PII in the chain payload...
+  });
+  assert.equal(state.compliance.length, 1);
+  const ce = state.compliance[0]!;
+  assert.equal(ce.eventType, "FINANCING_DECISION_RENDERED");
+  assert.equal(ce.buyerId, "b1");
+  const meta = ce.metadata as Record<string, unknown>;
+  assert.equal(meta.financingAuditSequence, e1.sequence);
+  assert.equal(meta.financingAuditHash, e1.hash);
+  assert.equal(meta.creditApplicationId, "app1");
+  assert.equal(meta.dealId, "deal1");
+  assert.equal(meta.ruleId, "r1");
+  // ...must NOT cross into the compliance mirror.
+  assert.equal(JSON.stringify(ce).includes("123-45-6789"), false, "no PII in the mirror");
+  assert.equal(JSON.stringify(ce).includes("90000"), false, "no PII in the mirror");
+
+  // Event with no buyer → not mirrored.
+  await appendFinancingAuditEvent({ eventType: "NOTICE_SENT" as never, actorType: "SYSTEM" as never, payload: { step: 2 } });
+  assert.equal(state.compliance.length, 1, "no buyer ⇒ no compliance mirror");
 });
 
 async function buildChain(): Promise<Record<string, unknown>[]> {

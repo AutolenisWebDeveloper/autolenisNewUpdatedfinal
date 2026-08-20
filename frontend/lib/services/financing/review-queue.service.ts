@@ -8,7 +8,7 @@
 // application forward (a human may override the machine via force).
 
 import { prisma } from "@/lib/prisma";
-import type { FinancingReviewTask, FinancingReviewTaskType, CreditApplicationStatus } from "@prisma/client";
+import type { FinancingReviewTask, FinancingReviewTaskType, FinancingReviewTaskStatus, CreditApplicationStatus } from "@prisma/client";
 import { appendFinancingAuditEvent } from "./financing-audit.service";
 import { advanceApplication } from "./credit-application.service";
 
@@ -32,21 +32,33 @@ export interface RouteToReviewInput {
  * task of the same (application, type) is reused rather than duplicated.
  */
 export async function routeToReview(input: RouteToReviewInput): Promise<FinancingReviewTask> {
-  const existing = await prisma.financingReviewTask.findFirst({
-    where: { creditApplicationId: input.creditApplicationId, taskType: input.taskType, status: { in: ["OPEN", "IN_PROGRESS"] } },
-  });
+  const OPEN_STATUSES: FinancingReviewTaskStatus[] = ["OPEN", "IN_PROGRESS"];
+  const openWhere = { creditApplicationId: input.creditApplicationId, taskType: input.taskType, status: { in: OPEN_STATUSES } };
+  const existing = await prisma.financingReviewTask.findFirst({ where: openWhere });
   if (existing) return existing;
 
-  const task = await prisma.financingReviewTask.create({
-    data: {
-      creditApplicationId: input.creditApplicationId,
-      dealId: input.dealId ?? null,
-      buyerId: input.buyerId ?? null,
-      taskType: input.taskType,
-      status: "OPEN",
-      reason: input.reason ?? null,
-    },
-  });
+  let task;
+  try {
+    task = await prisma.financingReviewTask.create({
+      data: {
+        creditApplicationId: input.creditApplicationId,
+        dealId: input.dealId ?? null,
+        buyerId: input.buyerId ?? null,
+        taskType: input.taskType,
+        status: "OPEN",
+        reason: input.reason ?? null,
+      },
+    });
+  } catch (e) {
+    // Lost the create race — the partial-unique index (one OPEN/IN_PROGRESS per
+    // app+type) rejected the duplicate. Return the winner instead of duplicating.
+    if ((e as { code?: string } | null)?.code === "P2002") {
+      const winner = await prisma.financingReviewTask.findFirst({ where: openWhere });
+      if (winner) return winner;
+    }
+    throw e;
+  }
+
   await appendFinancingAuditEvent({
     eventType: "REVIEW_ROUTED",
     actorType: "SYSTEM",
@@ -61,8 +73,14 @@ export async function routeToReview(input: RouteToReviewInput): Promise<Financin
 export interface ResolveReviewInput {
   adminId: string;
   resolution: string;
-  /** Optional human decision that moves the application forward (overrides the machine). */
+  /** Optional human decision that moves the application forward. */
   decision?: CreditApplicationStatus;
+  /**
+   * By default the human decision is still validated by the state machine (only a
+   * legal transition from the current status is applied). Set true ONLY for a
+   * deliberate override of an otherwise-illegal move — it is recorded as such.
+   */
+  override?: boolean;
 }
 
 /**
@@ -75,6 +93,8 @@ export async function resolveReviewTask(taskId: string, input: ResolveReviewInpu
   const task = await prisma.financingReviewTask.findUnique({ where: { id: taskId } });
   if (!task) throw new Error(`review task ${taskId} not found`);
 
+  // CAS first so exactly one resolver proceeds (no double-resolve / double-advance).
+  const priorStatus = task.status;
   const res = await prisma.financingReviewTask.updateMany({
     where: { id: taskId, status: { in: ["OPEN", "IN_PROGRESS"] } },
     data: {
@@ -87,33 +107,47 @@ export async function resolveReviewTask(taskId: string, input: ResolveReviewInpu
   });
   if (res.count !== 1) throw new ReviewTaskConcurrencyError(taskId);
 
-  if (input.decision) {
-    await advanceApplication(task.creditApplicationId, input.decision, {
-      actorType: "ADMIN",
-      actorId: input.adminId,
-      reason: `human review: ${input.resolution}`,
-      force: true,
-    });
+  // The audit trail's own append uses its own transaction (the hash chain), so a
+  // single enclosing transaction isn't available. Instead: if advancing the app or
+  // recording the audit fails, COMPENSATE by reverting the RESOLVED mark, so the
+  // resolve stays retryable and never lands as RESOLVED-but-unaudited (the ECOA/
+  // adverse-action trail must always reflect what happened).
+  try {
+    if (input.decision) {
+      await advanceApplication(task.creditApplicationId, input.decision, {
+        actorType: "ADMIN",
+        actorId: input.adminId,
+        reason: `human review: ${input.resolution}`,
+        force: input.override ?? false,
+      });
+      await appendFinancingAuditEvent({
+        eventType: "HUMAN_OVERRIDE",
+        actorType: "ADMIN",
+        actorId: input.adminId,
+        creditApplicationId: task.creditApplicationId,
+        dealId: task.dealId,
+        buyerId: task.buyerId,
+        payload: { taskId, decision: input.decision, resolution: input.resolution, override: input.override ?? false },
+      });
+    }
     await appendFinancingAuditEvent({
-      eventType: "HUMAN_OVERRIDE",
+      eventType: "REVIEW_RESOLVED",
       actorType: "ADMIN",
       actorId: input.adminId,
       creditApplicationId: task.creditApplicationId,
       dealId: task.dealId,
       buyerId: task.buyerId,
-      payload: { taskId, decision: input.decision, resolution: input.resolution },
+      payload: { taskId, taskType: task.taskType, resolution: input.resolution, decision: input.decision ?? null },
     });
+  } catch (e) {
+    await prisma.financingReviewTask
+      .updateMany({
+        where: { id: taskId, status: "RESOLVED" },
+        data: { status: priorStatus, resolution: null, resolutionOutcome: null, resolvedBy: null, resolvedAt: null },
+      })
+      .catch(() => {});
+    throw e;
   }
-
-  await appendFinancingAuditEvent({
-    eventType: "REVIEW_RESOLVED",
-    actorType: "ADMIN",
-    actorId: input.adminId,
-    creditApplicationId: task.creditApplicationId,
-    dealId: task.dealId,
-    buyerId: task.buyerId,
-    payload: { taskId, taskType: task.taskType, resolution: input.resolution, decision: input.decision ?? null },
-  });
 }
 
 export async function listOpenReviewTasks(limit = 100): Promise<FinancingReviewTask[]> {

@@ -113,6 +113,13 @@ test("advanceApplication throws on an illegal transition (before touching the DB
   assert.equal(state.updateManyCalls.length, 0, "no DB write on an illegal move");
 });
 
+test("advanceApplication cannot leave a terminal state even with force (no resurrecting APPROVED/WITHDRAWN)", async () => {
+  const { advanceApplication } = await import("@/lib/services/financing/credit-application.service");
+  state.apps.set("app_1", { id: "app_1", status: "APPROVED", dealId: "deal_1", buyerId: "b1" });
+  await assert.rejects(() => advanceApplication("app_1", "DECLINED" as never, { force: true }), /transition/i);
+  assert.equal(state.updateManyCalls.length, 0, "a terminal is never written out of, even under force");
+});
+
 test("advanceApplication throws a concurrency error when the CAS matches 0 rows (lost race)", async () => {
   const { advanceApplication } = await import("@/lib/services/financing/credit-application.service");
   state.apps.set("app_1", { id: "app_1", status: "DRAFT", dealId: "deal_1", buyerId: "b1" });

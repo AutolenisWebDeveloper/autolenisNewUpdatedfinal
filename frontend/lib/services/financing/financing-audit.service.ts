@@ -85,9 +85,10 @@ const APPEND_MAX_RETRIES = 5;
  * a mistake by appending a corrective event.
  */
 export async function appendFinancingAuditEvent(input: AppendAuditInput): Promise<FinancingAuditEvent> {
+  let event: FinancingAuditEvent | null = null;
   for (let attempt = 0; ; attempt++) {
     try {
-      return await prisma.$transaction(
+      event = await prisma.$transaction(
         async (tx) => {
           const tail = await tx.financingAuditEvent.findFirst({ orderBy: { sequence: "desc" } });
           const sequence = (tail?.sequence ?? 0) + 1;
@@ -125,12 +126,45 @@ export async function appendFinancingAuditEvent(input: AppendAuditInput): Promis
         },
         { isolationLevel: "Serializable" },
       );
+      break;
     } catch (e) {
       const code = (e as { code?: string } | null)?.code;
       if ((code === "P2034" || code === "P2002") && attempt < APPEND_MAX_RETRIES) continue;
       throw e;
     }
   }
+  // De-dup with the platform compliance timeline: when the event concerns a buyer,
+  // mirror a lightweight breadcrumb into the existing ComplianceEvent surface so
+  // financing decisions/notices show up alongside prequal in the per-buyer
+  // compliance history (admin already reads that timeline) rather than in a second,
+  // parallel audit view. This is best-effort and lives OUTSIDE the hash-chain
+  // transaction: the FinancingAuditEvent row is the tamper-evident source of truth;
+  // a mirror failure must never fail (or roll back) the audit append. The mirror
+  // carries only structural identifiers + the chain anchor (sequence/hash) — never
+  // the raw payload — so no financing PII crosses into the compliance table.
+  if (event.buyerId) {
+    try {
+      await prisma.complianceEvent.create({
+        data: {
+          eventType: `FINANCING_${input.eventType}`,
+          buyerId: event.buyerId,
+          metadata: {
+            source: "financing-audit",
+            financingAuditSequence: event.sequence,
+            financingAuditHash: event.hash,
+            financingEventType: input.eventType,
+            actorType: input.actorType,
+            ...(event.creditApplicationId ? { creditApplicationId: event.creditApplicationId } : {}),
+            ...(event.dealId ? { dealId: event.dealId } : {}),
+            ...(event.ruleId ? { ruleId: event.ruleId } : {}),
+          },
+        },
+      });
+    } catch {
+      // Non-fatal: the tamper-evident chain already recorded the event.
+    }
+  }
+  return event;
 }
 
 export interface ChainRow {

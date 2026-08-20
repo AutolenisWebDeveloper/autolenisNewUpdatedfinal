@@ -1,9 +1,11 @@
 // lib/security/field-encryption.ts
 //
-// Phase 5 — shared AES-256-GCM field encryption for sensitive financing data at
-// rest (SSN, income, employment, DOB). FAIL-FAST: there is NO default key; a
-// missing or malformed key throws rather than silently degrading to a guessable
-// key (which would make "encrypted" data trivially readable). Validated lazily on
+// Shared AES-256-GCM field encryption for sensitive buyer credit PII at rest
+// (SSN, income, employment, DOB). Uses the SAME platform PII key as the prequal
+// consumer-report encryption (PREQUAL_ENCRYPTION_KEY) rather than a second key —
+// financing and prequal are the same security domain (buyer credit PII), so they
+// share one key. FAIL-FAST: there is NO default key; a missing/malformed key
+// throws rather than silently degrading to a guessable key. Validated lazily on
 // first use so `next build` static analysis is not broken by a throw at import.
 //
 // Format: "<iv-b64>:<authTag-b64>:<ciphertext-b64>". The GCM auth tag makes any
@@ -11,7 +13,8 @@
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
-const KEY_ENV = "FINANCING_ENCRYPTION_KEY";
+// Shared platform PII key (also used by prequal/microbilt for consumer reports).
+const KEY_ENV = "PREQUAL_ENCRYPTION_KEY";
 const KEY_RE = /^[0-9a-fA-F]{64}$/; // 32-byte AES-256 key as hex
 
 let cachedKey: Buffer | null = null;

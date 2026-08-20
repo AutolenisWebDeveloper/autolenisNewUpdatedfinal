@@ -14,9 +14,11 @@ const state = {
   tasks: [] as Array<Record<string, unknown>>,
   created: [] as Array<Record<string, unknown>>,
   updateManyResult: 1,
-  updateManyCalls: [] as Array<Record<string, unknown>>,
+  updateManyCalls: [] as Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>,
   audit: [] as Array<Record<string, unknown>>,
   advanceCalls: [] as Array<{ to: string; force?: boolean }>,
+  createThrowsP2002: false,
+  advanceThrows: false,
 };
 
 mock.module("@/lib/prisma", {
@@ -29,6 +31,11 @@ mock.module("@/lib/prisma", {
           ) ?? null,
         findUnique: async ({ where }: { where: { id: string } }) => state.tasks.find((t) => t.id === where.id) ?? null,
         create: async ({ data }: { data: Record<string, unknown> }) => {
+          if (state.createThrowsP2002) {
+            const err = new Error("Unique constraint failed") as Error & { code?: string };
+            err.code = "P2002";
+            throw err;
+          }
           const row = { id: `task_${state.tasks.length + 1}`, ...data };
           state.created.push(data);
           state.tasks.push(row);
@@ -47,7 +54,12 @@ mock.module("@/lib/services/financing/financing-audit.service", {
   namedExports: { appendFinancingAuditEvent: async (e: Record<string, unknown>) => { state.audit.push(e); return { id: "e" }; } },
 });
 mock.module("@/lib/services/financing/credit-application.service", {
-  namedExports: { advanceApplication: async (_id: string, to: string, opts?: { force?: boolean }) => { state.advanceCalls.push({ to, force: opts?.force }); } },
+  namedExports: {
+    advanceApplication: async (_id: string, to: string, opts?: { force?: boolean }) => {
+      if (state.advanceThrows) throw new Error("app CAS conflict");
+      state.advanceCalls.push({ to, force: opts?.force });
+    },
+  },
 });
 
 beforeEach(() => {
@@ -57,6 +69,39 @@ beforeEach(() => {
   state.updateManyCalls = [];
   state.audit = [];
   state.advanceCalls = [];
+  state.createThrowsP2002 = false;
+  state.advanceThrows = false;
+});
+
+test("routeToReview handles the create race (P2002) by returning the winner, not duplicating", async () => {
+  const { routeToReview } = await import("@/lib/services/financing/review-queue.service");
+  // Simulate: findFirst saw nothing, but a concurrent create already inserted the
+  // winner (which the partial-unique index then rejects for us).
+  state.createThrowsP2002 = true;
+  state.tasks.push({ id: "winner", creditApplicationId: "app_1", taskType: "STIP_REVIEW", status: "OPEN" });
+  const t = await routeToReview({ creditApplicationId: "app_1", taskType: "STIP_REVIEW" as never });
+  assert.equal(t.id, "winner", "returns the concurrently-created task instead of throwing/duplicating");
+});
+
+test("claimReviewTask CAS: OPEN→IN_PROGRESS, and throws when the claim is lost", async () => {
+  const { claimReviewTask } = await import("@/lib/services/financing/review-queue.service");
+  await claimReviewTask("task_1", "admin_1");
+  assert.equal(state.updateManyCalls[0]!.data.status, "IN_PROGRESS");
+  assert.equal(state.updateManyCalls[0]!.data.assignedAdminId, "admin_1");
+  state.updateManyResult = 0;
+  await assert.rejects(() => claimReviewTask("task_1", "admin_2"), /already|concurren|conflict/i);
+});
+
+test("resolveReviewTask COMPENSATES (reverts the RESOLVED mark) if advancing the app fails — stays retryable", async () => {
+  const { resolveReviewTask } = await import("@/lib/services/financing/review-queue.service");
+  state.tasks.push({ id: "task_1", creditApplicationId: "app_1", taskType: "STIP_REVIEW", status: "OPEN" });
+  state.advanceThrows = true;
+  await assert.rejects(() => resolveReviewTask("task_1", { adminId: "a", resolution: "x", decision: "APPROVED" as never }), /CAS conflict/);
+  // Two updateMany calls: the RESOLVED CAS, then the compensating revert back to OPEN.
+  assert.equal(state.updateManyCalls.length, 2);
+  assert.equal(state.updateManyCalls[0]!.data.status, "RESOLVED");
+  assert.equal(state.updateManyCalls[1]!.data.status, "OPEN", "the RESOLVED mark is reverted so the resolve can be retried");
+  assert.equal(state.audit.some((e) => e.eventType === "REVIEW_RESOLVED"), false, "no REVIEW_RESOLVED written when it failed");
 });
 
 test("routeToReview creates a task and records REVIEW_ROUTED", async () => {
@@ -87,10 +132,17 @@ test("resolveReviewTask records HUMAN_OVERRIDE + REVIEW_RESOLVED and advances th
   assert.equal((call.where as Record<string, unknown>).id, "task_1");
   assert.equal((call.data as Record<string, unknown>).status, "RESOLVED");
   assert.equal((call.data as Record<string, unknown>).resolvedBy, "admin_9");
-  // the human decision drives the application forward (force — a human can override the machine)
-  assert.deepEqual(state.advanceCalls, [{ to: "DECLINED", force: true }]);
+  // the human decision drives the application forward — VALIDATED by default (no force)
+  assert.deepEqual(state.advanceCalls, [{ to: "DECLINED", force: false }]);
   assert.ok(state.audit.some((e) => e.eventType === "HUMAN_OVERRIDE" && (e.actorType === "ADMIN")));
   assert.ok(state.audit.some((e) => e.eventType === "REVIEW_RESOLVED"));
+});
+
+test("resolveReviewTask with override:true forces the transition (deliberate illegal-move override)", async () => {
+  const { resolveReviewTask } = await import("@/lib/services/financing/review-queue.service");
+  state.tasks.push({ id: "task_1", creditApplicationId: "app_1", taskType: "MANUAL_DECISION_REVIEW", status: "OPEN" });
+  await resolveReviewTask("task_1", { adminId: "admin_9", resolution: "manual override", decision: "APPROVED" as never, override: true });
+  assert.deepEqual(state.advanceCalls, [{ to: "APPROVED", force: true }]);
 });
 
 test("resolveReviewTask without a decision resolves the task but does NOT move the application", async () => {
