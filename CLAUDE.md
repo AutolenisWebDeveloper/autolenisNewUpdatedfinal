@@ -95,11 +95,20 @@ token/component source of truth.
 
 **Availability caveat — verify before you rely on it.** Skills outside `.claude/skills/` are
 environment-provided and are **not guaranteed to be present in a given session**. The
-`superpowers` plugin is declared in `.claude/settings.json` but resolves only where that
-marketplace is installed; as of the 2026-08 audit it was **absent** in the hosted Claude Code
-environment. Never treat an unavailable capability as a completed pipeline step — the repo-local
-`.claude/skills/autolenis-*` skills are the only guaranteed-present guidance, and step 4 below
-stands on its own without any plugin.
+`superpowers` plugin is now **vendored** into the repo as a local marketplace
+(`.claude/plugins/superpowers-marketplace/`, see its `VENDORING.md`) and enabled in
+`.claude/settings.json`. The hosted Claude Code runtime does **not** activate project-scoped
+plugin marketplaces, so the plugin form loads only in a **local** (non-hosted) CLI; to make the
+additive superpowers techniques usable in the **hosted** runtime they are also mirrored as plain
+project skills under `.claude/skills/` (the `superpowers-*` skills — brainstorming, writing-plans,
+executing-plans, using-git-worktrees, dispatching-parallel-agents, writing-skills,
+finishing-a-development-branch). The superpowers skills that would duplicate AutoLenis architecture
+skills (`systematic-debugging`, `test-driven-development`, `verification-before-completion`,
+`requesting-`/`receiving-code-review`, `subagent-driven-development`, `using-superpowers`) are
+deliberately **not** mirrored, per the "no duplicate architecture skills" rule. Never treat an
+unavailable capability as a completed pipeline step — the repo-local `.claude/skills/autolenis-*`
+skills are the only guaranteed-present guidance, and step 4 below stands on its own without any
+plugin.
 
 ## Continuous skill observation (Task Observer)
 
@@ -128,7 +137,7 @@ it does not modify existing skills automatically.
 8. Implement inside the existing architecture.
 9. `cd frontend && pnpm typecheck`
 10. `pnpm lint`
-11. `pnpm test:all` — the **full** matrix (18 suites). `pnpm test` alone covers ~a third of it.
+11. `pnpm test:all` — the **full** matrix (26 suites). `pnpm test` alone covers ~a third of it.
 12. Browser E2E / visual tests where UI changed (`pnpm test:visual`, Playwright).
 13. Impeccable audit for UI work.
 14. `/code-review`.
@@ -163,7 +172,7 @@ contract violations, integration failures, accessibility and responsive regressi
 regressions, dead code, placeholders, TODOs, and mocks/stubs left in production paths.
 
 **STEP 3 — RUN VERIFICATION.** Run every applicable executable check: `pnpm typecheck`, `pnpm lint`,
-`pnpm test:coverage-check`, `pnpm test:all` (the full 18-suite matrix — `pnpm test` alone is ~a
+`pnpm test:coverage-check`, `pnpm test:all` (the full 26-suite matrix — `pnpm test` alone is ~a
 third of it), plus browser/E2E, build, and accessibility where they apply.
 **Never claim something works because the code looks correct.**
 
@@ -223,7 +232,7 @@ pnpm dev                  # local dev on :3000
 pnpm typecheck            # tsc --noEmit
 pnpm lint                 # eslint
 pnpm test                 # core service unit tests (subset)
-pnpm test:all             # FULL matrix — all 18 test:* suites; this is the gate
+pnpm test:all             # FULL matrix — all 26 test:* suites; this is the gate
 pnpm test:coverage-check  # fails if any *.test.ts is unreachable from a test:* script
 pnpm test:payments        # payments suite (see package.json for the full test:* matrix)
 pnpm test:security        # security suite

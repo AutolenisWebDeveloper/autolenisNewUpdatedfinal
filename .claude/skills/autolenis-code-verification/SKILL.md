@@ -92,7 +92,7 @@ evidence.** From `frontend/`:
 | Types | `pnpm typecheck` | always |
 | Lint | `pnpm lint` | always |
 | Test reachability | `pnpm test:coverage-check` | always |
-| **Full matrix (the gate)** | `pnpm test:all` | always — all 18 suites |
+| **Full matrix (the gate)** | `pnpm test:all` | always — all 26 suites |
 | Core services (subset) | `pnpm test` | fast inner loop only; ~⅓ of `test:all` |
 | Payments / money | `pnpm test:payments` | deposits, fees, refunds, ledger |
 | Security / authz | `pnpm test:security` | auth, roles, CSRF, rate limits, PII |

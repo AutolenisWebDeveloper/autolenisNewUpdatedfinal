@@ -45,7 +45,7 @@ test('every material change requires typecheck, lint, coverage-check and the ful
 });
 
 test('the gate requires test:all, not the per-domain suites it already chains', () => {
-  // `test:all` runs all 18 unit suites, so requiring test:webhooks/test:payments
+  // `test:all` runs all 26 unit suites, so requiring test:webhooks/test:payments
   // alongside it would duplicate the repo's gate instead of extending it.
   const ids = requiredChecks([
     'frontend/app/api/webhooks/stripe/route.ts',
