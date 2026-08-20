@@ -14,18 +14,30 @@ const CATEGORIES = ["General feedback", "Bug report", "Feature request", "Billin
 export default function FeedbackPage() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", email: "", category: "", message: "" });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const res = await fetch("/api/public/feedback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: form.name, email: form.email, category: form.category, message: form.message }),
-    });
-    setLoading(false);
-    if (res.ok) setSubmitted(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/public/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: form.name, email: form.email, category: form.category, message: form.message }),
+      });
+      if (res.ok) {
+        setSubmitted(true);
+      } else {
+        setError("We couldn't send your feedback. Please try again in a moment.");
+      }
+    } catch {
+      // Network/transport failure — never leave the button stuck on "Sending…".
+      setError("We couldn't reach the server. Check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (submitted) {
@@ -75,6 +87,11 @@ export default function FeedbackPage() {
             <Textarea id="feedback-message" data-testid="feedback-message-input" placeholder="Tell us what's on your mind…" className="mt-1.5 min-h-[130px]"
               value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} required />
           </div>
+          {error && (
+            <p role="alert" data-testid="feedback-error" className="text-sm text-al-danger bg-al-danger-subtle border border-al-danger/20 rounded-lg px-4 py-3">
+              {error}
+            </p>
+          )}
           <Button type="submit" className="w-full" data-testid="feedback-submit-btn" disabled={loading}>
             {loading ? "Sending…" : "Send Feedback"}
           </Button>

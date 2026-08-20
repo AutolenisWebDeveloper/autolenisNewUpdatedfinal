@@ -50,6 +50,9 @@ export default function ContactFormClient() {
           phone: form.phone,
           subject: form.subject,
           message: form.message,
+          // TCPA: forward the SMS consent decision so it is recorded server-side
+          // alongside the phone number (only meaningful when a phone is given).
+          smsConsent: form.phone.trim().length > 0 ? smsConsent : false,
         }),
       });
       if (res.ok) {
