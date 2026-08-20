@@ -9,9 +9,10 @@ import { AutoLenisLogo } from "@/components/shared/AutoLenisLogo";
 import {
   LayoutDashboard, Car, Gavel, FileText, FileCheck, Shield, PenLine,
   MapPin, Bell, MessageSquare, FolderOpen, User, Settings, LogOut,
-  ClipboardList, TrendingUp, Heart, Search, Menu, X, CreditCard,
+  ClipboardList, TrendingUp, Heart, Search, Menu, CreditCard,
   Bookmark, Activity, Share2, Receipt,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { NOTIFICATION_CLEARED_EVENT } from "@/lib/events/notifications";
 import { api } from "@/lib/api/client";
 
@@ -174,31 +175,14 @@ export default function BuyerSidebar() {
           </button>
         </div>
       </div>
-      {/* Mobile drawer */}
-      {open && (
-        <>
-          <div
-            className="lg:hidden fixed inset-0 z-40 bg-black/40"
-            onClick={() => setOpen(false)}
-            data-testid="buyer-mobile-drawer-backdrop"
-          />
-          <aside
-            className="lg:hidden fixed top-0 left-0 z-50 w-72 max-w-[85vw] h-screen bg-white shadow-xl flex flex-col"
-            data-testid="buyer-mobile-drawer"
-          >
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              aria-label="Close navigation"
-              data-testid="buyer-mobile-menu-close"
-              className="absolute top-3 right-3 p-2 rounded-md text-slate-600 hover:bg-slate-100"
-            >
-              <X size={20} />
-            </button>
-            <SidebarContent pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} />
-          </aside>
-        </>
-      )}
+      {/* Mobile drawer — shared kit Dialog (sheet variant): focus trap, Escape,
+          aria-modal, scroll-lock and overlay dismissal come from Radix. */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent variant="sheet" side="left" className="flex flex-col p-0" data-testid="buyer-mobile-drawer">
+          <DialogTitle className="sr-only">Buyer navigation</DialogTitle>
+          <SidebarContent pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

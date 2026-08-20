@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, Building2, Share2, Gavel, FileText, Package,
   MapPin, PenLine, AlertOctagon, ClipboardList, MessageSquare, FolderOpen,
   Shield, BarChart2, Activity, TrendingUp, DollarSign, RefreshCw,
-  Search, Brain, Settings, LifeBuoy, Star, BookOpen, LogOut, Menu, X, CheckCircle2,
+  Search, Brain, Settings, LifeBuoy, Star, BookOpen, LogOut, Menu, CheckCircle2,
   CreditCard, FileCheck, Send,
   ClipboardCheck, ArrowDownCircle, RotateCcw, Bell,
   Trophy,
@@ -58,7 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
     { label: "Manual Reviews", href: "/admin/manual-reviews", icon: ClipboardCheck },
     { label: "Pickups", href: "/admin/pickups", icon: MapPin },
     { label: "E-Sign", href: "/admin/esign", icon: PenLine },
-    { label: "Requests (4C)", href: "/admin/requests", icon: ClipboardList },
+    { label: "Requests (Triage)", href: "/admin/requests", icon: ClipboardList },
     { label: "Vehicle Requests", href: "/admin/vehicle-requests", icon: ClipboardList },
     { label: "Vehicle Offers", href: "/admin/vehicle-offers", icon: Car },
     { label: "Dealer Health", href: "/admin/dealers/health", icon: TrendingUp },
@@ -212,21 +213,14 @@ export default function AdminSidebar({ adminRole }: { adminRole?: string }) {
           <Menu size={22} />
         </button>
       </div>
-      {open && (
-        <>
-          <div className="lg:hidden fixed inset-0 z-40 bg-[#94A3B8]/30" onClick={() => setOpen(false)}
-            data-testid="admin-mobile-drawer-backdrop" />
-          <aside className="lg:hidden fixed top-0 left-0 z-50 w-72 max-w-[85vw] h-screen bg-white shadow-xl flex flex-col"
-            data-testid="admin-mobile-drawer">
-            <button type="button" onClick={() => setOpen(false)} aria-label="Close navigation"
-              data-testid="admin-mobile-menu-close"
-              className="absolute top-3 right-3 p-2 rounded-md text-[#475569] hover:bg-[#F8FAFF] hover:text-al-primary transition-colors">
-              <X size={20} />
-            </button>
-            <Inner pathname={pathname} adminRole={adminRole} onNavigate={() => setOpen(false)} />
-          </aside>
-        </>
-      )}
+      {/* Mobile drawer — shared kit Dialog (sheet): focus trap, Escape,
+          aria-modal, scroll-lock and overlay dismissal from Radix. */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent variant="sheet" side="left" className="flex flex-col p-0" data-testid="admin-mobile-drawer">
+          <DialogTitle className="sr-only">Admin navigation</DialogTitle>
+          <Inner pathname={pathname} adminRole={adminRole} onNavigate={() => setOpen(false)} />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
