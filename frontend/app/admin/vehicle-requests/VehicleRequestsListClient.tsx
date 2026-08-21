@@ -3,6 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { ClipboardList } from "lucide-react";
+import type { VehicleRequestStatus } from "@prisma/client";
+// VehicleRequestStatus labels + badge tones — single source of truth (UI-13).
+import {
+  VEHICLE_REQUEST_STATUS_LABEL as STATUS_LABEL,
+  VEHICLE_REQUEST_STATUS_TONE as STATUS_TONE,
+} from "@/lib/domain/status-labels";
 
 export type VehicleRequestRow = {
   id: string;
@@ -18,30 +24,7 @@ export type VehicleRequestRow = {
   offerCount: number;
 };
 
-// Real VehicleRequestStatus enum values → display labels + badge tone.
-const STATUS_LABEL: Record<string, string> = {
-  SUBMITTED: "New",
-  INTAKE: "In Review",
-  ACTIVE_SOURCING: "Sourcing",
-  OFFER_READY: "Offer Ready",
-  OFFER_SENT: "Offer Sent",
-  OFFER_ACCEPTED: "Offer Accepted",
-  OFFER_DECLINED: "Offer Declined",
-  DEAL_CREATED: "Deal Created",
-  CLOSED_NO_MATCH: "Closed — No Match",
-};
 
-const STATUS_TONE: Record<string, string> = {
-  SUBMITTED: "bg-blue-100 text-blue-700 border-blue-200",
-  INTAKE: "bg-amber-100 text-amber-700 border-amber-200",
-  ACTIVE_SOURCING: "bg-violet-100 text-violet-700 border-violet-200",
-  OFFER_READY: "bg-cyan-100 text-cyan-700 border-cyan-200",
-  OFFER_SENT: "bg-cyan-100 text-cyan-700 border-cyan-200",
-  OFFER_ACCEPTED: "bg-green-100 text-green-700 border-green-200",
-  OFFER_DECLINED: "bg-red-100 text-red-700 border-red-200",
-  DEAL_CREATED: "bg-green-100 text-green-700 border-green-200",
-  CLOSED_NO_MATCH: "bg-slate-100 text-slate-600 border-slate-200",
-};
 
 // Filter tabs map a label → the set of statuses it shows ([] === all).
 const FILTERS: Array<{ key: string; label: string; statuses: string[] }> = [
@@ -142,10 +125,10 @@ export default function VehicleRequestsListClient({
                       </p>
                       <span
                         className={`text-[10px] font-semibold uppercase tracking-wide rounded-full border px-2 py-0.5 ${
-                          STATUS_TONE[req.status] ?? STATUS_TONE.SUBMITTED
+                          STATUS_TONE[req.status as VehicleRequestStatus] ?? STATUS_TONE.SUBMITTED
                         }`}
                       >
-                        {STATUS_LABEL[req.status] ?? req.status}
+                        {STATUS_LABEL[req.status as VehicleRequestStatus] ?? req.status}
                       </span>
                       {req.offerCount > 0 && (
                         <span className="text-[10px] font-semibold rounded-full border border-violet-200 bg-violet-100 text-violet-700 px-2 py-0.5">

@@ -1,4 +1,5 @@
 import { requireDealer } from "@/lib/auth/dealer-session";
+import Link from "next/link";
 import { Users } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
@@ -42,13 +43,19 @@ export default async function DealerLeadsPage() {
       ) : (
         <div className="space-y-2">
           {leads.map((lead, i) => (
-            <div key={lead.id} data-testid={`lead-item-${i}`} className={cn(CARD, "flex items-center justify-between px-5 py-4")}>
+            <Link
+              key={lead.id}
+              href={`/dealer/auctions/${lead.auctionId}`}
+              data-testid={`lead-item-${i}`}
+              aria-label={`Open auction lead ${lead.auctionId.slice(-6)}`}
+              className={cn(CARD, "flex items-center justify-between px-5 py-4 hover:border-al-primary/40 hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus")}
+            >
               <div>
                 <p className="text-sm font-medium text-slate-800 font-mono tabular-nums">Auction Lead #{lead.auctionId.slice(-6)}</p>
                 <p className="text-xs text-slate-500 tabular-nums">{lead.sentAt.toLocaleDateString()}</p>
               </div>
               <Badge variant={lead.auction.status === "ACTIVE" ? "green" : "secondary"} className="text-xs">{lead.auction.status}</Badge>
-            </div>
+            </Link>
           ))}
         </div>
       )}

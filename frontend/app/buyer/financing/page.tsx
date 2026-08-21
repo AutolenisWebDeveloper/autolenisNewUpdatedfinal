@@ -3,14 +3,16 @@
 // PII is submitted to the encrypting API and never rendered back here.
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import { FinancingApplicationForm } from "@/components/buyer/FinancingApplicationForm";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
 const STATUS_COPY: Record<string, string> = {
   DRAFT: "Started — not yet submitted.",
-  SUBMITTED: "Submitted. We're sending it to lenders.",
-  PENDING_LENDER: "Under review by the lender.",
+  // Direct lender decisioning is not active yet — an application that was
+  // submitted is received and handled by our team, not auto-sent to lenders.
+  SUBMITTED: "Received. Our team will follow up about next steps.",
+  PENDING_LENDER: "Our team is reviewing your application.",
   CONDITIONAL: "Conditionally approved — our team is reviewing the conditions.",
   APPROVED: "Approved. You're all set to continue your deal.",
   DECLINED: "Not approved. Our team is reviewing next steps with you.",
@@ -83,7 +85,27 @@ export default async function BuyerFinancingPage({ searchParams }: { searchParam
           </dl>
         </section>
       ) : (
-        <FinancingApplicationForm dealId={deal.id} />
+        // Direct online pre-approval (automated lender decisioning) is not
+        // available yet, so we do not open a credit-application form that would
+        // collect SSN/income and then go nowhere. Route buyers to the financing
+        // options that DO work today (dealer financing, your own bank, or cash).
+        <section className="mt-6 rounded-lg border border-[var(--color-al-border)] p-5" data-testid="financing-options-redirect">
+          <h2 className="text-[13px] font-medium uppercase tracking-wide text-[var(--color-al-text-subtle)]">
+            Choose how you&apos;ll pay
+          </h2>
+          <p className="mt-2 text-[15px] text-[var(--color-al-text-muted)]">
+            Online pre-approval isn&apos;t available yet. You can still move your deal forward by
+            choosing your financing path — finance through the dealer, use a pre-approval from your
+            own bank or credit union, or pay cash.
+          </p>
+          <Link
+            href="/buyer/deal/financing"
+            data-testid="financing-options-link"
+            className="mt-4 inline-flex items-center justify-center rounded-lg bg-al-primary px-4 py-2 text-sm font-semibold text-white hover:bg-al-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus focus-visible:ring-offset-2"
+          >
+            Choose financing options
+          </Link>
+        </section>
       )}
     </main>
   );

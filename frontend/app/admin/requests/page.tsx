@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { ClipboardList, AlertTriangle, BarChart2 } from "lucide-react";
 import { VehicleRequestStatus } from "@prisma/client";
+import { vehicleRequestStatusLabel } from "@/lib/domain/status-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -111,7 +112,7 @@ export default async function AdminRequestsPage() {
                   {score != null ? `${score}/100` : "—"}
                 </span>
                 <Badge variant="secondary" className="text-xs">{tabLabel}</Badge>
-                <Badge variant={req.status === "OFFER_SENT" ? "blue" : req.status === "CANCELLED" ? "gray" : "secondary"} className="text-xs">{req.status}</Badge>
+                <Badge variant={req.status === "OFFER_SENT" ? "blue" : req.status === "CANCELLED" ? "gray" : "secondary"} className="text-xs">{vehicleRequestStatusLabel(req.status)}</Badge>
                 <span className="text-xs text-slate-400">{req._count.checkpoints} checkpoints · {req._count.offers} offers</span>
               </div>
             </Link>

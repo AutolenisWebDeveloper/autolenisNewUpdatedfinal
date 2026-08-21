@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 import {
   CreditCard, AlertTriangle, CheckCircle2, Clock,
-  FileText, ExternalLink, LifeBuoy, Plus,
+  FileText, ExternalLink, LifeBuoy,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -68,14 +68,18 @@ export default async function DealerPaymentsPage() {
           )}
         </div>
 
-        {/* ── 5. Pay now CTA ─────────────────────────────────────────────────── */}
+        {/* ── 5. Settle-balance CTA ──────────────────────────────────────────── */}
+        {/* Online self-service payment is not launched yet — there is no dealer
+            Stripe checkout. Rather than a dead "Pay Now" link to a page that does
+            not exist, direct dealers to the billing team to settle. */}
         {billing.totalDueCents > 0 ? (
           <Button
             data-testid="pay-now-btn"
+            variant="secondary"
             className="shrink-0"
-            href="/dealer/payments/checkout"
+            href="/contact?subject=billing"
           >
-            Pay Now
+            Contact billing to pay
           </Button>
         ) : (
           <div className="flex items-center gap-2 text-emerald-600 text-sm font-medium" data-testid="balance-clear">
@@ -102,15 +106,16 @@ export default async function DealerPaymentsPage() {
               )}
             </div>
           </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            href="/dealer/payments/payment-method"
-            data-testid="add-payment-method-btn"
+          {/* Storing a card / self-service online payment is not available yet —
+              show an honest status instead of a button linking to a page that
+              does not exist. */}
+          <span
+            className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500"
+            data-testid="payment-method-coming-soon"
           >
-            <Plus size={12} className="mr-1" />
-            {billing.savedPaymentMethod === null ? "Add" : "Update"}
-          </Button>
+            <Clock size={11} aria-hidden="true" />
+            Coming soon
+          </span>
         </div>
       </div>
 

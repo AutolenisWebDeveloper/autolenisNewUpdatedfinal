@@ -152,9 +152,12 @@ function AddBuyerModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
   );
 }
 
+const BUYERS_PER_PAGE = 50;
+
 export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) {
   const [buyers, setBuyers] = useState<BuyerRow[]>(initialBuyers);
   const [total, setTotal] = useState(initialTotal);
+  const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
   const [onboardingFilter, setOnboardingFilter] = useState("");
   const [exceptionOnly, setExceptionOnly] = useState(false);
@@ -201,7 +204,7 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
     }
   }, []);
 
-  const applyFilters = useCallback((overrideLifecycle?: typeof lifecycleStatus) => {
+  const applyFilters = useCallback((overrideLifecycle?: typeof lifecycleStatus, pageArg = 1) => {
     const params: Record<string, string> = {};
     if (query) params.q = query;
     if (onboardingFilter) params.onboardingStatus = onboardingFilter;
@@ -212,14 +215,24 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
     if (registeredAfter) params.registeredAfter = registeredAfter;
     if (registeredBefore) params.registeredBefore = registeredBefore;
     params.lifecycleStatus = overrideLifecycle ?? lifecycleStatus;
+    params.page = String(pageArg);
+    setPage(pageArg);
     fetchBuyers(params);
   }, [query, onboardingFilter, exceptionOnly, prequalFilter, hasActiveDeal, hasActiveAuction, registeredAfter, registeredBefore, lifecycleStatus, fetchBuyers]);
+
+  // Page navigation preserves the active filters and only moves within range.
+  const totalPages = Math.max(1, Math.ceil(total / BUYERS_PER_PAGE));
+  const goToPage = (p: number) => {
+    const clamped = Math.min(Math.max(1, p), totalPages);
+    if (clamped !== page) applyFilters(undefined, clamped);
+  };
 
   const clearFilters = () => {
     setQuery(""); setOnboardingFilter(""); setExceptionOnly(false);
     setPrequalFilter(""); setHasActiveDeal(false); setHasActiveAuction(false);
     setRegisteredAfter(""); setRegisteredBefore("");
-    fetchBuyers({ lifecycleStatus });
+    setPage(1);
+    fetchBuyers({ lifecycleStatus, page: "1" });
   };
 
   const hasFilters = !!(query || onboardingFilter || exceptionOnly || prequalFilter || hasActiveDeal || hasActiveAuction || registeredAfter || registeredBefore);
@@ -808,10 +821,36 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
         })}
 
         {!loading && !error && buyers.length > 0 && (
-          <div className="px-5 py-3 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-xs text-slate-500">Showing {buyers.length} of {total.toLocaleString()} buyers</span>
-            {total > buyers.length && (
-              <span className="text-xs text-slate-400">Refine search to see more</span>
+          <div className="px-5 py-3 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-500">
+              {(() => {
+                const from = (page - 1) * BUYERS_PER_PAGE + 1;
+                const to = (page - 1) * BUYERS_PER_PAGE + buyers.length;
+                return `Showing ${from.toLocaleString()}–${to.toLocaleString()} of ${total.toLocaleString()} buyers`;
+              })()}
+            </span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2" data-testid="buyers-pagination">
+                <button
+                  type="button"
+                  onClick={() => goToPage(page - 1)}
+                  disabled={page <= 1 || loading}
+                  data-testid="buyers-prev"
+                  className="text-xs font-medium px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-al-primary/40 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  ← Prev
+                </button>
+                <span className="text-xs text-slate-500 tabular-nums">Page {page} of {totalPages}</span>
+                <button
+                  type="button"
+                  onClick={() => goToPage(page + 1)}
+                  disabled={page >= totalPages || loading}
+                  data-testid="buyers-next"
+                  className="text-xs font-medium px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-al-primary/40 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next →
+                </button>
+              </div>
             )}
           </div>
         )}

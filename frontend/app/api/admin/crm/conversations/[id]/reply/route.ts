@@ -74,6 +74,20 @@ export async function POST(
     return NextResponse.json({ error: 'PHONE_SUPPRESSED' }, { status: 409 });
   }
 
+  // Hard opt-out gate (D2): a contact flagged do_not_contact must never be
+  // texted, even on an open conversation — the send-sms and dispatch paths both
+  // enforce this, and this reply path previously did not.
+  if (conversation.contact_id) {
+    const { data: contact } = await supabase
+      .from('contacts')
+      .select('do_not_contact')
+      .eq('id', conversation.contact_id)
+      .maybeSingle();
+    if (contact?.do_not_contact) {
+      return NextResponse.json({ error: 'CONTACT_DO_NOT_CONTACT' }, { status: 409 });
+    }
+  }
+
   let twilioSid: string | null = null;
   try {
     const client = twilio(

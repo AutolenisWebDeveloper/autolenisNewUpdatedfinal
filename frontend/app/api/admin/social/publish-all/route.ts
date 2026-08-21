@@ -196,6 +196,9 @@ export async function POST(request: NextRequest) {
     schedulingStrategy,
     viralOptimized:
       useViralOptimizer && Object.keys(optimizedVersions).length > 0,
-    message: `Published to ${created.length} platforms. ${failed.length} failed.`,
+    // Honest wording (DEF-1): these posts are created APPROVED + scheduled; the
+    // actual send happens later via the (gated) publish-queue cron. Saying
+    // "Published" here overstated what occurred.
+    message: `Scheduled ${created.length} post${created.length === 1 ? "" : "s"} across platforms. ${failed.length} failed.`,
   });
 }

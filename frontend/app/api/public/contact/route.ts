@@ -19,13 +19,31 @@ const FROM_EMAIL = "noreply@autolenis.com";
 const FROM = `${FROM_NAME} <${FROM_EMAIL}>`;
 const ADMIN_TO = process.env.ADMIN_NOTIFICATION_EMAIL ?? "team@autolenis.com";
 
-const schema = z.object({
-  name:    z.string().min(1).max(100),
-  email:   z.string().email(),
-  phone:   z.string().max(30).optional(),
-  subject: z.string().min(1).max(200),
-  message: z.string().min(1).max(5000),
-});
+// TCPA consent disclosure recorded when a phone number is submitted with SMS
+// consent. Kept server-authoritative so the stored consent text is the terms we
+// consider agreed to, independent of the client label.
+const SMS_CONSENT_TEXT =
+  "I agree to receive SMS messages from AutoLenis regarding my inquiry, account " +
+  "notifications, and service-related communications. Message frequency varies. " +
+  "Message and data rates may apply. Reply STOP to opt out, HELP for assistance. " +
+  "Consent is not a condition of purchase.";
+
+export const contactSchema = z
+  .object({
+    name:       z.string().min(1).max(100),
+    email:      z.string().email(),
+    phone:      z.string().max(30).optional(),
+    subject:    z.string().min(1).max(200),
+    message:    z.string().min(1).max(5000),
+    smsConsent: z.boolean().optional(),
+  })
+  // TCPA defense-in-depth: never accept a phone number for messaging without an
+  // explicit consent flag. The client also gates this, but the server must not
+  // rely on a client check.
+  .refine((d) => !(d.phone && d.phone.trim().length > 0) || d.smsConsent === true, {
+    message: "SMS consent is required when a phone number is provided.",
+    path: ["smsConsent"],
+  });
 
 export async function POST(request: NextRequest) {
   let body: unknown;
@@ -38,7 +56,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const parsed = schema.safeParse(body);
+  const parsed = contactSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: { code: "VALIDATION_ERROR", message: parsed.error.issues[0]?.message ?? "Invalid input" }, correlationId: crypto.randomUUID() },
@@ -46,7 +64,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { name, email, phone, subject, message } = parsed.data;
+  const { name, email, phone, subject, message, smsConsent } = parsed.data;
+  const hasPhone = !!(phone && phone.trim().length > 0);
+  // Auditable TCPA consent record — captured only when a phone was provided with
+  // consent, and stamped with the time and the exact terms agreed to.
+  const smsConsentRecord = hasPhone && smsConsent === true
+    ? { smsConsent: true, smsConsentAt: new Date().toISOString(), smsConsentText: SMS_CONSENT_TEXT }
+    : { smsConsent: false };
   const resend = getResend();
 
   // 1. Notify admin (non-blocking — do not fail the request if email fails).
@@ -78,9 +102,30 @@ export async function POST(request: NextRequest) {
       type: "SYSTEM_ALERT",
       title: `Contact Form: ${subject}`,
       body: `From: ${name} <${email}>\n\n${message.slice(0, 500)}${message.length > 500 ? "…" : ""}`,
-      metadata: { source: "public_contact_form", name, email, phone: phone ?? null, subject, fullMessage: message },
+      metadata: { source: "public_contact_form", name, email, phone: phone ?? null, subject, fullMessage: message, ...smsConsentRecord },
     },
   }).catch(err => logger.error("[contact] DB log failed:", err));
+
+  // 4. Record SMS consent in the CANONICAL consent store (contacts.consent_sms),
+  //    which is the field the outbound SMS gate actually reads — otherwise the
+  //    consent captured here would be invisible to the compliance gate. Best-effort
+  //    and consent-only: upsertContact merges consent upward and never downgrades.
+  if (hasPhone && smsConsent === true) {
+    try {
+      const { getServiceSupabase } = await import("@/lib/supabase-service");
+      const { ContactService } = await import("@/lib/services/contact.service");
+      await ContactService.upsertContact(getServiceSupabase(), {
+        email,
+        phone,
+        source: "public_form",
+        consentSms: true,
+        consentEmail: false,
+        consentText: SMS_CONSENT_TEXT,
+      });
+    } catch (err) {
+      logger.error("[contact] consent upsert failed:", err);
+    }
+  }
 
   return NextResponse.json({ success: true, data: { message: "Message sent" } }, { status: 201 });
 }

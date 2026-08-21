@@ -1,3 +1,8 @@
+import type { Metadata } from "next";
+// Private portal — noindex at the metadata layer as defense-in-depth with
+// robots.txt (which disallows crawling these paths). robots.txt prevents
+// crawling; this prevents indexing of any externally-linked URL.
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 import { headers } from "next/headers";
 import AdminSidebar from "@/components/admin/AdminSidebar";
 import ChatWidget from "@/components/public/ChatWidget";

@@ -41,3 +41,18 @@ silently skipped.
 Auth-gated dashboard pages need a signed-in `storageState`; set
 `VISUAL_STORAGE_STATE` in CI to include them. Dashboard diffs are expected only
 inside labeled consolidation-delta commits; otherwise they fail the gate.
+
+## Baseline provenance (committed)
+
+The marketing baseline in `__baseline__/` is rendered by the CI runner image
+(`ubuntu-24.04`, pinned in `.github/workflows/visual.yml`) — never an ad-hoc
+container — so capture and comparison share the identical font/anti-aliasing
+environment. The `visual.yml` job self-seeds the baseline on that runner when
+none is committed (with a two-pass determinism check) and commits it back; every
+subsequent run compares a fresh render against the committed baseline on the same
+pinned image. The self-seed gate is all-or-nothing: it regenerates (and commits
+back) only when **no** baseline PNGs are committed. To re-seed after an
+intentional design change, either delete **all** `__baseline__/*.png` so the job
+takes the seed path, or regenerate locally with `pnpm test:visual:update` and
+commit the result — then review the diff here. Deleting only a subset does **not**
+trigger regeneration; the job runs compare-only and fails on the missing snapshots.

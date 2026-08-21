@@ -7,6 +7,7 @@ import { inngest } from "@/lib/inngest/client";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { recordMarketplaceFromAuction } from "@/lib/amips/pipelines/marketplace-intelligence.recorder";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { commitOfferSelection, OfferSelectionRaceLostError } from "@/lib/services/deal/select-offer.service";
 
 interface Props { params: Promise<{ auctionId: string }> }
 
@@ -69,16 +70,22 @@ export async function POST(request: NextRequest, { params }: Props) {
   });
   if (!offer) return errorResponse("NOT_FOUND", "Offer not found", 404);
 
-  // Commit the selection atomically: a deal can never exist without the chosen
-  // offer being ACCEPTED and the auction CLOSED.
-  const deal = await prisma.$transaction(async (tx) => {
-    const created = await tx.deal.create({
-      data: { buyerId: buyer.id, offerId: offer.id, status: "FINANCING_PENDING" },
-    });
-    await tx.offer.update({ where: { id: offer.id }, data: { status: "ACCEPTED" } });
-    await tx.auction.update({ where: { id: auctionId }, data: { status: "CLOSED", closedAt: new Date() } });
-    return created;
-  });
+  // Commit the selection atomically. The concurrency invariant (Phase 1 E-1) —
+  // at most one accepted offer / one Deal per auction — is enforced inside
+  // commitOfferSelection by locking the auction row and re-checking under the
+  // lock, so two genuinely concurrent selections of different offers cannot both
+  // create a Deal. The loser is rejected with the same 409 as the sequential
+  // pre-check above.
+  let dealId: string;
+  try {
+    ({ dealId } = await commitOfferSelection({ buyerId: buyer.id, auctionId, offerId: offer.id }));
+  } catch (e) {
+    if (e instanceof OfferSelectionRaceLostError) {
+      return errorResponse("ALREADY_SELECTED", "You have already selected an offer for this auction.", 409);
+    }
+    throw e;
+  }
+  const deal = { id: dealId };
 
   // F-007 — audit the explicit early-accept (buyer ended the auction before its
   // endsAt). Non-blocking; the selection has already committed.

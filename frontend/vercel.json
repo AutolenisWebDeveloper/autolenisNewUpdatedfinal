@@ -195,6 +195,14 @@
     {
       "path": "/api/cron/social-market-index",
       "schedule": "0 12 * * 1"
+    },
+    {
+      "path": "/api/cron/lead-magnet-sequence",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/social-lead-nurture",
+      "schedule": "0 15 * * *"
     }
   ]
 }

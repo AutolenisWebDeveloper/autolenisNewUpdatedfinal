@@ -81,11 +81,12 @@ const ENGAGEMENT_STYLES: Record<string, string> = {
 };
 
 export default function IntelligenceClient({
-  insights, markets, scores,
+  insights, markets, scores, dataSufficient = true,
 }: {
   insights: CompetitorInsightRow[];
   markets: MarketRow[];
   scores: Scores;
+  dataSufficient?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -223,8 +224,22 @@ export default function IntelligenceClient({
         </div>
       </div>
 
+      {/* DEF-2: when there is not enough AMIPS data, the indices below are
+          placeholder defaults, not measured intelligence. Say so rather than
+          presenting them as real. */}
+      {!dataSufficient && (
+        <div
+          className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+          data-testid="intelligence-insufficient-data"
+        >
+          <strong>Not enough market data yet.</strong> The indices below are
+          placeholder defaults and are not published as real intelligence until
+          AMIPS market data is available. Do not treat these numbers as measured.
+        </div>
+      )}
+
       {/* Four score gauges */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      <div className={`grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6${!dataSufficient ? " opacity-50" : ""}`}>
         <Gauge100 label="Buyer Power Index" score={scores.buyerPowerIndex} icon={Gauge} />
         <Gauge100 label="Dealer Competition" score={scores.dealerCompetitionIndex} icon={Swords} />
         <Gauge100 label="Vehicle Pricing" score={scores.vehiclePricingIndex} icon={TrendingUp} />

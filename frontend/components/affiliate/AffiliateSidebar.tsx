@@ -5,10 +5,11 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { signOutAction } from "@/lib/auth/actions";
 import { AutoLenisLogo } from "@/components/shared/AutoLenisLogo";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   LayoutDashboard, Users, DollarSign, Network,
   Calculator, Bell, ShieldCheck, FileText, User, Settings, LogOut,
-  FileCheck, Landmark, Share2, Menu, X, Trophy,
+  FileCheck, Landmark, Share2, Menu, Trophy,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -110,21 +111,14 @@ export default function AffiliateSidebar() {
           </button>
         </div>
       </div>
-      {open && (
-        <>
-          <div className="lg:hidden fixed inset-0 z-40 bg-black/40" onClick={() => setOpen(false)}
-            data-testid="affiliate-mobile-drawer-backdrop" />
-          <aside className="lg:hidden fixed top-0 left-0 z-50 w-72 max-w-[85vw] h-screen bg-white shadow-xl flex flex-col"
-            data-testid="affiliate-mobile-drawer">
-            <button type="button" onClick={() => setOpen(false)} aria-label="Close navigation"
-              data-testid="affiliate-mobile-menu-close"
-              className="absolute top-3 right-3 p-2 rounded-md text-slate-600 hover:bg-slate-100">
-              <X size={20} />
-            </button>
-            <Inner pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} />
-          </aside>
-        </>
-      )}
+      {/* Mobile drawer — shared kit Dialog (sheet): focus trap, Escape,
+          aria-modal, scroll-lock and overlay dismissal from Radix. */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent variant="sheet" side="left" className="flex flex-col p-0" data-testid="affiliate-mobile-drawer">
+          <DialogTitle className="sr-only">Affiliate navigation</DialogTitle>
+          <Inner pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
