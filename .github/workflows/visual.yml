@@ -32,7 +32,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # write so the seeding run can commit the CI-rendered baseline back to the PR
+  # branch (a reviewed commit); comparison-only runs never push.
+  contents: write
 
 jobs:
   visual:
@@ -55,6 +57,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Check out the PR head branch (not the detached merge ref) so the
+          # seeding run can push the baseline commit back to it.
+          ref: ${{ github.head_ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -118,6 +124,21 @@ jobs:
 
       - name: Compare screenshots against baseline (same image)
         run: pnpm test:visual
+
+      - name: Commit CI-rendered baseline back to the PR branch
+        # Only when we just seeded (no baseline was committed) AND the two-pass
+        # determinism compare above passed — so only a validated, reproducible
+        # baseline is committed. GITHUB_TOKEN pushes do not re-trigger workflows.
+        if: steps.seed.outputs.seeded == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/visual/__baseline__
+          if git diff --cached --quiet; then
+            echo "no baseline changes to commit"; exit 0
+          fi
+          git commit -m "ci(visual): commit CI-rendered marketing baseline (ubuntu-24.04)"
+          git push origin HEAD:"${{ github.head_ref }}"
 
       - name: Upload CI-rendered baseline (for reviewed commit)
         if: always()
