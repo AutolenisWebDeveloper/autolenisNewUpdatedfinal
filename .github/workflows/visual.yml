@@ -1,0 +1,142 @@
+name: Visual regression
+
+# Marketing-tier visual guardrail (Phase 2 design-system freeze).
+#
+# The baseline MUST be rendered by this runner image, not an ad-hoc container:
+# font/anti-aliasing rendering is environment-specific, so capture and
+# comparison have to happen on the same image or the 0.1%-tolerance gate
+# false-fails. The runner is therefore PINNED to ubuntu-24.04 (not the moving
+# ubuntu-latest) so a committed baseline stays comparable across runs.
+#
+# Behaviour:
+#   - No committed baseline yet  -> SEED it on this runner (test:visual:update),
+#     then immediately re-run test:visual as a determinism check (two
+#     independent render passes on the same image must match within tolerance),
+#     and upload the CI-rendered baseline as an artifact for a reviewed commit.
+#   - Committed baseline present  -> COMPARE only (fresh render vs the committed,
+#     CI-rendered baseline) on the identical image.
+#
+# The app is booted with the same placeholder env the CI build uses; the public
+# marketing pages render 200 in that degraded state (inventory widgets catch DB
+# errors), which yields a deterministic baseline.
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "frontend/tests/visual/**"
+      - "frontend/playwright.visual.config.ts"
+      - "frontend/components/ui/**"
+      - "frontend/app/(public)/**"
+      - ".github/workflows/visual.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visual:
+    name: Marketing visual guardrail
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgresql://placeholder:placeholder@localhost:5432/placeholder' }}
+      DIRECT_URL: ${{ secrets.DIRECT_URL || 'postgresql://placeholder:placeholder@localhost:5432/placeholder' }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder' }}
+      NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'http://localhost:3000' }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET || 'ci-placeholder-jwt-secret-32-characters' }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || 'placeholder' }}
+      VISUAL_BASE_URL: http://localhost:3000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a15d269cd4658e1107c09f1fabf4cbd7bd1f308a # v4.4.0
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        run: echo "store=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm modules
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.pnpm-cache.outputs.store }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm exec prisma generate
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build
+        run: pnpm build
+
+      - name: Start app
+        run: |
+          pnpm start &
+          echo "APP_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ || true)
+            if [ "$code" = "200" ]; then echo "app up after ${i}s"; exit 0; fi
+            sleep 1
+          done
+          echo "app did not become ready on :3000"; exit 1
+
+      - name: Seed baseline on this runner (only if none committed)
+        id: seed
+        run: |
+          shopt -s nullglob
+          existing=(tests/visual/__baseline__/*.png)
+          if [ ${#existing[@]} -eq 0 ]; then
+            echo "no committed baseline — seeding on ubuntu-24.04"
+            pnpm test:visual:update
+            echo "seeded=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "committed baseline present (${#existing[@]} images) — compare only"
+            echo "seeded=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compare screenshots against baseline (same image)
+        run: pnpm test:visual
+
+      - name: Upload CI-rendered baseline (for reviewed commit)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-baseline-ubuntu-24.04
+          path: frontend/tests/visual/__baseline__/**
+          if-no-files-found: warn
+
+      - name: Upload Playwright report + diffs on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-report
+          path: |
+            frontend/playwright-report/**
+            frontend/test-results/**
+          if-no-files-found: ignore
+
+      - name: Stop app
+        if: always()
+        run: kill "${APP_PID}" 2>/dev/null || true
