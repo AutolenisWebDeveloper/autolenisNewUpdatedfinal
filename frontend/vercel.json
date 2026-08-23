@@ -223,6 +223,10 @@
     {
       "path": "/api/cron/workflow-resume-drain",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/comms-outbox-drain",
+      "schedule": "* * * * *"
     }
   ]
 }

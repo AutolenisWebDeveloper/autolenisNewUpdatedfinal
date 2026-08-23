@@ -66,16 +66,19 @@ contains `analyticsRefreshFn` / `inactivityScannerFn` / `savedSearchMatcherFn`
 | Dependency order | None (leaf workload). |
 | **Status** | **MIGRATED + trustworthy completion (Batch 2).** No repo code requires Inngest for intake; terminal/retry is Inngest-free (columns-only, not `jobs_dead_letter`). Worker retained as dormant compatibility sink → `READY FOR REMOVAL` after live verification confirms an empty Inngest queue. |
 
-### 2. Transactional/nurture email — `emailSendFn` / `autolenis/email.send`  ⟶  `KEEP TEMPORARILY`
+### 2 & 3. Email / SMS — `emailSendFn` / `smsSendFn` (`autolenis/email.send`, `autolenis/sms.send`)  ⟶  **INTERNAL QUEUE BUILT (Batch 6a); CUTOVER PENDING (Batch 6b)**
 
-- Emitters: `lib/services/email/{nurture-sequence,lead-magnet-sequence,transactional-dispatch}.ts`, `campaignFanoutFn`, `formAbandonmentFn`, `exitIntentFn`, `workflow.engine.ts`, admin CRM send-email/bulk-send.
-- Side effects: Resend send; consult suppression/consent. Retry + DLQ on final failure.
-- Replacement: DB-backed send-queue table drained by a Vercel Cron, reusing the existing suppression/consent + `EmailSendLog` services. **Requires an internal comms-dispatch queue** (does not exist yet).
-- Difficulty: Medium-High. Cutover risk: **communication duplication** — idempotency per (recipient, template, dedup-key) is mandatory.
-- Dependency order: migrate BEFORE `campaignFanoutFn` and `scheduledCampaignCronFn` (they fan out into this).
-
-### 3. SMS — `smsSendFn` / `autolenis/sms.send`  ⟶  `KEEP TEMPORARILY`
-- Same shape as email; TCPA consent + quiet-hours + suppression already in services. Same internal-queue prerequisite and duplication risk.
+- **Emitters (all must cut over in 6b):** `lib/services/email/{nurture-sequence,lead-magnet-sequence,transactional-dispatch}.ts`, `workflow.engine.ts` (email/sms/notify), `dealer-award` sender wrappers, admin CRM `send-email`/`send-sms`/`campaigns/bulk-send`, `campaignFanoutFn`, `formAbandonmentFn`, `exitIntentFn`.
+- **Internal comms-dispatch queue — BUILT & DORMANT (Batch 6a):**
+  - `comms_outbox` table (`prisma/migrations/manual_supabase_sql/comms_outbox.sql`, additive Supabase, **OWNER-GATED**): `channel`, **`dedup_key` UNIQUE**, `status`, `payload` jsonb, `attempts`, `run_at`, `claimed_at`, `last_error`, `last_result`, `provider_id`.
+  - `lib/services/comms/comms-outbox.service.ts`: `enqueueEmail`/`enqueueSms` (INSERT … ON CONFLICT (dedup_key) DO NOTHING → **enqueue-once**, the HARD dedup), `deliverEmail`/`deliverSms` (faithful reproduction of the retired workers' consent/DNC/suppression-hard-vs-soft/TCPA gates + content resolve + provider send + EmailSendLog/timeline/campaign_recipients recording), and `drainCommsOutbox`/`processOutboxRow` (claim CAS with stale-reclaim, bounded retry `MAX=4`, **columns-only terminal** — status='failed', nothing to jobs_dead_letter).
+  - `lib/services/comms/comms-providers.ts`: the Resend/Twilio adapter (no raw SDK calls outside it).
+  - `app/api/cron/comms-outbox-drain/route.ts` (every minute) + `vercel.json` + CRON_STALENESS.
+- **HARD INVARIANT satisfied:** dedup at ENQUEUE (unique dedup_key = the producer's idempotencyKey or the recipient+kind+day fallback the workers used) + claim at DRAIN (one drain sends) → retry/dup-event/dup-cron never double-send. Terminal FAILED is columns-only so the Inngest DLQ drainer can't re-emit a comms job. A provider error fails closed (throws → bounded retry), never a fabricated success. The residual crash-mid-send window matches the pre-migration Inngest behaviour (transactional additionally guarded by the EmailSendLog SENT-precheck).
+- **DORMANT until 6b:** in 6a nothing enqueues to `comms_outbox` (emitters still `inngest.send`), so the drain is a no-op and there is no double-authority.
+- **Tests (Batch 6a):** `lib/services/comms/__tests__/comms-delivery.test.ts` (every gate: transactional DUPLICATE/hard-vs-soft-suppression bypass, DNC/missing-contact GATED, marketing CONSENT_GATED, SMS TCPA/INVALID/suppressed, provider-error throw + EmailSendLog FAILED record, happy-path recording) + `comms-outbox-queue.test.ts` (enqueue dedup, claim CAS, gated terminal, RETRY with backoff, terminal FAILED columns-only, drain aggregation) + the drain route contract test.
+- **Batch 6b (the atomic cutover — the ONLY step that changes live behaviour):** switch every emitter from `inngest.send('autolenis/email.send'|'…sms.send')` to `enqueueEmail`/`enqueueSms`; delete `emailSendFn`/`smsSendFn` (and, once campaign/lead/dealer-award are internalized, their workers); make `OperationsService.retryDeadLetterJob`/`autoDrainDeadLetterJobs` NOT re-emit `autolenis/email.send`/`sms.send` via `inngest.send`. **This is the big-bang required by the "never two authorities" rule and must ship atomically.**
+- Dependency order: 6b unblocks `campaignFanoutFn` (#4), `scheduledCampaignCronFn` (#5), `formAbandonmentFn` (#10), `exitIntentFn` (#11), `dealerAwardFn` (#14) — all fan into email/sms.
 
 ### 4. Campaign fan-out — `campaignFanoutFn` / `autolenis/campaign.execute`  ⟶  `KEEP TEMPORARILY`
 - Emitters: `app/api/admin/crm/campaigns/route.ts`, `campaigns/bulk-send`, `scheduledCampaignCronFn`.
