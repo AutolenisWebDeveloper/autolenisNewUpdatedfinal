@@ -1,6 +1,7 @@
 // Phase 3 — job control.
 // POST /api/admin/content/jobs/[id]  { action: retry | cancel | pause | resume }
-// Operates on ContentGenerationJob items + re-emits Inngest events as needed.
+// Operates on ContentGenerationJob item statuses; the content-generation-drain
+// cron picks up any items returned to QUEUED (no Inngest events involved).
 
 import { NextRequest } from "next/server";
 import { z } from "zod";

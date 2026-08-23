@@ -2,7 +2,8 @@
 //
 // POST /api/admin/content/articles/generate
 //   { slugs?: string[], filter?: {...}, reviewOnly?: boolean, regenerate?: boolean }
-// Long-running work is Inngest-backed; this returns the ContentGenerationJob id.
+// Enqueues ContentGenerationJob items (status QUEUED) and returns the job id; the
+// internal content-generation-drain cron performs the long-running generation.
 
 import { NextRequest } from "next/server";
 import { z } from "zod";

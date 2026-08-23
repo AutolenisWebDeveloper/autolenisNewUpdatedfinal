@@ -40,9 +40,16 @@ export const MAX_CONTENT_ATTEMPTS = 4;
 // (300s) so a live run is never reclaimed underneath itself.
 const STALE_MS = 15 * 60 * 1000;
 
-// Default items processed per drain tick. Each item is a long Groq call, so keep
-// the batch small enough to finish within the route's maxDuration.
-export const CONTENT_DRAIN_BATCH = 5;
+// Items processed per drain tick. Each item is a long Groq call, so the batch is
+// sized to finish within the route's maxDuration (300s). Because the cron runs
+// every 2 min and maxDuration (300s) exceeds the 120s interval, invocations can
+// overlap and the STALE_MS guard keeps them working on DISJOINT items — so the
+// effective throughput is several items concurrently, restoring the retired
+// worker's `concurrency: 5` ballpark. NOTE: a bulk `filter` regeneration can
+// enqueue up to ~5000 slugs (admin generate route); at ~10 items / 2 min that
+// backlog drains over hours, not the instant Inngest fan-out — the job stays
+// PROCESSING until the drain works through it (this is eventual, not stuck).
+export const CONTENT_DRAIN_BATCH = 10;
 
 export type GenerationOp = "generate" | "regenerate";
 
@@ -137,9 +144,9 @@ export async function processContentItem(itemId: string): Promise<ContentItemOut
     include: { job: { select: { id: true, jobType: true } } },
   });
   if (!item || !item.targetSlug) {
-    // Missing slug can never generate — terminal.
-    await prisma.contentGenerationJobItem.update({
-      where: { id: itemId },
+    // Missing slug can never generate — terminal (guarded so a concurrent cancel wins).
+    await prisma.contentGenerationJobItem.updateMany({
+      where: { id: itemId, status: "PROCESSING" },
       data: { status: "FAILED", lastError: "missing target slug" },
     });
     if (item?.jobId) await reconcileJob(item.jobId);
@@ -154,9 +161,10 @@ export async function processContentItem(itemId: string): Promise<ContentItemOut
   try {
     const keyword = CONTENT_KEYWORDS.find((k) => k.slug === slug);
     if (!keyword) {
-      // A permanently-missing keyword is terminal — do not retry.
-      await prisma.contentGenerationJobItem.update({
-        where: { id: itemId },
+      // A permanently-missing keyword is terminal — do not retry (guarded so a
+      // concurrent cancel wins).
+      await prisma.contentGenerationJobItem.updateMany({
+        where: { id: itemId, status: "PROCESSING" },
         data: { status: "FAILED", lastError: `no ContentKeyword for slug ${slug}` },
       });
       await reconcileJob(item.jobId);
@@ -191,11 +199,16 @@ export async function processContentItem(itemId: string): Promise<ContentItemOut
       });
     }
 
-    await prisma.contentGenerationJobItem.update({
-      where: { id: itemId },
+    // Guarded finalize: only transition an item that is STILL PROCESSING. If an
+    // admin `cancelJob`/`pauseJob` flipped it mid-generation (PROCESSING→CANCELED/
+    // PAUSED), this updates 0 rows and we respect that terminal admin action (the
+    // article was already upserted — harmless; the item keeps its new status).
+    const finalized = await prisma.contentGenerationJobItem.updateMany({
+      where: { id: itemId, status: "PROCESSING" },
       data: { status: "SUCCEEDED", articleId, lastError: null },
     });
     await reconcileJob(item.jobId);
+    if (finalized.count === 0) return "SKIPPED";
 
     await recordWorkflowEvent({
       articleId,
@@ -211,11 +224,13 @@ export async function processContentItem(itemId: string): Promise<ContentItemOut
     if (attempt >= MAX_CONTENT_ATTEMPTS) {
       // Terminal — COLUMNS-ONLY (item.status = FAILED). Nothing is written to
       // jobs_dead_letter, so the Inngest DLQ drainer can never re-emit this.
-      await prisma.contentGenerationJobItem.update({
-        where: { id: itemId },
+      // Guarded so a concurrent cancel/pause still wins.
+      const failed = await prisma.contentGenerationJobItem.updateMany({
+        where: { id: itemId, status: "PROCESSING" },
         data: { status: "FAILED", lastError: message },
       });
       await reconcileJob(item.jobId);
+      if (failed.count === 0) return "SKIPPED";
       await recordWorkflowEvent({
         jobId: item.jobId,
         eventType: `content.${op}.dead_letter`,
@@ -225,11 +240,12 @@ export async function processContentItem(itemId: string): Promise<ContentItemOut
       logger.error(`[content-drain] item ${itemId} dead-lettered after ${attempt} attempts`, message);
       return "DEAD_LETTERED";
     }
-    // Re-queue for a later drain tick.
-    await prisma.contentGenerationJobItem.update({
-      where: { id: itemId },
+    // Re-queue for a later drain tick — guarded so a concurrent cancel/pause wins.
+    const requeued = await prisma.contentGenerationJobItem.updateMany({
+      where: { id: itemId, status: "PROCESSING" },
       data: { status: "QUEUED", lastError: message },
     });
+    if (requeued.count === 0) return "SKIPPED";
     logger.warn(`[content-drain] item ${itemId} attempt ${attempt} failed, re-queued`, message);
     return "RETRY";
   }

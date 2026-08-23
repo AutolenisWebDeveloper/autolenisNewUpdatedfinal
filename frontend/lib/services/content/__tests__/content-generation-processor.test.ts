@@ -19,7 +19,8 @@ import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 // ── Controllable state ───────────────────────────────────────────────────────
-let claimCount = 1;
+let claimCount = 1; // rows the PROCESSING-claim CAS updates (1 = won, 0 = lost)
+let finalizeCount = 1; // rows a guarded finalize/terminal/retry updates (0 = canceled mid-flight)
 let itemRow: Record<string, unknown> | null = null;
 let generateThrows = false;
 let generatedStatus = "REVIEW_NEEDED";
@@ -30,6 +31,7 @@ let reconcileItems: Array<{ status: string }> = [];
 let dlqInserts = 0;
 
 const calls = {
+  claim: [] as Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>,
   itemUpdate: [] as Array<Record<string, unknown>>,
   articleUpdate: [] as Array<Record<string, unknown>>,
   events: [] as string[],
@@ -108,8 +110,16 @@ mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
       contentGenerationJobItem: {
-        updateMany: async ({ data }: { data: { status?: string } }) =>
-          data.status === "PROCESSING" ? { count: claimCount } : { count: 0 },
+        updateMany: async ({ where, data }: { where: Record<string, unknown>; data: { status?: string } }) => {
+          // The PROCESSING-status write is the claim CAS; everything else is a
+          // guarded finalize/terminal/retry write (status filter = PROCESSING).
+          if (data.status === "PROCESSING") {
+            calls.claim.push({ where, data });
+            return { count: claimCount };
+          }
+          calls.itemUpdate.push(data);
+          return { count: finalizeCount };
+        },
         findUnique: async () => itemRow,
         update: async ({ data }: { data: Record<string, unknown> }) => {
           calls.itemUpdate.push(data);
@@ -149,6 +159,7 @@ function baseItem(attempt: number) {
 
 beforeEach(() => {
   claimCount = 1;
+  finalizeCount = 1;
   itemRow = baseItem(1);
   generateThrows = false;
   generatedStatus = "REVIEW_NEEDED";
@@ -157,6 +168,7 @@ beforeEach(() => {
   drainCandidates = [];
   reconcileItems = [{ status: "SUCCEEDED" }];
   dlqInserts = 0;
+  calls.claim = [];
   calls.itemUpdate = [];
   calls.articleUpdate = [];
   calls.events = [];
@@ -169,6 +181,31 @@ test("SKIPPED when the claim CAS updates 0 rows (lost the race)", async () => {
   const outcome = await processContentItem("item-1");
   assert.equal(outcome, "SKIPPED");
   assert.equal(calls.itemUpdate.length, 0);
+});
+
+test("the claim CAS targets QUEUED-or-stale-PROCESSING and increments attemptCount", async () => {
+  const { processContentItem } = await load();
+  await processContentItem("item-1");
+  assert.equal(calls.claim.length, 1, "exactly one claim attempt");
+  const { where, data } = calls.claim[0];
+  // Claim must only match QUEUED or a stale PROCESSING row.
+  const or = (where as { OR?: Array<Record<string, unknown>> }).OR;
+  assert.ok(Array.isArray(or) && or.length === 2, "claim WHERE has the QUEUED/stale-PROCESSING OR");
+  assert.equal((or![0] as { status?: string }).status, "QUEUED");
+  assert.equal((or![1] as { status?: string }).status, "PROCESSING");
+  assert.ok((or![1] as { updatedAt?: { lt?: unknown } }).updatedAt?.lt, "stale branch bounds updatedAt");
+  // Claim transitions to PROCESSING and increments the retry counter.
+  assert.equal((data as { status?: string }).status, "PROCESSING");
+  assert.deepEqual((data as { attemptCount?: unknown }).attemptCount, { increment: 1 });
+});
+
+test("a cancel/pause that wins the finalize race yields SKIPPED (item not forced SUCCEEDED)", async () => {
+  finalizeCount = 0; // guarded finalize updates 0 rows → item was CANCELED/PAUSED mid-flight
+  const { processContentItem } = await load();
+  const outcome = await processContentItem("item-1");
+  assert.equal(outcome, "SKIPPED");
+  // No workflow "content.generate" success event is recorded for a canceled item.
+  assert.ok(!calls.events.includes("content.generate"));
 });
 
 test("happy path generates, upserts, snapshots, validates, and marks SUCCEEDED", async () => {

@@ -218,7 +218,7 @@
     },
     {
       "path": "/api/cron/content-generation-drain",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/2 * * * *"
     }
   ]
 }
