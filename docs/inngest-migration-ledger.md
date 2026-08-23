@@ -28,10 +28,13 @@ Status legend:
 | Idempotency table | `idempotency_keys` (migrations/01) | Keep — shared infra. |
 | Env: `INNGEST_SIGNING_KEY`, `INNGEST_EVENT_KEY` | Vercel env | Owner-gated; remove only at final retirement. |
 
-Registered function arrays: `inngestFunctions` (`lib/inngest/functions.ts`),
-`contentFunctions` (`lib/inngest/content-functions.ts`), `intakeFunctions`
-(`lib/inngest/intake-functions.ts`), `dealerAwardFunctions`
-(`lib/inngest/dealer-award-functions.ts`).
+Registered function arrays (as of Batch 4): `inngestFunctions` (`lib/inngest/functions.ts`),
+`intakeFunctions` (`lib/inngest/intake-functions.ts`), `dealerAwardFunctions`
+(`lib/inngest/dealer-award-functions.ts`). **`contentFunctions` /
+`lib/inngest/content-functions.ts` were removed in Batch 4** (content generation
+migrated to the `content-generation-drain` cron). `inngestFunctions` no longer
+contains `analyticsRefreshFn` / `inactivityScannerFn` / `savedSearchMatcherFn`
+(Batch 3).
 
 ---
 
@@ -117,8 +120,16 @@ Registered function arrays: `inngestFunctions` (`lib/inngest/functions.ts`),
 ### 11. Exit intent — `exitIntentFn` / `autolenis/lead.exit_intent_captured`  ⟶  `KEEP TEMPORARILY`
 - Emitter: `app/api/public/crm/exit-intent/route.ts`. Emits `email.send`. Depends on #2.
 
-### 12–13. Content generate/regenerate — `contentGenerateFn` / `contentRegenerateFn` (`autolenis/content.{generate,regenerate}`)  ⟶  `KEEP TEMPORARILY`
-- Emitter: `lib/services/content/content-generation.service.ts`. Already use the shared `idempotency_keys` guard. Medium migration (LLM generation, long-running) — good fit for a DB-queue + cron drain later.
+### 12–13. Content generate/regenerate — `contentGenerateFn` / `contentRegenerateFn` (`autolenis/content.{generate,regenerate}`)  ⟶  **MIGRATED + worker DELETED (Batch 4)**
+- **Not a duplicate.** Verified the existing `content-publisher` cron *publishes* already-generated/approved articles (`publishDueScheduled`) and `social-generate` produces social posts — neither generates buying-guide articles. So this is a real workload to migrate, not dead/duplicate code.
+- **New home:** `lib/services/content/content-generation-processor.service.ts` (`processContentItem` + `drainContentGenerationQueue`) driven by Vercel Cron route `app/api/cron/content-generation-drain/route.ts` (cron auth + `withCronRun`, `*/5 * * * *`, `maxDuration=300`). Registered in `vercel.json` + the CRON_STALENESS registry.
+- **Queue = the existing table.** `ContentGenerationJobItem.status` IS the durable queue; no new queue and no second DLQ. Concurrency + crash-recovery via a Postgres compare-and-set on the row status: `QUEUED` (or a `PROCESSING` row older than `STALE_MS = 15m` > the 300s maxDuration) → `PROCESSING`, `attemptCount++`; a losing racer updates 0 rows and backs off. `attemptCount` bounds retries at `MAX_CONTENT_ATTEMPTS = 4` (parity with the retired `retries: 3`).
+- **Emitter rewired:** `content-generation.service.ts` no longer calls `inngest.send`. `enqueueGeneration` just writes items `QUEUED` (job → `PROCESSING`); `resumeJob`/`retryFailedItems` re-queue by status (retry resets `attemptCount=0`) — the drain does the work. `contentIdentityKey` inlined so the service no longer imports `lib/inngest`.
+- **Terminal/replay Inngest-free:** a MAX-attempts failure is terminal **COLUMNS-ONLY** (`item.status=FAILED`) — **nothing is written to `jobs_dead_letter`**, so `OperationsService.autoDrainDeadLetterJobs`/`retryDeadLetterJob` (which `inngest.send`) can NEVER re-emit a content job. Admin `retryFailedItems` is the replay path.
+- **Business logic unchanged:** same `generateArticle` (Groq) → `contentArticle.upsert` (by unique slug, converges on retry/overlap) → `snapshot` → `validateArticle` (PUBLISHED→REVIEW_NEEDED downgrade gate preserved) → finalize item → `reconcileJob` → `recordWorkflowEvent`. Content has **no external email/SMS/dealer side effects**, so a redundant generation is at worst wasted Groq work, never a duplicate production comm.
+- **Worker DELETED:** `lib/inngest/content-functions.ts` removed and dropped from `app/api/inngest/route.ts` (proved: only the serve route imported `contentFunctions`; no live emitter of the events remains; no test imported the file).
+- **Tests:** `lib/services/content/__tests__/content-generation-processor.test.ts` (claim-race SKIP, happy path, PUBLISHED downgrade both ways, RETRY below MAX with no DLQ write, terminal FAILED columns-only at MAX, NO_KEYWORD, drain NO_QUEUED/aggregation) + `app/api/cron/__tests__/content-generation-drain-route.test.ts`. `test:content` now runs with `--experimental-test-module-mocks`.
+- **Status:** **MIGRATED, worker deleted.** No Inngest dependency remains for content. Live verification: confirm `cron_job_logs` for `content-generation-drain` shows real claims/successes and an admin generate job completes end-to-end on the drain.
 
 ### 14. Dealer award — `dealerAwardFn` / `autolenis/dealer.award`  ⟶  `KEEP TEMPORARILY`
 - Emitter: `app/api/buyer/auctions/[auctionId]/select-offer/route.ts`. Post-acceptance dealer award dispatch. **Financial/deal-adjacent** — migrate carefully, its own batch, after comms internalized.
@@ -133,12 +144,12 @@ Registered function arrays: `inngestFunctions` (`lib/inngest/functions.ts`),
 `inngestFunctions` (see entries 7–9). Live verification pending before deleting the
 function definitions.
 
-**NEXT EXECUTABLE WORKLOAD:** Content generate/regenerate (#12–13). FIRST prove
-whether the existing `content-publisher` / `social-generate` crons already cover
-this workload → if so it is a **DUPLICATE** (delete after proving no live
-caller/emitter). Otherwise migrate `content-generation.service.ts`'s emitters onto
-a DB-queue + Vercel-Cron drain reusing `lib/jobs/idempotency.ts` (the content
-functions already use the shared `idempotency_keys` guard).
+**DONE (Batch 4):** Content generate/regenerate (#12–13) — **MIGRATED**, worker
+deleted (see entry 12–13). Proven not a duplicate; runs on the
+`content-generation-drain` cron; terminal state columns-only (Inngest-free).
+
+**NEXT EXECUTABLE WORKLOAD:** `workflowResumeFn` (#6 — durable Postgres
+`run_at` state), then the comms keystone.
 
 **THEN (in dependency order):** `workflowResumeFn` (#6 — durable Postgres
 `run_at` state, its own batch) → the comms keystone (`emailSendFn` #2 / `smsSendFn`

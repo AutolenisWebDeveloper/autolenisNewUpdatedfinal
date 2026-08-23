@@ -1,17 +1,19 @@
 import { serve } from 'inngest/next';
 import { inngest } from '@/lib/inngest/client';
 import { inngestFunctions } from '@/lib/inngest/functions';
-import { contentFunctions } from '@/lib/inngest/content-functions';
 import { intakeFunctions } from '@/lib/inngest/intake-functions';
 import { dealerAwardFunctions } from '@/lib/inngest/dealer-award-functions';
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
-  // Existing messaging/automation workers + content-ops workers + the durable
-  // buyer-intake orchestration worker (S1) + the dealer-award dispatch worker (S3).
+  // Remaining Inngest workers during the incremental retirement:
+  //   - inngestFunctions: messaging/campaign/workflow-resume/lead-nurture workers
+  //   - intakeFunctions: dormant buyer-intake compatibility sink (no live emitter)
+  //   - dealerAwardFunctions: dealer-award dispatch worker
+  // Content generation (contentFunctions) was migrated to the internal
+  // content-generation-drain cron and removed.
   functions: [
     ...inngestFunctions,
-    ...contentFunctions,
     ...intakeFunctions,
     ...dealerAwardFunctions,
   ],

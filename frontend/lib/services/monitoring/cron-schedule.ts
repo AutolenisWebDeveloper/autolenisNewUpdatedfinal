@@ -38,6 +38,7 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "intake-reconcile": { intervalMinutes: 5 },
   "deposit-activation-reconcile": { intervalMinutes: 5 },
   "content-publisher": { intervalMinutes: 5 },
+  "content-generation-drain": { intervalMinutes: 5 }, // migrated off Inngest content workers
   "health-check": { intervalMinutes: 5 },
   "workflow-automation": { intervalMinutes: 5 },
   "social-publish-queue": { intervalMinutes: 5 },

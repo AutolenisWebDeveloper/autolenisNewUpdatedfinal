@@ -215,6 +215,10 @@
     {
       "path": "/api/cron/saved-search-match",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/content-generation-drain",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
