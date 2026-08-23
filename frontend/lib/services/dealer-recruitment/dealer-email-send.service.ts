@@ -45,10 +45,26 @@ function stepForOutreachType(type: OutreachType): number {
   return 1
 }
 
+// Machine-readable failure category so callers can act on WHY a send didn't land
+// without string-matching the human `error`. Distinguishes a TRANSIENT throttle
+// (rate_limited — clears on its own) and PERMANENT per-dealer states (suppressed /
+// undeliverable — retrying is futile) from a genuine execution error (send_error /
+// not_configured). Used by post-intake-outreach to decide defer vs complete vs fail.
+export type SendDealerEmailReason =
+  | "not_found"
+  | "no_email"
+  | "already_contacted"
+  | "suppressed"
+  | "undeliverable"
+  | "rate_limited"
+  | "not_configured"
+  | "send_error"
+
 export interface SendDealerEmailResult {
   success: boolean
   resendId?: string
   error?: string
+  reason?: SendDealerEmailReason
   outreachLogId?: string
 }
 
@@ -197,8 +213,8 @@ export async function sendDealerEmail(
       email: true,
     },
   })
-  if (!prospect) return { success: false, error: "Dealer not found" }
-  if (!prospect.email) return { success: false, error: "Dealer has no email" }
+  if (!prospect) return { success: false, reason: "not_found", error: "Dealer not found" }
+  if (!prospect.email) return { success: false, reason: "no_email", error: "Dealer has no email" }
 
   // 1b. Idempotency — never send the same outreach step to the same prospect
   // twice. The automatic post-intake path guards externally, but the admin
@@ -220,13 +236,13 @@ export async function sendDealerEmail(
     logger.info(
       `[phase-4b3] Skipping duplicate ${outreachType} send for prospect ${prospect.id} (log ${priorSend.id})`,
     )
-    return { success: false, error: "Already contacted for this outreach step", outreachLogId: priorSend.id }
+    return { success: false, reason: "already_contacted", error: "Already contacted for this outreach step", outreachLogId: priorSend.id }
   }
 
   // 2. Suppression gate (CAN-SPAM / deliverability).
   if (await isSuppressed(prospect.email)) {
     logger.warn(`[phase-4b3] Skipping suppressed address ${prospect.email}`)
-    return { success: false, error: "Recipient is suppressed (bounced/unsubscribed)" }
+    return { success: false, reason: "suppressed", error: "Recipient is suppressed (bounced/unsubscribed)" }
   }
 
   // 2b. Deliverability gate (Y1) — system-wide "never cold-email an unverified
@@ -240,13 +256,14 @@ export async function sendDealerEmail(
     logger.warn(
       `[phase-4b3] Skipping undeliverable address ${prospect.email} (${deliverability.reason})`,
     )
-    return { success: false, error: `Recipient address is not deliverable (${deliverability.reason})` }
+    return { success: false, reason: "undeliverable", error: `Recipient address is not deliverable (${deliverability.reason})` }
   }
 
   // 3. Rate limit.
   if (!(await checkRateLimit())) {
     return {
       success: false,
+      reason: "rate_limited",
       error: `Rate limit exceeded (${MAX_PER_HOUR}/hr, ${MAX_PER_DAY}/day)`,
     }
   }
@@ -324,7 +341,7 @@ export async function sendDealerEmail(
       data: { status: "failed", errorMessage: "RESEND_API_KEY not configured" },
     })
     logger.warn("[phase-4b3] RESEND_API_KEY not configured — send skipped")
-    return { success: false, error: "Email sending not configured", outreachLogId: log.id }
+    return { success: false, reason: "not_configured", error: "Email sending not configured", outreachLogId: log.id }
   }
 
   try {
@@ -359,7 +376,7 @@ export async function sendDealerEmail(
         data: { status: "failed", errorMessage: msg },
       })
       logger.error(`[phase-4b3] Resend dispatch failed for ${prospect.email}: ${msg}`)
-      return { success: false, error: msg, outreachLogId: log.id }
+      return { success: false, reason: "send_error", error: msg, outreachLogId: log.id }
     }
 
     await prisma.dealerOutreachLog.update({
@@ -387,6 +404,6 @@ export async function sendDealerEmail(
       data: { status: "failed", errorMessage: msg },
     })
     logger.error(`[phase-4b3] Email send threw for ${prospect.email}: ${msg}`)
-    return { success: false, error: msg, outreachLogId: log.id }
+    return { success: false, reason: "send_error", error: msg, outreachLogId: log.id }
   }
 }

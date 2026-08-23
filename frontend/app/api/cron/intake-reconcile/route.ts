@@ -42,24 +42,33 @@ export async function GET(request: NextRequest) {
   const run = await withCronRun("intake-reconcile", async () => {
     const summary = await processEligibleBuyerIntakes();
 
-    if (summary.failures.length > 0) {
-      logger.error(
-        `[intake-reconcile] ${summary.failed}/${summary.attempted} intake(s) failed`,
-        { failures: summary.failures },
-      );
-    } else if (summary.succeeded > 0) {
+    // Truthful, disambiguated log line: completions vs zero-supply vs
+    // required-stage failures vs terminal dead-letters.
+    if (summary.attempted > 0 || summary.deadLettered > 0) {
       logger.info(
-        `[intake-reconcile] processed ${summary.succeeded}/${summary.attempted} intake(s), ` +
-          `${summary.totalDealersContacted} dealer(s) contacted`,
+        `[intake-reconcile] succeeded=${summary.succeeded} zeroSupply=${summary.zeroSupply} ` +
+          `deferred=${summary.deferred} requiredStageFailed=${summary.requiredStageFailed} ` +
+          `deadLettered=${summary.deadLettered} failed=${summary.failed} ` +
+          `dealersContacted=${summary.totalDealersContacted}`,
+        { stageFailureCounts: summary.stageFailureCounts },
       );
     }
+    if (summary.failures.length > 0) {
+      logger.error(`[intake-reconcile] ${summary.failures.length} intake failure(s)`, {
+        failures: summary.failures,
+      });
+    }
 
-    // Business-dead guard: work was attempted but NONE succeeded. Throw so the
-    // cron is recorded FAILED (and returns 500) instead of a misleading green.
-    if (summary.allAttemptedFailed) {
+    // Business-dead guard: zero valid completions AND execution failures present
+    // (e.g. a provider outage failing the REQUIRED sourcing spine). Throw so the
+    // cron is recorded FAILED (HTTP 500) instead of a misleading green. A
+    // legitimate all-ZERO_SUPPLY batch (dealers ran, none found) is NOT dead and
+    // stays green.
+    if (summary.businessDead) {
       throw new Error(
-        `intake business failure: ${summary.attempted} attempted, 0 succeeded ` +
-          `(first: ${summary.failures[0]?.category} — ${summary.failures[0]?.error})`,
+        `intake business failure: 0 completed, ` +
+          `requiredStageFailed=${summary.requiredStageFailed} deadLettered=${summary.deadLettered} ` +
+          `failed=${summary.failed} (first: ${summary.failures[0]?.category} — ${summary.failures[0]?.error})`,
       );
     }
 

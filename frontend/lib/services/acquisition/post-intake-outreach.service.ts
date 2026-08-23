@@ -83,13 +83,32 @@ function humanizeTimeline(timeline: string | null): string {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+// Execution status of the outreach stage, so the intake pipeline can tell apart:
+//   SUCCESS       — at least one dealer contacted.
+//   ZERO_RESULTS  — ran fine, nobody CONTACTABLE (no eligible prospects, or every
+//                   candidate is permanently unreachable — suppressed / undeliverable).
+//                   A valid completion; retrying would not help.
+//   SKIPPED       — nothing to do (no make/vehicle info).
+//   DEFERRED      — a TRANSIENT throttle (channel rate limit) blocked every send.
+//                   NOT a failure: the intake must retry later WITHOUT counting
+//                   toward the terminal cap (the limit self-clears).
+//   FAILED        — an EXECUTION failure (infra error, or a genuine send error on
+//                   every eligible prospect). Blocks completion; bounded retry.
+// The dealer-sourcing spine is REQUIRED for a valid terminal intake, so this
+// distinction decides whether intake may complete, defer, or fail.
+export type OutreachStatus = "SUCCESS" | "ZERO_RESULTS" | "SKIPPED" | "DEFERRED" | "FAILED"
+
 export interface PostIntakeOutreachResult {
   dealersContacted: number
+  status: OutreachStatus
+  /** Sanitized reason, set on DEFERRED / FAILED. */
+  reason?: string
 }
 
 /**
  * Run the post-intake dealer outreach for a single BuyerOpportunity. Returns the
- * number of dealers successfully contacted (0 on any error).
+ * number of dealers contacted plus an execution status (see OutreachStatus).
+ * Never throws.
  */
 export async function runPostIntakeOutreach(
   buyerOpportunityId: string,
@@ -116,7 +135,9 @@ export async function runPostIntakeOutreach(
       logger.warn(
         `[post-intake-outreach] BuyerOpportunity ${buyerOpportunityId} not found`,
       )
-      return { dealersContacted: 0 }
+      // The pipeline already loaded this opportunity; a miss here is an anomaly,
+      // not a valid empty result — surface it as an execution failure.
+      return { dealersContacted: 0, status: "FAILED", reason: "opportunity not found during outreach" }
     }
 
     // Vehicle-specific outreach requires at least a make.
@@ -124,7 +145,7 @@ export async function runPostIntakeOutreach(
       logger.info(
         `[post-intake-outreach] Opportunity ${buyerOpportunityId} has no make — skipping outreach`,
       )
-      return { dealersContacted: 0 }
+      return { dealersContacted: 0, status: "SKIPPED" }
     }
 
     // 2. Resolve the buyer's city/state for the dealer-facing location. The
@@ -184,7 +205,8 @@ export async function runPostIntakeOutreach(
       logger.info(
         `[post-intake-outreach] No eligible dealers for buyer opportunity ${buyerOpportunityId}`,
       )
-      return { dealersContacted: 0 }
+      // Ran fine, nothing to contact — a valid business outcome, not a failure.
+      return { dealersContacted: 0, status: "ZERO_RESULTS" }
     }
 
     // 4. Precompute the shared, privacy-safe vehicle/budget signal.
@@ -202,8 +224,16 @@ export async function runPostIntakeOutreach(
     //    the loop. sendDealerEmail handles suppression, rate limiting, and the
     //    DealerOutreachLog record for us.
     let dealersContacted = 0
+    let sendsAttempted = 0
+    // Classify why sends did NOT land, so a transient throttle and permanently
+    // unreachable dealers are not mistaken for an execution failure. Permanent
+    // reasons (suppressed / undeliverable / already-contacted / no-email) need no
+    // counter — they simply fall through to the ZERO_RESULTS default below.
+    let transientCount = 0 // rate_limited / not_configured → defer, retry later
+    let errorCount = 0 // genuine send error (or unknown reason) → execution failure
     for (const prospect of prospects) {
       if (!prospect.email) continue
+      sendsAttempted += 1
 
       // Prefer the buyer's city/state; fall back to this dealer's area (the
       // discovery was run around the buyer's zip, so prospects share the metro)
@@ -238,12 +268,25 @@ export async function runPostIntakeOutreach(
           logger.warn(
             `[post-intake-outreach] Send to dealer ${prospect.id} failed: ${result.error}`,
           )
+          if (result.reason === "rate_limited" || result.reason === "not_configured") {
+            transientCount += 1
+          } else if (
+            result.reason === "suppressed" ||
+            result.reason === "undeliverable" ||
+            result.reason === "already_contacted" ||
+            result.reason === "no_email"
+          ) {
+            // Permanent — dealer is unreachable; no counter (falls through to ZERO_RESULTS).
+          } else {
+            errorCount += 1 // send_error / not_found / unknown reason → genuine failure
+          }
         }
       } catch (err) {
         logger.error(
           `[post-intake-outreach] Send threw for dealer ${prospect.id}:`,
           err,
         )
+        errorCount += 1
       }
 
       // Small delay between sends to respect channel rate limits.
@@ -253,12 +296,39 @@ export async function runPostIntakeOutreach(
     logger.info(
       `[post-intake-outreach] Contacted ${dealersContacted} dealers for buyer opportunity ${buyerOpportunityId}`,
     )
-    return { dealersContacted }
+    // Eligible prospects existed but NONE were contacted. Classify by why, so a
+    // self-clearing throttle or permanently-unreachable dealers do not masquerade
+    // as an execution failure (which would burn the bounded-retry budget and
+    // dead-letter a recoverable intake):
+    //   • any GENUINE send error  → FAILED   (execution failure; bounded retry).
+    //   • else any RATE-LIMIT      → DEFERRED (retry later; does NOT count to cap).
+    //   • else all PERMANENT       → ZERO_RESULTS (uncontactable dealers; complete).
+    if (dealersContacted === 0 && sendsAttempted > 0) {
+      if (errorCount > 0) {
+        return {
+          dealersContacted: 0,
+          status: "FAILED",
+          reason: `${errorCount} of ${sendsAttempted} dealer send(s) errored`,
+        }
+      }
+      if (transientCount > 0) {
+        return {
+          dealersContacted: 0,
+          status: "DEFERRED",
+          reason: `${transientCount} of ${sendsAttempted} send(s) throttled — retry later`,
+        }
+      }
+      // All permanent (suppressed / undeliverable): these dealers are unreachable;
+      // retrying will not help, so this is a valid zero-result completion.
+      return { dealersContacted: 0, status: "ZERO_RESULTS" }
+    }
+    return { dealersContacted, status: "SUCCESS" }
   } catch (err) {
     logger.error(
       `[post-intake-outreach] Outreach failed for buyer opportunity ${buyerOpportunityId}:`,
       err,
     )
-    return { dealersContacted: 0 }
+    const reason = err instanceof Error ? err.message : String(err)
+    return { dealersContacted: 0, status: "FAILED", reason }
   }
 }

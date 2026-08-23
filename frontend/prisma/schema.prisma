@@ -3546,6 +3546,19 @@ model BuyerOpportunity {
   // zero dealers), so this is the unambiguous "intake done" marker.
   intakeProcessedAt     DateTime? @map("intake_processed_at")
 
+  // Batch 2 — trustworthy completion semantics. A REQUIRED sourcing-spine stage
+  // (dealer discovery / outreach) that FAILS to EXECUTE no longer masquerades as
+  // completion: intake is NOT stamped, `intakeAttempts` is incremented, and after
+  // MAX_INTAKE_ATTEMPTS the intake is dead-lettered by setting `intakeFailedAt`
+  // (+ a sanitized `intakeFailureReason`). The intake-reconcile eligibility query
+  // excludes rows with intakeFailedAt set, so a provider outage can never make the
+  // cron re-drive one forever. Terminal state lives HERE (never in jobs_dead_letter),
+  // so the Inngest-based DLQ drainer can never re-emit a terminal intake. ZERO_RESULTS
+  // (dealer discovery ran, found none) is a VALID completion and never dead-letters.
+  intakeAttempts        Int       @default(0) @map("intake_attempts")
+  intakeFailedAt        DateTime? @map("intake_failed_at")
+  intakeFailureReason   String?   @db.Text @map("intake_failure_reason")
+
   // Dealer discovery (relation)
   dealerProspects       DealerProspect[]
 
