@@ -589,6 +589,10 @@ model Deal {
   // dispatches, then stamps this. Existing deals are backfilled = created_at so
   // only NEW acceptances dispatch.
   dealerAwardDispatchedAt DateTime?          @map("dealer_award_dispatched_at")
+  // Bounded-retry counter for the dealer-award dispatch. At MAX the drain stamps
+  // the marker terminal anyway (stops the retry loop) and leaves this >= MAX as a
+  // queryable recovery handle for a still-undelivered award.
+  dealerAwardAttempts  Int                  @default(0) @map("dealer_award_attempts")
   createdAt             DateTime             @default(now()) @map("created_at")
   updatedAt             DateTime             @updatedAt @map("updated_at")
   contractScans         ContractScan[]

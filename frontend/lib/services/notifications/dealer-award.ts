@@ -12,8 +12,9 @@
 //   • `emitDealerAwardOutcomes` loads the auction/offers, runs the planner, and
 //     performs the sends via the existing transactional email rail
 //     (`resend.service` — idempotent via EmailSendLog) plus in-app Notification
-//     rows. It runs inside the durable `dealerAwardFn` Inngest worker, so it is
-//     built to be RE-RUN: every channel is idempotent, and it therefore
+//     rows. It runs inside the durable `dealer-award-dispatch` cron (off the
+//     Deal's dealerAwardDispatchedAt marker), so it is built to be RE-RUN: every
+//     channel is idempotent, and it therefore
 //     PROPAGATES transient failures (load-phase DB error, any recipient dispatch
 //     failure) so the worker retries and ultimately dead-letters instead of
 //     silently marking the dispatch complete and blocking re-drive. Only a

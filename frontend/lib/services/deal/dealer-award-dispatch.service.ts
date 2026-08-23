@@ -32,6 +32,10 @@ const WINDOW_HOURS = 24 * 7;
 // A claim older than this is reclaimable (a prior drain died mid-dispatch). MUST
 // exceed the drain route's maxDuration.
 const STALE_MS = 10 * 60 * 1000;
+// Bounded retry (parity with the retired worker's retries:3 → up to 4 tries).
+// At MAX the marker is stamped terminal so a persistently-failing dispatch stops
+// re-driving; dealerAwardAttempts stays >= MAX as a queryable recovery handle.
+const MAX_DISPATCH_ATTEMPTS = 4;
 
 export interface DealerAwardDrainResult {
   status: "OK" | "NO_PENDING";
@@ -39,6 +43,7 @@ export interface DealerAwardDrainResult {
   dispatched: number;
   skipped: number;
   failed: number;
+  deadLettered: number;
 }
 
 export async function drainDealerAwardDispatch(): Promise<DealerAwardDrainResult> {
@@ -52,17 +57,18 @@ export async function drainDealerAwardDispatch(): Promise<DealerAwardDrainResult
     },
     orderBy: { createdAt: "asc" },
     take: BATCH,
-    select: { id: true, offerId: true, offer: { select: { auctionId: true } } },
+    select: { id: true, offerId: true, dealerAwardAttempts: true, offer: { select: { auctionId: true } } },
   });
 
   if (deals.length === 0) {
-    return { status: "NO_PENDING", scanned: 0, dispatched: 0, skipped: 0, failed: 0 };
+    return { status: "NO_PENDING", scanned: 0, dispatched: 0, skipped: 0, failed: 0, deadLettered: 0 };
   }
 
   const supabase = getSupabase();
   let dispatched = 0;
   let skipped = 0;
   let failed = 0;
+  let deadLettered = 0;
 
   for (const deal of deals) {
     const auctionId = deal.offer?.auctionId ?? null;
@@ -97,11 +103,35 @@ export async function drainDealerAwardDispatch(): Promise<DealerAwardDrainResult
       dispatched++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      await updateIdempotencyState(supabase, key, "failed", { error: message });
-      logger.error(`[dealer-award-dispatch] dispatch failed for deal ${deal.id}`, message);
-      failed++;
+      const attempts = deal.dealerAwardAttempts + 1;
+      if (attempts >= MAX_DISPATCH_ATTEMPTS) {
+        // Terminal — stamp the marker so a persistently-failing dispatch stops
+        // re-driving (no 7-day retry loop). dealerAwardAttempts stays >= MAX as the
+        // recovery handle (queryable: dispatched marker set AND attempts >= MAX).
+        // Nothing is written to jobs_dead_letter (no Inngest DLQ re-emit loop).
+        await prisma.deal.update({
+          where: { id: deal.id },
+          data: { dealerAwardDispatchedAt: new Date(), dealerAwardAttempts: attempts },
+        });
+        await releaseIdempotencyGuard(supabase, key);
+        logger.error(
+          `[dealer-award-dispatch] deal ${deal.id} DEAD-LETTERED after ${attempts} attempts (marker stamped for recovery)`,
+          message,
+        );
+        deadLettered++;
+      } else {
+        // Bounded retry: bump the counter, leave the marker NULL, mark the lease
+        // 'failed' (reclaimable) → re-driven on a later tick.
+        await prisma.deal.update({
+          where: { id: deal.id },
+          data: { dealerAwardAttempts: attempts },
+        });
+        await updateIdempotencyState(supabase, key, "failed", { error: message });
+        logger.error(`[dealer-award-dispatch] dispatch failed for deal ${deal.id} (attempt ${attempts})`, message);
+        failed++;
+      }
     }
   }
 
-  return { status: "OK", scanned: deals.length, dispatched, skipped, failed };
+  return { status: "OK", scanned: deals.length, dispatched, skipped, failed, deadLettered };
 }

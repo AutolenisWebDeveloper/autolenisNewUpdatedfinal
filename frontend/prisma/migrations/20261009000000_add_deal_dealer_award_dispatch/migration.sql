@@ -10,6 +10,12 @@
 ALTER TABLE "deals"
   ADD COLUMN IF NOT EXISTS "dealer_award_dispatched_at" TIMESTAMP(3);
 
+-- Bounded-retry counter: at MAX the drain stamps the marker terminal and leaves
+-- this >= MAX as a queryable recovery handle for a still-undelivered award (no
+-- silent 7-day retry loop, no jobs_dead_letter re-emit loop).
+ALTER TABLE "deals"
+  ADD COLUMN IF NOT EXISTS "dealer_award_attempts" INTEGER NOT NULL DEFAULT 0;
+
 -- HISTORICAL SAFETY: mark every EXISTING offer-accepted deal as already-dispatched
 -- so the cron can NEVER mass-notify dealers about historical auctions on first run.
 -- Only NEW acceptances (created after this migration) will have a NULL marker.

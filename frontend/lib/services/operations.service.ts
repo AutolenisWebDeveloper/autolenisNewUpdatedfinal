@@ -5,11 +5,12 @@ import { inngestFunctions } from '@/lib/inngest/functions';
 import { getStripe } from '@/lib/stripe';
 import { detectDeadCrons } from './monitoring/dead-cron.service';
 
-// Re-drive a NON-QStash dead-letter row to its current owner. Migrated comms
-// event names route to the internal comms-dispatch queue (Inngest-free terminal/
-// replay); anything still owned by an Inngest worker (e.g. autolenis/dealer.award)
-// re-emits through Inngest. Keeps the DLQ replay path from resurrecting a deleted
-// worker's events.
+// Re-drive a NON-QStash dead-letter row to its current owner. Migrated event
+// names route to their internal replacement (Inngest-free terminal/replay):
+// autolenis/email.send + sms.send → the comms outbox, autolenis/dealer.award →
+// emitDealerAwardOutcomes. Anything still owned by a live Inngest worker (the LP
+// lead-nurture events) re-emits through Inngest. Keeps the DLQ replay path from
+// resurrecting a deleted worker's events.
 async function reemitDeadLetterJob(
   eventName: string,
   payload: Record<string, unknown>,
