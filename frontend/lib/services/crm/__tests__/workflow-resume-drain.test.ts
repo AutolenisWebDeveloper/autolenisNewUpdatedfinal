@@ -21,6 +21,7 @@ let dueRows: Array<Record<string, unknown>> = [];
 let queryError: { message: string } | null = null;
 let claimResult = true;
 let resumeThrows = false;
+let engineEnabled = true;
 
 const resumeCalls: Array<{ enrollmentId: string; nodeId: string }> = [];
 const updateCalls: Array<{ data: Record<string, unknown>; eq: Array<[string, unknown]> }> = [];
@@ -65,6 +66,7 @@ mock.module("@/lib/jobs/idempotency", {
 
 mock.module("@/lib/services/workflow.engine", {
   namedExports: {
+    isInAppEngineEnabled: () => engineEnabled,
     WorkflowEngine: {
       resumeEnrollment: async (_s: unknown, enrollmentId: string, nodeId: string) => {
         resumeCalls.push({ enrollmentId, nodeId });
@@ -87,9 +89,20 @@ beforeEach(() => {
   queryError = null;
   claimResult = true;
   resumeThrows = false;
+  engineEnabled = true;
   resumeCalls.length = 0;
   updateCalls.length = 0;
   idempotencyStates.length = 0;
+});
+
+test("returns ENGINE_DISABLED and touches nothing when the in-app engine is off", async () => {
+  engineEnabled = false;
+  dueRows = [{ id: "e1", resume_node_id: "n2", resume_at: "2026-01-01T00:00:00.000Z" }];
+  const { drainDueWorkflowResumes } = await load();
+  const r = await drainDueWorkflowResumes();
+  assert.equal(r.status, "ENGINE_DISABLED");
+  assert.equal(resumeCalls.length, 0);
+  assert.equal(updateCalls.length, 0, "pending resumes are preserved for re-enablement, not cleared");
 });
 
 test("returns NO_DUE_RESUMES when nothing is due", async () => {
@@ -114,7 +127,7 @@ test("claims a due row, resumes it, and clears resume_at conditionally", async (
   assert.equal(updateCalls[0].data.resume_node_id, null);
   assert.ok(updateCalls[0].eq.some(([c, v]) => c === "id" && v === "e1"));
   assert.ok(updateCalls[0].eq.some(([c, v]) => c === "resume_at" && v === "2026-01-01T00:00:00.000Z"));
-  assert.deepEqual(idempotencyStates, [{ key: "workflow-resume:e1:n2", status: "completed" }]);
+  assert.deepEqual(idempotencyStates, [{ key: "workflow-resume:e1:n2:2026-01-01T00:00:00.000Z", status: "completed" }]);
 });
 
 test("skips a row whose claim is lost (does not resume)", async () => {
@@ -136,7 +149,7 @@ test("a failed resume does NOT clear resume_at and marks the guard failed", asyn
   assert.equal(r.failed, 1);
   assert.equal(r.resumed, 0);
   assert.equal(updateCalls.length, 0, "resume_at left set so a later tick re-drives it");
-  assert.deepEqual(idempotencyStates, [{ key: "workflow-resume:e1:n2", status: "failed" }]);
+  assert.deepEqual(idempotencyStates, [{ key: "workflow-resume:e1:n2:2026-01-01T00:00:00.000Z", status: "failed" }]);
 });
 
 test("a malformed row (no node) is cleared and skipped without claiming", async () => {

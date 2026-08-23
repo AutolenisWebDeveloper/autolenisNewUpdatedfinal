@@ -20,7 +20,7 @@
 import { logger } from "@/lib/logger";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { claimJob, updateIdempotencyState } from "@/lib/jobs/idempotency";
-import { WorkflowEngine } from "@/lib/services/workflow.engine";
+import { WorkflowEngine, isInAppEngineEnabled } from "@/lib/services/workflow.engine";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const BATCH = 100;
@@ -29,7 +29,7 @@ const BATCH = 100;
 const STALE_MS = 10 * 60 * 1000;
 
 export interface WorkflowResumeDrainResult {
-  status: "OK" | "NO_DUE_RESUMES";
+  status: "OK" | "NO_DUE_RESUMES" | "ENGINE_DISABLED";
   due: number;
   resumed: number;
   skipped: number;
@@ -51,6 +51,15 @@ async function clearResume(
 }
 
 export async function drainDueWorkflowResumes(): Promise<WorkflowResumeDrainResult> {
+  // If the in-app engine is disabled, resumeEnrollment would no-op — so DON'T
+  // select or clear anything. Leaving resume_at intact means a pending resume
+  // survives a disable window and fires once the engine is re-enabled, instead of
+  // being silently discarded. (In prod the engine is disabled and the column is
+  // brand-new, so there is nothing to drain today.)
+  if (!isInAppEngineEnabled()) {
+    return { status: "ENGINE_DISABLED", due: 0, resumed: 0, skipped: 0, failed: 0 };
+  }
+
   const supabase = getServiceSupabase();
   const now = new Date().toISOString();
 
@@ -86,7 +95,11 @@ export async function drainDueWorkflowResumes(): Promise<WorkflowResumeDrainResu
       continue;
     }
 
-    const key = `workflow-resume:${enrollmentId}:${nodeId}`;
+    // Include the resume_at instant so each scheduled resume is a DISTINCT claim
+    // identity — a workflow that loops back through the same delay node schedules a
+    // new (later) resume_at, which must not collide with the prior pass's
+    // 'completed' guard (which claimJob would treat as authoritatively done).
+    const key = `workflow-resume:${enrollmentId}:${nodeId}:${originalResumeAt}`;
     const claimed = await claimJob(supabase, key, { staleMs: STALE_MS });
     if (!claimed) {
       // Another drain owns it, or a prior run already completed it.

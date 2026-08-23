@@ -479,10 +479,16 @@ export class WorkflowEngine {
           return { status: 'success' };
         }
         const resumeAt = new Date(Date.now() + seconds * 1000).toISOString();
-        await supabase
+        const { error: persistErr } = await supabase
           .from('workflow_enrollments')
           .update({ resume_at: resumeAt, resume_node_id: next })
           .eq('id', enrollment.id);
+        // A failed persist must FAIL the node — never report 'suspended' without
+        // durable resume state, or the enrollment strands forever (the drain
+        // would never select it). Mirrors the old inngest.send throw → failEnrollment.
+        if (persistErr) {
+          return { status: 'failed', error: `RESUME_PERSIST_FAILED: ${persistErr.message}` };
+        }
         return { status: 'suspended', output: { duration, resume_at: resumeAt } };
       }
 
