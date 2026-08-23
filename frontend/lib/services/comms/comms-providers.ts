@@ -26,17 +26,27 @@ export interface ResendSendArgs {
   subject: string;
   html: string;
   text: string;
+  /**
+   * Provider-side idempotency key (the outbox dedup_key). Resend dedupes sends
+   * carrying the same key for ~24h, so a crash-then-reclaim re-send inside that
+   * window is collapsed provider-side — an extra guard on top of the outbox's
+   * dispatched_at reclaim policy.
+   */
+  idempotencyKey?: string;
 }
 
 export async function sendEmailViaResend(args: ResendSendArgs): Promise<{ id: string | null }> {
-  const out = await getResend().emails.send({
-    from: process.env.RESEND_FROM_EMAIL!,
-    to: args.to,
-    subject: args.subject,
-    text: args.text,
-    html: args.html,
-    headers: { "List-Unsubscribe": `<${process.env.NEXT_PUBLIC_APP_URL}/unsubscribe>` },
-  });
+  const out = await getResend().emails.send(
+    {
+      from: process.env.RESEND_FROM_EMAIL!,
+      to: args.to,
+      subject: args.subject,
+      text: args.text,
+      html: args.html,
+      headers: { "List-Unsubscribe": `<${process.env.NEXT_PUBLIC_APP_URL}/unsubscribe>` },
+    },
+    args.idempotencyKey ? { idempotencyKey: args.idempotencyKey } : undefined,
+  );
   if (out.error) throw new Error(`RESEND_API_EXCEPTION: ${out.error.message}`);
   return { id: out.data?.id ?? null };
 }

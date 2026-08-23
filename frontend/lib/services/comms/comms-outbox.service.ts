@@ -150,9 +150,17 @@ async function loadContact(
   return data ?? null;
 }
 
+// Delivery options: `onDispatch` is invoked IMMEDIATELY BEFORE the provider send
+// (after all gates pass) so the drain can stamp `dispatched_at` — the marker that
+// makes a crash-then-reclaim refuse to re-send.
+export interface DeliverOpts {
+  onDispatch?: () => Promise<void>;
+}
+
 export async function deliverEmail(
   supabase: SupabaseClient,
   payload: EmailOutboxPayload,
+  opts: DeliverOpts = {},
 ): Promise<{ outcome: DeliveryOutcome; providerId?: string }> {
   // Transactional lifecycle emails: stable key, no contactId — dedup on the
   // EmailSendLog SENT-precheck (retriable after a transient failure), and bypass
@@ -198,6 +206,10 @@ export async function deliverEmail(
     rendered = { subject: payload.subject, html: payload.html, text: payload.text ?? "" };
   }
 
+  // Stamp dispatched_at right before the provider call — a crash after this point
+  // must NOT re-send on reclaim.
+  await opts.onDispatch?.();
+
   let providerId: string | undefined;
   try {
     const out = await sendEmailViaResend({
@@ -205,6 +217,9 @@ export async function deliverEmail(
       subject: rendered.subject,
       text: rendered.text,
       html: rendered.html,
+      // Provider-side idempotency (the outbox dedup_key) collapses a crash-window
+      // re-send within Resend's ~24h dedup window.
+      idempotencyKey: payload.idempotencyKey,
     });
     providerId = out.id ?? undefined;
   } catch (err) {
@@ -226,33 +241,48 @@ export async function deliverEmail(
     throw err;
   }
 
+  // POST-SEND BOOKKEEPING — BEST-EFFORT. The provider has already sent; a failure
+  // here must NEVER re-throw (that would re-queue the row and re-send). Each write
+  // is isolated so the send is always recorded terminal 'sent' by the caller.
   if (payload.campaignRecipientId) {
-    await supabase
-      .from("campaign_recipients")
-      .update({ status: "sent", sent_at: new Date().toISOString(), resend_id: providerId ?? null })
-      .eq("id", payload.campaignRecipientId);
+    try {
+      await supabase
+        .from("campaign_recipients")
+        .update({ status: "sent", sent_at: new Date().toISOString(), resend_id: providerId ?? null })
+        .eq("id", payload.campaignRecipientId);
+    } catch (e) {
+      logger.error("[comms-outbox] campaign_recipient stamp failed (send already succeeded)", e);
+    }
   }
 
   if (payload.contactId) {
-    await supabase.from("contact_timeline_events").insert({
-      contact_id: payload.contactId,
-      event_type: "email_sent",
-      event_data: {
-        resend_id: providerId,
-        subject: rendered.subject,
-        template_id: payload.templateId ?? null,
-        campaign_id: payload.campaignId ?? null,
-      },
-    });
+    try {
+      await supabase.from("contact_timeline_events").insert({
+        contact_id: payload.contactId,
+        event_type: "email_sent",
+        event_data: {
+          resend_id: providerId,
+          subject: rendered.subject,
+          template_id: payload.templateId ?? null,
+          campaign_id: payload.campaignId ?? null,
+        },
+      });
+    } catch (e) {
+      logger.error("[comms-outbox] email timeline write failed (send already succeeded)", e);
+    }
   }
 
   if (isTransactional) {
-    await recordTransactionalEmailSend({
-      idempotencyKey: payload.idempotencyKey!,
-      recipient: payload.email,
-      templateId: payload.templateId ?? "transactional",
-      resendId: providerId ?? null,
-    });
+    try {
+      await recordTransactionalEmailSend({
+        idempotencyKey: payload.idempotencyKey!,
+        recipient: payload.email,
+        templateId: payload.templateId ?? "transactional",
+        resendId: providerId ?? null,
+      });
+    } catch (e) {
+      logger.error("[comms-outbox] EmailSendLog SENT write failed (send already succeeded)", e);
+    }
   }
 
   return { outcome: "SUCCESS", providerId };
@@ -261,6 +291,7 @@ export async function deliverEmail(
 export async function deliverSms(
   supabase: SupabaseClient,
   payload: SmsOutboxPayload,
+  opts: DeliverOpts = {},
 ): Promise<{ outcome: DeliveryOutcome; providerId?: string }> {
   const standardized = normalizePhone(payload.phone);
   if (!standardized) return { outcome: "INVALID_PHONE" };
@@ -276,14 +307,24 @@ export async function deliverSms(
     return { outcome: "SUPPRESSED" };
   }
 
+  // Stamp dispatched_at right before the provider call — a crash after this point
+  // must NOT re-send on reclaim (Twilio has no provider-side idempotency).
+  await opts.onDispatch?.();
+
   const result = await sendSmsViaTwilio({ to: standardized, body: payload.body });
 
+  // Best-effort timeline write — the SMS has already sent; never re-throw (that
+  // would re-queue and re-send).
   if (payload.contactId) {
-    await supabase.from("contact_timeline_events").insert({
-      contact_id: payload.contactId,
-      event_type: "sms_sent",
-      event_data: { twilio_sid: result.sid },
-    });
+    try {
+      await supabase.from("contact_timeline_events").insert({
+        contact_id: payload.contactId,
+        event_type: "sms_sent",
+        event_data: { twilio_sid: result.sid },
+      });
+    } catch (e) {
+      logger.error("[comms-outbox] sms timeline write failed (send already succeeded)", e);
+    }
   }
 
   return { outcome: "SUCCESS", providerId: result.sid };
@@ -307,6 +348,7 @@ interface OutboxRow {
   channel: "email" | "sms";
   attempts: number;
   payload: Record<string, unknown>;
+  dispatched_at: string | null;
 }
 
 export async function processOutboxRow(
@@ -319,6 +361,7 @@ export async function processOutboxRow(
     claimed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
+  const cols = "id, channel, attempts, payload, dispatched_at";
 
   // Claim CAS — two targeted updates (avoids a PostgREST .or() with an embedded
   // timestamp). Each UPDATE re-checks its predicate on the locked row, so a racing
@@ -328,8 +371,9 @@ export async function processOutboxRow(
     .update(claimPatch)
     .eq("id", rowId)
     .eq("status", "pending")
-    .select("id, channel, attempts, payload");
+    .select(cols);
   if (claimErr) throw new Error(`comms_claim_failed: ${claimErr.message}`);
+  let reclaimed = false;
 
   // (2) crash recovery: a 'sending' row whose claim went stale (prior drain died).
   if (!claimedRows || claimedRows.length === 0) {
@@ -339,20 +383,50 @@ export async function processOutboxRow(
       .eq("id", rowId)
       .eq("status", "sending")
       .lt("claimed_at", staleCutoff)
-      .select("id, channel, attempts, payload");
+      .select(cols);
     if (reclaim.error) throw new Error(`comms_reclaim_failed: ${reclaim.error.message}`);
     claimedRows = reclaim.data;
+    reclaimed = true;
   }
 
   const row = (claimedRows?.[0] as OutboxRow | undefined) ?? null;
   if (!row) return "SKIPPED"; // lost the race / not eligible
 
+  // RECLAIM-UNCERTAIN: a reclaimed row whose dispatched_at is set means a prior
+  // drain reached the provider send before dying — we cannot know if the message
+  // was delivered, so we do NOT re-send it. Marking it terminal 'failed' honors the
+  // hard "a crash must never double-send" invariant (a genuinely-not-sent message
+  // is surfaced for manual review rather than risking a duplicate). Transactional
+  // email would be safe to retry via the EmailSendLog precheck, but the conservative
+  // no-resend rule is applied uniformly for auditability.
+  if (reclaimed && row.dispatched_at) {
+    await supabase
+      .from("comms_outbox")
+      .update({
+        status: "failed",
+        last_result: "RECLAIM_UNCERTAIN",
+        last_error: "reclaimed after dispatch; not re-sent to avoid a duplicate",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", rowId);
+    logger.error(`[comms-outbox] row ${rowId} reclaimed after dispatch — NOT re-sent (uncertain)`);
+    return "FAILED";
+  }
+
+  // Stamp dispatched_at immediately before the provider send (inside deliver).
+  const onDispatch = async () => {
+    await supabase
+      .from("comms_outbox")
+      .update({ dispatched_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("id", rowId);
+  };
+
   const attempt = row.attempts + 1;
   try {
     const { outcome, providerId } =
       row.channel === "email"
-        ? await deliverEmail(supabase, row.payload as EmailOutboxPayload)
-        : await deliverSms(supabase, row.payload as SmsOutboxPayload);
+        ? await deliverEmail(supabase, row.payload as EmailOutboxPayload, { onDispatch })
+        : await deliverSms(supabase, row.payload as SmsOutboxPayload, { onDispatch });
 
     await supabase
       .from("comms_outbox")

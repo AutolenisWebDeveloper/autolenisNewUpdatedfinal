@@ -56,7 +56,10 @@ interface Row {
   channel: string;
   payload: Record<string, unknown>;
   claimed_at: string | null;
+  dispatched_at: string | null;
   run_at: string;
+  last_result?: string;
+  last_error?: string;
 }
 let row: Row | null = null;
 const enqueueUpserts: Array<{ dedup_key: string }> = [];
@@ -88,7 +91,18 @@ function outboxBuilder(table: string) {
     if (op === "update") {
       if (rowMatches()) {
         Object.assign(row!, patch);
-        return { data: [{ id: row!.id, channel: row!.channel, attempts: row!.attempts, payload: row!.payload }], error: null };
+        return {
+          data: [
+            {
+              id: row!.id,
+              channel: row!.channel,
+              attempts: row!.attempts,
+              payload: row!.payload,
+              dispatched_at: row!.dispatched_at,
+            },
+          ],
+          error: null,
+        };
       }
       return { data: [], error: null };
     }
@@ -163,6 +177,7 @@ function seed(overrides: Partial<Row> = {}): void {
     channel: "sms",
     payload: { contactId: "c1", phone: "+15555550123", body: "hi" },
     claimed_at: null,
+    dispatched_at: null,
     run_at: new Date(Date.now() - 1000).toISOString(),
     ...overrides,
   };
@@ -180,6 +195,38 @@ test("claims a pending SMS row and marks it sent on success", async () => {
     } as never,
     "r1",
   );
+  assert.equal(res, "SENT");
+  assert.equal(row!.status, "sent");
+});
+
+test("a stale-reclaimed row that already dispatched is NOT re-sent (RECLAIM_UNCERTAIN)", async () => {
+  // A prior drain stamped dispatched_at then died mid-delivery; the row is stuck
+  // 'sending' with a stale claim. The drain must refuse to re-send.
+  seed({
+    status: "sending",
+    channel: "email",
+    payload: { email: "b@x.com", subject: "S", html: "H", type: "marketing" },
+    claimed_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1h ago (stale)
+    dispatched_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+  });
+  const mod = await load();
+  const res = await mod.processOutboxRow({ from: (t: string) => outboxBuilder(t) } as never, "r1");
+  assert.equal(res, "FAILED");
+  assert.equal(row!.status, "failed");
+  assert.equal(row!.last_result, "RECLAIM_UNCERTAIN");
+});
+
+test("a stale-reclaimed row that had NOT dispatched is re-delivered (safe)", async () => {
+  // Crash was pre-send (dispatched_at null) → re-delivery is safe.
+  seed({
+    status: "sending",
+    channel: "email",
+    payload: { email: "b@x.com", subject: "S", html: "H", type: "marketing" },
+    claimed_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    dispatched_at: null,
+  });
+  const mod = await load();
+  const res = await mod.processOutboxRow({ from: (t: string) => outboxBuilder(t) } as never, "r1");
   assert.equal(res, "SENT");
   assert.equal(row!.status, "sent");
 });

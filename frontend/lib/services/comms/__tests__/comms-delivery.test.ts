@@ -269,6 +269,50 @@ test("happy path: sends, stamps campaign_recipient + timeline, records EmailSend
   assert.equal((sb as unknown as { writes: { campaign: unknown[]; timeline: unknown[] } }).writes.timeline.length, 1);
 });
 
+test("C1: a post-send bookkeeping failure does NOT throw (never triggers a re-send)", async () => {
+  const { deliverEmail } = await load();
+  // A fake whose contact_timeline_events insert throws AFTER the provider send.
+  const sb = {
+    from: (table: string) => {
+      const b: Record<string, unknown> = {
+        select: () => b,
+        eq: () => b,
+        maybeSingle: async () => ({ data: { do_not_contact: false, consent_email: true } }),
+        update: () => b,
+        insert: async () => {
+          if (table === "contact_timeline_events") throw new Error("timeline DB down");
+          return { error: null };
+        },
+        then: (resolve: (v: unknown) => void) => resolve({ data: null, error: null }),
+      };
+      return b;
+    },
+  };
+  // Must resolve SUCCESS despite the bookkeeping failure — the send already happened.
+  const r = await deliverEmail(sb as never, {
+    contactId: "c1",
+    email: "b@x.com",
+    subject: "S",
+    html: "<p>h</p>",
+    type: "marketing",
+  });
+  assert.equal(r.outcome, "SUCCESS");
+  assert.equal(sends.resend, 1);
+});
+
+test("onDispatch is invoked immediately before the provider send", async () => {
+  const { deliverEmail } = await load();
+  const order: string[] = [];
+  const sb = fakeSupabase(null);
+  await deliverEmail(sb as never, { email: "b@x.com", subject: "S", html: "<p>h</p>", type: "marketing" }, {
+    onDispatch: async () => { order.push("dispatch"); },
+  });
+  order.push("after");
+  // onDispatch ran (before the send completed and before we returned).
+  assert.deepEqual(order, ["dispatch", "after"]);
+  assert.equal(sends.resend, 1);
+});
+
 // ── deliverSms ───────────────────────────────────────────────────────────────
 test("invalid phone → INVALID_PHONE, no send", async () => {
   normalizeResult = "";

@@ -36,6 +36,12 @@ CREATE TABLE IF NOT EXISTS comms_outbox (
   provider_id text,       -- Resend id / Twilio sid
   run_at      timestamptz NOT NULL DEFAULT now(),  -- delay support (send at/after)
   claimed_at  timestamptz,                         -- stale-claim reclaim cursor
+  -- Stamped IMMEDIATELY BEFORE the provider call. On a stale-claim reclaim, a row
+  -- with dispatched_at set means the send MAY have reached the provider before the
+  -- drain died — so it is NOT re-sent (marked RECLAIM_UNCERTAIN) to honor the hard
+  -- "a crash must never double-send" invariant; a null dispatched_at means the
+  -- crash was pre-send, so re-delivery is safe.
+  dispatched_at timestamptz,
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
