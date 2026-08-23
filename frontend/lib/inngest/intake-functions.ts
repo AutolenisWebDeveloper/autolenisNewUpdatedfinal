@@ -34,9 +34,14 @@ export async function runIntakeProcess(ctx: {
     processBuyerOpportunityIntake(buyerOpportunityId),
   );
 
-  // Surface a business failure to Inngest's retry policy. Every other outcome
-  // (SUCCESS / ALREADY_PROCESSED / DUPLICATE_BLOCKED / NOT_FOUND) is terminal and
-  // returned as-is.
+  // This worker is a dormant compatibility sink (no repo code emits the event).
+  // The internal intake-reconcile cron owns retries and the bounded-retry/terminal
+  // machinery, so the Batch-2 statuses that mean "the internal path will handle it"
+  // — REQUIRED_FAILED, DEAD_LETTERED, DEFERRED — plus the normal terminal ones
+  // (SUCCESS / ZERO_SUPPLY / ALREADY_PROCESSED / DUPLICATE_BLOCKED / NOT_FOUND) are
+  // returned as-is and never re-thrown. In particular DEAD_LETTERED must NOT throw,
+  // so a terminal intake is never re-emitted or DLQ'd by Inngest. Only an
+  // unexpected infra FAILED surfaces to Inngest's retry policy.
   if (outcome.status === "FAILED") {
     throw new Error(`intake failed for ${buyerOpportunityId}: ${outcome.error ?? "unknown"}`);
   }

@@ -33,8 +33,79 @@ import { applyRequestCoverageGate } from "./request-coverage-gate.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
+// ── Structured per-stage outcomes (Batch 2 — trustworthy completion) ──────────
+//
+// Every stage reports one of:
+//   SUCCESS      — ran, did its work.
+//   ZERO_RESULTS — ran fine, nothing to act on (a VALID business result).
+//   SKIPPED      — preconditions absent / already done on a prior idempotent pass.
+//   DEFERRED     — a TRANSIENT throttle (channel rate limit) blocked the work; NOT
+//                  a failure — retry later WITHOUT counting toward the terminal cap.
+//   FAILED       — threw / timed out / DB error (an EXECUTION failure).
+// The completion policy (in intake-processor) stamps intake_processed_at only when
+// no REQUIRED stage FAILED and none is DEFERRED; ZERO_RESULTS and SKIPPED are valid
+// terminal states.
+export type StageStatus = "SUCCESS" | "ZERO_RESULTS" | "SKIPPED" | "DEFERRED" | "FAILED";
+
+export type IntakeStageName =
+  | "market_enrichment"
+  | "dealer_discovery"
+  | "phone_script_drafting"
+  | "lead_scoring_alerts"
+  | "prospect_email_enrichment"
+  | "dealer_outreach"
+  | "dealers_contacted_email"
+  | "coverage_gate";
+
+export interface StageOutcome {
+  stage: IntakeStageName;
+  status: StageStatus;
+  /** Sanitized reason — set only on FAILED. */
+  reason?: string;
+}
+
+// The dealer-sourcing spine. An EXECUTION failure of either of these must block
+// intake completion (bounded retry). Everything else is best-effort: its failure
+// is recorded but never blocks completion or stalls the intake.
+export const REQUIRED_STAGES: ReadonlySet<IntakeStageName> = new Set<IntakeStageName>([
+  "dealer_discovery",
+  "dealer_outreach",
+]);
+
 export interface IntakePipelineResult {
   dealersContacted: number;
+  stages: StageOutcome[];
+  /** True iff any REQUIRED stage FAILED — the completion decision hinges on this. */
+  requiredFailed: boolean;
+  /**
+   * True iff a REQUIRED stage was DEFERRED (transient throttle) and none FAILED.
+   * The intake must NOT complete (nobody was contacted) but must NOT count toward
+   * the terminal cap either — it retries when the throttle clears.
+   */
+  deferred: boolean;
+  /** True iff dealer discovery ran fine and found zero dealers (valid completion). */
+  zeroSupply: boolean;
+}
+
+// Bounded, single-line, PII-redacted stage-failure reason. Shared with the
+// processor (imported there) so there is one sanitizer. Opportunity ids are cuids
+// (not PII); downstream SDK errors could embed an email/phone, so redact both.
+export function sanitizeIntakeMessage(message: string): string {
+  return message
+    .replace(/\s+/g, " ")
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[redacted-email]")
+    .replace(/\+?\d[\d\s().-]{8,}\d/g, "[redacted-phone]")
+    // Coarse buyer location can leak if a discovery/geocode SDK error echoes the
+    // query ZIP (e.g. "no results for 90210"). Redact standalone 5-digit (ZIP or
+    // ZIP+4) tokens — also neutralizes budget-shaped 5-digit amounts. Over-
+    // redaction of an internal-only diagnostic is acceptable; a PII leak is not.
+    .replace(/\b\d{5}(?:-\d{4})?\b/g, "[redacted-zip]")
+    .trim()
+    .slice(0, 300);
+}
+
+function reasonOf(err: unknown): string {
+  return sanitizeIntakeMessage(err instanceof Error ? err.message : String(err));
 }
 
 // The subset of intake facts the pipeline consumes, reconstructed from a
@@ -122,8 +193,15 @@ function coerceVehicleType(vehicleType: string | null): "new" | "used" | "open" 
  * Score the lead and, when hot, fire the four notification channels. Moved here
  * from unified-buyer-intake with its behavior preserved; the caller guards it so
  * a re-drive of an already-scored opportunity never re-notifies.
+ *
+ * OPTIONAL stage: returns FAILED on an execution error (recorded but non-blocking).
+ * Individual notification-channel failures are recorded on the row flags (via
+ * allSettled) and do NOT make the stage FAILED — only a scoring/DB throw does.
  */
-async function scoreAndAlert(opportunityId: string, fields: IntakeFields): Promise<void> {
+async function scoreAndAlert(
+  opportunityId: string,
+  fields: IntakeFields,
+): Promise<{ status: StageStatus; reason?: string }> {
   try {
     const extractedData = {
       vehicleType: coerceVehicleType(fields.vehicleType),
@@ -222,8 +300,10 @@ async function scoreAndAlert(opportunityId: string, fields: IntakeFields): Promi
         },
       });
     }
+    return { status: "SUCCESS" };
   } catch (err) {
     logger.error("[intake-pipeline] scoreAndAlert error:", err);
+    return { status: "FAILED", reason: reasonOf(err) };
   }
 }
 
@@ -245,11 +325,15 @@ export async function runIntakePipeline(buyerOpportunityId: string): Promise<Int
 
   if (!opp) throw new Error(`BuyerOpportunity ${buyerOpportunityId} not found`);
   const fields = buildIntakeFields(opp);
+  const stages: StageOutcome[] = [];
 
-  // Stage 3b — market enrichment + dealer discovery (independent; run together).
-  const enrichmentPromise = (async () => {
-    if (opp.marketEnrichedAt) return; // already enriched — idempotent re-drive
-    if (!fields.make || !fields.model || !fields.zip) return;
+  // Stage 3b — market enrichment (OPTIONAL) + dealer discovery (REQUIRED) run
+  // concurrently. Each task catches its own errors and RESOLVES to a StageOutcome
+  // (never rejects), so failures are recorded, not swallowed.
+  const enrichmentTask = async (): Promise<StageOutcome> => {
+    if (opp.marketEnrichedAt) return { stage: "market_enrichment", status: "SKIPPED" };
+    if (!fields.make || !fields.model || !fields.zip)
+      return { stage: "market_enrichment", status: "SKIPPED" };
     try {
       const enrichment = await enrichMarketData({
         vehicleType: fields.vehicleType,
@@ -260,103 +344,153 @@ export async function runIntakePipeline(buyerOpportunityId: string): Promise<Int
         yearMax: fields.yearMax,
         zip: fields.zip,
       });
-      if (enrichment) {
-        await prisma.buyerOpportunity.update({
-          where: { id: buyerOpportunityId },
-          data: {
-            marketMsrpEstimate: enrichment.msrpEstimate,
-            marketAvgPaidPrice: enrichment.avgPaidPrice,
-            marketTypicalMarkup: enrichment.typicalMarkup,
-            marketGoodDealTarget: enrichment.goodDealTarget,
-            marketNotes: enrichment.notes,
-            marketEnrichedAt: new Date(),
-          },
-        });
-      }
+      if (!enrichment) return { stage: "market_enrichment", status: "ZERO_RESULTS" };
+      await prisma.buyerOpportunity.update({
+        where: { id: buyerOpportunityId },
+        data: {
+          marketMsrpEstimate: enrichment.msrpEstimate,
+          marketAvgPaidPrice: enrichment.avgPaidPrice,
+          marketTypicalMarkup: enrichment.typicalMarkup,
+          marketGoodDealTarget: enrichment.goodDealTarget,
+          marketNotes: enrichment.notes,
+          marketEnrichedAt: new Date(),
+        },
+      });
+      return { stage: "market_enrichment", status: "SUCCESS" };
     } catch (err) {
       logger.error("[intake-pipeline] market enrichment failed:", err);
+      return { stage: "market_enrichment", status: "FAILED", reason: reasonOf(err) };
     }
-  })();
+  };
 
-  const dealerPromise = (async () => {
-    if (!fields.make || !fields.zip) return;
+  const dealerTask = async (): Promise<StageOutcome[]> => {
+    if (!fields.make || !fields.zip)
+      return [
+        { stage: "dealer_discovery", status: "SKIPPED" },
+        { stage: "phone_script_drafting", status: "SKIPPED" },
+      ];
     // Idempotent re-drive guard: DealerProspect has no unique constraint on the
     // intake identity, so createMany({ skipDuplicates }) would NOT dedupe — a
-    // re-run (reconciler / late duplicate delivery) would insert a second full
-    // set of prospects and the outreach stage would re-email the same dealers.
-    // Skip discovery entirely once this opportunity already has prospects.
-    const existingProspects = await prisma.dealerProspect.count({
-      where: { buyerOppId: buyerOpportunityId },
-    });
-    if (existingProspects > 0) return;
+    // re-run would insert a second full set of prospects and the outreach stage
+    // would re-email the same dealers. Skip discovery once prospects exist.
+    // (A prior pass already discovered them → discovery SUCCESS for this run.)
+    let existingProspects: number;
     try {
-      const dealers = await discoverDealers({ make: fields.make, zip: fields.zip, radiusMiles: 25 });
-      if (dealers.length > 0) {
-        await prisma.dealerProspect.createMany({
-          data: dealers.map((d) => ({
-            buyerOppId: buyerOpportunityId,
-            name: d.name, address: d.address, city: d.city, state: d.state, zip: d.zip,
-            phone: d.phone, email: d.email, website: d.website, brand: d.brand,
-            sourceUrl: d.sourceUrl, searchScore: d.searchScore, status: "DISCOVERED",
-          })),
-          skipDuplicates: true,
-        });
-        // Phone-script drafting only for prospects without one (idempotent).
-        const pending = await prisma.dealerProspect.findMany({
-          where: { buyerOppId: buyerOpportunityId, status: "DISCOVERED", scriptDraftedAt: null },
-          select: { id: true },
-        });
-        for (const p of pending) {
-          try {
-            await draftAndSaveScript(p.id);
-            await new Promise((resolve) => setTimeout(resolve, 12000));
-          } catch (err) {
-            logger.error(`[intake-pipeline] script drafting threw for ${p.id}:`, err);
-          }
-        }
-      }
+      existingProspects = await prisma.dealerProspect.count({
+        where: { buyerOppId: buyerOpportunityId },
+      });
+    } catch (err) {
+      logger.error("[intake-pipeline] dealer prospect count failed:", err);
+      return [
+        { stage: "dealer_discovery", status: "FAILED", reason: reasonOf(err) },
+        { stage: "phone_script_drafting", status: "SKIPPED" },
+      ];
+    }
+    if (existingProspects > 0) {
+      return [
+        { stage: "dealer_discovery", status: "SUCCESS" },
+        ...(await draftPendingScripts(buyerOpportunityId)),
+      ];
+    }
+    let dealers: Awaited<ReturnType<typeof discoverDealers>>;
+    try {
+      dealers = await discoverDealers({ make: fields.make, zip: fields.zip, radiusMiles: 25 });
     } catch (err) {
       logger.error("[intake-pipeline] dealer discovery failed:", err);
+      return [
+        { stage: "dealer_discovery", status: "FAILED", reason: reasonOf(err) },
+        { stage: "phone_script_drafting", status: "SKIPPED" },
+      ];
     }
-  })();
+    // Ran fine, found nothing — a VALID zero-supply result (not a failure).
+    if (dealers.length === 0)
+      return [
+        { stage: "dealer_discovery", status: "ZERO_RESULTS" },
+        { stage: "phone_script_drafting", status: "SKIPPED" },
+      ];
+    try {
+      await prisma.dealerProspect.createMany({
+        data: dealers.map((d) => ({
+          buyerOppId: buyerOpportunityId,
+          name: d.name, address: d.address, city: d.city, state: d.state, zip: d.zip,
+          phone: d.phone, email: d.email, website: d.website, brand: d.brand,
+          sourceUrl: d.sourceUrl, searchScore: d.searchScore, status: "DISCOVERED",
+        })),
+        skipDuplicates: true,
+      });
+    } catch (err) {
+      // Persisting discovered prospects is part of the sourcing spine — a DB
+      // failure here means outreach has nothing to work with → REQUIRED FAILED.
+      logger.error("[intake-pipeline] dealer prospect persist failed:", err);
+      return [
+        { stage: "dealer_discovery", status: "FAILED", reason: reasonOf(err) },
+        { stage: "phone_script_drafting", status: "SKIPPED" },
+      ];
+    }
+    return [
+      { stage: "dealer_discovery", status: "SUCCESS" },
+      ...(await draftPendingScripts(buyerOpportunityId)),
+    ];
+  };
 
-  await Promise.allSettled([enrichmentPromise, dealerPromise]);
+  const [enrichmentOutcome, dealerOutcomes] = await Promise.all([
+    enrichmentTask(),
+    dealerTask(),
+  ]);
+  stages.push(enrichmentOutcome, ...dealerOutcomes);
 
-  // Stage 4 — lead scoring + hot-lead alerts. Guarded so a re-drive of an
-  // already-scored opportunity never re-scores or re-notifies.
-  if (fields.phone && !opp.leadTemperature) {
-    await scoreAndAlert(buyerOpportunityId, fields);
+  // Stage 4 — lead scoring + hot-lead alerts (OPTIONAL). Guarded so a re-drive of
+  // an already-scored opportunity never re-scores or re-notifies.
+  if (!fields.phone) {
+    stages.push({ stage: "lead_scoring_alerts", status: "SKIPPED" });
+  } else if (opp.leadTemperature) {
+    stages.push({ stage: "lead_scoring_alerts", status: "SKIPPED" });
+  } else {
+    const r = await scoreAndAlert(buyerOpportunityId, fields);
+    stages.push({ stage: "lead_scoring_alerts", status: r.status, reason: r.reason });
   }
 
   // Stage 4.5 — enrich discovered prospects with a VERIFIED business email so the
-  // outreach stage (email:{not:null}) can actually reach them. Best-effort; never
-  // blocks the pipeline.
+  // outreach stage (email:{not:null}) can actually reach them. OPTIONAL; a failure
+  // is recorded but never blocks completion.
   try {
     await enrichProspectEmailsForOpportunity(buyerOpportunityId);
+    stages.push({ stage: "prospect_email_enrichment", status: "SUCCESS" });
   } catch (err) {
     logger.error("[intake-pipeline] prospect email enrichment failed:", err);
+    stages.push({ stage: "prospect_email_enrichment", status: "FAILED", reason: reasonOf(err) });
   }
 
-  // Stage 5 — dealer outreach (self-idempotent: skips prospects already
-  // contacted), then the buyer "dealers contacted" confirmation.
-  const { dealersContacted } = await runPostIntakeOutreach(buyerOpportunityId);
+  // Stage 5 — dealer outreach (REQUIRED; self-idempotent: skips prospects already
+  // contacted). Its status distinguishes ZERO_RESULTS (nothing to contact) from
+  // FAILED (infra error, or eligible prospects existed but every send failed).
+  const outreach = await runPostIntakeOutreach(buyerOpportunityId);
+  const dealersContacted = outreach.dealersContacted;
+  stages.push({ stage: "dealer_outreach", status: outreach.status, reason: outreach.reason });
+
+  // Buyer "dealers contacted" confirmation email (OPTIONAL).
   if (dealersContacted > 0 && fields.email) {
-    await sendDealersContactedEmail({
-      buyerEmail: fields.email,
-      buyerFirstName: fields.firstName ?? "there",
-      vehicleMake: fields.make ?? fields.vehicleType ?? "",
-      vehicleModel: fields.model ?? "",
-      dealerCount: dealersContacted,
-      depositUrl: `${APP_URL}/buyer/deposit`,
-    }).catch((err) => logger.error("[intake-pipeline] dealers-contacted email failed:", err));
+    try {
+      await sendDealersContactedEmail({
+        buyerEmail: fields.email,
+        buyerFirstName: fields.firstName ?? "there",
+        vehicleMake: fields.make ?? fields.vehicleType ?? "",
+        vehicleModel: fields.model ?? "",
+        dealerCount: dealersContacted,
+        depositUrl: `${APP_URL}/buyer/deposit`,
+      });
+      stages.push({ stage: "dealers_contacted_email", status: "SUCCESS" });
+    } catch (err) {
+      logger.error("[intake-pipeline] dealers-contacted email failed:", err);
+      stages.push({ stage: "dealers_contacted_email", status: "FAILED", reason: reasonOf(err) });
+    }
+  } else {
+    stages.push({ stage: "dealers_contacted_email", status: "SKIPPED" });
   }
 
-  // Stage 6 (Y2) — request-time coverage gate. Discovery + enrichment above have
-  // populated contactable prospects, so assess TOTAL coverage now and record a
-  // soft-hold on the linked request when it's still thin (a reconciler keeps
-  // recruiting until it recovers). Record-only here (recruitOnThin:false):
-  // enrichment already ran unconditionally this pass, so the gate must not fire a
-  // redundant second pass. Best-effort — never blocks or fails the pipeline.
+  // Stage 6 (Y2) — request-time coverage gate (OPTIONAL). Record-only
+  // (recruitOnThin:false): enrichment already ran unconditionally this pass, so
+  // the gate must not fire a redundant second pass. Never blocks completion.
   try {
     const linkedRequest = await prisma.vehicleRequest.findFirst({
       where: { buyerOpportunityId },
@@ -365,10 +499,57 @@ export async function runIntakePipeline(buyerOpportunityId: string): Promise<Int
     });
     if (linkedRequest) {
       await applyRequestCoverageGate(linkedRequest.id, { recruitOnThin: false });
+      stages.push({ stage: "coverage_gate", status: "SUCCESS" });
+    } else {
+      stages.push({ stage: "coverage_gate", status: "SKIPPED" });
     }
   } catch (err) {
     logger.error("[intake-pipeline] coverage gate failed:", err);
+    stages.push({ stage: "coverage_gate", status: "FAILED", reason: reasonOf(err) });
   }
 
-  return { dealersContacted };
+  const requiredFailed = stages.some(
+    (s) => REQUIRED_STAGES.has(s.stage) && s.status === "FAILED",
+  );
+  const deferred =
+    !requiredFailed &&
+    stages.some((s) => REQUIRED_STAGES.has(s.stage) && s.status === "DEFERRED");
+  const zeroSupply =
+    stages.find((s) => s.stage === "dealer_discovery")?.status === "ZERO_RESULTS";
+
+  return { dealersContacted, stages, requiredFailed, deferred, zeroSupply };
+}
+
+// Phone-script drafting for prospects without one (OPTIONAL, idempotent via
+// scriptDraftedAt). Per-item failures are best-effort; the stage is FAILED only
+// when every attempted draft threw. Never throws.
+async function draftPendingScripts(buyerOpportunityId: string): Promise<StageOutcome[]> {
+  let pending: Array<{ id: string }>;
+  try {
+    pending = await prisma.dealerProspect.findMany({
+      where: { buyerOppId: buyerOpportunityId, status: "DISCOVERED", scriptDraftedAt: null },
+      select: { id: true },
+    });
+  } catch (err) {
+    logger.error("[intake-pipeline] pending-scripts query failed:", err);
+    return [{ stage: "phone_script_drafting", status: "FAILED", reason: reasonOf(err) }];
+  }
+  if (pending.length === 0) return [{ stage: "phone_script_drafting", status: "SKIPPED" }];
+  let drafted = 0;
+  let threw = 0;
+  let lastReason: string | undefined;
+  for (const p of pending) {
+    try {
+      await draftAndSaveScript(p.id);
+      drafted += 1;
+      await new Promise((resolve) => setTimeout(resolve, 12000));
+    } catch (err) {
+      threw += 1;
+      lastReason = reasonOf(err);
+      logger.error(`[intake-pipeline] script drafting threw for ${p.id}:`, err);
+    }
+  }
+  if (drafted === 0 && threw > 0)
+    return [{ stage: "phone_script_drafting", status: "FAILED", reason: lastReason }];
+  return [{ stage: "phone_script_drafting", status: "SUCCESS" }];
 }

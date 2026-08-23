@@ -56,13 +56,17 @@ function okSummary(over: Record<string, unknown> = {}) {
     eligible: 0,
     attempted: 0,
     succeeded: 0,
+    zeroSupply: 0,
+    requiredStageFailed: 0,
+    deadLettered: 0,
     failed: 0,
     duplicateBlocked: 0,
     alreadyProcessed: 0,
     notFound: 0,
     totalDealersContacted: 0,
+    stageFailureCounts: {},
     failures: [],
-    allAttemptedFailed: false,
+    businessDead: false,
     windowHours: 48,
     eligibilityFloor: "2026-08-21T00:00:00.000Z",
     timestamp: "2026-08-23T00:00:00.000Z",
@@ -110,30 +114,42 @@ test("delegates to processEligibleBuyerIntakes and returns the structured summar
   assert.equal(body.data.totalDealersContacted, 7);
 });
 
-test("partial failure stays green but surfaces the failures in the result", async () => {
+test("partial failure (some completed, some required-failed) stays green, surfaces failures", async () => {
   summary = okSummary({
     eligible: 2,
     attempted: 2,
     succeeded: 1,
-    failed: 1,
-    failures: [{ opportunityId: "opp_b", category: "PIPELINE_ERROR", error: "boom" }],
+    requiredStageFailed: 1,
+    stageFailureCounts: { dealer_discovery: 1 },
+    failures: [
+      { opportunityId: "opp_b", category: "REQUIRED_STAGE_FAILED", error: "boom", failedStages: ["dealer_discovery"] },
+    ],
   });
   const GET = await loadGET();
   const res = await GET(req(AUTH));
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.data.failed, 1);
+  assert.equal(body.data.requiredStageFailed, 1);
   assert.equal(body.data.failures[0].opportunityId, "opp_b");
 });
 
-test("business-dead run (attempted > 0, succeeded == 0) → FAILED cron / HTTP 500", async () => {
+test("all-ZERO_SUPPLY batch stays green (a supply gap is not a dead workload)", async () => {
+  summary = okSummary({ eligible: 2, attempted: 2, zeroSupply: 2, businessDead: false });
+  const GET = await loadGET();
+  const res = await GET(req(AUTH));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.data.zeroSupply, 2);
+});
+
+test("business-dead run (zero completions + required failures) → FAILED cron / HTTP 500", async () => {
   summary = okSummary({
     eligible: 2,
     attempted: 2,
-    succeeded: 0,
-    failed: 2,
-    allAttemptedFailed: true,
-    failures: [{ opportunityId: "a", category: "PIPELINE_ERROR", error: "down" }],
+    requiredStageFailed: 2,
+    businessDead: true,
+    stageFailureCounts: { dealer_discovery: 2 },
+    failures: [{ opportunityId: "a", category: "REQUIRED_STAGE_FAILED", error: "down" }],
   });
   const GET = await loadGET();
   const res = await GET(req(AUTH));
