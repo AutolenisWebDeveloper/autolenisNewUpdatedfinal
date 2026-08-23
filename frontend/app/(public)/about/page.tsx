@@ -165,34 +165,22 @@ export default function AboutPage() {
             </div>
             <div className="bg-white border border-[#E5E7EB] rounded-2xl p-8 shadow-sm">
               <p className="text-xs tracking-widest uppercase font-semibold text-[#9CA3AF] mb-6">
-                Buyer Advantage
+                The Buyer Advantage
               </p>
-              <div className="space-y-4">
+              <ul className="space-y-4">
                 {[
-                  { label: "Dealer competition", pct: 92 },
-                  { label: "Pricing transparency", pct: 96 },
-                  { label: "Buyer satisfaction", pct: 94 },
-                  { label: "Stress reduction", pct: 89 },
-                ].map((bar) => (
-                  <div key={bar.label}>
-                    <div className="flex justify-between mb-1.5">
-                      <span className="text-xs font-medium text-[#374151]">{bar.label}</span>
-                      <span className="text-xs font-semibold text-[#0B5FD1]">{bar.pct}%</span>
-                    </div>
-                    <div className="h-1.5 bg-[#E5E7EB] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#0B5FD1] rounded-full"
-                        style={{ width: `${bar.pct}%` }}
-                        role="progressbar"
-                        aria-valuenow={bar.pct}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-label={bar.label}
-                      />
-                    </div>
-                  </div>
+                  "Vetted dealers compete for your business in a private 48-hour auction",
+                  "Offers are ranked by total out-the-door cost — not just the sticker or monthly payment",
+                  "Buy entirely remotely — no dealership visit required",
+                  "Contract Shield reviews the paperwork for junk fees before you sign",
+                  "$99 Auction Access Deposit — fully refundable if you get no competitive offer",
+                ].map((point) => (
+                  <li key={point} className="flex items-start gap-3">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#0B5FD1]" />
+                    <span className="text-sm text-[#374151] leading-relaxed">{point}</span>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           </div>
         </div>

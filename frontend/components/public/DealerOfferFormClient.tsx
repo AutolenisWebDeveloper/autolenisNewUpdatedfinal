@@ -442,11 +442,12 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
               </svg>
             </div>
             <div>
-              <p className="text-sm font-semibold text-amber-800 mb-1">AutoLenis Broker Disclosure</p>
+              <p className="text-sm font-semibold text-amber-800 mb-1">AutoLenis Fee Disclosure</p>
               <p className="text-xs text-amber-700 leading-relaxed">
-                AutoLenis is a licensed car-buying concierge and broker. By submitting an offer through this platform,
-                your dealership agrees to pay AutoLenis a finder&rsquo;s fee upon successful completion of a sale to any buyer
-                introduced through AutoLenis. The finder&rsquo;s fee terms will be confirmed in writing before any deal is finalized.
+                AutoLenis is a car-buying concierge platform and is not a dealer, broker, lender, or party to the
+                vehicle transaction. By submitting an offer through this platform, your dealership agrees to pay
+                AutoLenis a referral fee upon successful completion of a sale to any buyer introduced through
+                AutoLenis. The referral-fee terms will be confirmed in writing before any deal is finalized.
                 Submitting this form constitutes acknowledgment of this arrangement.
               </p>
             </div>
@@ -753,7 +754,7 @@ export default function DealerOfferFormClient({ offer, isExpired }: { offer: Dea
                 className="h-4 w-4 mt-0.5 rounded border-slate-300 accent-[#0B5FD1]"
               />
               <span className="text-xs text-slate-600 leading-relaxed">
-                I acknowledge that AutoLenis is a car-buying concierge and broker, and I agree that my dealership will pay AutoLenis a <strong>finder&rsquo;s fee</strong> upon successful completion of any sale to a buyer introduced through this platform.
+                I acknowledge that AutoLenis is a car-buying concierge platform (not a dealer, broker, lender, or party to the sale), and I agree that my dealership will pay AutoLenis a <strong>referral fee</strong> upon successful completion of any sale to a buyer introduced through this platform.
               </span>
             </label>
             <label className="flex items-start gap-2 cursor-pointer select-none" data-testid="dealer-offer-accuracy-checkbox-label">

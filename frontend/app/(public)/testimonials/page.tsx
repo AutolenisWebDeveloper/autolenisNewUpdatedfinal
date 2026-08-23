@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Quote } from "lucide-react";
+import { ArrowRight, Quote, Star } from "lucide-react";
 import FaithVerseModule from "@/components/public/FaithVerseModule";
 import { buildPageMetadata, PAGE_METADATA } from "@/lib/seo/metadata";
+import { prisma } from "@/lib/prisma";
 import {
   DEPOSIT_AMOUNT_CENTS,
   MAX_DEALER_INVITATIONS,
@@ -13,108 +14,36 @@ export const metadata: Metadata = buildPageMetadata(PAGE_METADATA.testimonials);
 export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
-const BUYER_TESTIMONIALS = [
-  {
-    quote:
-      "I got 6 dealer offers in 48 hours. One came in $2,800 below the price I was quoted at the lot the week before. The whole process took less time than one dealership visit.",
-    name: "Marcus T.",
-    location: "Dallas TX",
-    plan: "Standard Plan",
-  },
-  {
-    quote:
-      "Contract Shield flagged a $1,200 dealer add-on I never would have caught. I had the dealer remove it before I signed. That alone was worth the entire process.",
-    name: "Priya S.",
-    location: "Houston TX",
-    plan: "Premium Concierge",
-  },
-  {
-    quote:
-      "We did the entire deal from home. E-signed the contract on a Tuesday night. QR code pickup took 12 minutes at the lot. No pressure, no back-and-forth.",
-    name: "James & Keisha R.",
-    location: "Atlanta GA",
-    plan: "Premium Concierge",
-  },
-  {
-    quote:
-      "As someone who dreads car dealerships, AutoLenis was exactly what I needed. I told them my budget, they did the rest. I never felt pressured once.",
-    name: "Angela M.",
-    location: "Phoenix AZ",
-    plan: "Standard Plan",
-  },
-  {
-    quote:
-      "The prequalification was fast and didn't hurt my credit. I knew my budget before I started looking, which made the whole search much less stressful.",
-    name: "DeShawn P.",
-    location: "Charlotte NC",
-    plan: "Standard Plan",
-  },
-  {
-    quote:
-      "Three dealers competed for my business. The best offer was significantly better than anything I'd gotten on my own. The deposit was worth it.",
-    name: "Melissa K.",
-    location: "Austin TX",
-    plan: "Premium Concierge",
-  },
-];
+// Phase 4 F2: this page previously shipped fabricated buyer/dealer/affiliate
+// testimonials. It now renders ONLY real testimonials that a buyer submitted and
+// an admin approved AND published (Testimonial.isApproved && isPublished). When
+// none exist yet it shows an honest empty state — never invented quotes. No
+// buyer PII is rendered (attributed generically as "Verified AutoLenis buyer").
+interface PublicTestimonial { id: string; rating: number; text: string }
 
-const DEALER_TESTIMONIALS = [
-  {
-    quote:
-      "The buyers I work with through AutoLenis are pre-qualified and ready to make a decision. My close rate on these deals is significantly higher than traditional leads.",
-    name: "David K.",
-    location: "Dallas TX",
-    role: "Franchise Dealer",
-  },
-  {
-    quote:
-      "I submitted 4 offers last month and closed 3 of them. The structured format means I'm not wasting time on unqualified shoppers.",
-    name: "Marcus T.",
-    location: "Houston TX",
-    role: "Independent Dealer",
-  },
-  {
-    quote:
-      "The platform respects dealer time. You see the buyer profile, you know the budget, you submit your best offer. Clean, professional process.",
-    name: "Jennifer R.",
-    location: "Austin TX",
-    role: "Pre-Owned Specialist",
-  },
-];
-
-const AFFILIATE_TESTIMONIALS = [
-  {
-    quote:
-      "My audience trusts me to recommend products that actually help them. AutoLenis is the first car-buying platform I've felt genuinely good about promoting.",
-    attribution: "Financial educator, 45K YouTube subscribers",
-  },
-  {
-    quote:
-      "The commission structure is transparent and the product sells itself — people already know car buying is broken. AutoLenis just fixes it.",
-    attribution: "Personal finance blogger, 28K newsletter subscribers",
-  },
-];
+async function getPublishedTestimonials(): Promise<PublicTestimonial[]> {
+  try {
+    return (await prisma.testimonial.findMany({
+      where: { isApproved: true, isPublished: true },
+      orderBy: { reviewedAt: "desc" },
+      take: 24,
+      select: { id: true, rating: true, text: true },
+    })) as PublicTestimonial[];
+  } catch {
+    return [];
+  }
+}
 
 const METRICS = [
-  {
-    value: `Up to ${MAX_DEALER_INVITATIONS}`,
-    label: "Dealers competing per auction",
-  },
-  {
-    value: `${AUCTION_DURATION_HOURS}h`,
-    label: "Average auction window",
-  },
-  {
-    value: `$${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(0)}`,
-    label: "Fully refundable deposit",
-  },
-  {
-    value: "3 min",
-    label: "Estimated prequalification time",
-  },
+  { value: `Up to ${MAX_DEALER_INVITATIONS}`, label: "Dealers competing per auction" },
+  { value: `${AUCTION_DURATION_HOURS}h`, label: "Average auction window" },
+  { value: `$${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(0)}`, label: "Fully refundable deposit" },
+  { value: "3 min", label: "Estimated prequalification time" },
 ];
 
-export default function TestimonialsPage() {
+export default async function TestimonialsPage() {
+  const testimonials = await getPublishedTestimonials();
+
   return (
     <div className="bg-[#F8F9FB]">
       {/* Hero */}
@@ -127,90 +56,59 @@ export default function TestimonialsPage() {
             Real Buyers. Real Outcomes.
           </h1>
           <p className="text-[#4B5563] text-lg max-w-2xl mx-auto leading-relaxed">
-            AutoLenis is built on a simple premise: buyers deserve a better process. Here's what
-            people say when that process works.
+            AutoLenis is built on a simple premise: buyers deserve a better process. We publish
+            verified buyer stories here as they come in.
           </p>
         </div>
       </section>
 
-      {/* Buyer Testimonials */}
+      {/* Buyer Testimonials — real, approved & published only */}
       <section className="py-20 bg-white">
         <div className="mx-auto max-w-7xl px-6 md:px-12">
           <h2 className="text-2xl font-bold tracking-tight text-[#111827] mb-10">
             Buyer Experiences
           </h2>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {BUYER_TESTIMONIALS.map((t) => (
-              <div
-                key={t.name}
-                className="bg-white border-l-4 border-[#0B5FD1] border border-[#E5E7EB] rounded-2xl shadow-sm p-8"
-              >
-                <Quote size={20} className="text-[#DBEAFE] mb-4" />
-                <p className="text-sm text-[#4B5563] italic leading-relaxed mb-6">{t.quote}</p>
-                <div>
-                  <p className="font-bold text-[#111827] text-sm">— {t.name}</p>
-                  <p className="text-xs text-[#94A3B8] mt-0.5">
-                    {t.location} · {t.plan}
-                  </p>
+          {testimonials.length > 0 ? (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="testimonials-grid">
+              {testimonials.map((t) => (
+                <div
+                  key={t.id}
+                  className="bg-white border border-[#E5E7EB] rounded-2xl shadow-sm p-8"
+                >
+                  <Quote size={20} className="text-[#DBEAFE] mb-4" />
+                  {t.rating > 0 && (
+                    <div className="flex gap-0.5 mb-4" aria-label={`Rated ${t.rating} out of 5`}>
+                      {Array.from({ length: Math.min(5, Math.max(0, t.rating)) }).map((_, i) => (
+                        <Star key={i} size={13} className="fill-amber-400 text-amber-400" />
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-sm text-[#4B5563] italic leading-relaxed mb-6">{t.text}</p>
+                  <p className="font-bold text-[#111827] text-sm">— Verified AutoLenis buyer</p>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div
+              className="bg-white border border-dashed border-[#CBD5E1] rounded-2xl p-10 text-center"
+              data-testid="testimonials-empty"
+            >
+              <Quote size={22} className="text-[#CBD5E1] mx-auto mb-3" />
+              <p className="text-sm text-[#4B5563] leading-relaxed max-w-md mx-auto">
+                We&rsquo;re a young platform and are gathering verified buyer stories now. Approved
+                reviews from real AutoLenis buyers will appear here — we don&rsquo;t publish anything
+                we can&rsquo;t stand behind.
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
-      {/* Dealer Testimonials */}
-      <section className="py-20 bg-[#F8F9FB]">
-        <div className="mx-auto max-w-7xl px-6 md:px-12">
-          <h2 className="text-2xl font-bold tracking-tight text-[#111827] mb-10">
-            Dealer Perspectives
-          </h2>
-          <div className="grid sm:grid-cols-3 gap-6">
-            {DEALER_TESTIMONIALS.map((t) => (
-              <div
-                key={t.name}
-                className="bg-[#F8F9FB] border-t-4 border-[#0B5FD1] border border-[#E5E7EB] rounded-2xl shadow-sm p-8"
-              >
-                <Quote size={20} className="text-[#DBEAFE] mb-4" />
-                <p className="text-sm text-[#4B5563] italic leading-relaxed mb-6">{t.quote}</p>
-                <div>
-                  <p className="font-bold text-[#111827] text-sm">— {t.name}</p>
-                  <p className="text-xs text-[#94A3B8] mt-0.5">
-                    {t.location} · {t.role}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Affiliate Testimonials */}
-      <section className="py-20 bg-white">
-        <div className="mx-auto max-w-7xl px-6 md:px-12">
-          <h2 className="text-2xl font-bold tracking-tight text-[#111827] mb-10">
-            Affiliate Partner Stories
-          </h2>
-          <div className="grid sm:grid-cols-2 gap-6 max-w-4xl">
-            {AFFILIATE_TESTIMONIALS.map((t) => (
-              <div
-                key={t.attribution}
-                className="bg-white border border-[#E5E7EB] rounded-2xl shadow-sm p-8"
-              >
-                <Quote size={20} className="text-[#DBEAFE] mb-4" />
-                <p className="text-sm text-[#4B5563] italic leading-relaxed mb-6">{t.quote}</p>
-                <p className="text-xs text-[#94A3B8]">— {t.attribution}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Aggregate Metrics */}
+      {/* Aggregate Metrics — derived from platform configuration, not claims */}
       <section className="py-20 bg-[#F8F9FB]">
         <div className="mx-auto max-w-7xl px-6 md:px-12">
           <h2 className="text-2xl font-bold tracking-tight text-[#111827] mb-12 text-center">
-            The Numbers Behind the Stories
+            How the Process Works
           </h2>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
             {METRICS.map((m) => (
@@ -235,8 +133,8 @@ export default function TestimonialsPage() {
             Had an AutoLenis Experience?
           </h2>
           <p className="text-[#4B5563] text-sm leading-relaxed mb-8">
-            We're actively collecting buyer, dealer, and affiliate stories. If you've used
-            AutoLenis, we'd love to hear about your experience.
+            We&rsquo;re actively collecting buyer stories. If you&rsquo;ve used AutoLenis, we&rsquo;d
+            love to hear about your experience.
           </p>
           <Link
             href="/contact"

@@ -103,7 +103,7 @@ export default async function DealerOfferConfirmedPage({ params }: Props) {
 
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mt-6 text-left">
           <p className="text-xs text-amber-700 leading-relaxed">
-            <strong>Reminder:</strong> By submitting this offer, your dealership has agreed to pay AutoLenis a finder&rsquo;s fee upon successful completion of a sale. Fee terms will be confirmed in writing before deal finalization.
+            <strong>Reminder:</strong> By submitting this offer, your dealership has agreed to pay AutoLenis a referral fee upon successful completion of a sale. Fee terms will be confirmed in writing before deal finalization.
           </p>
         </div>
       </div>

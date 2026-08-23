@@ -150,7 +150,7 @@ const TRUST_PILLARS = [
 ];
 
 const STATS = [
-  { value: "3,200+", label: "Families served" },
+  { value: "$0", label: "Fee for standard buyers" },
   { value: "48 hrs", label: "Auction duration" },
   { value: "Up to 8", label: "Competing dealers" },
   { value: "$99", label: "Fully refundable deposit" },
@@ -237,8 +237,8 @@ export default function ForBuyersPage() {
             </div>
             {/* Floating badge */}
             <div className="absolute -bottom-5 -left-6 bg-white rounded-xl shadow-xl shadow-[#0B5FD1]/10 px-5 py-4 border border-[#E5E7EB]">
-              <p className="text-xs text-[#94A3B8] mb-0.5">Families served</p>
-              <p className="text-2xl font-bold text-[#0B5FD1]">3,200+</p>
+              <p className="text-xs text-[#94A3B8] mb-0.5">Buy from home</p>
+              <p className="text-2xl font-bold text-[#0B5FD1]">100% remote</p>
             </div>
             <div className="absolute -top-4 -right-4 bg-[#0B5FD1] rounded-xl shadow-lg px-4 py-3 text-white">
               <p className="text-xs font-medium text-white/70 mb-0.5">Average auction</p>
