@@ -231,6 +231,10 @@
     {
       "path": "/api/cron/dealer-award-dispatch",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/campaign-dispatch",
+      "schedule": "*/2 * * * *"
     }
   ]
 }
