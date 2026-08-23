@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger";
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { inngest } from '@/lib/inngest/client';
+import { enqueueEmail, enqueueSms } from '@/lib/services/comms/comms-outbox.service';
 import type {
   Contact,
   TemplateVariable,
@@ -199,7 +199,8 @@ export class WorkflowEngine {
     return enrollment as WorkflowEnrollment;
   }
 
-  // Public re-entry — called by Inngest workflowResumeFn after a delay node.
+  // Public re-entry — called by the workflow-resume-drain cron when a delay
+  // node's persisted resume_at falls due.
   static async resumeEnrollment(
     supabase: SupabaseClient,
     enrollmentId: string,
@@ -216,8 +217,8 @@ export class WorkflowEngine {
     enrollmentId: string,
     startNodeId: string,
   ): Promise<void> {
-    // Cutover gate: blocks advancement AND in-flight Inngest delay-node resumes,
-    // so a pre-existing enrollment cannot dispatch once the engine is disabled.
+    // Cutover gate: blocks advancement AND in-flight delay-node resumes, so a
+    // pre-existing enrollment cannot dispatch once the engine is disabled.
     if (!isInAppEngineEnabled()) return;
     const enrollment = await this.loadEnrollment(supabase, enrollmentId);
     if (!enrollment) return;
@@ -274,7 +275,7 @@ export class WorkflowEngine {
         result.error,
       );
 
-      if (result.status === 'suspended') return; // delay node — resume via Inngest
+      if (result.status === 'suspended') return; // delay node — resumed by workflow-resume-drain cron
       if (result.status === 'failed') {
         await this.failEnrollment(supabase, enrollmentId, result.error ?? 'NODE_FAILED');
         return;
@@ -309,16 +310,13 @@ export class WorkflowEngine {
         if (!templateId) return { status: 'failed', error: 'TEMPLATE_ID_MISSING' };
         if (!contact.email) return { status: 'skipped', nextNodeId: next, output: { reason: 'NO_EMAIL' } };
 
-        await inngest.send({
-          name: 'autolenis/email.send',
-          data: {
-            contactId: contact.id,
-            email: contact.email,
-            templateId,
-            templateVariables: contactVars,
-            type: (cfg.email_type as 'transactional' | 'marketing') ?? 'transactional',
-            idempotencyKey: `workflow:${enrollment.id}:${node.id}:email`,
-          },
+        await enqueueEmail({
+          contactId: contact.id,
+          email: contact.email,
+          templateId,
+          templateVariables: contactVars,
+          type: (cfg.email_type as 'transactional' | 'marketing') ?? 'transactional',
+          idempotencyKey: `workflow:${enrollment.id}:${node.id}:email`,
         });
         return { status: 'success', nextNodeId: next, output: { template_id: templateId } };
       }
@@ -330,14 +328,11 @@ export class WorkflowEngine {
         if (!contact.consent_sms) return { status: 'skipped', nextNodeId: next, output: { reason: 'NO_CONSENT' } };
 
         const body = substituteVars(bodyTemplate, contactVars);
-        await inngest.send({
-          name: 'autolenis/sms.send',
-          data: {
-            contactId: contact.id,
-            phone: contact.phone,
-            body,
-            idempotencyKey: `workflow:${enrollment.id}:${node.id}:sms`,
-          },
+        await enqueueSms({
+          contactId: contact.id,
+          phone: contact.phone,
+          body,
+          idempotencyKey: `workflow:${enrollment.id}:${node.id}:sms`,
         });
         return { status: 'success', nextNodeId: next, output: { body_length: body.length } };
       }
@@ -429,16 +424,13 @@ export class WorkflowEngine {
             Workflow: ${workflow.name}
           </p>`;
 
-        await inngest.send({
-          name: 'autolenis/email.send',
-          data: {
-            email: adminEmail,
-            subject,
-            html,
-            text: message,
-            type: 'transactional',
-            idempotencyKey: `workflow:${enrollment.id}:${node.id}:notify`,
-          },
+        await enqueueEmail({
+          email: adminEmail,
+          subject,
+          html,
+          text: message,
+          type: 'transactional',
+          idempotencyKey: `workflow:${enrollment.id}:${node.id}:notify`,
         });
         return { status: 'success', nextNodeId: next };
       }
@@ -465,25 +457,30 @@ export class WorkflowEngine {
         };
       }
 
-      // -------- DELAY (suspends until Inngest resumes) --------
+      // -------- DELAY (suspends until the workflow-resume-drain cron resumes) --------
+      // Durable Postgres state (NOT Inngest, setTimeout, or a detached promise):
+      // persist WHEN to resume (resume_at) and WHICH node to resume from
+      // (resume_node_id) on the enrollment. The internal workflow-resume-drain
+      // cron selects due rows and re-enters resumeEnrollment.
       case 'delay': {
         const duration = (cfg.duration as string | undefined) ?? '';
         const seconds = parseDurationToSeconds(duration);
         if (!next) {
-          // Delay with no successor → effectively an end node. Don't enqueue.
+          // Delay with no successor → effectively an end node. Don't schedule.
           return { status: 'success' };
         }
-        await inngest.send({
-          name: 'autolenis/workflow.resume',
-          data: {
-            enrollment_id: enrollment.id,
-            node_id: next,
-          },
-          // Inngest accepts ISO datetime, duration string, or epoch ms; we
-          // use a future ISO timestamp for clarity in the dashboard.
-          ts: Date.now() + seconds * 1000,
-        });
-        return { status: 'suspended', output: { duration, resume_at: new Date(Date.now() + seconds * 1000).toISOString() } };
+        const resumeAt = new Date(Date.now() + seconds * 1000).toISOString();
+        const { error: persistErr } = await supabase
+          .from('workflow_enrollments')
+          .update({ resume_at: resumeAt, resume_node_id: next })
+          .eq('id', enrollment.id);
+        // A failed persist must FAIL the node — never report 'suspended' without
+        // durable resume state, or the enrollment strands forever (the drain
+        // would never select it). Mirrors the old inngest.send throw → failEnrollment.
+        if (persistErr) {
+          return { status: 'failed', error: `RESUME_PERSIST_FAILED: ${persistErr.message}` };
+        }
+        return { status: 'suspended', output: { duration, resume_at: resumeAt } };
       }
 
       // Trigger nodes should not be hit during execution — we start from the

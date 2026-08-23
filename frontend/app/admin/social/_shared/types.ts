@@ -19,26 +19,11 @@ export interface PlatformConnection {
   connected: boolean;
 }
 export interface ProviderConnections {
-  buffer: { connected: boolean; channelCount: number };
+  meta: { connected: boolean };
+  tiktok: { connected: boolean };
   linkedin: { connected: boolean; pageId: string };
   runway: { connected: boolean };
   automationMode: string;
-}
-export interface BufferTestResult {
-  enabled: boolean;
-  apiKeyPresent: boolean;
-  apiKeyValid: boolean;
-  organizations: { id: string; name: string }[];
-  channels: { id: string; name: string; service: string }[];
-  configured: {
-    platform: string;
-    profileId: string;
-    present: boolean;
-    matched: boolean;
-    channelName?: string;
-    autoResolved?: boolean;
-  }[];
-  error?: string;
 }
 export interface MarketIndexLast {
   title: string | null;

@@ -3,7 +3,6 @@ import { NextRequest, after } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { sendDealSelectedEmail } from "@/lib/services/email/resend.service";
-import { inngest } from "@/lib/inngest/client";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { recordMarketplaceFromAuction } from "@/lib/amips/pipelines/marketplace-intelligence.recorder";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
@@ -119,18 +118,13 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
   syncGhlTag(buyerWithEmail?.user?.email, "offer-selected");
 
-  // G1 (S3) — dispatch dealer award/non-award notifications through the durable
-  // dealer-award worker (autolenis/dealer.award), not a fire-and-forget after().
-  // The worker runs the planner, writes in-app Notification rows, and enqueues
-  // each award/non-award email onto the Inngest spine — idempotent and re-drivable
-  // if the request context ends. after() only enqueues the event (fast, off the
-  // committed-selection path).
-  after(() =>
-    inngest.send({
-      name: "autolenis/dealer.award",
-      data: { auctionId, winningOfferId: offer.id, dealId: deal.id },
-    }),
-  );
+  // G1 — dealer award/non-award notifications are dispatched by the internal
+  // dealer-award-dispatch cron off the durable Deal marker (dealerAwardDispatchedAt
+  // starts NULL on this newly-created deal). No event/emit is needed here: the deal
+  // row IS the durable signal, so dispatch survives this request context ending —
+  // the exact durability the retired Inngest worker provided. The cron runs the
+  // planner, writes in-app Notification rows, and enqueues each email onto the
+  // comms outbox (idempotent), then stamps the marker so it dispatches once.
 
   // CRM event spine — emit offer_selected for the buyer after the deal has
   // formed. Additive tail call: a failure never affects the selection, which

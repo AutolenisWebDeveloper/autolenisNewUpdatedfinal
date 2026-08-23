@@ -8,12 +8,13 @@
 //
 // Day 0 is the transactional delivery email (resend.service.ts). This module
 // owns the follow-up touches. Like lib/services/email/nurture-sequence.ts, every
-// step is queued through `inngest.send('autolenis/email.send')` so the Inngest
-// worker enforces suppression, idempotency, and timeline logging. A scheduler
+// step is enqueued via `enqueueEmail` onto the internal comms outbox (Batch 6b —
+// the retired `inngest.send('autolenis/email.send')` path) so the dispatcher
+// enforces suppression, idempotency, and timeline logging. A scheduler
 // (api/cron/lead-magnet-sequence) calls the due step for each lead by age.
 
 import { logger } from "@/lib/logger";
-import { inngest } from "@/lib/inngest/client";
+import { enqueueEmail } from "@/lib/services/comms/comms-outbox.service";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { SuppressionService } from "@/lib/services/suppression.service";
 import type { SequenceTrack } from "@/lib/leads/lead-magnets";
@@ -63,18 +64,15 @@ async function queueOrSkip(
     return { status: "suppressed" };
   }
 
-  await inngest.send({
-    name: "autolenis/email.send",
-    data: {
-      contactId: params.contactId,
-      email: params.to,
-      subject,
-      // Literal subject/body path — Phase 3 admin templates can later supply a
-      // templateId; until then the Inngest worker renders from bodyVars.
-      templateVariables: bodyVars,
-      type: "marketing",
-      idempotencyKey: idemKey(track, step, params.contactId),
-    },
+  await enqueueEmail({
+    contactId: params.contactId,
+    email: params.to,
+    subject,
+    // Literal subject/body path — Phase 3 admin templates can later supply a
+    // templateId; until then the drain renders from bodyVars.
+    templateVariables: bodyVars,
+    type: "marketing",
+    idempotencyKey: idemKey(track, step, params.contactId),
   });
   return { status: "queued" };
 }

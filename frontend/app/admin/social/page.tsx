@@ -40,13 +40,16 @@ export default async function AdminSocialPage() {
     // franchises stays as an empty array
   }
 
-  // Platform "connected" = a Buffer profile id is present in the environment.
+  // Platform "connected" = the retained direct-API access token is present in
+  // the environment. Buffer has been retired, so channels now map to their own
+  // provider tokens (Meta for facebook/instagram, TikTok, LinkedIn).
   const platformConnections: PlatformConnection[] = [
-    { platform: "facebook", connected: Boolean(process.env.BUFFER_PROFILE_FACEBOOK) },
-    { platform: "instagram", connected: Boolean(process.env.BUFFER_PROFILE_INSTAGRAM) },
-    { platform: "tiktok", connected: Boolean(process.env.BUFFER_PROFILE_TIKTOK) },
-    { platform: "youtube", connected: Boolean(process.env.BUFFER_PROFILE_YOUTUBE) },
-    { platform: "linkedin", connected: Boolean(process.env.BUFFER_PROFILE_LINKEDIN) },
+    { platform: "facebook", connected: Boolean(process.env.META_ACCESS_TOKEN) },
+    { platform: "instagram", connected: Boolean(process.env.META_ACCESS_TOKEN) },
+    { platform: "tiktok", connected: Boolean(process.env.TIKTOK_ACCESS_TOKEN) },
+    // YouTube publishing retired with Buffer — no direct publish surface
+    { platform: "youtube", connected: false },
+    { platform: "linkedin", connected: Boolean(process.env.LINKEDIN_ACCESS_TOKEN) },
   ];
 
   return (
@@ -55,7 +58,6 @@ export default async function AdminSocialPage() {
       franchises={franchises}
       platformConnections={platformConnections}
       videoEnabled={process.env.ENABLE_HIGGSFIELD_VIDEO === "true"}
-      publishingEnabled={process.env.ENABLE_BUFFER_PUBLISHING === "true"}
     />
   );
 }

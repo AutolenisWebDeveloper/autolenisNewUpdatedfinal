@@ -203,6 +203,50 @@
     {
       "path": "/api/cron/social-lead-nurture",
       "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/cron/analytics-refresh",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/inactivity-scan",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/saved-search-match",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/content-generation-drain",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/workflow-resume-drain",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/comms-outbox-drain",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/dealer-award-dispatch",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/campaign-dispatch",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/lead-nurture-drain",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/refinance-outreach-drain",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/outreach-touch-drain",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

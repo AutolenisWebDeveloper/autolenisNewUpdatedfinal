@@ -1,17 +1,18 @@
 // lib/services/email/transactional-dispatch.ts
 //
-// S3 — single seam for putting a transactional lifecycle email onto the durable
-// Inngest spine (autolenis/email.send). Replaces the direct resend.service
-// sendIdempotent rail for migrated senders. The worker (emailSendFn) applies
+// Single seam for putting a transactional lifecycle email onto the durable
+// internal comms-dispatch queue (comms_outbox). Replaces the direct
+// resend.service sendIdempotent rail for migrated senders. The drain applies
 // hard-suppression (transactional bypasses marketing/soft suppression), sends
 // via Resend, and writes the EmailSendLog audit row under the SAME idempotencyKey
-// the direct rail used (key parity).
+// the direct rail used (key parity) — the idempotencyKey is also the outbox
+// dedup_key, so an enqueue-once guarantee prevents duplicate sends.
 //
 // Deliberately passes NO contactId: these are transactional lifecycle emails,
 // not CRM/marketing traffic, so they must not write a contact_timeline_events
 // 'email_sent' row — the send is recorded on exactly one plane (EmailSendLog).
 
-import { inngest } from "@/lib/inngest/client";
+import { enqueueEmail } from "@/lib/services/comms/comms-outbox.service";
 
 export interface TransactionalEmailInput {
   to: string;
@@ -25,16 +26,13 @@ export interface TransactionalEmailInput {
 }
 
 export async function enqueueTransactionalEmail(input: TransactionalEmailInput): Promise<void> {
-  await inngest.send({
-    name: "autolenis/email.send",
-    data: {
-      email: input.to,
-      subject: input.subject,
-      html: input.html,
-      text: input.text,
-      templateId: input.templateId,
-      type: "transactional",
-      idempotencyKey: input.idempotencyKey,
-    },
+  await enqueueEmail({
+    email: input.to,
+    subject: input.subject,
+    html: input.html,
+    text: input.text,
+    templateId: input.templateId,
+    type: "transactional",
+    idempotencyKey: input.idempotencyKey,
   });
 }

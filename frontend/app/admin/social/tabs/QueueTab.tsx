@@ -84,6 +84,4 @@ function QueueTab({
   );
 }
 
-// ─── Tab: Buffer Posts ───────────────────────────────────────────────────────
-
 export default QueueTab;

@@ -34,10 +34,16 @@ const WEEK = 7 * DAY;
 
 export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   // ── every 5 minutes ──
+  "workflow-resume-drain": { intervalMinutes: 1 }, // migrated off Inngest workflowResumeFn
+  "comms-outbox-drain": { intervalMinutes: 1 }, // internal comms-dispatch queue (email.send/sms.send retirement)
+  "dealer-award-dispatch": { intervalMinutes: 1 }, // migrated off Inngest dealerAwardFn
+  "lead-nurture-drain": { intervalMinutes: 1 }, // migrated off Inngest formAbandonmentFn + exitIntentFn
   "auction-close": { intervalMinutes: 5 },
   "intake-reconcile": { intervalMinutes: 5 },
   "deposit-activation-reconcile": { intervalMinutes: 5 },
   "content-publisher": { intervalMinutes: 5 },
+  "campaign-dispatch": { intervalMinutes: 2 }, // migrated off Inngest campaignFanoutFn + scheduledCampaignCronFn
+  "content-generation-drain": { intervalMinutes: 2 }, // migrated off Inngest content workers
   "health-check": { intervalMinutes: 5 },
   "workflow-automation": { intervalMinutes: 5 },
   "social-publish-queue": { intervalMinutes: 5 },
@@ -48,6 +54,8 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "dlq-drain": { intervalMinutes: 15 },
   "inventory-stale-sweep": { intervalMinutes: 30 },
   "sla-check": { intervalMinutes: 30 },
+  "refinance-outreach-drain": { intervalMinutes: 15 }, // QStash non-deal parity (dormant: no producer until owner cutover)
+  "outreach-touch-drain": { intervalMinutes: 15 }, // QStash non-deal parity: affiliate/referral touches (dormant until owner cutover)
   // ── hourly ──
   "pickup-confirmation-nudge": { intervalMinutes: HOUR },
   "affiliates": { intervalMinutes: HOUR },
@@ -56,11 +64,13 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "inventory-sync-priority": { intervalMinutes: HOUR },
   "trust-check": { intervalMinutes: HOUR },
   "vehicle-offer-expire": { intervalMinutes: HOUR },
+  "inactivity-scan": { intervalMinutes: HOUR }, // migrated off Inngest cron `0 * * * *`
   // ── multi-hour ──
   "social-status-sync": { intervalMinutes: 2 * HOUR },
   "prequal-message-delivery": { intervalMinutes: 4 * HOUR },
   "sessions": { intervalMinutes: 6 * HOUR },
   "inventory-sync-full": { intervalMinutes: 6 * HOUR },
+  "saved-search-match": { intervalMinutes: 6 * HOUR }, // migrated off Inngest cron `0 */6 * * *`
   "amips-generate": { intervalMinutes: 8 * HOUR }, // 06,14,22 → 8h max gap
   // ── daily ──
   "apollo-ledger-rollover": { intervalMinutes: DAY },
@@ -69,6 +79,7 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "prequal-sla-escalation": { intervalMinutes: DAY },
   "prequal-purge": { intervalMinutes: DAY },
   "analytics-snapshot": { intervalMinutes: DAY },
+  "analytics-refresh": { intervalMinutes: DAY }, // migrated off Inngest cron `0 2 * * *`
   "morning-briefing": { intervalMinutes: DAY },
   "amips-tier-f": { intervalMinutes: DAY },
   // In-app nurture dispatchers scheduled in B-F5 (gated by CRM_INAPP_ENGINE_ENABLED).

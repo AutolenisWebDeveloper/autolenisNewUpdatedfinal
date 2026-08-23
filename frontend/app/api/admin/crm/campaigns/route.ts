@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { CampaignService, type CampaignInput } from '@/lib/services/campaign.service';
 import { requirePermissionActor } from '@/lib/auth/permissions';
-import { inngest } from '@/lib/inngest/client';
 import type { CampaignStatus } from '@/lib/types/crm';
 
 export const dynamic = 'force-dynamic';
@@ -39,13 +38,15 @@ export async function POST(req: Request) {
   try {
     const campaign = await CampaignService.createCampaign(supabase, body, actor);
 
-    // Send-immediately path enqueues the fan-out worker. Scheduled campaigns
-    // are picked up by the scheduledCampaignCronFn at run-time.
+    // Send-immediately path: mark the campaign scheduled-now so the internal
+    // campaign-dispatch cron picks it up on its next tick (unified with scheduled
+    // campaigns — no Inngest event). createCampaign leaves an immediate campaign in
+    // 'draft'; this flips it to a due 'scheduled' row.
     if (body.send_immediately && !body.scheduled_at) {
-      await inngest.send({
-        name: 'autolenis/campaign.execute',
-        data: { campaign_id: campaign.id },
-      });
+      await supabase
+        .from('campaigns')
+        .update({ status: 'scheduled', scheduled_at: new Date().toISOString() })
+        .eq('id', campaign.id);
     }
 
     return NextResponse.json({ campaign }, { status: 201 });

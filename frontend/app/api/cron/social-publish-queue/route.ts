@@ -20,8 +20,8 @@ export async function GET(request: NextRequest) {
   const run = await withCronRun("social-publish-queue", async () => {
   const now = new Date();
 
-  // Media-required platforms: only publish when VIDEO_READY (Buffer rejects
-  // these without an attached image/video).
+  // Media-required platforms: only publish when VIDEO_READY (these platforms
+  // reject a post without an attached image/video).
   const MEDIA_REQUIRED = ["tiktok", "instagram", "youtube"];
   // Text-capable platforms: can publish with or without media.
   const TEXT_OK = ["facebook", "linkedin"];

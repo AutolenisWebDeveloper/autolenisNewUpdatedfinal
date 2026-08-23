@@ -17,7 +17,9 @@ const isTrue = (v: string | undefined) => v === "true";
 
 export const AUTOMATION_MODE: AutomationMode = readMode();
 export const ENABLE_VIDEO: boolean = isTrue(process.env.ENABLE_HIGGSFIELD_VIDEO);
-export const ENABLE_PUBLISHING: boolean = isTrue(process.env.ENABLE_BUFFER_PUBLISHING);
+// Buffer retired: the former `ENABLE_PUBLISHING` (ENABLE_BUFFER_PUBLISHING) gated
+// only the Buffer fallback and is gone. Retained direct publishers (Meta/TikTok/
+// LinkedIn) are gated solely by the presence of their own access token.
 export const ENABLE_AUTO_PUBLISH: boolean = isTrue(process.env.ENABLE_AUTO_PUBLISH);
 export const ENABLE_CREATOR_DISTRIBUTION: boolean = isTrue(
   process.env.ENABLE_CREATOR_DISTRIBUTION,

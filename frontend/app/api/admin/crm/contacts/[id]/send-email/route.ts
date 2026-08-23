@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
 import { SuppressionService } from '@/lib/services/suppression.service';
-import { inngest } from '@/lib/inngest/client';
+import { enqueueEmail } from '@/lib/services/comms/comms-outbox.service';
 import { requirePermissionActor } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
@@ -58,17 +58,14 @@ export async function POST(
     }
   }
 
-  await inngest.send({
-    name: 'autolenis/email.send',
-    data: {
-      contactId: contact.id,
-      email: contact.email,
-      subject: body.subject,
-      html: body.html_body,
-      text: body.text_body,
-      templateId: body.template_id,
-      type: 'transactional',
-    },
+  await enqueueEmail({
+    contactId: contact.id,
+    email: contact.email,
+    subject: body.subject,
+    html: body.html_body,
+    text: body.text_body,
+    templateId: body.template_id,
+    type: 'transactional',
   });
 
   await writeCrmAuditLog(supabase, actor, {

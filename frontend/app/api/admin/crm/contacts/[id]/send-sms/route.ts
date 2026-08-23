@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
 import { SuppressionService } from '@/lib/services/suppression.service';
-import { inngest } from '@/lib/inngest/client';
+import { enqueueSms } from '@/lib/services/comms/comms-outbox.service';
 import { requirePermissionActor } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
@@ -54,13 +54,10 @@ export async function POST(
     return NextResponse.json({ error: 'SMS_SUPPRESSED' }, { status: 403 });
   }
 
-  await inngest.send({
-    name: 'autolenis/sms.send',
-    data: {
-      contactId: contact.id,
-      phone: contact.phone,
-      body: payload.body.trim(),
-    },
+  await enqueueSms({
+    contactId: contact.id,
+    phone: contact.phone,
+    body: payload.body.trim(),
   });
 
   await writeCrmAuditLog(supabase, actor, {

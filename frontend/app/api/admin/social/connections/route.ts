@@ -8,7 +8,8 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { AUTOMATION_MODE } from "@/lib/social/config";
 
 export interface ConnectionsResponse {
-  buffer: { connected: boolean; channelCount: number };
+  meta: { connected: boolean };
+  tiktok: { connected: boolean };
   linkedin: { connected: boolean; pageId: string };
   runway: { connected: boolean };
   automationMode: string;
@@ -18,18 +19,12 @@ export async function GET(request: NextRequest) {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
-  const bufferChannels = [
-    process.env.BUFFER_PROFILE_FACEBOOK,
-    process.env.BUFFER_PROFILE_INSTAGRAM,
-    process.env.BUFFER_PROFILE_TIKTOK,
-    process.env.BUFFER_PROFILE_YOUTUBE,
-    process.env.BUFFER_PROFILE_LINKEDIN,
-  ].filter((v) => Boolean(v && v.trim()));
-
   const data: ConnectionsResponse = {
-    buffer: {
-      connected: Boolean(process.env.BUFFER_API_KEY && process.env.BUFFER_API_KEY.trim()),
-      channelCount: bufferChannels.length,
+    meta: {
+      connected: Boolean(process.env.META_ACCESS_TOKEN?.trim()),
+    },
+    tiktok: {
+      connected: Boolean(process.env.TIKTOK_ACCESS_TOKEN?.trim()),
     },
     linkedin: {
       connected: Boolean(process.env.LINKEDIN_ACCESS_TOKEN && process.env.LINKEDIN_ACCESS_TOKEN.trim()),

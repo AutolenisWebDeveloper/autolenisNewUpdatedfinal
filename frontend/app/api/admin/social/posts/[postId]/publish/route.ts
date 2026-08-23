@@ -128,7 +128,7 @@ export async function POST(
     disabled ? "PUBLISHING_DISABLED" : "PUBLISH_FAILED",
     disabled
       ? `Publishing is disabled or not configured for ${existing.platform}. ` +
-          `Set ENABLE_BUFFER_PUBLISHING=true and configure a provider (Buffer / Meta / TikTok / LinkedIn) in Settings.`
+          `Configure a direct API token (Meta / TikTok / LinkedIn) for ${existing.platform} in Settings. (Buffer has been retired; YouTube auto-publishing is no longer available.)`
       : `Failed to publish to ${existing.platform}: ${publishError}`,
     disabled ? 409 : 502,
   );
