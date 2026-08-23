@@ -52,10 +52,54 @@ consolidation run and belongs to the business-lifecycle program.
 deposit-activation funnel and read live deposit state (`hasPaidDeposit`). Recommend
 deferring with the deal-path set.
 
-**NON-DEAL-PATH — internal Vercel-Cron + Postgres + idempotency parity is safe
-(candidates, NOT built in this run):** `review-request`, `refinance-outreach`
-(already fully idempotent via a `BuyerActivityEvent` guard — the cleanest first
-candidate), `referral-nudge`, `affiliate-inactive`, `affiliate-reengagement-2`.
+**NON-DEAL-PATH — internal Vercel-Cron + Postgres + idempotency parity is safe:**
+`refinance-outreach` (already fully idempotent via a `BuyerActivityEvent` guard —
+the cleanest first candidate), `review-request`, `referral-nudge`,
+`affiliate-inactive`, `affiliate-reengagement-2`.
+
+**`refinance-outreach` — internal parity BUILT (DORMANT) this run (reference
+implementation):**
+- `prisma/migrations/manual_supabase_sql/refinance_outreach_schedule.sql`
+  (additive, OWNER-GATED): durable single-touch queue table with
+  `UNIQUE(dedup_key)` (enqueue-once per buyer) + a partial due index.
+- `lib/services/refinance/refinance-outreach-drain.service.ts`:
+  `enqueueRefinanceOutreach` (dormant producer — upsert `ON CONFLICT (dedup_key)
+  DO NOTHING`, run_at = deal-complete + ~60d) and `drainDueRefinanceOutreach`
+  (claim CAS + stale reclaim; re-checks the SAME guards the QStash route enforced
+  — completed-purchase count + the `REFINANCE_EMAIL_SENT`/`CLICKED`
+  `BuyerActivityEvent` send-guard; sends through the SAME `notifyContact`
+  TCPA/suppression-gated layer; bounded retry `MAX=4`; **columns-only terminal**,
+  nothing to `jobs_dead_letter`; a missing table pre-cutover returns `NO_TABLE`,
+  not an error).
+- `app/api/cron/refinance-outreach-drain/route.ts` (cron auth + `withCronRun`,
+  `*/15`) + `vercel.json` + the CRON_STALENESS registry.
+- Tests: `lib/services/refinance/__tests__/refinance-outreach-drain.test.ts` (11)
+  + `app/api/cron/__tests__/refinance-outreach-drain-route.test.ts` (3), under
+  `test:refinance` (now runs with `--experimental-test-module-mocks`) / `test:cron`.
+- **DORMANCY / single-authority proof:** `enqueueRefinanceOutreach` has **zero
+  production callers** — the touch is still enqueued to QStash from the
+  `review-request` job (`dispatch({ path:'/api/jobs/refinance-outreach',
+  delaySeconds:5184000 })`, unchanged), and the QStash route is untouched. The
+  cron therefore no-ops (`NO_DUE`/`NO_TABLE`). QStash stays the SOLE live authority
+  — the HARD INVARIANT (never two authorities able to send the same message) holds.
+- **Owner-gated ATOMIC cutover (NOT executed):** (1) apply
+  `refinance_outreach_schedule.sql` to Supabase; (2) in `review-request`'s route,
+  replace the single `dispatch({ path:'/api/jobs/refinance-outreach', … })` with
+  `enqueueRefinanceOutreach({ buyerId, firstName, email, leadId: buyerId, runAt:
+  now + 60d })`; (3) delete `app/api/jobs/refinance-outreach/route.ts`; (4) make
+  `OperationsService.autoDrainDeadLetterJobs` NOT re-publish a
+  `qstash:/api/jobs/refinance-outreach` dead-letter row (route it to
+  `enqueueRefinanceOutreach`, or drop it — the internal path is columns-only).
+  One authority before and after; the swap is a single producer line.
+
+**Remaining four non-deal candidates (`review-request`, `referral-nudge`,
+`affiliate-inactive`, `affiliate-reengagement-2`) — ready-to-replicate, NOT built.**
+Each follows the identical dormant pattern above, differing only in (a) its
+per-workload guard (`review-request` chains the refinance + referral touches;
+`referral-nudge`/`affiliate-*` need a persisted dedup key added — see the
+idempotency gap below) and (b) its delay. `review-request` is the natural next one
+because it is the producer that would call `enqueueRefinanceOutreach` at cutover;
+building it lets the whole deal-complete → review → refinance chain move together.
 
 **Parity requirements any internal replacement MUST reproduce:** (1) the signature-
 verify equivalent (worker auth), (2) the `lib/qstash/state.ts` stop-guards (+
@@ -73,10 +117,12 @@ Any QStash workload migrated to an internal path must ensure its dead-letter row
 re-driven internally (columns-only terminal, as the Inngest content/intake batches did),
 **not** through the QStash or Inngest re-emit branches.
 
-**VERDICT — QStash:** **RETIREMENT-READY for the NON-DEAL-PATH set only, parity NOT yet
-built (deferred).** The deal-path/borderline majority is **DEFERRED to the
-business-lifecycle program**. No cutover; QStash stays fully wired. **OWNER-CHECK:**
-confirm prod `QSTASH_*` secrets and current job volume before any cutover.
+**VERDICT — QStash:** **NON-DEAL-PATH parity STARTED — `refinance-outreach` internal
+replacement BUILT & DORMANT (reference implementation); the remaining four non-deal
+candidates are ready-to-replicate from it.** The deal-path/borderline majority is
+**DEFERRED to the business-lifecycle program**. No cutover executed; QStash stays
+fully wired and the sole live authority for every job. **OWNER-CHECK:** confirm prod
+`QSTASH_*` secrets and current job volume before any cutover.
 
 ---
 
@@ -182,7 +228,7 @@ traffic flows through Buffer vs direct APIs today.
 
 | Vendor | No-ops when unset | Anything depends on its response | Internal equivalent | Verdict |
 | --- | --- | --- | --- | --- |
-| **QStash** | n/a (LIVE) | Consumers send notifications; no money mutation | Vercel-Cron+Postgres substrate (proven) | **Non-deal set retirement-ready (parity not built); deal-path DEFERRED** |
+| **QStash** | n/a (LIVE) | Consumers send notifications; no money mutation | Vercel-Cron+Postgres substrate (proven) | **`refinance-outreach` parity BUILT+DORMANT (reference); 4 non-deal candidates ready-to-replicate; deal-path DEFERRED** |
 | **Make.com** | Yes | No | `WorkflowEngine` + `/api/crm/dispatch/*` (flag-gated) | **Ready-to-retire · OWNER-CHECK prod flags** |
 | **GHL** | Yes | No (`void`, `.catch`) | contacts/lifecycle/timeline/tags via `emitDomainEvent` | **Ready-to-retire · OWNER-CHECK GHL automations** |
 | **Buffer** | Yes (Noop provider) | Publish outcome consumed; self-heals to FAILED/retry | Partial — direct FB/IG/TikTok/LinkedIn; **no direct YouTube** | **Parity-not-justified (keep/document) · OWNER-CHECK prod tokens** |

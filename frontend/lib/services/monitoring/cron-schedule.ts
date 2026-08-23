@@ -54,6 +54,7 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "dlq-drain": { intervalMinutes: 15 },
   "inventory-stale-sweep": { intervalMinutes: 30 },
   "sla-check": { intervalMinutes: 30 },
+  "refinance-outreach-drain": { intervalMinutes: 15 }, // QStash non-deal parity (dormant: no producer until owner cutover)
   // ── hourly ──
   "pickup-confirmation-nudge": { intervalMinutes: HOUR },
   "affiliates": { intervalMinutes: HOUR },

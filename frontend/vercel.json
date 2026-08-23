@@ -239,6 +239,10 @@
     {
       "path": "/api/cron/lead-nurture-drain",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/refinance-outreach-drain",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

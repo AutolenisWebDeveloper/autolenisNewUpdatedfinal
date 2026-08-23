@@ -57,7 +57,7 @@
     "amips:sync-markets": "tsx scripts/amips-sync-markets.ts",
     "amips:compute-scores": "tsx scripts/amips-compute-scores.ts",
     "setup:storage": "tsx scripts/setup-storage-buckets.ts",
-    "test:refinance": "tsx --test lib/services/refinance/__tests__/*.test.ts",
+    "test:refinance": "tsx --test --experimental-test-module-mocks lib/services/refinance/__tests__/*.test.ts",
     "test:domain": "tsx --test lib/domain/__tests__/*.test.ts",
     "test:jobs": "tsx --test --experimental-test-module-mocks lib/jobs/__tests__/*.test.ts",
     "test:crm-services": "tsx --test --experimental-test-module-mocks lib/services/crm/__tests__/*.test.ts",
