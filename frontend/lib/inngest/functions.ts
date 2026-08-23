@@ -1,383 +1,12 @@
-import { logger } from "@/lib/logger";
 import { type SupabaseClient } from '@supabase/supabase-js';
-import { Resend } from 'resend';
-import twilio from 'twilio';
 import { inngest } from './client';
-// #8 — use the SHARED idempotency/DLQ toolkit (fixed isFinalAttempt) instead of
-// this file's former inline copies, whose isFinalAttempt probed the wrong ctx
-// fields and returned false on every attempt — so the non-transactional DLQ path
-// (email/SMS/workflow-resume) never fired.
-import {
-  getSupabase,
-  acquireIdempotencyGuard,
-  updateIdempotencyState,
-  moveJobToDeadLetter,
-  releaseIdempotencyGuard,
-  isFinalAttempt,
-} from './idempotency';
+import { getSupabase } from './idempotency';
 import { SuppressionService } from '../services/suppression.service';
 import { TemplateService } from '../services/template.service';
-import { recordTransactionalEmailSend, transactionalEmailAlreadySent } from '../services/email/email-send-log';
-import { normalizePhone } from '../utils/phone';
+// Per-recipient sends now ride the internal comms-dispatch queue (comms_outbox),
+// not the retired autolenis/email.send + autolenis/sms.send Inngest workers.
+import { enqueueEmail, enqueueSms } from '../services/comms/comms-outbox.service';
 import type { TemplateVariable } from '../types/crm';
-
-// Lazy-init these clients so module load (e.g. Next.js page-data collection at
-// build time) doesn't crash when env vars are absent. They're only invoked
-// inside Inngest steps at runtime.
-let _resend: Resend | null = null;
-function getResend(): Resend {
-  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
-  return _resend;
-}
-
-let _twilioClient: ReturnType<typeof twilio> | null = null;
-function getTwilio(): ReturnType<typeof twilio> {
-  if (!_twilioClient) {
-    _twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-  }
-  return _twilioClient;
-}
-
-// Minimal structural context shared by the extracted worker handlers, so each is
-// unit-testable in isolation (the createFunction wrapper forwards the Inngest
-// ctx). isFinalAttempt reads `attempt`/`maxAttempts` off this same object.
-interface WorkerCtx {
-  event: { data: unknown };
-  step: { run<T>(name: string, fn: () => Promise<T>): Promise<T> };
-  attempt?: number;
-  maxAttempts?: number;
-  runId?: string;
-}
-
-// ---------------------------------------------------------------------------
-// EMAIL SEND WORKER — transactional + direct-payload marketing
-// Phase 1 deliberately does NOT couple to campaigns/templates (Phase 3).
-// ---------------------------------------------------------------------------
-export async function runEmailSend(ctx: WorkerCtx) {
-    const { event, step } = ctx;
-    const data = event.data as {
-      contactId?: string;
-      email: string;
-      // Direct payload path — used by ad-hoc admin sends and Phase 1
-      // transactional triggers. Phase 3 templated path is below.
-      subject?: string;
-      html?: string;
-      text?: string;
-      // Templated path — render via TemplateService at dispatch time.
-      templateId?: string;
-      templateVariables?: Partial<Record<TemplateVariable | string, string | number | null>>;
-      // Campaign integration — when set, the recipient row gets stamped with
-      // the resend id so the bounce/complaint webhook can attribute deliveries.
-      campaignId?: string;
-      campaignRecipientId?: string;
-      type?: 'transactional' | 'marketing';
-      idempotencyKey?: string;
-    };
-    const supabase = getSupabase();
-
-    // Transactional lifecycle emails (deal-selected, offers-ready, dealer
-    // award/loss…) are migrated from the direct resend rail and MUST keep that
-    // rail's semantics: they carry a stable idempotencyKey, no contactId (they
-    // record on EmailSendLog only, never contact_timeline_events), and dedup on
-    // EmailSendLog's SENT-precheck — which is retriable after a transient
-    // failure. The idempotency_keys guard below is insert-once and never
-    // released in this worker, so routing transactional sends through it would
-    // permanently poison the key after a single first-attempt failure.
-    const isTransactional =
-      data.type === 'transactional' && !!data.idempotencyKey && !data.contactId;
-
-    const uniqueKey =
-      data.idempotencyKey ||
-      `${data.contactId ?? data.email}:email_send:${new Date().toISOString().slice(0, 10)}`;
-
-    if (isTransactional) {
-      const alreadySent = await step.run('check-email-send-log', async () =>
-        transactionalEmailAlreadySent(data.idempotencyKey!)
-      );
-      if (alreadySent) return { status: 'DUPLICATE_BLOCKED' };
-    } else {
-      const proceed = await step.run('evaluate-idempotency', async () =>
-        acquireIdempotencyGuard(supabase, uniqueKey)
-      );
-      if (!proceed) return { status: 'DUPLICATE_BLOCKED' };
-    }
-
-    try {
-      const contact = data.contactId
-        ? await step.run('load-contact', async () => {
-            const { data: row } = await supabase
-              .from('contacts')
-              .select('*')
-              .eq('id', data.contactId)
-              .maybeSingle();
-            return row;
-          })
-        : null;
-
-      if (data.contactId && (!contact || contact.do_not_contact)) {
-        await updateIdempotencyState(supabase, uniqueKey, 'completed', {
-          reason: 'CONTACT_MISSING_OR_DNC',
-        });
-        return { status: 'GATED' };
-      }
-
-      // Transactional lifecycle emails bypass the marketing/soft suppression
-      // tier (a buyer who unsubscribed from MARKETING must still receive their
-      // own deal emails) but still honor HARD suppression (bounce / complaint /
-      // spam-trap). Marketing sends keep the full lumped check.
-      const suppressed = await step.run('check-suppression', async () =>
-        data.type === 'transactional'
-          ? SuppressionService.isEmailHardSuppressed(supabase, data.email)
-          : SuppressionService.isEmailSuppressed(supabase, data.email)
-      );
-      if (suppressed) {
-        if (!isTransactional) {
-          await updateIdempotencyState(supabase, uniqueKey, 'completed', { reason: 'SUPPRESSED' });
-        }
-        return { status: 'SUPPRESSED' };
-      }
-
-      if (data.type === 'marketing' && contact && !contact.consent_email) {
-        await updateIdempotencyState(supabase, uniqueKey, 'completed', {
-          reason: 'NO_MARKETING_EMAIL_CONSENT',
-        });
-        return { status: 'CONSENT_GATED' };
-      }
-
-      // Resolve the actual subject/html/text. Two paths:
-      //  - templateId present → render via TemplateService (Phase 3 path)
-      //  - else fall back to the direct subject/html payload (Phase 1 path)
-      const rendered = await step.run('resolve-content', async () => {
-        if (data.templateId) {
-          const baseVars: Record<string, string> = {
-            firstName: contact?.first_name ?? '',
-            lastName: contact?.last_name ?? '',
-            fullName: [contact?.first_name, contact?.last_name].filter(Boolean).join(' '),
-            supportEmail: process.env.SUPPORT_EMAIL ?? '',
-            dashboardUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/buyer/dashboard`,
-            unsubscribeUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/unsubscribe`,
-          };
-          const vars = { ...baseVars, ...(data.templateVariables ?? {}) };
-          return TemplateService.renderTemplate(supabase, data.templateId, vars);
-        }
-        if (!data.subject || !data.html) {
-          throw new Error('EMAIL_PAYLOAD_INCOMPLETE');
-        }
-        return {
-          subject: data.subject,
-          html: data.html,
-          text: data.text ?? '',
-        };
-      });
-
-      const sendResult = await step.run('dispatch-resend', async () => {
-        const out = await getResend().emails.send({
-          from: process.env.RESEND_FROM_EMAIL!,
-          to: data.email,
-          subject: rendered.subject,
-          text: rendered.text,
-          html: rendered.html,
-          headers: {
-            'List-Unsubscribe': `<${process.env.NEXT_PUBLIC_APP_URL}/unsubscribe>`,
-          },
-        });
-        if (out.error) throw new Error(`RESEND_API_EXCEPTION: ${out.error.message}`);
-        return out.data;
-      });
-
-      if (data.campaignRecipientId) {
-        await step.run('update-campaign-recipient', async () => {
-          await supabase
-            .from('campaign_recipients')
-            .update({
-              status: 'sent',
-              sent_at: new Date().toISOString(),
-              resend_id: sendResult?.id ?? null,
-            })
-            .eq('id', data.campaignRecipientId);
-        });
-      }
-
-      if (data.contactId) {
-        await step.run('log-timeline', async () => {
-          await supabase.from('contact_timeline_events').insert({
-            contact_id: data.contactId,
-            event_type: 'email_sent',
-            event_data: {
-              resend_id: sendResult?.id,
-              subject: rendered.subject,
-              template_id: data.templateId ?? null,
-              campaign_id: data.campaignId ?? null,
-            },
-          });
-        });
-      }
-
-      // S3 — EmailSendLog parity for migrated transactional lifecycle emails.
-      // isTransactional guarantees type:'transactional', a stable idempotencyKey,
-      // and NO contactId — so the audit row matches exactly what the direct
-      // resend rail wrote pre-migration (same key, no duplicate), and because
-      // contactId is absent the contact_timeline_events write above is skipped:
-      // the send is recorded on exactly ONE plane (EmailSendLog), never
-      // double-counted. status defaults to SENT.
-      if (isTransactional) {
-        await step.run('record-email-send-log', async () =>
-          recordTransactionalEmailSend({
-            idempotencyKey: data.idempotencyKey!,
-            recipient: data.email,
-            templateId: data.templateId ?? 'transactional',
-            resendId: sendResult?.id ?? null,
-          })
-        );
-      }
-
-      if (!isTransactional) {
-        await updateIdempotencyState(supabase, uniqueKey, 'completed', {
-          resendId: sendResult?.id,
-        });
-      }
-      return { status: 'SUCCESS', resendId: sendResult?.id };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (isTransactional) {
-        // Parity with the direct rail (sendIdempotent): record the failed
-        // attempt on EmailSendLog as FAILED — NOT SENT — so the audit trail
-        // shows the outage while the SENT-precheck keeps the key retriable on
-        // the next Inngest attempt. Best-effort: a logging failure must never
-        // mask the real send error that Inngest needs to drive the retry.
-        try {
-          await recordTransactionalEmailSend({
-            idempotencyKey: data.idempotencyKey!,
-            recipient: data.email,
-            templateId: data.templateId ?? 'transactional',
-            status: 'FAILED',
-            resendId: null,
-          });
-        } catch (logErr) {
-          logger.error('[email-send-worker] EmailSendLog FAILED write failed', logErr);
-        }
-      } else {
-        await updateIdempotencyState(supabase, uniqueKey, 'failed', { error: message });
-        if (isFinalAttempt(ctx as unknown as Record<string, unknown>)) {
-          await moveJobToDeadLetter(
-            supabase,
-            (ctx as unknown as { runId?: string }).runId ?? 'unknown',
-            'autolenis/email.send',
-            data,
-            message
-          );
-          // Release the guard on terminal failure so a re-emitted event can
-          // re-drive the dead-lettered job (else it 23505s → DUPLICATE_BLOCKED).
-          await releaseIdempotencyGuard(supabase, uniqueKey);
-        }
-      }
-      throw err;
-    }
-}
-
-export const emailSendFn = inngest.createFunction(
-  { id: 'email-send-worker', name: 'Email Dispatcher', retries: 3 },
-  { event: 'autolenis/email.send' },
-  (ctx) => runEmailSend(ctx as unknown as WorkerCtx),
-);
-
-// ---------------------------------------------------------------------------
-// SMS SEND WORKER — TCPA hard-gated (consent_sms + !do_not_contact)
-// ---------------------------------------------------------------------------
-export async function runSmsSend(ctx: WorkerCtx) {
-    const { event, step } = ctx;
-    const data = event.data as {
-      contactId?: string;
-      phone: string;
-      body: string;
-      idempotencyKey?: string;
-    };
-    const supabase = getSupabase();
-    const standardized = normalizePhone(data.phone);
-
-    if (!standardized) return { status: 'INVALID_PHONE' };
-
-    const uniqueKey =
-      data.idempotencyKey ||
-      `${data.contactId ?? standardized}:sms_send:${new Date().toISOString().slice(0, 10)}`;
-
-    const proceed = await step.run('evaluate-idempotency', async () =>
-      acquireIdempotencyGuard(supabase, uniqueKey)
-    );
-    if (!proceed) return { status: 'DUPLICATE_BLOCKED' };
-
-    try {
-      const contact = data.contactId
-        ? await step.run('load-contact', async () => {
-            const { data: row } = await supabase
-              .from('contacts')
-              .select('*')
-              .eq('id', data.contactId)
-              .maybeSingle();
-            return row;
-          })
-        : null;
-
-      // TCPA hard gate — every SMS path requires explicit consent.
-      if (!contact || !contact.consent_sms || contact.do_not_contact) {
-        await updateIdempotencyState(supabase, uniqueKey, 'completed', {
-          reason: 'TCPA_CONSENT_REJECTED',
-        });
-        return { status: 'TCPA_GATED' };
-      }
-
-      const suppressed = await step.run('check-suppression', async () =>
-        SuppressionService.isSmsSuppressed(supabase, standardized)
-      );
-      if (suppressed) {
-        await updateIdempotencyState(supabase, uniqueKey, 'completed', { reason: 'SUPPRESSED' });
-        return { status: 'SUPPRESSED' };
-      }
-
-      const result = await step.run('dispatch-twilio', async () =>
-        getTwilio().messages.create({
-          from: process.env.TWILIO_FROM_NUMBER!,
-          to: standardized,
-          body: `${data.body}\n\nReply STOP to opt out.`,
-        })
-      );
-
-      if (data.contactId) {
-        await step.run('log-timeline', async () => {
-          await supabase.from('contact_timeline_events').insert({
-            contact_id: data.contactId,
-            event_type: 'sms_sent',
-            event_data: { twilio_sid: result.sid },
-          });
-        });
-      }
-
-      await updateIdempotencyState(supabase, uniqueKey, 'completed', { sid: result.sid });
-      return { status: 'SUCCESS', sid: result.sid };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await updateIdempotencyState(supabase, uniqueKey, 'failed', { error: message });
-      if (isFinalAttempt(ctx as unknown as Record<string, unknown>)) {
-        await moveJobToDeadLetter(
-          supabase,
-          (ctx as unknown as { runId?: string }).runId ?? 'unknown',
-          'autolenis/sms.send',
-          data,
-          message
-        );
-        // Release the guard on terminal failure so a re-emitted event can
-        // re-drive the dead-lettered job (else it 23505s → DUPLICATE_BLOCKED).
-        await releaseIdempotencyGuard(supabase, uniqueKey);
-      }
-      throw err;
-    }
-}
-
-export const smsSendFn = inngest.createFunction(
-  { id: 'sms-send-worker', name: 'SMS Dispatcher', retries: 3 },
-  { event: 'autolenis/sms.send' },
-  (ctx) => runSmsSend(ctx as unknown as WorkerCtx),
-);
 
 // ---------------------------------------------------------------------------
 // CAMPAIGN FAN-OUT WORKER
@@ -518,56 +147,45 @@ export const campaignFanoutFn = inngest.createFunction(
       return map;
     });
 
-    // Fan-out actual send events. Inngest.sendBatch accepts arrays — batching
-    // 100 at a time keeps each network call small without flooding the queue.
+    // Fan-out per-recipient sends onto the internal comms-dispatch queue. Each
+    // enqueue is dedup'd on its stable idempotencyKey (campaign:{id}:{contact}:
+    // {channel}) → a retried fan-out never double-enqueues, and the outbox drain
+    // applies the same consent/DNC/suppression/TCPA gates the workers did.
     let sent_email = 0;
     let sent_sms = 0;
     await step.run('dispatch-send-events', async () => {
-      const emailEvents: { name: string; data: Record<string, unknown> }[] = [];
-      const smsEvents: { name: string; data: Record<string, unknown> }[] = [];
-
       for (const c of eligible) {
         const recipient_id = recipientByContactId[c.id];
         if (c.email_ok) {
           sent_email += 1;
-          emailEvents.push({
-            name: 'autolenis/email.send',
-            data: {
-              contactId: c.id,
-              email: c.email,
-              templateId: campaign.template_id,
-              templateVariables: {
-                firstName: c.first_name ?? '',
-                lastName: c.last_name ?? '',
-                fullName: [c.first_name, c.last_name].filter(Boolean).join(' '),
-              },
-              type: 'marketing',
-              campaignId: campaign_id,
-              campaignRecipientId: recipient_id,
-              idempotencyKey: `campaign:${campaign_id}:${c.id}:email`,
+          await enqueueEmail({
+            contactId: c.id,
+            // email_ok guarantees a non-null email (see the eligibility filter).
+            email: c.email!,
+            templateId: campaign.template_id,
+            templateVariables: {
+              firstName: c.first_name ?? '',
+              lastName: c.last_name ?? '',
+              fullName: [c.first_name, c.last_name].filter(Boolean).join(' '),
             },
+            type: 'marketing',
+            campaignId: campaign_id,
+            campaignRecipientId: recipient_id,
+            idempotencyKey: `campaign:${campaign_id}:${c.id}:email`,
           });
         }
         if (c.sms_ok) {
           sent_sms += 1;
-          smsEvents.push({
-            name: 'autolenis/sms.send',
-            data: {
-              contactId: c.id,
-              phone: c.phone,
-              body: campaign.sms_body,
-              campaignId: campaign_id,
-              campaignRecipientId: recipient_id,
-              idempotencyKey: `campaign:${campaign_id}:${c.id}:sms`,
-            },
+          await enqueueSms({
+            contactId: c.id,
+            // sms_ok guarantees a non-null phone (see the eligibility filter).
+            phone: c.phone!,
+            body: campaign.sms_body,
+            campaignId: campaign_id,
+            campaignRecipientId: recipient_id,
+            idempotencyKey: `campaign:${campaign_id}:${c.id}:sms`,
           });
         }
-      }
-
-      const all = [...emailEvents, ...smsEvents];
-      for (let i = 0; i < all.length; i += 100) {
-        const batch = all.slice(i, i + 100);
-        await inngest.send(batch);
       }
     });
 
@@ -727,17 +345,14 @@ export const formAbandonmentFn = inngest.createFunction(
         unsubscribeUrl,
       });
       if (!rendered) return;
-      await inngest.send({
-        name: 'autolenis/email.send',
-        data: {
-          contactId:      contact_id,
-          email:          contact_email,
-          type:           'marketing',
-          subject:        rendered.subject,
-          html:           rendered.html,
-          text:           rendered.text,
-          idempotencyKey: `${idempotency_key}-touch1`,
-        },
+      await enqueueEmail({
+        contactId:      contact_id,
+        email:          contact_email,
+        type:           'marketing',
+        subject:        rendered.subject,
+        html:           rendered.html,
+        text:           rendered.text,
+        idempotencyKey: `${idempotency_key}-touch1`,
       });
     });
 
@@ -763,17 +378,14 @@ export const formAbandonmentFn = inngest.createFunction(
         unsubscribeUrl,
       });
       if (!rendered) return;
-      await inngest.send({
-        name: 'autolenis/email.send',
-        data: {
-          contactId:      contact_id,
-          email:          contact_email,
-          type:           'marketing',
-          subject:        rendered.subject,
-          html:           rendered.html,
-          text:           rendered.text,
-          idempotencyKey: `${idempotency_key}-touch2`,
-        },
+      await enqueueEmail({
+        contactId:      contact_id,
+        email:          contact_email,
+        type:           'marketing',
+        subject:        rendered.subject,
+        html:           rendered.html,
+        text:           rendered.text,
+        idempotencyKey: `${idempotency_key}-touch2`,
       });
     });
 
@@ -799,17 +411,14 @@ export const formAbandonmentFn = inngest.createFunction(
         unsubscribeUrl,
       });
       if (rendered) {
-        await inngest.send({
-          name: 'autolenis/email.send',
-          data: {
-            contactId:      contact_id,
-            email:          contact_email,
-            type:           'marketing',
-            subject:        rendered.subject,
-            html:           rendered.html,
-            text:           rendered.text,
-            idempotencyKey: `${idempotency_key}-touch3`,
-          },
+        await enqueueEmail({
+          contactId:      contact_id,
+          email:          contact_email,
+          type:           'marketing',
+          subject:        rendered.subject,
+          html:           rendered.html,
+          text:           rendered.text,
+          idempotencyKey: `${idempotency_key}-touch3`,
         });
       }
 
@@ -876,17 +485,14 @@ export const exitIntentFn = inngest.createFunction(
         unsubscribeUrl,
       });
       if (!rendered) return;
-      await inngest.send({
-        name: 'autolenis/email.send',
-        data: {
-          contactId:      contact_id,
-          email:          contact_email,
-          type:           'marketing',
-          subject:        rendered.subject,
-          html:           rendered.html,
-          text:           rendered.text,
-          idempotencyKey: `${idempotency_key}-recovery`,
-        },
+      await enqueueEmail({
+        contactId:      contact_id,
+        email:          contact_email,
+        type:           'marketing',
+        subject:        rendered.subject,
+        html:           rendered.html,
+        text:           rendered.text,
+        idempotencyKey: `${idempotency_key}-recovery`,
       });
     });
 
@@ -895,14 +501,17 @@ export const exitIntentFn = inngest.createFunction(
 );
 
 export const inngestFunctions = [
-  emailSendFn,
-  smsSendFn,
   campaignFanoutFn,
   scheduledCampaignCronFn,
-  // Migrated off Inngest onto the internal Vercel-Cron substrate and removed from
-  // this array so Inngest no longer schedules/handles them:
+  // Migrated off Inngest and removed from this array so Inngest no longer
+  // schedules/handles them:
   //   - analyticsRefreshFn / inactivityScannerFn / savedSearchMatcherFn (Batch 3)
   //   - workflowResumeFn (Batch 5) → workflow-resume-drain cron
+  //   - emailSendFn / smsSendFn (Batch 6b) → comms-outbox-drain cron
+  //     (every email.send/sms.send emitter now calls enqueueEmail/enqueueSms).
+  // campaignFanoutFn / scheduledCampaignCronFn / formAbandonmentFn / exitIntentFn
+  // remain on Inngest for now; their per-recipient sends already enqueue to the
+  // outbox (migrations #4/#5/#10/#11 will move their triggers next).
   formAbandonmentFn,
   exitIntentFn,
 ];

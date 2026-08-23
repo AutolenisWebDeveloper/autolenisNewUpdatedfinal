@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { SuppressionService } from '@/lib/services/suppression.service';
-import { inngest } from '@/lib/inngest/client';
+import { enqueueEmail, enqueueSms } from '@/lib/services/comms/comms-outbox.service';
 import { requirePermissionActor } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 import type { Contact } from '@/lib/types/crm';
@@ -91,17 +91,14 @@ export async function POST(req: Request) {
         skipped_suppressed++;
         continue;
       }
-      await inngest.send({
-        name: 'autolenis/email.send',
-        data: {
-          contactId: c.id,
-          email: c.email,
-          subject: body.subject,
-          html: body.html_body,
-          text: body.text_body,
-          templateId: body.template_id,
-          type: 'marketing',
-        },
+      await enqueueEmail({
+        contactId: c.id,
+        email: c.email,
+        subject: body.subject,
+        html: body.html_body,
+        text: body.text_body,
+        templateId: body.template_id,
+        type: 'marketing',
       });
       queued++;
     } else {
@@ -117,13 +114,10 @@ export async function POST(req: Request) {
         skipped_suppressed++;
         continue;
       }
-      await inngest.send({
-        name: 'autolenis/sms.send',
-        data: {
-          contactId: c.id,
-          phone: c.phone,
-          body: (body.sms_body ?? '').trim(),
-        },
+      await enqueueSms({
+        contactId: c.id,
+        phone: c.phone,
+        body: (body.sms_body ?? '').trim(),
       });
       queued++;
     }

@@ -5,6 +5,28 @@ import { inngestFunctions } from '@/lib/inngest/functions';
 import { getStripe } from '@/lib/stripe';
 import { detectDeadCrons } from './monitoring/dead-cron.service';
 
+// Re-drive a NON-QStash dead-letter row to its current owner. Migrated comms
+// event names route to the internal comms-dispatch queue (Inngest-free terminal/
+// replay); anything still owned by an Inngest worker (e.g. autolenis/dealer.award)
+// re-emits through Inngest. Keeps the DLQ replay path from resurrecting a deleted
+// worker's events.
+async function reemitDeadLetterJob(
+  eventName: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  if (eventName === 'autolenis/email.send') {
+    const { enqueueEmail } = await import('@/lib/services/comms/comms-outbox.service');
+    await enqueueEmail(payload as never);
+    return;
+  }
+  if (eventName === 'autolenis/sms.send') {
+    const { enqueueSms } = await import('@/lib/services/comms/comms-outbox.service');
+    await enqueueSms(payload as never);
+    return;
+  }
+  await inngest.send({ name: eventName, data: payload });
+}
+
 // ----------------------------------------------------------------------------
 // AutoLenis Phase 5 — Operations dashboard data layer.
 //
@@ -330,10 +352,7 @@ export class OperationsService {
     };
 
     try {
-      await inngest.send({
-        name: row.event_name,
-        data: (row.payload ?? {}) as Record<string, unknown>,
-      });
+      await reemitDeadLetterJob(row.event_name, (row.payload ?? {}) as Record<string, unknown>);
     } catch (err) {
       // Re-emit failed — put the row back so the job is not silently lost.
       await this.supabase.from('jobs_dead_letter').insert({
@@ -408,7 +427,7 @@ export class OperationsService {
             body: (payload.body ?? {}) as Record<string, unknown>,
           });
         } else {
-          await inngest.send({ name: row.event_name, data: payload });
+          await reemitDeadLetterJob(row.event_name, payload);
         }
         // Success — remove the row.
         await this.supabase.from('jobs_dead_letter').delete().eq('id', row.id);

@@ -66,7 +66,11 @@ contains `analyticsRefreshFn` / `inactivityScannerFn` / `savedSearchMatcherFn`
 | Dependency order | None (leaf workload). |
 | **Status** | **MIGRATED + trustworthy completion (Batch 2).** No repo code requires Inngest for intake; terminal/retry is Inngest-free (columns-only, not `jobs_dead_letter`). Worker retained as dormant compatibility sink → `READY FOR REMOVAL` after live verification confirms an empty Inngest queue. |
 
-### 2 & 3. Email / SMS — `emailSendFn` / `smsSendFn` (`autolenis/email.send`, `autolenis/sms.send`)  ⟶  **INTERNAL QUEUE BUILT (Batch 6a); CUTOVER PENDING (Batch 6b)**
+### 2 & 3. Email / SMS — `emailSendFn` / `smsSendFn` (`autolenis/email.send`, `autolenis/sms.send`)  ⟶  **MIGRATED + workers DELETED (Batch 6a infra + 6b cutover)**
+
+> **Batch 6b (the atomic cutover) is DONE.** Every `autolenis/email.send` / `autolenis/sms.send` emitter now calls `enqueueEmail`/`enqueueSms` (repo grep for those event names as emitters returns ZERO); `emailSendFn`/`smsSendFn`/`runEmailSend`/`runSmsSend` are deleted from `functions.ts` and removed from `inngestFunctions`; `dlq-behavior.test.ts` (which drove the deleted workers) is removed; `OperationsService.retryDeadLetterJob`/`autoDrainDeadLetterJobs` now route `autolenis/email.send`→`enqueueEmail` and `autolenis/sms.send`→`enqueueSms` (Inngest-free replay), keeping `inngest.send` only for still-live workers (e.g. `autolenis/dealer.award`). **Emitters cut over:** `transactional-dispatch` (covers dealer-award, which routes through `enqueueTransactionalEmail`), `nurture-sequence`, `lead-magnet-sequence`, `workflow.engine` (email/sms/notify), admin `send-email`/`send-sms`/`campaigns/bulk-send`, and — inside the still-on-Inngest campaign/lead workers — `campaignFanoutFn`, `formAbandonmentFn` (×3), `exitIntentFn`. **PRODUCTION CUTOVER REQUIRES applying `comms_outbox.sql` to Supabase BEFORE this code deploys — OWNER-GATED** (enqueue throws if the table is absent). Sender-migration + dealer-award tests updated; full matrix (975 tests) green. Detail of the 6a infrastructure below.
+
+**Batch 6a — the internal comms-dispatch queue (built & now LIVE-emitted-into after 6b):**
 
 - **Emitters (all must cut over in 6b):** `lib/services/email/{nurture-sequence,lead-magnet-sequence,transactional-dispatch}.ts`, `workflow.engine.ts` (email/sms/notify), `dealer-award` sender wrappers, admin CRM `send-email`/`send-sms`/`campaigns/bulk-send`, `campaignFanoutFn`, `formAbandonmentFn`, `exitIntentFn`.
 - **Internal comms-dispatch queue — BUILT & DORMANT (Batch 6a):**

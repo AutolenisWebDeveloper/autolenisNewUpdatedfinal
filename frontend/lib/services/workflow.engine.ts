@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger";
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { inngest } from '@/lib/inngest/client';
+import { enqueueEmail, enqueueSms } from '@/lib/services/comms/comms-outbox.service';
 import type {
   Contact,
   TemplateVariable,
@@ -310,16 +310,13 @@ export class WorkflowEngine {
         if (!templateId) return { status: 'failed', error: 'TEMPLATE_ID_MISSING' };
         if (!contact.email) return { status: 'skipped', nextNodeId: next, output: { reason: 'NO_EMAIL' } };
 
-        await inngest.send({
-          name: 'autolenis/email.send',
-          data: {
-            contactId: contact.id,
-            email: contact.email,
-            templateId,
-            templateVariables: contactVars,
-            type: (cfg.email_type as 'transactional' | 'marketing') ?? 'transactional',
-            idempotencyKey: `workflow:${enrollment.id}:${node.id}:email`,
-          },
+        await enqueueEmail({
+          contactId: contact.id,
+          email: contact.email,
+          templateId,
+          templateVariables: contactVars,
+          type: (cfg.email_type as 'transactional' | 'marketing') ?? 'transactional',
+          idempotencyKey: `workflow:${enrollment.id}:${node.id}:email`,
         });
         return { status: 'success', nextNodeId: next, output: { template_id: templateId } };
       }
@@ -331,14 +328,11 @@ export class WorkflowEngine {
         if (!contact.consent_sms) return { status: 'skipped', nextNodeId: next, output: { reason: 'NO_CONSENT' } };
 
         const body = substituteVars(bodyTemplate, contactVars);
-        await inngest.send({
-          name: 'autolenis/sms.send',
-          data: {
-            contactId: contact.id,
-            phone: contact.phone,
-            body,
-            idempotencyKey: `workflow:${enrollment.id}:${node.id}:sms`,
-          },
+        await enqueueSms({
+          contactId: contact.id,
+          phone: contact.phone,
+          body,
+          idempotencyKey: `workflow:${enrollment.id}:${node.id}:sms`,
         });
         return { status: 'success', nextNodeId: next, output: { body_length: body.length } };
       }
@@ -430,16 +424,13 @@ export class WorkflowEngine {
             Workflow: ${workflow.name}
           </p>`;
 
-        await inngest.send({
-          name: 'autolenis/email.send',
-          data: {
-            email: adminEmail,
-            subject,
-            html,
-            text: message,
-            type: 'transactional',
-            idempotencyKey: `workflow:${enrollment.id}:${node.id}:notify`,
-          },
+        await enqueueEmail({
+          email: adminEmail,
+          subject,
+          html,
+          text: message,
+          type: 'transactional',
+          idempotencyKey: `workflow:${enrollment.id}:${node.id}:notify`,
         });
         return { status: 'success', nextNodeId: next };
       }

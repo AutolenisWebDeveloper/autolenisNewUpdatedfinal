@@ -18,7 +18,6 @@
 // unless a gate passes. This module is DORMANT until producers are cut over to it.
 
 import { logger } from "@/lib/logger";
-import { getServiceSupabase } from "@/lib/supabase-service";
 import { SuppressionService } from "@/lib/services/suppression.service";
 import { TemplateService } from "@/lib/services/template.service";
 import {
@@ -83,6 +82,14 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Lazy service-role client. Imported at call time (not module load) so that a
+// module merely importing enqueueEmail/enqueueSms for typing does not pull in the
+// `server-only`-guarded supabase-service at import time.
+async function serviceClient(): Promise<SupabaseClient> {
+  const { getServiceSupabase } = await import("@/lib/supabase-service");
+  return getServiceSupabase();
+}
+
 // ---------------------------------------------------------------------------
 // ENQUEUE — the single dedup point (ON CONFLICT (dedup_key) DO NOTHING)
 // ---------------------------------------------------------------------------
@@ -112,7 +119,7 @@ async function insertOutbox(
   payload: Record<string, unknown>,
   opts: { runAt?: Date; supabase?: SupabaseClient },
 ): Promise<{ enqueued: boolean; dedupKey: string }> {
-  const supabase = opts.supabase ?? getServiceSupabase();
+  const supabase = opts.supabase ?? (await serviceClient());
   // ignoreDuplicates → INSERT ... ON CONFLICT (dedup_key) DO NOTHING. A duplicate
   // emit adds no row and does NOT resurrect a completed one — enqueue-once.
   const { data, error } = await supabase
@@ -387,7 +394,7 @@ export async function processOutboxRow(
 }
 
 export async function drainCommsOutbox(batchSize: number = DEFAULT_BATCH): Promise<CommsDrainSummary> {
-  const supabase = getServiceSupabase();
+  const supabase = await serviceClient();
   const now = new Date().toISOString();
 
   // Candidates = due, not-yet-terminal rows. A fresh 'sending' row (owned by a

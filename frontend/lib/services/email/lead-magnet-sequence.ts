@@ -13,7 +13,7 @@
 // (api/cron/lead-magnet-sequence) calls the due step for each lead by age.
 
 import { logger } from "@/lib/logger";
-import { inngest } from "@/lib/inngest/client";
+import { enqueueEmail } from "@/lib/services/comms/comms-outbox.service";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { SuppressionService } from "@/lib/services/suppression.service";
 import type { SequenceTrack } from "@/lib/leads/lead-magnets";
@@ -63,18 +63,15 @@ async function queueOrSkip(
     return { status: "suppressed" };
   }
 
-  await inngest.send({
-    name: "autolenis/email.send",
-    data: {
-      contactId: params.contactId,
-      email: params.to,
-      subject,
-      // Literal subject/body path — Phase 3 admin templates can later supply a
-      // templateId; until then the Inngest worker renders from bodyVars.
-      templateVariables: bodyVars,
-      type: "marketing",
-      idempotencyKey: idemKey(track, step, params.contactId),
-    },
+  await enqueueEmail({
+    contactId: params.contactId,
+    email: params.to,
+    subject,
+    // Literal subject/body path — Phase 3 admin templates can later supply a
+    // templateId; until then the drain renders from bodyVars.
+    templateVariables: bodyVars,
+    type: "marketing",
+    idempotencyKey: idemKey(track, step, params.contactId),
   });
   return { status: "queued" };
 }

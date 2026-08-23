@@ -13,7 +13,7 @@
 // queuing one Inngest job.
 
 import { logger } from "@/lib/logger";
-import { inngest } from "@/lib/inngest/client";
+import { enqueueEmail } from "@/lib/services/comms/comms-outbox.service";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { SuppressionService } from "@/lib/services/suppression.service";
 
@@ -55,20 +55,17 @@ async function queueOrSkip(
     return { status: "suppressed" };
   }
 
-  await inngest.send({
-    name: "autolenis/email.send",
-    data: {
-      contactId:        params.contactId,
-      email:            params.to,
-      subject,
-      // templateId is null when using the literal subject/html path. Phase 3
-      // templates are populated by ops via the admin template manager; once
-      // they exist the templateId points at the rendered row.
-      templateId:       templateId ?? undefined,
-      templateVariables: bodyVars,
-      type:             "marketing",
-      idempotencyKey:   idemKey(step, params.contactId),
-    },
+  await enqueueEmail({
+    contactId:        params.contactId,
+    email:            params.to,
+    subject,
+    // templateId is null when using the literal subject/html path. Phase 3
+    // templates are populated by ops via the admin template manager; once
+    // they exist the templateId points at the rendered row.
+    templateId:       templateId ?? undefined,
+    templateVariables: bodyVars,
+    type:             "marketing",
+    idempotencyKey:   idemKey(step, params.contactId),
   });
   return { status: "queued" };
 }
