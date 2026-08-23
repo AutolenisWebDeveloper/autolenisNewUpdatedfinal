@@ -440,11 +440,11 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── Post-intake pipeline (S1) ────────────────────────────────────────────
-  // Dealer outreach + the dealers-contacted buyer email now run inside the
-  // durable Inngest worker `intakeProcessFn`, enqueued by intakeBuyerRequest
-  // (autolenis/intake.process). No fire-and-forget after() here — the worker is
-  // retried/dead-lettered and re-drivable by the intake-reconcile cron.
+  // ── Post-intake pipeline ─────────────────────────────────────────────────
+  // Dealer outreach + the dealers-contacted buyer email run in the (Inngest-free)
+  // intake pipeline, executed by the intake-reconcile cron via
+  // processBuyerOpportunityIntake off the persisted row (intakeProcessedAt IS
+  // NULL). No fire-and-forget after() here and no enqueue.
 
   // Phase C-Attribution — if this request came from a buyer who read a
   // buying-guide article, link the opportunity to that article. No-op when

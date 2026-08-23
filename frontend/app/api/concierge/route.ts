@@ -28,7 +28,6 @@ import {
 import { CONCIERGE_SYSTEM_PROMPT } from "@/lib/ai/concierge-prompt";
 import { promoteOpportunity } from "@/lib/services/acquisition/unified-buyer-intake.service";
 import { decideIntakeTurnActions } from "@/lib/services/acquisition/intake-turn";
-import { inngest } from "@/lib/inngest/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -354,21 +353,11 @@ CRITICAL RULES:
     }
 
     // Stage 4: an early contactable lead (phone captured before the request is
-    // complete) — enqueue the durable pipeline for scoring + hot-lead alerts
-    // (retired the inline scoreAndAlert). decideIntakeTurnActions guarantees this
-    // never runs on a turn that promoted, so there is no concurrent double
-    // enqueue (which would double-notify the founder).
-    if (actions.enqueuePipeline) {
-      try {
-        await inngest.send({
-          name: "autolenis/intake.process",
-          data: { buyerOpportunityId: opportunitySnapshot.id },
-        });
-        logger.info("[concierge] STAGE 4 (pipeline enqueue for scoring/alerts) OK");
-      } catch (err) {
-        logger.error("[concierge] STAGE 4 (pipeline enqueue) FAILED:", err);
-      }
-    }
+    // complete) needs no explicit trigger. The BuyerOpportunity already exists with
+    // intakeProcessedAt IS NULL, so the intake-reconcile cron
+    // (processBuyerOpportunityIntake) runs its scoring + hot-lead alerts on the
+    // next pass. Intake orchestration is Inngest-free and has one authoritative
+    // executor, so there is no creation-time enqueue to race with the cron.
 
     // The lead just became contactable this turn — mirror it onto the CRM
     // contact plane (additive; the durable pipeline does not own this).

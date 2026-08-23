@@ -1,12 +1,11 @@
-// S2 — intake-reconcile cron. Mirrors the auction-close F-001 reconciler.
+// Buyer-intake processor cron (/api/cron/intake-reconcile) — the authoritative,
+// Inngest-FREE execution path.
 //
-// Pins: cron auth; the stuck-detection query uses intakeProcessedAt IS NULL (so a
-// completed intake, and a legit zero-dealer coverage-gap intake that still got
-// stamped, are BOTH excluded — the whole reason S1 added intakeProcessedAt rather
-// than inferring from marketEnrichedAt/prospect presence); bounded take:100
-// oldest-first; and one autolenis/intake.process re-emit per stuck row (safe
-// because the worker is idempotent and the S1 discovery guard blocks duplicate
-// prospects on re-drive).
+// Pins: cron auth via the shared authorizeCronRequest helper (Bearer <CRON_SECRET>
+// only; a spoofed x-vercel-cron header is rejected — Phase 4 posture); delegation
+// to the shared processEligibleBuyerIntakes service (no inngest.send anywhere); the
+// structured summary is returned; and a business-dead run (work attempted, zero
+// successes) is escalated to a FAILED cron / HTTP 500 rather than a misleading green.
 //
 // Run with:
 //   npx tsx --test --experimental-test-module-mocks "app/api/cron/__tests__/intake-reconcile-route.test.ts"
@@ -15,111 +14,130 @@ import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 
-let findManyArgs: Record<string, unknown> | null = null;
-let stuckRows: Array<{ id: string }> = [];
-const sent: Array<{ name: string; data: Record<string, unknown> }> = [];
+let summary: Record<string, unknown> = {};
+let processCalls = 0;
 
-mock.module("@/lib/prisma", {
+mock.module("@/lib/services/acquisition/intake-processor.service", {
   namedExports: {
-    prisma: {
-      buyerOpportunity: {
-        findMany: async (args: Record<string, unknown>) => {
-          findManyArgs = args;
-          return stuckRows;
-        },
-      },
+    processEligibleBuyerIntakes: async () => {
+      processCalls += 1;
+      return summary;
     },
   },
 });
 
-mock.module("@/lib/inngest/client", {
+// Replicate withCronRun's real contract: run the work; a throw → { ok:false };
+// otherwise { ok:true, result }. Monitoring is best-effort and irrelevant here.
+mock.module("@/lib/services/monitoring/cron-monitor.service", {
   namedExports: {
-    inngest: {
-      send: async (evt: { name: string; data: Record<string, unknown> }) => {
-        sent.push(evt);
-        return { ids: ["evt"] };
-      },
+    withCronRun: async (_name: string, work: () => Promise<unknown>) => {
+      try {
+        return { ok: true, result: await work() };
+      } catch (error) {
+        return { ok: false, error };
+      }
     },
   },
 });
 
 async function loadGET() {
-  const mod = await import("@/app/api/cron/intake-reconcile/route");
-  return mod.GET;
+  return (await import("@/app/api/cron/intake-reconcile/route")).GET;
 }
 
 function req(headers: Record<string, string> = {}) {
   return new NextRequest("http://localhost/api/cron/intake-reconcile", { headers });
 }
 
+// The authorized request header the shared cron authorizer accepts.
+const AUTH = { authorization: "Bearer test-secret" };
+
+function okSummary(over: Record<string, unknown> = {}) {
+  return {
+    eligible: 0,
+    attempted: 0,
+    succeeded: 0,
+    failed: 0,
+    duplicateBlocked: 0,
+    alreadyProcessed: 0,
+    notFound: 0,
+    totalDealersContacted: 0,
+    failures: [],
+    allAttemptedFailed: false,
+    windowHours: 48,
+    eligibilityFloor: "2026-08-21T00:00:00.000Z",
+    timestamp: "2026-08-23T00:00:00.000Z",
+    ...over,
+  };
+}
+
 beforeEach(() => {
-  findManyArgs = null;
-  stuckRows = [];
-  sent.length = 0;
+  processCalls = 0;
+  summary = okSummary();
   process.env.CRON_SECRET = "test-secret";
 });
 
-test("rejects unauthorized requests without touching the DB", async () => {
+test("rejects unauthorized requests without doing any work", async () => {
   const GET = await loadGET();
   const res = await GET(req());
   assert.equal(res.status, 401);
-  assert.equal(findManyArgs, null, "no query on an unauthorized request");
-  assert.equal(sent.length, 0);
+  assert.equal(processCalls, 0, "no work on an unauthorized request");
 });
 
 test("rejects a spoofed x-vercel-cron header; accepts the bearer secret", async () => {
   const GET = await loadGET();
+  // Phase 4: the header-only bypass is gone — a spoofed x-vercel-cron is rejected.
   assert.equal((await GET(req({ "x-vercel-cron": "1" }))).status, 401);
-  assert.equal((await GET(req({ authorization: "Bearer test-secret" }))).status, 200);
+  assert.equal((await GET(req(AUTH))).status, 200);
 });
 
-test("query targets intakeProcessedAt IS NULL + active VR status, bounded oldest-first", async () => {
+test("fails closed (500) when CRON_SECRET is unconfigured", async () => {
+  process.env.CRON_SECRET = ""; // helper treats empty as unconfigured → fail closed
   const GET = await loadGET();
-  await GET(req({ authorization: "Bearer test-secret" }));
-  assert.ok(findManyArgs, "findMany was called");
-  const where = findManyArgs!.where as Record<string, unknown>;
-
-  // The unambiguous "not done" marker — excludes completed AND coverage-gap rows.
-  assert.equal(where.intakeProcessedAt, null);
-  // Staleness threshold, not a trailing window.
-  assert.ok((where.createdAt as { lt: Date }).lt instanceof Date);
-  // Covers BOTH stuck cases: linked VR still sourcing OR no VR at all.
-  const or = where.OR as Array<Record<string, unknown>>;
-  const sourcing = or.find((c) => (c.vehicleRequests as { some?: unknown }).some);
-  const noVr = or.find((c) => (c.vehicleRequests as { none?: unknown }).none);
-  assert.deepEqual(
-    (sourcing!.vehicleRequests as { some: { status: { in: string[] } } }).some.status.in,
-    ["SUBMITTED", "INTAKE", "ACTIVE_SOURCING"],
-  );
-  assert.deepEqual((noVr!.vehicleRequests as { none: unknown }).none, {});
-  // Must NOT infer stuckness from enrichment/prospect presence (S1 decision).
-  assert.equal("marketEnrichedAt" in where, false);
-  assert.equal("dealerProspects" in where, false);
-
-  assert.equal(findManyArgs!.take, 100);
-  assert.deepEqual(findManyArgs!.orderBy, { createdAt: "asc" });
+  const res = await GET(req(AUTH));
+  assert.equal(res.status, 500);
+  assert.equal(processCalls, 0);
 });
 
-test("re-emits exactly one intake.process event per stuck row", async () => {
-  stuckRows = [{ id: "opp_a" }, { id: "opp_b" }];
+test("delegates to processEligibleBuyerIntakes and returns the structured summary", async () => {
+  summary = okSummary({ eligible: 3, attempted: 3, succeeded: 3, totalDealersContacted: 7 });
   const GET = await loadGET();
-  const res = await GET(req({ authorization: "Bearer test-secret" }));
+  const res = await GET(req(AUTH));
   assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.data.found, 2);
-  assert.equal(body.data.reEmitted, 2);
-
-  const intakeEvents = sent.filter((e) => e.name === "autolenis/intake.process");
-  assert.equal(intakeEvents.length, 2);
-  assert.deepEqual(intakeEvents.map((e) => e.data.buyerOpportunityId).sort(), ["opp_a", "opp_b"]);
+  assert.equal(processCalls, 1);
+  assert.equal(body.success, true);
+  assert.equal(body.data.succeeded, 3);
+  assert.equal(body.data.totalDealersContacted, 7);
 });
 
-test("no stuck rows → nothing re-emitted", async () => {
-  stuckRows = [];
+test("partial failure stays green but surfaces the failures in the result", async () => {
+  summary = okSummary({
+    eligible: 2,
+    attempted: 2,
+    succeeded: 1,
+    failed: 1,
+    failures: [{ opportunityId: "opp_b", category: "PIPELINE_ERROR", error: "boom" }],
+  });
   const GET = await loadGET();
-  const res = await GET(req({ authorization: "Bearer test-secret" }));
+  const res = await GET(req(AUTH));
+  assert.equal(res.status, 200);
   const body = await res.json();
-  assert.equal(body.data.found, 0);
-  assert.equal(body.data.reEmitted, 0);
-  assert.equal(sent.length, 0);
+  assert.equal(body.data.failed, 1);
+  assert.equal(body.data.failures[0].opportunityId, "opp_b");
+});
+
+test("business-dead run (attempted > 0, succeeded == 0) → FAILED cron / HTTP 500", async () => {
+  summary = okSummary({
+    eligible: 2,
+    attempted: 2,
+    succeeded: 0,
+    failed: 2,
+    allAttemptedFailed: true,
+    failures: [{ opportunityId: "a", category: "PIPELINE_ERROR", error: "down" }],
+  });
+  const GET = await loadGET();
+  const res = await GET(req(AUTH));
+  assert.equal(res.status, 500, "a dead workload must not be reported as green");
+  const body = await res.json();
+  assert.equal(body.success, false);
 });

@@ -1,76 +1,69 @@
-// S2 — stuck-intake reconciler. Mirrors the auction-close F-001 reconciler.
+// Buyer-intake processor + reconciler — the ONE authoritative execution path for
+// buyer-intake orchestration. Runs on the internal Vercel-Cron / application /
+// Postgres substrate; it requires NO Inngest.
 //
-// Every few minutes, find BuyerOpportunity rows whose durable intake never
-// completed (intakeProcessedAt IS NULL) beyond a staleness threshold — whose
-// linked VehicleRequest is still sourcing, OR which have no VehicleRequest at
-// all — and re-emit autolenis/intake.process for each. Safe to re-drive:
-// intakeProcessFn is idempotent (guard + per-stage skips) and the S1 discovery
-// guard prevents duplicate prospects. Bounded per run (take:100, oldest-first);
-// any remainder is picked up next tick.
+// Every few minutes it selects recent, eligible, unprocessed BuyerOpportunity rows
+// (intakeProcessedAt IS NULL, completed, within the eligibility window, whose
+// linked VehicleRequest is still sourcing OR which have none) and runs each through
+// the shared `processBuyerOpportunityIntake` service. This is BOTH the normal
+// execution of freshly-created intakes AND the recovery of any that did not
+// complete — one idempotent, concurrency-safe, crash-recoverable path.
 //
-// Uses intakeProcessedAt as the ONLY "done" marker — never inferred from
-// marketEnrichedAt or prospect presence — so a legitimate zero-dealer
-// coverage-gap intake (which still stamps intakeProcessedAt) is NOT re-driven.
+// HISTORICAL SAFETY: the eligibility window (default 48h, env-tunable) excludes
+// long-dormant historical opportunities, so this cron can NEVER auto-process the
+// pre-existing backlog. Historical backfill is a separate, owner-authorized
+// process — not this route.
+//
+// OBSERVABILITY: the per-run structured result records eligible / attempted /
+// succeeded / failed / skipped counts, failed ids + sanitized reasons, and the
+// eligibility floor. A run that attempted work but had ZERO successes is escalated
+// to a FAILED cron (HTTP 500) so a green invocation can never conceal a dead
+// workload.
 
 import { logger } from "@/lib/logger";
 import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { inngest } from "@/lib/inngest/client";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
+import { processEligibleBuyerIntakes } from "@/lib/services/acquisition/intake-processor.service";
 
-// A just-submitted intake's worker may still be running: enrichment + discovery +
-// phone-script drafting (12s per discovered prospect, which can be dozens) + Inngest
-// retry backoff. Only reconcile rows older than this generous threshold so we don't
-// waste re-emits on in-flight intakes. (Correctness never depends on this — the
-// idempotency guard blocks a re-emit of a still-running intake regardless.)
-const STUCK_INTAKE_THRESHOLD_MINUTES = 30;
+// Buyer-intake orchestration can legitimately take minutes (per-prospect script
+// drafting is spaced 12s, dealer sends are rate-limited). Give each batch the
+// full window; the pipeline is resumable, so anything not finished this tick
+// continues on the next.
+export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
+  // Shared cron authorizer (Phase 4): requires `Bearer <CRON_SECRET>`; 401 on a
+  // bad/absent token, 500 (fail-closed) when CRON_SECRET is unconfigured — all
+  // BEFORE any DB access or work.
   const cronAuth = authorizeCronRequest(request);
   if (cronAuth) return cronAuth;
 
   const run = await withCronRun("intake-reconcile", async () => {
-  const now = new Date();
-  const threshold = new Date(now.getTime() - STUCK_INTAKE_THRESHOLD_MINUTES * 60 * 1000);
+    const summary = await processEligibleBuyerIntakes();
 
-  const stuck = await prisma.buyerOpportunity.findMany({
-    where: {
-      intakeProcessedAt: null,
-      createdAt: { lt: threshold },
-      // Cover BOTH stuck cases: an opportunity whose linked VehicleRequest is
-      // still sourcing, AND an opportunity with no VehicleRequest at all (no
-      // buyer resolved / the VR insert threw) — the pipeline still does real
-      // work for those, so they must self-heal too. A VR that has advanced past
-      // ACTIVE_SOURCING is intentionally excluded (sourcing already happened).
-      OR: [
-        { vehicleRequests: { some: { status: { in: ["SUBMITTED", "INTAKE", "ACTIVE_SOURCING"] } } } },
-        { vehicleRequests: { none: {} } },
-      ],
-    },
-    select: { id: true },
-    orderBy: { createdAt: "asc" },
-    take: 100,
-  });
-
-  let reEmitted = 0;
-  for (const opp of stuck) {
-    try {
-      await inngest.send({
-        name: "autolenis/intake.process",
-        data: { buyerOpportunityId: opp.id },
-      });
-      reEmitted += 1;
-    } catch (err) {
-      logger.error(`[intake-reconcile] re-emit failed for ${opp.id}:`, err);
+    if (summary.failures.length > 0) {
+      logger.error(
+        `[intake-reconcile] ${summary.failed}/${summary.attempted} intake(s) failed`,
+        { failures: summary.failures },
+      );
+    } else if (summary.succeeded > 0) {
+      logger.info(
+        `[intake-reconcile] processed ${summary.succeeded}/${summary.attempted} intake(s), ` +
+          `${summary.totalDealersContacted} dealer(s) contacted`,
+      );
     }
-  }
 
-  if (reEmitted > 0) {
-    logger.info(`[intake-reconcile] re-drove ${reEmitted}/${stuck.length} stuck intake(s)`);
-  }
+    // Business-dead guard: work was attempted but NONE succeeded. Throw so the
+    // cron is recorded FAILED (and returns 500) instead of a misleading green.
+    if (summary.allAttemptedFailed) {
+      throw new Error(
+        `intake business failure: ${summary.attempted} attempted, 0 succeeded ` +
+          `(first: ${summary.failures[0]?.category} — ${summary.failures[0]?.error})`,
+      );
+    }
 
-    return { found: stuck.length, reEmitted, timestamp: now.toISOString() };
+    return summary;
   });
 
   if (!run.ok) {

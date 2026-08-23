@@ -1,5 +1,7 @@
-// S1 — intakeBuyerRequest must enqueue exactly one autolenis/intake.process
-// event per submission (and never run the heavy pipeline inline anymore).
+// intakeBuyerRequest persists the records and does NOT trigger intake
+// orchestration inline — buyer intake is Inngest-free and the intake-reconcile
+// cron is the single authoritative executor. This pins that the creation path
+// emits NO Inngest event (and never runs the heavy pipeline inline).
 //
 // Run with:
 //   npx tsx --test --experimental-test-module-mocks lib/services/acquisition/__tests__/unified-intake-emit.test.ts
@@ -7,6 +9,8 @@
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
+// Guard: if the service ever re-introduces an Inngest emit, this spy records it
+// and the test fails.
 const sent: Array<{ name: string; data: Record<string, unknown> }> = [];
 
 mock.module("@/lib/inngest/client", {
@@ -20,6 +24,7 @@ mock.module("@/lib/inngest/client", {
   },
 });
 
+const created: Array<Record<string, unknown>> = [];
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
@@ -33,24 +38,26 @@ mock.module("@/lib/prisma", {
       },
       buyer: { create: async () => ({ id: "buyer_1" }) },
       vehicleRequest: {
-        // promoteOpportunity now guards idempotency with a findFirst before create.
         findFirst: async () => null,
-        create: async () => ({ id: "vr_1" }),
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          created.push(data);
+          return { id: "vr_1" };
+        },
       },
     },
   },
 });
 
 async function load() {
-  const mod = await import("@/lib/services/acquisition/unified-buyer-intake.service");
-  return mod.intakeBuyerRequest;
+  return (await import("@/lib/services/acquisition/unified-buyer-intake.service")).intakeBuyerRequest;
 }
 
 beforeEach(() => {
   sent.length = 0;
+  created.length = 0;
 });
 
-test("a submission enqueues exactly one autolenis/intake.process event with the opportunity id", async () => {
+test("a submission creates the opportunity + linked request and emits NO Inngest event", async () => {
   const intakeBuyerRequest = await load();
   const result = await intakeBuyerRequest({
     source: "request_vehicle_wizard",
@@ -63,7 +70,7 @@ test("a submission enqueues exactly one autolenis/intake.process event with the 
   });
 
   assert.equal(result.buyerOpportunityId, "opp_1");
-  const intakeEvents = sent.filter((e) => e.name === "autolenis/intake.process");
-  assert.equal(intakeEvents.length, 1, "exactly one intake.process event");
-  assert.equal(intakeEvents[0]!.data.buyerOpportunityId, "opp_1");
+  assert.equal(result.vehicleRequestId, "vr_1");
+  assert.equal(created.length, 1, "one linked VehicleRequest");
+  assert.equal(sent.length, 0, "intake is Inngest-free — no event emitted from the creation path");
 });
