@@ -31,6 +31,32 @@ mutates money/deal/auction/deposit state — all send notifications** and some c
 next delayed touch. "Deal-path" below therefore means *triggered by / gated on* the
 deposit/auction/offer/deal-completion path, not money movement.
 
+### Complete per-job disposition (all 16, evidence-backed from the current branch)
+
+| Job route | Actual behavior (code) | Disposition | Internal replacement |
+| --- | --- | --- | --- |
+| `deposit-reminder` | 3-touch $99 activation reminder; reads `hasPaidDeposit` | DEFER (deposit/money-path) | — |
+| `auction-active` | auction-started notify; seeded from **Stripe webhook** (deposit PAID) | DEFER (auction lifecycle) | — |
+| `auction-midpoint` | mid-auction notify; reads `hasSelectedOffer` | DEFER (auction lifecycle) | — |
+| `auction-closing` | closing notify; auction lifecycle | DEFER (auction lifecycle) | — |
+| `dealer-invited` | dealer invite notify; seeded from `dealer-invitation.service` | DEFER (dealer participation in live deal) | — |
+| `dealer-bid-reminder` | bid reminder; reads `hasDealerBid` | DEFER (bids) | — |
+| `offer-received` | offer-received notify; seeded from `dealer/offers` | DEFER (offers) | — |
+| `offer-follow-up` | offer follow-up; reads `hasSelectedOffer` | DEFER (offers) | — |
+| `deal-complete` | deal-complete notify; seeded from pickup/complete; seeds `review-request` | DEFER (deal completion) | — |
+| `form-submitted` | intake welcome; seeds `check-form-completion` | DEFER (funnel entry into deposit path) | — |
+| `check-form-completion` | 3-touch activation nudge; reads `hasPaidDeposit` | DEFER (reads deposit state) | — |
+| `review-request` | post-purchase feedback notify; **sole producer is the deferred `deal-complete`**; fans out to refinance + referral | DEFER (deal-completion-coupled) — its route is the cutover enqueue-point for refinance/referral | — |
+| `refinance-outreach` | 60-day OpenRoad refinance notify; guarded by completed-purchase + `BuyerActivityEvent` | **INTERNAL PARITY BUILT** | `refinance_outreach_schedule` + `refinance-outreach-drain` |
+| `referral-nudge` | buyer referral notify (terminal); no guard | **INTERNAL PARITY BUILT** | `outreach_touch_schedule` (`referral_nudge`) + `outreach-touch-drain` |
+| `affiliate-inactive` | affiliate re-engagement notify; seeded from `cron/affiliate-inactive` (Vercel cron, non-deal); chains `affiliate-reengagement-2` | **INTERNAL PARITY BUILT** | `outreach_touch_schedule` (`affiliate_inactive`) + `outreach-touch-drain` |
+| `affiliate-reengagement-2` | affiliate 2nd-touch notify (terminal); no guard | **INTERNAL PARITY BUILT** | `outreach_touch_schedule` (`affiliate_reengagement_2`) + `outreach-touch-drain` |
+
+**No `DEAD/DUPLICATE` job found** — every one of the 16 has a live producer/consumer.
+The four `INTERNAL PARITY BUILT` are the only jobs whose behavior is purely non-deal
+notification with no money/deal-state read or write; the rest are deal/money-path or
+(review-request) coupled to a deferred deal-path producer.
+
 ### Migration split
 
 **DEAL-PATH — DEFER TO THE BUSINESS-LIFECYCLE PROGRAM (do NOT rewire in this run):**
@@ -52,10 +78,12 @@ consolidation run and belongs to the business-lifecycle program.
 deposit-activation funnel and read live deposit state (`hasPaidDeposit`). Recommend
 deferring with the deal-path set.
 
-**NON-DEAL-PATH — internal Vercel-Cron + Postgres + idempotency parity is safe:**
-`refinance-outreach` (already fully idempotent via a `BuyerActivityEvent` guard —
-the cleanest first candidate), `review-request`, `referral-nudge`,
-`affiliate-inactive`, `affiliate-reengagement-2`.
+**NON-DEAL-PATH — internal parity BUILT this run (all four):** `refinance-outreach`
+(own table — reference implementation), plus `referral-nudge`, `affiliate-inactive`,
+`affiliate-reengagement-2` (consolidated `outreach_touch_schedule`).
+`review-request` is DEFERRED (its sole producer, `deal-complete`, is deal-path) —
+its route is the cutover enqueue-point for refinance/referral, so those two cut over
+by editing `review-request`'s dispatch lines while it itself stays QStash-triggered.
 
 **`refinance-outreach` — internal parity BUILT (DORMANT) this run (reference
 implementation):**
@@ -92,14 +120,48 @@ implementation):**
   `enqueueRefinanceOutreach`, or drop it — the internal path is columns-only).
   One authority before and after; the swap is a single producer line.
 
-**Remaining four non-deal candidates (`review-request`, `referral-nudge`,
-`affiliate-inactive`, `affiliate-reengagement-2`) — ready-to-replicate, NOT built.**
-Each follows the identical dormant pattern above, differing only in (a) its
-per-workload guard (`review-request` chains the refinance + referral touches;
-`referral-nudge`/`affiliate-*` need a persisted dedup key added — see the
-idempotency gap below) and (b) its delay. `review-request` is the natural next one
-because it is the producer that would call `enqueueRefinanceOutreach` at cutover;
-building it lets the whole deal-complete → review → refinance chain move together.
+**`referral-nudge` + `affiliate-inactive` + `affiliate-reengagement-2` — internal
+parity BUILT (DORMANT) this run (consolidated):**
+- `prisma/migrations/manual_supabase_sql/outreach_touch_schedule.sql` (additive,
+  OWNER-GATED): ONE sequence-discriminated table (the same multi-sequence shape as
+  `lead_nurture_schedule`, NOT a generalized queue — a fixed 3-value CHECK) with
+  `UNIQUE(base_key, sequence)` (enqueue-once per touch, closing the QStash
+  no-dedup double-send gap) + a partial due index.
+- `lib/services/crm/outreach-touch-drain.service.ts`: `enqueueOutreachTouch`
+  (dormant producer) and `drainDueOutreachTouches` (claim CAS + stale reclaim;
+  message bodies ported **verbatim** from the three QStash routes; sends through
+  the SAME `notifyContact` TCPA/DNC/suppression/STOP-gated layer; a gated/suppressed
+  send is a terminal success exactly as the QStash job treats it; `affiliate_inactive`
+  chains `affiliate_reengagement_2` at +14d reusing the base_key; bounded retry
+  `MAX=4`; **columns-only terminal**; missing table → `NO_TABLE`, not an error).
+- `app/api/cron/outreach-touch-drain/route.ts` (cron auth + `withCronRun`, `*/15`)
+  + `vercel.json` + the CRON_STALENESS registry.
+- Tests: `lib/services/crm/__tests__/outreach-touch-drain.test.ts` (14) +
+  `app/api/cron/__tests__/outreach-touch-drain-route.test.ts` (3), under
+  `test:crm-services` / `test:cron`.
+- **DORMANCY / single-authority proof:** `enqueueOutreachTouch` has **zero
+  production callers** — `affiliate_inactive` is still dispatched to QStash from the
+  `cron/affiliate-inactive` Vercel cron (its recent-activity + weekly
+  `lastInactiveNudgeAt` guard UNCHANGED on the producer), the QStash job still
+  chains `affiliate-reengagement-2`, and `referral-nudge` is still dispatched from
+  the `review-request` job — all UNCHANGED. The cron no-ops (`NO_DUE`/`NO_TABLE`).
+  QStash stays the SOLE live authority for all three.
+- **Owner-gated ATOMIC cutovers (NOT executed):** apply
+  `outreach_touch_schedule.sql`; then per touch — (referral) in `review-request`,
+  swap `dispatch({ path:'/api/jobs/referral-nudge', delaySeconds:2332800 })` →
+  `enqueueOutreachTouch({ sequence:'referral_nudge', …, runAt: now+27d })`;
+  (affiliate) in `cron/affiliate-inactive`, swap the `dispatch({ path:
+  '/api/jobs/affiliate-inactive' })` → `enqueueOutreachTouch({ sequence:
+  'affiliate_inactive', …, runAt: now })` (the drain then chains reengagement-2
+  internally); delete the three QStash routes; make
+  `OperationsService.autoDrainDeadLetterJobs` not re-publish those `qstash:*` rows.
+  One authority before and after each swap.
+
+**`review-request` (DEFERRED — deal-completion-coupled) stays a QStash job.** At the
+refinance/referral cutovers its route is simply edited to call the internal
+`enqueue*` functions instead of `dispatch()`; it remains QStash-triggered by the
+deferred `deal-complete`, so no dual authority arises. Its own migration off QStash
+belongs to the business-lifecycle program alongside `deal-complete`.
 
 **Parity requirements any internal replacement MUST reproduce:** (1) the signature-
 verify equivalent (worker auth), (2) the `lib/qstash/state.ts` stop-guards (+
@@ -117,12 +179,15 @@ Any QStash workload migrated to an internal path must ensure its dead-letter row
 re-driven internally (columns-only terminal, as the Inngest content/intake batches did),
 **not** through the QStash or Inngest re-emit branches.
 
-**VERDICT — QStash:** **NON-DEAL-PATH parity STARTED — `refinance-outreach` internal
-replacement BUILT & DORMANT (reference implementation); the remaining four non-deal
-candidates are ready-to-replicate from it.** The deal-path/borderline majority is
-**DEFERRED to the business-lifecycle program**. No cutover executed; QStash stays
-fully wired and the sole live authority for every job. **OWNER-CHECK:** confirm prod
-`QSTASH_*` secrets and current job volume before any cutover.
+**VERDICT — QStash:** **ALL non-deal-path parity BUILT & DORMANT this run** — the four
+purely-non-deal notification jobs (`refinance-outreach`, `referral-nudge`,
+`affiliate-inactive`, `affiliate-reengagement-2`) have complete internal replacements
+(two durable schedulers: `refinance_outreach_schedule` + the consolidated
+`outreach_touch_schedule`), each proven dormant (zero production callers; QStash
+producers unchanged; QStash the sole live authority). The 12 deal/money-path or
+deal-completion-coupled jobs are **DEFERRED to the business-lifecycle program**, each
+mapped in the disposition table above. No cutover executed; QStash stays fully wired.
+**OWNER-CHECK:** confirm prod `QSTASH_*` secrets and current job volume before any cutover.
 
 ---
 
@@ -228,7 +293,7 @@ traffic flows through Buffer vs direct APIs today.
 
 | Vendor | No-ops when unset | Anything depends on its response | Internal equivalent | Verdict |
 | --- | --- | --- | --- | --- |
-| **QStash** | n/a (LIVE) | Consumers send notifications; no money mutation | Vercel-Cron+Postgres substrate (proven) | **`refinance-outreach` parity BUILT+DORMANT (reference); 4 non-deal candidates ready-to-replicate; deal-path DEFERRED** |
+| **QStash** | n/a (LIVE) | Consumers send notifications; no money mutation | Vercel-Cron+Postgres substrate (proven) | **All 4 non-deal jobs parity BUILT+DORMANT; 12 deal/coupled jobs DEFERRED (mapped)** |
 | **Make.com** | Yes | No | `WorkflowEngine` + `/api/crm/dispatch/*` (flag-gated) | **Ready-to-retire · OWNER-CHECK prod flags** |
 | **GHL** | Yes | No (`void`, `.catch`) | contacts/lifecycle/timeline/tags via `emitDomainEvent` | **Ready-to-retire · OWNER-CHECK GHL automations** |
 | **Buffer** | Yes (Noop provider) | Publish outcome consumed; self-heals to FAILED/retry | Partial — direct FB/IG/TikTok/LinkedIn; **no direct YouTube** | **Parity-not-justified (keep/document) · OWNER-CHECK prod tokens** |
