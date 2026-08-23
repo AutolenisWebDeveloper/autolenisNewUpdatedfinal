@@ -56,11 +56,13 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "inventory-sync-priority": { intervalMinutes: HOUR },
   "trust-check": { intervalMinutes: HOUR },
   "vehicle-offer-expire": { intervalMinutes: HOUR },
+  "inactivity-scan": { intervalMinutes: HOUR }, // migrated off Inngest cron `0 * * * *`
   // ── multi-hour ──
   "social-status-sync": { intervalMinutes: 2 * HOUR },
   "prequal-message-delivery": { intervalMinutes: 4 * HOUR },
   "sessions": { intervalMinutes: 6 * HOUR },
   "inventory-sync-full": { intervalMinutes: 6 * HOUR },
+  "saved-search-match": { intervalMinutes: 6 * HOUR }, // migrated off Inngest cron `0 */6 * * *`
   "amips-generate": { intervalMinutes: 8 * HOUR }, // 06,14,22 → 8h max gap
   // ── daily ──
   "apollo-ledger-rollover": { intervalMinutes: DAY },
@@ -69,6 +71,7 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "prequal-sla-escalation": { intervalMinutes: DAY },
   "prequal-purge": { intervalMinutes: DAY },
   "analytics-snapshot": { intervalMinutes: DAY },
+  "analytics-refresh": { intervalMinutes: DAY }, // migrated off Inngest cron `0 2 * * *`
   "morning-briefing": { intervalMinutes: DAY },
   "amips-tier-f": { intervalMinutes: DAY },
   // In-app nurture dispatchers scheduled in B-F5 (gated by CRM_INAPP_ENGINE_ENABLED).

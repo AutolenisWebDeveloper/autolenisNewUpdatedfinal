@@ -5,7 +5,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildInventoryWhereFromFilters } from "../../inngest/functions";
+import { buildInventoryWhereFromFilters } from "../saved-search-filters";
 
 test("maps make/model to case-insensitive equals", () => {
   const w = buildInventoryWhereFromFilters({ make: "Toyota", model: "Camry" });
