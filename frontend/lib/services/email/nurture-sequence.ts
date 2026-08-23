@@ -1,16 +1,17 @@
 // AutoLenis LP Nurture Sequence — v2 (emotional escalation arc).
 //
-// Every step in this sequence MUST emit via `inngest.send('autolenis/email.send')`.
-// Direct `resend.emails.send()` calls are forbidden here because the Inngest
-// worker (lib/inngest/functions.ts:emailSendFn) is what:
+// Every step in this sequence MUST enqueue via `enqueueEmail` onto the internal
+// comms outbox (Batch 6b — the retired `inngest.send('autolenis/email.send')`
+// path). Direct `resend.emails.send()` calls are forbidden here because the
+// comms-outbox dispatcher (lib/services/comms/comms-outbox.service.ts) is what:
 //   - checks email_suppression (SuppressionService)
-//   - enforces idempotency
+//   - enforces idempotency (enqueue-once on the dedup_key)
 //   - records send attempts in contact_timeline_events for the admin
-//   - routes failed sends to the dead-letter queue
+//   - bounds retries and marks a terminal failure columns-only (no Inngest DLQ)
 //
 // The cron at /api/cron/nurture-sequence (or any scheduler) calls these
 // functions; each function is responsible for guarding suppression and
-// queuing one Inngest job.
+// enqueuing one outbox row.
 
 import { logger } from "@/lib/logger";
 import { enqueueEmail } from "@/lib/services/comms/comms-outbox.service";

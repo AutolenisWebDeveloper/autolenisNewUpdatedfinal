@@ -8,8 +8,9 @@
 //
 // Day 0 is the transactional delivery email (resend.service.ts). This module
 // owns the follow-up touches. Like lib/services/email/nurture-sequence.ts, every
-// step is queued through `inngest.send('autolenis/email.send')` so the Inngest
-// worker enforces suppression, idempotency, and timeline logging. A scheduler
+// step is enqueued via `enqueueEmail` onto the internal comms outbox (Batch 6b —
+// the retired `inngest.send('autolenis/email.send')` path) so the dispatcher
+// enforces suppression, idempotency, and timeline logging. A scheduler
 // (api/cron/lead-magnet-sequence) calls the due step for each lead by age.
 
 import { logger } from "@/lib/logger";

@@ -235,6 +235,10 @@
     {
       "path": "/api/cron/campaign-dispatch",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/lead-nurture-drain",
+      "schedule": "* * * * *"
     }
   ]
 }

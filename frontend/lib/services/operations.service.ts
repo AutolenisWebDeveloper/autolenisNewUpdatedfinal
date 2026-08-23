@@ -5,12 +5,15 @@ import { inngestFunctions } from '@/lib/inngest/functions';
 import { getStripe } from '@/lib/stripe';
 import { detectDeadCrons } from './monitoring/dead-cron.service';
 
-// Re-drive a NON-QStash dead-letter row to its current owner. Migrated event
-// names route to their internal replacement (Inngest-free terminal/replay):
-// autolenis/email.send + sms.send → the comms outbox, autolenis/dealer.award →
-// emitDealerAwardOutcomes. Anything still owned by a live Inngest worker (the LP
-// lead-nurture events) re-emits through Inngest. Keeps the DLQ replay path from
-// resurrecting a deleted worker's events.
+// Re-drive a NON-QStash dead-letter row to its current owner. Every migrated
+// event name routes to its internal replacement (Inngest-free terminal/replay) —
+// the DLQ replay path must NEVER resurrect a deleted Inngest worker's events:
+//   autolenis/email.send + sms.send          → the comms outbox
+//   autolenis/dealer.award                    → emitDealerAwardOutcomes
+//   autolenis/lead.form_abandoned             → scheduleLeadNurture('form_abandonment')
+//   autolenis/lead.exit_intent_captured       → scheduleLeadNurture('exit_intent')
+// All Inngest workloads are now retired (lib/inngest/functions.ts is empty), so
+// the only fall-through owner is the dormant buyer-intake compatibility sink.
 async function reemitDeadLetterJob(
   eventName: string,
   payload: Record<string, unknown>,
@@ -31,6 +34,27 @@ async function reemitDeadLetterJob(
     await emitDealerAwardOutcomes(
       payload as { auctionId: string; winningOfferId: string; dealId: string },
     );
+    return;
+  }
+  if (
+    eventName === 'autolenis/lead.form_abandoned' ||
+    eventName === 'autolenis/lead.exit_intent_captured'
+  ) {
+    // Re-drive the LP lead-nurture sequence via the internal durable scheduler,
+    // not the deleted formAbandonmentFn / exitIntentFn Inngest workers. The
+    // dead-letter payload carries the original Inngest event shape (snake_case);
+    // scheduleLeadNurture is idempotent on (idempotency_key, step) so a replay
+    // of an already-scheduled sequence adds no duplicate touch.
+    const { scheduleLeadNurture } = await import('@/lib/services/crm/lead-nurture.service');
+    const sequence =
+      eventName === 'autolenis/lead.form_abandoned' ? 'form_abandonment' : 'exit_intent';
+    await scheduleLeadNurture(sequence, {
+      contactId:      String(payload.contact_id ?? ''),
+      contactEmail:   String(payload.contact_email ?? ''),
+      firstName:      (payload.first_name as string | null) ?? null,
+      campaign:       (payload.campaign as string | null) ?? null,
+      idempotencyKey: String(payload.idempotency_key ?? ''),
+    });
     return;
   }
   await inngest.send({ name: eventName, data: payload });
@@ -233,9 +257,14 @@ export class OperationsService {
 
     const inngestCheck = (): DependencyStatus => {
       const count = inngestFunctions.length;
+      // Inngest workload retirement is complete: an empty registry is the
+      // INTENDED terminal state (every worker migrated onto the internal
+      // Vercel-Cron substrate), not a degradation. Report healthy/retired so it
+      // doesn't fire a false incident; only a non-empty registry (a regression
+      // that re-registered a worker) is noteworthy here.
       return count > 0
         ? { key: 'inngest', label: 'Inngest', status: 'healthy', detail: `${count} functions registered`, checked_at }
-        : { key: 'inngest', label: 'Inngest', status: 'degraded', detail: 'No functions registered', checked_at };
+        : { key: 'inngest', label: 'Inngest', status: 'healthy', detail: 'Retired — all workloads migrated to internal cron substrate', checked_at };
     };
 
     const [supabase, stripe] = await Promise.all([supabaseCheck(), stripeCheck()]);

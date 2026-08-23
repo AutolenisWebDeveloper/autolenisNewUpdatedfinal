@@ -28,13 +28,20 @@ Status legend:
 | Idempotency table | `idempotency_keys` (migrations/01) | Keep — shared infra. |
 | Env: `INNGEST_SIGNING_KEY`, `INNGEST_EVENT_KEY` | Vercel env | Owner-gated; remove only at final retirement. |
 
-Registered function arrays (as of Batch 4): `inngestFunctions` (`lib/inngest/functions.ts`),
-`intakeFunctions` (`lib/inngest/intake-functions.ts`), `dealerAwardFunctions`
-(`lib/inngest/dealer-award-functions.ts`). **`contentFunctions` /
-`lib/inngest/content-functions.ts` were removed in Batch 4** (content generation
-migrated to the `content-generation-drain` cron). `inngestFunctions` no longer
-contains `analyticsRefreshFn` / `inactivityScannerFn` / `savedSearchMatcherFn`
-(Batch 3).
+Registered function arrays (as of **Batch 9 — Inngest workload retirement COMPLETE**):
+`app/api/inngest/route.ts` now serves only `intakeFunctions`
+(`lib/inngest/intake-functions.ts`, a dormant buyer-intake compatibility sink with
+NO live emitter). **`inngestFunctions` (`lib/inngest/functions.ts`) is now `[]`** —
+every worker it once held is migrated onto the internal Vercel-Cron substrate
+(`analyticsRefreshFn`/`inactivityScannerFn`/`savedSearchMatcherFn` Batch 3,
+content Batch 4, `workflowResumeFn` Batch 5, `emailSendFn`/`smsSendFn` Batch 6b,
+`dealerAwardFn` Batch 7, `campaignFanoutFn`/`scheduledCampaignCronFn` Batch 8,
+`formAbandonmentFn`/`exitIntentFn` Batch 9). `dealerAwardFunctions`
+(`lib/inngest/dealer-award-functions.ts`) and `contentFunctions`
+(`lib/inngest/content-functions.ts`) were **deleted** in Batches 7 and 4. The only
+remaining Inngest surface is the global infra in the table above — removed by the
+**owner-gated FINAL-REMOVAL checklist** (`docs/inngest-final-removal-checklist.md`,
+ready-to-execute, **not executed by the automation run**), after live verification.
 
 ---
 
@@ -130,11 +137,16 @@ contains `analyticsRefreshFn` / `inactivityScannerFn` / `savedSearchMatcherFn`
 - **Cutover is atomic in the code:** the three functions are removed from `inngestFunctions` **and** the three Vercel crons are added to `vercel.json` in the same change, so after deploy exactly one authority schedules each workload. A brief deploy-window overlap (old deployment's Inngest cron + new deployment's Vercel cron firing once each) is low-risk: these emit only to the (dormant) Make forward + optional in-app engine, never a direct email/SMS, and each side is independently idempotent (stage-advance / lastMatchAt cursor / idempotent RPC).
 - **`LIVE VERIFICATION REQUIRED`** before deleting the Inngest function *definitions*: confirm `cron_job_logs` shows `analytics-refresh` / `inactivity-scan` / `saved-search-match` running green with real work, AND confirm the corresponding Inngest crons no longer fire (Inngest Cloud dashboard) after the deploy sync.
 
-### 10. Form abandonment — `formAbandonmentFn` / `autolenis/lead.form_abandoned`  ⟶  `KEEP TEMPORARILY`
-- Emitter: `app/api/public/crm/partial-lead/route.ts`. Emits `email.send` (nurture). Depends on #2.
-
-### 11. Exit intent — `exitIntentFn` / `autolenis/lead.exit_intent_captured`  ⟶  `KEEP TEMPORARILY`
-- Emitter: `app/api/public/crm/exit-intent/route.ts`. Emits `email.send`. Depends on #2.
+### 10 & 11. LP lead-nurture — `formAbandonmentFn` / `exitIntentFn` (`autolenis/lead.form_abandoned`, `autolenis/lead.exit_intent_captured`)  ⟶  **MIGRATED + workers DELETED (Batch 9) — LAST live Inngest workload**
+- **The inter-touch delay is now durable Postgres state, not Inngest `step.sleep`.** The 3-touch form-abandonment sequence (`1h → 23h → 72h`) and the single 30-min exit-intent recovery are each a chain of durable `lead_nurture_schedule` rows: `run_at` holds WHEN a touch fires, and the `lead-nurture-drain` cron sends the due touch (re-checking the lead's completion + suppression at send time) and schedules the NEXT touch. Nothing depends on Inngest, `setTimeout`, or a detached promise.
+- **New home:** `lib/services/crm/lead-nurture.service.ts` (`scheduleLeadNurture` enqueues touch 1; `drainDueLeadNurture` sends due touches + schedules the next) driven by `app/api/cron/lead-nurture-drain/route.ts` (cron auth + `withCronRun`, `* * * * *` for ≤1-min lateness on the long nurture windows, `maxDuration=120`). Registered in `vercel.json` + the CRON_STALENESS registry (`intervalMinutes:1`).
+- **Emitters rewired:** `app/api/public/crm/partial-lead/route.ts` (`form_abandoned` → `scheduleLeadNurture('form_abandonment', …)`) and `app/api/public/crm/exit-intent/route.ts` (`exit_intent_captured` → `scheduleLeadNurture('exit_intent', …)`). Both dropped the `inngest` import. A repo grep for `autolenis/lead.form_abandoned` / `autolenis/lead.exit_intent_captured` as **emitters** now returns ZERO (only the DLQ replay branch + the retired-worker SQL/doc references remain). (The additive `emitDomainEvent('partial_lead_captured'|'exit_intent_captured', …)` calls in those routes are the SEPARATE Make/CRM domain-event spine — never Inngest events — and are unchanged.)
+- **Migration schema (additive, OWNER-GATED):** `prisma/migrations/manual_supabase_sql/lead_nurture_schedule.sql` — the `lead_nurture_schedule` table (`sequence`, `step`, `contact_id`, `contact_email`, `first_name`, `campaign`, `idempotency_key`, `run_at`, `status ∈ {pending,sending,done,canceled,failed}`, `attempts`, `last_error`, `claimed_at`), a **`UNIQUE(idempotency_key, step)`** index (enqueue-once per touch), and a partial due index `ON (run_at) WHERE status IN ('pending','sending')`. Raw Supabase SQL — **PRODUCTION CUTOVER REQUIRES applying this SQL to Supabase — OWNER-GATED** (not `prisma migrate deploy`; `scheduleLeadNurture` throws if the table is absent).
+- **HARD INVARIANT — zero duplicate touches:** dedup at THREE layers. (1) Scheduling a touch is enqueue-once via `UNIQUE(idempotency_key, step)` + `ON CONFLICT DO NOTHING (ignoreDuplicates)` — a re-trigger (same lead, same day) or a re-scheduled next-step adds no row. (2) The drain's claim CAS (`pending → sending`, guarded, with a stale `sending` reclaim after `STALE_MS=10m > maxDuration`) serializes concurrent drains so one drain sends a given touch. (3) The touch email itself carries the outbox dedup_key `${idempotency_key}${keySuffix}` (`-touch1/-touch2/-touch3` / `-recovery`), so even an overlapping re-drive collapses at the comms outbox. A converted lead (`lifecycle_stage != 'lead'`) cancels the rest of the sequence; a missing template throws → bounded retry (`MAX_TOUCH_ATTEMPTS=4`, then terminal `failed`); an inactive template skips the send but still advances. **Terminal state is COLUMNS-ONLY** (`status='failed'` on the row) — nothing to `jobs_dead_letter`, so the Inngest DLQ drainer can't re-emit a nurture touch.
+- **DLQ replay is Inngest-free:** `OperationsService.reemitDeadLetterJob` now routes `autolenis/lead.form_abandoned` → `scheduleLeadNurture('form_abandonment')` and `autolenis/lead.exit_intent_captured` → `scheduleLeadNurture('exit_intent')` (mapping the snake_case Inngest payload), so replaying a historical dead-letter row re-drives the internal scheduler, never the deleted worker.
+- **Workers DELETED:** `formAbandonmentFn` + `exitIntentFn` + their `buildLpRecoveryUrl` / `buildUnsubUrl` / `renderRecoveryTemplate` helpers removed from `lib/inngest/functions.ts`; **`inngestFunctions` is now `[]`.** `app/api/inngest/route.ts` serves only the dormant `intakeFunctions`. `OperationsService`'s Inngest health check now reports `healthy / "Retired — all workloads migrated"` for an empty registry (an empty registry is the intended terminal state, not a degradation).
+- **Tests:** `lib/services/crm/__tests__/lead-nurture.test.ts` (14: form/exit initial-delay scheduling, idempotent conflict → `scheduled:false`, DB-error throw; drain NO_DUE, send-touch-1 → done → schedule touch-2 at +23h with the `-touch1` outbox key, converted-lead cancel, suppressed-skip-but-advance, inactive-template-skip-but-advance, final-touch markInactive + no-next, missing-template retry vs MAX-attempts `failed`, lost-claim skip, query-error throw) + `app/api/cron/__tests__/lead-nurture-drain-route.test.ts` (auth guard, delegation, 500-on-throw). Both under the existing `test:crm-services` / `test:cron` suites (no new suite needed).
+- **Status:** **MIGRATED, workers deleted.** With this batch **every Inngest workload is retired** — no repo code path schedules or handles an Inngest function (only the dormant `intakeProcessFn` compatibility sink remains served). Live verification: create an abandoned LP form + an exit-intent capture; confirm `cron_job_logs` for `lead-nurture-drain` sends the touches on schedule, a converting lead stops mid-sequence, and no `autolenis/lead.*` events remain queued in Inngest Cloud.
 
 ### 12–13. Content generate/regenerate — `contentGenerateFn` / `contentRegenerateFn` (`autolenis/content.{generate,regenerate}`)  ⟶  **MIGRATED + worker DELETED (Batch 4)**
 - **Not a duplicate.** Verified the existing `content-publisher` cron *publishes* already-generated/approved articles (`publishDueScheduled`) and `social-generate` produces social posts — neither generates buying-guide articles. So this is a real workload to migrate, not dead/duplicate code.

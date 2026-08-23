@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger";
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
-import { inngest } from '@/lib/inngest/client';
+import { scheduleLeadNurture } from '@/lib/services/crm/lead-nurture.service';
 
 // Captures email from the exit-intent modal. Buyer was about to leave the LP
 // without engaging the form at all — softer touch than the abandonment
@@ -42,16 +42,18 @@ export async function POST(req: Request) {
       created_by: null,
     });
 
+    // Schedule the durable single-touch exit-intent recovery (internal cron,
+    // not Inngest). One recovery per contact per day — a re-trigger within the
+    // same day folds into the existing schedule (UNIQUE idempotency_key+step).
     if (contact.lifecycle_stage === 'lead') {
-      await inngest.send({
-        name: 'autolenis/lead.exit_intent_captured',
-        data: {
-          contact_id:      contact.id,
-          contact_email:   contact.email,
-          first_name:      contact.first_name,
-          campaign:        campaign ?? 'unknown',
-          idempotency_key: `exit-intent-${contact.id}-${new Date().toISOString().slice(0, 10)}`,
-        },
+      await scheduleLeadNurture('exit_intent', {
+        contactId:      contact.id,
+        // contact.email is nullable in the row type but always set here (the
+        // route rejected a missing email above and upserted this exact value).
+        contactEmail:   contact.email ?? email.toLowerCase().trim(),
+        firstName:      contact.first_name ?? null,
+        campaign:       campaign ?? 'unknown',
+        idempotencyKey: `exit-intent-${contact.id}-${new Date().toISOString().slice(0, 10)}`,
       });
     }
 

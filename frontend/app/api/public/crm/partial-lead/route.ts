@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger";
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
-import { inngest } from '@/lib/inngest/client';
+import { scheduleLeadNurture } from '@/lib/services/crm/lead-nurture.service';
 
 // Captures Step 1 of the LP form before the buyer reaches Step 2. The CRM
 // gets an email + (optional) phone the moment Step 1 validates, so a tab
@@ -85,18 +85,17 @@ export async function POST(req: Request) {
         created_by: null,
       });
 
-      await inngest.send({
-        name: 'autolenis/lead.form_abandoned',
-        data: {
-          contact_id:      contact.id,
-          contact_email:   contact.email,
-          first_name:      contact.first_name,
-          campaign:        campaign ?? 'unknown',
-          zip:             zip ?? null,
-          // One abandonment sequence per contact per day — re-submits within
-          // the same day fold into the existing in-flight workflow.
-          idempotency_key: `form-abandon-${contact.id}-${new Date().toISOString().slice(0, 10)}`,
-        },
+      // Schedule the durable 3-touch abandonment sequence (internal cron, not
+      // Inngest). One sequence per contact per day — a re-submit within the same
+      // day folds into the existing in-flight schedule (UNIQUE idempotency_key+step).
+      await scheduleLeadNurture('form_abandonment', {
+        contactId:      contact.id,
+        // contact.email is nullable in the row type but always set here (the
+        // route rejected a missing email above and upserted this exact value).
+        contactEmail:   contact.email ?? email.toLowerCase().trim(),
+        firstName:      contact.first_name ?? null,
+        campaign:       campaign ?? 'unknown',
+        idempotencyKey: `form-abandon-${contact.id}-${new Date().toISOString().slice(0, 10)}`,
       });
     }
 
