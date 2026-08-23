@@ -199,7 +199,8 @@ export class WorkflowEngine {
     return enrollment as WorkflowEnrollment;
   }
 
-  // Public re-entry — called by Inngest workflowResumeFn after a delay node.
+  // Public re-entry — called by the workflow-resume-drain cron when a delay
+  // node's persisted resume_at falls due.
   static async resumeEnrollment(
     supabase: SupabaseClient,
     enrollmentId: string,
@@ -216,8 +217,8 @@ export class WorkflowEngine {
     enrollmentId: string,
     startNodeId: string,
   ): Promise<void> {
-    // Cutover gate: blocks advancement AND in-flight Inngest delay-node resumes,
-    // so a pre-existing enrollment cannot dispatch once the engine is disabled.
+    // Cutover gate: blocks advancement AND in-flight delay-node resumes, so a
+    // pre-existing enrollment cannot dispatch once the engine is disabled.
     if (!isInAppEngineEnabled()) return;
     const enrollment = await this.loadEnrollment(supabase, enrollmentId);
     if (!enrollment) return;
@@ -274,7 +275,7 @@ export class WorkflowEngine {
         result.error,
       );
 
-      if (result.status === 'suspended') return; // delay node — resume via Inngest
+      if (result.status === 'suspended') return; // delay node — resumed by workflow-resume-drain cron
       if (result.status === 'failed') {
         await this.failEnrollment(supabase, enrollmentId, result.error ?? 'NODE_FAILED');
         return;
@@ -465,25 +466,24 @@ export class WorkflowEngine {
         };
       }
 
-      // -------- DELAY (suspends until Inngest resumes) --------
+      // -------- DELAY (suspends until the workflow-resume-drain cron resumes) --------
+      // Durable Postgres state (NOT Inngest, setTimeout, or a detached promise):
+      // persist WHEN to resume (resume_at) and WHICH node to resume from
+      // (resume_node_id) on the enrollment. The internal workflow-resume-drain
+      // cron selects due rows and re-enters resumeEnrollment.
       case 'delay': {
         const duration = (cfg.duration as string | undefined) ?? '';
         const seconds = parseDurationToSeconds(duration);
         if (!next) {
-          // Delay with no successor → effectively an end node. Don't enqueue.
+          // Delay with no successor → effectively an end node. Don't schedule.
           return { status: 'success' };
         }
-        await inngest.send({
-          name: 'autolenis/workflow.resume',
-          data: {
-            enrollment_id: enrollment.id,
-            node_id: next,
-          },
-          // Inngest accepts ISO datetime, duration string, or epoch ms; we
-          // use a future ISO timestamp for clarity in the dashboard.
-          ts: Date.now() + seconds * 1000,
-        });
-        return { status: 'suspended', output: { duration, resume_at: new Date(Date.now() + seconds * 1000).toISOString() } };
+        const resumeAt = new Date(Date.now() + seconds * 1000).toISOString();
+        await supabase
+          .from('workflow_enrollments')
+          .update({ resume_at: resumeAt, resume_node_id: next })
+          .eq('id', enrollment.id);
+        return { status: 'suspended', output: { duration, resume_at: resumeAt } };
       }
 
       // Trigger nodes should not be hit during execution — we start from the

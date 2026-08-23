@@ -34,6 +34,7 @@ const WEEK = 7 * DAY;
 
 export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   // ── every 5 minutes ──
+  "workflow-resume-drain": { intervalMinutes: 1 }, // migrated off Inngest workflowResumeFn
   "auction-close": { intervalMinutes: 5 },
   "intake-reconcile": { intervalMinutes: 5 },
   "deposit-activation-reconcile": { intervalMinutes: 5 },

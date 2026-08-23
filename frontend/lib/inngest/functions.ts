@@ -633,48 +633,12 @@ export const scheduledCampaignCronFn = inngest.createFunction(
   }
 );
 
-// ---------------------------------------------------------------------------
-// WORKFLOW RESUME WORKER — picks up enrollments suspended by a delay node
-// ---------------------------------------------------------------------------
-// The engine emits autolenis/workflow.resume with a future ts (= now + delay).
-// Inngest holds the event until then, then dispatches it here. The handler
-// is a thin shell — all the logic lives in WorkflowEngine so the same code
-// path is exercised by initial enrollment and by post-delay resumption.
-export async function runWorkflowResume(ctx: WorkerCtx) {
-    const { event, step } = ctx;
-    const data = event.data as { enrollment_id: string; node_id: string };
-    const supabase = getSupabase();
-
-    // Lazy import — keeps the module graph for the rest of the workers light
-    // and avoids pulling workflow.engine into edge-runtime bundles unless a
-    // workflow actually resumes.
-    const { WorkflowEngine } = await import('../services/workflow.engine');
-
-    try {
-      await step.run('resume-enrollment', async () =>
-        WorkflowEngine.resumeEnrollment(supabase, data.enrollment_id, data.node_id),
-      );
-      return { status: 'OK' };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (isFinalAttempt(ctx as unknown as Record<string, unknown>)) {
-        await moveJobToDeadLetter(
-          supabase,
-          (ctx as unknown as { runId?: string }).runId ?? 'unknown',
-          'autolenis/workflow.resume',
-          data,
-          message,
-        );
-      }
-      throw err;
-    }
-}
-
-export const workflowResumeFn = inngest.createFunction(
-  { id: 'workflow-resume-worker', name: 'Workflow Resume', retries: 3 },
-  { event: 'autolenis/workflow.resume' },
-  (ctx) => runWorkflowResume(ctx as unknown as WorkerCtx),
-);
+// WORKFLOW RESUME WORKER — MIGRATED (Batch 5) off Inngest onto the internal
+// Vercel-Cron substrate. The WorkflowEngine delay node now persists durable
+// resume state (workflow_enrollments.resume_at/resume_node_id) and the
+// `workflow-resume-drain` cron (app/api/cron/workflow-resume-drain →
+// lib/services/crm/workflow-resume-drain.service.ts) re-enters
+// WorkflowEngine.resumeEnrollment when it falls due. No Inngest event remains.
 
 // ---------------------------------------------------------------------------
 // LP FORM ABANDONMENT — 3-touch recovery sequence
@@ -935,11 +899,10 @@ export const inngestFunctions = [
   smsSendFn,
   campaignFanoutFn,
   scheduledCampaignCronFn,
-  workflowResumeFn,
-  // inactivityScannerFn, savedSearchMatcherFn, analyticsRefreshFn were migrated
-  // off Inngest onto the internal Vercel-Cron substrate (routes
-  // /api/cron/inactivity-scan, /api/cron/saved-search-match, /api/cron/analytics-refresh)
-  // and removed from this array so Inngest no longer schedules them.
+  // Migrated off Inngest onto the internal Vercel-Cron substrate and removed from
+  // this array so Inngest no longer schedules/handles them:
+  //   - analyticsRefreshFn / inactivityScannerFn / savedSearchMatcherFn (Batch 3)
+  //   - workflowResumeFn (Batch 5) → workflow-resume-drain cron
   formAbandonmentFn,
   exitIntentFn,
 ];

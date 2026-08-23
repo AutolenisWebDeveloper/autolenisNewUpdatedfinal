@@ -219,6 +219,10 @@
     {
       "path": "/api/cron/content-generation-drain",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/workflow-resume-drain",
+      "schedule": "* * * * *"
     }
   ]
 }

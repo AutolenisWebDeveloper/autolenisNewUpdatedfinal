@@ -84,9 +84,15 @@ contains `analyticsRefreshFn` / `inactivityScannerFn` / `savedSearchMatcherFn`
 ### 5. Scheduled campaign cron — `scheduledCampaignCronFn` / **Inngest cron `*/5`**  ⟶  `MIGRATE TO EXISTING INTERNAL PATH`
 - Pure scheduler: scans due campaigns, emits `campaign.execute`. Trivially a Vercel Cron route, BUT depends on #4/#2/#3 for the downstream send. Migrate after them.
 
-### 6. Workflow resume — `workflowResumeFn` / `autolenis/workflow.resume`  ⟶  `MIGRATE TO DB-SCHEDULED STATE`
-- Emitter: `lib/services/workflow.engine.ts` (delayed step resume). Uses Inngest's **delay** primitive.
-- Replacement: a `workflow_step` table with `run_at` + a Vercel Cron drain (DB-scheduled state). Difficulty: Medium (delay semantics). Migrate as its own batch.
+### 6. Workflow resume — `workflowResumeFn` / `autolenis/workflow.resume`  ⟶  **MIGRATED + worker DELETED (Batch 5)**
+- **Delay is now durable Postgres state, not Inngest's `ts`.** The WorkflowEngine `delay` node persists `resume_at` (when) + `resume_node_id` (which node) on the `workflow_enrollments` row instead of emitting `autolenis/workflow.resume` with a future `ts`. Additive Supabase migration `prisma/migrations/manual_supabase_sql/workflow_scheduled_resume.sql` adds the two columns + a partial index `WHERE resume_at IS NOT NULL AND status='active'`. **PRODUCTION CUTOVER REQUIRES applying this SQL to Supabase — OWNER-GATED** (raw Supabase, not `prisma migrate deploy`).
+- **New home:** `lib/services/crm/workflow-resume-drain.service.ts::drainDueWorkflowResumes` driven by `app/api/cron/workflow-resume-drain/route.ts` (cron auth + `withCronRun`, `* * * * *` for ≤1-min resume lateness on long nurture delays, `maxDuration=300`). Registered in `vercel.json` + CRON_STALENESS.
+- **Crash-safe at-least-once (reuses `claimJob`):** each due row is claimed on `workflow-resume:{enrollment}:{node}` (reclaimable after 10-min stale). `resume_at` is cleared **only after a successful resume**, and **only if unchanged** (`.eq('resume_at', originalResumeAt)`) — a re-suspend at a later delay writes a new future `resume_at` that the conditional clear leaves intact. A failed/crashed resume leaves `resume_at` set → re-selected + re-driven next tick. `resumeEnrollment` is idempotent per node (its email/SMS/notify sends already carry `workflow:{enrollment}:{node}:{channel}` idempotency keys), so a re-run never double-sends.
+- **No delay-path Inngest, no DLQ:** the delay node's only write is the enrollment update; nothing goes to `jobs_dead_letter`, so the Inngest DLQ drainer can't re-emit a workflow resume. (The engine still imports `inngest` for its email/SMS/notify sends — those ride the email.send/sms.send spine and are the SEPARATE comms migration.)
+- **Worker DELETED:** `runWorkflowResume` + `workflowResumeFn` removed from `functions.ts` and `inngestFunctions`; the two `workflowResumeFn` DLQ tests removed from `dlq-behavior.test.ts` (email/SMS DLQ tests retained).
+- **Dormancy:** the WorkflowEngine is double-gated OFF in prod (every workflow archived by the Make cutover T1 + `CRM_INAPP_ENGINE_ENABLED` default off), and the `resume_at` column is brand-new, so there are ZERO live/pending resumes today — this batch is dormant-safe and only takes effect if the in-app engine is re-enabled. When disabled, `resumeEnrollment` no-ops and the drain clears any (non-existent in prod) stale resume — acceptable for the retired state.
+- **Tests:** `lib/services/crm/__tests__/workflow-resume-drain.test.ts` (NO_DUE, claim+resume+conditional-clear, lost-claim skip, failed-resume no-clear + guard 'failed', malformed-row clear, query-error throw) + `app/api/cron/__tests__/workflow-resume-drain-route.test.ts`.
+- **Status:** **MIGRATED, worker deleted.** No Inngest dependency remains for workflow resume. Live verification (only if the in-app engine is re-enabled): confirm a delay node persists `resume_at` and the `workflow-resume-drain` cron resumes it on schedule.
 
 ### 7. Inactivity scanner — `inactivityScannerFn` / **Inngest cron `0 * * * *`**  ⟶  **MIGRATED (Batch 3)**
 - **New home:** `lib/services/crm/inactivity-scanner.service.ts::scanInactiveContacts` (business logic) driven by Vercel Cron route `app/api/cron/inactivity-scan/route.ts` (cron auth + `withCronRun`). Schedule added to `vercel.json` at the **same** `0 * * * *` cadence. Removed from `inngestFunctions`.
@@ -150,11 +156,15 @@ function definitions.
 deleted (see entry 12–13). Proven not a duplicate; runs on the
 `content-generation-drain` cron; terminal state columns-only (Inngest-free).
 
-**NEXT EXECUTABLE WORKLOAD:** `workflowResumeFn` (#6 — durable Postgres
-`run_at` state), then the comms keystone.
+**DONE (Batch 5):** `workflowResumeFn` (#6) — **MIGRATED**, worker deleted (see
+entry 6). Durable `resume_at` state + `workflow-resume-drain` cron; delay-path
+Inngest-free.
 
-**THEN (in dependency order):** `workflowResumeFn` (#6 — durable Postgres
-`run_at` state, its own batch) → the comms keystone (`emailSendFn` #2 / `smsSendFn`
+**NEXT EXECUTABLE WORKLOAD:** the comms keystone (`emailSendFn` #2 / `smsSendFn`
+#3) — internal comms-dispatch queue with a per-(recipient,template,dedup-key)
+idempotency key; **zero duplicate production comms**. Everything below fans into it.
+
+**THEN (in dependency order):** the comms keystone (`emailSendFn` #2 / `smsSendFn`
 #3 — internal comms-dispatch queue with a per-(recipient,template,dedup-key)
 idempotency key; **zero duplicate production comms**) → the workloads that fan into
 comms (`campaignFanoutFn` #4, `scheduledCampaignCronFn` #5, `formAbandonmentFn` #10,

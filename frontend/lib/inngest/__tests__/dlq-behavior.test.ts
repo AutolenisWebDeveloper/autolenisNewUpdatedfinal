@@ -113,12 +113,6 @@ mock.module("twilio", {
     messages: { create: async () => { throw new Error("twilio dispatch boom"); } },
   }),
 });
-mock.module("@/lib/services/workflow.engine", {
-  namedExports: {
-    WorkflowEngine: { resumeEnrollment: async () => { throw new Error("workflow resume boom"); } },
-  },
-});
-
 async function load() {
   return import("@/lib/inngest/functions");
 }
@@ -196,18 +190,7 @@ test("smsSendFn: non-final failure does NOT dead-letter or release", async () =>
   assert.equal(releasedKeys.length, 0);
 });
 
-// ── workflowResumeFn ─────────────────────────────────────────────────────────
-const wfData = { enrollment_id: "e1", node_id: "n1" };
-
-test("workflowResumeFn: final-attempt failure lands the job in jobs_dead_letter", async () => {
-  const { runWorkflowResume } = await load();
-  await assert.rejects(() => runWorkflowResume(ctx(wfData, FINAL) as never), /workflow resume boom/);
-  assert.equal(dlqRows.length, 1);
-  assert.equal(dlqRows[0]!.event_name, "autolenis/workflow.resume");
-});
-
-test("workflowResumeFn: non-final failure does NOT dead-letter", async () => {
-  const { runWorkflowResume } = await load();
-  await assert.rejects(() => runWorkflowResume(ctx(wfData, NON_FINAL) as never), /workflow resume boom/);
-  assert.equal(dlqRows.length, 0);
-});
+// NOTE: the former workflowResumeFn DLQ tests were removed in Batch 5 — the
+// workflow-resume worker was migrated off Inngest to the workflow-resume-drain
+// cron (durable resume_at state); its retry/terminal path is covered by
+// lib/services/crm/__tests__/workflow-resume-drain.test.ts.
