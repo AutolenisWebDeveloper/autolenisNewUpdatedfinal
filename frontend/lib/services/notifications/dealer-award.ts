@@ -182,11 +182,12 @@ const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").tri
  * Impure dispatcher: notify the winning + non-winning dealers for a just-accepted
  * auction offer. Idempotent (email via EmailSendLog keys; in-app rows deduped on
  * a stable metadata key), so it is safe to re-run. It runs inside the durable
- * `dealerAwardFn` worker and PROPAGATES transient failures — a load-phase DB
- * error, or any recipient dispatch failure — so the worker retries and
- * dead-letters rather than losing the notifications silently. Every recipient is
- * attempted before a batch failure is raised, so one bad address never starves
- * the rest on a given run. A terminal missing-auction returns quietly.
+ * `dealer-award-dispatch` cron (off the Deal's dealerAwardDispatchedAt marker) and
+ * PROPAGATES transient failures — a load-phase DB error, or any recipient dispatch
+ * failure — so the cron leaves the marker unstamped and re-drives on the next tick
+ * rather than losing the notifications silently. Every recipient is attempted
+ * before a batch failure is raised, so one bad address never starves the rest on a
+ * given run. A terminal missing-auction returns quietly.
  */
 export async function emitDealerAwardOutcomes(args: {
   auctionId: string;

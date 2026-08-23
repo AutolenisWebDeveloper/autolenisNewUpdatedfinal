@@ -36,6 +36,7 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   // ── every 5 minutes ──
   "workflow-resume-drain": { intervalMinutes: 1 }, // migrated off Inngest workflowResumeFn
   "comms-outbox-drain": { intervalMinutes: 1 }, // internal comms-dispatch queue (email.send/sms.send retirement)
+  "dealer-award-dispatch": { intervalMinutes: 1 }, // migrated off Inngest dealerAwardFn
   "auction-close": { intervalMinutes: 5 },
   "intake-reconcile": { intervalMinutes: 5 },
   "deposit-activation-reconcile": { intervalMinutes: 5 },

@@ -24,6 +24,14 @@ async function reemitDeadLetterJob(
     await enqueueSms(payload as never);
     return;
   }
+  if (eventName === 'autolenis/dealer.award') {
+    // Re-drive via the internal (idempotent) dispatcher, not the deleted worker.
+    const { emitDealerAwardOutcomes } = await import('@/lib/services/notifications/dealer-award');
+    await emitDealerAwardOutcomes(
+      payload as { auctionId: string; winningOfferId: string; dealId: string },
+    );
+    return;
+  }
   await inngest.send({ name: eventName, data: payload });
 }
 

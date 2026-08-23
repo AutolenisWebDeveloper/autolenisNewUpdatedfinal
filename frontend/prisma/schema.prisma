@@ -583,6 +583,12 @@ model Deal {
   contractShieldStatus  String?              @map("contract_shield_status")
   riskScore             Int?                 @map("risk_score")
   riskTier              RiskTier?            @map("risk_tier")
+  // Durable marker for the internal dealer-award dispatch (Inngest dealer.award
+  // retirement). NULL = award/non-award notifications not yet dispatched; the
+  // dealer-award-dispatch cron scans offer-accepted deals with a NULL marker,
+  // dispatches, then stamps this. Existing deals are backfilled = created_at so
+  // only NEW acceptances dispatch.
+  dealerAwardDispatchedAt DateTime?          @map("dealer_award_dispatched_at")
   createdAt             DateTime             @default(now()) @map("created_at")
   updatedAt             DateTime             @updatedAt @map("updated_at")
   contractScans         ContractScan[]
