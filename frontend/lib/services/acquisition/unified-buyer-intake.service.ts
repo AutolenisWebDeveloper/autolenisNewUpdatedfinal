@@ -18,7 +18,6 @@
 import { logger } from "@/lib/logger";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { inngest } from "@/lib/inngest/client";
 
 export type IntakeSource =
   | "zura_widget"
@@ -247,17 +246,17 @@ export async function intakeBuyerRequest(
 
 /**
  * Promote an existing BuyerOpportunity into a sourceable VehicleRequest (when a
- * buyer can be resolved) and enqueue the durable intake pipeline.
+ * buyer can be resolved).
  *
  * Extracted from intakeBuyerRequest so the Zura concierge chat can reuse it
  * against its OWN live BuyerOpportunity (no duplicate opportunity). Idempotent:
  * a second call for an opportunity that already has a linked VehicleRequest
- * creates no duplicate. The pipeline enqueue is best-effort and always fires
- * (even when no buyer resolves, so lead enrichment/scoring still runs); the
- * intake-reconcile cron recovers a dropped emit. The heavy background sequence
- * (market enrichment, dealer discovery, phone-script drafting, lead
- * scoring/alerts, dealer outreach) runs in the Inngest worker `intakeProcessFn`,
- * keyed on buyerOpportunityId — the single owner of that work.
+ * creates no duplicate. This does NOT trigger intake orchestration — the heavy
+ * background sequence (market enrichment, dealer discovery, phone-script drafting,
+ * lead scoring/alerts, dealer outreach) is run by the intake-reconcile cron via
+ * `processBuyerOpportunityIntake`, keyed on buyerOpportunityId, which is the single
+ * owner of that work (and runs even when no buyer resolves, so lead
+ * enrichment/scoring still happens).
  *
  * `input.budgetAmount` is CENTS (callers convert at their boundary).
  */
@@ -344,24 +343,18 @@ export async function promoteOpportunity(
     });
   }
 
-  // Enqueue the durable pipeline (idempotent worker; reconciler recovers a drop).
-  try {
-    await inngest.send({
-      name: "autolenis/intake.process",
-      data: { buyerOpportunityId: opportunityId },
-    });
-    logger.info("[unified-intake] intake.process enqueued", { opportunityId });
-  } catch (err) {
-    logger.error(
-      "[unified-intake] intake.process emit failed (reconciler will recover):",
-      err,
-    );
-  }
-
+  // Intake orchestration is NOT triggered here. The creation path only persists
+  // the BuyerOpportunity (and, when a buyer resolves, the linked VehicleRequest);
+  // `intakeProcessedAt IS NULL` on the persisted row makes it eligible. The single
+  // authoritative executor — the intake-reconcile cron
+  // (processEligibleBuyerIntakes) — picks it up and runs the durable, idempotent
+  // pipeline. This keeps the buyer-facing request fast and bounded (the pipeline
+  // performs slow, rate-limited work) and removes Inngest from the intake path.
   return { vehicleRequestId };
 }
 
 // NOTE: lead scoring + hot-lead alerts (scoreAndAlert) and the market-enrichment
-// / dealer-discovery / outreach sequence moved to intake-pipeline.service.ts,
-// where they run inside the durable Inngest worker (S1). This service now only
-// creates the records and enqueues autolenis/intake.process.
+// / dealer-discovery / outreach sequence live in intake-pipeline.service.ts and
+// are executed by the intake-reconcile cron via processBuyerOpportunityIntake
+// (Inngest-free). This service now only creates the records; the persisted
+// BuyerOpportunity (intakeProcessedAt IS NULL) is what the cron picks up.

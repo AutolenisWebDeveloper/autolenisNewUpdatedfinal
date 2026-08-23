@@ -1,14 +1,15 @@
 // lib/services/acquisition/intake-pipeline.service.ts
 //
-// S1 — the durable intake background pipeline.
+// The durable intake background pipeline.
 //
 // This is the sequence that used to run in two racing `after()` blocks (one in
-// unified-buyer-intake, one in the API routes). It now runs inside the Inngest
-// worker `intakeProcessFn`, driven off `buyerOpportunityId` ALONE so the S2
-// reconciler — which only has the id — can re-drive a stranded intake. Every
-// stage reconstructs what it needs from the persisted BuyerOpportunity row and
-// is idempotent, so a re-drive never re-enriches, re-scores, re-alerts, or
-// double-contacts a dealer.
+// unified-buyer-intake, one in the API routes). It is driven off
+// `buyerOpportunityId` ALONE and is Inngest-free: the authoritative executor is
+// the intake-reconcile cron via `processBuyerOpportunityIntake`
+// (intake-processor.service.ts), which owns the claim + completion marker. Every
+// stage reconstructs what it needs from the persisted BuyerOpportunity row and is
+// idempotent/resumable, so a re-drive (or a run resumed after a mid-flight kill)
+// never re-enriches, re-scores, re-alerts, or double-contacts a dealer.
 
 import { logger } from "@/lib/logger";
 import type { Prisma } from "@prisma/client";

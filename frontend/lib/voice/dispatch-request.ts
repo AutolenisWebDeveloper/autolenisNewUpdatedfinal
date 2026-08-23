@@ -220,11 +220,11 @@ export async function dispatchVehicleRequest(
     }
     vehicleRequestId = result.vehicleRequestId;
 
-    // ── Post-intake pipeline (S1) ──────────────────────────────────────────
-    // Dealer outreach + the dealers-contacted buyer email now run inside the
-    // durable Inngest worker `intakeProcessFn`, which intakeBuyerRequest already
-    // enqueued (autolenis/intake.process). No fire-and-forget after() here — a
-    // second runner would double-contact dealers and double-email the buyer.
+    // ── Post-intake pipeline ────────────────────────────────────────────────
+    // Dealer outreach + the dealers-contacted buyer email run in the (Inngest-free)
+    // intake pipeline, executed by the intake-reconcile cron via
+    // processBuyerOpportunityIntake off the persisted row. No fire-and-forget
+    // after() here and no enqueue — one authoritative executor.
   } catch (err) {
     logger.error("[voice/dispatch] unified intake failed:", err);
     return { success: false, buyerId, error: "could not save vehicle request" };

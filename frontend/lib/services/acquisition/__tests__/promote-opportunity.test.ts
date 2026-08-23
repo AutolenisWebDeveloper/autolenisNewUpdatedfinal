@@ -1,7 +1,9 @@
 // A′ — promoteOpportunity: turn an existing BuyerOpportunity into a sourceable
-// VehicleRequest (when a buyer resolves) and enqueue the durable pipeline.
-// Extracted from intakeBuyerRequest so the Zura chat can reuse it against its
-// own live BuyerOpportunity (no duplicate opportunity).
+// VehicleRequest (when a buyer resolves). Extracted from intakeBuyerRequest so the
+// Zura chat can reuse it against its own live BuyerOpportunity (no duplicate
+// opportunity). It does NOT trigger intake orchestration — buyer intake is
+// Inngest-free and the intake-reconcile cron is the single authoritative executor,
+// so the creation path emits NO Inngest event.
 //
 //   npx tsx --test --experimental-test-module-mocks \
 //     lib/services/acquisition/__tests__/promote-opportunity.test.ts
@@ -66,7 +68,7 @@ beforeEach(() => {
 
 const intakeEvents = () => sent.filter((e) => e.name === "autolenis/intake.process");
 
-test("resolvable opportunity → creates ONE VehicleRequest and enqueues the pipeline once", async () => {
+test("resolvable opportunity → creates ONE VehicleRequest and emits NO Inngest event", async () => {
   const promoteOpportunity = await load();
   const r = await promoteOpportunity("opp_1", {
     firstName: "Sam",
@@ -79,9 +81,7 @@ test("resolvable opportunity → creates ONE VehicleRequest and enqueues the pip
   assert.equal(r.vehicleRequestId, "vr_new");
   assert.equal(createdVR.length, 1);
   assert.equal(createdVR[0]!.buyerOpportunityId, "opp_1");
-  const evts = intakeEvents();
-  assert.equal(evts.length, 1, "exactly one intake.process event");
-  assert.equal(evts[0]!.data.buyerOpportunityId, "opp_1");
+  assert.equal(intakeEvents().length, 0, "creation path is Inngest-free");
 });
 
 test("budget stays EXACT integer cents (no dollars round-trip drift)", async () => {
@@ -94,7 +94,7 @@ test("budget stays EXACT integer cents (no dollars round-trip drift)", async () 
   assert.equal(createdVR[0]!.maxBudgetCents, 2_500_050);
 });
 
-test("idempotent: an already-linked opportunity creates NO second VehicleRequest but still enqueues", async () => {
+test("idempotent: an already-linked opportunity creates NO second VehicleRequest and emits nothing", async () => {
   existingVR = { id: "vr_existing" };
   const promoteOpportunity = await load();
   const r = await promoteOpportunity("opp_1", {
@@ -104,13 +104,15 @@ test("idempotent: an already-linked opportunity creates NO second VehicleRequest
   });
   assert.equal(r.vehicleRequestId, "vr_existing");
   assert.equal(createdVR.length, 0, "no duplicate VehicleRequest");
-  assert.equal(intakeEvents().length, 1, "pipeline still enqueued");
+  assert.equal(intakeEvents().length, 0, "creation path is Inngest-free");
 });
 
-test("no resolvable buyer (missing email/name) → no VehicleRequest, pipeline still runs", async () => {
+test("no resolvable buyer (missing email/name) → no VehicleRequest, still emits nothing", async () => {
   const promoteOpportunity = await load();
   const r = await promoteOpportunity("opp_1", { make: "Toyota", zip: "75001" });
   assert.equal(r.vehicleRequestId, null);
   assert.equal(createdVR.length, 0);
-  assert.equal(intakeEvents().length, 1, "lead enrichment still enqueued even without a buyer");
+  // Intake (incl. lead enrichment/scoring for buyer-less opportunities) is run by
+  // the cron via the "VR none" eligibility branch — never enqueued here.
+  assert.equal(intakeEvents().length, 0, "creation path is Inngest-free");
 });

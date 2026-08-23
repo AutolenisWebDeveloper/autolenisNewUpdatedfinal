@@ -196,15 +196,15 @@ export async function POST(request: NextRequest) {
     hasTradeIn: validatedFinancing?.tradeIn ?? false,
   };
 
-  // buyerOpportunityId is intentionally not read here — intakeBuyerRequest now
-  // enqueues autolenis/intake.process itself (S1).
+  // intakeBuyerRequest only persists the BuyerOpportunity (+ linked VehicleRequest).
   const { vehicleRequestId } = await intakeBuyerRequest(intakeInput);
 
-  // ── Post-intake pipeline (S1) ────────────────────────────────────────────
-  // Dealer outreach + the dealers-contacted buyer email now run inside the
-  // durable Inngest worker `intakeProcessFn`, enqueued by intakeBuyerRequest
-  // (autolenis/intake.process) — retried/dead-lettered and re-drivable by the
-  // intake-reconcile cron. No fire-and-forget after() here.
+  // ── Post-intake pipeline ─────────────────────────────────────────────────
+  // Dealer outreach + the dealers-contacted buyer email run in the (Inngest-free)
+  // intake pipeline, executed by the intake-reconcile cron via
+  // processBuyerOpportunityIntake off the persisted row (intakeProcessedAt IS
+  // NULL). No fire-and-forget after() here and no enqueue — one authoritative
+  // executor, idempotent and re-drivable.
 
   // buyerId is always supplied here, so the service must have created a
   // VehicleRequest. If it didn't, surface a clear server error rather than
