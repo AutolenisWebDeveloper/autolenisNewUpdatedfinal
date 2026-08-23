@@ -249,8 +249,8 @@ export default function HowItWorksPage() {
           <DefinitionBlock
             term="AutoLenis"
             category="Automotive Service"
-            definition="AutoLenis is a licensed automotive buying concierge and broker that connects pre-qualified car buyers with verified dealers through a private 48-hour auction. Buyers receive multiple competing offers and select the best price — without visiting a dealership or negotiating directly."
-            relatedTerms={["Car Buying Concierge", "Auto Broker", "Dealer Auction", "Vehicle Pre-Qualification"]}
+            definition="AutoLenis is an automotive buying concierge platform that connects pre-qualified car buyers with verified dealers through a private 48-hour auction. AutoLenis is not a dealership, broker, or party to any vehicle transaction — the sale happens directly between the buyer and the dealer they choose. Buyers receive multiple competing offers and select the best price without visiting a dealership."
+            relatedTerms={["Car Buying Concierge", "Dealer Auction", "Reverse Auction", "Vehicle Pre-Qualification"]}
           />
           <CitationBlock
             id="how-autolenis-works"

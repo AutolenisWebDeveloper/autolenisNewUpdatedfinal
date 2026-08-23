@@ -58,7 +58,7 @@ export const entityGraphSchema: Record<string, unknown> = {
       },
       knowsAbout: [
         "Car Buying Concierge",
-        "Auto Broker Services",
+        "Automotive Buying Concierge",
         "Vehicle Pre-Qualification",
         "Dealer Auctions",
         "Automotive Finance",
@@ -84,7 +84,7 @@ export const entityGraphSchema: Record<string, unknown> = {
         "Fintech",
         "Automotive Finance",
         "Car Buying",
-        "Auto Broker Services",
+        "Automotive Buying Concierge",
         "Vehicle Marketplace Platforms",
       ],
       sameAs: [`${BASE}/about`],

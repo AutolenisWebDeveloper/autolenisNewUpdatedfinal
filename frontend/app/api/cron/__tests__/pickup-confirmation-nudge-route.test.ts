@@ -49,13 +49,13 @@ test("accepts a valid cron secret and returns the nudge counts", async () => {
   assert.equal(body.data.buyerNudged, 1);
 });
 
-test("accepts the Vercel cron header", async () => {
+test("rejects a spoofed x-vercel-cron header without the bearer secret", async () => {
   const GET = await loadGET();
   const res = await GET(
     new NextRequest("http://localhost/api/cron/pickup-confirmation-nudge", {
       headers: { "x-vercel-cron": "1" },
     }),
   );
-  assert.equal(res.status, 200);
-  assert.equal(runCalls, 1);
+  assert.equal(res.status, 401);
+  assert.equal(runCalls, 0);
 });

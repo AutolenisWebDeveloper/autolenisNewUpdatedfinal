@@ -4,12 +4,12 @@
 // follow-up touch and sends it, spacing sends ~1s apart to stay polite to the
 // Resend channel (the send service also enforces the platform rate limits).
 //
-// Auth: Vercel cron (x-vercel-cron header) OR a Bearer CRON_SECRET, matching
-// the convention used by the other /api/cron/* routes.
+// Auth: requires `Authorization: Bearer ${CRON_SECRET}` via authorizeCronRequest
+// (the shared cron-auth guard used by all /api/cron/* routes).
 
 import { logger } from "@/lib/logger";
+import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { NextRequest, NextResponse } from "next/server"
-import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants"
 import {
   findDealersDueForFollowup,
   sendFollowUp,
@@ -21,12 +21,8 @@ export const runtime = "nodejs"
 export const maxDuration = 300
 
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get(CRON_AUTH_HEADER)
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1"
-  const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`
-  if (!isVercelCron && !isValidSecret) {
-    return new NextResponse("Unauthorized", { status: 401 })
-  }
+  const cronAuth = authorizeCronRequest(request);
+  if (cronAuth) return cronAuth;
 
   const run = await withCronRun("dealer-followup", async () => {
   const due = await findDealersDueForFollowup()

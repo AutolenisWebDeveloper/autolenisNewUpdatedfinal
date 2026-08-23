@@ -1,11 +1,11 @@
 // WO-4 — Content publisher cron.
 // Publishes due, approved, validated buying-guide articles
-// (scheduledAt reached). Mirrors the social-publish-queue cron: CRON_SECRET /
-// x-vercel-cron auth, maxDuration, MAX_PER_RUN. Schedule: every 5 minutes.
+// (scheduledAt reached). Mirrors the social-publish-queue cron: Bearer
+// CRON_SECRET auth (authorizeCronRequest), maxDuration, MAX_PER_RUN. Schedule: every 5 minutes.
 
 import { logger } from "@/lib/logger";
+import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { NextRequest, NextResponse } from "next/server";
-import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { publishDueScheduled } from "@/lib/services/content/content-publishing.service";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
@@ -14,12 +14,8 @@ export const maxDuration = 300;
 const MAX_PER_RUN = 10;
 
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get(CRON_AUTH_HEADER);
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-  const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
-  if (!isVercelCron && !isValidSecret) {
-    return new NextResponse("Unauthorized", { status: 401 });
-  }
+  const cronAuth = authorizeCronRequest(request);
+  if (cronAuth) return cronAuth;
 
   const run = await withCronRun("content-publisher", () => publishDueScheduled(MAX_PER_RUN));
   if (!run.ok) return NextResponse.json({ success: false, error: "content-publisher_failed" }, { status: 500 });

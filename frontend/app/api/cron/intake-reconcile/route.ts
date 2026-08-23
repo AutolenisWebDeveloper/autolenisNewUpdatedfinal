@@ -13,8 +13,8 @@
 // coverage-gap intake (which still stamps intakeProcessedAt) is NOT re-driven.
 
 import { logger } from "@/lib/logger";
+import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { NextRequest, NextResponse } from "next/server";
-import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { inngest } from "@/lib/inngest/client";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
@@ -27,12 +27,8 @@ import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 const STUCK_INTAKE_THRESHOLD_MINUTES = 30;
 
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get(CRON_AUTH_HEADER);
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-  const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
-  if (!isVercelCron && !isValidSecret) {
-    return new NextResponse("Unauthorized", { status: 401 });
-  }
+  const cronAuth = authorizeCronRequest(request);
+  if (cronAuth) return cronAuth;
 
   const run = await withCronRun("intake-reconcile", async () => {
   const now = new Date();

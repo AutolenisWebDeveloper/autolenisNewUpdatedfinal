@@ -1,29 +1,42 @@
 "use client";
 
-// HeroLiveSignal — displays live buyer activity fetched from /api/public/platform-stats
-// Falls back to FALLBACK_BUYER_COUNT if the fetch fails or data is unavailable.
+// HeroLiveSignal — shows a genuinely live platform signal fetched from
+// /api/public/platform-stats. It renders ONLY a real value from the database.
+//
+// Phase 4 F1: the previous version substituted a hardcoded "12 buyers" whenever
+// the fetch failed or data was missing, and mislabeled `activeAuctions` as
+// "buyers". Both are fabrications/misstatements shown to real visitors. Now:
+//   - the value is the real `activeAuctions` count, labeled truthfully;
+//   - if the fetch fails, is loading, or the count is not a positive number,
+//     the component renders NOTHING (honest neutral state) — never a fake number.
 
 import { useEffect, useState } from "react";
 
-const FALLBACK_BUYER_COUNT = 12;
-
 export default function HeroLiveSignal() {
-  const [count, setCount] = useState<number | null>(null);
+  const [activeAuctions, setActiveAuctions] = useState<number | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     fetch("/api/public/platform-stats")
-      .then((r) => r.json())
-      .then((d: { success: boolean; data?: { activeAuctions?: number } }) => {
-        if (d.success && d.data?.activeAuctions != null) {
-          setCount(d.data.activeAuctions);
-        } else {
-          setCount(FALLBACK_BUYER_COUNT);
-        }
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { success?: boolean; data?: { activeAuctions?: number } } | null) => {
+        if (cancelled) return;
+        const n =
+          d?.success && typeof d.data?.activeAuctions === "number"
+            ? d.data.activeAuctions
+            : null;
+        setActiveAuctions(n);
       })
-      .catch(() => setCount(FALLBACK_BUYER_COUNT));
+      .catch(() => {
+        if (!cancelled) setActiveAuctions(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const displayCount = count ?? FALLBACK_BUYER_COUNT;
+  // Only surface the signal when there is a real, positive live count.
+  if (activeAuctions === null || activeAuctions <= 0) return null;
 
   return (
     <div className="mt-6 inline-flex items-center gap-2.5" data-testid="hero-live-signal">
@@ -32,7 +45,10 @@ export default function HeroLiveSignal() {
         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
       </span>
       <span className="text-xs text-[#4B5563]">
-        <span className="font-semibold text-[#111827]">{displayCount} buyers</span> currently comparing dealer offers
+        <span className="font-semibold text-[#111827]">
+          {activeAuctions} live {activeAuctions === 1 ? "auction" : "auctions"}
+        </span>{" "}
+        running right now
       </span>
     </div>
   );

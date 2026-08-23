@@ -67,15 +67,15 @@ test("rejects unauthorized requests without touching the DB", async () => {
   assert.equal(sent.length, 0);
 });
 
-test("accepts the Vercel cron header and the bearer secret", async () => {
+test("rejects a spoofed x-vercel-cron header; accepts the bearer secret", async () => {
   const GET = await loadGET();
-  assert.equal((await GET(req({ "x-vercel-cron": "1" }))).status, 200);
+  assert.equal((await GET(req({ "x-vercel-cron": "1" }))).status, 401);
   assert.equal((await GET(req({ authorization: "Bearer test-secret" }))).status, 200);
 });
 
 test("query targets intakeProcessedAt IS NULL + active VR status, bounded oldest-first", async () => {
   const GET = await loadGET();
-  await GET(req({ "x-vercel-cron": "1" }));
+  await GET(req({ authorization: "Bearer test-secret" }));
   assert.ok(findManyArgs, "findMany was called");
   const where = findManyArgs!.where as Record<string, unknown>;
 
@@ -103,7 +103,7 @@ test("query targets intakeProcessedAt IS NULL + active VR status, bounded oldest
 test("re-emits exactly one intake.process event per stuck row", async () => {
   stuckRows = [{ id: "opp_a" }, { id: "opp_b" }];
   const GET = await loadGET();
-  const res = await GET(req({ "x-vercel-cron": "1" }));
+  const res = await GET(req({ authorization: "Bearer test-secret" }));
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.data.found, 2);
@@ -117,7 +117,7 @@ test("re-emits exactly one intake.process event per stuck row", async () => {
 test("no stuck rows → nothing re-emitted", async () => {
   stuckRows = [];
   const GET = await loadGET();
-  const res = await GET(req({ "x-vercel-cron": "1" }));
+  const res = await GET(req({ authorization: "Bearer test-secret" }));
   const body = await res.json();
   assert.equal(body.data.found, 0);
   assert.equal(body.data.reEmitted, 0);

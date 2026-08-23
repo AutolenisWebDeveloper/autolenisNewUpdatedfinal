@@ -12,9 +12,9 @@
 // static images only and are never selected here.
 
 import { logger } from "@/lib/logger";
+import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { getServiceSupabase } from "@/lib/supabase-service";
 
 export const maxDuration = 300;
@@ -52,12 +52,8 @@ async function storeVideoInSupabase(videoUrl: string, postId: string): Promise<s
 export async function GET(request: NextRequest) {
   // Auth — Vercel cron header or the shared CRON_SECRET bearer (same pattern as
   // the other social crons).
-  const auth = request.headers.get(CRON_AUTH_HEADER);
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-  const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
-  if (!isVercelCron && !isValidSecret) {
-    return new NextResponse("Unauthorized", { status: 401 });
-  }
+  const cronAuth = authorizeCronRequest(request);
+  if (cronAuth) return cronAuth;
 
   if (!process.env.RUNWAY_API_KEY) {
     return NextResponse.json({

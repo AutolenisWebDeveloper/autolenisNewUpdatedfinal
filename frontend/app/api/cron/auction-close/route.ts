@@ -2,8 +2,8 @@
 // Closes expired auctions, triggers dealer invitation release, notifies buyers
 
 import { logger } from "@/lib/logger";
+import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { NextRequest, NextResponse } from "next/server";
-import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { closeExpiredAuctions, processAuctionClose } from "@/lib/services/auction/auction.service";
 import {
   sendDealerAuctionReminderEmail,
@@ -15,12 +15,8 @@ import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get(CRON_AUTH_HEADER);
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-  const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
-  if (!isVercelCron && !isValidSecret) {
-    return new NextResponse("Unauthorized", { status: 401 });
-  }
+  const cronAuth = authorizeCronRequest(request);
+  if (cronAuth) return cronAuth;
 
   const run = await withCronRun("auction-close", async () => {
   const now = new Date();
