@@ -9,17 +9,13 @@
 // Lives under /api/cron (CSRF-exempt, cron-secret enforced at the edge by
 // proxy.ts validateCronRequest); the handler re-checks the secret defensively.
 import { NextRequest, NextResponse } from "next/server";
-import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
+import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { ensureCurrentCycleLedger } from "@/lib/services/dealer-recruitment/apollo-credit-ledger.service";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get(CRON_AUTH_HEADER);
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-  const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
-  if (!isVercelCron && !isValidSecret) {
-    return new NextResponse("Unauthorized", { status: 401 });
-  }
+  const cronAuth = authorizeCronRequest(request);
+  if (cronAuth) return cronAuth;
 
   const run = await withCronRun("apollo-ledger-rollover", () => ensureCurrentCycleLedger(new Date()));
   if (!run.ok) {

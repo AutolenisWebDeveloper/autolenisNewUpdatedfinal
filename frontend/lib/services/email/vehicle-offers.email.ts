@@ -322,7 +322,7 @@ export async function sendDealerOfferConfirmation(params: {
     <h1 style="color:#111827;font-size:22px;font-weight:700;margin:0 0 8px">Thanks, ${escape(params.contactName)} — we got your offer</h1>
     <p style="color:#4B5563;font-size:14px;line-height:1.6;margin:0 0 16px">Your offer for the <strong>${escape(params.vehicleOfferLabel)}</strong> on behalf of <strong>${escape(params.dealershipName)}</strong> has been received.</p>
     <p style="color:#4B5563;font-size:14px;line-height:1.6;margin:0 0 12px">AutoLenis will review your offer and contact you within 24 hours.</p>
-    <p style="color:#94A3B8;font-size:12px;margin-top:16px"><em>Reminder: by submitting an offer, your dealership has agreed to pay AutoLenis a finder's fee upon successful completion of a sale. Fee terms will be confirmed in writing before deal finalization.</em></p>`;
+    <p style="color:#94A3B8;font-size:12px;margin-top:16px"><em>Reminder: by submitting an offer, your dealership has agreed to pay AutoLenis a referral fee upon successful completion of a sale. Fee terms will be confirmed in writing before deal finalization.</em></p>`;
   await sendRaw(params.to, "Your offer was received — AutoLenis", wrap(inner));
 }
 
@@ -489,8 +489,8 @@ export async function sendVehicleOfferInvitationEmail(params: {
     </div>
 
     <p style="color:#9CA3AF;font-size:11px;text-align:center;margin:16px 0 0;line-height:1.5">
-      AutoLenis is a licensed automotive buying concierge and broker.<br/>
-      A finder's fee applies upon successful completion of a sale.
+      AutoLenis is an automotive buying concierge platform — not a dealer, broker, lender, or party to the sale.<br/>
+      A referral fee applies upon successful completion of a sale.
     </p>`;
 
   await sendRaw(params.to, subject, wrap(inner));

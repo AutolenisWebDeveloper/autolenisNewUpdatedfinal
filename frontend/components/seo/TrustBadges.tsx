@@ -3,11 +3,13 @@
 
 import { ShieldCheck, BadgeCheck, Lock, Star } from "lucide-react";
 
+// Factual, substantiated signals only — no broker/licensure claim (AutoLenis is
+// not a broker) and no unsubstantiated rating (Phase 4 F2/F4).
 const BADGES = [
-  { Icon: ShieldCheck, label: "Licensed Auto Broker", color: "text-green-600" },
+  { Icon: ShieldCheck, label: "Buyer-First Marketplace", color: "text-green-600" },
   { Icon: BadgeCheck,  label: "Verified Dealer Network", color: "text-[#0B5FD1]" },
   { Icon: Lock,        label: "Stripe Secure Payments", color: "text-slate-600" },
-  { Icon: Star,        label: "4.9/5 Buyer Satisfaction", color: "text-amber-500" },
+  { Icon: Star,        label: "Fully Refundable Deposit", color: "text-amber-500" },
 ] as const;
 
 export default function TrustBadges({ compact = false }: { compact?: boolean }) {

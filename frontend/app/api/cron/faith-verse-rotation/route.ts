@@ -1,7 +1,8 @@
 import { logger } from "@/lib/logger";
+import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX, FAITH_VERSE_ENABLED_PAGES, FAITH_VERSE_ROTATION_WEEKS } from "@/lib/constants";
+import { FAITH_VERSE_ENABLED_PAGES, FAITH_VERSE_ROTATION_WEEKS } from "@/lib/constants";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 // Cron: /api/cron/faith-verse-rotation — Schedule: 1 6 * * 1 (Monday 12:01 AM CST)
@@ -10,12 +11,8 @@ import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 // Registered in vercel.json ✓
 
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get(CRON_AUTH_HEADER);
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-  const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
-  if (!isVercelCron && !isValidSecret) {
-    return new NextResponse("Unauthorized", { status: 401 });
-  }
+  const cronAuth = authorizeCronRequest(request);
+  if (cronAuth) return cronAuth;
 
   const run = await withCronRun("faith-verse-rotation", async () => {
   const now = new Date();

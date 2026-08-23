@@ -53,9 +53,17 @@ test("rejects unauthorized requests without running any snapshot", async () => {
   assert.equal(funnelCalls, 0);
 });
 
-test("accepts the Vercel cron header and runs BOTH the stats + funnel passes", async () => {
+test("rejects a spoofed x-vercel-cron header without the bearer secret", async () => {
   const GET = await loadGET();
   const res = await GET(req({ "x-vercel-cron": "1" }));
+  assert.equal(res.status, 401);
+  assert.equal(platformSnapshotCalls, 0);
+  assert.equal(funnelCalls, 0);
+});
+
+test("accepts the bearer secret and runs BOTH the stats + funnel passes", async () => {
+  const GET = await loadGET();
+  const res = await GET(req({ authorization: "Bearer test-secret" }));
   assert.equal(res.status, 200);
   assert.equal(platformSnapshotCalls, 1);
   assert.equal(funnelCalls, 1);

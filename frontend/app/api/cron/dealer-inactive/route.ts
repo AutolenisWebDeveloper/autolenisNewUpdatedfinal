@@ -9,8 +9,8 @@
 // runnable via authenticated GET.
 
 import { logger } from "@/lib/logger";
+import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { NextRequest, NextResponse } from "next/server";
-import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { emitDomainEvent } from "@/lib/events/emit";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
@@ -22,12 +22,8 @@ export const maxDuration = 180;
 const INACTIVITY_WINDOW_MS = 30 * 24 * 3600 * 1000;
 
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get(CRON_AUTH_HEADER);
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-  const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
-  if (!isVercelCron && !isValidSecret) {
-    return new NextResponse("Unauthorized", { status: 401 });
-  }
+  const cronAuth = authorizeCronRequest(request);
+  if (cronAuth) return cronAuth;
 
   const run = await withCronRun("dealer-inactive", async () => {
   const cutoff = new Date(Date.now() - INACTIVITY_WINDOW_MS);

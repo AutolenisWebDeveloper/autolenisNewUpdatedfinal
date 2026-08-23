@@ -334,6 +334,8 @@ export default function RequestVehicleFormClient() {
   // §5 Notes + consent
   const [notes, setNotes] = useState("");
   const [agreedToContact, setAgreedToContact] = useState(false);
+  // Explicit, optional TCPA SMS consent — persisted to consent_sms only when checked.
+  const [smsConsent, setSmsConsent] = useState(false);
 
   useEffect(() => {
     if (!preferredMake || preferredMake === "Other") {
@@ -487,6 +489,9 @@ export default function RequestVehicleFormClient() {
       }),
       notes: notes || undefined,
       agreedToContact: true as const,
+      // Persist the buyer's actual, explicit SMS consent (never inferred). The
+      // outbound-SMS gate reads consent_sms, so an unchecked box → no SMS.
+      consent_sms: smsConsent,
     };
   }
 
@@ -1550,7 +1555,9 @@ export default function RequestVehicleFormClient() {
                         />
                       </div>
 
-                      <label className="flex items-start gap-2 cursor-pointer select-none mb-4" data-testid="rv-consent-label">
+                      {/* Required: agree to be contacted about the request + accept the terms.
+                          This is NOT SMS-specific — SMS consent is separate and optional below. */}
+                      <label className="flex items-start gap-2 cursor-pointer select-none mb-3" data-testid="rv-consent-label">
                         <input
                           type="checkbox"
                           checked={agreedToContact}
@@ -1559,14 +1566,30 @@ export default function RequestVehicleFormClient() {
                           className="h-4 w-4 mt-0.5 rounded border-[#CBD5E1] text-[#0B5FD1] focus:ring-[#0B5FD1]/30"
                         />
                         <span className="text-xs text-[#64748B] leading-relaxed">
-                          I agree to receive SMS messages from AutoLenis regarding my vehicle request,
-                          dealer offers, financing updates, appointment reminders, and service-related
-                          communications. Message frequency varies. Message and data rates may apply.
-                          Reply STOP to opt out, HELP for assistance. Consent is not a condition of
-                          purchase. View our{" "}
+                          I agree to be contacted by AutoLenis about my vehicle request (by my chosen
+                          contact method and email) and I accept the{" "}
                           <a href="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Privacy Policy</a>
                           {" "}and{" "}
                           <a href="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-[#0B5FD1] hover:underline">Terms of Service</a>.
+                        </span>
+                      </label>
+
+                      {/* Optional, explicit TCPA SMS consent. Unchecked by default and NOT a
+                          condition of submitting — persists to consent_sms only when checked. */}
+                      <label className="flex items-start gap-2 cursor-pointer select-none mb-4" data-testid="rv-sms-consent-label">
+                        <input
+                          type="checkbox"
+                          checked={smsConsent}
+                          onChange={(e) => setSmsConsent(e.target.checked)}
+                          data-testid="rv-sms-consent-checkbox"
+                          className="h-4 w-4 mt-0.5 rounded border-[#CBD5E1] text-[#0B5FD1] focus:ring-[#0B5FD1]/30"
+                        />
+                        <span className="text-xs text-[#64748B] leading-relaxed">
+                          <span className="font-medium text-[#475569]">Optional:</span> I agree to
+                          receive recurring automated marketing and account text messages (SMS) from
+                          AutoLenis at the phone number I provided, including messages sent by an
+                          autodialer. Consent is not a condition of purchase. Message frequency varies;
+                          message &amp; data rates may apply. Reply STOP to opt out, HELP for help.
                         </span>
                       </label>
 

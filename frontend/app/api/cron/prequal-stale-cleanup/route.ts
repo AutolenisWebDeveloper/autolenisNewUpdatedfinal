@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
+import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/prisma";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
@@ -17,10 +17,8 @@ import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 // This cron is now observability only — it counts expired records so we can
 // alert on backlog, and never writes a `decision` value.
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get(CRON_AUTH_HEADER);
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-  const isValidSecret = auth === `${CRON_AUTH_PREFIX}${process.env.CRON_SECRET}`;
-  if (!isVercelCron && !isValidSecret) return new NextResponse("Unauthorized", { status: 401 });
+  const cronAuth = authorizeCronRequest(request);
+  if (cronAuth) return cronAuth;
 
   const run = await withCronRun("prequal-stale-cleanup", async () => {
   const expiredCount = await prisma.preQualification.count({

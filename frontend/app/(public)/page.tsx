@@ -7,7 +7,6 @@ import {
   DollarSign,
   Shield,
   ShieldCheck,
-  Star,
   User,
 } from "lucide-react";
 import StatsStrip from "@/components/public/StatsStrip";
@@ -58,12 +57,6 @@ const WHY_ITEMS = [
   { icon: Clock, title: "Smarter Financing", body: "Understand total cost of ownership — not just the monthly payment. We help you see the full financial picture." },
 ];
 
-const TESTIMONIALS = [
-  { name: "Marcus T.", location: "Atlanta, GA", tag: "Saved $2,100", text: "I had 5 offers in my inbox by 6am. Never set foot in a dealership. AutoLenis paid for itself before I even picked up the car.", rating: 5 },
-  { name: "Priya S.", location: "Dallas, TX", tag: "Saved 8 Hours", text: "The Contract Shield caught a $400 documentation fee buried in the paperwork. I saved 8+ hours of back-and-forth and got a better deal.", rating: 5 },
-  { name: "David R.", location: "Chicago, IL", tag: "Better APR Found", text: "I was skeptical this could really work. My dealer financing was 7.9%. AutoLenis found me 5.4%. This is how buying a car should work.", rating: 5 },
-];
-
 const FAQ_ITEMS = [
   {
     q: "Does prequalification hurt credit?",
@@ -86,8 +79,6 @@ const FAQ_ITEMS = [
     a: "Yes, completely. Pre-qualification, offer selection, financing, e-signing, and delivery coordination — 100% remote. No dealership visit required.",
   },
 ];
-
-const PRESS_LOGOS = ["Forbes", "Business Insider", "TechCrunch", "Automotive News", "NerdWallet"];
 
 export default function HomePage() {
   return (
@@ -238,22 +229,6 @@ function HomePageBody() {
         </div>
       </section>
 
-      {/* ── SECTION 2.5: PRESS / CREDIBILITY BAR ────────────────────────── */}
-      <section data-testid="press-bar">
-        <div className="border-y border-[#E5E7EB] bg-[#F8F9FB] py-7">
-          <div className="mx-auto max-w-7xl px-6 md:px-12">
-            <p className="text-center text-xs font-semibold uppercase tracking-[0.15em] text-[#9CA3AF] mb-5">As Seen In</p>
-            <div className="flex flex-wrap items-center justify-center gap-10 grayscale opacity-50">
-              {PRESS_LOGOS.map((name) => (
-                <span key={name} className="text-sm font-bold text-[#6B7280] tracking-tight">
-                  {name}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* ── SECTION 3: STATS STRIP ───────────────────────────────────────── */}
       <StatsStrip />
 
@@ -329,43 +304,6 @@ function HomePageBody() {
       {/* ── SECTION 7: PAYMENT CALCULATOR ───────────────────────────────── */}
       <SavingsCalculator />
 
-      {/* ── SECTION 8: SOCIAL PROOF / TESTIMONIALS ──────────────────────── */}
-      <section className="py-24 md:py-32 bg-white" data-testid="testimonials-section">
-        <div className="mx-auto max-w-7xl px-6 md:px-12">
-          <div className="mb-14 text-center">
-            <span className="text-xs font-bold uppercase tracking-[0.15em] text-[#0B5FD1]">Buyer Stories</span>
-            <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#111827] mt-3">
-              Real Buyers. Real Savings.
-            </h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {TESTIMONIALS.map((t) => (
-              <article
-                key={t.name}
-                data-testid={`testimonial-${t.name.toLowerCase().replace(/\s+/, "-")}`}
-                className="bg-[#F8F9FB] border border-[#E5E7EB] rounded-2xl p-8 hover:border-[#0B5FD1]/30 hover:shadow-sm transition-all"
-              >
-                <div className="flex gap-0.5 mb-5">
-                  {Array.from({ length: t.rating }).map((_, i) => (
-                    <Star key={i} size={13} className="fill-amber-400 text-amber-400" />
-                  ))}
-                </div>
-                <p className="text-[#4B5563] text-sm leading-relaxed mb-7 italic">&ldquo;{t.text}&rdquo;</p>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-bold text-[#111827] text-sm">{t.name}</p>
-                    <p className="text-xs text-[#94A3B8]">{t.location}</p>
-                  </div>
-                  <span className="text-xs font-semibold text-[#0B5FD1] bg-[#EEF4FF] border border-[#BFDBFE] px-2.5 py-1 rounded-md">
-                    {t.tag}
-                  </span>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* ── SECTION 9: COMPARISON TABLE ─────────────────────────────────── */}
       <ComparisonTable />
 
@@ -393,7 +331,7 @@ function HomePageBody() {
             Your Next Car Should Be a Smart Decision
           </h2>
           <p className="text-white/70 mb-10 max-w-lg mx-auto leading-relaxed">
-            Join 3,200+ buyers choosing a more intelligent way to purchase vehicles.
+            Choose a more intelligent way to purchase your next vehicle.
           </p>
           <div className="flex flex-wrap gap-4 justify-center">
             <Link

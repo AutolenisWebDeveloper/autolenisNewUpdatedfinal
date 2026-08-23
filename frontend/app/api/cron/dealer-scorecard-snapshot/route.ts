@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/prisma";
 import { computeDealerScorecard } from "@/lib/services/dealer/dealer-scorecard.service";
-import { CRON_AUTH_HEADER, CRON_AUTH_PREFIX } from "@/lib/constants";
 import { sendDealerWeeklyScorecardEmail } from "@/lib/services/email/resend.service";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
@@ -20,14 +20,8 @@ function isoWeekKey(d: Date): string {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = request.headers.get(CRON_AUTH_HEADER);
-  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
-  const isValidSecret =
-    !!auth && auth.startsWith(CRON_AUTH_PREFIX) &&
-    auth.slice(CRON_AUTH_PREFIX.length) === process.env.CRON_SECRET;
-  if (!isVercelCron && !isValidSecret) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const cronAuth = authorizeCronRequest(request);
+  if (cronAuth) return cronAuth;
   const run = await withCronRun("dealer-scorecard-snapshot", async () => {
   const dealers = await prisma.dealer.findMany({
     where: { status: "ACTIVE" },

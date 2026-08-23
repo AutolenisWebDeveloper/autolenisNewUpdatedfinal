@@ -643,26 +643,6 @@ export default function LandingPageClient({
                     </div>
                   ))}
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex -space-x-2">
-                    {["S", "M", "J", "A"].map((c) => (
-                      <div
-                        key={c}
-                        className="w-8 h-8 rounded-full bg-gradient-to-br from-[#0B5FD1] to-[#0944a8] border-2 border-white flex items-center justify-center text-white text-[11px] font-black"
-                      >
-                        {c}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <Star key={i} size={13} className="text-amber-400 fill-amber-400" />
-                    ))}
-                    <span className="ml-1.5 text-xs font-semibold text-slate-600">
-                      4.9 / 5 from 1,200+ buyers
-                    </span>
-                  </div>
-                </div>
               </div>
 
               {/* Right — form card */}
