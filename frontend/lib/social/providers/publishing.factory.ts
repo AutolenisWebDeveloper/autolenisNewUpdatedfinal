@@ -1,55 +1,50 @@
 // AutoLenis Social Engine — Publishing provider factory.
 //
-// Returns the right publishing provider for a platform. Each platform prefers
-// its own direct API when the corresponding access token is configured, and
-// falls back to Buffer otherwise:
-//   - facebook / instagram → Meta Graph API (META_ACCESS_TOKEN) else Buffer
-//   - tiktok               → TikTok Content API (TIKTOK_ACCESS_TOKEN) else Buffer
-//   - linkedin             → LinkedIn v2 API (LINKEDIN_ACCESS_TOKEN) else Buffer
-//   - youtube / unknown    → Buffer
+// Returns the right publishing provider for a platform. Each retained platform
+// publishes through its own DIRECT API when the corresponding access token is
+// configured; when it isn't, the caller gets a no-op provider that fails
+// EXPLICITLY (success:false) — it never silently succeeds and never falls back to
+// a third party:
+//   - facebook / instagram → Meta Graph API (META_ACCESS_TOKEN) else explicit fail
+//   - tiktok               → TikTok Content API (TIKTOK_ACCESS_TOKEN) else explicit fail
+//   - linkedin             → LinkedIn v2 API (LINKEDIN_ACCESS_TOKEN) else explicit fail
+//   - youtube              → YouTubeProvider: analytics only (Data API). Publishing
+//                            was Buffer-only and has been RETIRED — publish fails
+//                            explicitly (no direct YouTube publish surface).
+//   - unknown              → explicit fail
 //
-// Buffer self-gates on ENABLE_BUFFER_PUBLISHING + BUFFER_API_KEY and skips
-// gracefully when unconfigured, so callers never branch on config.
+// Buffer has been retired: there is no third-party publishing fallback. A channel
+// without a configured direct token surfaces a truthful failure rather than a
+// silent hand-off.
 
-import { ENABLE_PUBLISHING } from "@/lib/social/config";
 import {
   NoopPublishingProvider,
   type PublishingProvider,
 } from "@/lib/social/providers/publishing.provider";
-import { BufferProvider } from "@/lib/social/providers/buffer.provider";
 import { LinkedInProvider } from "@/lib/social/providers/linkedin.provider";
 import { MetaProvider } from "@/lib/social/providers/meta.provider";
 import { TikTokProvider } from "@/lib/social/providers/tiktok.provider";
 import { YouTubeProvider } from "@/lib/social/providers/youtube.provider";
 
-// Buffer when enabled + configured, otherwise a no-op so callers never branch.
-function bufferOrNoop(): PublishingProvider {
-  if (ENABLE_PUBLISHING && process.env.BUFFER_API_KEY) {
-    return new BufferProvider();
-  }
-  return new NoopPublishingProvider();
-}
-
 export function getPublishingProvider(platform?: string): PublishingProvider {
   switch (platform?.toLowerCase()) {
     case "facebook":
     case "instagram":
-      return process.env.META_ACCESS_TOKEN ? new MetaProvider() : bufferOrNoop();
+      // Meta Graph API when configured; otherwise an explicit, non-fabricated failure.
+      return process.env.META_ACCESS_TOKEN ? new MetaProvider() : new NoopPublishingProvider();
     case "tiktok":
-      return process.env.TIKTOK_ACCESS_TOKEN ? new TikTokProvider() : bufferOrNoop();
+      return process.env.TIKTOK_ACCESS_TOKEN ? new TikTokProvider() : new NoopPublishingProvider();
     case "linkedin":
-      // Try LinkedIn direct when a token is configured. The provider fails
-      // cleanly (no retry) when its token can't author the post — e.g. a 403 on
-      // /author because the token lacks org scope — so the publish queue falls
-      // back to Buffer (BUFFER_PROFILE_LINKEDIN) on the next pass.
-      return process.env.LINKEDIN_ACCESS_TOKEN ? new LinkedInProvider() : bufferOrNoop();
+      // LinkedIn direct when a token is configured. The provider fails cleanly
+      // (no retry) when its token can't author the post — there is no longer a
+      // Buffer fallback, so that failure is final and surfaced to the admin.
+      return process.env.LINKEDIN_ACCESS_TOKEN ? new LinkedInProvider() : new NoopPublishingProvider();
     case "youtube":
-      // YouTube publishes via Buffer (delegated internally by YouTubeProvider)
-      // while analytics read from the YouTube Data API. The provider degrades
-      // gracefully when YOUTUBE_API_KEY / Buffer config is missing.
+      // Analytics read from the YouTube Data API; publishing (formerly delegated
+      // to Buffer) is retired and fails explicitly inside YouTubeProvider.
       return new YouTubeProvider();
     default:
-      // Unknown platforms publish via Buffer.
-      return bufferOrNoop();
+      // Unknown platforms have no publish surface — fail explicitly.
+      return new NoopPublishingProvider();
   }
 }

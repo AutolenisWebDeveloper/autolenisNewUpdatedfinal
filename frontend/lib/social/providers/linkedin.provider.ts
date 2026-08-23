@@ -2,8 +2,8 @@
 //
 // Publishes text posts to the AutoLenis LinkedIn company page via the LinkedIn
 // v2 ugcPosts API. Used by the publishing factory for the `linkedin` platform
-// when LINKEDIN_ACCESS_TOKEN is configured; all other platforms fall back to
-// Buffer.
+// when LINKEDIN_ACCESS_TOKEN is configured; when it is not, the factory returns
+// an explicit-failure no-op (Buffer, the former fallback, has been retired).
 //
 // Token expires ~Aug 8 2026. Rotate via
 // linkedin.com/developers/tools/oauth/token-generator
@@ -40,7 +40,7 @@ export class LinkedInProvider implements PublishingProvider {
   // token carries `w_member_social` (person posting only), not
   // `w_organization_social`, so we must author as the member — not the company
   // organization — or LinkedIn rejects /author with HTTP 403. Returns undefined
-  // when the lookup fails so the caller can fall back to Buffer.
+  // when the lookup fails so the caller reports an explicit failure.
   private async getMemberSub(token: string): Promise<string | undefined> {
     try {
       const res = await providerFetch(LINKEDIN_USERINFO_URL, {
@@ -73,13 +73,13 @@ export class LinkedInProvider implements PublishingProvider {
     }
 
     // Author as the member (person URN). If userinfo fails the token can't
-    // resolve a usable author, so fail cleanly and let the queue fall back to
-    // Buffer (BUFFER_PROFILE_LINKEDIN).
+    // resolve a usable author, so fail cleanly — there is no fallback (Buffer
+    // retired); the publish queue surfaces this failure to the admin.
     const sub = await this.getMemberSub(token);
     if (!sub) {
       return {
         success: false,
-        error: "LinkedIn token lacks org scope — use Buffer",
+        error: "LinkedIn token lacks the scope to resolve a post author (userinfo failed)",
         provider: this.name,
       };
     }

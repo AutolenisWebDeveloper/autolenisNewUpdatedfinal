@@ -84,8 +84,10 @@ export interface PublishingProvider {
   getAnalytics(platformPostId: string, platform?: string): Promise<PostAnalyticsResult>;
 }
 
-// No-op provider — logs but never calls an external API. Selected when
-// publishing is disabled or BUFFER_API_KEY is unset.
+// No-op provider — logs but never calls an external API, and always returns an
+// EXPLICIT failure (success:false), never a fabricated success. The factory
+// selects it for a retained channel with no configured direct token and for
+// unknown platforms (Buffer, the former fallback, has been retired).
 export class NoopPublishingProvider implements PublishingProvider {
   readonly name = "noop";
 

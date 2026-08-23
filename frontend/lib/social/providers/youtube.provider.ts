@@ -1,9 +1,13 @@
 // AutoLenis Social Engine — YouTube provider.
 //
-// Publishing is delegated to Buffer (YouTube has no first-party publish surface
-// wired up here). Analytics read from the YouTube Data API v3 (public stats via
-// YOUTUBE_API_KEY) with optional richer watch-time + completion metrics from the
-// YouTube Analytics API when an OAuth token (YOUTUBE_OAUTH_TOKEN) is present.
+// Publishing has been RETIRED: it was previously delegated to Buffer (YouTube has
+// no first-party publish surface wired up here), and Buffer is gone. The publish
+// methods now fail EXPLICITLY (success:false) — no fabricated success, no
+// third-party hand-off. Per the owner decision, no YouTube publish replacement is
+// built. Analytics are UNAFFECTED and still read from the YouTube Data API v3
+// (public stats via YOUTUBE_API_KEY) with optional richer watch-time + completion
+// metrics from the YouTube Analytics API when an OAuth token (YOUTUBE_OAUTH_TOKEN)
+// is present.
 //
 // Graceful degradation:
 //   - YOUTUBE_API_KEY unset           → zeros
@@ -23,7 +27,11 @@ import type {
   PostStatusResult,
   PostAnalyticsResult,
 } from "@/lib/social/providers/publishing.provider";
-import { BufferProvider } from "@/lib/social/providers/buffer.provider";
+
+// YouTube auto-publishing was Buffer-only and has been retired. Every publish
+// path returns this explicit failure so a caller never mistakes it for success.
+const PUBLISH_RETIRED =
+  "YouTube publishing has been retired (was Buffer-only); no direct YouTube publish surface is configured";
 
 const YOUTUBE_DATA_API = "https://www.googleapis.com/youtube/v3/videos";
 const YOUTUBE_ANALYTICS_API = "https://youtubeanalytics.googleapis.com/v2/reports";
@@ -39,19 +47,17 @@ function parseIso8601Duration(iso: string): number {
 export class YouTubeProvider implements PublishingProvider {
   readonly name = "youtube";
 
-  // YouTube publishing is handled through Buffer. Instantiate once and delegate.
-  private readonly buffer = new BufferProvider();
-
-  async schedulePost(input: SchedulePostInput): Promise<PublishResult> {
-    return this.buffer.schedulePost(input);
+  // Publishing retired with Buffer — fail explicitly (never fabricate success).
+  async schedulePost(_input: SchedulePostInput): Promise<PublishResult> {
+    return { success: false, error: PUBLISH_RETIRED, provider: this.name };
   }
 
-  async publishNow(input: PublishPostInput): Promise<PublishResult> {
-    return this.buffer.publishNow(input);
+  async publishNow(_input: PublishPostInput): Promise<PublishResult> {
+    return { success: false, error: PUBLISH_RETIRED, provider: this.name };
   }
 
   async getPostStatus(platformPostId: string): Promise<PostStatusResult> {
-    return this.buffer.getPostStatus(platformPostId);
+    return { platformPostId, status: "unknown", error: PUBLISH_RETIRED };
   }
 
   async getAnalytics(videoId: string): Promise<PostAnalyticsResult> {

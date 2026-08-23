@@ -27,7 +27,6 @@ const OverviewTab = lazy(() => import("./tabs/OverviewTab"));
 const CalendarTab = lazy(() => import("./tabs/CalendarTab"));
 const PendingTab = lazy(() => import("./tabs/PendingTab"));
 const QueueTab = lazy(() => import("./tabs/QueueTab"));
-const BufferTab = lazy(() => import("./tabs/BufferTab"));
 const MediaTab = lazy(() => import("./tabs/MediaTab"));
 const PerformanceTab = lazy(() => import("./tabs/PerformanceTab"));
 const AnalyticsTab = lazy(() => import("./tabs/AnalyticsTab"));
@@ -46,7 +45,6 @@ const TABS = [
   { key: "calendar", label: "Content Calendar", icon: Calendar },
   { key: "pending", label: "Pending Review", icon: ClipboardCheck },
   { key: "queue", label: "Publishing Queue", icon: Send },
-  { key: "buffer", label: "Buffer Posts", icon: Radio },
   { key: "media", label: "Media", icon: Film },
   { key: "performance", label: "Performance", icon: BarChart2 },
   { key: "analytics", label: "Analytics", icon: TrendingUp },
@@ -64,13 +62,11 @@ export default function SocialDashboardClient({
   franchises,
   platformConnections,
   videoEnabled,
-  publishingEnabled,
 }: {
   automationMode: AutomationMode;
   franchises: FranchiseRow[];
   platformConnections: PlatformConnection[];
   videoEnabled: boolean;
-  publishingEnabled: boolean;
 }) {
   const [tab, setTab] = useState<TabKey>("overview");
   const [stats, setStats] = useState<Stats | null>(null);
@@ -166,7 +162,6 @@ export default function SocialDashboardClient({
         {tab === "calendar" && <CalendarTab onOpenPost={setDrawerPost} showToast={showToast} />}
         {tab === "pending" && <PendingTab onOpenPost={setDrawerPost} onChanged={loadStats} showToast={showToast} />}
         {tab === "queue" && <QueueTab onOpenPost={setDrawerPost} onChanged={loadStats} showToast={showToast} />}
-        {tab === "buffer" && <BufferTab showToast={showToast} />}
         {tab === "media" && <MediaTab showToast={showToast} />}
         {tab === "performance" && <PerformanceTab stats={stats} onOpenPost={setDrawerPost} showToast={showToast} />}
         {tab === "analytics" && <AnalyticsTab showToast={showToast} />}
@@ -180,7 +175,6 @@ export default function SocialDashboardClient({
             franchises={franchises}
             platformConnections={platformConnections}
             videoEnabled={videoEnabled}
-            publishingEnabled={publishingEnabled}
             showToast={showToast}
           />
         )}

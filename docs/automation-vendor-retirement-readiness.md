@@ -256,36 +256,81 @@ delete/disconnect in this run.**
 
 ---
 
-## Buffer — real social infra · retirement readiness
+## Buffer — RETIRED FROM THE BRANCH (owner decision) · BUFFER-REMOVAL-READY
 
-**What it is.** A full `PublishingProvider` against Buffer's GraphQL API
-(`lib/social/providers/buffer.provider.ts`, Bearer `BUFFER_API_KEY`) plus an admin
-management surface (list/edit/duplicate/delete). Provider selection
-(`publishing.factory.ts`): Facebook/Instagram → `MetaProvider` if `META_ACCESS_TOKEN`
-else Buffer; TikTok → `TikTokProvider` if `TIKTOK_ACCESS_TOKEN` else Buffer; LinkedIn →
-`LinkedInProvider` if `LINKEDIN_ACCESS_TOKEN` else Buffer; **YouTube → always delegates to
-Buffer (no first-party publish surface); default/unknown → Buffer.** Publishing is
-**disabled by default** (`ENABLE_BUFFER_PUBLISHING`, ships empty → `NoopPublishingProvider`
-returns "publishing disabled").
+**Owner decision (given):** Buffer is being retired; the Buffer-backed YouTube publishing
+capability is dropped; no YouTube replacement and no speculative direct-publishing
+infrastructure are to be built.
 
-**What actually publishes.** The `social-publish-queue` cron (every 5m) selects due
-`APPROVED`/`SCHEDULED` `SocialPost` rows across tiktok/instagram/facebook/youtube/linkedin
-and calls `publishApprovedPost` (atomic row claim). Direct-platform providers
-(Meta Graph API, TikTok Content Posting API, LinkedIn ugcPosts) **supersede Buffer when
-their token is set** — but they publish immediately (no native scheduling; AutoLenis's own
-DB+cron handles future scheduling). **YouTube has NO in-repo direct publisher** — retiring
-Buffer removes the only YouTube publish surface, and Buffer is the universal fallback for
-every platform when direct tokens are absent.
+**What it was.** A full `PublishingProvider` against Buffer's GraphQL API
+(`lib/social/providers/buffer.provider.ts`, Bearer `BUFFER_API_KEY`, `fetch`-based — **no
+npm dependency**) + an admin management surface (list/edit/duplicate/delete + a
+connection-test endpoint + a "Buffer Posts" dashboard tab). In the old
+`publishing.factory.ts`, Buffer was the universal fallback for every platform when its
+direct token was absent, and the SOLE publish surface for YouTube and unknown platforms.
+`ENABLE_BUFFER_PUBLISHING` gated ONLY that Buffer fallback — the direct providers
+(Meta/TikTok/LinkedIn) were, and remain, gated solely by the presence of their own access
+token.
 
-**VERDICT — Buffer:** **PARITY-NOT-JUSTIFIED (keep / document, do not build speculative
-social infra).** Direct-platform parity already exists for FB/IG/TikTok/LinkedIn; replacing
-Buffer would require net-new YouTube upload OAuth+resumable-upload infrastructure plus
-re-implementing provider-native scheduling and the admin management surface — speculative
-work with no clear economic justification given Buffer ships gated-off. Recommend
-**documenting** Buffer as (a) the YouTube publish surface and (b) the universal fallback,
-rather than retiring it. **OWNER-CHECK:** whether prod sets `ENABLE_BUFFER_PUBLISHING=true`
-and which of `META_/TIKTOK_/LINKEDIN_ACCESS_TOKEN` are set — that determines how much live
-traffic flows through Buffer vs direct APIs today.
+**Branch changes made this run (repository preparation — NOT a production disconnect):**
+- **Deleted** `lib/social/providers/buffer.provider.ts` and its two tests
+  (`buffer-provider.test.ts`, `buffer-verify.test.ts`).
+- **`publishing.factory.ts` rewritten** with no Buffer: FB/IG→Meta, TikTok→TikTok,
+  LinkedIn→LinkedIn when the direct token is set; **otherwise an explicit-failure
+  `NoopPublishingProvider` (`success:false`)** — never a fabricated success, never a
+  third-party fallback. YouTube→`YouTubeProvider` (analytics only). Unknown→explicit fail.
+- **`youtube.provider.ts`**: publish/schedule/status now return an **explicit
+  "publishing retired" failure**; the YouTube **Data-API analytics are retained and
+  unchanged** (they never used Buffer).
+- **`config.ts`**: removed the now-dead `ENABLE_PUBLISHING` (`ENABLE_BUFFER_PUBLISHING`)
+  export — no remaining consumer. Direct-publisher gating (token presence) is UNCHANGED,
+  so no retained channel is silently disabled.
+- **Admin API deleted:** `app/api/admin/social/buffer/**` (posts list/edit/delete/
+  duplicate) and `connections/buffer-test`. **`connections/route.ts`** reshaped to report
+  direct-token status (`meta`/`tiktok`/`linkedin`/`runway`) instead of Buffer profiles.
+  **`posts/[postId]/publish`** error hint de-Bufferized.
+- **Admin UI:** removed the "Buffer Posts" tab (`tabs/BufferTab.tsx` deleted),
+  de-Bufferized `SettingsTab`, repointed `page.tsx` platform-connection indicators to the
+  direct tokens (YouTube shown as no-longer-publishable), and dropped `BufferTestResult` /
+  the `buffer` connection field from `_shared/types.ts`.
+- **Regression test added** (`lib/social/__tests__/publishing-factory.test.ts`): proves
+  retained channels select their direct provider when configured, fail explicitly when
+  not, YouTube publishing is retired while analytics degrade truthfully, and **no source
+  references the deleted Buffer module**.
+
+**What breaks when Buffer disappears — and how it now behaves (truthfully):**
+- **YouTube auto-publishing** — the only Buffer-exclusive capability — is gone; publish
+  attempts fail explicitly. Analytics unaffected. (Owner accepted.)
+- **A channel with NO direct token** (FB/IG without `META_ACCESS_TOKEN`, etc.) no longer
+  silently routes through Buffer; the publish queue records an explicit failure. Retained
+  channels **with** their direct token are unaffected.
+- **`social-status-sync`** (which polled the no-arg default provider = Buffer) degrades to
+  a safe no-op: direct providers publish synchronously, so there is no Buffer
+  schedule-then-send state left to poll. No crash, no fabricated transition.
+
+**No retained functionality silently depends on Buffer:** direct FB/IG/TikTok/LinkedIn
+publishing (token-gated), YouTube analytics (Data API), the social generation/calendar/
+queue/analytics pipeline, and all admin auth are preserved and covered by the regression
+test + the full gates.
+
+**VERDICT — Buffer: `BUFFER-REMOVAL-READY`.** The branch compiles and passes the full
+gates with Buffer entirely removed and retained channels failing explicitly rather than
+falling back. The only remaining steps are the owner-gated EXTERNAL actions below.
+
+**Owner-gated EXTERNAL teardown checklist (NOT executed — no deploy, no disconnect):**
+1. Merge + deploy this branch (activates the Buffer-free code; see the cumulative
+   deployment review).
+2. In Vercel, remove the Buffer env vars from all environments: `BUFFER_API_KEY`,
+   `BUFFER_ORGANIZATION_ID`, `BUFFER_GRAPHQL_URL`, `BUFFER_PROFILE_FACEBOOK/INSTAGRAM/
+   TIKTOK/YOUTUBE/LINKEDIN`, `ENABLE_BUFFER_PUBLISHING`. (Removing them is a no-op for the
+   new code — it reads none of them — but they should not linger.)
+3. Revoke the Buffer API token in the Buffer dashboard; disconnect the Buffer account.
+4. Cancel the Buffer subscription.
+5. (Optional product decision, out of scope here) drop `youtube` from
+   `DAILY_POST_TARGETS.platforms` / `PLATFORM_POST_TIMES` if you don't want the generator
+   producing YouTube posts that can no longer auto-publish. Left unchanged this run to
+   avoid an unrequested content-plan change; YouTube analytics stay useful for any
+   externally-published content.
 
 ---
 
@@ -296,7 +341,9 @@ traffic flows through Buffer vs direct APIs today.
 | **QStash** | n/a (LIVE) | Consumers send notifications; no money mutation | Vercel-Cron+Postgres substrate (proven) | **All 4 non-deal jobs parity BUILT+DORMANT; 12 deal/coupled jobs DEFERRED (mapped)** |
 | **Make.com** | Yes | No | `WorkflowEngine` + `/api/crm/dispatch/*` (flag-gated) | **Ready-to-retire · OWNER-CHECK prod flags** |
 | **GHL** | Yes | No (`void`, `.catch`) | contacts/lifecycle/timeline/tags via `emitDomainEvent` | **Ready-to-retire · OWNER-CHECK GHL automations** |
-| **Buffer** | Yes (Noop provider) | Publish outcome consumed; self-heals to FAILED/retry | Partial — direct FB/IG/TikTok/LinkedIn; **no direct YouTube** | **Parity-not-justified (keep/document) · OWNER-CHECK prod tokens** |
+| **Buffer** | n/a (removed) | Publish outcome consumed; retained channels now fail explicitly | Direct FB/IG/TikTok/LinkedIn (token-gated); YouTube analytics only | **`BUFFER-REMOVAL-READY` — removed from the branch; owner-gated external teardown only** |
 
-**No production side effects were produced generating this assessment, and no vendor
-config, route, key, package, or subscription was changed.**
+**No production side effects were produced by this work. QStash/Make/GHL vendor config,
+routes, keys, and subscriptions were NOT changed. Buffer was removed from the BRANCH ONLY
+(repository preparation) — no production deploy, no env change, no token revocation, no
+account disconnect, no subscription cancellation was performed.**
