@@ -103,7 +103,7 @@ export async function sendEnvelope(dealId: string): Promise<void> {
 // mock/unconfigured path (no real envelope to fetch). Throws on a real fetch /
 // upload failure so the caller can log it and leave documentKey null (the buyer
 // download route then 404s gracefully until a later run populates it).
-async function retrieveAndStoreSignedContract(
+export async function retrieveAndStoreSignedContract(
   docusignEnvelopeId: string,
   dealId: string,
 ): Promise<string | null> {

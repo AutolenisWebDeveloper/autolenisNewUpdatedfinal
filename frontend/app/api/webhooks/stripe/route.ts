@@ -14,6 +14,7 @@ import { walkCommissionTree } from "@/lib/services/affiliate/commission.service"
 import { launchAuction } from "@/lib/services/auction/auction.service";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
+import { writeServiceFeePayment } from "@/lib/services/deal/service-fee.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { dispatch } from "@/lib/qstash/dispatch";
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
@@ -278,6 +279,15 @@ export async function POST(request: NextRequest) {
               // Already at/after INSURANCE_PENDING — record fee fields, do not regress status.
               await prisma.deal.update({ where: { id: feeDeal.id }, data: feeData });
             }
+
+            // Ledger completeness: write the ServiceFeePayment row (the only
+            // writer — recordFeePayment was dead, so service_fee_payments never
+            // populated even after a real fee). Idempotent on dealId; best-effort
+            // so a ledger-row failure never rolls back the already-committed fee
+            // receipt / status advance above.
+            await writeServiceFeePayment(feeDeal.id, pi.id).catch((err) =>
+              logger.error("[stripe-webhook] service fee payment record failed:", err),
+            );
           }
 
           // Send the buyer a confirmation that their service fee was received.
