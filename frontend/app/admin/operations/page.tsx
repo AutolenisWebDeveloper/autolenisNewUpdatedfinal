@@ -157,9 +157,9 @@ export default async function OperationsPage({
       <section className={SECTION_CLASS}>
         <header className="flex items-center justify-between border-b border-[var(--crm-border)] crm-hairline px-5 py-4">
           <div>
-            <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Dead letter queue</h2>
+            <h2 className="text-[13px] font-medium text-[var(--crm-text-primary)]">Job dead-letter queue</h2>
             <p className="mt-0.5 text-[12px] text-[var(--crm-text-tertiary)]">
-              Inngest jobs that exhausted their retry budget. Retrying re-emits the original event.
+              Automation jobs that exhausted their retry budget. Retrying re-drives the job to its internal owner.
             </p>
           </div>
           <span className="text-[12px] text-[var(--crm-text-tertiary)]">

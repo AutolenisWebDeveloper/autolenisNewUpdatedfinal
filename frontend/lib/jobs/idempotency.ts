@@ -1,12 +1,10 @@
 // Transport-agnostic job idempotency + dead-letter primitives.
 //
-// These are DB-backed (Supabase, service role) and have NO dependency on Inngest,
-// QStash, or any other runtime — they read/write the existing `idempotency_keys`
-// and `jobs_dead_letter` tables (migrations/01). They were previously defined in
-// `lib/inngest/idempotency.ts`; they now live here so an internal Vercel-Cron /
-// Postgres execution path (e.g. buyer-intake) can reuse them without importing
-// anything under `lib/inngest`. `lib/inngest/idempotency.ts` re-exports them so
-// every existing caller keeps working unchanged.
+// These are DB-backed (Supabase, service role) and have NO dependency on any
+// external job runtime — they read/write the existing `idempotency_keys` and
+// `jobs_dead_letter` tables (migrations/01). This module is the single canonical
+// home for these primitives; the internal Vercel-Cron / Postgres execution paths
+// import them directly from here.
 //
 // No forked idempotency table, no second dead-letter table, no new runtime.
 
