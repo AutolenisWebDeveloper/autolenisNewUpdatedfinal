@@ -7,6 +7,9 @@ export const FLAGS = {
   TRADE_IN_ENABLED: "trade_in_enabled",
   INSURANCE_MOCK: "insurance_mock",
   SYSTEM_4C_ENABLED: "system_4c_enabled",
+  // Batch 2 — hard-block dealer activation until agreement signed + license
+  // verified. DEFAULT OFF (no FeatureFlag row → getFeatureFlag returns false).
+  DEALER_ACTIVATION_GATE: "dealer_activation_gate",
 } as const;
 
 export async function isEnabled(flag: string): Promise<boolean> {

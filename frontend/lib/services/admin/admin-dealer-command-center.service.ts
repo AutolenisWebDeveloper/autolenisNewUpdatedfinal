@@ -4,6 +4,7 @@
 import { prisma } from "@/lib/prisma";
 import { DealerStatus } from "@prisma/client";
 import { addSupportNote } from "@/lib/services/admin/admin-support.service";
+import { assertDealerCanActivate } from "@/lib/services/dealer/dealer-activation.service";
 import type { SupportNoteType } from "@prisma/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -634,6 +635,11 @@ export async function approveDealerByAdmin(
   if (dealer.status !== DealerStatus.PENDING) {
     throw new Error("Dealer is not in PENDING status");
   }
+
+  // Batch 2 — verification gate. When enforced (flag ON), an admin cannot approve
+  // a dealer that has not signed the agreement and had its license verified; this
+  // throws DealerActivationBlockedError. No-op when the gate is off.
+  await assertDealerCanActivate(dealerId);
 
   const updated = await prisma.dealer.update({
     where: { id: dealerId },

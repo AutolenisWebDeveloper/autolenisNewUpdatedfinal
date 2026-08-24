@@ -445,3 +445,16 @@ Locked from repository evidence before implementing Batch 1, so the batch cannot
 - **Additive schema** — `SyncRunStatus += {NOT_CONFIGURED, ZERO_RESULTS, DEFERRED}`, `InventorySourceType += MARKETCHECK`, `@@unique` on `InventorySource(type,name)` and `VehicleRequestMatchResult(requestId,inventoryItemId)`.
 
 **PRODUCTION CUTOVER REQUIRES `prisma migrate deploy` — OWNER-GATED** (migration `20261010000000_batch1_inventory_matching_truthfulness`, guarded with `IF NOT EXISTS` / `ADD VALUE IF NOT EXISTS`; verify **physical** schema, not just `_prisma_migrations`). No production data is mutated and the 206 historical inventory rows are **not** backfilled or reattached.
+
+## 20. Batch 2 — Dealer Onboarding Integrity & Verification Gate (delivered on this branch)
+
+**Locked owner decisions:** gate enforcement is **flag-gated, default OFF** (`FLAGS.DEALER_ACTIVATION_GATE`; DB feature flag → `false` when no row); the 2 existing ACTIVE dealers are **grandfathered** (the gate applies only at the `PENDING → ACTIVE` transition — an already-ACTIVE dealer is never re-evaluated or auto-deactivated). License verification is deterministic **format/presence validation with record creation — no external provider**; only an admin action may set a license `verified`.
+
+**Delivered (Tier C, branch-only; no schema change, no external comms, no production mutation):**
+- **FS-B fixed (agreement):** new shared authority `lib/services/agreement/dealer-agreement.service.ts` (`recordDealerAgreementSignature` + `finalizeDealerAgreementCertificate`). BOTH the onboarding-wizard AGREEMENT step and `/api/dealer/agreement/sign` now route through it, so a dealer can never be marked "agreed"/ACTIVE without a real, tamper-evident `DealerAgreementSignature` (SHA-256 + IP + user-agent) and a certificate generated off the request path. The two divergent paths are unified.
+- **FS-C fixed (license/verification):** `lib/services/dealer/dealer-verification.service.ts` — the LICENSE step validates format/presence and creates a real `DealerLicense` + a `DealerVerification` in the **PENDING (verified=false)** state; format validation is explicitly *not* authoritative verification. New admin route `POST /api/admin/dealers/[dealerId]/verify-license` (OPERATIONAL_ROLES) is the only path that sets `verified = true`, with an audit trail.
+- **Activation gate:** `lib/services/dealer/dealer-activation.service.ts` — `activateDealerIfEligible` (single activation authority, transition-only/grandfather-safe) and `assertDealerCanActivate` (used by admin approve). With the flag OFF nothing new blocks; with it ON, `PENDING → ACTIVE` requires a signature **and** a verified license, else the dealer stays PENDING (surfaced as "pending verification", not an error). `listLegacyUnverifiedActiveDealers` gives admins the grandfathered-dealer follow-up list.
+- **FS-N fixed:** `getDealerOnboardingStatus` now computes `license`/`inventory`/`agreement` from real rows instead of hardcoded `false`.
+- **Feature flag** `dealer_activation_gate` registered (default OFF).
+
+**No migration** (all models — `DealerVerification`, `DealerLicense`, `DealerAgreementSignature`, `FeatureFlag` — pre-exist). Production activation of the gate is a single owner-gated feature-flag flip; existing dealers are never touched.
