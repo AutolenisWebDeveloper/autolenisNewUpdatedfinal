@@ -52,15 +52,18 @@ export class MarketCheckAdapter implements IInventoryAdapter {
     const start = Date.now();
     const apiKey = process.env.MARKETCHECK_API_KEY;
 
-    // Gracefully skip when not configured — never fail the orchestrator
+    // Not configured — report NOT_CONFIGURED so the orchestrator SKIPS this
+    // source from the health denominator rather than scoring an empty no-op as
+    // "100% healthy". A missing credential is never a successful sync.
     if (!apiKey) {
       logger.warn("[MarketCheck adapter] MARKETCHECK_API_KEY not set — skipping. Provision the key in env to activate this source.");
       return {
         adapter: this.name,
         vehicles: [],
         duration: Date.now() - start,
+        configured: false,
+        outcome: "NOT_CONFIGURED",
         fetchedAt: new Date(),
-        // Note: no `error` field so the orchestrator treats this as a clean no-op rather than a failure
       };
     }
 
@@ -75,7 +78,17 @@ export class MarketCheckAdapter implements IInventoryAdapter {
       });
 
       if (!response.ok) {
-        throw new Error(`MarketCheck HTTP ${response.status}: ${response.statusText}`);
+        // 429 / 5xx are transient — DEFERRED (retry next run), not a hard FAILED.
+        const transient = response.status === 429 || response.status >= 500;
+        return {
+          adapter: this.name,
+          vehicles: [],
+          duration: Date.now() - start,
+          configured: true,
+          outcome: transient ? "DEFERRED" : "FAILED",
+          error: `MarketCheck HTTP ${response.status}: ${response.statusText}`,
+          fetchedAt: new Date(),
+        };
       }
 
       const data = (await response.json()) as MarketCheckResponse;
@@ -88,14 +101,22 @@ export class MarketCheckAdapter implements IInventoryAdapter {
         adapter: this.name,
         vehicles,
         duration: Date.now() - start,
+        configured: true,
+        // A successful call that returns nothing is ZERO_RESULTS — a legitimate
+        // business result, explicitly distinct from an execution failure.
+        outcome: vehicles.length > 0 ? "SUCCESS" : "ZERO_RESULTS",
         fetchedAt: new Date(),
       };
     } catch (error) {
+      // Network abort / timeout — transient, DEFERRED.
+      const isTimeout = error instanceof Error && /abort|timeout/i.test(error.message);
       logger.error("[MarketCheck adapter] Error:", error);
       return {
         adapter: this.name,
         vehicles: [],
         duration: Date.now() - start,
+        configured: true,
+        outcome: isTimeout ? "DEFERRED" : "FAILED",
         error: error instanceof Error ? error.message : String(error),
         fetchedAt: new Date(),
       };

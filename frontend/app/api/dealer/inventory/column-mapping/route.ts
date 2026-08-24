@@ -102,6 +102,9 @@ function rowToInventoryCreate(
       priceCents,
       images: [],
       isActive: true,
+      // Batch 1 — provenance + freshness for executable-supply eligibility.
+      sourceAdapter: "dealer_csv",
+      lastSeenAt: new Date(),
     },
   };
 }

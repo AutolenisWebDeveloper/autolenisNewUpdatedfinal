@@ -1568,6 +1568,11 @@ enum SyncRunStatus {
   COMPLETED
   FAILED
   PARTIAL
+  // Batch 1 — explicit, truthful sync outcomes so a run can never claim
+  // "healthy / 0 items" when no synchronization actually occurred.
+  NOT_CONFIGURED // provider credential/feed absent — source skipped, NOT scored as healthy
+  ZERO_RESULTS   // source queried successfully but returned no listings (a legitimate result)
+  DEFERRED       // transient failure (timeout / 429 / 5xx) — will be retried next run
 }
 
 enum InventorySourceType {
@@ -1578,6 +1583,7 @@ enum InventorySourceType {
   EDMUNDS
   CUSTOM
   DMS
+  MARKETCHECK // Batch 1 — the built-in production aggregator adapter, recorded as a first-class source
 }
 
 enum DealerDiscoveryStatus {
@@ -2220,6 +2226,9 @@ model InventorySource {
   vehiclesLastCount Int?                @map("vehicles_last_count")
   createdAt         DateTime            @default(now()) @map("created_at")
   syncRuns          InventorySyncRun[]
+  // Batch 1 — idempotent source registration: one source row per (type, name)
+  // so the orchestrator can find-or-create without racing duplicates.
+  @@unique([type, name])
   @@map("inventory_sources")
 }
 
@@ -2966,6 +2975,11 @@ model VehicleRequestMatchResult {
   priceCents    Int?     @map("price_cents")
   notes         String?
   foundAt       DateTime @default(now()) @map("found_at")
+  // Batch 1 — canonical request→inventory match result consumed by downstream
+  // sourcing. Uniqueness makes re-matching idempotent and concurrency-safe:
+  // each (request, inventoryItem) pair is upserted, never duplicated.
+  @@unique([requestId, inventoryItemId])
+  @@index([requestId])
   @@map("vehicle_request_match_results")
 }
 

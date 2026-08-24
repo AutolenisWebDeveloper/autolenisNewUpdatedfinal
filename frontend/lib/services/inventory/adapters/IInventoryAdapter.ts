@@ -26,10 +26,26 @@ export interface NormalizedVehicle {
   sourceUrl: string;
 }
 
+// Batch 1 — a truthful, mutually-exclusive outcome for a single adapter run.
+// This is the anti-fake-success primitive: an unconfigured source is
+// NOT_CONFIGURED (skipped, never scored), an empty-but-successful fetch is
+// ZERO_RESULTS, a transient failure is DEFERRED, and a hard failure is FAILED.
+// Only SUCCESS means "real vehicles were ingested".
+export type AdapterOutcome =
+  | "SUCCESS"
+  | "ZERO_RESULTS"
+  | "NOT_CONFIGURED"
+  | "DEFERRED"
+  | "FAILED";
+
 export interface AdapterRunResult {
   adapter: string;
   vehicles: NormalizedVehicle[];
   duration: number;
+  /** Was the provider credential/feed present so a fetch was actually attempted? */
+  configured: boolean;
+  /** Truthful, mutually-exclusive outcome of this run. */
+  outcome: AdapterOutcome;
   error?: string;
   fetchedAt: Date;
 }

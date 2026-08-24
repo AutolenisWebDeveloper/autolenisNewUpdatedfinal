@@ -101,6 +101,10 @@
       "schedule": "*/30 * * * *"
     },
     {
+      "path": "/api/cron/inventory-match-refresh",
+      "schedule": "30 */6 * * *"
+    },
+    {
       "path": "/api/cron/analytics-snapshot",
       "schedule": "0 1 * * *"
     },
