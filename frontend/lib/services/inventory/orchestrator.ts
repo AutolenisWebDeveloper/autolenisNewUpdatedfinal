@@ -138,16 +138,20 @@ export interface OrchestratorRunResult {
 }
 
 // Roll a set of per-adapter outcomes into one run-level outcome.
-function rollUpOutcome(outcomes: AdapterOutcome[]): OrchestratorRunResult["outcome"] {
+// Exported for deterministic verification of the PARTIAL (mixed-outcome) rule,
+// which the single-adapter live orchestrator cannot exercise on its own.
+export function rollUpOutcome(outcomes: AdapterOutcome[]): OrchestratorRunResult["outcome"] {
   const hasSuccess = outcomes.some(o => o === "SUCCESS");
   const hasFailure = outcomes.some(o => o === "FAILED" || o === "DEFERRED");
   // A run where some sources succeeded and others failed is PARTIAL — never a
   // clean SUCCESS that hides the failure.
   if (hasSuccess && hasFailure) return "PARTIAL";
   if (hasSuccess) return "SUCCESS";
-  if (outcomes.some(o => o === "ZERO_RESULTS")) return "ZERO_RESULTS";
+  // With NO success, a real failure must surface — it must NOT be masked by a
+  // sibling ZERO_RESULTS into looking like a clean, healthy empty run.
   if (outcomes.some(o => o === "FAILED")) return "FAILED";
   if (outcomes.some(o => o === "DEFERRED")) return "DEFERRED";
+  if (outcomes.some(o => o === "ZERO_RESULTS")) return "ZERO_RESULTS";
   return "NOT_CONFIGURED";
 }
 
