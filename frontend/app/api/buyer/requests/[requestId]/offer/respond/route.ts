@@ -4,7 +4,6 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import { VehicleRequestStatus } from "@prisma/client";
 import { sendDealSelectedEmail } from "@/lib/services/email/resend.service";
-import { convertConciergeOfferToDeal } from "@/lib/services/offer/concierge-offer.service";
 
 interface Props { params: Promise<{ requestId: string }> }
 
@@ -78,35 +77,45 @@ export async function POST(request: NextRequest, { params }: Props) {
     });
   }
 
-  // ACCEPT: converge onto the ONE canonical spine (Deal.offerId) via the
-  // concierge adapter — a deposit-optional Auction + a canonical Offer. This
-  // replaces the legacy Deal.vehicleRequestOfferId write path (Batch 4). Idempotent
-  // by sourceRef, so a double-submit returns the same Deal.
-  let deal: { id: string };
-  try {
-    const conv = await convertConciergeOfferToDeal({
-      buyerId: buyer.id,
-      sourceRef: `vehicle_request_offer:${offerId}`,
-      vehicleRequestId: requestId,
-      dealerId: null, // System C carries no dealer identity → outside placeholder
-      otdPriceCents: acceptedOffer.priceCents,
-      vehicleSummary: acceptedOffer.vehicleInfo ? JSON.stringify(acceptedOffer.vehicleInfo) : null,
-    });
-    deal = { id: conv.dealId };
-  } catch (err) {
-    logger.error("[offer/respond] concierge conversion failed:", err);
-    // Degrade gracefully and truthfully: buyer still sees OFFER_ACCEPTED.
+  // ACCEPT: create Deal and move buyer into buying journey
+
+  // Idempotency: don't create a second deal if one already exists
+  const existingDeal = await prisma.deal.findUnique({
+    where:  { vehicleRequestOfferId: offerId },
+    select: { id: true },
+  });
+
+  if (existingDeal) {
     return successResponse({
-      status:  newRequestStatus,
-      message: "Offer accepted. Our team will finalize your deal shortly.",
-      redirect: null,
+      status:   newRequestStatus,
+      message:  "Your deal is ready. Continue with financing.",
+      redirect: "/buyer/deal",
+      dealId:   existingDeal.id,
     });
   }
 
-  // A canonical Deal now exists → reflect it on the request lifecycle.
-  await prisma.vehicleRequest
-    .update({ where: { id: requestId }, data: { status: VehicleRequestStatus.DEAL_CREATED } })
-    .catch(() => {});
+  // Create Deal — mirrors select-offer pattern exactly.
+  // offerId is nullable; vehicleRequestOfferId is used for concierge deals.
+  let deal: { id: string } | null = null;
+
+  try {
+    deal = await prisma.deal.create({
+      data: {
+        buyerId:               buyer.id,
+        vehicleRequestOfferId: offerId,
+        status:                "FINANCING_PENDING",
+      },
+      select: { id: true },
+    });
+  } catch (err) {
+    logger.error("[offer/respond] Deal creation failed:", err);
+    // Degrade gracefully: buyer still sees OFFER_ACCEPTED
+    return successResponse({
+      status:  newRequestStatus,
+      message: "Offer accepted. Our team will be in touch to finalize your deal.",
+      redirect: null,
+    });
+  }
 
   // In-app notification with actionUrl
   await prisma.notification.create({

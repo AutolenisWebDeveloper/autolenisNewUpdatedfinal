@@ -184,15 +184,10 @@ export async function submitOffer(input: OfferInput) {
             where: { id: auction.buyerId },
             select: { firstName: true, user: { select: { email: true } } },
           }),
-          // Batch 4 — depositId is nullable (deposit-optional concierge auctions).
-          // A competitive auction always has one; guard so the lookup is type-safe
-          // and a deposit-less auction simply reports hasDeposit=false.
-          auction.depositId
-            ? prisma.deposit.findUnique({
-                where: { id: auction.depositId },
-                select: { status: true },
-              })
-            : Promise.resolve(null),
+          prisma.deposit.findUnique({
+            where: { id: auction.depositId },
+            select: { status: true },
+          }),
           prisma.auctionVehicle.findFirst({
             where: { auctionId: auction.id },
             select: { make: true, model: true },
