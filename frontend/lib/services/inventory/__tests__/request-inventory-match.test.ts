@@ -30,7 +30,22 @@ mock.module("@/lib/prisma", {
         upsert: async (args: Record<string, unknown>) => { calls.upsert.push(args); return { id: "vrmr" }; },
         deleteMany: async (args: Record<string, unknown>) => { calls.deleteMany.push(args); return { count: 0 }; },
       },
-      $transaction: async (ops: Promise<unknown>[]) => Promise.all(ops),
+      // Supports the interactive-transaction form used by replaceResults: the tx
+      // client captures upsert/deleteMany into the same call log; $executeRaw (the
+      // advisory lock) is a no-op in tests.
+      $transaction: async (arg: unknown) => {
+        if (typeof arg === "function") {
+          const tx = {
+            $executeRaw: async () => 0,
+            vehicleRequestMatchResult: {
+              upsert: async (a: Record<string, unknown>) => { calls.upsert.push(a); return { id: "vrmr" }; },
+              deleteMany: async (a: Record<string, unknown>) => { calls.deleteMany.push(a); return { count: 0 }; },
+            },
+          };
+          return (arg as (t: unknown) => Promise<unknown>)(tx);
+        }
+        return Promise.all(arg as Promise<unknown>[]);
+      },
     },
   },
 });

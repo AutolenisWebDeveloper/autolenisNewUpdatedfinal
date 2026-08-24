@@ -65,18 +65,17 @@ function outcomeToStatus(outcome: AdapterOutcome): SyncRunStatus {
 // LANE_1: Dealer has an active AutoLenis account AND vehicle is explicitly linked
 // LANE_2: External listing from a known dealer network (partner-adjacent)
 // LANE_3: Open-market listing — no direct dealer relationship
-export async function assignLane(
-  vehicle: NormalizedVehicle
-): Promise<InventoryLane> {
-  // Check if external dealer name matches an active AutoLenis dealer
+export function assignLane(
+  vehicle: NormalizedVehicle,
+  activeDealerNames: string[]
+): InventoryLane {
+  // Partner-adjacent if the external dealer name matches an ACTIVE AutoLenis dealer.
+  // Matched in memory against a single prefetched list — no per-vehicle DB query.
   if (vehicle.externalDealerName) {
-    const matchedDealer = await prisma.dealer.findFirst({
-      where: {
-        dealershipName: { contains: vehicle.externalDealerName, mode: "insensitive" },
-        status: "ACTIVE",
-      },
-    });
-    if (matchedDealer) return InventoryLane.LANE_2; // Partner-adjacent (not fully verified)
+    const ext = vehicle.externalDealerName.toLowerCase();
+    if (activeDealerNames.some((name) => name.toLowerCase().includes(ext))) {
+      return InventoryLane.LANE_2;
+    }
   }
   return InventoryLane.LANE_3; // Open-market default
 }
@@ -129,8 +128,8 @@ export interface OrchestratorRunResult {
   configuredSources: number;
   /** How many sources actually ran a fetch (configured, not NOT_CONFIGURED). */
   attemptedSources: number;
-  /** Roll-up outcome for the whole run. */
-  outcome: "SUCCESS" | "ZERO_RESULTS" | "NOT_CONFIGURED" | "DEFERRED" | "FAILED";
+  /** Roll-up outcome for the whole run. PARTIAL = some sources succeeded, some failed. */
+  outcome: "SUCCESS" | "PARTIAL" | "ZERO_RESULTS" | "NOT_CONFIGURED" | "DEFERRED" | "FAILED";
   adapterResults: AdapterOutcomeSummary[];
   /** null when no configured source ran — NEVER defaulted to 100. */
   healthScore: number | null;
@@ -140,7 +139,12 @@ export interface OrchestratorRunResult {
 
 // Roll a set of per-adapter outcomes into one run-level outcome.
 function rollUpOutcome(outcomes: AdapterOutcome[]): OrchestratorRunResult["outcome"] {
-  if (outcomes.some(o => o === "SUCCESS")) return "SUCCESS";
+  const hasSuccess = outcomes.some(o => o === "SUCCESS");
+  const hasFailure = outcomes.some(o => o === "FAILED" || o === "DEFERRED");
+  // A run where some sources succeeded and others failed is PARTIAL — never a
+  // clean SUCCESS that hides the failure.
+  if (hasSuccess && hasFailure) return "PARTIAL";
+  if (hasSuccess) return "SUCCESS";
   if (outcomes.some(o => o === "ZERO_RESULTS")) return "ZERO_RESULTS";
   if (outcomes.some(o => o === "FAILED")) return "FAILED";
   if (outcomes.some(o => o === "DEFERRED")) return "DEFERRED";
@@ -163,12 +167,15 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
   // Deduplication pipeline
   const uniqueVehicles = deduplicateVehicles(adapterResults);
 
+  // Prefetch ACTIVE dealer names once for in-memory lane assignment (no N+1).
+  const activeDealerNames = (await prisma.dealer.findMany({ where: { status: "ACTIVE" }, select: { dealershipName: true } })).map((d) => d.dealershipName);
+
   // Upsert to database with lane assignment + provenance. Track per-adapter upsert
   // counts so each source's InventorySyncRun reflects what IT actually ingested.
   const upsertedByAdapter = new Map<string, number>();
   let upserted = 0;
   for (const vehicle of uniqueVehicles) {
-    const lane = await assignLane(vehicle);
+    const lane = assignLane(vehicle, activeDealerNames);
 
     // VIN identity: normalize + shape-validate. A malformed VIN is NOT written to
     // the global @unique slot — it falls through to the no-VIN create path so it

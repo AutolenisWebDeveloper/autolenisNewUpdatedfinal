@@ -140,25 +140,32 @@ interface MatchRow {
 }
 
 /**
- * Idempotently replace the persisted match set for a request. Upsert on the
- * unique [requestId, inventoryItemId] (never duplicates under concurrency), then
- * remove any prior rows no longer matched. Runs in one transaction.
+ * Idempotently replace the persisted match set for a request, atomically and
+ * concurrency-safely. A per-request advisory lock (pg_advisory_xact_lock)
+ * serializes concurrent matchers for the SAME request, so the upsert-then-prune
+ * never races on the compound unique; the `@@unique([requestId, inventoryItemId])`
+ * guarantees no duplicate rows regardless. Re-running with the same inputs
+ * converges to the same set (idempotent).
  */
 async function replaceResults(requestId: string, rows: MatchRow[]): Promise<void> {
   const matchedIds = rows.map((r) => r.inventoryItemId);
-  const ops: Prisma.PrismaPromise<unknown>[] = rows.map((r) =>
-    prisma.vehicleRequestMatchResult.upsert({
-      where: { requestId_inventoryItemId: { requestId, inventoryItemId: r.inventoryItemId } },
-      create: { requestId, inventoryItemId: r.inventoryItemId, matchScore: r.matchScore, source: r.source, priceCents: r.priceCents, notes: r.notes },
-      update: { matchScore: r.matchScore, source: r.source, priceCents: r.priceCents, notes: r.notes },
-    })
-  );
-  ops.push(
-    matchedIds.length > 0
-      ? prisma.vehicleRequestMatchResult.deleteMany({ where: { requestId, inventoryItemId: { notIn: matchedIds } } })
-      : prisma.vehicleRequestMatchResult.deleteMany({ where: { requestId } })
-  );
-  await prisma.$transaction(ops);
+  await prisma.$transaction(async (tx) => {
+    // Serialize same-request matchers. hashtext() maps the id to the bigint the
+    // advisory-lock API expects; the lock releases automatically at commit/rollback.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${requestId}))`;
+    for (const r of rows) {
+      await tx.vehicleRequestMatchResult.upsert({
+        where: { requestId_inventoryItemId: { requestId, inventoryItemId: r.inventoryItemId } },
+        create: { requestId, inventoryItemId: r.inventoryItemId, matchScore: r.matchScore, source: r.source, priceCents: r.priceCents, notes: r.notes },
+        update: { matchScore: r.matchScore, source: r.source, priceCents: r.priceCents, notes: r.notes },
+      });
+    }
+    if (matchedIds.length > 0) {
+      await tx.vehicleRequestMatchResult.deleteMany({ where: { requestId, inventoryItemId: { notIn: matchedIds } } });
+    } else {
+      await tx.vehicleRequestMatchResult.deleteMany({ where: { requestId } });
+    }
+  });
 }
 
 /**
