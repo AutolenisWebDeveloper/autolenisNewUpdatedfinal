@@ -33,6 +33,7 @@ interface Ctrl {
   lostClaimIds: Set<string>;
   notifyResult: { smsSent: boolean; emailSent: boolean };
   notifyThrows: boolean;
+  chainThrows: boolean;
   paidDeposit: boolean;
   selectedOffer: boolean;
   scheduled: Array<Record<string, unknown>>;
@@ -55,6 +56,7 @@ function freshCtrl(): Ctrl {
     lostClaimIds: new Set(),
     notifyResult: { smsSent: true, emailSent: true },
     notifyThrows: false,
+    chainThrows: false,
     paidDeposit: false,
     selectedOffer: false,
     scheduled: [],
@@ -83,6 +85,7 @@ function resolve(state: {
       ctrl.scheduled.push(state.payload ?? {});
       return { data: ctrl.scheduleConflict ? [] : [{ id: "sched-new" }], error: ctrl.scheduleError };
     }
+    if (ctrl.chainThrows) throw new Error("chain upsert boom");
     ctrl.nextScheduled.push(state.payload ?? {});
     return { data: null, error: null };
   }
@@ -310,6 +313,43 @@ test("auction_closing sends when no offer selected, terminal (no next)", async (
   assert.equal(r.sent, 1);
   assert.equal(ctrl.notifies[0].entityType, "buyer");
   assert.equal(ctrl.nextScheduled.length, 0);
+});
+
+test("check_form_completion_1 delivers via contact resolution — no email/phone passed (QStash parity)", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = {
+    r1: row({ sequence: "check_form_completion_1", base_key: "form:b1", email: "b@x.com", phone: "+15550000000" }),
+  };
+  const { drainDueLifecycleTouches } = await load();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.sent, 1);
+  assert.equal(ctrl.notifies.length, 1);
+  assert.equal(ctrl.notifies[0].entityId, "b1");
+  assert.equal(ctrl.notifies[0].email, undefined, "email omitted → resolves from contact (parity)");
+  assert.equal(ctrl.notifies[0].phone, undefined, "phone omitted → resolves from contact (parity)");
+  // still chains to touch 2
+  assert.equal(ctrl.nextScheduled.length, 1);
+  assert.equal(ctrl.nextScheduled[0].sequence, "check_form_completion_2");
+});
+
+test("a chain-upsert throw does NOT reset the done row or re-send (no double-send)", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row() }; // deposit_reminder_1 → chains deposit_reminder_2
+  ctrl.chainThrows = true;
+  const { drainDueLifecycleTouches } = await load();
+  const r = await drainDueLifecycleTouches();
+  // The send succeeded and the row was marked done BEFORE the failing chain write;
+  // the chain failure is swallowed so the drain does not reset the row to pending.
+  assert.equal(r.sent, 1);
+  assert.equal(r.retried, 0);
+  assert.equal(r.failed, 0);
+  assert.equal(ctrl.notifies.length, 1);
+  const doneUpdate = ctrl.statusUpdates.find((u) => u.id === "r1" && u.payload.status === "done");
+  assert.ok(doneUpdate, "row stays done");
+  assert.ok(
+    !ctrl.statusUpdates.some((u) => u.id === "r1" && u.payload.status === "pending"),
+    "row is never reset to pending (which would re-send)",
+  );
 });
 
 test("dealer_invited notifies entity 'dealer' and does not chain a bid reminder", async () => {

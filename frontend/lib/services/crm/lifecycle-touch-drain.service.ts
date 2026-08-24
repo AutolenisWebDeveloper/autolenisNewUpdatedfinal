@@ -78,10 +78,16 @@ interface SequenceConfig {
   render: (ctx: RowContext) => RenderedTouch;
   // The next touch to chain, or null if terminal. delayMs mirrors the QStash delay.
   next: { sequence: LifecycleSequence; delayMs: number } | null;
+  // When true, notifyContact is called WITHOUT email/phone so the target resolves
+  // from the linked contact — exact parity with the QStash `check-form-completion`
+  // job, which passed only entityId. (The other jobs pass email explicitly, so
+  // they must NOT set this.) Prevents the internal path from reaching a buyer with
+  // no linked contact that the QStash job would have skipped.
+  deliverToContactOnly?: boolean;
   // Extra side effects fired AFTER a successful send + status=done (used only by
   // review_request to seed the refinance + referral cross-table touches). Runs
   // best-effort: a failure here must never re-send the (non-deduped) notify.
-  postSend?: (ctx: RowContext) => Promise<void>;
+  postSend?: (ctx: { entityId: string; firstName: string | null; email: string }) => Promise<void>;
 }
 
 const DASH = `${NOTIFY_APP_URL}/buyer/dashboard`;
@@ -321,6 +327,7 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
   check_form_completion_1: {
     entityType: "buyer",
     guard: hasPaidDeposit,
+    deliverToContactOnly: true,
     render: ({ firstName }) => ({
       sms: `${firstName}, dealers are waiting for you on AutoLenis. Activate your auction to let them compete: autolenis.com/buyer/dashboard`,
       emailSubject: "Dealers are waiting for you",
@@ -336,6 +343,7 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
   check_form_completion_2: {
     entityType: "buyer",
     guard: hasPaidDeposit,
+    deliverToContactOnly: true,
     render: ({ firstName }) => ({
       sms: `${firstName}, your AutoLenis auction room is still empty. Activate now and let dealers compete: autolenis.com/buyer/dashboard`,
       emailSubject: "The auction room is still empty",
@@ -351,6 +359,7 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
   check_form_completion_3: {
     entityType: "buyer",
     guard: hasPaidDeposit,
+    deliverToContactOnly: true,
     render: ({ firstName }) => ({
       sms: `${firstName}, last chance — we'll close your AutoLenis file soon. Activate to keep dealers competing: autolenis.com/buyer/dashboard`,
       emailSubject: "Last chance — we will close your file",
@@ -484,12 +493,17 @@ async function processTouch(supabase: SupabaseClient, row: TouchRow): Promise<"S
 
   // notifyContact fails closed (returns {false,false}) on a gated/suppressed/
   // unconfigured send and only throws on an unexpected error — a gated send is a
-  // terminal success, not a retry (parity with the QStash route).
+  // terminal success, not a retry (parity with the QStash route). For
+  // deliverToContactOnly sequences (check-form-completion), email/phone are
+  // omitted so the target resolves from the linked contact — exact parity with
+  // the QStash job, which passed only entityId (so a buyer with no linked
+  // contact is reached by neither path).
   await notifyContact({
     entityType: cfg.entityType,
     entityId: row.entity_id,
-    email: row.email,
-    ...(row.phone ? { phone: row.phone } : {}),
+    ...(cfg.deliverToContactOnly
+      ? {}
+      : { email: row.email, ...(row.phone ? { phone: row.phone } : {}) }),
     sms: content.sms,
     emailSubject: content.emailSubject,
     emailHtml: content.emailHtml,
@@ -499,28 +513,39 @@ async function processTouch(supabase: SupabaseClient, row: TouchRow): Promise<"S
   // the (non-deduped) notify on retry.
   await markStatus(supabase, row.id, "done");
 
-  // Chain the next touch (enqueue-once on base_key+sequence).
+  // Chain the next touch (enqueue-once on base_key+sequence). Best-effort: the
+  // row is already 'done', so a chain-write failure must NOT propagate to the
+  // drain loop (which would reset the row to pending and re-send the notify) — a
+  // dropped chain step is recoverable by a re-enqueue, a double send is not.
   if (cfg.next) {
-    await supabase.from("lifecycle_touch_schedule").upsert(
-      {
-        base_key: row.base_key,
-        sequence: cfg.next.sequence,
-        entity_id: row.entity_id,
-        first_name: row.first_name,
-        email: row.email,
-        phone: row.phone,
-        run_at: new Date(Date.now() + cfg.next.delayMs).toISOString(),
-        status: "pending",
-      },
-      { onConflict: "base_key,sequence", ignoreDuplicates: true },
-    );
+    try {
+      await supabase.from("lifecycle_touch_schedule").upsert(
+        {
+          base_key: row.base_key,
+          sequence: cfg.next.sequence,
+          entity_id: row.entity_id,
+          first_name: row.first_name,
+          email: row.email,
+          phone: row.phone,
+          run_at: new Date(Date.now() + cfg.next.delayMs).toISOString(),
+          status: "pending",
+        },
+        { onConflict: "base_key,sequence", ignoreDuplicates: true },
+      );
+    } catch (err) {
+      logger.error("[lifecycle-touch] chain enqueue failed:", err);
+    }
   }
 
   // Cross-table coupling (review_request → refinance + referral). Best-effort:
   // the enqueues are enqueue-once, and the row is already 'done', so a failure
   // never re-sends the review notify — it can be recovered by a re-enqueue.
+  // Uses the RAW first_name (nullable) so a missing name is not persisted
+  // downstream as the literal "there".
   if (cfg.postSend) {
-    await cfg.postSend(ctx).catch((err) => logger.error("[lifecycle-touch] postSend failed:", err));
+    await cfg
+      .postSend({ entityId: row.entity_id, firstName: row.first_name, email: row.email })
+      .catch((err) => logger.error("[lifecycle-touch] postSend failed:", err));
   }
 
   return "SENT";
