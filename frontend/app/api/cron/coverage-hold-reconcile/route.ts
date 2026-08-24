@@ -8,6 +8,7 @@
 // picked up next tick. Safe to re-run: the gate is idempotent set-or-clear.
 
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
 import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { reconcileCoverageHolds } from "@/lib/services/acquisition/request-coverage-gate.service";
 import { reconcileRequestProgression } from "@/lib/services/vehicle-request/request-progression.service";
@@ -23,8 +24,15 @@ export async function GET(request: NextRequest) {
   // advance); (2) release/refresh coverage soft-holds. Progression first, so a
   // freshly-advanced request's coverage flag is set the same tick.
   const run = await withCronRun("coverage-hold-reconcile", async () => {
-    const progression = await reconcileRequestProgression();
-    const holds = await reconcileCoverageHolds();
+    // Isolated: a failure in one reconciler must not skip the other this tick.
+    const progression = await reconcileRequestProgression().catch((err) => {
+      logger.error("[coverage-hold-reconcile] progression failed:", err);
+      return { error: String(err) };
+    });
+    const holds = await reconcileCoverageHolds().catch((err) => {
+      logger.error("[coverage-hold-reconcile] holds failed:", err);
+      return { error: String(err) };
+    });
     return { progression, holds };
   });
   if (!run.ok) {

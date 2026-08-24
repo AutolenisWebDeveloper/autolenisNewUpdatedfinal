@@ -13,6 +13,10 @@ const matchCalls: string[] = [];
 const coverageCalls: string[] = [];
 let matchBehavior: "ok" | "throw" = "ok";
 let coverageBehavior: "ok" | "held" | "throw" = "ok";
+// When set to a status, the next updateMany transitioning FROM it "loses the race":
+// it returns count:0 but the row has already been advanced by the (simulated)
+// winner — exercising the service's re-read branch.
+let loseRaceFor: string | null = null;
 
 mock.module("@/lib/prisma", {
   namedExports: {
@@ -20,6 +24,11 @@ mock.module("@/lib/prisma", {
       vehicleRequest: {
         findUnique: async () => req,
         updateMany: async ({ where, data }: { where: { status: string }; data: { status: string } }) => {
+          if (loseRaceFor && where.status === loseRaceFor) {
+            req.status = data.status; // the concurrent winner already advanced it
+            loseRaceFor = null;
+            return { count: 0 };
+          }
           if (req.status === where.status) { req.status = data.status; return { count: 1 }; }
           return { count: 0 };
         },
@@ -41,7 +50,7 @@ async function load() { return import("@/lib/services/vehicle-request/request-pr
 beforeEach(() => {
   req = { status: "SUBMITTED", makePreference: "Toyota", modelPreference: null, notes: null, buyer: { zip: "75201" } };
   events.length = 0; matchCalls.length = 0; coverageCalls.length = 0;
-  matchBehavior = "ok"; coverageBehavior = "ok";
+  matchBehavior = "ok"; coverageBehavior = "ok"; loseRaceFor = null;
 });
 
 test("incomplete submission (no zip) stays SUBMITTED", async () => {
@@ -120,9 +129,27 @@ test("progression never advances past ACTIVE_SOURCING (no offer/deal auto-creati
   assert.equal(r.advanced, false, "OFFER_READY+ is admin/offer-driven, left untouched");
 });
 
+test("CAS lost race: a concurrent advance is picked up via re-read, no duplicate event", async () => {
+  loseRaceFor = "SUBMITTED"; // this caller loses the SUBMITTED→INTAKE flip
+  const { advanceVehicleRequest } = await load();
+  const r = await advanceVehicleRequest("r1");
+  // The winner did INTAKE; this caller re-reads and completes INTAKE→ACTIVE_SOURCING.
+  assert.equal(r.to, "ACTIVE_SOURCING");
+  assert.deepEqual(events.map((e) => e.eventType), ["AUTO_SOURCING"], "no duplicate AUTO_INTAKE from the loser");
+});
+
 test("reconcileRequestProgression advances scanned requests and counts outcomes", async () => {
   const { reconcileRequestProgression } = await load();
   const r = await reconcileRequestProgression();
   assert.equal(r.found, 1);
   assert.equal(r.advanced, 1);
+});
+
+test("reconcileRequestProgression counts an incomplete request without advancing it", async () => {
+  req.buyer = { zip: null }; // incomplete → cannot advance
+  const { reconcileRequestProgression } = await load();
+  const r = await reconcileRequestProgression();
+  assert.equal(r.found, 1);
+  assert.equal(r.advanced, 0);
+  assert.equal(r.incomplete, 1);
 });

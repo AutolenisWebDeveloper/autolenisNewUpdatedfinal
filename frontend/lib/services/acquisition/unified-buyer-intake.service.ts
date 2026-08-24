@@ -126,11 +126,19 @@ async function resolveBuyerId(
   try {
     const existingUser = await prisma.user.findUnique({
       where: { email },
-      include: { buyer: { select: { id: true } } },
+      include: { buyer: { select: { id: true, zip: true } } },
     });
 
     if (existingUser?.buyer) {
-      // Case 1: Registered buyer — link directly.
+      // Case 1: Registered buyer — link directly. Backfill Buyer.zip from this
+      // submission when it is missing, so geolocation-dependent request
+      // progression + coverage can run (the public form always carries a ZIP).
+      // Never overwrite an existing ZIP.
+      if (!existingUser.buyer.zip && input.zip) {
+        await prisma.buyer
+          .update({ where: { id: existingUser.buyer.id }, data: { zip: input.zip } })
+          .catch((err) => logger.error("[unified-intake] buyer zip backfill failed:", err));
+      }
       return existingUser.buyer.id;
     }
 
