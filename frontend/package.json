@@ -68,7 +68,7 @@
     "test:vehicle-request": "tsx --test --experimental-test-module-mocks lib/services/vehicle-request/__tests__/*.test.ts",
     "test:dealer-onboarding": "tsx --test --experimental-test-module-mocks lib/services/dealer/__tests__/batch2/*.test.ts lib/services/agreement/__tests__/*.test.ts",
     "test:esign": "tsx --test --experimental-test-module-mocks lib/services/esign/__tests__/*.test.ts",
-    "test:admin-payments": "tsx --test --experimental-test-module-mocks app/api/admin/payments/__tests__/*.test.ts"
+    "test:admin-payments": "tsx --test --experimental-test-module-mocks app/api/admin/payments/__tests__/*.test.ts lib/services/payment/__tests__/*.test.ts"
   },
   "engines": {
     "node": ">=18.18"

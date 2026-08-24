@@ -27,6 +27,10 @@ export async function writeServiceFeePayment(dealId: string, paymentIntentId: st
     });
   } catch (err) {
     // Lost the unique(dealId) race with a concurrent writer — return the winner.
+    // (The table also has a unique stripePaymentIntentId, but every concierge-fee
+    // PI is created per-deal via `concierge-fee-${dealId}` and the webhook
+    // resolves one PI to one deal, so a P2002 here is always the dealId
+    // constraint — the dealId re-fetch returns the winning row.)
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return prisma.serviceFeePayment.findUnique({ where: { dealId } });
     }

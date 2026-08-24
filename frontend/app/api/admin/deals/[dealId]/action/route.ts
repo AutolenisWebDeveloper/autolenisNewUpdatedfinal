@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { DealStatus } from "@prisma/client";
-import { getStripe } from "@/lib/stripe";
+import { refundDepositCharge } from "@/lib/services/payment/refund.service";
 import { advanceDealStatus, DealTransitionError, InsuranceRequiredError } from "@/lib/services/deal/deal.service";
 import {
   sendDealerContractPendingEmail,
@@ -169,23 +169,19 @@ export async function POST(request: NextRequest, { params }: Props) {
         return adminError("INVALID_STATE", `Deal is already ${deal.status.toLowerCase()}`, 400);
       }
 
-      // Refund the deposit if one is still held. The `status: "PAID"` guard
-      // makes this safe against double-refund — an already-refunded deposit
-      // is skipped, and the separate REFUND_TRIGGERED action will likewise
-      // find nothing to refund afterward.
+      // Refund the deposit's real charge if one is still held (FS-K: a
+      // no-real-charge / admin-seeded deposit returns NO_CHARGE — no money moves
+      // and `refunded` stays false, so the buyer is never falsely told a refund
+      // was processed). Guarded flip + deposit-scoped idempotency key inside the
+      // shared helper make this safe against double-refund.
       let refunded = false;
       const deposit = await prisma.deposit.findFirst({
         where: { buyerId: deal.buyerId, status: "PAID" },
         orderBy: { createdAt: "desc" },
       });
-      if (deposit?.stripePaymentIntentId) {
+      if (deposit) {
         try {
-          await getStripe().refunds.create(
-            { payment_intent: deposit.stripePaymentIntentId },
-            { idempotencyKey: `refund-deposit-${deposit.id}` },
-          );
-          await prisma.deposit.update({ where: { id: deposit.id }, data: { status: "REFUNDED", refundedAt: new Date() } });
-          refunded = true;
+          refunded = (await refundDepositCharge(deposit)) === "REFUNDED";
         } catch (err) {
           return adminError("STRIPE_ERROR", `Deal cancel refund failed: ${err}`, 500);
         }
@@ -224,19 +220,20 @@ export async function POST(request: NextRequest, { params }: Props) {
     }
 
     case "REFUND_TRIGGERED": {
-      // Find the deposit payment intent and refund
+      // Find the deposit and refund its real charge. FS-K: a no-real-charge /
+      // admin-seeded deposit returns NO_CHARGE — no money moves — so we must NOT
+      // tell the buyer "your refund has been processed". The deal is still moved
+      // to REFUNDED (an admin bookkeeping transition), but the buyer notification
+      // and the API `refunded` flag are gated on money actually having moved.
       const deposit = await prisma.deposit.findFirst({
         where: { buyerId: deal.buyerId, status: "PAID" },
         orderBy: { createdAt: "desc" },
       });
 
-      if (deposit?.stripePaymentIntentId) {
+      let refunded = false;
+      if (deposit) {
         try {
-          await getStripe().refunds.create(
-            { payment_intent: deposit.stripePaymentIntentId },
-            { idempotencyKey: `refund-deposit-${deposit.id}` },
-          );
-          await prisma.deposit.update({ where: { id: deposit.id }, data: { status: "REFUNDED", refundedAt: new Date() } });
+          refunded = (await refundDepositCharge(deposit)) === "REFUNDED";
         } catch (err) {
           return adminError("STRIPE_ERROR", `Refund failed: ${err}`, 500);
         }
@@ -244,17 +241,19 @@ export async function POST(request: NextRequest, { params }: Props) {
 
       await advanceDealStatus(dealId, "REFUNDED", { actorId: admin.adminId, actorRole: "ADMIN", reason, force: true });
 
-      // Notify buyer
+      // Notify buyer only when a real refund actually happened.
       await prisma.notification.create({
         data: {
           buyerId: deal.buyerId,
-          title: "Refund issued",
-          body: "Your refund has been processed. Please allow 3–5 business days for funds to appear.",
+          title: refunded ? "Refund issued" : "Deal refunded",
+          body: refunded
+            ? "Your refund has been processed. Please allow 3–5 business days for funds to appear."
+            : "Your deal was marked refunded. If a refund is due, our team will follow up shortly.",
           type: "DEAL_STAGE_CHANGED",
         },
-      });
+      }).catch(err => logger.error("[deals/action] refund buyer notify failed:", err));
 
-      result = { refunded: true };
+      result = { refunded };
       break;
     }
 
