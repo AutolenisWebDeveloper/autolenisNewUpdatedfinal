@@ -141,7 +141,7 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
   await releaseAuctionLoad(auctionId);
 
   if (auction._count.offers > 0) {
-    await rankOffers(auctionId).catch(err =>
+    await rankOffers(auctionId, 60, { persistLog: true }).catch(err =>
       logger.error(`[processAuctionClose] rankOffers failed for ${auctionId}:`, err)
     );
 

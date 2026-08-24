@@ -4,6 +4,7 @@ export const metadata: Metadata = { title: "Contract", robots: { index: false, f
 
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { buyerFacingDealerName } from "@/lib/services/offer/dealer-display";
 import { notFound } from "next/navigation";
 import { Shield, CheckCircle2, AlertTriangle, XCircle, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +24,7 @@ export default async function ContractDetailPage({ params }: Props) {
     include: {
       contractScans: { orderBy: { scannedAt: "desc" } },
       eSignEnvelope: true,
-      offer: { include: { dealer: { select: { dealershipName: true, tier: true } } } },
+      offer: { include: { dealer: { select: { dealershipName: true, tier: true, isSystemPlaceholder: true } } } },
       vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
     },
     orderBy: { createdAt: "desc" },
@@ -33,8 +34,10 @@ export default async function ContractDetailPage({ params }: Props) {
   if (!deal || deal.id !== contractId) notFound();
 
   const otdPriceCents = deal.offer?.otdPriceCents ?? deal.vehicleRequestOffer?.priceCents ?? 0;
-  const dealerName = deal.offer?.dealer?.dealershipName ?? "AutoLenis Concierge";
-  const dealerTier = deal.offer?.dealer?.tier ?? "STANDARD";
+  const dealerName = buyerFacingDealerName(deal.offer);
+  // A concierge/placeholder offer isn't a tiered dealer → don't label it one.
+  const isPlaceholderDealer = deal.offer?.dealer?.isSystemPlaceholder === true;
+  const dealerTier = isPlaceholderDealer ? null : (deal.offer?.dealer?.tier ?? "STANDARD");
 
   const latestScan = deal.contractScans[0];
   const scanHistory = deal.contractScans;
@@ -66,7 +69,7 @@ export default async function ContractDetailPage({ params }: Props) {
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6 flex items-center justify-between" data-testid="contract-deal-summary">
         <div>
           <p className="text-sm font-semibold text-slate-900">${(otdPriceCents / 100).toLocaleString()} out-the-door</p>
-          <p className="text-xs text-slate-400 mt-0.5">{dealerName} · {dealerTier} Dealer</p>
+          <p className="text-xs text-slate-400 mt-0.5">{dealerName}{dealerTier ? ` · ${dealerTier} Dealer` : ""}</p>
         </div>
         <Badge variant={deal.status === "COMPLETED" ? "green" : "blue"}>{deal.status.replace(/_/g, " ")}</Badge>
       </div>

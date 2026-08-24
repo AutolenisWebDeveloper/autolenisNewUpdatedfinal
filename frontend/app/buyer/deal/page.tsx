@@ -4,6 +4,7 @@ export const metadata: Metadata = { title: "My Deal" };
 
 import { requireBuyer } from "@/lib/auth/session";
 import { dealStatusLabel, dealStatusTone } from "@/lib/domain/status-labels";
+import { buyerFacingDealerName } from "@/lib/services/offer/dealer-display";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +18,7 @@ export default async function DealPage() {
   const deal = await prisma.deal.findFirst({
     where: { buyerId: buyer.id },
     include: {
-      offer: { include: { dealer: { select: { dealershipName: true, tier: true } } } },
+      offer: { include: { dealer: { select: { dealershipName: true, tier: true, isSystemPlaceholder: true } } } },
       vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
     },
     orderBy: { createdAt: "desc" },
@@ -35,7 +36,7 @@ export default async function DealPage() {
   }
 
   const otdPriceCents = deal.offer?.otdPriceCents ?? deal.vehicleRequestOffer?.priceCents ?? 0;
-  const dealerName = deal.offer?.dealer?.dealershipName ?? "AutoLenis Concierge";
+  const dealerName = buyerFacingDealerName(deal.offer);
 
   const steps = [
     { label: "Deal Selected", done: true },
