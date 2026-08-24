@@ -26,6 +26,9 @@ const loadIncremented: string[][] = []; // dealer.updateMany id lists (load incr
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
+      // Batch 2 verification gate reads this; no row → gate OFF (default), so
+      // invitation selection is unchanged.
+      featureFlag: { findUnique: async () => null },
       auction: {
         findUnique: async () => ({ endsAt: new Date(), buyerId: "b1", buyer: buyerRow }),
       },

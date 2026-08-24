@@ -6,8 +6,8 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { requireDealerFromRequest } from "@/lib/auth/dealer-session";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { emitDomainEvent } from "@/lib/events/emit";
 import { recordDealerLicense } from "@/lib/services/dealer/dealer-verification.service";
-import { activateDealerIfEligible } from "@/lib/services/dealer/dealer-activation.service";
 import {
   recordDealerAgreementSignature,
   finalizeDealerAgreementCertificate,
@@ -180,7 +180,8 @@ export async function PATCH(request: NextRequest) {
     const { ipAddress, userAgent } = clientAttribution(request);
 
     // Record a REAL, tamper-evident signature (SHA-256 + IP + UA) and complete
-    // onboarding — never a bare "agreed" timestamp (FS-B).
+    // onboarding — never a bare "agreed" timestamp (FS-B). This is the shared
+    // authority also used by /api/dealer/agreement/sign.
     const signature = await recordDealerAgreementSignature({
       dealerId: dealer.id,
       dealershipName: d?.dealershipName ?? "Dealer",
@@ -201,12 +202,13 @@ export async function PATCH(request: NextRequest) {
       agreementHash: signature.agreementHash,
     }));
 
-    // Activate — subject to the flag-gated verification gate. With the gate OFF
-    // this activates as before; with it ON an unverified dealer stays PENDING.
-    const activation = await activateDealerIfEligible(dealer.id, {
-      adminId: "system",
-      adminEmail: "system@autolenis.com",
-      reason: "Dealer completed self-serve onboarding (agreement signed)",
+    // Mark ACTIVE (idempotent — the dealer is typically already ACTIVE from admin
+    // approval). The verification GATE is NOT here: it governs auction eligibility
+    // (see dealer-auction-eligibility.service.ts), not portal activation.
+    const updatedDealer = await prisma.dealer.update({
+      where: { id: dealer.id },
+      data: { status: "ACTIVE" },
+      include: { user: { select: { email: true } } },
     });
 
     // Belt-and-suspenders DocuSign marketplace envelope — fire-and-forget.
@@ -214,19 +216,19 @@ export async function PATCH(request: NextRequest) {
       "@/lib/services/esign/dealer-marketplace-agreement.service"
     );
     void sendDealerMarketplaceAgreement({
-      dealerId: dealer.id,
-      email: d?.user?.email ?? "",
-      name: d?.dealershipName ?? "Dealer",
+      dealerId: updatedDealer.id,
+      email: updatedDealer.user?.email ?? "",
+      name: updatedDealer.dealershipName ?? "Dealer",
     }).catch((err) => {
       logger.error("[dealer-onboarding/agreement] DocuSign send failed:", err);
     });
 
-    if (activation.blocked) {
-      return NextResponse.json({
-        success: true,
-        nextStep: "COMPLETE",
-        status: "PENDING_VERIFICATION",
-        message: "Agreement signed. Your account is pending license verification before it goes live.",
+    // CRM spine: onboarding complete → timeline + Make (non-blocking, never throws).
+    if (updatedDealer.user?.email) {
+      await emitDomainEvent("dealer_activated", {
+        domainEntityId: updatedDealer.id,
+        contact: { email: updatedDealer.user.email, firstName: updatedDealer.dealershipName ?? undefined, source: "dealer_signup" },
+        data: { dealer_id: updatedDealer.id, dealership_name: updatedDealer.dealershipName },
       });
     }
 

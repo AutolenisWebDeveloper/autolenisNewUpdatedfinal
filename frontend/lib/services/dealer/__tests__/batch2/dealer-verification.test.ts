@@ -82,6 +82,27 @@ test("recordDealerLicense is idempotent for the same license number (no duplicat
   assert.equal(state.createdLicense.length, 0, "existing license reused, not duplicated");
 });
 
+test("re-saving the SAME already-verified license preserves verified=true", async () => {
+  state.license = { id: "lic_existing" };
+  state.verification = { id: "ver_1", licenseNum: "DL-12345", verified: true };
+  const { recordDealerLicense } = await load();
+  await recordDealerLicense("d1", "DL-12345", "TX");
+  const update = (state.upsertedVerification[0]! as { update: Row }).update;
+  assert.equal(update.verified, true, "same verified license stays verified");
+  assert.equal("verifiedAt" in update, false, "does not clear verifiedAt when kept");
+});
+
+test("saving a DIFFERENT license resets verified=false and clears verifiedAt/verifiedBy", async () => {
+  state.license = null;
+  state.verification = { id: "ver_1", licenseNum: "OLD-999", verified: true };
+  const { recordDealerLicense } = await load();
+  await recordDealerLicense("d1", "DL-12345", "TX");
+  const update = (state.upsertedVerification[0]! as { update: Row }).update;
+  assert.equal(update.verified, false, "a changed license must be re-verified");
+  assert.equal(update.verifiedAt, null);
+  assert.equal(update.verifiedBy, null);
+});
+
 test("verifyDealerLicense is the ONLY path that sets verified=true, and audits it", async () => {
   state.verification = { id: "ver_1", licenseNum: "DL-12345", state: "TX", verified: false };
   const { verifyDealerLicense } = await load();

@@ -11,6 +11,7 @@ import { geocodeZip } from "@/lib/services/integrations/geocoding.service";
 import { lookupCity, type LatLng } from "@/lib/utils/zip-coords";
 import { getPreferredMakes } from "@/lib/services/auction/auction-capacity.service";
 import { selectCoverageRadius } from "@/lib/services/auction/coverage.service";
+import { filterAuctionEligibleDealerIds } from "@/lib/services/dealer/dealer-auction-eligibility.service";
 
 const MAX_INVITATIONS_PER_AUCTION = 8;
 // Widest invite radius, applied as a real cutoff when we have buyer coordinates
@@ -209,10 +210,18 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
   }
 
   // Get active dealers. Exclude the system "Outside Dealer" placeholder.
-  const dealers = await prisma.dealer.findMany({
+  let dealers = await prisma.dealer.findMany({
     where: { status: "ACTIVE", isSystemPlaceholder: false },
     select: { id: true, zip: true, latitude: true, longitude: true },
   });
+
+  // Batch 2 — verification gate (flag-gated, default OFF). When enforced, only
+  // dealers with a signed agreement AND an admin-verified license may be invited
+  // to compete. Off by default, this is a no-op and dealer selection is unchanged.
+  const eligibleIds = await filterAuctionEligibleDealerIds(dealers.map((d) => d.id));
+  if (eligibleIds.size !== dealers.length) {
+    dealers = dealers.filter((d) => eligibleIds.has(d.id));
+  }
 
   // Resolve each dealer's coordinates (Y5 persisted coords first, then a live
   // ZIP geocode), then geo-filter FAIL CLOSED via pickNearbyDealers: a dealer

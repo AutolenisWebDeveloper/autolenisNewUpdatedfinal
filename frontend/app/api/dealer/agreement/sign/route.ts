@@ -15,7 +15,6 @@ import {
   recordDealerAgreementSignature,
   finalizeDealerAgreementCertificate,
 } from "@/lib/services/agreement/dealer-agreement.service";
-import { activateDealerIfEligible } from "@/lib/services/dealer/dealer-activation.service";
 
 const bodySchema = z.object({
   agreedToTerms: z.literal(true),
@@ -81,12 +80,5 @@ export async function POST(request: NextRequest) {
     agreementVersion: CURRENT_DEALER_AGREEMENT_VERSION,
   }));
 
-  // Activate subject to the flag-gated verification gate.
-  const activation = await activateDealerIfEligible(dealer.id, {
-    adminId: "system",
-    adminEmail: "system@autolenis.com",
-    reason: "Dealer signed the network agreement",
-  });
-
-  return successResponse({ signed: true, activated: activation.activated, pendingVerification: activation.blocked ?? false }, 201);
+  return successResponse({ signed: true }, 201);
 }
