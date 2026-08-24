@@ -17,11 +17,13 @@ import {
 // scope and omits it. Never pass an unvalidated id here — resolve ownership first
 // with resolveOwnedVehicleRequestId so an auction can't link to another buyer's
 // request.
-export async function createAuction(buyerId: string, depositId: string, vehicleRequestId?: string | null) {
+export async function createAuction(buyerId: string, depositId: string | null, vehicleRequestId?: string | null) {
   return prisma.auction.create({
     data: {
       buyerId,
-      depositId,
+      // Batch 4 — depositId may be null for a deposit-optional concierge auction.
+      // The competitive path always passes a real deposit id (unchanged).
+      ...(depositId ? { depositId } : {}),
       status: AuctionStatus.PENDING,
       ...(vehicleRequestId ? { vehicleRequestId } : {}),
     },

@@ -412,7 +412,10 @@ model Deposit {
 model Auction {
   id                String              @id @default(uuid())
   buyerId           String              @map("buyer_id")
-  depositId         String              @unique @map("deposit_id")
+  // Batch 4 — nullable so a deposit-OPTIONAL concierge auction can exist without
+  // the $99 deposit. The competitive reverse auction still always has one (set at
+  // creation from the Stripe webhook / deposit-activation reconciler).
+  depositId         String?             @unique @map("deposit_id")
   status            AuctionStatus       @default(PENDING)
   startedAt         DateTime?           @map("started_at")
   endsAt            DateTime?           @map("ends_at")
@@ -442,7 +445,7 @@ model Auction {
   outsideInvites    OutsideAuctionInvite[]
   vehicles          AuctionVehicle[]
   buyer             Buyer               @relation(fields: [buyerId], references: [id])
-  deposit           Deposit             @relation(fields: [depositId], references: [id])
+  deposit           Deposit?            @relation(fields: [depositId], references: [id])
   vehicleRequest    VehicleRequest?     @relation(fields: [vehicleRequestId], references: [id], onDelete: SetNull)
   originalAuction   Auction?            @relation("AuctionRetry", fields: [originalAuctionId], references: [id])
   retryAuctions     Auction[]           @relation("AuctionRetry")
@@ -555,6 +558,11 @@ model Offer {
   notes               String?
   // Set when an admin entered this offer manually on behalf of a dealer.
   submittedByAdminId  String?   @map("submitted_by_admin_id")
+  // Batch 4 — links a converted concierge offer back to its source
+  // (e.g. "vehicle_request_offer:<id>"). Unique → idempotent convergence: a retry
+  // of the same source never mints a duplicate Offer/Auction/Deal. Null for
+  // ordinary competitive-auction offers.
+  conciergeSourceRef  String?   @unique @map("concierge_source_ref")
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @updatedAt @map("updated_at")
   deal              Deal?

@@ -48,6 +48,11 @@ export async function GET(request: NextRequest, { params }: Props) {
   const bestOverallId = selectTopOffers(ranked).bestOverall?.offerId;
   const overallOffer = (bestOverallId && offers.find(o => o.id === bestOverallId)) || sorted[0];
 
+  // FS-I fix (Batch 4) — junk fees come from the Best Price engine's real
+  // junkFeeItems sum, NOT a fabricated `feesCents * 0.3` or a hardcoded 0.
+  const junkByOffer = new Map(ranked.map(r => [r.offerId, r.junkFeesCents]));
+  const junkFor = (offerId: string): number => junkByOffer.get(offerId) ?? 0;
+
   const calculateMonthly = (priceCents: number, apr: number, months: number): number => {
     const r = apr / 12 / 100;
     return Math.round(priceCents * r / (1 - Math.pow(1 + r, -months)));
@@ -81,7 +86,7 @@ export async function GET(request: NextRequest, { params }: Props) {
       rankLabel: "Best Cash Price",
       otdPriceCents: sorted[0].otdPriceCents,
       monthlyPayment: sorted[0].aprRate ? calculateMonthly(sorted[0].otdPriceCents, sorted[0].aprRate, termMonths) : undefined,
-      junkFeesCents: (sorted[0].feesCents * 0.3) | 0,
+      junkFeesCents: junkFor(sorted[0].id),
       dealerTier: sorted[0].dealer.tier,
       rankingExplanation: "Lowest out-the-door price among all submitted offers.",
       aprFlag: sorted[0].aprFlag,
@@ -100,7 +105,7 @@ export async function GET(request: NextRequest, { params }: Props) {
         rankLabel: "Best Monthly Payment",
         otdPriceCents: bestMonthlyOffer.otdPriceCents,
         monthlyPayment: calculateMonthly(bestMonthlyOffer.otdPriceCents, bestMonthlyOffer.aprRate ?? DEFAULT_APR_RATE, termMonths),
-        junkFeesCents: 0,
+        junkFeesCents: junkFor(bestMonthlyOffer.id),
         dealerTier: bestMonthlyOffer.dealer.tier,
         rankingExplanation: "Best estimated monthly payment given the offer financing terms.",
         aprFlag: bestMonthlyOffer.aprFlag,
@@ -114,7 +119,7 @@ export async function GET(request: NextRequest, { params }: Props) {
       rankLabel: "Best Overall Value",
       otdPriceCents: overallOffer.otdPriceCents,
       monthlyPayment: undefined,
-      junkFeesCents: 0,
+      junkFeesCents: junkFor(overallOffer.id),
       dealerTier: overallOffer.dealer.tier,
       rankingExplanation: "Highest overall AutoLenis score, balancing price, fees, and reliability.",
       aprFlag: overallOffer.aprFlag,

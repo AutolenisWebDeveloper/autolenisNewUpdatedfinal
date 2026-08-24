@@ -56,7 +56,7 @@ export async function rankOffers(auctionId: string, termMonths = 60): Promise<Ra
   const sortedByMonthly = [...withMetrics].filter(o => o.monthly).sort((a, b) => (a.monthly ?? 0) - (b.monthly ?? 0));
   const sortedByJunk = [...withMetrics].sort((a, b) => a.junkFeesCents - b.junkFeesCents);
 
-  return withMetrics.map(({ offer, monthly, junkFeesCents }) => {
+  const ranked = withMetrics.map(({ offer, monthly, junkFeesCents }) => {
     const rankCash = sortedByOtd.findIndex(o => o.offer.id === offer.id) + 1;
     const rankMonthly = sortedByMonthly.findIndex(o => o.offer.id === offer.id) + 1 || withMetrics.length;
     const rankJunk = sortedByJunk.findIndex(o => o.offer.id === offer.id) + 1;
@@ -87,6 +87,37 @@ export async function rankOffers(auctionId: string, termMonths = 60): Promise<Ra
     const sortedByOverall = [...arr].sort((a, b) => a.overallScore - b.overallScore);
     return { ...r, rankOverall: sortedByOverall.findIndex(o => o.offerId === r.offerId) + 1 };
   });
+
+  // Audit trail — persist the ranking so the buyer-facing Best Price cards are
+  // reproducible and never a black box (FS-I). Best-effort only: a logging
+  // failure must never break ranking, so it is fire-and-forget and swallows
+  // its own error. Weights and result are stored verbatim (the exact inputs and
+  // outputs of this calculation).
+  prisma.bestPriceCalculationLog.create({
+    data: {
+      auctionId,
+      termMonths,
+      offerCount: ranked.length,
+      weights: {
+        weightOtd: weightConfig.weightOtd,
+        weightMonthly: weightConfig.weightMonthly,
+        weightFees: weightConfig.weightFees,
+        weightJunkFees: weightConfig.weightJunkFees,
+      },
+      result: ranked.map(r => ({
+        offerId: r.offerId,
+        otdPriceCents: r.otdPriceCents,
+        junkFeesCents: r.junkFeesCents,
+        monthlyPayment: r.monthlyPayment ?? null,
+        rankCash: r.rankCash,
+        rankMonthly: r.rankMonthly,
+        rankOverall: r.rankOverall,
+        overallScore: r.overallScore,
+      })),
+    },
+  }).catch(() => {});
+
+  return ranked;
 }
 
 // Three canonical ranked offers for buyer comparison

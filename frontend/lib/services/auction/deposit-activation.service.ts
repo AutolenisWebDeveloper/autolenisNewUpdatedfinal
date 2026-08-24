@@ -201,6 +201,9 @@ export async function reconcileStuckActivations(opts?: {
     prisma.auction.findMany({
       where: {
         createdAt: { lt: cutoff },
+        // Batch 4 — deposit-OPTIONAL concierge auctions carry no depositId and are
+        // never reconciled here; this sweep only heals stranded deposit-backed auctions.
+        depositId: { not: null },
         OR: [
           { status: 'PENDING' },
           { status: 'ACTIVE', invitations: { none: {} }, offers: { none: {} } },
@@ -225,7 +228,9 @@ export async function reconcileStuckActivations(opts?: {
 
   const depositIds = Array.from(
     new Set([
-      ...strandedAuctions.map((a) => a.depositId),
+      ...strandedAuctions
+        .map((a) => a.depositId)
+        .filter((id): id is string => id !== null),
       ...depositsNoAuction.map((d) => d.id),
     ]),
   );
