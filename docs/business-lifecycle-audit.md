@@ -460,3 +460,17 @@ Locked from repository evidence before implementing Batch 1, so the batch cannot
 - **Feature flag** `dealer_verification_gate` registered (default OFF).
 
 **No migration** (all models — `DealerVerification`, `DealerLicense`, `DealerAgreementSignature`, `FeatureFlag` — pre-exist). Enabling the gate is a single owner-gated feature-flag flip; existing dealers are never touched (they only need an admin license-verification to become invite-eligible once the gate is on).
+
+## 21. Batch 3 — Request → Sourcing Progression (delivered on this branch)
+
+**Locked owner decisions:** **deposit-first** — reaching `ACTIVE_SOURCING` surfaces matched inventory + coverage but does **not** launch the competitive dealer auction (that stays gated on the $99 deposit) and does **not** create any Offer or Deal (the vehicle-request module keeps deal/offer creation admin-only); **advance + flag** — thin coverage (below `MIN_COVERAGE_DEALERS`) does **not** block advancement, it only sets the existing coverage-hold marker. Tier A: no money, no external comms, no schema change.
+
+**Root cause fixed.** Requests stalled at `SUBMITTED` because the only auto-advance was a best-effort, conditional (make+zip+email) `INTAKE` bump inside `request-vehicle`'s `after()` that silently failed, and `INTAKE → ACTIVE_SOURCING` had no automatic path at all.
+
+**Delivered:**
+- **`lib/services/vehicle-request/request-progression.service.ts`** — `advanceVehicleRequest` deterministically advances `SUBMITTED → INTAKE → ACTIVE_SOURCING`. Each transition is a conditional `updateMany` on the exact prior status (concurrency-safe, idempotent) and writes a `VehicleRequestEvent` (`AUTO_INTAKE`, `AUTO_SOURCING`). At the sourcing step it runs the Batch-1 matcher (`matchInventoryForRequest`) and the coverage gate (best-effort — neither ever blocks advancement). It **stops at `ACTIVE_SOURCING`**; `OFFER_READY`+ and terminal statuses are never touched. `isWellFormedForIntake` = geocodable ZIP + vehicle intent (make/model/notes).
+- **`reconcileRequestProgression`** — scans `SUBMITTED`/`INTAKE` requests and advances each (bounded, per-request isolated); the reliable backstop behind the best-effort inline advance. Wired into the existing **`coverage-hold-reconcile`** cron (runs progression, then coverage-hold release) — no new cron surface.
+- **`request-vehicle` route** — the ad-hoc INTAKE-only `after()` advance now calls `advanceVehicleRequest` (full progression), still off the request path.
+- **Admin `launch-auction` reconciliation** — the manual override now honors the Batch-2 verification gate: flag OFF (default) → unchanged; flag ON → hand-picked but unverified dealers are dropped (reported in the audit log as `droppedUnverifiedDealerIds`; 400 if none remain). The admin's hand-pick capability, comp-deposit, and outside-invite flow are otherwise unchanged (deeper money/offer convergence stays with Batches 4/6).
+
+**No migration**; `VehicleRequestStatus` is a pre-existing stored column (distinct from the derived buyer-journey stage, which is untouched). No auction launch, deposit, offer, or deal is created by progression.
