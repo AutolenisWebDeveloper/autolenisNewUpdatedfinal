@@ -69,6 +69,10 @@ export async function POST(request: NextRequest) {
         condition: parsed.data.condition?.toLowerCase(),
         images: parsed.data.images ?? [],
         isActive: true,
+        // Batch 1 — provenance + freshness so dealer-owned inventory is
+        // attributable and eligible as executable supply.
+        sourceAdapter: "dealer_manual",
+        lastSeenAt: new Date(),
       },
     });
     return successResponse({ item }, 201);

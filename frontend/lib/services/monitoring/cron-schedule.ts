@@ -70,6 +70,8 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "prequal-message-delivery": { intervalMinutes: 4 * HOUR },
   "sessions": { intervalMinutes: 6 * HOUR },
   "inventory-sync-full": { intervalMinutes: 6 * HOUR },
+  "inventory-match-refresh": { intervalMinutes: 6 * HOUR }, // Batch 1 — recompute request↔inventory matches after sync
+
   "saved-search-match": { intervalMinutes: 6 * HOUR }, // migrated off Inngest cron `0 */6 * * *`
   "amips-generate": { intervalMinutes: 8 * HOUR }, // 06,14,22 → 8h max gap
   // ── daily ──

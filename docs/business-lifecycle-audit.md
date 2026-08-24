@@ -413,3 +413,35 @@ It has **no prerequisites**, is the safest tier, directly removes the most opera
 ---
 
 *Phase 0 complete. No application code, schema, or migrations were changed. No production data was mutated. No emails/SMS/invitations/payments/refunds/envelopes/financing submissions were sent.*
+
+---
+
+## 18. Architecture Decisions (Prompt 2 · Step 0 — locked)
+
+Locked from repository evidence before implementing Batch 1, so the batch cannot reinforce a dead, duplicate, or non-canonical path. Evidence tags as elsewhere. **None required an owner STOP** — each is unambiguously supported by the code/schema; #10's full offer convergence is explicitly deferred to Batch 4 and Batch 1 stays offer-agnostic.
+
+| # | Decision (locked) | Rationale / evidence |
+|---|---|---|
+| 1 | **Canonical dealer-owned inventory = `InventoryItem`** (single table) with `dealerId` → ACTIVE `Dealer`, `lane = LANE_1`. | One table, provenance discriminators distinguish ownership. `VERIFIED—REPOSITORY`: `InventoryItem.dealer` relation, `assignLane` LANE_1 semantics, inventory-intelligence skill. |
+| 2 | **The `Dealer` entity owns inventory** via `InventoryItem.dealerId`. Rooftop is future; `Dealer` is the current FK. | `VERIFIED—REPOSITORY`: schema `InventoryItem.dealerId` → `Dealer`. `DealerRooftop` has 0 prod rows and no inventory FK. |
+| 3 | **Provenance = `sourceAdapter` (provider) + `dealerId` (dealer-owned) + `addedByAdminId` (admin).** Sync accounting via `InventorySource`/`InventorySyncRun`; feed accounting via `InventoryFeedLog`. | `VERIFIED—REPOSITORY`: existing columns; skill "provenance is `sourceAdapter`". Item-level provenance needs **populating**, not new columns. |
+| 4 | **A truthful sync** persists an `InventorySyncRun` per source with an explicit outcome — `SUCCESS` / `ZERO_RESULTS` / `NOT_CONFIGURED` / `DEFERRED` / `FAILED`. Health is computed **only over configured sources that actually ran**; unconfigured are skipped, never scored. An all-unconfigured run yields `healthScore = null`, never 100. | Fixes FS-D/FS-E. `VERIFIED—REPOSITORY`: `InventorySyncRun` fields; skill rule "health scores must stay honest". |
+| 5 | **Canonical demand entity = `VehicleRequest`.** Request-scoped match output = **`VehicleRequestMatchResult`**; buyer-scoped recommendation score = **`VehicleMatchScore`**. | `VERIFIED—REPOSITORY`: `VehicleRequestStatus` machine (`ACTIVE_SOURCING`/`OFFER_*`), both match models present but unwritten. |
+| 6 | **Downstream sourcing consumes `VehicleRequestMatchResult`.** Batch 1 persists it; Batch 3 sourcing reads it. | `VERIFIED—REPOSITORY`: model carries `requestId` + `source`(lane) + `matchScore` — request-scoped by design. |
+| 7 | **Matching supports BOTH** inventory-based (this batch) and dealer-capability targeting (existing sourcing), at **different stages**. Batch 1 = inventory-based request matching only. | `VERIFIED—REPOSITORY`: dealer-capability scoring already lives in `dealer-invitation.service.ts`; inventory matching was dead. Keeping them separate avoids a parallel engine. |
+| 8 | **Executable-supply eligibility** = `isActive` ∧ `priceCents>0` ∧ attributable provenance ∧ fresh (LANE_1 exempt while active; external LANE_2/3 must be seen within 48 h). Stale sweep continues to deactivate. | Row-existing ≠ executable. Automatically **excludes the 206 historical orphan rows** (null provenance) without rewriting them. `VERIFIED—REPOSITORY`: `isActive`/`lastSeenAt`/lane columns + stale-sweep. |
+| 9 | **Matching ↔ sourcing boundary:** matching answers "which eligible vehicles satisfy this request" (persist `VehicleRequestMatchResult`); sourcing answers "which dealers to invite" (`dealer-invitation.service.ts`). Batch 1 owns matching only. | `VERIFIED—REPOSITORY`: the two concerns already live in distinct services. |
+| 10 | **Canonical downstream offer spine = System A (`Offer`/`Auction` → `Deal.offerId`).** Batch 1 couples ONLY to `VehicleRequest` + `InventoryItem` + match models — it writes to **no** offer path (`Offer`, `VehicleOffer`, `VehicleRequestOffer`, `Auction`), so it cannot reinforce the dead/duplicate System B/C. Full convergence deferred to **Batch 4**. | `VERIFIED—REPOSITORY`: §7/§8 — only System A reaches `Deal` with guarded selection. Decision scoped to "don't couple wrong"; convergence is a separate owner-gated batch. |
+
+## 19. Batch 1 — Implementation Status (delivered on this branch)
+
+**Delivered (Tier A, branch-only; no money/contract/comms/offer side effects):**
+- **Inventory truthfulness** — adapter `AdapterRunResult` now carries `configured` + explicit `outcome`; MarketCheck & Custom adapters classify NOT_CONFIGURED / ZERO_RESULTS / DEFERRED / FAILED / SUCCESS; orchestrator persists one `InventorySyncRun` per source, computes health only over sources that actually ran (`null`, never 100, when none configured), and stamps `sourceAdapter` provenance + normalized-VIN identity on every ingested row. Fixes **FS-D, FS-E**.
+- **Dead-adapter removal** — the 5 returns-nothing web-scrape stubs deleted (**FS-F**); intended `CustomAdapter` retained and made honest.
+- **Provenance/freshness on dealer write paths** — dealer manual/CSV routes now stamp `sourceAdapter` + `lastSeenAt`.
+- **Executable-supply eligibility** — `inventory-eligibility.ts` (`executableSupplyWhere` + pure `isExecutableSupply`) is the single source of truth; orphan/stale/unpriced rows excluded; the 206 historical orphans are excluded **without** being rewritten.
+- **Canonical matching wired** — `request-inventory-match.service.ts` persists `VehicleRequestMatchResult` idempotently (`@@unique([requestId, inventoryItemId])` + upsert + scoped prune in one transaction); deterministic pure scoring (`inventory-match-score.ts`); truthful outcomes MATCHED / ZERO_MATCHES / NO_ELIGIBLE_SUPPLY / SKIPPED_TERMINAL; execution failure throws (never masquerades as zero). Buyer-facing `findMatchedVehicles` rewired onto the same eligibility+scoring and now persists the previously-dead `VehicleMatchScore`. Fixes **FS-M**; supersedes **FS-L** eligibility gap.
+- **Observability** — new `inventory-match-refresh` cron (auth-gated, read+match+persist only) records the truthful roll-up via existing `CronJobLog`; FS-G false "feed sync failure" dealer email suppressed until a feed sync is actually attempted.
+- **Additive schema** — `SyncRunStatus += {NOT_CONFIGURED, ZERO_RESULTS, DEFERRED}`, `InventorySourceType += MARKETCHECK`, `@@unique` on `InventorySource(type,name)` and `VehicleRequestMatchResult(requestId,inventoryItemId)`.
+
+**PRODUCTION CUTOVER REQUIRES `prisma migrate deploy` — OWNER-GATED** (migration `20261010000000_batch1_inventory_matching_truthfulness`, guarded with `IF NOT EXISTS` / `ADD VALUE IF NOT EXISTS`; verify **physical** schema, not just `_prisma_migrations`). No production data is mutated and the 206 historical inventory rows are **not** backfilled or reattached.

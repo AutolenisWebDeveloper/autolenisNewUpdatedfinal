@@ -85,15 +85,23 @@ export async function GET(request: NextRequest) {
     feedConfig: { lastSyncAt: Date | null } | null;
   }>);
   const failureCutoff = new Date(Date.now() - 24 * 3600000);
+  let feedFailureEmails = 0;
+  let feedFailureSuppressed = 0;
   for (const dealer of activeDealersWithFeeds) {
     if (!dealer.user?.email) continue;
     const freshCount = await prisma.inventoryItem.count({
       where: { dealerId: dealer.id, lastSeenAt: { gte: failureCutoff } },
     }).catch(() => 1);
     if (freshCount > 0) continue;
-    const lastSync = dealer.feedConfig?.lastSyncAt
-      ? dealer.feedConfig.lastSyncAt.toISOString().slice(0, 10)
-      : "unknown";
+    // FS-G fix (Batch 1): only claim a "feed sync failure" when a feed sync was
+    // actually ATTEMPTED (feedConfig.lastSyncAt set). The dealer-feed puller is not
+    // wired yet, so lastSyncAt is null — blaming the dealer for a sync the platform
+    // never runs is a false signal. Suppress it and account for the suppression.
+    if (!dealer.feedConfig?.lastSyncAt) {
+      feedFailureSuppressed++;
+      continue;
+    }
+    const lastSync = dealer.feedConfig.lastSyncAt.toISOString().slice(0, 10);
     await sendDealerInventorySyncFailureEmail({
       to: dealer.user.email,
       contactName: dealer.dealershipName,
@@ -101,9 +109,10 @@ export async function GET(request: NextRequest) {
       errorCategory: "FEED_NO_DATA",
       feedSetupUrl: `${APP_URL}/dealer/inventory/feed`,
     }).catch(() => {});
+    feedFailureEmails++;
   }
 
-  return { deactivated, cutoff };
+  return { deactivated, cutoff, feedFailureEmails, feedFailureSuppressed };
   });
   if (!run.ok) return NextResponse.json({ success: false, error: "inventory-stale-sweep_failed" }, { status: 500 });
 

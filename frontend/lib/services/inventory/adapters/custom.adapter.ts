@@ -32,27 +32,64 @@ export class CustomAdapter implements IInventoryAdapter {
 
   async search(_params: SearchParams): Promise<AdapterRunResult> {
     const start = Date.now();
+
+    // Only JSON feeds are actually parsed today. XML/CSV are NOT_CONFIGURED
+    // (unsupported) rather than a silent empty "success" — never let an
+    // unimplemented format read as a healthy zero-vehicle sync.
+    if (this.config.format !== "json") {
+      logger.warn(`[Custom adapter: ${this.name}] format '${this.config.format}' not implemented — skipping (NOT_CONFIGURED).`);
+      return {
+        adapter: this.name,
+        vehicles: [],
+        duration: Date.now() - start,
+        configured: false,
+        outcome: "NOT_CONFIGURED",
+        error: `feed format '${this.config.format}' not implemented`,
+        fetchedAt: new Date(),
+      };
+    }
+
     try {
       const response = await fetch(this.config.feedUrl, {
         headers: { "User-Agent": "Mozilla/5.0 (compatible; AutoLenis/1.0)" },
         signal: AbortSignal.timeout(20000),
       });
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        const transient = response.status === 429 || response.status >= 500;
+        return {
+          adapter: this.name,
+          vehicles: [],
+          duration: Date.now() - start,
+          configured: true,
+          outcome: transient ? "DEFERRED" : "FAILED",
+          error: `HTTP ${response.status}`,
+          fetchedAt: new Date(),
+        };
+      }
 
-      const vehicles = await this.parseFeed(response);
-      return { adapter: this.name, vehicles, duration: Date.now() - start, fetchedAt: new Date() };
+      const vehicles = this.parseJson((await response.json()) as unknown);
+      return {
+        adapter: this.name,
+        vehicles,
+        duration: Date.now() - start,
+        configured: true,
+        outcome: vehicles.length > 0 ? "SUCCESS" : "ZERO_RESULTS",
+        fetchedAt: new Date(),
+      };
     } catch (error) {
+      const isTimeout = error instanceof Error && /abort|timeout/i.test(error.message);
       logger.error(`[Custom adapter: ${this.name}] Error:`, error);
-      return { adapter: this.name, vehicles: [], duration: Date.now() - start, error: String(error), fetchedAt: new Date() };
+      return {
+        adapter: this.name,
+        vehicles: [],
+        duration: Date.now() - start,
+        configured: true,
+        outcome: isTimeout ? "DEFERRED" : "FAILED",
+        error: String(error),
+        fetchedAt: new Date(),
+      };
     }
-  }
-
-  private async parseFeed(response: Response): Promise<NormalizedVehicle[]> {
-    if (this.config.format === "json") return this.parseJson(await response.json() as unknown);
-    // XML and CSV parsing would go here
-    await response.text();
-    return [];
   }
 
   private parseJson(data: unknown): NormalizedVehicle[] {

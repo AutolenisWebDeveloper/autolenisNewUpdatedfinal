@@ -6,25 +6,67 @@
 //   - MarketCheckAdapter: real production aggregator (gated by MARKETCHECK_API_KEY)
 //   - CustomAdapter: dealer-supplied feeds (instantiated per source row in DB)
 //
-// Removed in 2026-04 audit: AutoTrader, Cars.com, CarGurus, TrueCar, Edmunds web-scrape stubs
-// (all returned [] pending production parsing implementation; dropped to keep healthScore honest).
+// Batch 1 (truthfulness): every run now persists an InventorySyncRun per source with
+// an explicit outcome (SUCCESS / ZERO_RESULTS / NOT_CONFIGURED / DEFERRED / FAILED),
+// stamps provenance (sourceAdapter) on every ingested row, and computes healthScore
+// ONLY over configured sources that actually ran. An unconfigured provider can never
+// read as "100% healthy / 0 items".
+//
+// Removed in 2026-04 audit (files deleted in Batch 1): AutoTrader, Cars.com, CarGurus,
+// TrueCar, Edmunds web-scrape stubs — they returned [] and inflated healthScore.
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { InventoryLane } from "@prisma/client";
-import type { NormalizedVehicle, AdapterRunResult, SearchParams } from "./adapters/IInventoryAdapter";
+import { InventoryLane, InventorySourceType, SyncRunStatus } from "@prisma/client";
+import { normalizeVin, isValidVin } from "@/lib/utils/vin";
+import type { NormalizedVehicle, AdapterRunResult, AdapterOutcome, SearchParams } from "./adapters/IInventoryAdapter";
 import { MarketCheckAdapter } from "./adapters/marketcheck.adapter";
 
 // Built-in adapters. Adapter#search() owns its own no-op behavior when not configured.
 const ADAPTERS = [new MarketCheckAdapter()];
+
+// Map an adapter's `name` to a first-class InventorySource (type + display name)
+// so its runs can be recorded. Custom dealer-feed adapters use type CUSTOM.
+export function inventorySourceForAdapter(adapterName: string): { type: InventorySourceType; name: string } {
+  if (adapterName === "marketcheck") return { type: InventorySourceType.MARKETCHECK, name: "MarketCheck" };
+  if (adapterName.startsWith("custom_")) return { type: InventorySourceType.CUSTOM, name: adapterName };
+  return { type: InventorySourceType.CUSTOM, name: adapterName };
+}
+
+// Idempotent source registration — one row per (type, name). Best-effort: a
+// monitoring/accounting write must never break the actual ingestion.
+async function ensureInventorySource(type: InventorySourceType, name: string): Promise<string | null> {
+  try {
+    const source = await prisma.inventorySource.upsert({
+      where: { type_name: { type, name } },
+      create: { type, name },
+      update: {},
+      select: { id: true },
+    });
+    return source.id;
+  } catch (e) {
+    logger.warn(`[inventory-orchestrator] ensureInventorySource failed for ${type}/${name}:`, e);
+    return null;
+  }
+}
+
+// Translate an adapter outcome into the persisted SyncRunStatus.
+function outcomeToStatus(outcome: AdapterOutcome): SyncRunStatus {
+  switch (outcome) {
+    case "SUCCESS": return SyncRunStatus.COMPLETED;
+    case "ZERO_RESULTS": return SyncRunStatus.ZERO_RESULTS;
+    case "NOT_CONFIGURED": return SyncRunStatus.NOT_CONFIGURED;
+    case "DEFERRED": return SyncRunStatus.DEFERRED;
+    case "FAILED": return SyncRunStatus.FAILED;
+  }
+}
 
 // Lane assignment logic
 // LANE_1: Dealer has an active AutoLenis account AND vehicle is explicitly linked
 // LANE_2: External listing from a known dealer network (partner-adjacent)
 // LANE_3: Open-market listing — no direct dealer relationship
 export async function assignLane(
-  vehicle: NormalizedVehicle,
-  activeDealerIds: Set<string>
+  vehicle: NormalizedVehicle
 ): Promise<InventoryLane> {
   // Check if external dealer name matches an active AutoLenis dealer
   if (vehicle.externalDealerName) {
@@ -40,31 +82,42 @@ export async function assignLane(
 }
 
 // Deduplication: VIN + source as the unique key (per V4 System 15 spec)
-// Primary key: VIN (if present)
-// Fallback: make:model:year:mileage:price composite
+// Primary key: VIN (if present); Fallback: make:model:year:mileage:price composite
 function deduplicateVehicles(results: AdapterRunResult[]): NormalizedVehicle[] {
   const seen = new Map<string, NormalizedVehicle>();
-
   for (const result of results) {
     for (const vehicle of result.vehicles) {
       const key = vehicle.sourceKey;
       if (!seen.has(key)) {
         seen.set(key, vehicle);
-      }
-      // If duplicate VIN from different sources, keep the one with more data
-      else if (vehicle.images.length > (seen.get(key)?.images.length ?? 0)) {
+      } else if (vehicle.images.length > (seen.get(key)?.images.length ?? 0)) {
         seen.set(key, vehicle);
       }
     }
   }
-
   return Array.from(seen.values());
 }
 
-// Health scoring — ENH-14
-function computeAdapterHealth(results: AdapterRunResult[]): number {
-  const successful = results.filter(r => !r.error).length;
-  return Math.round((successful / results.length) * 100);
+// Health scoring — ENH-14, corrected in Batch 1.
+// Only configured sources that actually RAN count toward health. Unconfigured
+// sources are SKIPPED, not scored — so an all-unconfigured run yields null health,
+// never a misleading 100%.
+function computeHealthScore(results: AdapterRunResult[]): number | null {
+  const attempted = results.filter(r => r.outcome !== "NOT_CONFIGURED");
+  if (attempted.length === 0) return null;
+  const healthy = attempted.filter(r => r.outcome === "SUCCESS" || r.outcome === "ZERO_RESULTS").length;
+  return Math.round((healthy / attempted.length) * 100);
+}
+
+export interface AdapterOutcomeSummary {
+  adapter: string;
+  count: number;
+  duration: number;
+  configured: boolean;
+  outcome: AdapterOutcome;
+  upserted: number;
+  syncRunId: string | null;
+  error?: string;
 }
 
 export interface OrchestratorRunResult {
@@ -72,10 +125,26 @@ export interface OrchestratorRunResult {
   totalAfterDedup: number;
   upserted: number;
   deactivated: number;
-  adapterResults: Array<{ adapter: string; count: number; duration: number; error?: string }>;
-  healthScore: number;
+  /** How many sources were actually configured (credential/feed present). */
+  configuredSources: number;
+  /** How many sources actually ran a fetch (configured, not NOT_CONFIGURED). */
+  attemptedSources: number;
+  /** Roll-up outcome for the whole run. */
+  outcome: "SUCCESS" | "ZERO_RESULTS" | "NOT_CONFIGURED" | "DEFERRED" | "FAILED";
+  adapterResults: AdapterOutcomeSummary[];
+  /** null when no configured source ran — NEVER defaulted to 100. */
+  healthScore: number | null;
   startedAt: Date;
   completedAt: Date;
+}
+
+// Roll a set of per-adapter outcomes into one run-level outcome.
+function rollUpOutcome(outcomes: AdapterOutcome[]): OrchestratorRunResult["outcome"] {
+  if (outcomes.some(o => o === "SUCCESS")) return "SUCCESS";
+  if (outcomes.some(o => o === "ZERO_RESULTS")) return "ZERO_RESULTS";
+  if (outcomes.some(o => o === "FAILED")) return "FAILED";
+  if (outcomes.some(o => o === "DEFERRED")) return "DEFERRED";
+  return "NOT_CONFIGURED";
 }
 
 export async function runInventorySync(params: SearchParams = {}, mode: "full" | "priority" = "full"): Promise<OrchestratorRunResult> {
@@ -94,31 +163,29 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
   // Deduplication pipeline
   const uniqueVehicles = deduplicateVehicles(adapterResults);
 
-  // Get active dealers for lane assignment
-  const activeDealers = await prisma.dealer.findMany({ where: { status: "ACTIVE" }, select: { id: true } });
-  const activeDealerIds = new Set(activeDealers.map(d => d.id));
-
-  // Upsert to database with lane assignment
+  // Upsert to database with lane assignment + provenance. Track per-adapter upsert
+  // counts so each source's InventorySyncRun reflects what IT actually ingested.
+  const upsertedByAdapter = new Map<string, number>();
   let upserted = 0;
   for (const vehicle of uniqueVehicles) {
-    const lane = await assignLane(vehicle, activeDealerIds);
+    const lane = await assignLane(vehicle);
 
-    // Upsert by VIN or by source adapter + sourceKey
-    const where = vehicle.vin
-      ? { vin: vehicle.vin }
-      : undefined;
+    // VIN identity: normalize + shape-validate. A malformed VIN is NOT written to
+    // the global @unique slot — it falls through to the no-VIN create path so it
+    // can never collide with or overwrite a valid record.
+    const normalizedVin = vehicle.vin ? normalizeVin(vehicle.vin) : undefined;
+    const vin = normalizedVin && isValidVin(normalizedVin) ? normalizedVin : undefined;
 
-    if (where) {
-      // Price history tracking — ENH-10
-      const existing = await prisma.inventoryItem.findFirst({ where });
+    if (vin) {
+      const existing = await prisma.inventoryItem.findFirst({ where: { vin } });
       const priceHistory = existing
-        ? [...((existing.priceHistory as Array<{price: number; date: string}>) ?? []), { price: vehicle.priceCents, date: new Date().toISOString() }].slice(-24) // Keep last 24 data points
+        ? [...((existing.priceHistory as Array<{ price: number; date: string }>) ?? []), { price: vehicle.priceCents, date: new Date().toISOString() }].slice(-24)
         : [{ price: vehicle.priceCents, date: new Date().toISOString() }];
 
       await prisma.inventoryItem.upsert({
-        where,
+        where: { vin },
         create: {
-          vin: vehicle.vin,
+          vin,
           year: vehicle.year,
           make: vehicle.make,
           model: vehicle.model,
@@ -130,6 +197,7 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
           lane,
           isActive: true,
           lastSeenAt: new Date(),
+          sourceAdapter: vehicle.sourceAdapter, // provenance — Batch 1
           priceHistory,
           externalDealerName: vehicle.externalDealerName,
           externalDealerPhone: vehicle.externalDealerPhone,
@@ -144,12 +212,12 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
           lane,
           isActive: true,
           lastSeenAt: new Date(),
+          sourceAdapter: vehicle.sourceAdapter, // keep provenance current
           priceHistory,
         },
       });
-      upserted++;
     } else {
-      // No VIN — create only (no upsert possible without unique key)
+      // No usable VIN — create only (no unique key to upsert on).
       await prisma.inventoryItem.create({
         data: {
           year: vehicle.year,
@@ -163,6 +231,7 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
           lane,
           isActive: true,
           lastSeenAt: new Date(),
+          sourceAdapter: vehicle.sourceAdapter, // provenance — Batch 1
           priceHistory: [{ price: vehicle.priceCents, date: new Date().toISOString() }],
           externalDealerName: vehicle.externalDealerName,
           externalDealerCity: vehicle.externalDealerCity,
@@ -170,11 +239,12 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
           externalListingUrl: vehicle.externalListingUrl,
         },
       }).catch(() => {}); // Ignore duplicates
-      upserted++;
     }
+    upserted++;
+    upsertedByAdapter.set(vehicle.sourceAdapter, (upsertedByAdapter.get(vehicle.sourceAdapter) ?? 0) + 1);
   }
 
-  // ENH-5: Stale sweep — deactivate vehicles not seen in this run (for full sync only)
+  // ENH-5: Stale sweep — deactivate vehicles not seen in this run (full sync only)
   let deactivated = 0;
   if (mode === "full") {
     const cutoff = new Date(Date.now() - 48 * 3600000); // 48 hours
@@ -186,14 +256,64 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
   }
 
   const completedAt = new Date();
-  const healthScore = computeAdapterHealth(adapterResults);
+  const healthScore = computeHealthScore(adapterResults);
 
-  // ENH-14: Alert if health drops below threshold
-  if (healthScore < 70) {
+  // Record one InventorySyncRun per source — the durable, truthful evidence that a
+  // sync occurred and what it did. Best-effort: accounting never breaks ingestion.
+  const adapterSummaries: AdapterOutcomeSummary[] = [];
+  for (const r of adapterResults) {
+    const { type, name } = inventorySourceForAdapter(r.adapter);
+    const sourceId = await ensureInventorySource(type, name);
+    const perAdapterUpserted = upsertedByAdapter.get(r.adapter) ?? 0;
+    let syncRunId: string | null = null;
+    if (sourceId) {
+      try {
+        const runRow = await prisma.inventorySyncRun.create({
+          data: {
+            sourceId,
+            status: outcomeToStatus(r.outcome),
+            vehiclesFetched: r.vehicles.length,
+            vehiclesUpserted: perAdapterUpserted,
+            vehiclesDeactivated: 0, // deactivation is cross-source; reported at run level below
+            healthScore: r.outcome === "NOT_CONFIGURED" ? null : (r.outcome === "FAILED" || r.outcome === "DEFERRED" ? 0 : 100),
+            error: r.error ?? null,
+            startedAt,
+            completedAt,
+          },
+          select: { id: true },
+        });
+        syncRunId = runRow.id;
+        await prisma.inventorySource.update({
+          where: { id: sourceId },
+          data: { lastRunAt: completedAt, lastRunStatus: r.outcome, vehiclesLastCount: r.vehicles.length },
+        }).catch(() => {});
+      } catch (e) {
+        logger.warn(`[inventory-orchestrator] InventorySyncRun write failed for ${r.adapter}:`, e);
+      }
+    }
+    adapterSummaries.push({
+      adapter: r.adapter,
+      count: r.vehicles.length,
+      duration: r.duration,
+      configured: r.configured,
+      outcome: r.outcome,
+      upserted: perAdapterUpserted,
+      syncRunId,
+      error: r.error,
+    });
+  }
+
+  const configuredSources = adapterResults.filter(r => r.configured).length;
+  const attemptedSources = adapterResults.filter(r => r.outcome !== "NOT_CONFIGURED").length;
+  const overall = rollUpOutcome(adapterResults.map(r => r.outcome));
+
+  // ENH-14: Alert only on a genuine failure among sources that actually ran — never
+  // for an unconfigured source (that is an ops config gap, not a health incident).
+  if (healthScore !== null && healthScore < 70 && attemptedSources > 0) {
     await prisma.notification.create({
       data: {
         title: `Inventory Health Alert: ${healthScore}%`,
-        body: `${adapterResults.filter(r => r.error).length} of ${adapterResults.length} adapters failed in the last sync run.`,
+        body: `${adapterResults.filter(r => r.outcome === "FAILED" || r.outcome === "DEFERRED").length} of ${attemptedSources} running sources failed in the last sync.`,
         type: "SYSTEM_ALERT",
       },
     }).catch(() => {});
@@ -204,12 +324,10 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
     totalAfterDedup: uniqueVehicles.length,
     upserted,
     deactivated,
-    adapterResults: adapterResults.map(r => ({
-      adapter: r.adapter,
-      count: r.vehicles.length,
-      duration: r.duration,
-      error: r.error,
-    })),
+    configuredSources,
+    attemptedSources,
+    outcome: overall,
+    adapterResults: adapterSummaries,
     healthScore,
     startedAt,
     completedAt,
@@ -218,7 +336,6 @@ export async function runInventorySync(params: SearchParams = {}, mode: "full" |
 
 // Bootstrap seed — ENH deploy hook
 export async function bootstrapInventory(): Promise<void> {
-  // Seed with basic market coverage defaults
   const defaultMarkets = [
     { city: "New York", state: "NY", zip: "10001" },
     { city: "Los Angeles", state: "CA", zip: "90001" },
