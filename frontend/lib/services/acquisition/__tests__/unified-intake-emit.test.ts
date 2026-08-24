@@ -1,28 +1,16 @@
 // intakeBuyerRequest persists the records and does NOT trigger intake
-// orchestration inline — buyer intake is Inngest-free and the intake-reconcile
-// cron is the single authoritative executor. This pins that the creation path
-// emits NO Inngest event (and never runs the heavy pipeline inline).
+// orchestration inline — buyer intake runs only on the intake-reconcile cron
+// (the single authoritative executor) off durable DB state. This pins that the
+// creation path stays lightweight (persist only, no heavy pipeline inline). With
+// Inngest fully removed there is no event bus to emit to at all — the
+// no-external-dispatch invariant is enforced structurally + by the repo-wide
+// "no @/lib/inngest import" guard.
 //
 // Run with:
 //   npx tsx --test --experimental-test-module-mocks lib/services/acquisition/__tests__/unified-intake-emit.test.ts
 
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-
-// Guard: if the service ever re-introduces an Inngest emit, this spy records it
-// and the test fails.
-const sent: Array<{ name: string; data: Record<string, unknown> }> = [];
-
-mock.module("@/lib/inngest/client", {
-  namedExports: {
-    inngest: {
-      send: async (evt: { name: string; data: Record<string, unknown> }) => {
-        sent.push(evt);
-        return { ids: ["evt_1"] };
-      },
-    },
-  },
-});
 
 const created: Array<Record<string, unknown>> = [];
 mock.module("@/lib/prisma", {
@@ -53,11 +41,10 @@ async function load() {
 }
 
 beforeEach(() => {
-  sent.length = 0;
   created.length = 0;
 });
 
-test("a submission creates the opportunity + linked request and emits NO Inngest event", async () => {
+test("a submission creates the opportunity + linked request without inline orchestration", async () => {
   const intakeBuyerRequest = await load();
   const result = await intakeBuyerRequest({
     source: "request_vehicle_wizard",
@@ -72,5 +59,4 @@ test("a submission creates the opportunity + linked request and emits NO Inngest
   assert.equal(result.buyerOpportunityId, "opp_1");
   assert.equal(result.vehicleRequestId, "vr_1");
   assert.equal(created.length, 1, "one linked VehicleRequest");
-  assert.equal(sent.length, 0, "intake is Inngest-free — no event emitted from the creation path");
 });

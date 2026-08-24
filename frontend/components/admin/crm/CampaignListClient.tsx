@@ -158,7 +158,7 @@ export function CampaignListClient({
     <div className="mx-auto max-w-6xl space-y-5 p-6" data-testid="crm-campaigns">
       <PageHeader
         title="Campaigns"
-        subtitle="Email + SMS sends to dynamic audiences. Fan-out runs on Inngest."
+        subtitle="Email + SMS sends to dynamic audiences. Fan-out runs on the internal campaign-dispatch cron."
         data-testid="crm-campaigns-header"
         actions={
           <Link href="/admin/crm/campaigns/new" data-testid="crm-campaigns-new">

@@ -7,7 +7,7 @@ import {
   getSupabase,
   acquireIdempotencyGuard,
   releaseIdempotencyGuard,
-} from "@/lib/inngest/idempotency";
+} from "@/lib/jobs/idempotency";
 import {
   classifyActivation,
   type ActivationAction,
@@ -39,7 +39,7 @@ export type { ActivationAction, ActivationState };
 // market with no dealers self-closes at auction end via F-001.
 //
 // Idempotency (G5): per-deposit work is serialized with the shared
-// idempotency_keys guard (lib/inngest/idempotency.ts), so two overlapping cron
+// idempotency_keys guard (lib/jobs/idempotency.ts), so two overlapping cron
 // runs never double-invite (which would double-increment dealer load) or
 // double-close. Dealers are (re)invited ONLY when zero invitations exist;
 // inviteDealersToAuction upserts invitations by (auctionId, dealerId) but

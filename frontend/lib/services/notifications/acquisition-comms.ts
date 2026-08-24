@@ -25,7 +25,7 @@
 //               + recipient-local quiet hours). Off by default — opt in with
 //               ACQUISITION_COMMS_SMS_ENABLED=true (governance: outreach stays
 //               disabled until reviewed).
-//   - idempotency : the shared `idempotency_keys` guard (lib/inngest/idempotency),
+//   - idempotency : the shared `idempotency_keys` guard (lib/jobs/idempotency),
 //               NOT a new dedup table.
 //   - preferences : `notification-preference.service` (inAppEnabled gate).
 //
@@ -400,7 +400,7 @@ export async function emitDealStatusComms(
     const guardSupabase = await getGuardSupabase();
     if (guardSupabase) {
       try {
-        const { acquireIdempotencyGuard } = await import("@/lib/inngest/idempotency");
+        const { acquireIdempotencyGuard } = await import("@/lib/jobs/idempotency");
         const claimed = await acquireIdempotencyGuard(guardSupabase, key);
         if (!claimed) return { status: "deduped", inApp: false, sms: "disabled" };
       } catch (err) {
@@ -462,7 +462,7 @@ export async function emitDealStatusComms(
     // ── Record terminal outcome on the idempotency ledger ──────────────────────
     if (guardSupabase) {
       try {
-        const { updateIdempotencyState } = await import("@/lib/inngest/idempotency");
+        const { updateIdempotencyState } = await import("@/lib/jobs/idempotency");
         await updateIdempotencyState(guardSupabase, key, "completed", {
           dealId,
           dealStatus: status,

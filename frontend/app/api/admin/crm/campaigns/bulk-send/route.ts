@@ -20,9 +20,9 @@ type BulkSendBody = {
 };
 
 // Fan-out endpoint for ad-hoc bulk sends from the Contacts list. Bypasses the
-// campaign/segment path (which requires a segment) and dispatches the same
-// inngest events the single-contact send endpoints use — every gate (DNC,
-// consent, suppression) is enforced by the workers themselves.
+// campaign/segment path (which requires a segment) and enqueues the same internal
+// comms-outbox sends the single-contact send endpoints use — every gate (DNC,
+// consent, suppression) is enforced by the comms-outbox dispatcher.
 export async function POST(req: Request) {
   const actor = await requirePermissionActor("comms.bulk_send");
   if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });

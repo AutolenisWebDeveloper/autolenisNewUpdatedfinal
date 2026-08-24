@@ -1,9 +1,10 @@
 // A′ — promoteOpportunity: turn an existing BuyerOpportunity into a sourceable
 // VehicleRequest (when a buyer resolves). Extracted from intakeBuyerRequest so the
 // Zura chat can reuse it against its own live BuyerOpportunity (no duplicate
-// opportunity). It does NOT trigger intake orchestration — buyer intake is
-// Inngest-free and the intake-reconcile cron is the single authoritative executor,
-// so the creation path emits NO Inngest event.
+// opportunity). It does NOT trigger intake orchestration inline — the
+// intake-reconcile cron is the single authoritative executor off durable DB state,
+// so the creation path stays persist-only. With Inngest removed there is no event
+// bus to dispatch to at all.
 //
 //   npx tsx --test --experimental-test-module-mocks \
 //     lib/services/acquisition/__tests__/promote-opportunity.test.ts
@@ -11,22 +12,10 @@
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
-const sent: Array<{ name: string; data: Record<string, unknown> }> = [];
 let existingVR: { id: string } | null = null;
 const createdVR: Array<Record<string, unknown>> = [];
 let userRow: { id: string; buyer: { id: string } | null } | null = null;
 const oppUpdates: Array<Record<string, unknown>> = [];
-
-mock.module("@/lib/inngest/client", {
-  namedExports: {
-    inngest: {
-      send: async (evt: { name: string; data: Record<string, unknown> }) => {
-        sent.push(evt);
-        return { ids: ["evt_1"] };
-      },
-    },
-  },
-});
 
 mock.module("@/lib/prisma", {
   namedExports: {
@@ -59,14 +48,11 @@ async function load() {
 }
 
 beforeEach(() => {
-  sent.length = 0;
   existingVR = null;
   createdVR.length = 0;
   userRow = null;
   oppUpdates.length = 0;
 });
-
-const intakeEvents = () => sent.filter((e) => e.name === "autolenis/intake.process");
 
 test("resolvable opportunity → creates ONE VehicleRequest and emits NO Inngest event", async () => {
   const promoteOpportunity = await load();
@@ -81,7 +67,6 @@ test("resolvable opportunity → creates ONE VehicleRequest and emits NO Inngest
   assert.equal(r.vehicleRequestId, "vr_new");
   assert.equal(createdVR.length, 1);
   assert.equal(createdVR[0]!.buyerOpportunityId, "opp_1");
-  assert.equal(intakeEvents().length, 0, "creation path is Inngest-free");
 });
 
 test("budget stays EXACT integer cents (no dollars round-trip drift)", async () => {
@@ -104,7 +89,6 @@ test("idempotent: an already-linked opportunity creates NO second VehicleRequest
   });
   assert.equal(r.vehicleRequestId, "vr_existing");
   assert.equal(createdVR.length, 0, "no duplicate VehicleRequest");
-  assert.equal(intakeEvents().length, 0, "creation path is Inngest-free");
 });
 
 test("no resolvable buyer (missing email/name) → no VehicleRequest, still emits nothing", async () => {
@@ -114,5 +98,4 @@ test("no resolvable buyer (missing email/name) → no VehicleRequest, still emit
   assert.equal(createdVR.length, 0);
   // Intake (incl. lead enrichment/scoring for buyer-less opportunities) is run by
   // the cron via the "VR none" eligibility branch — never enqueued here.
-  assert.equal(intakeEvents().length, 0, "creation path is Inngest-free");
 });

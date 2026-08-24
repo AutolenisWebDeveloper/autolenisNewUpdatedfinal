@@ -1,19 +1,32 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { inngest } from '@/lib/inngest/client';
-import { inngestFunctions } from '@/lib/inngest/functions';
 import { getStripe } from '@/lib/stripe';
 import { detectDeadCrons } from './monitoring/dead-cron.service';
 
-// Re-drive a NON-QStash dead-letter row to its current owner. Every migrated
-// event name routes to its internal replacement (Inngest-free terminal/replay) —
-// the DLQ replay path must NEVER resurrect a deleted Inngest worker's events:
-//   autolenis/email.send + sms.send          → the comms outbox
-//   autolenis/dealer.award                    → emitDealerAwardOutcomes
+// Raised when a dead-letter row names an event with NO internal owner. Inngest is
+// fully removed, so there is no fallback dispatcher: rather than silently dropping
+// the row or resurrecting a vendor, the caller catches this and marks the row
+// TERMINAL (observable, bounded, never retried, never re-emitted anywhere).
+export class UnroutableDeadLetterError extends Error {
+  constructor(public readonly eventName: string) {
+    super(`no internal owner for dead-letter event "${eventName}" — not re-emitted`);
+    this.name = 'UnroutableDeadLetterError';
+  }
+}
+
+// Re-drive a NON-QStash dead-letter row to its current owner. Every migrated event
+// name routes to its internal replacement (transport-neutral terminal/replay) — the
+// DLQ replay path must NEVER resurrect a retired worker's events:
+//   autolenis/email.send + sms.send          → the comms outbox (enqueue-once)
+//   autolenis/dealer.award                    → emitDealerAwardOutcomes (idempotent)
 //   autolenis/lead.form_abandoned             → scheduleLeadNurture('form_abandonment')
 //   autolenis/lead.exit_intent_captured       → scheduleLeadNurture('exit_intent')
-// All Inngest workloads are now retired (lib/inngest/functions.ts is empty), so
-// the only fall-through owner is the dormant buyer-intake compatibility sink.
+// These four had a durable-queue entry point, so replaying a legacy row is safe and
+// idempotent. Every OTHER workload recovers from its own durable DB state via its
+// cron (campaign status, workflow_enrollments.resume_at, ContentGenerationJobItem
+// status, buyer_opportunities.intake_failed_at) and writes NOTHING to
+// jobs_dead_letter — so an unrecognized event here is a vestige with no internal
+// consumer and is terminalized (UnroutableDeadLetterError), never sent onward.
 async function reemitDeadLetterJob(
   eventName: string,
   payload: Record<string, unknown>,
@@ -57,7 +70,9 @@ async function reemitDeadLetterJob(
     });
     return;
   }
-  await inngest.send({ name: eventName, data: payload });
+  // No internal owner and no vendor fallback (Inngest removed). Signal the caller
+  // to terminalize this row rather than dropping it or dispatching it anywhere.
+  throw new UnroutableDeadLetterError(eventName);
 }
 
 // ----------------------------------------------------------------------------
@@ -65,7 +80,7 @@ async function reemitDeadLetterJob(
 //
 // Surfaces the four operational visibility panels:
 //   1. System health  (counts + last refresh)
-//   2. Dead letter queue (failed Inngest jobs, retry one-by-one)
+//   2. Job dead-letter queue (failed automation jobs, retry one-by-one)
 //   3. Failed workflow enrollments (engine-level failures)
 //   4. Admin audit log (last N admin mutations)
 //
@@ -201,8 +216,8 @@ export class OperationsService {
   // and report healthy/degraded. Credential-gated services with no cheap ping
   // (Resend, Twilio, DocuSign) report healthy when configured and `unknown`
   // when their credentials are absent — we cannot confirm reachability without
-  // a billable call. Inngest reports healthy when functions are registered with
-  // the serve handler.
+  // a billable call. Automated-job execution is the internal Vercel-Cron
+  // substrate, monitored separately by the cron liveness / dead-cron detector.
   // ────────────────────────────────────────────────────────────────────────
   async getDependencyHealth(): Promise<DependencyStatus[]> {
     const checked_at = new Date().toISOString();
@@ -255,18 +270,9 @@ export class OperationsService {
         : { key, label, status: 'unknown', detail: 'Credentials not set', checked_at };
     };
 
-    const inngestCheck = (): DependencyStatus => {
-      const count = inngestFunctions.length;
-      // Inngest workload retirement is complete: an empty registry is the
-      // INTENDED terminal state (every worker migrated onto the internal
-      // Vercel-Cron substrate), not a degradation. Report healthy/retired so it
-      // doesn't fire a false incident; only a non-empty registry (a regression
-      // that re-registered a worker) is noteworthy here.
-      return count > 0
-        ? { key: 'inngest', label: 'Inngest', status: 'healthy', detail: `${count} functions registered`, checked_at }
-        : { key: 'inngest', label: 'Inngest', status: 'healthy', detail: 'Retired — all workloads migrated to internal cron substrate', checked_at };
-    };
-
+    // Inngest is fully removed — it is no longer a dependency and no longer appears
+    // in the health panel. Automated-job execution is now the internal Vercel-Cron
+    // substrate, surfaced separately by the cron liveness / dead-cron monitor.
     const [supabase, stripe] = await Promise.all([supabaseCheck(), stripeCheck()]);
 
     return [
@@ -275,7 +281,6 @@ export class OperationsService {
       credentialCheck('resend', 'Resend', ['RESEND_API_KEY']),
       credentialCheck('twilio', 'Twilio', ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN']),
       credentialCheck('docusign', 'DocuSign', ['DOCUSIGN_INTEGRATION_KEY', 'DOCUSIGN_ACCOUNT_ID']),
-      inngestCheck(),
     ];
   }
 
@@ -366,12 +371,12 @@ export class OperationsService {
     }));
   }
 
-  // Re-emit a dead-letter job via Inngest. Idempotency is enforced by claiming
-  // the row with a conditional delete BEFORE dispatching: only the caller whose
-  // delete actually removed the row proceeds to re-emit, so a double retry (two
-  // concurrent clicks, or a retried request) dispatches at most once. The
+  // Re-drive a dead-letter job to its internal owner. Idempotency is enforced by
+  // claiming the row with a conditional delete BEFORE re-driving: only the caller
+  // whose delete actually removed the row proceeds, so a double retry (two
+  // concurrent clicks, or a retried request) re-drives at most once. The
   // underlying job's own idempotency guard is a second line of defence. If the
-  // re-emit fails after the claim, the row is restored so it can be retried.
+  // re-drive fails after the claim, the row is restored so it can be retried.
   async retryDeadLetterJob(id: string): Promise<{ retried: boolean }> {
     const { data: claimed, error: claimErr } = await this.supabase
       .from('jobs_dead_letter')
@@ -392,16 +397,22 @@ export class OperationsService {
     try {
       await reemitDeadLetterJob(row.event_name, (row.payload ?? {}) as Record<string, unknown>);
     } catch (err) {
-      // Re-emit failed — put the row back so the job is not silently lost.
+      // An unroutable event has no internal owner — restore the row with a
+      // sanitized terminal reason and report not-retried (never re-emit anywhere).
+      const unroutable = err instanceof UnroutableDeadLetterError;
       await this.supabase.from('jobs_dead_letter').insert({
         id: row.id,
         job_id: row.job_id,
         event_name: row.event_name,
         payload: row.payload ?? {},
-        error_message: row.error_message,
+        error_message: unroutable
+          ? `TERMINAL — no internal owner for "${row.event_name}" (not re-emitted)`
+          : row.error_message,
         failed_at: row.failed_at,
       });
-      throw err instanceof Error ? err : new Error('DLQ re-emit failed');
+      if (unroutable) return { retried: false };
+      // Transient failure — restore + surface so it can be retried again.
+      throw err instanceof Error ? err : new Error('DLQ re-drive failed');
     }
 
     return { retried: true };
@@ -413,9 +424,10 @@ export class OperationsService {
   //   • only rows under `maxAutoRetries` (else left for manual review),
   //   • a per-run batch cap.
   // QStash-origin rows (event_name "qstash:<path>") are re-published through
-  // QStash; everything else is re-emitted through Inngest. The attempt counter
-  // is incremented BEFORE re-emit (claim), so a crash mid-drain can never cause
-  // an unbounded loop. The underlying jobs are themselves idempotency-guarded.
+  // QStash; everything else is re-driven to its internal owner (or terminalized
+  // when no owner exists — Inngest is gone, nothing is ever re-emitted to it). The
+  // attempt counter is incremented BEFORE re-drive (claim), so a crash mid-drain
+  // can never cause an unbounded loop. The underlying jobs are idempotency-guarded.
   async autoDrainDeadLetterJobs(opts?: {
     maxAutoRetries?: number;
     minAgeMs?: number;
@@ -470,8 +482,21 @@ export class OperationsService {
         // Success — remove the row.
         await this.supabase.from('jobs_dead_letter').delete().eq('id', row.id);
         reemitted += 1;
-      } catch {
-        // Leave the row (counter already incremented) for the next pass / manual review.
+      } catch (err) {
+        if (err instanceof UnroutableDeadLetterError) {
+          // No internal owner: terminalize NOW (pin auto_retry_count at the cap so
+          // it's excluded from every future scan) with a sanitized diagnostic. The
+          // row is kept for operator visibility — never re-driven, never re-emitted.
+          await this.supabase
+            .from('jobs_dead_letter')
+            .update({
+              auto_retry_count: maxAutoRetries,
+              error_message: `TERMINAL — no internal owner for "${row.event_name}" (not re-emitted)`,
+            })
+            .eq('id', row.id);
+        }
+        // Transient failure: leave the row (counter already incremented) for the
+        // next pass / manual review. Either way, bounded — never a hot loop.
         failed += 1;
       }
     }
