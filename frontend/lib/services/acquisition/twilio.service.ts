@@ -112,7 +112,7 @@ ZIP: ${lead.zip}`;
   const system = `You write short, warm, conversion-focused SMS messages for AutoLenis — a premium car buying service where verified dealers compete for the buyer's business in a private 48-hour reverse auction. The buyer just told us what they want. Write a first SMS that:
 - Feels personal and human, not robotic
 - Creates genuine excitement about dealers competing for their specific vehicle
-- Ends with one clear call to action to activate their refundable $99 auction deposit
+- Ends with one clear call to action to activate their $99 auction deposit
 - Is under 160 characters total
 - Never mentions AI
 - Never uses exclamation marks more than once`;

@@ -895,7 +895,7 @@ export default function LandingPageClient({
         <section className="bg-white border-y border-slate-200 py-6">
           <div className="max-w-5xl mx-auto px-5 grid grid-cols-2 sm:grid-cols-4 gap-6">
             {[
-              { icon: <DollarSign size={18} />, number: "$99",       label: "Refundable to Start"       },
+              { icon: <DollarSign size={18} />, number: "$99",       label: "Refund on request"       },
               { icon: <Users size={18} />,      number: "8",         label: "Dealers Compete per Auction" },
               { icon: <Car size={18} />,        number: "48 hrs",    label: "Private Auction Window"    },
               { icon: <Star size={18} />,       number: "0",         label: "Impact to Your Credit"     },
@@ -1316,7 +1316,7 @@ export default function LandingPageClient({
                 },
                 {
                   q: "What if no offer works for me?",
-                  a: "You are never obligated to accept any offer. If no dealers submit offers during your auction, your $99 Auction Access Fee is refunded in full. If offers are submitted but none meet your expectations, you can decline them all — your concierge will follow up to discuss next steps.",
+                  a: "You are never obligated to accept any offer. If no competitive offer is received during your auction, you can request a refund of your $99 Auction Access Fee — our team reviews every request. If offers are submitted but none meet your expectations, you can decline them all — your concierge will follow up to discuss next steps.",
                 },
               ].map((item) => (
                 <details

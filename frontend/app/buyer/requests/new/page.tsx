@@ -1334,7 +1334,7 @@ function Step4({
       {/* Trust signals */}
       <div className="my-7 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs" data-testid="trust-signals">
         <TrustItem icon={<ShieldCheck size={14} />} text="Soft credit check only" />
-        <TrustItem icon={<RefreshCw size={14} />} text="$99 refundable if no match" />
+        <TrustItem icon={<RefreshCw size={14} />} text="$99 — refund on request if no match" />
         <TrustItem icon={<Clock size={14} />} text="Dealers respond within 48 hours" />
       </div>
 

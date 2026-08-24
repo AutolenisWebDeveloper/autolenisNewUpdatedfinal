@@ -115,7 +115,7 @@ export default async function BillingPage() {
               <div key={deposit.id} className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
                 <div className="space-y-0.5">
                   <p className="text-sm font-medium text-gray-900">
-                    Refundable Auction Access Fee — {formatCurrency(deposit.amountCents)}
+                    Auction Access Fee — {formatCurrency(deposit.amountCents)}
                   </p>
                   <p className="text-xs text-gray-400">{formatDate(deposit.createdAt)}</p>
                 </div>
@@ -127,7 +127,7 @@ export default async function BillingPage() {
             {hasPaidDeposit && (
               <div className="flex items-start gap-2 pt-2 text-sm text-green-700">
                 <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>Your Auction Access Fee is on file. It is refundable if no valuable offer is received.</span>
+                <span>Your Auction Access Fee is on file. If no valuable offer is received, you can request a refund — our team reviews every request.</span>
               </div>
             )}
             {!hasPaidDeposit && deposits.some((d) => d.status === "REFUNDED") && (

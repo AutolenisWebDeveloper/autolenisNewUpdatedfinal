@@ -518,7 +518,7 @@ export default async function BuyerDashboard() {
                 You have {shortlistCount} vehicle{shortlistCount !== 1 ? "s" : ""} shortlisted. Pay the ${DEPOSIT_AMOUNT_CENTS / 100} Limited-Time Auction Access Fee to launch your private 48-hour dealer competition.
               </p>
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mb-5">
-                <span className="flex items-center gap-1"><CheckCircle2 size={13} className="text-emerald-500" /> Refundable if no valuable offer</span>
+                <span className="flex items-center gap-1"><CheckCircle2 size={13} className="text-emerald-500" /> Refund available on request if no valuable offer</span>
                 <span className="flex items-center gap-1"><CheckCircle2 size={13} className="text-emerald-500" /> Up to 8 dealers compete</span>
                 <span className="flex items-center gap-1"><CheckCircle2 size={13} className="text-emerald-500" /> 48-hour window</span>
               </div>

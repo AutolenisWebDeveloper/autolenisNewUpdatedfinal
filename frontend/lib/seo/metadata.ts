@@ -115,7 +115,7 @@ export const PAGE_METADATA = {
   trust: {
     title: "Trust & Security — How We Protect You",
     description:
-      "Contract Shield catches junk fees and unfair terms. Verified dealers only. $99 refund guarantee. See how AutoLenis protects every buyer.",
+      "Contract Shield catches junk fees and unfair terms. Verified dealers only. $99 — refund on request. See how AutoLenis protects every buyer.",
     path: "/trust",
     keywords: ["car buying protection", "Contract Shield", "verified car dealers"],
   },

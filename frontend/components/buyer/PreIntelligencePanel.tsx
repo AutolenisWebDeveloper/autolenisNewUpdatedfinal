@@ -69,7 +69,7 @@ export default function PreIntelligencePanel() {
 
       <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-3">
         <p className="text-xs text-green-700 leading-relaxed">
-          <strong>$99 Refund Guarantee:</strong> If no dealer submits a competitive offer, your full $99 deposit is returned within 3 business days — no questions asked.
+          <strong>Not satisfied? Request a refund:</strong> If no dealer submits a competitive offer, you can request a refund of your $99 Auction Access Fee. Our team reviews every request and, once approved, returns the funds to your original payment method.
         </p>
       </div>
     </div>

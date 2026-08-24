@@ -41,7 +41,7 @@ export default async function DealPaymentPage() {
             <div>
               <p className="text-sm font-bold text-[#111827] mb-1">You are on the Standard plan.</p>
               <p className="text-sm text-[#4B5563] leading-relaxed">
-                No service fee applies. Your $99 Limited-Time Auction Access Fee is refundable if no valuable offer is received.
+                No service fee applies. If no valuable offer is received, you can request a refund of your $99 Limited-Time Auction Access Fee — our team reviews every request.
               </p>
             </div>
           </div>
@@ -52,8 +52,8 @@ export default async function DealPaymentPage() {
               <span className="font-semibold text-[#111827]">$0</span>
             </div>
             <div className="flex justify-between text-[#1A6B18]">
-              <span>$99 Auction Access Fee → refundable if no valuable offer</span>
-              <span>Refundable</span>
+              <span>$99 Auction Access Fee → refund available on request if no valuable offer</span>
+              <span>Refund on request</span>
             </div>
             <div className="flex justify-between font-bold text-base border-t border-al-primary-subtle pt-2">
               <span>Due to AutoLenis today</span>

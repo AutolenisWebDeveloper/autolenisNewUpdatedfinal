@@ -11,7 +11,7 @@ export const viewport: Viewport = {
 };
 
 const FAQ_SCHEMA_ITEMS = [
-  { question: "How does the $99 deposit work?", answer: "The $99 deposit activates your private 48-hour reverse auction. If no dealers submit qualifying offers, or you choose not to proceed, your $99 is fully refunded." },
+  { question: "How does the $99 deposit work?", answer: "The $99 deposit activates your private 48-hour reverse auction. If no competitive offer is received, or you choose not to proceed, you can request a refund of your $99 — our team reviews every request." },
   { question: "Does the prequalification affect my credit score?", answer: "No. AutoLenis uses a soft-pull prequalification. Soft pulls do not appear on your credit report and do not impact your score." },
   { question: "How many dealers will see my auction?", answer: "Up to 8 vetted dealers are invited per auction, selected on vehicle match, geographic coverage, historical performance, and current capacity." },
   { question: "Do dealers know who I am?", answer: "No. Your identity remains confidential throughout the entire auction. Dealers see only vehicle specs and your pre-qualified budget band." },

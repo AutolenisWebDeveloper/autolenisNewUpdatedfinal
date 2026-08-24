@@ -78,7 +78,7 @@ export function renderDepositConfirmationEmail({
                 <tr>
                   <td style="background:#F8F9FB;border-left:4px solid #0B5FD1;padding:14px 18px;border-radius:4px;">
                     <p style="margin:0;font-size:13px;color:#555555;line-height:1.6;">
-                      Your ${DEPOSIT_AMOUNT_USD} Auction Access Fee is <strong>refundable if no valuable offer is received</strong>. It will be credited toward your AutoLenis concierge fee when your deal closes.
+                      If no valuable offer is received, <strong>you can request a refund of your ${DEPOSIT_AMOUNT_USD} Auction Access Fee — our team reviews every request</strong>. Otherwise it is credited toward your AutoLenis concierge fee when your deal closes.
                     </p>
                   </td>
                 </tr>

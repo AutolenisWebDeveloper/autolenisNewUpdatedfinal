@@ -115,9 +115,9 @@ const FEATURES = [
   },
   {
     Icon: Lock,
-    title: "$99 Fully Refundable Deposit",
+    title: "$99 — refund on request",
     description:
-      "Your auction access deposit is returned in full if no deal is reached. Zero financial risk to try.",
+      "If no competitive offer is received, you can request a refund of your $99 — our team reviews every request. Zero financial risk to try.",
     tag: "Zero-risk commitment",
   },
 ];
@@ -137,9 +137,9 @@ const TRUST_PILLARS = [
   },
   {
     Icon: Lock,
-    title: "100% Refundable Deposit",
+    title: "Refund on request",
     description:
-      "If no deal is reached that you're happy with, your $99 auction deposit comes back. No questions, no hoops.",
+      "If no competitive offer is received, you can request a refund of your $99 — our team reviews every request.",
   },
   {
     Icon: Eye,
@@ -153,7 +153,7 @@ const STATS = [
   { value: "$0", label: "Fee for standard buyers" },
   { value: "48 hrs", label: "Auction duration" },
   { value: "Up to 8", label: "Competing dealers" },
-  { value: "$99", label: "Fully refundable deposit" },
+  { value: "$99", label: "Refund on request" },
 ];
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -185,7 +185,7 @@ export default function ForBuyersPage() {
               {[
                 "48-hr private auction",
                 "Up to 8 dealers compete",
-                "$99 fully refundable",
+                "$99 — refund on request",
               ].map((pill) => (
                 <span
                   key={pill}
@@ -505,7 +505,7 @@ export default function ForBuyersPage() {
                 </span>
               </summary>
               <p className="px-6 pb-5 text-sm text-[#4B5563] leading-relaxed">
-                The $99 deposit is refundable if you don&apos;t select any offer. If you do
+                You can request a refund of the $99 deposit if you don&apos;t select any offer — our team reviews every request. If you do
                 buy, the $99 is credited toward the $499 Service Fee. Because dealers
                 compete privately for your business, the auction is designed to surface
                 their most competitive pricing — actual savings vary by vehicle, market,
@@ -568,7 +568,7 @@ export default function ForBuyersPage() {
               <p className="px-6 pb-5 text-sm text-[#4B5563] leading-relaxed">
                 No. Creating an account and getting pre-qualified is completely free.
                 Even after paying the $99 deposit, you can decline all offers and
-                receive a full refund. You only pay the Service Fee if you select an
+                request a refund — our team reviews every request. You only pay the Service Fee if you select an
                 offer and proceed with a purchase.
               </p>
             </details>
@@ -594,7 +594,7 @@ export default function ForBuyersPage() {
             <span className="text-[#0B5FD1]">actually offer you?</span>
           </h2>
           <p className="text-[#6B7280] text-lg mb-10 max-w-xl mx-auto leading-relaxed">
-            Check your buying power in 3 minutes. No credit impact. No commitment. Your $99 auction deposit is fully refundable if no deal works for you.
+            Check your buying power in 3 minutes. No credit impact. No commitment. You can request a refund of your $99 auction deposit if no deal works for you — our team reviews every request.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
@@ -612,7 +612,7 @@ export default function ForBuyersPage() {
             </Link>
           </div>
           <p className="text-xs text-[#94A3B8] mt-6">
-            No credit score impact &bull; 3 minutes to start &bull; $99 deposit refunded if no deal
+            No credit score impact &bull; 3 minutes to start &bull; $99 deposit — refund on request
           </p>
         </div>
       </section>

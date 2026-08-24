@@ -20,7 +20,7 @@ export default async function AcceptTermsPage({ searchParams }: Props) {
 
       <div className="bg-[#F8F9FB] border border-[#E5E7EB] rounded-xl p-5 mb-6 space-y-3 text-sm text-[#4B5563] leading-relaxed max-h-60 overflow-y-auto" data-testid="terms-summary">
         <p><strong className="text-[#111827]">Service Summary:</strong> AutoLenis facilitates a reverse-auction process connecting buyers with licensed dealers. AutoLenis is not a dealer, broker, or party to any vehicle transaction.</p>
-        <p><strong className="text-[#111827]">$99 Deposit:</strong> Fully refundable if no deal is selected. Credited toward the $499 concierge fee if you proceed.</p>
+        <p><strong className="text-[#111827]">$99 Deposit:</strong> If no deal is selected, you can request a refund — our team reviews every request. Credited toward the $499 concierge fee if you proceed.</p>
         <p><strong className="text-[#111827]">$499 Fee:</strong> Charged only after you select a deal. Covers everything from auction to vehicle pickup.</p>
         <p><strong className="text-[#111827]">Data:</strong> Your prequalification data is encrypted at rest and never shared with dealers until you select a deal.</p>
         <p><strong className="text-[#111827]">FCRA:</strong> Credit checks are soft-pull only and do not affect your score.</p>

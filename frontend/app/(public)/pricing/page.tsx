@@ -94,15 +94,15 @@ function PricingPageBody() {
           <CitationBlock
             id="autolenis-pricing"
             question="How much does AutoLenis cost?"
-            answer={`AutoLenis charges two fees: a ${DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee (refundable if no valuable offer is received) and a ${PREMIUM_FEE_USD} Service Fee only if you proceed with a purchase. The ${DEPOSIT_AMOUNT_USD} Auction Access Fee is credited toward the ${PREMIUM_FEE_USD} fee, making your balance ${PREMIUM_FEE_REMAINING_USD}. There are no monthly charges, subscriptions, or hidden fees.`}
+            answer={`AutoLenis charges two fees: a ${DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee (refund available on request if no valuable offer is received) and a ${PREMIUM_FEE_USD} Service Fee only if you proceed with a purchase. The ${DEPOSIT_AMOUNT_USD} Auction Access Fee is credited toward the ${PREMIUM_FEE_USD} fee, making your balance ${PREMIUM_FEE_REMAINING_USD}. There are no monthly charges, subscriptions, or hidden fees.`}
             sourceLabel="AutoLenis Official Pricing"
             lastUpdated="2025-01-01"
           />
           <DefinitionBlock
             term="AutoLenis Auction Access Fee"
             category="Fee"
-            definition={`A ${DEPOSIT_AMOUNT_USD} limited-time Auction Access Fee paid by the buyer to activate a private dealer auction. The fee is refundable if no valuable offer is received. If a purchase is made, the ${DEPOSIT_AMOUNT_USD} is credited toward the ${PREMIUM_FEE_USD} AutoLenis Service Fee.`}
-            relatedTerms={["Refundable Fee", "Auction Activation", "Service Fee"]}
+            definition={`A ${DEPOSIT_AMOUNT_USD} limited-time Auction Access Fee paid by the buyer to activate a private dealer auction. Refund is available on request if no valuable offer is received. If a purchase is made, the ${DEPOSIT_AMOUNT_USD} is credited toward the ${PREMIUM_FEE_USD} AutoLenis Service Fee.`}
+            relatedTerms={["Refund on request", "Auction Activation", "Service Fee"]}
           />
         </div>
       </section>
@@ -128,7 +128,7 @@ function PricingPageBody() {
                 <div className="mt-4 bg-[#F8F9FB] border border-[#E5E7EB] rounded-lg px-4 py-3">
                   <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">{DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee</p>
                   <p className="text-xs text-[#4B5563] leading-relaxed">
-                    Required to activate your auction. <span className="font-semibold">Refundable if no valuable offer is received.</span>
+                    Required to activate your auction. <span className="font-semibold">Refund available on request if no valuable offer is received.</span>
                   </p>
                 </div>
               </div>
@@ -224,7 +224,7 @@ function PricingPageBody() {
                 </h3>
                 <p className="text-sm text-[#4B5563] leading-relaxed">
                   The {DEPOSIT_AMOUNT_USD} Auction Access Fee is required before your auction begins. It unlocks live dealer bidding and competitive offer access — ensuring dealers invest real effort in competing for your business.{" "}
-                  <span className="font-semibold text-[#111827]">It is refundable if no valuable offer is received.</span>{" "}
+                  <span className="font-semibold text-[#111827]">Refund is available on request if no valuable offer is received.</span>{" "}
                   On Premium, it is credited toward your {PREMIUM_FEE_USD} concierge fee.
                 </p>
               </div>
@@ -276,7 +276,7 @@ function PricingPageBody() {
               },
               {
                 q: "Is the Auction Access Fee refundable?",
-                a: "Yes. The Auction Access Fee is refundable if no valuable offer is received within your auction window.",
+                a: "It isn't automatically refunded, but if no competitive offer is received you can request a refund — our team reviews every request.",
               },
               {
                 q: "Are there any subscriptions?",

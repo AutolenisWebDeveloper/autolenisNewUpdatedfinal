@@ -106,7 +106,7 @@ export default function DepositPage() {
       <div className="mb-4">
         <h1 className="text-xl font-bold text-[#111827]">Activate Your Auction</h1>
         <p className="text-sm text-[#4B5563] mt-1">
-          Pay a <strong>$99 Limited-Time Auction Access Fee — refundable if no valuable offer is received</strong> to launch your private 48-hour reverse auction.
+          Pay a <strong>$99 Limited-Time Auction Access Fee — refund available on request if no valuable offer is received</strong> to launch your private 48-hour reverse auction.
         </p>
       </div>
 
@@ -131,7 +131,7 @@ export default function DepositPage() {
           <p data-testid="deposit-plan-credit-copy">
             {isPremium
               ? `Your $99 Auction Access Fee will be credited toward your $${PREMIUM_FEE_CENTS / 100} AutoLenis Service Fee ($${PREMIUM_FEE_REMAINING_CENTS / 100} remaining after this).`
-              : "Your $99 Auction Access Fee is refundable if no valuable offer is received."}
+              : "If no valuable offer is received, you can request a refund of your $99 Auction Access Fee — our team reviews every request."}
           </p>
         </div>
       </div>
@@ -150,7 +150,7 @@ export default function DepositPage() {
         </div>
         <p className="text-xs text-[#1A6B18] mt-2 flex items-center gap-1">
           <Shield size={12} />
-          Refundable if no valuable offer is received
+          Refund available on request if no valuable offer is received
         </p>
       </div>
 

@@ -16,7 +16,7 @@ const DEFAULT_MESSAGES: Record<string, string> = {
   prequal:       "Check your buying power — complete pre-qualification to see what you qualify for.",
   search:        "Browse our inventory and shortlist vehicles you're interested in.",
   shortlist:     "Shortlist vehicles you love so we can source competitive dealer offers.",
-  deposit:       `Activate your dealer auction with a ${DEPOSIT_AMOUNT_USD} refundable deposit.`,
+  deposit:       `Activate your dealer auction with a ${DEPOSIT_AMOUNT_USD} deposit.`,
   auction:       "Your dealer auction is active — dealer offers are being collected.",
   "select-deal": "Your auction has closed — review dealer offers and select your best deal.",
   financing:     "Choose your financing path to continue with your selected deal.",

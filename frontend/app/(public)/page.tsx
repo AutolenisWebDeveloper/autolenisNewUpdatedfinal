@@ -47,8 +47,8 @@ export const revalidate = 3600;
 const HOW_IT_WORKS = [
   { step: "01", title: "Get Prequalified", body: "Free soft-pull prequalification in 3 minutes. See your exact pre-qualified budget — zero credit score impact." },
   { step: "02", title: "Choose Smart Inventory", body: "Browse curated vehicles selected for value and demand. Shortlist up to 5 vehicles with confirmed prices and real mileage." },
-  { step: "03", title: "Activate Dealer Competition", body: "A small refundable Auction Access Deposit launches your auction. Up to 8 pre-vetted dealers compete privately within 48 hours." },
-  { step: "04", title: "Buy With Confidence", body: "Compare offers ranked by total cost, monthly payment, and overall value. Choose the best deal — or decline and receive a full refund." },
+  { step: "03", title: "Activate Dealer Competition", body: "A small Auction Access Deposit launches your auction. Up to 8 pre-vetted dealers compete privately within 48 hours." },
+  { step: "04", title: "Buy With Confidence", body: "Compare offers ranked by total cost, monthly payment, and overall value. Choose the best deal — or decline and request a refund." },
 ];
 
 const WHY_ITEMS = [
@@ -64,11 +64,11 @@ const FAQ_ITEMS = [
   },
   {
     q: "Is the Auction Access Deposit refundable?",
-    a: "Yes, fully. No competitive offer within 48 hours? Complete refund — no disputes, no conditions, no follow-up calls.",
+    a: "It isn't automatically refunded, but if no competitive offer is received you can request a refund — our team reviews every request.",
   },
   {
     q: "How do dealer offers work?",
-    a: "Up to 8 pre-vetted dealers receive a private invitation to compete for your business within 48 hours. You compare offers ranked by total cost, monthly payment, and overall value. You choose — or decline and get your deposit back.",
+    a: "Up to 8 pre-vetted dealers receive a private invitation to compete for your business within 48 hours. You compare offers ranked by total cost, monthly payment, and overall value. You choose — or decline and request a refund of your deposit.",
   },
   {
     q: "Is AutoLenis a dealership?",
