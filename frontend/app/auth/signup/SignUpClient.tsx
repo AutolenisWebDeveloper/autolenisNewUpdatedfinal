@@ -193,7 +193,7 @@ function SignUpInner({ stats }: { stats: StatsProps }) {
             Find your next car.<br />Without the negotiation.
           </h1>
           <p className="text-white/80 text-sm leading-relaxed mb-10 max-w-md">
-            Tell us what you want. Verified dealers compete for your business in a private 48-hour auction. You pick the winner — or walk away with a full refund.
+            Tell us what you want. Verified dealers compete for your business in a private 48-hour auction. You pick the winner — or walk away and request a refund of your $99.
           </p>
 
           <ul className="space-y-4 mb-10">

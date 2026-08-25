@@ -16,7 +16,7 @@ const FAQ_SCHEMA_ITEMS = [
   { question: "How many dealers will see my auction?", answer: "Up to 8 vetted dealers are invited per auction, selected on vehicle match, geographic coverage, historical performance, and current capacity." },
   { question: "Do dealers know who I am?", answer: "No. Your identity remains confidential throughout the entire auction. Dealers see only vehicle specs and your pre-qualified budget band." },
   { question: "What is Contract Shield?", answer: "Contract Shield is our automated dealer-contract review. Before you sign anything, we scan for junk fees, APR discrepancies, and hidden add-ons." },
-  { question: "What if no dealer submits an offer?", answer: "Your $99 deposit is refunded in full within 3 business days. We may also re-run the auction at no additional cost." },
+  { question: "What if no dealer submits an offer?", answer: "If no competitive offer is received, you can request a refund of your $99 — our team reviews every request. We may also re-run the auction at no additional cost." },
   { question: "Can I use my own financing?", answer: "Yes. After selecting a deal, you can choose dealer financing, your own bank or credit union pre-approval, or a cash purchase." },
   { question: "How long does the entire process take?", answer: "Most buyers complete the full process in 3–7 days, from prequalification to vehicle pickup." },
 ];

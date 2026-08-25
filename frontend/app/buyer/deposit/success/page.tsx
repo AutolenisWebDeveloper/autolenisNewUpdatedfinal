@@ -102,7 +102,7 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
         <p>• Dealers will receive invitations within the next few minutes</p>
         <p>• Your 48-hour auction window starts now</p>
         <p>• You will be notified when offers arrive</p>
-        <p>• If no competitive offer is received, you can request a refund of your $99 — our team reviews every request.</p>
+        <p>• If no competitive offer is received, you can request a refund of your $99 — our team reviews every request</p>
       </div>
       <Link href="/buyer/auctions" data-testid="view-auction-btn"
         className="inline-flex items-center justify-center gap-2 w-full py-4 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors">
