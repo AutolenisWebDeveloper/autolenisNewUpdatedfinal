@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { ContactService } from '@/lib/services/contact.service';
 import { SuppressionService } from '@/lib/services/suppression.service';
 import { normalizePhone } from '@/lib/utils/phone';
+import { claimProviderEvent } from '@/lib/services/webhooks/provider-event-dedup';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -76,6 +77,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // Inbox routing — find/create contact, find/open conversation, append message.
+    // Replay dedup on Twilio's MessageSid: a retried delivery must not insert a
+    // duplicate inbound message, re-bump unread_count, or duplicate the timeline
+    // event. Only the inbox path is guarded — STOP/START/HELP above are keyword
+    // handlers that are already idempotent by construction. (When MessageSid is
+    // absent we cannot dedup and fall through to normal handling.)
+    const messageSid = params.MessageSid ?? '';
+    const inboxClaim = messageSid
+      ? await claimProviderEvent({
+          provider: 'twilio',
+          eventId: messageSid,
+          eventType: 'sms.inbound',
+          payload: { From: standardizedPhone, Body: messageBody, MessageSid: messageSid },
+        })
+      : null;
+    if (inboxClaim?.status === 'duplicate') return twimlResponse('<Response/>');
+    if (inboxClaim?.status === 'in_progress') {
+      return new NextResponse('Concurrent delivery in progress', { status: 503 });
+    }
+
     let { data: contact } = await ContactService.findContactByPhone(supabase, standardizedPhone);
     if (!contact) {
       contact = await ContactService.upsertContact(supabase, {
@@ -138,6 +158,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       event_type: 'sms_received',
       event_data: { body: messageBody, sms_sid: params.MessageSid ?? null },
     });
+
+    // Mark this MessageSid processed so a Twilio redelivery is deduped above.
+    if (inboxClaim?.status === 'claimed') await inboxClaim.settle();
 
     return twimlResponse('<Response/>');
   } catch (err) {

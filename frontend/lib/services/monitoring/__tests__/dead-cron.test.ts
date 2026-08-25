@@ -11,9 +11,13 @@ import assert from "node:assert/strict";
 
 // ── controllable prisma fake ────────────────────────────────────────────────
 type Group = { cronName: string; _max: { startedAt: Date | null } };
+type RunRow = { cronName: string; status: string; error: string | null; startedAt: Date };
 const state = {
   groups: [] as Group[],
   groupByThrows: false,
+  // Recent cron_job_logs rows (DESC by startedAt) for detectFailedCrons.
+  runRows: [] as RunRow[],
+  findManyThrows: false,
   // Titles for which findFirst reports a recent alert already exists (per-cron
   // idempotency). "*" means every title has a recent alert.
   recentTitles: new Set<string>(),
@@ -28,6 +32,11 @@ mock.module("@/lib/prisma", {
         groupBy: async () => {
           if (state.groupByThrows) throw new Error("db down");
           return state.groups;
+        },
+        findMany: async () => {
+          if (state.findManyThrows) throw new Error("db down");
+          // Service sorts by startedAt DESC; honor the same order the DB would.
+          return [...state.runRows].sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime());
         },
       },
       notification: {
@@ -60,11 +69,17 @@ const NOW = new Date("2026-08-19T12:00:00.000Z");
 beforeEach(() => {
   state.groups = [];
   state.groupByThrows = false;
+  state.runRows = [];
+  state.findManyThrows = false;
   state.recentTitles = new Set<string>();
   state.createdNotifications = [];
   state.createThrows = false;
   oncallCalls.length = 0;
 });
+
+function run(cronName: string, status: string, minutesAgo: number, error: string | null = null): RunRow {
+  return { cronName, status, error, startedAt: new Date(NOW.getTime() - minutesAgo * 60_000) };
+}
 
 test("detectDeadCrons classifies a fresh run as OK and a stale run as OVERDUE", async () => {
   const { detectDeadCrons } = await import("@/lib/services/monitoring/dead-cron.service");
@@ -144,4 +159,78 @@ test("reportOverdueCrons swallows a per-cron insert failure without blocking the
   ];
   const res = await reportOverdueCrons(overdue, NOW); // must not throw
   assert.equal(res.alerted, 0);
+});
+
+// ── Failing-cron detection (fired-but-threw blind spot) ──────────────────────
+
+test("detectFailedCrons counts the trailing consecutive-FAILED streak per cron", async () => {
+  const { detectFailedCrons } = await import("@/lib/services/monitoring/dead-cron.service");
+  state.runRows = [
+    // intake-reconcile: last two runs FAILED (streak 2), then a COMPLETED
+    run("intake-reconcile", "FAILED", 5, "0 successes, 3 failures"),
+    run("intake-reconcile", "FAILED", 10, "0 successes, 2 failures"),
+    run("intake-reconcile", "COMPLETED", 15),
+    // health-check: newest run COMPLETED → not failing (streak 0)
+    run("health-check", "COMPLETED", 4),
+    run("health-check", "FAILED", 9),
+    // auction-close: single most-recent FAILED (streak 1, below paging threshold)
+    run("auction-close", "FAILED", 6, "boom"),
+    run("auction-close", "COMPLETED", 12),
+  ];
+  const failing = await detectFailedCrons(NOW);
+  const byName = new Map(failing.map((c) => [c.cronName, c]));
+  assert.equal(byName.get("intake-reconcile")!.consecutiveFailures, 2);
+  assert.equal(byName.get("intake-reconcile")!.lastError, "0 successes, 3 failures");
+  assert.equal(byName.get("auction-close")!.consecutiveFailures, 1);
+  assert.equal(byName.has("health-check"), false, "a cron whose latest run COMPLETED is not failing");
+});
+
+test("detectFailedCrons: a RUNNING latest run clears the streak (not counted as failure)", async () => {
+  const { detectFailedCrons } = await import("@/lib/services/monitoring/dead-cron.service");
+  state.runRows = [
+    run("sla-check", "RUNNING", 1),
+    run("sla-check", "FAILED", 6),
+    run("sla-check", "FAILED", 11),
+  ];
+  const failing = await detectFailedCrons(NOW);
+  assert.equal(failing.find((c) => c.cronName === "sla-check"), undefined);
+});
+
+test("detectFailedCrons degrades to [] (never throws) when the query fails", async () => {
+  const { detectFailedCrons } = await import("@/lib/services/monitoring/dead-cron.service");
+  state.findManyThrows = true;
+  assert.deepEqual(await detectFailedCrons(NOW), []);
+});
+
+test("reportFailedCrons pages only at/above the streak threshold, once per window", async () => {
+  const { reportFailedCrons } = await import("@/lib/services/monitoring/dead-cron.service");
+  const failing = [
+    { cronName: "intake-reconcile", consecutiveFailures: 2, lastError: "0 successes", lastRunAt: NOW },
+    { cronName: "auction-close", consecutiveFailures: 1, lastError: "one-off", lastRunAt: NOW }, // below threshold
+  ];
+  const res = await reportFailedCrons(failing, NOW);
+  assert.equal(res.alerted, 1, "only the persistently-failing cron pages");
+  assert.equal(state.createdNotifications.length, 1);
+  assert.equal(state.createdNotifications[0]!.title, "Failing cron: intake-reconcile");
+  assert.equal(state.createdNotifications[0]!.type, "SYSTEM_ALERT");
+  assert.match(String(state.createdNotifications[0]!.body), /failed 2 run\(s\) in a row/);
+  assert.equal(oncallCalls.length, 1);
+});
+
+test("reportFailedCrons is per-cron idempotent within the window", async () => {
+  const { reportFailedCrons } = await import("@/lib/services/monitoring/dead-cron.service");
+  state.recentTitles = new Set(["Failing cron: intake-reconcile"]);
+  const failing = [{ cronName: "intake-reconcile", consecutiveFailures: 3, lastError: "x", lastRunAt: NOW }];
+  const res = await reportFailedCrons(failing, NOW);
+  assert.equal(res.alerted, 0);
+  assert.equal(state.createdNotifications.length, 0);
+});
+
+test("reportFailedCrons never conflates with dead-cron alerts (distinct title namespace)", async () => {
+  const { reportFailedCrons } = await import("@/lib/services/monitoring/dead-cron.service");
+  // A dead-cron alert for the same cron does NOT suppress a failing-cron alert.
+  state.recentTitles = new Set(["Dead cron: intake-reconcile"]);
+  const failing = [{ cronName: "intake-reconcile", consecutiveFailures: 2, lastError: "x", lastRunAt: NOW }];
+  const res = await reportFailedCrons(failing, NOW);
+  assert.equal(res.alerted, 1, "distinct 'Failing cron:' title pages independently of a dead-cron alert");
 });

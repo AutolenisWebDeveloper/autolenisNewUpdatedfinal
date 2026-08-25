@@ -164,6 +164,11 @@ export default async function OperationsPage({
           </div>
           <span className="text-[12px] text-[var(--crm-text-tertiary)]">
             {dlq.length} of {health.dead_letter_count}
+            {health.terminal_dead_letter_count > 0 && (
+              <span className="ml-2" style={{ color: 'var(--crm-danger)' }}>
+                · {health.terminal_dead_letter_count} terminal (needs review)
+              </span>
+            )}
           </span>
         </header>
         {dlq.length === 0 ? (

@@ -47,6 +47,13 @@ mock.module("@/lib/services/crm/lead-nurture.service", {
 mock.module("@/lib/qstash/dispatch", {
   namedExports: { dispatch: async (p: unknown) => { calls.dispatch.push(p); } },
 });
+mock.module("@/lib/services/affiliate/commission.service", {
+  namedExports: {
+    processFeeCommission: async (p: Record<string, unknown>) => { commissionCalls.push(p); },
+  },
+});
+
+const commissionCalls: Record<string, unknown>[] = [];
 
 // ── Controllable fake Supabase for jobs_dead_letter ──────────────────────────
 interface Ctrl {
@@ -102,6 +109,7 @@ async function newOps() {
 
 beforeEach(() => {
   calls.email = []; calls.sms = []; calls.dealer = []; calls.nurture = []; calls.dispatch = [];
+  commissionCalls.length = 0;
   ctrl = { dueRows: [], lostClaim: false, retryRow: null, terminalized: [], deleted: [], inserted: [] };
 });
 
@@ -179,6 +187,92 @@ test("manual retry of a recognized event → replays internally, {retried:true}"
   assert.equal(r.retried, true);
   assert.equal(calls.email.length, 1);
   assert.equal(ctrl.inserted.length, 0, "no restore on success");
+});
+
+test("affiliate.commission_walk replays via processFeeCommission (durable recovery), row removed", async () => {
+  ctrl.dueRows = [due("autolenis/affiliate.commission_walk", {
+    dealId: "deal_1", buyerId: "buyer_1", qualifyingEventId: "pi_123", feeBasisCents: 40000,
+  }, "r1")];
+  const r = await (await newOps()).autoDrainDeadLetterJobs({ minAgeMs: 0 });
+  assert.equal(commissionCalls.length, 1);
+  assert.deepEqual(commissionCalls[0], {
+    dealId: "deal_1", buyerId: "buyer_1", qualifyingEventId: "pi_123", feeBasisCents: 40000,
+  });
+  // No legacy transport touched, and the row is cleared on success.
+  assert.equal(calls.email.length + calls.sms.length + calls.dealer.length + calls.dispatch.length, 0);
+  assert.deepEqual(ctrl.deleted, ["r1"]);
+  assert.equal(r.reemitted, 1);
+});
+
+test("malformed commission_walk (missing buyerId) is terminalized, never walked", async () => {
+  ctrl.dueRows = [due("autolenis/affiliate.commission_walk", { dealId: "deal_1", qualifyingEventId: "pi_123" }, "r9")];
+  const r = await (await newOps()).autoDrainDeadLetterJobs({ minAgeMs: 0, maxAutoRetries: 3 });
+  assert.equal(commissionCalls.length, 0, "never invokes the walk with an incomplete payload");
+  assert.deepEqual(ctrl.deleted, []);
+  assert.equal(ctrl.terminalized.length, 1);
+  assert.equal(ctrl.terminalized[0].payload.auto_retry_count, 3);
+  assert.match(String(ctrl.terminalized[0].payload.error_message), /TERMINAL — no internal owner/);
+  assert.equal(r.failed, 1);
+});
+
+// ── getHealth: terminal DLQ rows must not pin the status at 'critical' forever ──
+function healthFake(counts: {
+  dlqTotal: number; dlqTerminal: number; failed: number; active: number; pendingIdem: number; refreshDay?: string | null;
+}) {
+  return {
+    from(table: string) {
+      const st = { table, filters: [] as Array<[string, unknown]>, gteCol: null as string | null };
+      const b: Record<string, unknown> = {
+        select: () => b,
+        in: (c: string, v: unknown) => { st.filters.push([c, v]); return b; },
+        eq: (c: string, v: unknown) => { st.filters.push([c, v]); return b; },
+        gte: (c: string) => { st.gteCol = c; return b; },
+        order: () => b,
+        limit: () => b,
+        maybeSingle: async () => ({ data: counts.refreshDay ? { day: counts.refreshDay } : null, error: null }),
+        then: (res: (v: unknown) => void) => {
+          if (st.table === "jobs_dead_letter") {
+            return res({ count: st.gteCol === "auto_retry_count" ? counts.dlqTerminal : counts.dlqTotal, error: null });
+          }
+          if (st.table === "workflow_enrollments") {
+            const active = st.filters.some((f) => f[0] === "status" && f[1] === "active");
+            return res({ count: active ? counts.active : counts.failed, error: null });
+          }
+          if (st.table === "idempotency_keys") return res({ count: counts.pendingIdem, error: null });
+          return res({ count: 0, data: null, error: null });
+        },
+      };
+      return b;
+    },
+  };
+}
+async function health(counts: Parameters<typeof healthFake>[0]) {
+  const { OperationsService } = await import("@/lib/services/operations.service");
+  return new OperationsService(healthFake(counts) as never).getHealth();
+}
+
+test("getHealth: a pile of TERMINAL dlq rows is 'degraded', not 'critical' (no permanent pin)", async () => {
+  const h = await health({ dlqTotal: 30, dlqTerminal: 30, failed: 0, active: 5, pendingIdem: 0 });
+  assert.equal(h.dead_letter_count, 30);
+  assert.equal(h.terminal_dead_letter_count, 30);
+  assert.equal(h.retryable_dead_letter_count, 0);
+  assert.equal(h.status, "degraded"); // visible, but not screaming critical forever
+});
+
+test("getHealth: live retryable backlog still escalates to 'critical'", async () => {
+  const h = await health({ dlqTotal: 30, dlqTerminal: 0, failed: 0, active: 5, pendingIdem: 0 });
+  assert.equal(h.retryable_dead_letter_count, 30);
+  assert.equal(h.status, "critical");
+});
+
+test("getHealth: mixed — few terminal + few live is 'degraded'; empty is 'ok'", async () => {
+  const mixed = await health({ dlqTotal: 5, dlqTerminal: 3, failed: 0, active: 0, pendingIdem: 0 });
+  assert.equal(mixed.retryable_dead_letter_count, 2);
+  assert.equal(mixed.terminal_dead_letter_count, 3);
+  assert.equal(mixed.status, "degraded");
+
+  const clean = await health({ dlqTotal: 0, dlqTerminal: 0, failed: 0, active: 10, pendingIdem: 0 });
+  assert.equal(clean.status, "ok");
 });
 
 test("STRUCTURAL: the Inngest client/module is gone and nothing imports @/lib/inngest", async () => {

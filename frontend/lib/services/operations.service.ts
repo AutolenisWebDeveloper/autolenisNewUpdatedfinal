@@ -14,6 +14,11 @@ export class UnroutableDeadLetterError extends Error {
   }
 }
 
+// Default ceiling for automated DLQ re-drives. Shared so the drainer and the
+// health read agree on what "terminal" means: a row whose auto_retry_count has
+// reached this cap is no longer auto-retried and needs human review.
+export const DEFAULT_MAX_AUTO_RETRIES = 3;
+
 // Re-drive a NON-QStash dead-letter row to its current owner. Every migrated event
 // name routes to its internal replacement (transport-neutral terminal/replay) — the
 // DLQ replay path must NEVER resurrect a retired worker's events:
@@ -21,7 +26,11 @@ export class UnroutableDeadLetterError extends Error {
 //   autolenis/dealer.award                    → emitDealerAwardOutcomes (idempotent)
 //   autolenis/lead.form_abandoned             → scheduleLeadNurture('form_abandonment')
 //   autolenis/lead.exit_intent_captured       → scheduleLeadNurture('exit_intent')
-// These four had a durable-queue entry point, so replaying a legacy row is safe and
+//   autolenis/affiliate.commission_walk       → processFeeCommission (idempotent on
+//                                               qualifyingEventId) — the durable
+//                                               recovery path for a commission walk
+//                                               that failed after the fee PI paid.
+// These had a durable/idempotent entry point, so replaying a row is safe and
 // idempotent. Every OTHER workload recovers from its own durable DB state via its
 // cron (campaign status, workflow_enrollments.resume_at, ContentGenerationJobItem
 // status, buyer_opportunities.intake_failed_at) and writes NOTHING to
@@ -70,6 +79,26 @@ async function reemitDeadLetterJob(
     });
     return;
   }
+  if (eventName === 'autolenis/affiliate.commission_walk') {
+    // Durable recovery for a commission walk that failed in the Stripe fee webhook
+    // after the fee PaymentIntent was captured. processFeeCommission re-runs the
+    // whole buyer→referral→walk chain and is idempotent on qualifyingEventId
+    // (`${eventId}-L${level}`), so replaying it — including after a partial success —
+    // never double-pays.
+    const dealId = String(payload.dealId ?? '');
+    const buyerId = String(payload.buyerId ?? '');
+    const qualifyingEventId = String(payload.qualifyingEventId ?? '');
+    if (!dealId || !buyerId || !qualifyingEventId) {
+      // A malformed row can never produce a valid commission — terminalize it
+      // rather than writing garbage or looping.
+      throw new UnroutableDeadLetterError(eventName);
+    }
+    const feeBasisCents =
+      typeof payload.feeBasisCents === 'number' ? payload.feeBasisCents : undefined;
+    const { processFeeCommission } = await import('@/lib/services/affiliate/commission.service');
+    await processFeeCommission({ dealId, buyerId, qualifyingEventId, feeBasisCents });
+    return;
+  }
   // No internal owner and no vendor fallback (Inngest removed). Signal the caller
   // to terminalize this row rather than dropping it or dispatching it anywhere.
   throw new UnroutableDeadLetterError(eventName);
@@ -91,6 +120,14 @@ async function reemitDeadLetterJob(
 
 export interface SystemHealth {
   dead_letter_count: number;
+  // DLQ rows still under the auto-retry cap — transient failures the drainer is
+  // actively re-driving. These are what the overall `status` escalates on.
+  retryable_dead_letter_count: number;
+  // DLQ rows that reached the auto-retry cap: no longer auto-retried, they need a
+  // human. Surfaced as a distinct signal so they never masquerade as transient
+  // backlog, and — critically — so a pile of permanently-stuck rows can no longer
+  // pin `status` at 'critical' forever and drown out fresh, actionable failures.
+  terminal_dead_letter_count: number;
   failed_enrollments_count: number;
   active_enrollments_count: number;
   pending_idempotency_count: number;
@@ -162,10 +199,17 @@ export class OperationsService {
   // SYSTEM HEALTH
   // ────────────────────────────────────────────────────────────────────────
   async getHealth(): Promise<SystemHealth> {
-    const [dlqRes, failedRes, activeRes, pendingIdemRes, refreshRes] = await Promise.all([
+    const [dlqRes, terminalDlqRes, failedRes, activeRes, pendingIdemRes, refreshRes] = await Promise.all([
       this.supabase
         .from('jobs_dead_letter')
         .select('id', { count: 'exact', head: true }),
+      // Terminal rows: auto_retry_count has reached the cap, so the drainer will
+      // never touch them again. Counted separately so live (retryable) backlog
+      // drives the status while terminal rows are surfaced without pinning it.
+      this.supabase
+        .from('jobs_dead_letter')
+        .select('id', { count: 'exact', head: true })
+        .gte('auto_retry_count', DEFAULT_MAX_AUTO_RETRIES),
       this.supabase
         .from('workflow_enrollments')
         .select('id', { count: 'exact', head: true })
@@ -188,17 +232,27 @@ export class OperationsService {
         .maybeSingle(),
     ]);
 
-    const dlq = dlqRes.count ?? 0;
+    const dlqTotal = dlqRes.count ?? 0;
+    const terminal = terminalDlqRes.count ?? 0;
+    // Rows below the cap the drainer is still re-driving. Guard against a negative
+    // if the two head-count queries race a concurrent insert/terminalize.
+    const retryable = Math.max(0, dlqTotal - terminal);
     const failed = failedRes.count ?? 0;
     const active = activeRes.count ?? 0;
     const pendingIdem = pendingIdemRes.count ?? 0;
 
+    // Escalate on the ACTIONABLE-by-system signal (live retryable backlog + failed
+    // enrollments), never on terminal rows alone — those are bounded and need a
+    // human, so they hold 'degraded' (visible) but can no longer force 'critical'
+    // in perpetuity, which was drowning fresh failures in the ops banner.
     let status: 'ok' | 'degraded' | 'critical' = 'ok';
-    if (dlq >= 25 || failed >= 25) status = 'critical';
-    else if (dlq > 0 || failed > 0) status = 'degraded';
+    if (retryable >= 25 || failed >= 25) status = 'critical';
+    else if (retryable > 0 || failed > 0 || terminal > 0) status = 'degraded';
 
     return {
-      dead_letter_count: dlq,
+      dead_letter_count: dlqTotal,
+      retryable_dead_letter_count: retryable,
+      terminal_dead_letter_count: terminal,
       failed_enrollments_count: failed,
       active_enrollments_count: active,
       pending_idempotency_count: pendingIdem,
@@ -433,7 +487,7 @@ export class OperationsService {
     minAgeMs?: number;
     batch?: number;
   }): Promise<{ scanned: number; reemitted: number; skipped: number; failed: number }> {
-    const maxAutoRetries = opts?.maxAutoRetries ?? 3;
+    const maxAutoRetries = opts?.maxAutoRetries ?? DEFAULT_MAX_AUTO_RETRIES;
     const minAgeMs = opts?.minAgeMs ?? 10 * 60_000;
     const batch = opts?.batch ?? 25;
     const cutoff = new Date(Date.now() - minAgeMs).toISOString();
