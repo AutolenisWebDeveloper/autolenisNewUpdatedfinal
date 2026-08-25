@@ -4,7 +4,7 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
-import { dispatch } from "@/lib/qstash/dispatch";
+import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import { limitPaymentIntent, clientIpKey } from "@/lib/security/rate-limit";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 
@@ -206,15 +206,11 @@ export async function POST(request: NextRequest) {
       select: { firstName: true, lastName: true, phone: true, user: { select: { email: true } } },
     });
     if (buyerContact?.user?.email) {
-      dispatch({
-        path: "/api/jobs/deposit-reminder",
-        body: {
-          buyerId: buyer.id,
-          firstName: buyerContact.firstName,
-          email: buyerContact.user.email,
-          touchNumber: 1,
-        },
-        delaySeconds: 86400,
+      scheduleLifecycleWorkload({
+        workload: "deposit_reminder",
+        buyerId: buyer.id,
+        firstName: buyerContact.firstName,
+        email: buyerContact.user.email,
       }).catch(() => {});
     }
 

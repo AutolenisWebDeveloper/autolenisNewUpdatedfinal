@@ -11,7 +11,7 @@ import { UserRole } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import twilio from "twilio";
-import { dispatch } from "@/lib/qstash/dispatch";
+import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import {
   intakeBuyerRequest,
   type UnifiedIntakeInput,
@@ -277,10 +277,14 @@ export async function dispatchVehicleRequest(
     logger.error("[voice/dispatch] CRM sync failed:", crmErr);
   }
 
-  // 5. Fire the standard post-intake flow (welcome SMS/email + abandonment timer).
-  await dispatch({
-    path: "/api/jobs/form-submitted",
-    body: { buyerId, firstName, email, phone: callerPhone || null },
+  // 5. Fire the standard post-intake flow (welcome SMS/email + abandonment
+  //    timer). Internal vs QStash is chosen per the form-submitted flag.
+  await scheduleLifecycleWorkload({
+    workload: "form_submitted",
+    buyerId,
+    firstName,
+    email,
+    phone: callerPhone || null,
   });
 
   return { success: true, buyerId, vehicleRequestId };

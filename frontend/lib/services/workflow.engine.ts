@@ -509,13 +509,25 @@ export class WorkflowEngine {
   ): Promise<{ enrolled: number; skipped: number }> {
     const { data: workflows } = await supabase
       .from('workflows')
-      .select('id')
+      .select('id, prebuilt_key')
       .eq('status', 'active')
       .eq('trigger_type', triggerType);
+
+    // §10 truthfulness invariant: a concierge-converted deposit converges to an
+    // already-CLOSED auction with offers ready — it never launches a live
+    // competitive auction. So a `deposit_paid` carrying `concierge === true` must
+    // NOT enroll into the live-auction-launch workflow, whose copy says "your
+    // auction is live. Dealers are now competing." This is state-eligibility, not
+    // wording: the concierge deposit is simply not eligible for that workflow.
+    const isConciergeDeposit = triggerData?.concierge === true;
 
     let enrolled = 0;
     let skipped = 0;
     for (const w of workflows ?? []) {
+      if (isConciergeDeposit && (w as { prebuilt_key?: string | null }).prebuilt_key === 'auction_launch') {
+        skipped += 1;
+        continue;
+      }
       try {
         const e = await this.enrollContact(supabase, w.id, contactId, triggerData);
         if (e) enrolled += 1;

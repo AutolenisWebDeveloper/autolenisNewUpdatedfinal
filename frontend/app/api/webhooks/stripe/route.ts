@@ -18,7 +18,7 @@ import { convertConciergeOfferToClosedAuction } from "@/lib/services/concierge/c
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { writeServiceFeePayment } from "@/lib/services/deal/service-fee.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
-import { dispatch } from "@/lib/qstash/dispatch";
+import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
 import { allowedPredecessors } from "@/lib/payments/deposit-state";
 
@@ -205,16 +205,18 @@ export async function POST(request: NextRequest) {
               }
               syncGhlTag(buyerEmail, "deposit-paid");
 
-              // QStash — auction-live sequence (immediate + midpoint/closing checks).
+              // Lifecycle — auction-live sequence (immediate + midpoint/closing
+              // checks). Only the STANDARD deposit branch reaches here; the
+              // concierge branch never launches a live auction, so it never
+              // schedules this sequence (Program 2 §10). Internal vs QStash is
+              // chosen per the auction activation flag (default QStash).
               if (createdAuction) {
-                dispatch({
-                  path: "/api/jobs/auction-active",
-                  body: {
-                    buyerId: deposit.buyerId,
-                    firstName: deposit.buyer?.firstName ?? "there",
-                    email: buyerEmail,
-                    auctionId: createdAuction.id,
-                  },
+                scheduleLifecycleWorkload({
+                  workload: "auction_active",
+                  buyerId: deposit.buyerId,
+                  firstName: deposit.buyer?.firstName ?? "there",
+                  email: buyerEmail,
+                  auctionId: createdAuction.id,
                 }).catch(() => {});
               }
             }

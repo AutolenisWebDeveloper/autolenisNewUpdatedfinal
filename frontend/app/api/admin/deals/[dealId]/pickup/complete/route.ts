@@ -15,7 +15,7 @@ import {
   sendDealerPayoutInitiatedEmail,
 } from "@/lib/services/email/resend.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
-import { dispatch } from "@/lib/qstash/dispatch";
+import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -103,16 +103,17 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
   syncGhlTag(deal.buyer?.user?.email, "purchase-complete");
 
-  // QStash — congratulations + review-request sequence.
+  // Lifecycle — congratulations + review-request sequence (the review touch, on
+  // the internal path, also seeds the day-60 refinance + day-27 referral touches
+  // via the drain's coupled postSend). Internal vs QStash is chosen per the
+  // deal-complete activation flag (default QStash).
   if (deal.buyer?.user?.email) {
-    dispatch({
-      path: "/api/jobs/deal-complete",
-      body: {
-        buyerId: deal.buyerId,
-        firstName: deal.buyer.firstName,
-        email: deal.buyer.user.email,
-        dealId,
-      },
+    scheduleLifecycleWorkload({
+      workload: "deal_complete",
+      buyerId: deal.buyerId,
+      dealId,
+      firstName: deal.buyer.firstName,
+      email: deal.buyer.user.email,
     }).catch(() => {});
   }
 
