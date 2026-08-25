@@ -277,7 +277,7 @@ function SignUpInner({ stats }: { stats: StatsProps }) {
                     {plan === "STANDARD" && <CheckCircle2 size={13} className="text-[#0B5FD1]" />}
                   </div>
                   <p className="text-sm font-bold text-[#0B5FD1] mt-1 font-[family-name:var(--font-mono)]">Free</p>
-                  <p className="text-[10px] text-[#94A3B8] mt-0.5 leading-tight">$99 deposit credited to purchase</p>
+                  <p className="text-[10px] text-[#94A3B8] mt-0.5 leading-tight">$99 deposit — refund on request</p>
                 </button>
                 <button
                   type="button"

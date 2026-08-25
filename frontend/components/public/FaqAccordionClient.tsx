@@ -37,7 +37,7 @@ const FAQ_CATEGORIES = [
     faqs: [
       {
         q: "What are the AutoLenis plans?",
-        a: "AutoLenis offers two plans: Standard (free to start) and Premium Concierge ($499 total). Both require the $99 Auction Access Deposit to activate your auction, which is credited toward your vehicle purchase (Standard) or concierge fee (Premium).",
+        a: "AutoLenis offers two plans: Standard (free to start) and Premium Concierge ($499 total). Both use the $99 Auction Access Deposit to activate your auction. The deposit is refundable on request, subject to review. On the Premium plan it is credited toward the $499 concierge fee, leaving $400 due.",
       },
       {
         q: "Is the $99 a plan?",
@@ -45,7 +45,7 @@ const FAQ_CATEGORIES = [
       },
       {
         q: "How does the Auction Access Deposit work?",
-        a: "The deposit activates your private 48-hour reverse auction. It unlocks live dealer bidding and competitive offer access — keeping auction quality high. If no competitive offer is received, you can request a refund of your $99 — our team reviews every request. On the Standard plan, it is credited toward your vehicle purchase at closing. On Premium, it is credited toward your concierge fee.",
+        a: "The deposit activates your private 48-hour reverse auction. It unlocks live dealer bidding and competitive offer access — keeping auction quality high. If no competitive offer is received, you can request a refund of your $99 — our team reviews every request. When you proceed on the Premium concierge plan, the $99 is credited toward the $499 concierge fee, leaving $400 due.",
       },
     ],
   },

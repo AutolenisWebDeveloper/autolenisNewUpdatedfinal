@@ -24,7 +24,7 @@ export function trackVehicleRequest(params: {
   });
 }
 
-// Fire on deposit payment ($99 fee)
+// Fire on deposit payment ($99 Auction Access Deposit)
 export function trackDepositPayment(amountCents: number) {
   if (typeof window === "undefined" || !window.ttq) return;
   window.ttq.track("CompletePayment", {

@@ -84,7 +84,7 @@ export default async function ReceiptPage({ params }: Props) {
             </div>
           )}
           <div className="flex justify-between text-sm">
-            <span className="text-[#4B5563]">Auction Access Fee (credited)</span>
+            <span className="text-[#4B5563]">Auction Access Deposit (credited)</span>
             <span className="text-[#059669]">
               −${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(2)}
             </span>

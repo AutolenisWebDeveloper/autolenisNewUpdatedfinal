@@ -4,7 +4,7 @@
 // buyer's behalf as the auto-outreach pipeline runs:
 //
 //   A. sendDealersContactedEmail   — "we've contacted N dealers" (drives the
-//                                     buyer to pay the $99 service fee).
+//                                     buyer to pay the $99 Auction Access Deposit).
 //   B. sendFirstOfferReceivedEmail — "your first offer is in" (drives the buyer
 //                                     to the portal — pay if not yet active,
 //                                     otherwise view offers).
@@ -90,7 +90,7 @@ export async function sendDealersContactedEmail(params: {
   vehicleMake: string
   vehicleModel: string
   dealerCount: number // ONLY the count — never any dealer names
-  depositUrl: string // link to pay the $99 service fee
+  depositUrl: string // link to pay the $99 Auction Access Deposit
 }): Promise<void> {
   const vehicle = [params.vehicleMake, params.vehicleModel]
     .filter(Boolean)
@@ -108,7 +108,7 @@ export async function sendDealersContactedEmail(params: {
     <p style="margin:0 0 16px">Hi ${escapeHtml(firstName)},</p>
     <p style="margin:0 0 16px">We've reached out to <strong>${params.dealerCount} verified dealerships</strong> on your behalf who carry the ${escapeHtml(vehicle)} you're looking for.</p>
     <p style="margin:0 0 16px">Your personal contact information will <strong>NOT</strong> be shared with any dealer until you select a winning offer.</p>
-    <p style="margin:0 0 16px">To activate your 48-hour auction and receive their competitive offers, complete your $99 service fee:</p>
+    <p style="margin:0 0 16px">To activate your 48-hour auction and receive their competitive offers, complete your $99 Auction Access Deposit:</p>
     <div style="text-align:center;margin:24px 0">
       <a href="${escapeHtml(params.depositUrl)}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">ACTIVATE MY AUCTION — $99 →</a>
     </div>
@@ -136,7 +136,7 @@ export async function sendFirstOfferReceivedEmail(params: {
   buyerFirstName: string
   vehicleMake: string
   vehicleModel: string
-  hasDeposit: boolean // whether the buyer already paid the $99 service fee
+  hasDeposit: boolean // whether the buyer already paid the $99 Auction Access Deposit
   depositUrl: string // link to pay if not active
   offersUrl: string // link to view offers if active
 }): Promise<void> {

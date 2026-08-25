@@ -230,7 +230,7 @@ export default function TradeInPage() {
           {loading ? "Submitting…" : "Submit Trade-In Details"}
         </Button>
         <p className="text-xs text-slate-400 text-center">
-          Trade-in information is visible to dealers during auction only. It does not affect your $99 Auction Access Fee or prequalification.
+          Trade-in information is visible to dealers during auction only. It does not affect your $99 Auction Access Deposit or prequalification.
         </p>
       </form>
 

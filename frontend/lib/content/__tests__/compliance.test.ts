@@ -100,24 +100,34 @@ test("does NOT flag buyer-advocate framing (dealers compete for you)", () => {
   assert.equal(result.passed, true);
 });
 
-test("flags 'refundable deposit' pricing language", () => {
+test("flags an over-promised fully-refundable claim", () => {
   const bad = "<p>Get started with a fully refundable deposit today.</p>";
   const result = validateCompliance(bad);
   assert.equal(result.passed, false);
   assert.ok(result.violations.some((v) => v.rule === "pricing_language"));
 });
 
-test("flags a $99 deposit framing", () => {
-  const bad = "<p>Pay a $99 deposit to enter the auction.</p>";
+test("does NOT flag the canonical $99 Auction Access Deposit language", () => {
+  const ok =
+    "<p>Start with a one-time $99 Auction Access Deposit — refundable on request " +
+    "(subject to review) and credited toward the $499 concierge fee when you " +
+    "proceed.</p>";
+  const result = validateCompliance(ok);
+  assert.equal(result.passed, true);
+});
+
+test("flags the Model-Y non-refundable / not-a-deposit framing", () => {
+  const bad =
+    "<p>The $99 is a non-refundable Auction Access Fee — it is not a deposit.</p>";
   const result = validateCompliance(bad);
   assert.equal(result.passed, false);
   assert.ok(result.violations.some((v) => v.rule === "pricing_language"));
 });
 
-test("does NOT flag the canonical non-refundable Auction Access Fee language", () => {
-  const ok =
-    "<p>Start with a one-time, non-refundable $99 Auction Access Fee — it is a " +
-    "fee, not a deposit.</p>";
-  const result = validateCompliance(ok);
-  assert.equal(result.passed, true);
+test("flags a $99 that is 'not credited toward' the $499 fee", () => {
+  const bad =
+    "<p>The $99 is not credited toward the $499 concierge fee.</p>";
+  const result = validateCompliance(bad);
+  assert.equal(result.passed, false);
+  assert.ok(result.violations.some((v) => v.rule === "pricing_language"));
 });

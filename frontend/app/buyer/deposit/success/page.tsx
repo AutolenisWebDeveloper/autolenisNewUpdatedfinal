@@ -1,7 +1,7 @@
 import { logger } from "@/lib/logger";
 import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Auction Access Fee Confirmed", robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: "Auction Access Deposit Confirmed", robots: { index: false, follow: false } };
 
 import Link from "next/link";
 import { CheckCircle2, XCircle, ArrowRight, Clock } from "lucide-react";
@@ -96,7 +96,7 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
       </div>
       <h1 className="text-2xl font-bold text-[#111827] mb-2">Auction activated!</h1>
       <p className="text-[#4B5563] text-sm mb-8 leading-relaxed">
-        Your $99 Limited-Time Auction Access Fee was received. Your private 48-hour dealer competition is being prepared.
+        Your $99 Limited-Time Auction Access Deposit was received. Your private 48-hour dealer competition is being prepared.
       </p>
       <div className="bg-al-primary-subtle border border-[#DBEAFE] rounded-xl p-5 mb-6 text-left text-sm text-[#374151] space-y-2">
         <p>• Dealers will receive invitations within the next few minutes</p>

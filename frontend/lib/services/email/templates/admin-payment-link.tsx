@@ -9,7 +9,7 @@ import {
 } from "@/lib/constants";
 
 export const DEPOSIT_PAYMENT_LINK_SUBJECT =
-  `Action Required — Complete Your ${DEPOSIT_AMOUNT_USD} AutoLenis Auction Access Fee`;
+  `Action Required — Complete Your ${DEPOSIT_AMOUNT_USD} AutoLenis Auction Access Deposit`;
 
 export const CONCIERGE_FEE_PAYMENT_LINK_SUBJECT =
   `Action Required — ${PREMIUM_FEE_REMAINING_USD} Concierge Fee Due`;
@@ -37,7 +37,7 @@ export function renderDepositPaymentLinkEmail({
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Action Required — AutoLenis Auction Access Fee</title>
+  <title>Action Required — AutoLenis Auction Access Deposit</title>
 </head>
 <body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:32px 0;">
@@ -55,7 +55,7 @@ export function renderDepositPaymentLinkEmail({
           <tr>
             <td style="padding:40px 40px 24px 40px;color:#333333;font-size:15px;line-height:1.6;">
               <p style="margin:0 0 16px 0;">Hi ${firstName},</p>
-              <p style="margin:0 0 16px 0;">Your AutoLenis specialist has sent you a secure payment link to complete your <strong>${DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee</strong>.</p>
+              <p style="margin:0 0 16px 0;">Your AutoLenis specialist has sent you a secure payment link to complete your <strong>${DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Deposit</strong>.</p>
               <p style="margin:0 0 16px 0;">Click the button below to pay securely through Stripe. This link expires in 24 hours.</p>
               <!-- CTA Button -->
               <table cellpadding="0" cellspacing="0" style="margin:24px 0;">
@@ -63,7 +63,7 @@ export function renderDepositPaymentLinkEmail({
                   <td>
                     <a href="${checkoutUrl}"
                        style="display:inline-block;background:#0B5FD1;color:#ffffff;text-decoration:none;font-weight:bold;padding:14px 28px;border-radius:6px;font-size:15px;">
-                      Pay ${DEPOSIT_AMOUNT_USD} Auction Access Fee Now &#8594;
+                      Pay ${DEPOSIT_AMOUNT_USD} Auction Access Deposit Now &#8594;
                     </a>
                   </td>
                 </tr>
@@ -116,7 +116,7 @@ export function renderConciergeFeePaymentLinkEmail({
             <td style="padding:40px 40px 24px 40px;color:#333333;font-size:15px;line-height:1.6;">
               <p style="margin:0 0 16px 0;">Hi ${firstName},</p>
               <p style="margin:0 0 16px 0;">Your AutoLenis specialist has sent you a secure payment link to complete your <strong>${PREMIUM_FEE_USD} Premium Concierge Fee</strong>.</p>
-              <p style="margin:0 0 16px 0;">Your ${DEPOSIT_AMOUNT_USD} Auction Access Fee has been credited — <strong>${PREMIUM_FEE_REMAINING_USD} is due</strong>. Click the button below to pay securely.</p>
+              <p style="margin:0 0 16px 0;">Your ${DEPOSIT_AMOUNT_USD} Auction Access Deposit has been credited — <strong>${PREMIUM_FEE_REMAINING_USD} is due</strong>. Click the button below to pay securely.</p>
               <!-- CTA Button -->
               <table cellpadding="0" cellspacing="0" style="margin:24px 0;">
                 <tr>

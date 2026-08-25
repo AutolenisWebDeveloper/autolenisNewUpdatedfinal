@@ -94,14 +94,14 @@ function PricingPageBody() {
           <CitationBlock
             id="autolenis-pricing"
             question="How much does AutoLenis cost?"
-            answer={`AutoLenis charges two fees: a ${DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee (refund available on request if no valuable offer is received) and a ${PREMIUM_FEE_USD} Service Fee only if you proceed with a purchase. The ${DEPOSIT_AMOUNT_USD} Auction Access Fee is credited toward the ${PREMIUM_FEE_USD} fee, making your balance ${PREMIUM_FEE_REMAINING_USD}. There are no monthly charges, subscriptions, or hidden fees.`}
+            answer={`AutoLenis charges two fees: a ${DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Deposit (refund available on request if no valuable offer is received) and a ${PREMIUM_FEE_USD} Service Fee only if you proceed with a purchase. The ${DEPOSIT_AMOUNT_USD} Auction Access Deposit is credited toward the ${PREMIUM_FEE_USD} fee, making your balance ${PREMIUM_FEE_REMAINING_USD}. There are no monthly charges, subscriptions, or hidden fees.`}
             sourceLabel="AutoLenis Official Pricing"
             lastUpdated="2025-01-01"
           />
           <DefinitionBlock
-            term="AutoLenis Auction Access Fee"
+            term="AutoLenis Auction Access Deposit"
             category="Fee"
-            definition={`A ${DEPOSIT_AMOUNT_USD} limited-time Auction Access Fee paid by the buyer to activate a private dealer auction. Refund is available on request if no valuable offer is received. If a purchase is made, the ${DEPOSIT_AMOUNT_USD} is credited toward the ${PREMIUM_FEE_USD} AutoLenis Service Fee.`}
+            definition={`A ${DEPOSIT_AMOUNT_USD} limited-time Auction Access Deposit paid by the buyer to activate a private dealer auction. Refund is available on request if no valuable offer is received. If a purchase is made, the ${DEPOSIT_AMOUNT_USD} is credited toward the ${PREMIUM_FEE_USD} AutoLenis Service Fee.`}
             relatedTerms={["Refund on request", "Auction Activation", "Service Fee"]}
           />
         </div>
@@ -126,7 +126,7 @@ function PricingPageBody() {
                   Free <span className="text-base font-normal text-[#94A3B8]">to start</span>
                 </p>
                 <div className="mt-4 bg-[#F8F9FB] border border-[#E5E7EB] rounded-lg px-4 py-3">
-                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">{DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee</p>
+                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">{DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Deposit</p>
                   <p className="text-xs text-[#4B5563] leading-relaxed">
                     Required to activate your auction. <span className="font-semibold">Refund available on request if no valuable offer is received.</span>
                   </p>
@@ -176,10 +176,10 @@ function PricingPageBody() {
                   {PREMIUM_FEE_USD} <span className="text-base font-normal text-[#94A3B8]">concierge fee</span>
                 </p>
                 <p className="text-xs text-[#0B5FD1] font-semibold mt-2">
-                  {DEPOSIT_AMOUNT_USD} Auction Access Fee credited → {PREMIUM_FEE_REMAINING_USD} net at closing
+                  {DEPOSIT_AMOUNT_USD} Auction Access Deposit credited → {PREMIUM_FEE_REMAINING_USD} net at closing
                 </p>
                 <div className="mt-4 bg-white border border-[#DBEAFE] rounded-lg px-4 py-3">
-                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">{DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee</p>
+                  <p className="text-xs font-semibold text-[#0B5FD1] mb-0.5">{DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Deposit</p>
                   <p className="text-xs text-[#4B5563] leading-relaxed">
                     Required to activate your auction. <span className="font-semibold">Credited toward your {PREMIUM_FEE_USD} concierge fee</span> — you pay {PREMIUM_FEE_REMAINING_USD} after selecting your deal.
                   </p>
@@ -207,7 +207,7 @@ function PricingPageBody() {
         </div>
       </section>
 
-      {/* $99 Auction Access Fee Callout — Fix 1: replace non-brand green icon wrapper */}
+      {/* $99 Auction Access Deposit Callout — Fix 1: replace non-brand green icon wrapper */}
       <section className="pb-24" data-testid="pricing-deposit-callout-section">
         <div className="mx-auto max-w-4xl px-6">
           <div
@@ -220,10 +220,10 @@ function PricingPageBody() {
               </div>
               <div>
                 <h3 className="text-lg font-bold text-[#111827] mb-2 tracking-tight">
-                  Why the {DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Fee?
+                  Why the {DEPOSIT_AMOUNT_USD} Limited-Time Auction Access Deposit?
                 </h3>
                 <p className="text-sm text-[#4B5563] leading-relaxed">
-                  The {DEPOSIT_AMOUNT_USD} Auction Access Fee is required before your auction begins. It unlocks live dealer bidding and competitive offer access — ensuring dealers invest real effort in competing for your business.{" "}
+                  The {DEPOSIT_AMOUNT_USD} Auction Access Deposit is required before your auction begins. It unlocks live dealer bidding and competitive offer access — ensuring dealers invest real effort in competing for your business.{" "}
                   <span className="font-semibold text-[#111827]">Refund is available on request if no valuable offer is received.</span>{" "}
                   On Premium, it is credited toward your {PREMIUM_FEE_USD} concierge fee.
                 </p>
@@ -272,15 +272,15 @@ function PricingPageBody() {
             {[
               {
                 q: `Is the ${DEPOSIT_AMOUNT_USD} a plan or subscription?`,
-                a: `No. The ${DEPOSIT_AMOUNT_USD} is a Limited-Time Auction Access Fee used to activate your private dealer auction. It is not a plan, not a subscription, and not a recurring charge.`,
+                a: `No. The ${DEPOSIT_AMOUNT_USD} is a Limited-Time Auction Access Deposit used to activate your private dealer auction. It is not a plan, not a subscription, and not a recurring charge.`,
               },
               {
-                q: "Is the Auction Access Fee refundable?",
+                q: "Is the Auction Access Deposit refundable?",
                 a: "It isn't automatically refunded, but if no competitive offer is received you can request a refund — our team reviews every request.",
               },
               {
                 q: "Are there any subscriptions?",
-                a: "No. There are no monthly or recurring fees. The Auction Access Fee is a one-time auction activation, and Premium is a one-time concierge fee.",
+                a: "No. There are no monthly or recurring fees. The Auction Access Deposit is a one-time auction activation, and Premium is a one-time concierge fee.",
               },
               {
                 q: "Do I have to accept any offer?",

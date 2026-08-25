@@ -166,16 +166,17 @@ export async function processAuctionClose(auctionId: string): Promise<{ offers: 
       ).catch(err => logger.error(`[processAuctionClose] buyer email failed for ${auctionId}:`, err));
     }
   } else {
-    // NO AUTO-REFUND. The $99 Auction Access Deposit is a non-refundable
-    // access fee and is retained when an auction closes with no
-    // dealer offers. The platform never initiates a refund automatically at
-    // auction close; any refund must be issued deliberately by an admin via the
-    // manual refund tools. Only buyer-facing/dealer notifications are emitted here.
+    // NO AUTO-REFUND. The $99 Auction Access Deposit is not automatically
+    // refunded when an auction closes with no dealer offers — it is retained
+    // and the platform never initiates a refund on its own at auction close.
+    // The deposit remains refundable on request, subject to manual AutoLenis
+    // review; any refund must be issued deliberately by an admin via the manual
+    // refund tools. Only buyer-facing/dealer notifications are emitted here.
     await prisma.notification.create({
       data: {
         buyerId: auction.buyerId,
         title: "Auction closed — no offers received",
-        body: `Your ${DEPOSIT_AMOUNT_USD} Auction Access Deposit secured your private auction and is non-refundable. You may start a new request or request a specific vehicle.`,
+        body: `Your ${DEPOSIT_AMOUNT_USD} Auction Access Deposit secured your private auction. Since no competitive offer was received, you can request a refund — our team reviews every request. You may also start a new request or request a specific vehicle.`,
         type: "DEAL_STAGE_CHANGED",
       },
     }).catch(() => {});

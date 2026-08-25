@@ -634,7 +634,7 @@ export default function LandingPageClient({
                   {[
                     "Takes about 60 seconds",
                     "No credit impact",
-                    "$99 one-time Auction Access Fee activates your private auction",
+                    "$99 one-time Auction Access Deposit activates your private auction",
                     "No obligation to accept",
                   ].map((item) => (
                     <div key={item} className="flex items-center gap-3">
@@ -867,8 +867,9 @@ export default function LandingPageClient({
 
                 {/* disclaimers */}
                 <p className="text-[10px] text-slate-400 text-center mt-3 leading-relaxed">
-                  The $99 Auction Access Fee is a one-time, non-refundable fee that activates your
-                  private 48-hour dealer auction. It is not a deposit and is not credited toward a purchase.
+                  The $99 Auction Access Deposit is a one-time deposit that activates your
+                  private 48-hour dealer auction. It is refundable on request if no competitive offer is
+                  received, and is credited toward the $499 concierge fee when you proceed.
                 </p>
                 <p className="text-[10px] text-slate-400 text-center mt-2 leading-relaxed">
                   Savings vary based on vehicle, market conditions, dealer participation, and buyer-selected offer.
@@ -1308,7 +1309,7 @@ export default function LandingPageClient({
                 },
                 {
                   q: "What does it cost?",
-                  a: "A one-time $99 Auction Access Fee unlocks dealer competition. It is a non-refundable access fee — not a deposit, and not credited toward your purchase. Premium concierge is available for buyers who want full hands-off service.",
+                  a: "A one-time $99 Auction Access Deposit unlocks dealer competition. It's refundable on request — reviewed by our team — and credited toward the $499 concierge fee when you proceed. Premium concierge is available for buyers who want full hands-off service.",
                 },
                 {
                   q: "Do I have to talk to dealers?",
@@ -1316,7 +1317,7 @@ export default function LandingPageClient({
                 },
                 {
                   q: "What if no offer works for me?",
-                  a: "You are never obligated to accept any offer. If no competitive offer is received during your auction, you can request a refund of your $99 Auction Access Fee — our team reviews every request. If offers are submitted but none meet your expectations, you can decline them all — your concierge will follow up to discuss next steps.",
+                  a: "You are never obligated to accept any offer. If no competitive offer is received during your auction, you can request a refund of your $99 Auction Access Deposit — our team reviews every request. If offers are submitted but none meet your expectations, you can decline them all — your concierge will follow up to discuss next steps.",
                 },
               ].map((item) => (
                 <details
@@ -1622,7 +1623,7 @@ export default function LandingPageClient({
             Compare Dealer Offers <ArrowRight size={16} />
           </button>
           <p className="text-[10px] text-slate-400 text-center mt-1.5">
-            $99 Limited-Time Auction Access Fee · No obligation · 48-hour auction
+            $99 Limited-Time Auction Access Deposit · No obligation · 48-hour auction
           </p>
         </div>
       )}

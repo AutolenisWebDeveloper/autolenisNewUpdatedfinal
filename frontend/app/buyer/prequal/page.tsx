@@ -450,7 +450,7 @@ export default async function PrequalPage() {
               <JourneyStep icon={<CheckCircle2 size={15} className="text-emerald-600" />} label="Pre-Qual complete" done />
               <JourneyStep icon={<Car size={15} className="text-al-primary" />} label="Search vehicles within your budget" current />
               <JourneyStep icon={<ListChecks size={15} className="text-slate-400" />} label="Build your shortlist" />
-              <JourneyStep icon={<Banknote size={15} className="text-slate-400" />} label="Pay the Auction Access Fee" />
+              <JourneyStep icon={<Banknote size={15} className="text-slate-400" />} label="Pay the Auction Access Deposit" />
               <JourneyStep icon={<TrendingUp size={15} className="text-slate-400" />} label="Participate in auction" />
               <JourneyStep icon={<FileText size={15} className="text-slate-400" />} label="Select deal & finalize financing" />
               <JourneyStep icon={<Pen size={15} className="text-slate-400" />} label="Sign contract" />

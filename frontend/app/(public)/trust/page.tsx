@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 86400;
 
 const TRUST_PILLARS = [
-  { icon: CreditCard, title: "Not satisfied? Request a refund", body: "If no dealer submits a competitive offer, you can request a refund of your $99 Auction Access Fee. Our team reviews every request and, once approved, returns the funds to your original payment method.", accent: "text-[#059669]", bg: "bg-[#ECFDF5]", border: "border-[#A7F3D0]" },
+  { icon: CreditCard, title: "Not satisfied? Request a refund", body: "If no dealer submits a competitive offer, you can request a refund of your $99 Auction Access Deposit. Our team reviews every request and, once approved, returns the funds to your original payment method.", accent: "text-[#059669]", bg: "bg-[#ECFDF5]", border: "border-[#A7F3D0]" },
   { icon: Shield, title: "Dealer Vetting & Scoring", body: "Every dealer is licensed, insured, and scored by deal history. Dealers with high junk-fee ratios or low completion rates are removed automatically.", accent: "text-[#0B5FD1]", bg: "bg-[#0B5FD1]/10", border: "border-[#DBEAFE]" },
   { icon: FileText, title: "Contract Shield", body: "Before you sign anything, AutoLenis runs every contract through our Contract Shield engine — scanning for junk fees, unusual add-ons, and compliance issues.", accent: "text-[#0B5FD1]", bg: "bg-[#EFF6FF]", border: "border-[#BFDBFE]" },
   { icon: Lock, title: "Bank-Grade Data Security", body: "Your prequalification data is encrypted with AES-256-GCM at rest. We never share your identity with dealers until you select a deal. FCRA-compliant.", accent: "text-[#0B5FD1]", bg: "bg-[#0B5FD1]/10", border: "border-[#DBEAFE]" },

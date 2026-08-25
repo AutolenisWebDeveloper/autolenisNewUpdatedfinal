@@ -123,7 +123,7 @@ export default async function RequestDetailPage({ params }: Props) {
           <div className="flex items-start gap-3">
             <RefreshCw size={18} className="text-amber-700 shrink-0 mt-0.5" />
             <div className="flex-1">
-              <p className="font-semibold text-amber-900 mb-1">No match found — request a refund of your $99 Auction Access Fee</p>
+              <p className="font-semibold text-amber-900 mb-1">No match found — request a refund of your $99 Auction Access Deposit</p>
               <p className="text-sm text-amber-800 mb-4">
                 Our team was unable to source a vehicle that fits this request. You can adjust your preferences and try again at no additional cost.
               </p>

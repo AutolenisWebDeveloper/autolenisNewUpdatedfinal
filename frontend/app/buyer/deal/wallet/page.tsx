@@ -48,11 +48,11 @@ function WalletBreakdown({ deal }: {
 
   const items = [
     { label: "Vehicle out-the-door price", amount: otdPriceCents, positive: false },
-    { label: "Auction Access Fee paid", amount: DEPOSIT_AMOUNT_CENTS, positive: true },
+    { label: "Auction Access Deposit paid", amount: DEPOSIT_AMOUNT_CENTS, positive: true },
     // Service fee shown GROSS (= net charge + $99 deposit credit) so the credit
     // line below explains the net. feeAmountCents itself is the net charge.
     { label: "Service fee", amount: deal.feePaidAt ? (deal.feeAmountCents ?? PREMIUM_FEE_REMAINING_CENTS) + DEPOSIT_AMOUNT_CENTS : 0, positive: false },
-    { label: "Net Auction Access Fee credit", amount: deal.feePaidAt ? DEPOSIT_AMOUNT_CENTS : 0, positive: true },
+    { label: "Net Auction Access Deposit credit", amount: deal.feePaidAt ? DEPOSIT_AMOUNT_CENTS : 0, positive: true },
   ];
 
   return (

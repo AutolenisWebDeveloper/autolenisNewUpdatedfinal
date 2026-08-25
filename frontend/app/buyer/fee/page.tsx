@@ -350,7 +350,7 @@ function FeePage_Due({
               <p className="text-sm text-slate-600 leading-relaxed">
                 Standard plan buyers pay no service fee. If no valuable offer is
                 received, you can request a refund of your{" "}
-                <strong>{formatCents(DEPOSIT_AMOUNT_CENTS)} Limited-Time Auction Access Fee</strong> — our team
+                <strong>{formatCents(DEPOSIT_AMOUNT_CENTS)} Limited-Time Auction Access Deposit</strong> — our team
                 reviews every request.
               </p>
             </div>
@@ -400,7 +400,7 @@ function FeePage_Due({
               className="text-amber-500 mt-0.5 shrink-0"
             />
             <p className="text-sm text-slate-600 leading-relaxed">
-              Your {formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Fee has not been confirmed yet. Once confirmed, it
+              Your {formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Deposit has not been confirmed yet. Once confirmed, it
               will be credited toward your service fee.
             </p>
           </div>
@@ -450,7 +450,7 @@ function FeePage_Paid({
         subtitle={
           isPremium
             ? "Your AutoLenis service fee has been received"
-            : "No service fee required — Auction Access Fee refund available on request if no valuable offer"
+            : "No service fee required — Auction Access Deposit refund available on request if no valuable offer"
         }
         status={{ text: "Complete", color: "green" }}
       />
@@ -695,13 +695,13 @@ function FeeBreakdown({
               value={formatCents(totalFeeCents)}
             />
             <FeeRow
-              label={`${formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Fee credited`}
+              label={`${formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Deposit credited`}
               value={`−${formatCents(depositCreditCents)}`}
               highlight
               note={
                 depositPaid
-                  ? "Auction Access Fee confirmed"
-                  : "Auction Access Fee not yet confirmed"
+                  ? "Auction Access Deposit confirmed"
+                  : "Auction Access Deposit not yet confirmed"
               }
               noteColor={depositPaid ? "green" : "amber"}
             />
@@ -723,7 +723,7 @@ function FeeBreakdown({
               noteColor="green"
             />
             <FeeRow
-              label={`${formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Fee`}
+              label={`${formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Deposit`}
               value="Refund on request"
               note="Refund available on request if no valuable offer is received"
               noteColor="green"
@@ -741,11 +741,11 @@ function FeeBreakdown({
 
       {isPremium && (
         <p className="text-xs text-slate-400 mt-4 leading-relaxed bg-slate-50 rounded-lg px-3 py-2">
-          AutoLenis Service Fee: <strong>{formatCents(PREMIUM_FEE_CENTS)} total</strong> — {formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Fee
+          AutoLenis Service Fee: <strong>{formatCents(PREMIUM_FEE_CENTS)} total</strong> — {formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Deposit
           credited ={" "}
           <strong>{formatCents(netFeeCents)} due to AutoLenis</strong>.
           If no valuable offer is received, you can request a refund of the
-          Auction Access Fee — our team reviews every request.
+          Auction Access Deposit — our team reviews every request.
         </p>
       )}
     </div>
@@ -821,12 +821,12 @@ function PlanInfoCard({
         </p>
         <p className="text-sm text-slate-600 leading-relaxed">
           {isPremium
-            ? `Premium plan includes the full AutoLenis white-glove concierge service. A ${formatCents(PREMIUM_FEE_CENTS)} fee applies, with your ${formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Fee already credited — leaving ${formatCents(PREMIUM_FEE_REMAINING_CENTS)} due.`
-            : `Standard plan buyers pay no service fee. If no valuable offer is received, you can request a refund of your ${formatCents(DEPOSIT_AMOUNT_CENTS)} Limited-Time Auction Access Fee — our team reviews every request.`}
+            ? `Premium plan includes the full AutoLenis white-glove concierge service. A ${formatCents(PREMIUM_FEE_CENTS)} fee applies, with your ${formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Deposit already credited — leaving ${formatCents(PREMIUM_FEE_REMAINING_CENTS)} due.`
+            : `Standard plan buyers pay no service fee. If no valuable offer is received, you can request a refund of your ${formatCents(DEPOSIT_AMOUNT_CENTS)} Limited-Time Auction Access Deposit — our team reviews every request.`}
         </p>
         {isPremium && !depositPaid && (
           <p className="text-xs text-amber-600 mt-1.5">
-            Note: Your {formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Fee has not yet been confirmed. Once confirmed,
+            Note: Your {formatCents(DEPOSIT_AMOUNT_CENTS)} Auction Access Deposit has not yet been confirmed. Once confirmed,
             it will reduce your balance to {formatCents(PREMIUM_FEE_REMAINING_CENTS)}.
           </p>
         )}
