@@ -61,8 +61,20 @@ export default function DepositPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [plan, setPlan] = useState<"STANDARD" | "PREMIUM">("STANDARD");
+  // Concierge convergence: when the buyer arrives from a "?offer=<reviewToken>"
+  // vehicle-offer review link, this deposit unlocks an admin-curated set of
+  // dealer offers (converted to a CLOSED auction on settle) instead of launching
+  // a live reverse auction. Read from the URL to avoid a Suspense boundary.
+  const [reviewToken, setReviewToken] = useState<string | null>(null);
+  const isConcierge = !!reviewToken;
 
   useEffect(() => {
+    const token =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("offer")
+        : null;
+    setReviewToken(token);
+
     // Fetch buyer's plan + create payment intent in parallel
     api.get<{ plan?: string }>("/api/buyer/profile")
       .then(data => {
@@ -70,14 +82,24 @@ export default function DepositPage() {
       })
       .catch(() => { /* default to STANDARD */ });
 
-    fetch("/api/buyer/deposit/create-intent", { method: "POST" })
+    fetch("/api/buyer/deposit/create-intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Concierge deposits carry the review token so the server binds this
+      // deposit to the offers and stamps the concierge PI metadata.
+      body: JSON.stringify(token ? { reviewToken: token } : {}),
+    })
       .then(r => r.json())
-      .then((d: { success: boolean; data?: { clientSecret: string }; error?: { code?: string } }) => {
+      .then((d: { success: boolean; data?: { clientSecret: string }; error?: { code?: string; message?: string } }) => {
         if (d.success && d.data) {
           setClientSecret(d.data.clientSecret);
         } else if (d.error?.code === "PREQUAL_REQUIRED") {
           setError("You need to complete prequalification before paying the Auction Access Deposit.");
           setTimeout(() => router.push("/buyer/prequal"), 2000);
+        } else if (d.error?.code === "REVIEW_FORBIDDEN") {
+          setError("These offers were sent to a different account. Please sign in with the email the offers were sent to.");
+        } else if (d.error?.code === "REVIEW_EXPIRED" || d.error?.code === "REVIEW_NOT_FOUND") {
+          setError("This offer review link is no longer valid. Please contact AutoLenis support.");
         } else {
           setError("Unable to initialize payment. Please try again.");
         }
@@ -92,9 +114,17 @@ export default function DepositPage() {
         <div className="w-16 h-16 rounded-full bg-[#50D14E]/15 flex items-center justify-center mx-auto mb-4">
           <Shield size={28} className="text-[#1A6B18]" />
         </div>
-        <h2 className="text-2xl font-bold text-[#111827] mb-2">Auction activated!</h2>
-        <p className="text-[#4B5563] text-sm mb-6">Your private 48-hour auction is now live. Dealers are being invited.</p>
-        <Button href="/buyer/auctions" data-testid="goto-auction-btn">View My Auction <ArrowRight size={15} /></Button>
+        <h2 className="text-2xl font-bold text-[#111827] mb-2">
+          {isConcierge ? "Deposit received!" : "Auction activated!"}
+        </h2>
+        <p className="text-[#4B5563] text-sm mb-6">
+          {isConcierge
+            ? "Your offers are being prepared. Head to your offers to review them and choose the best one."
+            : "Your private 48-hour auction is now live. Dealers are being invited."}
+        </p>
+        <Button href="/buyer/auctions" data-testid="goto-auction-btn">
+          {isConcierge ? "View My Offers" : "View My Auction"} <ArrowRight size={15} />
+        </Button>
       </div>
     );
   }
@@ -104,9 +134,20 @@ export default function DepositPage() {
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="deposit-page">
       <div className="mb-4">
-        <h1 className="text-xl font-bold text-[#111827]">Activate Your Auction</h1>
+        <h1 className="text-xl font-bold text-[#111827]">
+          {isConcierge ? "Unlock & Accept Your Offers" : "Activate Your Auction"}
+        </h1>
         <p className="text-sm text-[#4B5563] mt-1">
-          Pay a <strong>$99 Limited-Time Auction Access Deposit — refund available on request if no valuable offer is received</strong> to launch your private 48-hour reverse auction.
+          {isConcierge ? (
+            <>
+              Pay your <strong>$99 Auction Access Deposit — refundable on request</strong> to unlock the dealer
+              offers we prepared for you and choose the one you want.
+            </>
+          ) : (
+            <>
+              Pay a <strong>$99 Limited-Time Auction Access Deposit — refund available on request if no valuable offer is received</strong> to launch your private 48-hour reverse auction.
+            </>
+          )}
         </p>
       </div>
 

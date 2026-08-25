@@ -19,27 +19,63 @@ export async function POST(request: NextRequest) {
     if (!rl.ok) return errorResponse("RATE_LIMITED", rl.message, rl.status);
   }
 
-  // D1: Verify prequal is valid before allowing deposit. Uses the platform
-  // single-source-of-truth (decision === APPROVED AND not expired) rather than
-  // an expiry-only check — a future-dated DECLINED/PENDING/MANUAL_REVIEW record
-  // must not pass this gate (defense-in-depth behind the layout gate).
-  const prequal = buyer.preQualification;
-  if (!isPrequalValid(prequal ?? null)) {
-    return errorResponse("PREQUAL_REQUIRED", "Valid prequalification required before deposit", 400);
+  // Concierge convergence path: when a reviewToken is supplied, this deposit
+  // unlocks an admin-curated set of dealer offers (System B) rather than
+  // launching a live reverse auction. The concierge buyer has a VehicleOffer,
+  // not a prequal + shortlist — so those gates are replaced by a strict
+  // buyer↔offer binding (the authenticated buyer's email must match the review
+  // the admin sent). A settled concierge deposit is converted to a CLOSED
+  // auction with canonical Offers by the Stripe webhook.
+  let conciergeVehicleOfferId: string | null = null;
+  {
+    let body: { reviewToken?: unknown } = {};
+    try { body = (await request.json()) as { reviewToken?: unknown }; } catch { /* no body — standard path */ }
+    const reviewToken = typeof body?.reviewToken === "string" ? body.reviewToken.trim() : "";
+    if (reviewToken) {
+      const review = await prisma.buyerOfferReview.findUnique({
+        where: { reviewToken },
+        select: { buyerEmail: true, expiresAt: true, vehicleOfferId: true },
+      });
+      if (!review) return errorResponse("REVIEW_NOT_FOUND", "Offer review link not found", 404);
+      if (review.expiresAt && review.expiresAt < new Date()) {
+        return errorResponse("REVIEW_EXPIRED", "This offer review link has expired", 410);
+      }
+      const buyerRow = await prisma.buyer.findUnique({
+        where: { id: buyer.id },
+        select: { user: { select: { email: true } } },
+      });
+      const buyerEmail = buyerRow?.user?.email?.trim().toLowerCase() ?? "";
+      if (!buyerEmail || buyerEmail !== review.buyerEmail.trim().toLowerCase()) {
+        // The signed-in account must be the buyer the offers were sent to.
+        return errorResponse("REVIEW_FORBIDDEN", "This offer was sent to a different account. Sign in with the email the offers were sent to.", 403);
+      }
+      conciergeVehicleOfferId = review.vehicleOfferId;
+    }
   }
 
-  // Auction activation precondition: the buyer must have at least one vehicle on
-  // their shortlist — there must be something for dealers to compete over. Paying
-  // the deposit launches the auction, so this gate belongs before payment.
-  const shortlistCount = await prisma.shortlistItem.count({
-    where: { shortlist: { buyerId: buyer.id } },
-  });
-  if (shortlistCount === 0) {
-    return errorResponse(
-      "SHORTLIST_REQUIRED",
-      "Add at least one vehicle to your shortlist before activating your auction.",
-      400,
-    );
+  if (!conciergeVehicleOfferId) {
+    // D1: Verify prequal is valid before allowing deposit. Uses the platform
+    // single-source-of-truth (decision === APPROVED AND not expired) rather than
+    // an expiry-only check — a future-dated DECLINED/PENDING/MANUAL_REVIEW record
+    // must not pass this gate (defense-in-depth behind the layout gate).
+    const prequal = buyer.preQualification;
+    if (!isPrequalValid(prequal ?? null)) {
+      return errorResponse("PREQUAL_REQUIRED", "Valid prequalification required before deposit", 400);
+    }
+
+    // Auction activation precondition: the buyer must have at least one vehicle on
+    // their shortlist — there must be something for dealers to compete over. Paying
+    // the deposit launches the auction, so this gate belongs before payment.
+    const shortlistCount = await prisma.shortlistItem.count({
+      where: { shortlist: { buyerId: buyer.id } },
+    });
+    if (shortlistCount === 0) {
+      return errorResponse(
+        "SHORTLIST_REQUIRED",
+        "Add at least one vehicle to your shortlist before activating your auction.",
+        400,
+      );
+    }
   }
 
   // Check for existing active deposit
@@ -92,7 +128,13 @@ export async function POST(request: NextRequest) {
         existingPi.status === "requires_payment_method" ||
         existingPi.status === "requires_confirmation" ||
         existingPi.status === "requires_action";
-      if (isReusable && existingPi.client_secret) {
+      // Only reuse a PENDING intent whose type matches the path being requested —
+      // a lingering standard-deposit PI must not be served to a concierge request
+      // (its webhook branch, metadata, and downstream auction differ), and vice
+      // versa. A mismatched PI falls through to a fresh create below.
+      const pathType = conciergeVehicleOfferId ? "concierge_deposit" : "deposit";
+      const typeMatches = (existingPi.metadata?.type ?? "deposit") === pathType;
+      if (isReusable && existingPi.client_secret && typeMatches) {
         return successResponse({ clientSecret: existingPi.client_secret });
       }
       // PI is in a terminal state (canceled/failed) — mark deposit failed
@@ -110,13 +152,23 @@ export async function POST(request: NextRequest) {
     // share a PI, but a buyer returning the next day gets a fresh intent (the
     // previous day's PI may already be canceled by Stripe's automatic timeout).
     const dayKey = new Date().toISOString().slice(0, 10);
+    // Concierge deposits carry type "concierge_deposit" + the source vehicleOfferId
+    // so the webhook converts them to a CLOSED auction with canonical offers,
+    // rather than launching a live reverse auction. Distinct idempotency bucket so
+    // a concierge intent never collides with a standard one for the same buyer.
+    const metadata: Record<string, string> = conciergeVehicleOfferId
+      ? { buyerId: buyer.id, type: "concierge_deposit", vehicleOfferId: conciergeVehicleOfferId }
+      : { buyerId: buyer.id, type: "deposit" };
+    const idempotencyKey = conciergeVehicleOfferId
+      ? `concierge-deposit-buyer-${buyer.id}-${conciergeVehicleOfferId}-${dayKey}`
+      : `deposit-buyer-${buyer.id}-${dayKey}`;
     const paymentIntent = await getStripe().paymentIntents.create(
       {
         amount: DEPOSIT_AMOUNT_CENTS, // $99 hardcoded
         currency: "usd",
-        metadata: { buyerId: buyer.id, type: "deposit" },
+        metadata,
       },
-      { idempotencyKey: `deposit-buyer-${buyer.id}-${dayKey}` },
+      { idempotencyKey },
     );
 
     // upsert protects against the race where a concurrent retry already
