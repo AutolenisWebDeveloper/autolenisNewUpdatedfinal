@@ -260,7 +260,10 @@ export async function POST(request: NextRequest) {
           // + offer conversion) runs in ONE transaction, so a PAID concierge
           // deposit ALWAYS has its auction: the deposit-activation reconciler can
           // never see a PAID+no-auction concierge deposit and mis-activate it.
-          const vehicleOfferId = pi.metadata?.vehicleOfferId;
+          // The reviewToken binds this deposit to the SPECIFIC curated review the
+          // buyer acted on — conversion uses that review's items (not every
+          // submission on the VehicleOffer).
+          const reviewToken = pi.metadata?.reviewToken;
 
           // Resolve the Outside Dealer placeholder OUTSIDE the transaction — that
           // helper runs its own transaction and must not nest.
@@ -287,12 +290,12 @@ export async function POST(request: NextRequest) {
             });
             if (!deposit) return { deposit: null, auctionId: null, offerCount: 0, reused: false };
 
-            if (!vehicleOfferId) {
-              // Should never happen — create-intent always stamps vehicleOfferId
-              // on a concierge deposit PI. Record PAID (already done) but do not
-              // fabricate an auction with no source offer.
+            if (!reviewToken) {
+              // Should never happen — create-intent always stamps reviewToken on
+              // a concierge deposit PI. Record PAID (already done) but do not
+              // fabricate an auction with no source review.
               logger.error(
-                `[stripe/webhook] concierge_deposit ${deposit.id} missing pi.metadata.vehicleOfferId — deposit marked PAID, no auction created`,
+                `[stripe/webhook] concierge_deposit ${deposit.id} missing pi.metadata.reviewToken — deposit marked PAID, no auction created`,
               );
               return { deposit, auctionId: null, offerCount: 0, reused: false };
             }
@@ -300,7 +303,7 @@ export async function POST(request: NextRequest) {
             const conv = await convertConciergeOfferToClosedAuction(tx, {
               buyerId: deposit.buyerId,
               depositId: deposit.id,
-              vehicleOfferId,
+              reviewToken,
               outsideDealerId,
             });
 

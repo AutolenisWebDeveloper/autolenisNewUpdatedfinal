@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
   // the admin sent). A settled concierge deposit is converted to a CLOSED
   // auction with canonical Offers by the Stripe webhook.
   let conciergeVehicleOfferId: string | null = null;
+  let conciergeReviewToken: string | null = null;
   {
     let body: { reviewToken?: unknown } = {};
     try { body = (await request.json()) as { reviewToken?: unknown }; } catch { /* no body — standard path */ }
@@ -50,10 +51,11 @@ export async function POST(request: NextRequest) {
         return errorResponse("REVIEW_FORBIDDEN", "This offer was sent to a different account. Sign in with the email the offers were sent to.", 403);
       }
       conciergeVehicleOfferId = review.vehicleOfferId;
+      conciergeReviewToken = reviewToken;
     }
   }
 
-  if (!conciergeVehicleOfferId) {
+  if (!conciergeReviewToken) {
     // D1: Verify prequal is valid before allowing deposit. Uses the platform
     // single-source-of-truth (decision === APPROVED AND not expired) rather than
     // an expiry-only check — a future-dated DECLINED/PENDING/MANUAL_REVIEW record
@@ -131,10 +133,16 @@ export async function POST(request: NextRequest) {
       // Only reuse a PENDING intent whose type matches the path being requested —
       // a lingering standard-deposit PI must not be served to a concierge request
       // (its webhook branch, metadata, and downstream auction differ), and vice
-      // versa. A mismatched PI falls through to a fresh create below.
-      const pathType = conciergeVehicleOfferId ? "concierge_deposit" : "deposit";
+      // versa. For the concierge path we additionally require the PI to be bound
+      // to the SAME review: the buyer↔offer binding is strict, and reusing a PI
+      // stamped with a different reviewToken would make the webhook convert the
+      // wrong review on payment. A mismatched PI falls through to a fresh create
+      // below (whose idempotency key is scoped by reviewToken).
+      const pathType = conciergeReviewToken ? "concierge_deposit" : "deposit";
       const typeMatches = (existingPi.metadata?.type ?? "deposit") === pathType;
-      if (isReusable && existingPi.client_secret && typeMatches) {
+      const reviewMatches =
+        !conciergeReviewToken || existingPi.metadata?.reviewToken === conciergeReviewToken;
+      if (isReusable && existingPi.client_secret && typeMatches && reviewMatches) {
         return successResponse({ clientSecret: existingPi.client_secret });
       }
       // PI is in a terminal state (canceled/failed) — mark deposit failed
@@ -156,11 +164,18 @@ export async function POST(request: NextRequest) {
     // so the webhook converts them to a CLOSED auction with canonical offers,
     // rather than launching a live reverse auction. Distinct idempotency bucket so
     // a concierge intent never collides with a standard one for the same buyer.
-    const metadata: Record<string, string> = conciergeVehicleOfferId
-      ? { buyerId: buyer.id, type: "concierge_deposit", vehicleOfferId: conciergeVehicleOfferId }
+    const metadata: Record<string, string> = conciergeReviewToken
+      ? {
+          buyerId: buyer.id,
+          type: "concierge_deposit",
+          reviewToken: conciergeReviewToken,
+          ...(conciergeVehicleOfferId ? { vehicleOfferId: conciergeVehicleOfferId } : {}),
+        }
       : { buyerId: buyer.id, type: "deposit" };
-    const idempotencyKey = conciergeVehicleOfferId
-      ? `concierge-deposit-buyer-${buyer.id}-${conciergeVehicleOfferId}-${dayKey}`
+    // Scope the concierge idempotency bucket by the specific review so two
+    // different reviews for the same buyer never collapse onto one PI/auction.
+    const idempotencyKey = conciergeReviewToken
+      ? `concierge-deposit-buyer-${buyer.id}-${conciergeReviewToken}-${dayKey}`
       : `deposit-buyer-${buyer.id}-${dayKey}`;
     const paymentIntent = await getStripe().paymentIntents.create(
       {
