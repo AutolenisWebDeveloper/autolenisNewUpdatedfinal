@@ -78,6 +78,8 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "amips-generate": { intervalMinutes: 8 * HOUR }, // 06,14,22 → 8h max gap
   // ── daily ──
   "apollo-ledger-rollover": { intervalMinutes: DAY },
+  "dealer-contact-backfill": { intervalMinutes: DAY }, // B′ — off-peak; no-op until Apollo is enabled
+
   "prequal-ibv-reminders": { intervalMinutes: DAY },
   "prequal-stale-cleanup": { intervalMinutes: DAY },
   "prequal-sla-escalation": { intervalMinutes: DAY },

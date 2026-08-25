@@ -13,6 +13,10 @@
       "schedule": "10 0 * * *"
     },
     {
+      "path": "/api/cron/dealer-contact-backfill",
+      "schedule": "45 8 * * *"
+    },
+    {
       "path": "/api/cron/intake-reconcile",
       "schedule": "*/5 * * * *"
     },
