@@ -125,6 +125,24 @@ test("an undeliverable address is blocked BEFORE any outreach log is created", a
   assert.equal(verifySpy.mock.callCount(), 1, "the deliverability check must run");
 });
 
+test("an unconfigured email channel returns reason 'not_configured' (never a genuine send error)", async () => {
+  // A missing required env var must classify the SAME as a missing/placeholder
+  // RESEND_API_KEY: `not_configured` (a channel-config gap), so post-intake-outreach
+  // DEFERS the required outreach stage rather than counting it a genuine send error
+  // that dead-letters a recoverable intake.
+  delete process.env.DEALER_OUTREACH_FROM_EMAIL;
+  const sendDealerEmail = await loadSend();
+
+  const result = await sendDealerEmail({ dealerProspectId: "p1" });
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "not_configured");
+  assert.match(result.error ?? "", /not configured/i);
+  // Blocked at the very top — no prospect load, no deliverability check, no log row.
+  assert.equal(createSpy.mock.callCount(), 0, "no outreach log for an unconfigured channel");
+  assert.equal(verifySpy.mock.callCount(), 0, "config gate short-circuits before deliverability");
+});
+
 test("a deliverable address passes the gate and proceeds to dispatch", async () => {
   deliverability = { deliverable: true, reason: "mx_ok" };
   const sendDealerEmail = await loadSend();

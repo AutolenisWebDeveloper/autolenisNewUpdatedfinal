@@ -194,8 +194,16 @@ export async function sendDealerEmail(
     logger.warn(
       `[phase-4b2] Send blocked — missing required email env vars: ${missingEnv.join(", ")}`,
     )
+    // Truthful classification: an unconfigured sending domain is NOT an execution
+    // error, it is the same "channel not configured" state as a missing/placeholder
+    // RESEND_API_KEY (getResend() → null below). Both must surface `not_configured`
+    // so post-intake-outreach DEFERS the required outreach stage (retry once the
+    // owner wires the channel) instead of counting a config gap as a genuine send
+    // failure — which would burn the bounded retry budget and DEAD-LETTER a fully
+    // recoverable intake (intakeFailedAt) as though the code were broken.
     return {
       success: false,
+      reason: "not_configured",
       error: `Email domain not configured — set in Vercel before sending: ${missingEnv.join(", ")}`,
     }
   }

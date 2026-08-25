@@ -13,6 +13,25 @@ export const MONITORING_RETENTION_DAYS = 30;
 const PURGE_HOUR_UTC = 3;
 const HEALTH_CHECK_INTERVAL_MINUTES = 5;
 
+// Dealer-sourcing-spine SLA: how long a completed opportunity that discovered
+// dealers, or a contactable prospect (has a verified email), may sit with NO
+// dealer contacted before it is a breach. 24h gives the intake spine (discovery →
+// enrichment → outreach, all rate-limited/spaced) ample time to run; anything
+// still uncontacted past it is a real gap in the request→dealer pipeline.
+export const SOURCING_SLA_HOURS = 24;
+// Prospect statuses that mean "this dealership has been reached" (any outreach
+// touch or beyond). A prospect NOT in this set with an email is contactable-but-
+// -uncontacted.
+const CONTACTED_PROSPECT_STATUSES = ["CONTACTED", "REPLIED", "ONBOARDED"] as const;
+// Re-alert throttle: sla-check runs every 30m, but a structural sourcing backlog
+// persists for days, so emit each sourcing breach notification at most once/24h
+// (dedup on a stable title prefix) rather than flooding the alert channel.
+const SOURCING_ALERT_DEDUP_HOURS = 24;
+const SOURCING_ALERT_PREFIXES = {
+  opportunities: "SLA Breach: opportunities discovered but no dealer contacted",
+  prospects: "SLA Breach: prospects have an email but were never contacted",
+} as const;
+
 export interface IntegrationStatus {
   stripe: boolean;
   docusign: boolean;
@@ -183,7 +202,42 @@ export async function runHealthCheckCycle(
   return { report, deadCrons };
 }
 
-export async function checkSLAs(): Promise<{ breached: number; warnings: number }> {
+export interface SLAResult {
+  breached: number;
+  warnings: number;
+  /** Completed opportunities that discovered dealers but contacted none, past SLA. */
+  opportunitiesUncontacted: number;
+  /** Contactable prospects (verified email) never contacted, past SLA. */
+  prospectsUncontacted: number;
+}
+
+/**
+ * Emit a sourcing-spine SLA breach notification through the existing SYSTEM_ALERT
+ * channel, but at most once per SOURCING_ALERT_DEDUP_HOURS — a structural backlog
+ * persists for days and sla-check fires every 30m, so an undeduped alert would
+ * flood the channel. Best-effort: a notification write never fails the SLA check.
+ */
+async function emitSourcingAlertOnce(
+  titlePrefix: string,
+  count: number,
+  body: string,
+): Promise<void> {
+  try {
+    const since = new Date(Date.now() - SOURCING_ALERT_DEDUP_HOURS * 3600000);
+    const recent = await prisma.notification.findFirst({
+      where: { type: "SYSTEM_ALERT", title: { startsWith: titlePrefix }, createdAt: { gte: since } },
+      select: { id: true },
+    });
+    if (recent) return;
+    await prisma.notification.create({
+      data: { title: `${titlePrefix} (${count})`, body, type: "SYSTEM_ALERT" },
+    });
+  } catch {
+    // Alerting is best-effort — never let it fail the SLA cron.
+  }
+}
+
+export async function checkSLAs(): Promise<SLAResult> {
   let breached = 0, warnings = 0;
 
   // Auctions closing in < 2 hours with 0 offers
@@ -214,5 +268,52 @@ export async function checkSLAs(): Promise<{ breached: number; warnings: number 
     }).catch(() => {});
   }
 
-  return { breached, warnings };
+  // Dealer-sourcing-spine invariants — surface a stalled request→dealer pipeline
+  // through the SAME SYSTEM_ALERT channel. These are the health signals for the
+  // spine repair: an opportunity that discovered dealers but reached none, and a
+  // prospect that has a verified email yet was never contacted, both past SLA.
+  const sourcingCutoff = new Date(Date.now() - SOURCING_SLA_HOURS * 3600000);
+
+  // (a) Completed opportunities that discovered ≥1 dealer prospect but contacted
+  //     NONE of them, older than the SLA. A pure zero-supply opportunity (no
+  //     prospects discovered) is intentionally NOT a breach here.
+  const opportunitiesUncontacted = await prisma.buyerOpportunity.count({
+    where: {
+      completed: true,
+      createdAt: { lt: sourcingCutoff },
+      dealerProspects: { some: {} },
+      NOT: { dealerProspects: { some: { status: { in: [...CONTACTED_PROSPECT_STATUSES] } } } },
+    },
+  });
+  if (opportunitiesUncontacted > 0) {
+    breached += opportunitiesUncontacted;
+    await emitSourcingAlertOnce(
+      SOURCING_ALERT_PREFIXES.opportunities,
+      opportunitiesUncontacted,
+      `${opportunitiesUncontacted} completed buyer opportunit(ies) discovered dealers but contacted none past ${SOURCING_SLA_HOURS}h — the request→dealer outreach spine is not reaching dealers. Check email-channel config and the intake-reconcile eligibility window.`,
+    );
+  }
+
+  // (b) Contactable prospects — a verified, deliverable email, not DEAD/ONBOARDED,
+  //     never contacted — that have sat past SLA. These are ready to email but the
+  //     outreach stage never reached them.
+  const prospectsUncontacted = await prisma.dealerProspect.count({
+    where: {
+      email: { not: null },
+      emailVerificationStatus: "VERIFIED",
+      status: { notIn: ["DEAD", "ONBOARDED", ...CONTACTED_PROSPECT_STATUSES] },
+      contactedAt: null,
+      createdAt: { lt: sourcingCutoff },
+    },
+  });
+  if (prospectsUncontacted > 0) {
+    breached += prospectsUncontacted;
+    await emitSourcingAlertOnce(
+      SOURCING_ALERT_PREFIXES.prospects,
+      prospectsUncontacted,
+      `${prospectsUncontacted} dealer prospect(s) have a verified email but were never contacted past ${SOURCING_SLA_HOURS}h — dealer outreach is not dispatching. Verify the email channel is configured/enabled.`,
+    );
+  }
+
+  return { breached, warnings, opportunitiesUncontacted, prospectsUncontacted };
 }
