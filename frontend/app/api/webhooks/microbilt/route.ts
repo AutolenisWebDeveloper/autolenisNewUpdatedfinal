@@ -7,6 +7,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { claimProviderEvent } from "@/lib/services/webhooks/provider-event-dedup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +35,20 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as { buyerId?: string; status?: string; decision?: string };
 
     if (body.buyerId && body.status === "completed") {
+      // Replay dedup: the callback carries no provider event id, so a retried
+      // delivery would otherwise create a DUPLICATE buyer notification. Key on the
+      // (buyer, status, decision) tuple — a repeat of the same completed decision
+      // is suppressed; a genuinely different decision keys separately.
+      const decisionKey = (body.decision ?? "").toUpperCase() || "UNKNOWN";
+      const claim = await claimProviderEvent({
+        provider: "microbilt",
+        eventId: `${body.buyerId}:${body.status}:${decisionKey}`,
+        eventType: "ibv.completed",
+        payload: body,
+      });
+      if (claim.status === "duplicate") return NextResponse.json({ received: true, duplicate: true });
+      if (claim.status === "in_progress") return new NextResponse("Concurrent delivery in progress", { status: 503 });
+
       const prequal = await prisma.preQualification.findUnique({ where: { buyerId: body.buyerId } });
       if (prequal) {
         // Send an HONEST notification based on the callback's decision. The bug
@@ -57,6 +72,8 @@ export async function POST(request: NextRequest) {
           },
         }).catch(() => {});
       }
+      // Mark the callback processed so a retry is deduped (not re-notified).
+      await claim.settle();
     }
 
     return NextResponse.json({ received: true });

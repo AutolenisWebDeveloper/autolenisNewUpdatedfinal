@@ -31,6 +31,9 @@ function alertRecentlyExists(where: Where): boolean {
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
+      // Provider-evidence invariant (checkSLAs also calls checkDepositProviderEvidence):
+      // no PAID-without-evidence deposits in this test → clean no-op, gaps=0.
+      $queryRaw: async () => [] as unknown[],
       auction: { findMany: async () => [] }, // no urgent auctions
       deal: { count: async () => 0 }, // no stuck deals
       buyerOpportunity: {

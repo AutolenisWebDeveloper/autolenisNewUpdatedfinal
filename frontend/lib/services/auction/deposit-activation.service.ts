@@ -60,6 +60,39 @@ interface LoadedState {
   auctionId: string | null;
 }
 
+// Raise an operator-facing exception when a PAID $99 deposit converges to a
+// terminal no-dealer close — Section-9 invariant "PAID deposit with no downstream
+// progression." This is the ONE human-required outcome of this reconciler: the
+// buyer paid and no dealers competed, which the automation cannot resolve and
+// policy forbids resolving automatically (the $99 is retained; a refund is
+// request-only and manually reviewed — never auto-issued here).
+//
+// It reuses the existing SYSTEM_ALERT Notification rail (the same channel dead-cron
+// / SLA checks use, surfaced on /admin/operations + /admin/queues) rather than a
+// new exception store. Ops-only: NO buyerId, so the buyer is never notified that
+// their auction found no dealers. Idempotent per deposit and best-effort — it must
+// never throw into or roll back the reconciler's terminal close.
+async function raiseStrandedDepositException(depositId: string, auctionId: string): Promise<void> {
+  const title = `Stranded $99 deposit — no dealers: ${depositId}`;
+  try {
+    const existing = await prisma.notification.findFirst({
+      where: { title, type: "SYSTEM_ALERT" },
+      select: { id: true },
+    });
+    if (existing) return;
+    await prisma.notification.create({
+      data: {
+        title,
+        body: `A PAID $99 Auction Access Deposit converged to a no-dealer close (deposit ${depositId}, auction ${auctionId}). No dealers competed; the automation cannot recover this. The $99 is retained per policy — do NOT auto-refund. Review for manual dealer outreach or a policy-compliant refund decision via /admin/operations.`,
+        type: "SYSTEM_ALERT",
+        actionUrl: "/admin/operations",
+      },
+    });
+  } catch (err) {
+    logger.error(`[deposit-activation] stranded-deposit exception raise failed for ${depositId} (best-effort):`, err);
+  }
+}
+
 async function loadState(depositId: string): Promise<LoadedState | null> {
   const deposit = await prisma.deposit.findUnique({
     where: { id: depositId },
@@ -159,6 +192,9 @@ export async function reconcileDepositActivation(depositId: string): Promise<Act
         });
         if (closed.count === 1) {
           logger.warn(`[deposit-activation] no dealers after grace — closed auction ${loaded.auctionId} (deposit ${depositId} retained, no refund)`);
+          // Surface the stranded paid deposit as an operational exception — this is
+          // the terminal, human-required outcome the reconciler cannot auto-resolve.
+          await raiseStrandedDepositException(depositId, loaded.auctionId);
           return 'closed_no_dealers';
         }
         return 'skip';

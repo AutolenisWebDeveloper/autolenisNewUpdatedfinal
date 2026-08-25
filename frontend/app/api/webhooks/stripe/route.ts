@@ -10,7 +10,7 @@ import {
   sendConciergeFeeConfirmationEmail,
   sendRefundConfirmationEmail,
 } from "@/lib/services/email/resend.service";
-import { walkCommissionTree } from "@/lib/services/affiliate/commission.service";
+import { processFeeCommission } from "@/lib/services/affiliate/commission.service";
 import { launchAuction } from "@/lib/services/auction/auction.service";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
 import { getOrCreateOutsideDealerId } from "@/lib/services/offer/outside-dealer";
@@ -445,30 +445,42 @@ export async function POST(request: NextRequest) {
             logger.error("[stripe/webhook] service fee email failed:", err);
           }
 
-          // Trigger affiliate commissions — idempotent (commission service checks qualifyingEventId before creating)
-          // Safe: a commission failure must never roll back the deal status update above.
-          try {
-            if (metaDealId && metaBuyerId) {
-              const buyer = await prisma.buyer.findUnique({
-                where: { id: metaBuyerId },
-                select: { userId: true },
+          // Trigger affiliate commissions — idempotent (commission service checks
+          // qualifyingEventId before creating). A commission failure must never roll
+          // back the deal status update above, but it must ALSO never be silently
+          // lost: this branch marks the Stripe event processed at the end, so Stripe
+          // will not retry. On failure we hand the walk to the durable dead-letter
+          // queue keyed on the fee PaymentIntent; the DLQ drainer replays
+          // processFeeCommission (idempotent) until it succeeds or is surfaced for
+          // review — closing the one path where a paid-fee commission could vanish.
+          if (metaDealId && metaBuyerId) {
+            // F-004 — base commissions on the actual fee paid (this PI), not a
+            // hardcoded constant. amount_received is the captured amount in cents;
+            // fall back to amount if unset.
+            const feeBasisCents = pi.amount_received || pi.amount || 0;
+            try {
+              await processFeeCommission({
+                dealId: metaDealId,
+                buyerId: metaBuyerId,
+                qualifyingEventId: pi.id,
+                feeBasisCents,
               });
-              if (buyer) {
-                const referral = await prisma.affiliateReferral.findFirst({
-                  where: { referredUserId: buyer.userId },
-                  select: { affiliateId: true },
-                });
-                if (referral) {
-                  // F-004 — base commissions on the actual fee paid (this PI),
-                  // not a hardcoded constant. amount_received is the captured
-                  // amount in cents; fall back to amount if unset.
-                  const feeBasisCents = pi.amount_received || pi.amount || 0;
-                  await walkCommissionTree(metaDealId, referral.affiliateId, pi.id, feeBasisCents);
-                }
+            } catch (commissionErr) {
+              logger.error("[stripe/webhook] commission walk failed — dead-lettering for durable recovery:", commissionErr);
+              try {
+                const { moveJobToDeadLetter } = await import("@/lib/jobs/idempotency");
+                const { getServiceSupabase } = await import("@/lib/supabase-service");
+                await moveJobToDeadLetter(
+                  getServiceSupabase(),
+                  `commission:${metaDealId}:${pi.id}`,
+                  "autolenis/affiliate.commission_walk",
+                  { dealId: metaDealId, buyerId: metaBuyerId, qualifyingEventId: pi.id, feeBasisCents },
+                  commissionErr instanceof Error ? commissionErr.message : String(commissionErr),
+                );
+              } catch (dlqErr) {
+                logger.error("[stripe/webhook] commission dead-letter capture failed:", dlqErr);
               }
             }
-          } catch (commissionErr) {
-            logger.error("[stripe/webhook] commission walk failed (non-fatal):", commissionErr);
           }
         }
         break;
