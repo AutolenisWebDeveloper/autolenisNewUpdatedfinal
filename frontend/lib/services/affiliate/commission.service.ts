@@ -91,6 +91,38 @@ export async function walkCommissionTree(
   }
 }
 
+// Resolve the buyer's referring affiliate from a paid fee and walk the tree.
+// This is the single idempotent recovery unit for fee-driven commissions: it is
+// called inline by the Stripe fee webhook AND replayed by the DLQ drainer
+// (autolenis/affiliate.commission_walk) if the inline call fails after the fee
+// PaymentIntent was captured. Every step is safe to repeat — the buyer/referral
+// lookups are reads and walkCommissionTree dedupes on qualifyingEventId — so a
+// replay after a partial success never double-pays and a replay for a
+// non-referred buyer is a clean no-op.
+export async function processFeeCommission(params: {
+  dealId: string;
+  buyerId: string;
+  qualifyingEventId: string;
+  feeBasisCents?: number;
+}): Promise<void> {
+  const { dealId, buyerId, qualifyingEventId, feeBasisCents } = params;
+  if (!dealId || !buyerId || !qualifyingEventId) return;
+
+  const buyer = await prisma.buyer.findUnique({
+    where: { id: buyerId },
+    select: { userId: true },
+  });
+  if (!buyer) return;
+
+  const referral = await prisma.affiliateReferral.findFirst({
+    where: { referredUserId: buyer.userId },
+    select: { affiliateId: true },
+  });
+  if (!referral) return; // buyer was not referred — nothing to pay
+
+  await walkCommissionTree(dealId, referral.affiliateId, qualifyingEventId, feeBasisCents);
+}
+
 // Commission summary for an affiliate
 export async function getCommissionSummary(affiliateId: string) {
   const [paid, approved, pendingReview] = await Promise.all([

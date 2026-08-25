@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { ENABLE_AUTO_PUBLISH } from "@/lib/social/config";
+import { claimProviderEvent } from "@/lib/services/webhooks/provider-event-dedup";
 import type { HiggsfieldResponse } from "@/lib/social/providers/higgsfield.types";
 
 const MAX_VIDEO_RETRIES = 3;
@@ -61,6 +62,25 @@ export async function POST(request: NextRequest) {
 
   const status = body.status;
 
+  // Replay dedup for the state-changing statuses. Higgsfield retries deliveries,
+  // and the `failed` branch increments retryCount unconditionally — a duplicate
+  // `failed` callback would double-count it and prematurely exhaust MAX_VIDEO_RETRIES.
+  // Key on (request_id, status) so a legitimate queued→completed transition is a
+  // distinct event but a redelivery of the same status is suppressed. Non-terminal
+  // statuses (queued/in_progress) change no state and are not claimed.
+  let settle: (() => Promise<void>) | null = null;
+  if (status === "completed" || status === "nsfw" || status === "failed") {
+    const claim = await claimProviderEvent({
+      provider: "higgsfield",
+      eventId: `${requestId}:${status}`,
+      eventType: status,
+      payload: body,
+    });
+    if (claim.status === "duplicate") return NextResponse.json({ received: true, duplicate: true });
+    if (claim.status === "in_progress") return new NextResponse("Concurrent delivery in progress", { status: 503 });
+    settle = claim.settle;
+  }
+
   // ── completed ──────────────────────────────────────────────────────────
   if (status === "completed") {
     const videoUrl = body.video?.url;
@@ -99,6 +119,7 @@ export async function POST(request: NextRequest) {
       }
       logger.info(`[higgsfield-webhook] video ${video.id} ready (request_id ${requestId})`);
     }
+    if (settle) await settle();
     return NextResponse.json({ received: true, status: "ready" });
   }
 
@@ -126,6 +147,7 @@ export async function POST(request: NextRequest) {
       });
     }
     logger.info(`[higgsfield-webhook] NSFW flagged: ${requestId}`);
+    if (settle) await settle();
     return NextResponse.json({ received: true, status: "nsfw" });
   }
 
@@ -158,6 +180,7 @@ export async function POST(request: NextRequest) {
         `[higgsfield-webhook] video ${video.id} failed (request_id ${requestId}), retryable=${retryable}`,
       );
     }
+    if (settle) await settle();
     return NextResponse.json({ received: true, status: retryable ? "requeued" : "failed" });
   }
 

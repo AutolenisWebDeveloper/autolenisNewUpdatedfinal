@@ -4,7 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { INVENTORY_HEALTH_P1_THRESHOLD } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
 import { logger } from "@/lib/logger";
-import { detectDeadCrons, overdueCrons, reportOverdueCrons } from "./dead-cron.service";
+import {
+  detectDeadCrons,
+  overdueCrons,
+  reportOverdueCrons,
+  detectFailedCrons,
+  reportFailedCrons,
+  FAILED_CRON_STREAK_THRESHOLD,
+} from "./dead-cron.service";
 import type { CronLiveness } from "./cron-schedule";
 
 // Monitoring-log retention. health-check ticks every 5 minutes, so the purge is
@@ -172,6 +179,24 @@ export async function runHealthCheckCycle(
     logger.warn("[health] dead-cron detection failed (best-effort):", e);
   }
 
+  // Failing-cron detection: a cron that FIRES but throws (a reconciler returning
+  // HTTP 500 every tick) is invisible to dead-cron detection. Surface a persistent
+  // FAILED streak as a P1 alert so the reconciler's only human-escalation channel
+  // actually reaches an operator. Best-effort and independently guarded.
+  try {
+    const failing = await detectFailedCrons(now);
+    for (const c of failing) {
+      if (c.consecutiveFailures >= FAILED_CRON_STREAK_THRESHOLD) {
+        report.alerts.push(
+          `P1: cron '${c.cronName}' failing — ${c.consecutiveFailures} consecutive failed run(s)`,
+        );
+      }
+    }
+    await reportFailedCrons(failing, now);
+  } catch (e) {
+    logger.warn("[health] failing-cron detection failed (best-effort):", e);
+  }
+
   await persistHealthReport(report);
 
   try {
@@ -183,7 +208,62 @@ export async function runHealthCheckCycle(
   return { report, deadCrons };
 }
 
-export async function checkSLAs(): Promise<{ breached: number; warnings: number }> {
+// Business-invariant (Program 1): a PAID deposit linked to a real Stripe
+// PaymentIntent must have provider-event evidence in `payment_provider_events`.
+// The Stripe webhook records that evidence for every payment it processes, so a
+// PAID+pi_ deposit with NO matching provider event means the deposit was flipped
+// PAID outside the webhook (admin mark-paid / override / launch-auction) OR a real
+// Stripe event was never delivered/recorded — a provider-vs-internal-state
+// inconsistency an operator should reconcile.
+//
+// It is deliberately TRUTHFUL and non-mutating: it raises a per-deposit SYSTEM_ALERT
+// for reconciliation review and NEVER fabricates a provider event from a deposit
+// row (a PaymentProviderEvent represents Stripe evidence, not an inference).
+// Deposits with NO PaymentIntent id are admin/manual by construction and are
+// excluded — they are not Stripe payments and carry no provider evidence to miss.
+export async function checkDepositProviderEvidence(): Promise<{ gaps: number }> {
+  let rows: Array<{ id: string; pi: string }> = [];
+  try {
+    rows = await prisma.$queryRaw<Array<{ id: string; pi: string }>>`
+      SELECT d.id AS id, d.stripe_payment_intent_id AS pi
+      FROM deposits d
+      WHERE d.status = 'PAID'
+        AND d.stripe_payment_intent_id LIKE 'pi_%'
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_provider_events e
+          WHERE e.payload -> 'data' -> 'object' ->> 'id' = d.stripe_payment_intent_id
+        )
+    `;
+  } catch (e) {
+    logger.warn("[health] deposit provider-evidence check failed (best-effort):", e);
+    return { gaps: 0 };
+  }
+
+  for (const row of rows) {
+    const title = `Reconcile: PAID deposit lacks Stripe provider evidence: ${row.id}`;
+    try {
+      const existing = await prisma.notification.findFirst({
+        where: { title, type: "SYSTEM_ALERT" },
+        select: { id: true },
+      });
+      if (existing) continue;
+      await prisma.notification.create({
+        data: {
+          title,
+          body: `Deposit ${row.id} is PAID and linked to Stripe PaymentIntent ${row.pi}, but no payment_provider_events row records that PaymentIntent. Either it was marked PAID outside the Stripe webhook, or a real Stripe event was never delivered/recorded. Reconcile against Stripe (read-only) before relying on the ledger — do NOT fabricate a provider event. Review via /admin/operations.`,
+          type: "SYSTEM_ALERT",
+          actionUrl: "/admin/operations",
+        },
+      }).catch(() => {});
+    } catch (e) {
+      logger.warn(`[health] deposit-evidence alert failed for ${row.id} (best-effort):`, e);
+    }
+  }
+
+  return { gaps: rows.length };
+}
+
+export async function checkSLAs(): Promise<{ breached: number; warnings: number; providerEvidenceGaps: number }> {
   let breached = 0, warnings = 0;
 
   // Auctions closing in < 2 hours with 0 offers
@@ -214,5 +294,15 @@ export async function checkSLAs(): Promise<{ breached: number; warnings: number 
     }).catch(() => {});
   }
 
-  return { breached, warnings };
+  // Provider-evidence reconciliation invariant (Program 1). Isolated so a raw-query
+  // hiccup can never fail the SLA cycle.
+  let providerEvidenceGaps = 0;
+  try {
+    ({ gaps: providerEvidenceGaps } = await checkDepositProviderEvidence());
+    breached += providerEvidenceGaps;
+  } catch (e) {
+    logger.warn("[health] provider-evidence invariant failed (best-effort):", e);
+  }
+
+  return { breached, warnings, providerEvidenceGaps };
 }
