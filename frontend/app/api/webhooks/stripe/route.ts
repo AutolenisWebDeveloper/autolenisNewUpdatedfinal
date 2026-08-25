@@ -13,6 +13,8 @@ import {
 import { walkCommissionTree } from "@/lib/services/affiliate/commission.service";
 import { launchAuction } from "@/lib/services/auction/auction.service";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
+import { getOrCreateOutsideDealerId } from "@/lib/services/offer/outside-dealer";
+import { convertConciergeOfferToClosedAuction } from "@/lib/services/concierge/concierge-conversion.service";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { writeServiceFeePayment } from "@/lib/services/deal/service-fee.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
@@ -246,6 +248,129 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        if (type === "concierge_deposit") {
+          // System B convergence: a settled $99 concierge deposit mints a
+          // deposit-gated CLOSED auction with canonical Offers converted from the
+          // source VehicleOffer's dealer submissions. Kept SEPARATE from the
+          // standard "deposit" branch (which launches a LIVE auction + invites
+          // dealers) — a concierge auction is created CLOSED with its offers
+          // already present, so no launch/invite happens.
+          //
+          // The whole money-cluster (event claim → deposit PAID → CLOSED auction
+          // + offer conversion) runs in ONE transaction, so a PAID concierge
+          // deposit ALWAYS has its auction: the deposit-activation reconciler can
+          // never see a PAID+no-auction concierge deposit and mis-activate it.
+          const vehicleOfferId = pi.metadata?.vehicleOfferId;
+
+          // Resolve the Outside Dealer placeholder OUTSIDE the transaction — that
+          // helper runs its own transaction and must not nest.
+          const outsideDealerId = await getOrCreateOutsideDealerId();
+
+          const outcome = await prisma.$transaction(async (tx) => {
+            const claimed = await tx.paymentProviderEvent.updateMany({
+              where: { eventId: event.id, processed: false },
+              data: { processed: true, processedAt: new Date() },
+            });
+            if (claimed.count === 0) return null; // another delivery won
+
+            // Guarded PAID flip (transition matrix): only from an allowed
+            // predecessor, so a late/out-of-order success can't resurrect a
+            // settled deposit.
+            await tx.deposit.updateMany({
+              where: { stripePaymentIntentId: pi.id, status: { in: allowedPredecessors("PAID") } },
+              data: { status: "PAID" },
+            });
+
+            const deposit = await tx.deposit.findFirst({
+              where: { stripePaymentIntentId: pi.id },
+              include: { buyer: { include: { user: { select: { email: true } } } } },
+            });
+            if (!deposit) return { deposit: null, auctionId: null, offerCount: 0, reused: false };
+
+            if (!vehicleOfferId) {
+              // Should never happen — create-intent always stamps vehicleOfferId
+              // on a concierge deposit PI. Record PAID (already done) but do not
+              // fabricate an auction with no source offer.
+              logger.error(
+                `[stripe/webhook] concierge_deposit ${deposit.id} missing pi.metadata.vehicleOfferId — deposit marked PAID, no auction created`,
+              );
+              return { deposit, auctionId: null, offerCount: 0, reused: false };
+            }
+
+            const conv = await convertConciergeOfferToClosedAuction(tx, {
+              buyerId: deposit.buyerId,
+              depositId: deposit.id,
+              vehicleOfferId,
+              outsideDealerId,
+            });
+
+            if (!conv.reused) {
+              await tx.notification.create({
+                data: {
+                  buyerId: deposit.buyerId,
+                  title: "Your offers are ready",
+                  body: "Your $99 deposit was received. Review your vehicle offers and choose the best one to start your deal.",
+                  type: "AUCTION_STARTED",
+                },
+              });
+            }
+            return { deposit, auctionId: conv.auctionId, offerCount: conv.offerIds.length, reused: conv.reused };
+          }, {
+            // Bound the lock hold like the standard deposit cluster. The
+            // conversion is a handful of local inserts, so this is generous.
+            maxWait: 2000,
+            timeout: 8000,
+          });
+
+          if (outcome === null) {
+            return NextResponse.json({ received: true, duplicate: true });
+          }
+
+          const { deposit, auctionId, reused } = outcome;
+          if (deposit && auctionId && !reused) {
+            // Post-commit, best-effort effects (money already committed).
+            const buyerEmail = deposit.buyer?.user?.email;
+            const buyerName = deposit.buyer?.firstName?.trim() || "valued customer";
+
+            if (buyerEmail) {
+              await markContentConversion({
+                email: buyerEmail,
+                conversionValueCents: deposit.amountCents,
+              });
+              try {
+                await sendDepositConfirmationEmail(buyerEmail, buyerName, deposit.id);
+              } catch (e) {
+                logger.error("[stripe/webhook] concierge deposit confirmation email failed:", e);
+              }
+              syncGhlTag(buyerEmail, "deposit-paid");
+            }
+
+            try {
+              const { emitDomainEvent } = await import("@/lib/events/emit");
+              await emitDomainEvent("deposit_paid", {
+                domainEntityId: deposit.id,
+                contact: {
+                  email: deposit.buyer?.user?.email ?? null,
+                  phone: deposit.buyer?.phone ?? null,
+                  firstName: deposit.buyer?.firstName,
+                  lastName: deposit.buyer?.lastName,
+                  source: "buyer_signup",
+                },
+                data: {
+                  deposit_id: deposit.id,
+                  buyer_id: deposit.buyerId,
+                  amount_cents: deposit.amountCents,
+                  payment_intent_id: pi.id,
+                  auction_id: auctionId,
+                  concierge: true,
+                },
+              });
+            } catch (err) {
+              logger.error("[stripe/webhook] concierge deposit_paid emit failed:", err);
+            }
+          }
+        }
+
         // "concierge_fee" is the canonical type for admin-initiated payment intents.
         // "service_fee" is the legacy type used by the buyer self-service path — kept for
         // backward compatibility with payment intents already in flight.
@@ -349,9 +474,11 @@ export async function POST(request: NextRequest) {
       case "payment_intent.payment_failed": {
         const pi = event.data.object as Stripe.PaymentIntent;
 
-        if (pi.metadata.type === "deposit") {
+        if (pi.metadata.type === "deposit" || pi.metadata.type === "concierge_deposit") {
           // Transition matrix: FAILED is reachable only from PENDING, so a late
-          // failure event can never downgrade a PAID or REFUNDED deposit.
+          // failure event can never downgrade a PAID or REFUNDED deposit. Both the
+          // standard and concierge deposit types are $99 Deposit rows keyed on the
+          // same stripePaymentIntentId, so the same guarded flip applies.
           await prisma.deposit.updateMany({
             where: { stripePaymentIntentId: pi.id, status: { in: allowedPredecessors("FAILED") } },
             data:  { status: "FAILED" },

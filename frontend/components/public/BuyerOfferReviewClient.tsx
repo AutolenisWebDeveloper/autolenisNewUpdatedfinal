@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckCircle2, Clock, ExternalLink, Loader2, MessageCircle, XCircle } from "lucide-react";
+import { Clock, ExternalLink, Loader2, MessageCircle, ShieldCheck } from "lucide-react";
 
 export type ReviewVehicle = {
   vehicleUrl: string;
@@ -44,13 +44,25 @@ export type ReviewData = {
   items: ReviewItem[];
 };
 
+// Deposit-first funnel: accepting an offer requires the buyer to sign in and pay
+// the $99 refundable Auction Access Deposit. That settled deposit converts these
+// concierge dealer offers into canonical Offers the buyer can select into a real
+// Deal (Stripe webhook → CLOSED auction). The old "respond" fake-success (which
+// only marked a review item ACCEPTED and sent an email, creating nothing on the
+// canonical spine) has been removed — this surface now routes into that flow.
+const DEPOSIT_PRICE_LABEL = "$99";
+
 export default function BuyerOfferReviewClient({ review, isExpired }: { review: ReviewData; isExpired: boolean }) {
-  const [items, setItems] = useState<ReviewItem[]>(review.items);
-  const [responding, setResponding] = useState<string | null>(null);
+  const items = review.items;
   const [showQuestion, setShowQuestion] = useState<Record<string, boolean>>({});
   const [questions, setQuestions] = useState<Record<string, string>>({});
   const [questionSent, setQuestionSent] = useState<Record<string, boolean>>({});
   const [questionSending, setQuestionSending] = useState<string | null>(null);
+
+  // Route the buyer into the authenticated deposit flow, carrying the review
+  // token so create-intent binds this deposit to these offers. Unauthenticated
+  // visitors are redirected to sign-in by the buyer route gate and returned here.
+  const depositHref = `/buyer/deposit?offer=${encodeURIComponent(review.reviewToken)}`;
 
   if (isExpired) {
     return (
@@ -69,24 +81,6 @@ export default function BuyerOfferReviewClient({ review, isExpired }: { review: 
         </div>
       </main>
     );
-  }
-
-  async function handleRespond(itemId: string, status: "ACCEPTED" | "DECLINED") {
-    setResponding(itemId);
-    try {
-      const res = await fetch(`/api/public/buyer-offer-review/${review.reviewToken}/respond`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itemId, status }),
-      });
-      if (res.ok) {
-        setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, status } : i)));
-      }
-    } catch {
-      // Silent fail — UI stays in Pending state and user can retry.
-    } finally {
-      setResponding(null);
-    }
   }
 
   async function handleSendQuestion(itemId: string) {
@@ -127,10 +121,38 @@ export default function BuyerOfferReviewClient({ review, isExpired }: { review: 
         )}
       </section>
 
-      <section className="max-w-2xl mx-auto px-4 pb-12 space-y-5">
+      {/* Deposit-first CTA — accepting an offer requires the refundable deposit. */}
+      <section className="max-w-2xl mx-auto px-4 -mt-4 mb-2">
+        <div
+          className="bg-white rounded-2xl border border-[#0B5FD1]/25 shadow-sm p-6"
+          data-testid="buyer-review-deposit-cta"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#0B5FD1]/10 flex items-center justify-center shrink-0">
+              <ShieldCheck size={20} className="text-[#0B5FD1]" />
+            </div>
+            <div className="flex-1">
+              <h2 className="font-bold text-[#111827] mb-1">Ready to accept an offer?</h2>
+              <p className="text-sm text-[#4B5563] mb-4">
+                Sign in and pay your <strong>{DEPOSIT_PRICE_LABEL} refundable Auction Access Deposit</strong> to
+                unlock these offers and choose the one you want. Your deposit locks in your deal and is refundable
+                on request. Use the email these offers were sent to: <strong>{review.buyerEmail}</strong>.
+              </p>
+              <a
+                href={depositHref}
+                data-testid="buyer-review-accept-deposit-btn"
+                className="inline-flex items-center gap-2 bg-[#0B5FD1] text-white rounded-lg px-5 py-2.5 text-sm font-semibold hover:bg-[#0944a8] transition-colors"
+              >
+                Pay {DEPOSIT_PRICE_LABEL} deposit &amp; accept an offer →
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="max-w-2xl mx-auto px-4 pb-12 space-y-5 pt-4">
         {items.map((item) => {
           const v = item.vehicle;
-          const isResponding = responding === item.id;
           return (
             <div key={item.id} className="bg-white rounded-2xl border border-[#E5E7EB] shadow-sm p-6 space-y-4" data-testid={`offer-item-${item.id}`}>
               <div className="flex items-start justify-between">
@@ -138,9 +160,7 @@ export default function BuyerOfferReviewClient({ review, isExpired }: { review: 
                   <p className="text-xs uppercase tracking-wider text-slate-400 mb-1 font-semibold">From Dealership</p>
                   <p className="font-bold text-[#111827] text-lg">{item.dealershipName}</p>
                 </div>
-                {item.status === "ACCEPTED" && <Badge className="bg-green-100 text-green-700 border-green-200">✓ Accepted</Badge>}
-                {item.status === "DECLINED" && <Badge className="bg-red-100 text-red-700 border-red-200">✗ Declined</Badge>}
-                {item.status === "PENDING" && <Badge variant="outline">Pending Review</Badge>}
+                <Badge variant="outline">Awaiting Your Deposit</Badge>
               </div>
 
               <div>
@@ -237,80 +257,57 @@ export default function BuyerOfferReviewClient({ review, isExpired }: { review: 
                 </p>
               )}
 
-              {item.status === "PENDING" ? (
-                <div>
-                  <div className="flex gap-3 pt-2">
-                    <Button
-                      className="flex-1 h-11"
-                      onClick={() => handleRespond(item.id, "ACCEPTED")}
-                      disabled={isResponding}
-                      data-testid={`accept-offer-${item.id}`}
-                    >
-                      {isResponding ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                      Accept This Offer
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="flex-1 h-11"
-                      onClick={() => handleRespond(item.id, "DECLINED")}
-                      disabled={isResponding}
-                      data-testid={`decline-offer-${item.id}`}
-                    >
-                      <XCircle size={16} /> Decline
-                    </Button>
-                  </div>
+              <div className="border-t border-slate-100 pt-4 space-y-2">
+                <a
+                  href={depositHref}
+                  data-testid={`select-offer-${item.id}`}
+                  className="flex items-center justify-center gap-2 w-full rounded-xl border border-[#0B5FD1] text-[#0B5FD1] font-semibold text-sm py-2.5 hover:bg-[#0B5FD1]/5 transition-colors"
+                >
+                  <ShieldCheck size={15} /> Pay {DEPOSIT_PRICE_LABEL} deposit to accept this offer
+                </a>
 
-                  {questionSent[item.id] ? (
-                    <p className="text-xs text-green-600 mt-2 text-center">✓ Your question was sent — we&rsquo;ll get back to you shortly.</p>
-                  ) : !showQuestion[item.id] ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowQuestion((prev) => ({ ...prev, [item.id]: true }))}
-                      className="w-full text-xs text-slate-400 hover:text-[#0B5FD1] mt-2 py-1 hover:underline inline-flex items-center justify-center gap-1"
-                      data-testid={`ask-question-${item.id}`}
-                    >
-                      <MessageCircle size={11} /> Have a question about this offer?
-                    </button>
-                  ) : (
-                    <div className="mt-3 space-y-2">
-                      <Textarea
-                        value={questions[item.id] ?? ""}
-                        onChange={(e) => setQuestions((prev) => ({ ...prev, [item.id]: e.target.value.slice(0, 500) }))}
-                        placeholder="Ask about availability, delivery, trade-in value, financing terms, etc."
-                        rows={2}
-                        className="text-sm"
-                        data-testid={`question-input-${item.id}`}
-                      />
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={() => handleSendQuestion(item.id)}
-                          variant="outline"
-                          className="flex-1"
-                          disabled={!questions[item.id]?.trim() || questionSending === item.id}
-                          data-testid={`send-question-${item.id}`}
-                        >
-                          {questionSending === item.id ? <Loader2 size={14} className="animate-spin" /> : "Send Question"}
-                        </Button>
-                        <button
-                          type="button"
-                          onClick={() => setShowQuestion((prev) => ({ ...prev, [item.id]: false }))}
-                          className="text-xs text-slate-400 px-3"
-                        >
-                          Cancel
-                        </button>
-                      </div>
+                {questionSent[item.id] ? (
+                  <p className="text-xs text-green-600 mt-2 text-center">✓ Your question was sent — we&rsquo;ll get back to you shortly.</p>
+                ) : !showQuestion[item.id] ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowQuestion((prev) => ({ ...prev, [item.id]: true }))}
+                    className="w-full text-xs text-slate-400 hover:text-[#0B5FD1] mt-1 py-1 hover:underline inline-flex items-center justify-center gap-1"
+                    data-testid={`ask-question-${item.id}`}
+                  >
+                    <MessageCircle size={11} /> Have a question about this offer?
+                  </button>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    <Textarea
+                      value={questions[item.id] ?? ""}
+                      onChange={(e) => setQuestions((prev) => ({ ...prev, [item.id]: e.target.value.slice(0, 500) }))}
+                      placeholder="Ask about availability, delivery, trade-in value, financing terms, etc."
+                      rows={2}
+                      className="text-sm"
+                      data-testid={`question-input-${item.id}`}
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={() => handleSendQuestion(item.id)}
+                        variant="outline"
+                        className="flex-1"
+                        disabled={!questions[item.id]?.trim() || questionSending === item.id}
+                        data-testid={`send-question-${item.id}`}
+                      >
+                        {questionSending === item.id ? <Loader2 size={14} className="animate-spin" /> : "Send Question"}
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => setShowQuestion((prev) => ({ ...prev, [item.id]: false }))}
+                        className="text-xs text-slate-400 px-3"
+                      >
+                        Cancel
+                      </button>
                     </div>
-                  )}
-                </div>
-              ) : (
-                <div className={`rounded-xl p-4 text-center ${item.status === "ACCEPTED" ? "bg-green-50 border border-green-200" : "bg-slate-50 border border-slate-200"}`}>
-                  <p className={`text-sm font-medium ${item.status === "ACCEPTED" ? "text-green-700" : "text-slate-600"}`}>
-                    {item.status === "ACCEPTED"
-                      ? "✓ You accepted this offer. Our team will follow up to complete the deal."
-                      : "You declined this offer."}
-                  </p>
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}
@@ -322,9 +319,10 @@ export default function BuyerOfferReviewClient({ review, isExpired }: { review: 
           className="bg-[#0B5FD1]/5 border border-[#0B5FD1]/20 rounded-2xl p-6 text-center"
           data-testid="buyer-review-account-prompt"
         >
-          <h3 className="font-bold text-[#111827] mb-2">Track This Offer From Your Dashboard</h3>
+          <h3 className="font-bold text-[#111827] mb-2">New to AutoLenis?</h3>
           <p className="text-sm text-[#4B5563] mb-4">
-            Create a free AutoLenis account to track this offer, view updates, and manage your vehicle search — all in one place.
+            Create a free account (or sign in) with <strong>{review.buyerEmail}</strong> to pay your refundable
+            deposit and accept an offer.
           </p>
           <div className="flex gap-3 justify-center flex-wrap">
             <a
@@ -342,7 +340,7 @@ export default function BuyerOfferReviewClient({ review, isExpired }: { review: 
               Sign In
             </a>
           </div>
-          <p className="text-xs text-slate-400 mt-3">Free to join. No credit card required.</p>
+          <p className="text-xs text-slate-400 mt-3">Free to join. Deposit is refundable on request.</p>
         </div>
       </section>
 

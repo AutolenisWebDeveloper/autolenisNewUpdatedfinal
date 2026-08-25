@@ -11,37 +11,13 @@ import { writeDealerAudit } from "@/lib/services/audit/dealer-audit.service";
 import { maybeExtendForAntiSnipe } from "@/lib/services/auction/anti-snipe.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { sendFirstOfferReceivedEmail } from "@/lib/services/email/buyer-notifications.service";
+// OTD component arithmetic lives in a dependency-free module so the concierge
+// conversion path validates prices with the exact same assertion. Re-exported
+// here to keep offer.service's public surface unchanged for existing importers.
+import { assertOtdComponentsMatch } from "./otd";
+export { assertOtdComponentsMatch };
 
 const APR_SUSPICIOUS_THRESHOLD = 29.0;
-// Allow up to 1 cent rounding tolerance when summing OTD components
-const OTD_SUM_TOLERANCE_CENTS = 1;
-
-function assertOtdComponentsMatch(input: {
-  otdPriceCents: number;
-  vehiclePriceCents: number;
-  taxCents: number;
-  feesCents: number;
-  junkFeeItems?: Array<{ name: string; amount: number }>;
-}) {
-  // Reject negative junk-fee line items. Without this a dealer can inflate
-  // vehiclePriceCents while holding OTD constant by carrying a negative "fee",
-  // recording a misrepresented breakdown that still reconciles to OTD.
-  for (const item of input.junkFeeItems ?? []) {
-    if ((item.amount ?? 0) < 0) {
-      throw new Error(`Junk fee "${item.name}" cannot be negative`);
-    }
-  }
-  const junkFeeCents = (input.junkFeeItems ?? []).reduce(
-    (sum, item) => sum + Math.round((item.amount ?? 0) * 100),
-    0,
-  );
-  const expected = input.vehiclePriceCents + input.taxCents + input.feesCents + junkFeeCents;
-  if (Math.abs(input.otdPriceCents - expected) > OTD_SUM_TOLERANCE_CENTS) {
-    throw new Error(
-      `OTD breakdown mismatch: components sum to ${expected} cents but otdPriceCents is ${input.otdPriceCents}`,
-    );
-  }
-}
 
 function assertFinancingConsistent(input: {
   includesFinancing?: boolean;
