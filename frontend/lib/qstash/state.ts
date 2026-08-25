@@ -34,3 +34,21 @@ export async function hasDealerBid(auctionId: string, dealerId: string): Promise
   });
   return offer !== null;
 }
+
+// Buyer currently has a genuinely LIVE (ACTIVE) reverse auction — dealers can
+// still submit/revise bids. This is the authoritative "is a live competitive
+// auction actually running?" check that live-auction lifecycle touches
+// (auction-active / -midpoint / -closing) must pass at execution time.
+//
+// It is FALSE for a concierge-converted auction, which is minted already
+// `CLOSED` (with offers already present and no dealer invitations) — that buyer
+// was never in a live competitive auction, so telling them "your auction is
+// LIVE / dealers are bidding / closing soon" would be untrue (Program 2 §10).
+// It is also false once a normal auction has closed, expired, or been cancelled.
+export async function hasLiveAuction(buyerId: string): Promise<boolean> {
+  const auction = await prisma.auction.findFirst({
+    where: { buyerId, status: "ACTIVE" },
+    select: { id: true },
+  });
+  return auction !== null;
+}

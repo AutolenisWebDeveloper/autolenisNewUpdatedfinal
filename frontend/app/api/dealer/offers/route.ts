@@ -4,7 +4,7 @@ import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dea
 import { submitOffer } from "@/lib/services/offer/offer.service";
 import { z } from "zod";
 import { sendDealerOfferSubmittedEmail } from "@/lib/services/email/resend.service";
-import { dispatch } from "@/lib/qstash/dispatch";
+import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 
 const schema = z.object({
   auctionId: z.string(), otdPriceCents: z.number().int().min(100),
@@ -77,14 +77,13 @@ export async function POST(request: NextRequest) {
     });
     const buyerOfferEmail = auctionBuyer?.buyer?.user?.email;
     if (auctionBuyer?.buyerId && buyerOfferEmail) {
-      dispatch({
-        path: "/api/jobs/offer-received",
-        body: {
-          buyerId: auctionBuyer.buyerId,
-          firstName: auctionBuyer.buyer?.firstName ?? "there",
-          email: buyerOfferEmail,
-          offerId: offer.id,
-        },
+      scheduleLifecycleWorkload({
+        workload: "offer_received",
+        buyerId: auctionBuyer.buyerId,
+        auctionId: parsed.data.auctionId,
+        offerId: offer.id,
+        firstName: auctionBuyer.buyer?.firstName ?? "there",
+        email: buyerOfferEmail,
       }).catch(() => {});
     }
 

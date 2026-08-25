@@ -22,7 +22,7 @@ import {
   sendDealerNewBuyerOpportunityEmail,
   sendSocialLeadWelcomeEmail,
 } from "@/lib/services/email/resend.service";
-import { dispatch } from "@/lib/qstash/dispatch";
+import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import {
   intakeBuyerRequest,
   type UnifiedIntakeInput,
@@ -575,17 +575,17 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // QStash — kick off the buyer welcome + activation-recovery sequence.
+  // Lifecycle — kick off the buyer welcome + activation-recovery sequence.
+  // Internal vs QStash is chosen per the form-submitted activation flag
+  // (default QStash).
   if (buyerId) {
-    dispatch({
-      path: "/api/jobs/form-submitted",
-      body: {
-        buyerId,
-        firstName: data.firstName,
-        email: data.email,
-        phone: data.phone,
-        campaign: data.campaign ?? "default",
-      },
+    scheduleLifecycleWorkload({
+      workload: "form_submitted",
+      buyerId,
+      firstName: data.firstName,
+      email: data.email,
+      phone: data.phone,
+      campaign: data.campaign ?? "default",
     }).catch(() => {});
   }
 

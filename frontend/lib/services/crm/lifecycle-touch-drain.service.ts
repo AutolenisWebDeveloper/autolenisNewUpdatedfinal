@@ -38,7 +38,7 @@
 
 import { logger } from "@/lib/logger";
 import { notifyContact, renderEmail, NOTIFY_APP_URL } from "@/lib/qstash/notify";
-import { hasPaidDeposit, hasSelectedOffer } from "@/lib/qstash/state";
+import { hasPaidDeposit, hasSelectedOffer, hasLiveAuction } from "@/lib/qstash/state";
 import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -92,6 +92,21 @@ interface SequenceConfig {
 
 const DASH = `${NOTIFY_APP_URL}/buyer/dashboard`;
 
+// Live-auction eligibility guard for the auction-active / -midpoint / -closing
+// touches (Program 2 §10 truthfulness invariant). Re-reads authoritative state
+// at drain time and CANCELS the touch (no send, no chain) when the buyer has
+// either converted (selected an offer / has a deal) OR no longer has a genuinely
+// LIVE (ACTIVE) auction. This closes two gaps at once:
+//   • a buyer whose auction already CLOSED/expired/cancelled is never told it is
+//     "live / dealers are bidding / closing soon";
+//   • a concierge-converted auction (minted already CLOSED with offers, never a
+//     live competitive auction) can never receive live-auction copy, even as a
+//     defense-in-depth backstop should a producer ever enqueue one.
+// Root producer exclusion is the primary control (the concierge branch never
+// enqueues these sequences); this drain-time guard is the second line.
+const auctionLiveGuard = async (buyerId: string): Promise<boolean> =>
+  (await hasSelectedOffer(buyerId)) || !(await hasLiveAuction(buyerId));
+
 // Message bodies ported verbatim from app/api/jobs/<name>/route.ts.
 const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
   // ── deposit-reminder (3 touches, guard hasPaidDeposit) ────────────────────
@@ -144,6 +159,9 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
   // ── auction lifecycle (active → midpoint → closing) ───────────────────────
   auction_active: {
     entityType: "buyer",
+    // §10: only send "your auction is LIVE" when a live ACTIVE auction truly
+    // exists (never for a converted buyer or a concierge CLOSED auction).
+    guard: auctionLiveGuard,
     render: ({ firstName }) => ({
       sms: `Your auction is LIVE ${firstName}! Dealers are competing for your vehicle. Check offers: autolenis.com/buyer/dashboard`,
       emailSubject: "Your dealer auction is live",
@@ -158,7 +176,9 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
   },
   auction_midpoint: {
     entityType: "buyer",
-    guard: hasSelectedOffer,
+    // §10: "halfway done and dealers are still bidding" must be true — require a
+    // live ACTIVE auction and an unconverted buyer.
+    guard: auctionLiveGuard,
     render: ({ firstName }) => ({
       sms: `${firstName}, your AutoLenis auction is halfway done and dealers are still bidding. See the latest offers: autolenis.com/buyer/dashboard`,
       emailSubject: "Your auction is halfway done",
@@ -174,8 +194,10 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
   auction_closing: {
     entityType: "buyer",
     // FIX: the QStash `auction-closing` job had NO guard and sent even after the
-    // buyer selected an offer. Parity-correct: skip a converted buyer.
-    guard: hasSelectedOffer,
+    // buyer selected an offer. §10: also require a live ACTIVE auction so a buyer
+    // whose auction already closed (or a concierge CLOSED auction) is never told
+    // "your auction closes soon".
+    guard: auctionLiveGuard,
     render: ({ firstName }) => ({
       sms: `${firstName} — your auction closes soon. Compare your dealer offers now: autolenis.com/buyer/dashboard`,
       emailSubject: "Your auction results are ready",
