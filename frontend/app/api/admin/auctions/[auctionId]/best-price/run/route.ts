@@ -18,7 +18,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   const auction = await prisma.auction.findUnique({ where: { id: auctionId } });
   if (!auction) return adminError("NOT_FOUND", "Auction not found", 404);
 
-  const ranked = await rankOffers(auctionId);
+  const ranked = await rankOffers(auctionId, 60, { persistLog: true });
   if (!ranked.length) return adminError("NO_OFFERS", "No submitted offers found for this auction", 400);
 
   // Persist ranks back to offer records

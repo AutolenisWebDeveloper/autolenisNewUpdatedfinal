@@ -9,7 +9,7 @@ const BADGES = [
   { Icon: ShieldCheck, label: "Buyer-First Marketplace", color: "text-green-600" },
   { Icon: BadgeCheck,  label: "Verified Dealer Network", color: "text-[#0B5FD1]" },
   { Icon: Lock,        label: "Stripe Secure Payments", color: "text-slate-600" },
-  { Icon: Star,        label: "Fully Refundable Deposit", color: "text-amber-500" },
+  { Icon: Star,        label: "Refund on request", color: "text-amber-500" },
 ] as const;
 
 export default function TrustBadges({ compact = false }: { compact?: boolean }) {

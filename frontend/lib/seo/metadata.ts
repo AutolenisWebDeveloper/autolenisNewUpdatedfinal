@@ -67,7 +67,7 @@ export const PAGE_METADATA = {
   pricing: {
     title: "Pricing — Free to Start, $499 Premium Concierge",
     description:
-      "Start free with a one-time $99 non-refundable Auction Access Fee, or go Premium for the full white-glove experience. No hidden fees.",
+      "Start free with a one-time $99 Auction Access Deposit — refundable on request and credited toward the $499 Premium concierge fee — or go Premium for the full white-glove experience. No hidden fees.",
     path: "/pricing",
     keywords: ["car concierge price", "AutoLenis pricing", "premium car buying"],
   },
@@ -115,7 +115,7 @@ export const PAGE_METADATA = {
   trust: {
     title: "Trust & Security — How We Protect You",
     description:
-      "Contract Shield catches junk fees and unfair terms. Verified dealers only. $99 refund guarantee. See how AutoLenis protects every buyer.",
+      "Contract Shield catches junk fees and unfair terms. Verified dealers only. $99 — refund on request. See how AutoLenis protects every buyer.",
     path: "/trust",
     keywords: ["car buying protection", "Contract Shield", "verified car dealers"],
   },

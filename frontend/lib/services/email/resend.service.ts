@@ -1994,7 +1994,7 @@ export async function sendSocialLeadNurtureEmail(params: {
       heading = "Multiple offers, completely free to start";
       bodyHtml = `
         <p>Hi ${firstName},</p>
-        <p>AutoLenis buyers consistently receive multiple competing offers within 48 hours. The process is completely free to start — you only pay the $99 Auction Access Fee when you're ready to activate your private auction.</p>
+        <p>AutoLenis buyers consistently receive multiple competing offers within 48 hours. The process is completely free to start — you only pay the $99 Auction Access Deposit when you're ready to activate your private auction.</p>
         <p>That one-time fee is what puts local dealers in real competition for your business.</p>
       `;
       ctaLabel = "Get My Competing Offers";

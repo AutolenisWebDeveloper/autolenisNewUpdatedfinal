@@ -140,7 +140,7 @@ export function pricingSchema() {
       "@context": "https://schema.org",
       "@type": "Product",
       name: "AutoLenis Free Tier",
-      description: "Reverse auction with a one-time $99 non-refundable Auction Access Fee and full Contract Shield protection.",
+      description: "Reverse auction with a one-time $99 Auction Access Deposit and full Contract Shield protection.",
       offers: {
         "@type": "Offer",
         price: "99.00",
@@ -150,7 +150,7 @@ export function pricingSchema() {
           price: "99.00",
           priceCurrency: "USD",
           valueAddedTaxIncluded: false,
-          description: "One-time, non-refundable Auction Access Fee — not a deposit and not credited toward purchase.",
+          description: "One-time $99 Auction Access Deposit — refundable on request, credited toward the $499 concierge fee.",
         },
         availability: "https://schema.org/InStock",
       },

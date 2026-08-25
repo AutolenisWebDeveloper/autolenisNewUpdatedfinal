@@ -289,43 +289,21 @@ export async function POST(request: NextRequest) {
   const { buyerOpportunityId, vehicleRequestId } =
     await intakeBuyerRequest(input);
 
-  // ── Auto-advance clean submissions to INTAKE (non-blocking) ───────────────
-  // Submissions that arrive with a make, ZIP, and email are complete enough to
-  // skip manual triage, so move them out of SUBMITTED automatically. Runs after
-  // the response is sent; an audit event records the auto-advance.
+  // ── Auto-advance the request toward ACTIVE_SOURCING (non-blocking) ─────────
+  // A well-formed submission advances SUBMITTED → INTAKE → ACTIVE_SOURCING,
+  // surfacing matched inventory + coverage. Runs after the response is sent;
+  // the coverage-hold reconciler cron re-drives any request this best-effort
+  // pass fails to advance, so the progression is reliable, not fire-and-forget.
   if (vehicleRequestId) {
     after(async () => {
       try {
-        const hasCleanSubmission =
-          !!(input.make ?? data.preferredMake) &&
-          !!data.zip &&
-          !!data.email;
-
-        if (hasCleanSubmission) {
-          await prisma.vehicleRequest.update({
-            where: { id: vehicleRequestId },
-            data: { status: "INTAKE" },
-          });
-
-          // Audit event — best effort.
-          await prisma.vehicleRequestEvent.create({
-            data: {
-              requestId: vehicleRequestId,
-              eventType: "AUTO_INTAKE",
-              payload: {
-                reason: "Clean submission auto-advanced",
-                make: input.make ?? data.preferredMake ?? null,
-                zip: data.zip,
-              },
-            },
-          }).catch(() => {});
-
-          logger.info(
-            `[request-vehicle] auto-advanced to INTAKE: ${vehicleRequestId}`
-          );
-        }
+        const { advanceVehicleRequest } = await import(
+          "@/lib/services/vehicle-request/request-progression.service"
+        );
+        const r = await advanceVehicleRequest(vehicleRequestId);
+        logger.info(`[request-vehicle] progression ${vehicleRequestId}: ${r.from} → ${r.to}`);
       } catch (err) {
-        logger.error("[request-vehicle] auto-intake failed:", err);
+        logger.error("[request-vehicle] auto-progression failed:", err);
       }
     });
   }

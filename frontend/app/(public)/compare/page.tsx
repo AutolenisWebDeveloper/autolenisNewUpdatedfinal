@@ -314,7 +314,7 @@ export default function ComparePage() {
               <h3 className="font-bold text-[#92400E] mb-5 text-sm">AutoLenis deposit note:</h3>
               <p className="text-sm text-[#78350F] leading-relaxed">
                 The ${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(0)} Auction Access Deposit is required
-                to activate dealer competition. It's fully refundable if no competitive offer is
+                to activate dealer competition. Refund is available on request if no competitive offer is
                 received. This is not a hidden fee — it's how serious dealer engagement is
                 guaranteed.
               </p>

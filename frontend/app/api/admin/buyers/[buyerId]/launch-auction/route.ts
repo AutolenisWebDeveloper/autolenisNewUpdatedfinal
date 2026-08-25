@@ -17,6 +17,7 @@ import {
   type MintedInvite,
 } from "@/lib/services/auction/outside-invite.service";
 import { lookupZip, lookupCity } from "@/lib/utils/zip-coords";
+import { filterAuctionEligibleDealerIds } from "@/lib/services/dealer/dealer-auction-eligibility.service";
 
 interface Props { params: Promise<{ buyerId: string }> }
 
@@ -103,7 +104,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
 
   // Validate dealers are ACTIVE and dedupe
-  const dealers = await prisma.dealer.findMany({
+  const activeDealers = await prisma.dealer.findMany({
     where: { id: { in: dealerIds }, status: "ACTIVE" },
     select: {
       id: true,
@@ -111,8 +112,23 @@ export async function POST(request: NextRequest, { params }: Props) {
       user: { select: { email: true } },
     },
   });
-  if (dealers.length === 0) {
+  if (activeDealers.length === 0) {
     return adminError("NO_VALID_DEALERS", "No active dealers found in selection", 400);
+  }
+
+  // Batch 2/3 — honor the verification gate on the admin override too. Flag OFF
+  // (default) → no change; flag ON → drop any hand-picked dealer that is not
+  // signed + license-verified, so the manual path can't invite an unverified
+  // dealer to compete either. Report the drop rather than silently filtering.
+  const eligibleIds = await filterAuctionEligibleDealerIds(activeDealers.map((d) => d.id));
+  const dealers = activeDealers.filter((d) => eligibleIds.has(d.id));
+  const droppedUnverified = activeDealers.filter((d) => !eligibleIds.has(d.id)).map((d) => d.id);
+  if (dealers.length === 0) {
+    return adminError(
+      "NO_VERIFIED_DEALERS",
+      "All selected dealers are unverified (no signed agreement + verified license) and the verification gate is enabled.",
+      400,
+    );
   }
 
   // Find existing PAID deposit not linked to an auction, or create an admin-override one
@@ -316,6 +332,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         buyerId,
         dealerIds: dealers.map(d => d.id),
         dealerCount: dealers.length,
+        droppedUnverifiedDealerIds: droppedUnverified,
         outsideDealerCount: outsideInviteCount,
         vehicleCount: attachedVehicleCount,
         hours: hours ?? AUCTION_DURATION_HOURS,

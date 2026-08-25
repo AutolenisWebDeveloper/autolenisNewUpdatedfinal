@@ -71,7 +71,7 @@ export default function AboutPage() {
                   </div>
                   <div className="grid grid-cols-3 w-full gap-4 pt-4 border-t border-[#F3F4F6]">
                     {[
-                      { v: "$99", l: "Refundable Start" },
+                      { v: "$99", l: "Refund on request" },
                       { v: "48 hrs", l: "Auction Window" },
                       { v: "0", l: "Credit Impact" },
                     ].map((s) => (
@@ -173,7 +173,7 @@ export default function AboutPage() {
                   "Offers are ranked by total out-the-door cost — not just the sticker or monthly payment",
                   "Buy entirely remotely — no dealership visit required",
                   "Contract Shield reviews the paperwork for junk fees before you sign",
-                  "$99 Auction Access Deposit — fully refundable if you get no competitive offer",
+                  "$99 Auction Access Deposit — refund available on request if no competitive offer is received",
                 ].map((point) => (
                   <li key={point} className="flex items-start gap-3">
                     <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#0B5FD1]" />

@@ -104,15 +104,15 @@ export const entityGraphSchema: Record<string, unknown> = {
       mainEntityOfPage: { "@id": ENTITY_IDS.howItWorks },
     },
 
-    // $99 Auction Access Fee — connected to service
+    // $99 Auction Access Deposit — connected to service
     {
       "@type": "Offer",
       "@id": ENTITY_IDS.depositService,
-      name: "Auction Access Fee",
+      name: "Auction Access Deposit",
       price: "99.00",
       priceCurrency: "USD",
       description:
-        "One-time, non-refundable $99 Auction Access Fee that activates a private 48-hour dealer auction for the buyer. It is not a deposit and is not credited toward a purchase.",
+        "One-time $99 Auction Access Deposit that activates a private 48-hour dealer auction for the buyer. It is refundable on request if no competitive offer is received, and is credited toward the $499 AutoLenis concierge fee when the buyer proceeds (leaving $400 due).",
       offeredBy: { "@id": ENTITY_IDS.organization },
       priceValidUntil: "2027-12-31",
       availability: "https://schema.org/InStock",

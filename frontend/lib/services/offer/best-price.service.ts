@@ -26,7 +26,23 @@ function calculateMonthly(principal: number, aprRate: number, months: number): n
   return Math.round(principal * r / (1 - Math.pow(1 + r, -months)));
 }
 
-export async function rankOffers(auctionId: string, termMonths = 60): Promise<RankedOffer[]> {
+export interface RankOffersOptions {
+  /**
+   * Persist a BestPriceCalculationLog audit row for this ranking. Default false.
+   * Only the canonical/terminal callers (auction close-processing, the admin
+   * explicit re-run) opt in — the buyer best-price GET is polled on every load
+   * (including preliminary ACTIVE reads), so persisting there would append an
+   * unbounded stream of near-identical rows and, on serverless, may not even
+   * flush after the response. Keep the audit trail meaningful: log final rankings.
+   */
+  persistLog?: boolean;
+}
+
+export async function rankOffers(
+  auctionId: string,
+  termMonths = 60,
+  opts: RankOffersOptions = {},
+): Promise<RankedOffer[]> {
   const offers = await prisma.offer.findMany({
     where: { auctionId, status: "SUBMITTED" },
     include: { dealer: { select: { id: true, tier: true, dealershipName: true } } },
@@ -56,7 +72,7 @@ export async function rankOffers(auctionId: string, termMonths = 60): Promise<Ra
   const sortedByMonthly = [...withMetrics].filter(o => o.monthly).sort((a, b) => (a.monthly ?? 0) - (b.monthly ?? 0));
   const sortedByJunk = [...withMetrics].sort((a, b) => a.junkFeesCents - b.junkFeesCents);
 
-  return withMetrics.map(({ offer, monthly, junkFeesCents }) => {
+  const ranked = withMetrics.map(({ offer, monthly, junkFeesCents }) => {
     const rankCash = sortedByOtd.findIndex(o => o.offer.id === offer.id) + 1;
     const rankMonthly = sortedByMonthly.findIndex(o => o.offer.id === offer.id) + 1 || withMetrics.length;
     const rankJunk = sortedByJunk.findIndex(o => o.offer.id === offer.id) + 1;
@@ -87,6 +103,38 @@ export async function rankOffers(auctionId: string, termMonths = 60): Promise<Ra
     const sortedByOverall = [...arr].sort((a, b) => a.overallScore - b.overallScore);
     return { ...r, rankOverall: sortedByOverall.findIndex(o => o.offerId === r.offerId) + 1 };
   });
+
+  // Audit trail — persist the ranking so the buyer-facing Best Price cards are
+  // reproducible and never a black box (FS-I). Opt-in only (persistLog): the
+  // canonical/terminal callers await this so it flushes; the polled buyer GET
+  // never writes. Best-effort — a logging failure must never break ranking.
+  if (opts.persistLog) {
+    await prisma.bestPriceCalculationLog.create({
+      data: {
+        auctionId,
+        termMonths,
+        offerCount: ranked.length,
+        weights: {
+          weightOtd: weightConfig.weightOtd,
+          weightMonthly: weightConfig.weightMonthly,
+          weightFees: weightConfig.weightFees,
+          weightJunkFees: weightConfig.weightJunkFees,
+        },
+        result: ranked.map(r => ({
+          offerId: r.offerId,
+          otdPriceCents: r.otdPriceCents,
+          junkFeesCents: r.junkFeesCents,
+          monthlyPayment: r.monthlyPayment ?? null,
+          rankCash: r.rankCash,
+          rankMonthly: r.rankMonthly,
+          rankOverall: r.rankOverall,
+          overallScore: r.overallScore,
+        })),
+      },
+    }).catch(() => {});
+  }
+
+  return ranked;
 }
 
 // Three canonical ranked offers for buyer comparison

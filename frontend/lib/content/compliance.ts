@@ -115,18 +115,31 @@ const RULES: ComplianceRule[] = [
     ],
   },
   {
-    // Canonical pricing language: the $99 is a NON-REFUNDABLE Auction Access
-    // Fee, NOT a deposit. AI must never reintroduce "refundable deposit".
+    // Canonical pricing language (owner decision): the $99 is the "Auction
+    // Access Deposit" — refundable ON REQUEST subject to manual AutoLenis
+    // review, NOT automatically refunded, NOT a guaranteed refund, and credited
+    // toward the $499 concierge fee when the buyer proceeds. This rule bans the
+    // contradictory "Model Y" narrative (non-refundable / not a deposit / not
+    // credited) and any over-promise of an automatic or guaranteed refund.
     id: "pricing_language",
     detail:
-      'Misstates the $99 pricing. It is a one-time, non-refundable Auction Access Fee — never a "deposit" and never "refundable". Use the canonical phrasing.',
+      'Misstates the $99 pricing. Canonical: the $99 is the "Auction Access Deposit" — refundable on request (subject to manual review), not automatically or guaranteed refunded, and credited toward the $499 concierge fee. Do not call it non-refundable, "not a deposit", or "not credited", and do not promise a full/automatic/guaranteed refund.',
     patterns: [
-      // "refundable deposit" / "refundable $99" — but NOT "non-refundable …".
-      /(?<!non[-\s])\brefundable\s+deposit\b/i,
-      /\$\s?99[^.<\n]{0,30}\bdeposit\b/i,
-      /\bdeposit\b[^.<\n]{0,30}\$\s?99/i,
-      /(?<!non[-\s])\brefundable\s+\$\s?99\b/i,
-      /\$\s?99[^.<\n]{0,30}(?<!non[-\s])\brefundable\b/i,
+      // Model Y: "non-refundable" in the $99 context (either order).
+      /\$\s?99[^.<\n]{0,40}\bnon[-\s]?refundable\b/i,
+      /\bnon[-\s]?refundable\b[^.<\n]{0,40}\$\s?99/i,
+      // Model Y: "$99 ... Auction Access Fee" (it is a Deposit, not a Fee).
+      /\$\s?99[^.<\n]{0,40}\bauction\s+access\s+fee\b/i,
+      /\bauction\s+access\s+fee\b[^.<\n]{0,40}\$\s?99/i,
+      // Model Y: "not a deposit".
+      /\bnot\s+a\s+deposit\b/i,
+      // Model Y: "$99 ... not credited / does not credit toward ...".
+      /\$\s?99[^.<\n]{0,40}\bnot\s+credited\b/i,
+      /\bnot\s+credited\b[^.<\n]{0,40}\$\s?(?:99|499)/i,
+      // Over-promise: fully/100%/automatically/guaranteed refundable.
+      /\b(?:fully|100%|automatically|always|guaranteed)\s+refundable\b/i,
+      /\b(?:guaranteed|automatic)\s+refund\b/i,
+      /\brefund\s+guarantee(?:d)?\b/i,
     ],
   },
 ];

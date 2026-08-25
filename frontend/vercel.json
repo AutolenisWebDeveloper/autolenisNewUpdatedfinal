@@ -251,6 +251,14 @@
     {
       "path": "/api/cron/outreach-touch-drain",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/lifecycle-touch-drain",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/signed-contract-refetch",
+      "schedule": "*/30 * * * *"
     }
   ]
 }

@@ -37,7 +37,7 @@ async function getPublishedTestimonials(): Promise<PublicTestimonial[]> {
 const METRICS = [
   { value: `Up to ${MAX_DEALER_INVITATIONS}`, label: "Dealers competing per auction" },
   { value: `${AUCTION_DURATION_HOURS}h`, label: "Average auction window" },
-  { value: `$${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(0)}`, label: "Fully refundable deposit" },
+  { value: `$${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(0)}`, label: "Refund on request" },
   { value: "3 min", label: "Estimated prequalification time" },
 ];
 

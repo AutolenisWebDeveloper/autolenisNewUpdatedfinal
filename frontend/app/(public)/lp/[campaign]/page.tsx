@@ -75,8 +75,8 @@ const LP_FAQS = [
     a: "No. Submitting a vehicle request through AutoLenis does not affect your credit score. AutoLenis performs a soft prequalification only. Any hard credit pull would only occur if you choose to proceed with financing through a dealer.",
   },
   {
-    q: "What is the Auction Access Fee?",
-    a: "The $99 Auction Access Fee is a one-time, non-refundable fee that activates your private 48-hour dealer auction. It signals seriousness to verified dealers. It is not a deposit and is not credited toward your vehicle purchase.",
+    q: "What is the Auction Access Deposit?",
+    a: "The $99 Auction Access Deposit is a one-time deposit that activates your private 48-hour dealer auction and signals seriousness to verified dealers. It's refundable on request — reviewed by our team — if no competitive offer is received, and it's credited toward the $499 AutoLenis concierge fee when you proceed (leaving $400 due).",
   },
   {
     q: "How is AutoLenis different from other car buying services?",
@@ -216,13 +216,13 @@ export default async function LandingPage({
             price: "0",
             priceCurrency: "USD",
             description:
-              "Free to submit a vehicle request. A one-time $99 non-refundable Auction Access Fee activates dealer competition.",
+              "Free to submit a vehicle request. A one-time $99 Auction Access Deposit activates dealer competition.",
             priceSpecification: {
               "@type": "PriceSpecification",
               price: "99",
               priceCurrency: "USD",
               description:
-                "One-time, non-refundable Auction Access Fee — not a deposit, not credited toward purchase",
+                "One-time $99 Auction Access Deposit — refundable on request, credited toward the $499 concierge fee",
             },
           },
           hasOfferCatalog: {
@@ -235,7 +235,7 @@ export default async function LandingPage({
                   "@type": "Service",
                   name: "Standard Plan",
                   description:
-                    "Free to start. A one-time $99 non-refundable Auction Access Fee activates your 48-hour dealer auction. Not a deposit; not credited toward purchase.",
+                    "Free to start. A one-time $99 Auction Access Deposit activates your 48-hour dealer auction — refundable on request and credited toward the $499 concierge fee when you proceed.",
                 },
               },
               {

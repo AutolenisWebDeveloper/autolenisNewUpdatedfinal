@@ -239,7 +239,7 @@ export default async function BuyerDashboard() {
               <h3 className="font-semibold text-amber-900 mb-1">No dealers in your area yet</h3>
               <p className="text-sm text-amber-700 mb-3">
                 We&apos;re actively onboarding dealers in your area. In the meantime, you can submit a vehicle
-                request and our team will source options for you manually — no Auction Access Fee required.
+                request and our team will source options for you manually — no Auction Access Deposit required.
               </p>
               <Link
                 href="/buyer/requests/new"
@@ -515,17 +515,17 @@ export default async function BuyerDashboard() {
             <div>
               <h2 className="text-lg font-bold text-slate-900 mb-2">Activate your auction</h2>
               <p className="text-sm text-slate-600 leading-relaxed mb-4">
-                You have {shortlistCount} vehicle{shortlistCount !== 1 ? "s" : ""} shortlisted. Pay the ${DEPOSIT_AMOUNT_CENTS / 100} Limited-Time Auction Access Fee to launch your private 48-hour dealer competition.
+                You have {shortlistCount} vehicle{shortlistCount !== 1 ? "s" : ""} shortlisted. Pay the ${DEPOSIT_AMOUNT_CENTS / 100} Limited-Time Auction Access Deposit to launch your private 48-hour dealer competition.
               </p>
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mb-5">
-                <span className="flex items-center gap-1"><CheckCircle2 size={13} className="text-emerald-500" /> Refundable if no valuable offer</span>
+                <span className="flex items-center gap-1"><CheckCircle2 size={13} className="text-emerald-500" /> Refund available on request if no valuable offer</span>
                 <span className="flex items-center gap-1"><CheckCircle2 size={13} className="text-emerald-500" /> Up to 8 dealers compete</span>
                 <span className="flex items-center gap-1"><CheckCircle2 size={13} className="text-emerald-500" /> 48-hour window</span>
               </div>
               <Link href="/buyer/deposit"
                 className="inline-flex items-center gap-2 px-6 py-3 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
                 data-testid="next-step-deposit">
-                Pay ${DEPOSIT_AMOUNT_CENTS / 100} Auction Access Fee <ArrowRight size={15} />
+                Pay ${DEPOSIT_AMOUNT_CENTS / 100} Auction Access Deposit <ArrowRight size={15} />
               </Link>
             </div>
           )}

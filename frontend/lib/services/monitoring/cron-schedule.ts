@@ -54,8 +54,10 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "dlq-drain": { intervalMinutes: 15 },
   "inventory-stale-sweep": { intervalMinutes: 30 },
   "sla-check": { intervalMinutes: 30 },
+  "signed-contract-refetch": { intervalMinutes: 30 }, // Batch 6 durability: re-fetch a missing signed PDF (dormant without real DocuSign)
   "refinance-outreach-drain": { intervalMinutes: 15 }, // QStash non-deal parity (dormant: no producer until owner cutover)
   "outreach-touch-drain": { intervalMinutes: 15 }, // QStash non-deal parity: affiliate/referral touches (dormant until owner cutover)
+  "lifecycle-touch-drain": { intervalMinutes: 15 }, // QStash lifecycle-comms parity: the 12 deferred lifecycle jobs (dormant until owner cutover)
   // ── hourly ──
   "pickup-confirmation-nudge": { intervalMinutes: HOUR },
   "affiliates": { intervalMinutes: HOUR },

@@ -193,7 +193,7 @@ function SignUpInner({ stats }: { stats: StatsProps }) {
             Find your next car.<br />Without the negotiation.
           </h1>
           <p className="text-white/80 text-sm leading-relaxed mb-10 max-w-md">
-            Tell us what you want. Verified dealers compete for your business in a private 48-hour auction. You pick the winner — or walk away with a full refund.
+            Tell us what you want. Verified dealers compete for your business in a private 48-hour auction. You pick the winner — or walk away and request a refund of your $99.
           </p>
 
           <ul className="space-y-4 mb-10">
@@ -277,7 +277,7 @@ function SignUpInner({ stats }: { stats: StatsProps }) {
                     {plan === "STANDARD" && <CheckCircle2 size={13} className="text-[#0B5FD1]" />}
                   </div>
                   <p className="text-sm font-bold text-[#0B5FD1] mt-1 font-[family-name:var(--font-mono)]">Free</p>
-                  <p className="text-[10px] text-[#94A3B8] mt-0.5 leading-tight">$99 deposit credited to purchase</p>
+                  <p className="text-[10px] text-[#94A3B8] mt-0.5 leading-tight">$99 deposit — refund on request</p>
                 </button>
                 <button
                   type="button"

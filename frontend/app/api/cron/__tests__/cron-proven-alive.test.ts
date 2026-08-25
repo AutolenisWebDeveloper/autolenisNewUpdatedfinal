@@ -37,6 +37,9 @@ mock.module("@/lib/prisma", {
 mock.module("@/lib/services/acquisition/request-coverage-gate.service", {
   namedExports: { reconcileCoverageHolds: async () => ({ released: 0, recruited: 0 }) },
 });
+mock.module("@/lib/services/vehicle-request/request-progression.service", {
+  namedExports: { reconcileRequestProgression: async () => ({ found: 0, advanced: 0, incomplete: 0, failed: 0 }) },
+});
 mock.module("@/lib/services/dealer-recruitment/apollo-credit-ledger.service", {
   namedExports: {
     ensureCurrentCycleLedger: async () => ({ cycleKey: "2026-03", capCredits: 2000, spentCredits: 0 }),

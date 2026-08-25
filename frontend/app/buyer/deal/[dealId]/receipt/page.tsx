@@ -1,5 +1,6 @@
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { buyerFacingDealerName } from "@/lib/services/offer/dealer-display";
 import { notFound } from "next/navigation";
 import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS } from "@/lib/constants";
 import ReceiptActions from "@/components/buyer/ReceiptActions";
@@ -16,7 +17,7 @@ export default async function ReceiptPage({ params }: Props) {
     include: {
       offer: {
         include: {
-          dealer: { select: { dealershipName: true, city: true, state: true } },
+          dealer: { select: { dealershipName: true, city: true, state: true, isSystemPlaceholder: true } },
         },
       },
       vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
@@ -25,9 +26,11 @@ export default async function ReceiptPage({ params }: Props) {
   if (!deal) notFound();
 
   const otdPriceCents = deal.offer?.otdPriceCents ?? deal.vehicleRequestOffer?.priceCents ?? 0;
-  const dealerName = deal.offer?.dealer?.dealershipName ?? "AutoLenis Concierge";
-  const dealerCity = deal.offer?.dealer?.city ?? null;
-  const dealerState = deal.offer?.dealer?.state ?? null;
+  const dealerName = buyerFacingDealerName(deal.offer);
+  // Placeholder/concierge offers carry no real dealer city/state → suppress the line.
+  const isPlaceholderDealer = deal.offer?.dealer?.isSystemPlaceholder === true;
+  const dealerCity = isPlaceholderDealer ? null : (deal.offer?.dealer?.city ?? null);
+  const dealerState = isPlaceholderDealer ? null : (deal.offer?.dealer?.state ?? null);
   const isPremium = buyer.plan === "PREMIUM";
 
   return (
@@ -81,7 +84,7 @@ export default async function ReceiptPage({ params }: Props) {
             </div>
           )}
           <div className="flex justify-between text-sm">
-            <span className="text-[#4B5563]">Auction Access Fee (credited)</span>
+            <span className="text-[#4B5563]">Auction Access Deposit (credited)</span>
             <span className="text-[#059669]">
               −${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(2)}
             </span>

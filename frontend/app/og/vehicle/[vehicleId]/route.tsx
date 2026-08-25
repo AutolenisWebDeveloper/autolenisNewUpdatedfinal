@@ -90,7 +90,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
             </p>
           )}
           <p style={{ color: "rgba(255,255,255,0.6)", fontSize: "18px", margin: 0 }}>
-            Soft-pull prequalification · $99 fully refundable · 48-hour auction
+            Soft-pull prequalification · $99 — refund on request · 48-hour auction
           </p>
         </div>
       </div>

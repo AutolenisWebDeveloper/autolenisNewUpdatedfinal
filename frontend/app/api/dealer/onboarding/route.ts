@@ -2,11 +2,26 @@
 // GET   /api/dealer/onboarding — return current persisted onboarding values for hydration
 
 import { logger } from "@/lib/logger";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { requireDealerFromRequest } from "@/lib/auth/dealer-session";
 import { prisma } from "@/lib/prisma";
-import { emitDomainEvent } from "@/lib/events/emit";
 import { z } from "zod";
+import { emitDomainEvent } from "@/lib/events/emit";
+import { recordDealerLicense } from "@/lib/services/dealer/dealer-verification.service";
+import {
+  recordDealerAgreementSignature,
+  finalizeDealerAgreementCertificate,
+} from "@/lib/services/agreement/dealer-agreement.service";
+
+function clientAttribution(request: NextRequest): { ipAddress: string; userAgent: string } {
+  const forwarded = request.headers.get("x-forwarded-for");
+  const ipAddress =
+    (forwarded ? forwarded.split(",")[0]?.trim() : undefined) ||
+    request.headers.get("x-real-ip") ||
+    "unknown";
+  const userAgent = request.headers.get("user-agent") || "unknown";
+  return { ipAddress, userAgent };
+}
 
 export async function GET(request: NextRequest) {
   const dealer = await requireDealerFromRequest(request);
@@ -115,6 +130,13 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (data.step === "LICENSE") {
+    // Record a REAL DealerLicense + (pending) DealerVerification — the license
+    // step no longer just stores free text and advances (FS-C).
+    const current = await prisma.dealer.findUnique({ where: { id: dealer.id }, select: { state: true } });
+    const recorded = await recordDealerLicense(dealer.id, data.licenseNumber, current?.state ?? null);
+    if (!recorded.ok) {
+      return NextResponse.json({ error: recorded.error ?? "Invalid license" }, { status: 422 });
+    }
     await prisma.dealer.update({
       where: { id: dealer.id },
       data: { licenseNumber: data.licenseNumber, onboardingStep: "INVENTORY" },
@@ -145,25 +167,51 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (data.step === "AGREEMENT") {
-    // Idempotent: if onboarding is already complete, do not re-stamp the
-    // consent timestamp or re-fire the DocuSign envelope / activation event.
+    // Idempotent: if onboarding is already complete, do not re-record the
+    // signature or re-fire the DocuSign envelope / activation event.
     if (dealer.onboardingStep === "COMPLETE") {
       return NextResponse.json({ success: true, nextStep: "COMPLETE", redirect: "/dealer/dashboard" });
     }
 
+    const d = await prisma.dealer.findUnique({
+      where: { id: dealer.id },
+      select: { dealershipName: true, user: { select: { email: true } } },
+    });
+    const { ipAddress, userAgent } = clientAttribution(request);
+
+    // Record a REAL, tamper-evident signature (SHA-256 + IP + UA) and complete
+    // onboarding — never a bare "agreed" timestamp (FS-B). This is the shared
+    // authority also used by /api/dealer/agreement/sign.
+    const signature = await recordDealerAgreementSignature({
+      dealerId: dealer.id,
+      dealershipName: d?.dealershipName ?? "Dealer",
+      signerEmail: d?.user?.email ?? "",
+      ipAddress,
+      userAgent,
+    });
+
+    // Certificate + confirmation email off the request path (must not throw).
+    after(() => finalizeDealerAgreementCertificate({
+      signatureId: signature.signatureId,
+      dealerId: dealer.id,
+      dealershipName: d?.dealershipName ?? "Dealer",
+      signerEmail: d?.user?.email ?? "",
+      ipAddress,
+      userAgent,
+      signedAt: signature.signedAt,
+      agreementHash: signature.agreementHash,
+    }));
+
+    // Mark ACTIVE (idempotent — the dealer is typically already ACTIVE from admin
+    // approval). The verification GATE is NOT here: it governs auction eligibility
+    // (see dealer-auction-eligibility.service.ts), not portal activation.
     const updatedDealer = await prisma.dealer.update({
       where: { id: dealer.id },
-      data: {
-        agreedToTermsAt: new Date(),
-        onboardingStep: "COMPLETE",
-        status: "ACTIVE",
-      },
+      data: { status: "ACTIVE" },
       include: { user: { select: { email: true } } },
     });
 
-    // Fire-and-forget: send the DocuSign marketplace agreement envelope.
-    // Failures here must never block onboarding completion — the dealer is
-    // already ACTIVE and can retry from the dashboard if anything went wrong.
+    // Belt-and-suspenders DocuSign marketplace envelope — fire-and-forget.
     const { sendDealerMarketplaceAgreement } = await import(
       "@/lib/services/esign/dealer-marketplace-agreement.service"
     );
@@ -175,16 +223,11 @@ export async function PATCH(request: NextRequest) {
       logger.error("[dealer-onboarding/agreement] DocuSign send failed:", err);
     });
 
-    // CRM spine: dealer self-activated (onboarding complete) → timeline + Make
-    // (non-blocking, never throws). Forward no-ops until MAKE_WEBHOOK_URL is set.
+    // CRM spine: onboarding complete → timeline + Make (non-blocking, never throws).
     if (updatedDealer.user?.email) {
       await emitDomainEvent("dealer_activated", {
         domainEntityId: updatedDealer.id,
-        contact: {
-          email: updatedDealer.user.email,
-          firstName: updatedDealer.dealershipName ?? undefined,
-          source: "dealer_signup",
-        },
+        contact: { email: updatedDealer.user.email, firstName: updatedDealer.dealershipName ?? undefined, source: "dealer_signup" },
         data: { dealer_id: updatedDealer.id, dealership_name: updatedDealer.dealershipName },
       });
     }

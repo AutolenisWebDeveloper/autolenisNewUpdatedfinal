@@ -35,7 +35,7 @@ export default async function AuctionsPage() {
           icon={Gavel}
           tone="active"
           heading="No active auctions yet"
-          body="Complete your vehicle request and pay the $99 service fee to launch your 48-hour dealer auction."
+          body="Complete your vehicle request and pay the $99 Auction Access Deposit to launch your 48-hour dealer auction."
           cta={{ label: "Start My Auction", href: "/buyer/deposit" }}
         />
       ) : (

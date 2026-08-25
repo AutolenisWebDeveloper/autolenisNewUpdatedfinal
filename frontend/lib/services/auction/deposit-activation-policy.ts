@@ -20,7 +20,8 @@ export interface ActivationState {
   offerCount: number;
   auctionAgeMinutes: number;
   // Grace after which a no-dealer ACTIVE auction is closed out (terminal state).
-  // The $99 deposit is NEVER auto-refunded — it is a non-refundable access fee.
+  // The $99 Auction Access Deposit is NEVER auto-refunded — it is refundable on
+  // request, subject to manual AutoLenis review.
   noDealerCloseGraceMinutes: number;
 }
 

@@ -295,7 +295,7 @@ export default async function VehicleDetailPage({ params, searchParams }: { para
                   <CheckCircle2 size={12} /> Contract Shield protected
                 </div>
                 <div className="flex items-center gap-2 text-xs text-[#4B5563]">
-                  <CheckCircle2 size={12} /> $99 deposit · refundable
+                  <CheckCircle2 size={12} /> $99 deposit · refund on request
                 </div>
               </div>
 

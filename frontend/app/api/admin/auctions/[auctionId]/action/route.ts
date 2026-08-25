@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import { getStripe } from "@/lib/stripe";
+import { refundDepositCharge } from "@/lib/services/payment/refund.service";
 import { AUCTION_DURATION_HOURS } from "@/lib/constants";
 import { sendDealerAuctionInvitationEmail } from "@/lib/services/email/resend.service";
 import { processAuctionClose } from "@/lib/services/auction/auction.service";
@@ -128,13 +128,14 @@ export async function POST(request: NextRequest, { params }: Props) {
       const offerCount = await prisma.offer.count({ where: { auctionId, status: "SUBMITTED" } });
       if (offerCount > 0) return adminError("HAS_OFFERS", "Cannot refund — auction has submitted offers", 400);
 
-      if (auction.deposit?.stripePaymentIntentId) {
+      // FS-K: refund the deposit's real charge only. A no-real-charge /
+      // admin-seeded deposit (null PI or a synthetic pi_admin_ id) returns
+      // NO_CHARGE — no money moves — so the buyer is never falsely told their
+      // deposit was refunded.
+      let refunded = false;
+      if (auction.deposit) {
         try {
-          await getStripe().refunds.create(
-            { payment_intent: auction.deposit.stripePaymentIntentId },
-            { idempotencyKey: `refund-deposit-${auction.deposit.id}` },
-          );
-          await prisma.deposit.update({ where: { id: auction.deposit.id }, data: { status: "REFUNDED", refundedAt: new Date() } });
+          refunded = (await refundDepositCharge(auction.deposit)) === "REFUNDED";
         } catch (err) {
           return adminError("STRIPE_ERROR", `Refund failed: ${err}`, 500);
         }
@@ -142,13 +143,16 @@ export async function POST(request: NextRequest, { params }: Props) {
 
       await prisma.auction.update({ where: { id: auctionId }, data: { status: "CANCELLED" } });
 
-      // Notify the buyer their auction was cancelled and deposit refunded.
+      // Notify the buyer their auction was cancelled — only claim a refund when
+      // money actually moved.
       await prisma.notification.create({
         data: {
           buyerId: auction.buyerId,
           type: "DEAL_STAGE_CHANGED",
           title: "Auction cancelled",
-          body: "Your auction was cancelled and your deposit refunded. Please allow 3–5 business days for funds to appear.",
+          body: refunded
+            ? "Your auction was cancelled and your deposit refunded. Please allow 3–5 business days for funds to appear."
+            : "Your auction was cancelled. If a refund is due, our team will follow up shortly.",
         },
       }).catch(err => logger.error("[auctions/action] cancel buyer notify failed:", err));
 
@@ -166,7 +170,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         }).catch(err => logger.error("[auctions/action] cancel dealer notify failed:", err));
       }
 
-      result = { refunded: true, dealersNotified: cancelInvitations.length };
+      result = { refunded, dealersNotified: cancelInvitations.length };
       break;
     }
     case "AUCTION_REOPENED": {

@@ -30,8 +30,9 @@ export type { ActivationAction, ActivationState };
 //   • auction ACTIVE but zero invitations (invite failed → no dealers can bid).
 //
 // INVARIANT: a confirmed $99 always converges to a populated ACTIVE auction OR
-// a terminal CLOSED auction — never stuck. The $99 deposit is a non-refundable
-// access fee and is NEVER auto-refunded. This reconciler sweeps by STATE (not a
+// a terminal CLOSED auction — never stuck. The $99 Auction Access Deposit is
+// NEVER auto-refunded (refundable on request, subject to manual review). This
+// reconciler sweeps by STATE (not a
 // rolling time window, the F-001 anti-pattern it replaces) and re-attempts
 // activation. A genuinely no-dealer auction is CLOSED so the merged F-001
 // processAuctionClose emits the buyer/dealer no-offer notifications (no refund) —
@@ -149,9 +150,9 @@ export async function reconcileDepositActivation(depositId: string): Promise<Act
       if (action === 'close' && loaded.auctionId) {
         // No dealers after the grace — converge to a terminal CLOSED state by
         // closing the ACTIVE auction; F-001's processAuctionClose emits the
-        // no-offer notifications. NO refund is issued — the $99 deposit is a
-        // non-refundable access fee and is retained. Atomic: only closes if
-        // still ACTIVE.
+        // no-offer notifications. NO refund is issued automatically — the $99
+        // Auction Access Deposit is retained (refundable on request, subject to
+        // manual review). Atomic: only closes if still ACTIVE.
         const closed = await prisma.auction.updateMany({
           where: { id: loaded.auctionId, status: 'ACTIVE' },
           data: { status: 'CLOSED', closedAt: new Date() },

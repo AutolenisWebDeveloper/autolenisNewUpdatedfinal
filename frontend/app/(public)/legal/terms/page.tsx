@@ -67,10 +67,15 @@ export default function TermsPage() {
             3. Deposit and Fee Policy
           </h2>
           <p className="text-sm text-[#4B5563] leading-relaxed">
-            The $99 auction activation deposit is fully refundable if no deal is
-            selected. The $499 concierge fee is charged only upon selection of a
-            deal. The $99 deposit is credited toward the $499 fee, resulting in a
-            net charge of $400. All payments are processed via Stripe.
+            The $99 Auction Access Deposit is refundable on request, subject to
+            AutoLenis&rsquo;s review and approval. It is not refunded
+            automatically and a refund is not guaranteed: for example, if no
+            competitive offer is received you may request a refund, which
+            AutoLenis will review and, if approved, return to your original
+            payment method. When you select a deal, the $99 deposit is credited
+            toward the $499 concierge fee (charged only upon selection),
+            resulting in a net charge of $400. All payments are processed via
+            Stripe.
           </p>
         </div>
 

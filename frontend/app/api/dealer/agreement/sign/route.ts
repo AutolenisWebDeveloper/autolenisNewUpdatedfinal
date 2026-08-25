@@ -1,26 +1,20 @@
 // POST /api/dealer/agreement/sign
 //
 // Captures the dealer's in-house electronic signature for the dealer network
-// participation agreement. Writes the signature record, completes onboarding,
-// and the admin audit log atomically, then generates the certificate PDF and
-// confirmation email as non-blocking post-response work.
+// participation agreement, then activates the dealer subject to the verification
+// gate. Signature recording, onboarding completion, and the audit log are written
+// atomically by the shared dealer-agreement service (also used by the onboarding
+// wizard's AGREEMENT step) so the two paths can never diverge; the certificate PDF
+// + confirmation email run as non-blocking post-response work.
 
-import { logger } from "@/lib/logger";
-import { NextRequest } from "next/server";
-import { after } from "next/server";
-import { createHash } from "crypto";
+import { NextRequest, after } from "next/server";
 import { z } from "zod";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
-import { prisma } from "@/lib/prisma";
+import { CURRENT_DEALER_AGREEMENT_VERSION } from "@/lib/constants/dealer-agreement";
 import {
-  CURRENT_DEALER_AGREEMENT_VERSION,
-  DEALER_AGREEMENT_TEXT,
-} from "@/lib/constants/dealer-agreement";
-import { sendDealerAgreementConfirmation } from "@/lib/services/email/dealer-agreement-confirmation.service";
-import {
-  generateAndUploadCertificate,
-  getSignedCertificateUrl,
-} from "@/lib/services/agreement/certificate.service";
+  recordDealerAgreementSignature,
+  finalizeDealerAgreementCertificate,
+} from "@/lib/services/agreement/dealer-agreement.service";
 
 const bodySchema = z.object({
   agreedToTerms: z.literal(true),
@@ -28,32 +22,10 @@ const bodySchema = z.object({
   consentedToElectronic: z.literal(true),
 });
 
-// Idempotent completion: mark onboarding complete without re-creating the
-// signature. Uses the original signature timestamp for agreedToTermsAt so the
-// audit trail never disagrees with the signature record.
-async function markAlreadySigned(dealerId: string, signedAt: Date) {
-  const dealer = await prisma.dealer.findUnique({
-    where: { id: dealerId },
-    select: { agreedToTermsAt: true },
-  });
-  await prisma.dealer.update({
-    where: { id: dealerId },
-    data: {
-      onboardingStep: "COMPLETE",
-      agreedToTermsAt: dealer?.agreedToTermsAt ?? signedAt,
-    },
-  });
-  return successResponse({ alreadySigned: true });
-}
-
 export async function POST(request: NextRequest) {
-  // 1. Auth
   const dealer = await getRequestDealer(request);
-  if (!dealer) {
-    return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
-  }
+  if (!dealer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
-  // 2. Body parse + validation
   let raw: unknown;
   try {
     raw = await request.json();
@@ -62,14 +34,9 @@ export async function POST(request: NextRequest) {
   }
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) {
-    return errorResponse(
-      "VALIDATION_ERROR",
-      parsed.error.issues[0]?.message ?? "Invalid request body",
-      400,
-    );
+    return errorResponse("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Invalid request body", 400);
   }
 
-  // 3. Version check
   if (parsed.data.agreementVersion !== CURRENT_DEALER_AGREEMENT_VERSION) {
     return errorResponse(
       "VERSION_MISMATCH",
@@ -78,25 +45,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Contact identity. The Dealer model has no separate contact name field —
-  // the dealership name is the legal signer of record (mirrors the existing
-  // DocuSign marketplace agreement flow), and the linked user's email is the
-  // signer email.
-  const signerName = dealer.dealershipName;
-  const signerEmail = dealer.user?.email ?? "";
-
-  // 4. Idempotency check. dealerId is @unique on DealerAgreementSignature, so a
-  // concurrent double-submit is also caught by the P2002 handler around the
-  // create() below — this fast-path just avoids the wasted write in the common
-  // case where the dealer already signed.
-  const existing = await prisma.dealerAgreementSignature.findUnique({
-    where: { dealerId: dealer.id },
-  });
-  if (existing) {
-    return markAlreadySigned(dealer.id, existing.signedAt);
-  }
-
-  // 5. Attribution capture
   const forwarded = request.headers.get("x-forwarded-for");
   const ipAddress =
     (forwarded ? forwarded.split(",")[0]?.trim() : undefined) ||
@@ -104,114 +52,33 @@ export async function POST(request: NextRequest) {
     "unknown";
   const userAgent = request.headers.get("user-agent") || "unknown";
 
-  // 6. Hash computation
-  const agreementHash = createHash("sha256").update(DEALER_AGREEMENT_TEXT).digest("hex");
+  const signerEmail = dealer.user?.email ?? "";
 
-  // 7. Atomic transaction — signature, onboarding completion, audit log
-  let signature: Awaited<ReturnType<typeof prisma.dealerAgreementSignature.create>>;
-  try {
-    signature = await prisma.$transaction(async (tx) => {
-    const sig = await tx.dealerAgreementSignature.create({
-      data: {
-        dealerId: dealer.id,
-        agreementVersion: CURRENT_DEALER_AGREEMENT_VERSION,
-        agreementHash,
-        signerName,
-        signerEmail,
-        dealershipName: dealer.dealershipName,
-        ipAddress,
-        userAgent,
-        consentedToElectronic: true,
-      },
-    });
-
-    await tx.dealer.update({
-      where: { id: dealer.id },
-      data: {
-        onboardingStep: "COMPLETE",
-        agreedToTermsAt: new Date(),
-      },
-    });
-
-    await tx.adminAuditLog.create({
-      data: {
-        adminId: "system",
-        adminEmail: "system@autolenis.com",
-        action: "DEALER_AGREEMENT_SIGNED",
-        entityType: "DealerAgreementSignature",
-        entityId: sig.id,
-        reason:
-          "Dealer completed in-house electronic signature during onboarding",
-        metadata: {
-          dealerId: dealer.id,
-          agreementVersion: CURRENT_DEALER_AGREEMENT_VERSION,
-          agreementHash,
-          ipAddress,
-          signerEmail,
-        },
-      },
-    });
-
-    return sig;
-    });
-  } catch (err) {
-    // Concurrent double-submit lost the unique-constraint race — treat the
-    // winner's signature as authoritative and complete idempotently.
-    if (typeof err === "object" && err !== null && (err as { code?: string }).code === "P2002") {
-      const winner = await prisma.dealerAgreementSignature.findUnique({
-        where: { dealerId: dealer.id },
-      });
-      if (winner) return markAlreadySigned(dealer.id, winner.signedAt);
-    }
-    throw err;
-  }
-
-  // 8. Non-blocking post-sign work — certificate + confirmation email.
-  after(async () => {
-    try {
-      const storagePath = await generateAndUploadCertificate({
-        signatureId: signature.id,
-        dealerId: dealer.id,
-        signerName,
-        signerEmail,
-        dealershipName: dealer.dealershipName,
-        ipAddress,
-        userAgent,
-        signedAt: signature.signedAt,
-        agreementVersion: CURRENT_DEALER_AGREEMENT_VERSION,
-        agreementHash,
-      });
-
-      // 24-hour URL for the email only — the dashboard always mints fresh
-      // short-lived URLs on demand.
-      const emailPdfUrl = storagePath
-        ? await getSignedCertificateUrl(storagePath, 86400)
-        : null;
-
-      const emailResult = await sendDealerAgreementConfirmation({
-        signatureId: signature.id,
-        contactName: signerName,
-        dealershipName: dealer.dealershipName,
-        email: signerEmail,
-        pdfSignedUrl: emailPdfUrl ?? null,
-        signedAt: signature.signedAt,
-        agreementVersion: CURRENT_DEALER_AGREEMENT_VERSION,
-      });
-
-      await prisma.dealerAgreementSignature.update({
-        where: { id: signature.id },
-        data: {
-          certificatePdfPath: storagePath ?? null,
-          certificateGeneratedAt: storagePath ? new Date() : null,
-          confirmationEmailSentAt: emailResult.success ? new Date() : null,
-          confirmationEmailId: emailResult.messageId ?? null,
-        },
-      });
-    } catch (err) {
-      logger.error("[dealer/agreement/sign] post-sign work failed:", err);
-    }
+  const signature = await recordDealerAgreementSignature({
+    dealerId: dealer.id,
+    dealershipName: dealer.dealershipName,
+    signerEmail,
+    ipAddress,
+    userAgent,
+    agreementVersion: CURRENT_DEALER_AGREEMENT_VERSION,
   });
 
-  // 9. Done
+  if (signature.alreadySigned) {
+    return successResponse({ alreadySigned: true });
+  }
+
+  // Certificate + confirmation email off the request path (never throws).
+  after(() => finalizeDealerAgreementCertificate({
+    signatureId: signature.signatureId,
+    dealerId: dealer.id,
+    dealershipName: dealer.dealershipName,
+    signerEmail,
+    ipAddress,
+    userAgent,
+    signedAt: signature.signedAt,
+    agreementHash: signature.agreementHash,
+    agreementVersion: CURRENT_DEALER_AGREEMENT_VERSION,
+  }));
+
   return successResponse({ signed: true }, 201);
 }
