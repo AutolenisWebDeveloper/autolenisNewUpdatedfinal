@@ -1,12 +1,13 @@
 // Concierge → canonical spine conversion contract.
 // Run: npx tsx --test --experimental-test-module-mocks lib/services/concierge/__tests__/concierge-conversion.test.ts
 //
-// Locks the deposit-gated convergence: a non-rejected DealerOfferSubmission
-// becomes a SUBMITTED canonical Offer under a CLOSED, deposit-gated Auction with
-// a VehicleRequest link; real dealers keep their id, unregistered dealers point
-// at the Outside-Dealer placeholder with identity in externalDealer*; the price
-// passes the shared assertOtdComponentsMatch; and the whole thing is idempotent
-// on Auction.depositId. Uses a hand-rolled transaction client — no DB, no prisma.
+// Locks the deposit-gated convergence: conversion is driven by the SPECIFIC
+// BuyerOfferReview the buyer acted on — one SUBMITTED canonical Offer per
+// non-rejected review item, priced on that item's vehicleIndex — under a CLOSED,
+// deposit-gated Auction with a VehicleRequest link. Real dealers keep their id;
+// unregistered dealers point at the Outside-Dealer placeholder with identity in
+// externalDealer*. Prices pass the shared assertOtdComponentsMatch, and the whole
+// thing is idempotent on Auction.depositId. Hand-rolled transaction client — no DB.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -21,7 +22,7 @@ type AnyRec = Record<string, unknown>;
 
 interface MockState {
   existingAuction: AnyRec | null;
-  vehicleOffer: AnyRec | null;
+  review: AnyRec | null;
   vehicleRequestCreates: AnyRec[];
   auctionCreates: AnyRec[];
   offerCreates: AnyRec[];
@@ -40,8 +41,8 @@ function makeTx(state: MockState) {
         return { id: `auc_${++aucSeq}`, ...data };
       },
     },
-    vehicleOffer: {
-      findUnique: async (_args: AnyRec) => state.vehicleOffer,
+    buyerOfferReview: {
+      findUnique: async (_args: AnyRec) => state.review,
     },
     vehicleRequest: {
       create: async ({ data }: { data: AnyRec }) => {
@@ -58,7 +59,7 @@ function makeTx(state: MockState) {
   } as unknown as Parameters<typeof convertConciergeOfferToClosedAuction>[0];
 }
 
-function baseVehicleOffer(overrides: AnyRec = {}): AnyRec {
+function vehicleOffer(overrides: AnyRec = {}): AnyRec {
   return {
     id: "vo_1",
     vehicleMake: "BMW",
@@ -66,7 +67,6 @@ function baseVehicleOffer(overrides: AnyRec = {}): AnyRec {
     vehicleYear: 2024,
     buyerBudget: "35000",
     createdByAdminId: "admin_1",
-    submissions: [],
     ...overrides,
   };
 }
@@ -84,22 +84,28 @@ function submission(overrides: AnyRec = {}): AnyRec {
   };
 }
 
+function reviewItem(id: string, sub: AnyRec, vehicleIndex = 0): AnyRec {
+  return { id, vehicleIndex, submission: sub };
+}
+
+function review(items: AnyRec[], voOverrides: AnyRec = {}): AnyRec {
+  return { id: "rev_1", vehicleOffer: vehicleOffer(voOverrides), items };
+}
+
 const PARAMS = {
   buyerId: "buyer_1",
   depositId: "dep_1",
-  vehicleOfferId: "vo_1",
+  reviewToken: "rev-token-1",
   outsideDealerId: "outside_dealer_1",
 };
 
-test("happy path: mints CLOSED deposit-gated auction + VehicleRequest + offers", async () => {
+test("happy path: mints CLOSED deposit-gated auction + VehicleRequest + offers from review items", async () => {
   const state: MockState = {
     existingAuction: null,
-    vehicleOffer: baseVehicleOffer({
-      submissions: [
-        submission({ id: "sub_outside", dealerId: null }),
-        submission({ id: "sub_real", dealerId: "dealer_real", vehicles: [{ offerPriceCents: 3835000 }] }),
-      ],
-    }),
+    review: review([
+      reviewItem("it_outside", submission({ id: "sub_outside", dealerId: null })),
+      reviewItem("it_real", submission({ id: "sub_real", dealerId: "dealer_real", vehicles: [{ offerPriceCents: 3835000 }] })),
+    ]),
     vehicleRequestCreates: [],
     auctionCreates: [],
     offerCreates: [],
@@ -110,13 +116,11 @@ test("happy path: mints CLOSED deposit-gated auction + VehicleRequest + offers",
   assert.equal(res.offerIds.length, 2);
   assert.equal(res.skipped, 0);
 
-  // VehicleRequest created for the buyer, seeded from the offer.
   assert.equal(state.vehicleRequestCreates.length, 1);
   assert.equal(state.vehicleRequestCreates[0].buyerId, "buyer_1");
   assert.equal(state.vehicleRequestCreates[0].status, "OFFER_SENT");
   assert.equal(state.vehicleRequestCreates[0].maxBudgetCents, 3500000);
 
-  // Auction is CLOSED, deposit-gated, request-linked, and marked post-close-processed.
   assert.equal(state.auctionCreates.length, 1);
   const auc = state.auctionCreates[0];
   assert.equal(auc.status, "CLOSED");
@@ -129,12 +133,10 @@ test("happy path: mints CLOSED deposit-gated auction + VehicleRequest + offers",
 test("outside dealer → placeholder id + externalDealer*; real dealer → own id, no externalDealer*", async () => {
   const state: MockState = {
     existingAuction: null,
-    vehicleOffer: baseVehicleOffer({
-      submissions: [
-        submission({ id: "sub_outside", dealerId: null, dealershipName: "Outside LLC", contactEmail: "o@x.com", contactPhone: "111" }),
-        submission({ id: "sub_real", dealerId: "dealer_real", vehicles: [{ offerPriceCents: 4000000 }] }),
-      ],
-    }),
+    review: review([
+      reviewItem("it_o", submission({ id: "sub_outside", dealerId: null, dealershipName: "Outside LLC", contactEmail: "o@x.com", contactPhone: "111" })),
+      reviewItem("it_r", submission({ id: "sub_real", dealerId: "dealer_real", vehicles: [{ offerPriceCents: 4000000 }] })),
+    ]),
     vehicleRequestCreates: [],
     auctionCreates: [],
     offerCreates: [],
@@ -147,7 +149,6 @@ test("outside dealer → placeholder id + externalDealer*; real dealer → own i
   assert.equal(outside!.externalDealerEmail, "o@x.com");
   assert.equal(outside!.externalDealerPhone, "111");
   assert.equal(outside!.status, "SUBMITTED");
-  // OTD components reconcile: whole price on the vehicle line, zero tax/fees.
   assert.equal(outside!.otdPriceCents, 3450000);
   assert.equal(outside!.vehiclePriceCents, 3450000);
   assert.equal(outside!.taxCents, 0);
@@ -162,10 +163,52 @@ test("outside dealer → placeholder id + externalDealer*; real dealer → own i
   assert.equal(real!.otdPriceCents, 4000000);
 });
 
+test("prices the EXACT vehicleIndex the buyer was shown, not always vehicles[0]", async () => {
+  const state: MockState = {
+    existingAuction: null,
+    review: review([
+      reviewItem(
+        "it_idx1",
+        submission({
+          id: "sub_multi",
+          dealerId: "d1",
+          vehicles: [{ offerPriceCents: 1000000 }, { offerPriceCents: 2222222 }, { offerPriceCents: 3000000 }],
+        }),
+        1, // buyer was shown vehicles[1]
+      ),
+    ]),
+    vehicleRequestCreates: [],
+    auctionCreates: [],
+    offerCreates: [],
+  };
+  const res = await convertConciergeOfferToClosedAuction(makeTx(state), PARAMS);
+  assert.equal(res.offerIds.length, 1);
+  assert.equal(state.offerCreates[0].otdPriceCents, 2222222, "must price vehicles[1], not vehicles[0]");
+  assert.equal(state.offerCreates[0].vehiclePriceCents, 2222222);
+});
+
+test("only the curated review items convert — submissions not in the review are excluded", async () => {
+  // The VehicleOffer may have more submissions than the review curated; the
+  // converter must NOT surface offers the buyer was never shown. Modeled by the
+  // review carrying exactly one item even though other submissions exist.
+  const state: MockState = {
+    existingAuction: null,
+    review: review([
+      reviewItem("it_only", submission({ id: "sub_curated", dealerId: "d1", vehicles: [{ offerPriceCents: 500000 }] })),
+    ]),
+    vehicleRequestCreates: [],
+    auctionCreates: [],
+    offerCreates: [],
+  };
+  const res = await convertConciergeOfferToClosedAuction(makeTx(state), PARAMS);
+  assert.equal(res.offerIds.length, 1);
+  assert.equal(state.offerCreates[0].otdPriceCents, 500000);
+});
+
 test("idempotent: existing auction for deposit → reuse, no offers created", async () => {
   const state: MockState = {
     existingAuction: { id: "auc_existing", vehicleRequestId: "vr_existing", offers: [{ id: "off_a" }, { id: "off_b" }] },
-    vehicleOffer: baseVehicleOffer(),
+    review: review([reviewItem("it_1", submission())]),
     vehicleRequestCreates: [],
     auctionCreates: [],
     offerCreates: [],
@@ -182,12 +225,10 @@ test("idempotent: existing auction for deposit → reuse, no offers created", as
 test("rejected submissions are skipped", async () => {
   const state: MockState = {
     existingAuction: null,
-    vehicleOffer: baseVehicleOffer({
-      submissions: [
-        submission({ id: "ok", dealerId: "d1", vehicles: [{ offerPriceCents: 100 }] }),
-        submission({ id: "rej", rejected: true, vehicles: [{ offerPriceCents: 200 }] }),
-      ],
-    }),
+    review: review([
+      reviewItem("it_ok", submission({ id: "ok", dealerId: "d1", vehicles: [{ offerPriceCents: 100 }] })),
+      reviewItem("it_rej", submission({ id: "rej", rejected: true, vehicles: [{ offerPriceCents: 200 }] })),
+    ]),
     vehicleRequestCreates: [],
     auctionCreates: [],
     offerCreates: [],
@@ -197,32 +238,31 @@ test("rejected submissions are skipped", async () => {
   assert.equal(res.skipped, 1);
 });
 
-test("malformed / non-positive prices are skipped, not thrown", async () => {
+test("malformed / non-positive / out-of-range prices are skipped, not thrown", async () => {
   const state: MockState = {
     existingAuction: null,
-    vehicleOffer: baseVehicleOffer({
-      submissions: [
-        submission({ id: "empty", vehicles: [] }),
-        submission({ id: "missing", vehicles: [{ make: "BMW" }] }),
-        submission({ id: "zero", vehicles: [{ offerPriceCents: 0 }] }),
-        submission({ id: "neg", vehicles: [{ offerPriceCents: -5 }] }),
-        submission({ id: "good", vehicles: [{ offerPriceCents: 123456 }] }),
-      ],
-    }),
+    review: review([
+      reviewItem("it_empty", submission({ id: "empty", vehicles: [] })),
+      reviewItem("it_missing", submission({ id: "missing", vehicles: [{ make: "BMW" }] })),
+      reviewItem("it_zero", submission({ id: "zero", vehicles: [{ offerPriceCents: 0 }] })),
+      reviewItem("it_neg", submission({ id: "neg", vehicles: [{ offerPriceCents: -5 }] })),
+      reviewItem("it_oor", submission({ id: "oor", vehicles: [{ offerPriceCents: 100 }] }), 3), // index out of range
+      reviewItem("it_good", submission({ id: "good", vehicles: [{ offerPriceCents: 123456 }] })),
+    ]),
     vehicleRequestCreates: [],
     auctionCreates: [],
     offerCreates: [],
   };
   const res = await convertConciergeOfferToClosedAuction(makeTx(state), PARAMS);
   assert.equal(res.offerIds.length, 1);
-  assert.equal(res.skipped, 4);
+  assert.equal(res.skipped, 5);
   assert.equal(state.offerCreates[0].otdPriceCents, 123456);
 });
 
-test("missing VehicleOffer throws ConciergeConversionError", async () => {
+test("missing BuyerOfferReview throws ConciergeConversionError", async () => {
   const state: MockState = {
     existingAuction: null,
-    vehicleOffer: null,
+    review: null,
     vehicleRequestCreates: [],
     auctionCreates: [],
     offerCreates: [],
@@ -233,8 +273,11 @@ test("missing VehicleOffer throws ConciergeConversionError", async () => {
   );
 });
 
-test("extractOfferPriceCents handles shapes", () => {
+test("extractOfferPriceCents handles shapes and index", () => {
   assert.equal(extractOfferPriceCents([{ offerPriceCents: 100 }]), 100);
+  assert.equal(extractOfferPriceCents([{ offerPriceCents: 100 }, { offerPriceCents: 200 }], 1), 200);
+  assert.equal(extractOfferPriceCents([{ offerPriceCents: 100 }], 1), null); // out of range
+  assert.equal(extractOfferPriceCents([{ offerPriceCents: 100 }], -1), null);
   assert.equal(extractOfferPriceCents([]), null);
   assert.equal(extractOfferPriceCents(null), null);
   assert.equal(extractOfferPriceCents([{ offerPriceCents: 0 }]), null);

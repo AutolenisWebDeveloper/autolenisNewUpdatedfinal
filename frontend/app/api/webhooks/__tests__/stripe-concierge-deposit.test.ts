@@ -148,7 +148,7 @@ async function deliver(eventId: string, type: string, object: Record<string, unk
 
 const CONCIERGE_PI = {
   id: "pi_c1",
-  metadata: { type: "concierge_deposit", buyerId: "buyer_c", vehicleOfferId: "vo_1" },
+  metadata: { type: "concierge_deposit", buyerId: "buyer_c", reviewToken: "rev-token-1", vehicleOfferId: "vo_1" },
 };
 
 beforeEach(() => {
@@ -171,7 +171,7 @@ test("fresh concierge deposit: PAID, converts, notifies, claims — no live auct
   assert.equal(db.deposits[0].status, "PAID");
   assert.equal(convertCalls.length, 1);
   assert.deepEqual(convertCalls[0], {
-    buyerId: "buyer_c", depositId: "dep_c", vehicleOfferId: "vo_1", outsideDealerId: "outside_dealer_1",
+    buyerId: "buyer_c", depositId: "dep_c", reviewToken: "rev-token-1", outsideDealerId: "outside_dealer_1",
   });
   assert.equal(db.notifications.length, 1);
   assert.equal(db.notifications[0].title, "Your offers are ready");

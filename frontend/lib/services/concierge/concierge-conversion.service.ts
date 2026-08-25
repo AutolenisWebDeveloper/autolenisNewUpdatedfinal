@@ -43,7 +43,15 @@ export class ConciergeConversionError extends Error {
 export interface ConvertConciergeParams {
   buyerId: string;
   depositId: string;
-  vehicleOfferId: string;
+  /**
+   * The specific BuyerOfferReview the buyer acted on (the reviewToken they came
+   * through). Conversion is driven by THIS review's curated items — one canonical
+   * Offer per non-rejected item, priced on that item's vehicleIndex — NOT by every
+   * submission on the VehicleOffer. A VehicleOffer can have several reviews (each
+   * a different curated subset sent to a buyer); keying off the review is what
+   * guarantees the buyer can only accept an offer they were actually shown.
+   */
+  reviewToken: string;
   /**
    * The system "Outside Dealer" placeholder id, resolved by the caller via
    * getOrCreateOutsideDealerId() BEFORE opening the transaction (that helper
@@ -58,7 +66,7 @@ export interface ConvertConciergeResult {
   offerIds: string[];
   /** true when an auction already existed for this deposit (idempotent reuse). */
   reused: boolean;
-  /** submissions read that were skipped (rejected or malformed price). */
+  /** curated review items read that were skipped (rejected or malformed price). */
   skipped: number;
 }
 
@@ -68,15 +76,18 @@ interface DealerVehicleLike {
 }
 
 /**
- * Extract the OTD price (in integer cents) from a DealerOfferSubmission.vehicles
- * JSON payload. Returns null when the payload is empty, malformed, or the price
- * is missing / non-positive / non-integer.
+ * Extract the OTD price (in integer cents) from the vehicle at `index` in a
+ * DealerOfferSubmission.vehicles JSON payload. The index comes from the curated
+ * BuyerOfferReviewItem.vehicleIndex — the exact vehicle the buyer was shown — so
+ * a multi-vehicle submission is priced on the shown line, not always vehicles[0].
+ * Returns null when the payload is empty, the index is out of range, the element
+ * is malformed, or the price is missing / non-positive / non-integer.
  */
-export function extractOfferPriceCents(vehicles: unknown): number | null {
-  if (!Array.isArray(vehicles) || vehicles.length === 0) return null;
-  const first = vehicles[0] as DealerVehicleLike | null;
-  if (!first || typeof first !== "object") return null;
-  const raw = (first as DealerVehicleLike).offerPriceCents;
+export function extractOfferPriceCents(vehicles: unknown, index = 0): number | null {
+  if (!Array.isArray(vehicles) || index < 0 || index >= vehicles.length) return null;
+  const entry = vehicles[index] as DealerVehicleLike | null;
+  if (!entry || typeof entry !== "object") return null;
+  const raw = (entry as DealerVehicleLike).offerPriceCents;
   if (typeof raw !== "number" || !Number.isFinite(raw) || !Number.isInteger(raw) || raw <= 0) {
     return null;
   }
@@ -105,14 +116,14 @@ export function parseBudgetToCents(budget: string | null | undefined): number | 
  * Convert a concierge VehicleOffer into a deposit-gated CLOSED Auction with
  * canonical Offers, inside the caller's transaction. Idempotent on the deposit.
  *
- * @throws ConciergeConversionError if the source VehicleOffer no longer exists
- *   (a real integrity failure — the offer was validated at deposit-intent time).
+ * @throws ConciergeConversionError if the BuyerOfferReview no longer exists
+ *   (a real integrity failure — the review was validated at deposit-intent time).
  */
 export async function convertConciergeOfferToClosedAuction(
   tx: Prisma.TransactionClient,
   params: ConvertConciergeParams,
 ): Promise<ConvertConciergeResult> {
-  const { buyerId, depositId, vehicleOfferId, outsideDealerId } = params;
+  const { buyerId, depositId, reviewToken, outsideDealerId } = params;
   const now = new Date();
 
   // Idempotency anchor: Auction.depositId is unique. If a prior (partial or
@@ -132,15 +143,23 @@ export async function convertConciergeOfferToClosedAuction(
     };
   }
 
-  const vehicleOffer = await tx.vehicleOffer.findUnique({
-    where: { id: vehicleOfferId },
-    include: { submissions: true },
+  // Drive conversion from the SPECIFIC review the buyer acted on — its curated
+  // items (each a submission + the exact vehicleIndex shown), not every
+  // submission on the VehicleOffer. This is what keeps the buyer's selectable set
+  // identical to what the admin sent them.
+  const review = await tx.buyerOfferReview.findUnique({
+    where: { reviewToken },
+    include: {
+      vehicleOffer: true,
+      items: { include: { submission: true }, orderBy: { id: "asc" } },
+    },
   });
-  if (!vehicleOffer) {
+  if (!review) {
     throw new ConciergeConversionError(
-      `VehicleOffer ${vehicleOfferId} not found — cannot convert concierge deposit ${depositId}`,
+      `BuyerOfferReview ${reviewToken} not found — cannot convert concierge deposit ${depositId}`,
     );
   }
+  const vehicleOffer = review.vehicleOffer;
 
   // A VehicleRequest for the authenticated buyer, seeded from the concierge
   // offer, gives the canonical Auction.vehicleRequestId link. Status OFFER_SENT:
@@ -156,7 +175,7 @@ export async function convertConciergeOfferToClosedAuction(
       yearMin: vehicleOffer.vehicleYear,
       yearMax: vehicleOffer.vehicleYear,
       maxBudgetCents: parseBudgetToCents(vehicleOffer.buyerBudget),
-      notes: `Concierge convergence from vehicle offer ${vehicleOffer.id}`,
+      notes: `Concierge convergence from vehicle offer ${vehicleOffer.id} (review ${review.id})`,
       assignedAdminId: vehicleOffer.createdByAdminId,
     },
     select: { id: true },
@@ -182,17 +201,20 @@ export async function convertConciergeOfferToClosedAuction(
   const offerIds: string[] = [];
   let skipped = 0;
 
-  for (const submission of vehicleOffer.submissions) {
+  for (const item of review.items) {
+    const submission = item.submission;
     // Only non-rejected submissions become offers.
-    if (submission.rejected) {
+    if (!submission || submission.rejected) {
       skipped++;
       continue;
     }
 
-    const otdPriceCents = extractOfferPriceCents(submission.vehicles);
+    // Price the EXACT vehicle the buyer was shown (item.vehicleIndex), not
+    // always vehicles[0].
+    const otdPriceCents = extractOfferPriceCents(submission.vehicles, item.vehicleIndex);
     if (otdPriceCents == null) {
       logger.warn(
-        `[concierge-conversion] skipping submission ${submission.id}: no valid offerPriceCents (deposit ${depositId})`,
+        `[concierge-conversion] skipping review item ${item.id} (submission ${submission.id}, vehicleIndex ${item.vehicleIndex}): no valid offerPriceCents (deposit ${depositId})`,
       );
       skipped++;
       continue;
@@ -212,7 +234,7 @@ export async function convertConciergeOfferToClosedAuction(
       });
     } catch (err) {
       logger.warn(
-        `[concierge-conversion] skipping submission ${submission.id}: OTD assertion failed (${(err as Error).message})`,
+        `[concierge-conversion] skipping review item ${item.id} (submission ${submission.id}): OTD assertion failed (${(err as Error).message})`,
       );
       skipped++;
       continue;
@@ -240,7 +262,7 @@ export async function convertConciergeOfferToClosedAuction(
         externalDealerName: isOutside ? submission.dealershipName : null,
         externalDealerEmail: isOutside ? submission.contactEmail : null,
         externalDealerPhone: isOutside ? submission.contactPhone : null,
-        notes: `Converted from concierge dealer submission ${submission.id}`,
+        notes: `Converted from concierge dealer submission ${submission.id} (review item ${item.id}, vehicleIndex ${item.vehicleIndex})`,
       },
       select: { id: true },
     });
