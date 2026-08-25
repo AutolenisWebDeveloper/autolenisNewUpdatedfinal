@@ -51,8 +51,8 @@ async function loadEngine() {
   // eligibility-skip logic. `this.enrollContact` in triggerForEvent resolves to
   // this static property.
   (mod.WorkflowEngine as unknown as { enrollContact: (...a: unknown[]) => Promise<unknown> }).enrollContact =
-    async (_s: unknown, workflowId: string) => {
-      enrollCalls.push(workflowId);
+    async (...args: unknown[]) => {
+      enrollCalls.push(args[1] as string);
       return true;
     };
   return mod.WorkflowEngine;
