@@ -14,6 +14,9 @@ import assert from "node:assert/strict";
 let opp: Record<string, unknown> | null;
 let prospectRows: Array<Record<string, unknown>> = [];
 let prospectFindThrows = false;
+// $99 pre-activation gate: default PAID so the existing status tests exercise the
+// post-gate outreach logic; the gate itself is covered by a dedicated test below.
+let depositPaid = true;
 let sendResult: () => { success: boolean; error?: string; reason?: string } = () => ({ success: true });
 
 mock.module("@/lib/prisma", {
@@ -21,6 +24,7 @@ mock.module("@/lib/prisma", {
     prisma: {
       buyerOpportunity: { findUnique: async () => opp },
       buyer: { findUnique: async () => ({ city: "Dallas", state: "TX" }) },
+      deposit: { findFirst: async () => (depositPaid ? { id: "dep_1" } : null) },
       dealerProspect: {
         findMany: async () => {
           if (prospectFindThrows) throw new Error("db connection lost");
@@ -48,7 +52,29 @@ beforeEach(() => {
   opp = { id: "opp_1", buyerId: "b1", make: "Toyota", model: "Camry", yearMin: null, yearMax: null, budgetAmount: 30000, vehicleType: "used", timeline: "this_week", zip: "75001" };
   prospectRows = [];
   prospectFindThrows = false;
+  depositPaid = true;
   sendResult = () => ({ success: true });
+});
+
+// $99 PRE-ACTIVATION COST GATE — no PAID deposit ⇒ outreach never fires.
+test("no PAID $99 deposit → SKIPPED (awaiting_deposit_gate), prospects never fetched/contacted", async () => {
+  depositPaid = false;
+  prospectRows = [{ id: "p1", name: "D1", contactName: null, email: "d1@x.com", city: "Dallas", state: "TX" }];
+  sendResult = () => ({ success: true });
+  const run = await load();
+  const r = await run("opp_1");
+  assert.equal(r.status, "SKIPPED");
+  assert.equal(r.reason, "awaiting_deposit_gate");
+  assert.equal(r.dealersContacted, 0, "an unpaid buyer never triggers dealer outreach");
+});
+
+test("anonymous opportunity (no buyerId) → SKIPPED (cannot have paid)", async () => {
+  opp = { ...(opp as object), buyerId: null };
+  prospectRows = [{ id: "p1", name: "D1", contactName: null, email: "d1@x.com", city: "Dallas", state: "TX" }];
+  const run = await load();
+  const r = await run("opp_1");
+  assert.equal(r.status, "SKIPPED");
+  assert.equal(r.reason, "awaiting_deposit_gate");
 });
 
 test("no make → SKIPPED", async () => {

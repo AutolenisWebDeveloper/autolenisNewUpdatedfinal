@@ -7,6 +7,7 @@ import { getStripe } from "@/lib/stripe";
 import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import { limitPaymentIntent, clientIpKey } from "@/lib/security/rate-limit";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
+import { cancelPreCheckoutTouches } from "@/lib/services/crm/lifecycle-touch-drain.service";
 
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
@@ -199,46 +200,64 @@ export async function POST(request: NextRequest) {
       update: {},
     });
 
-    // QStash — start the deposit-activation reminder sequence. The job
-    // self-stops once the deposit is PAID, so re-creating an intent is safe.
-    const buyerContact = await prisma.buyer.findUnique({
-      where: { id: buyer.id },
-      select: { firstName: true, lastName: true, phone: true, user: { select: { email: true } } },
-    });
-    if (buyerContact?.user?.email) {
-      scheduleLifecycleWorkload({
-        workload: "deposit_reminder",
-        buyerId: buyer.id,
-        firstName: buyerContact.firstName,
-        email: buyerContact.user.email,
-      }).catch(() => {});
-    }
+    // CONCIERGE EXCLUSION (Section 2): concierge deposits (reviewToken present)
+    // have their own review-link CTA and must NEVER also receive the generic
+    // "$99 deposit" reminder sequence or the abandoned-deposit nurture. Only the
+    // normal competitive path enrolls — everything below is gated on !concierge.
+    if (!conciergeReviewToken) {
+      // Start the $99 deposit-conversion reminder via the lifecycle scheduler
+      // (single authority: QStash by default; internal lifecycle_touch once the
+      // LIFECYCLE_INTERNAL_DEPOSIT_REMINDER flag is cut over). Self-stops once the
+      // deposit is PAID (send-time guard), so re-creating an intent is safe.
+      const buyerContact = await prisma.buyer.findUnique({
+        where: { id: buyer.id },
+        select: { firstName: true, lastName: true, phone: true, user: { select: { email: true } } },
+      });
+      if (buyerContact?.user?.email) {
+        // Best-effort tail — never affects the payment response.
+        scheduleLifecycleWorkload({
+          workload: "deposit_reminder",
+          buyerId: buyer.id,
+          firstName: buyerContact.firstName,
+          email: buyerContact.user.email,
+          phone: buyerContact.phone,
+        }).catch((err) => logger.error("[deposit/create-intent] reminder enrollment failed:", err));
+      }
 
-    // F-037 — emit the deposit_pending domain event. It was defined in the
-    // WorkflowTriggerType union but never fired, so the prebuilt 1h→24h→72h
-    // abandoned-deposit nurture (workflow.prebuilt.ts) was dead. Emitting it
-    // here (deposit intent created, not yet paid) revives that recovery
-    // sequence. Tail call: never throws, never affects the payment response.
-    if (buyerContact) {
-      try {
-        const { emitDomainEvent } = await import("@/lib/events/emit");
-        await emitDomainEvent("deposit_pending", {
-          domainEntityId: buyer.id,
-          contact: {
-            email: buyerContact.user?.email ?? null,
-            phone: buyerContact.phone,
-            firstName: buyerContact.firstName,
-            lastName: buyerContact.lastName,
-            source: "buyer_signup",
-          },
-          data: {
-            buyer_id: buyer.id,
-            amount_cents: DEPOSIT_AMOUNT_CENTS,
-            deposit_url: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/deposit`,
-          },
-        });
-      } catch (err) {
-        logger.error("[deposit/create-intent] deposit_pending emit failed:", err);
+      // HANDOFF: a competitive PENDING deposit now exists → the pre-checkout stage
+      // hands off to deposit_reminder. Cancel any remaining pre-checkout touches so
+      // the two stages never run against the same buyer at once (the send-time
+      // preCheckoutResolved guard is the authoritative backstop). Best-effort.
+      cancelPreCheckoutTouches(buyer.id).catch((err) =>
+        logger.error("[deposit/create-intent] pre-checkout cancel failed:", err),
+      );
+
+      // F-037 — emit the deposit_pending domain event. It was defined in the
+      // WorkflowTriggerType union but never fired, so the prebuilt 1h→24h→72h
+      // abandoned-deposit nurture (workflow.prebuilt.ts) was dead. Emitting it
+      // here (deposit intent created, not yet paid) revives that recovery
+      // sequence. Tail call: never throws, never affects the payment response.
+      if (buyerContact) {
+        try {
+          const { emitDomainEvent } = await import("@/lib/events/emit");
+          await emitDomainEvent("deposit_pending", {
+            domainEntityId: buyer.id,
+            contact: {
+              email: buyerContact.user?.email ?? null,
+              phone: buyerContact.phone,
+              firstName: buyerContact.firstName,
+              lastName: buyerContact.lastName,
+              source: "buyer_signup",
+            },
+            data: {
+              buyer_id: buyer.id,
+              amount_cents: DEPOSIT_AMOUNT_CENTS,
+              deposit_url: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/deposit`,
+            },
+          });
+        } catch (err) {
+          logger.error("[deposit/create-intent] deposit_pending emit failed:", err);
+        }
       }
     }
 
