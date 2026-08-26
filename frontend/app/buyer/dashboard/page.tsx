@@ -536,7 +536,7 @@ export default async function BuyerDashboard() {
               <h2 className="text-lg font-bold text-slate-900 mb-2">Your auction is live</h2>
               <p className="text-sm text-slate-600 leading-relaxed mb-4">
                 {latestAuction._count.offers === 0
-                  ? "Dealers are reviewing your request. Check back soon for offers."
+                  ? "Your auction is live. You'll see offers here as dealers submit them."
                   : `You have ${latestAuction._count.offers} offer${latestAuction._count.offers !== 1 ? "s" : ""} waiting. Review and compare them now.`}
               </p>
               <Link href="/buyer/auctions"

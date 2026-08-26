@@ -6,6 +6,10 @@ import { refundDepositCharge } from "@/lib/services/payment/refund.service";
 import { AUCTION_DURATION_HOURS } from "@/lib/constants";
 import { sendDealerAuctionInvitationEmail } from "@/lib/services/email/resend.service";
 import { processAuctionClose } from "@/lib/services/auction/auction.service";
+import {
+  checkDealerAuctionInvitable,
+  isConciergeConvertedAuction,
+} from "@/lib/services/dealer/dealer-auction-eligibility.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 interface Props { params: Promise<{ auctionId: string }> }
@@ -41,7 +45,23 @@ export async function POST(request: NextRequest, { params }: Props) {
       break;
     }
     case "AUCTION_EXTENDED": {
+      // Program 3 — an extension only makes sense for a live auction. Refusing
+      // terminal states (a) is correct domain behavior and (b) closes a concierge
+      // isolation bypass: extending a concierge CLOSED auction would push endsAt
+      // past startedAt and erase the structural concierge signature, after which
+      // AUCTION_REOPENED would no longer be blocked. Blocking the extend at the
+      // source (concierge auctions are always CLOSED) makes that two-step attack
+      // fail at step 1.
+      if (["CLOSED", "EXPIRED", "CANCELLED"].includes(auction.status)) {
+        return adminError("INVALID_STATE", `Cannot extend an auction that is ${auction.status.toLowerCase()}`, 400);
+      }
       const addHours = hours ?? 24;
+      // Reject non-positive / non-finite hours — a negative extension could move
+      // endsAt to or before startedAt and spoof the concierge signature on a
+      // genuine auction (blocking its later reopen).
+      if (!Number.isFinite(addHours) || addHours <= 0) {
+        return adminError("INVALID_HOURS", "Extension hours must be a positive number", 400);
+      }
       const currentEnd = auction.endsAt ?? new Date();
       const newEnd = new Date(currentEnd.getTime() + addHours * 3600000);
       await prisma.auction.update({
@@ -76,6 +96,18 @@ export async function POST(request: NextRequest, { params }: Props) {
       if (!dealerId) return adminError("DEALER_ID_REQUIRED", "dealerId is required", 400);
       const dealer = await prisma.dealer.findUnique({ where: { id: dealerId }, include: { user: true } });
       if (!dealer) return adminError("DEALER_NOT_FOUND", "Dealer not found", 404);
+
+      // Program 3 — route this admin invitation through the canonical invitability
+      // decision so the manual single-invite enforces the same eligibility the bulk
+      // paths do: an OPEN competitive auction (never a concierge-converted CLOSED
+      // auction), an ACTIVE non-placeholder dealer, and the same verification gate
+      // (getDealerVerificationEligibility) filterAuctionEligibleDealerIds uses.
+      // Closes the admin bypass of the dealer_verification_gate and the
+      // concierge-auction reinvite hole.
+      const invitability = await checkDealerAuctionInvitable(auctionId, dealerId);
+      if (!invitability.invitable) {
+        return adminError("DEALER_NOT_INVITABLE", `Dealer cannot be invited to this auction: ${invitability.reason}`, 400);
+      }
 
       // Idempotent — skip if invitation already exists
       const existing = await prisma.auctionInvitation.findFirst({ where: { auctionId, dealerId } });
@@ -177,6 +209,13 @@ export async function POST(request: NextRequest, { params }: Props) {
       // Only allow re-opening CLOSED or EXPIRED auctions — not CANCELLED
       if (!["CLOSED", "EXPIRED"].includes(auction.status)) {
         return adminError("INVALID_STATE", "Only CLOSED or EXPIRED auctions can be reopened", 400);
+      }
+      // Program 3 — a concierge-converted CLOSED auction is NOT a competitive
+      // auction and must never be reopened into the live-auction lifecycle. It is
+      // born CLOSED with pre-attached offers and zero invitations; reopening it
+      // would corrupt its status/endsAt and expose it to competitive machinery.
+      if (isConciergeConvertedAuction(auction)) {
+        return adminError("CONCIERGE_AUCTION", "A concierge auction cannot be reopened into a competitive auction", 400);
       }
       const newEndsAt = new Date(Date.now() + AUCTION_DURATION_HOURS * 3600000);
       await prisma.auction.update({

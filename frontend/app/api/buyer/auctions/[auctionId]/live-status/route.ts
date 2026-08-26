@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { deriveAuctionEngagement } from "@/lib/services/auction/auction-engagement";
 
 interface Props { params: Promise<{ auctionId: string }> }
 
@@ -32,9 +33,10 @@ export async function GET(request: NextRequest, { params }: Props) {
   // Total dealers invited = registered invitations + outside (unregistered) invites.
   const dealersInvited = auction._count.invitations + auction._count.outsideInvites;
 
-  // Anonymous engagement signal (no amounts, no dealer names)
-  const engagementLevel = offerCount >= 5 ? "Very High" : offerCount >= 3 ? "High" : offerCount >= 1 ? "Active" : "Building";
-  const aboveAverage = offerCount >= 3; // Platform baseline
+  // Program 3 — TRUTHFUL engagement signal (no amounts, no dealer names). Real
+  // participation is SUBMITTED offers only; the buyer is never told dealers are
+  // bidding/reviewing merely because an auction record or invitation exists.
+  const engagement = deriveAuctionEngagement({ status: auction.status, dealersInvited, offerCount });
 
   return successResponse({
     status: auction.status,
@@ -42,7 +44,8 @@ export async function GET(request: NextRequest, { params }: Props) {
     endsAt: auction.endsAt,
     offerCount, // Count only — no amounts
     dealersInvited, // Group 7 (7B) — count only, no dealer identities
-    engagementLevel,
-    socialProof: aboveAverage ? "Your auction is performing above average" : "Dealers are reviewing your request",
+    dealersBidding: engagement.dealersBidding, // real participation (== offerCount)
+    engagementLevel: engagement.engagementLevel,
+    socialProof: engagement.socialProof,
   });
 }
