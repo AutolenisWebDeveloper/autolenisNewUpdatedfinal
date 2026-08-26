@@ -200,17 +200,29 @@ export async function generateAndUploadExecutedContract(
     const hash = createHash("sha256").update(pdfBuffer).digest("hex");
     const storagePath = `executed/${payload.dealId}/${payload.envelopeId}.pdf`;
     const supabase = createServiceSupabaseClient();
-    // upsert:true is idempotent for regeneration from the SAME frozen evidence;
-    // callers guard the DB write so a COMPLETED artifact reference is never
-    // overwritten (immutability is enforced at the DB layer, not here).
+    // upsert:FALSE — the executed artifact is immutable. A concurrent or prior
+    // generation that already wrote this path must NEVER be overwritten (pdfkit
+    // assigns a random document /ID per run, so re-uploaded bytes would differ and
+    // the recorded hash would stop matching the stored file).
     const { error } = await supabase.storage
       .from(STORAGE_BUCKET)
-      .upload(storagePath, pdfBuffer, { contentType: "application/pdf", upsert: true });
-    if (error) {
-      logger.error("[executed-contract] upload failed:", error);
+      .upload(storagePath, pdfBuffer, { contentType: "application/pdf", upsert: false });
+    if (!error) {
+      // We wrote the object → our in-memory bytes ARE the stored bytes.
+      return { key: storagePath, hash };
+    }
+    // Upload failed. The overwhelmingly common cause is "already exists" (a
+    // concurrent/prior generation won). Adopt the STORED object as authoritative
+    // and derive the hash from ITS bytes, so the recorded hash always matches what
+    // is actually stored. If we can't read it back, the write genuinely failed.
+    const { data: existing, error: dlErr } = await supabase.storage.from(STORAGE_BUCKET).download(storagePath);
+    if (dlErr || !existing) {
+      logger.error("[executed-contract] upload failed and stored artifact is unreadable:", error, dlErr);
       return null;
     }
-    return { key: storagePath, hash };
+    const storedBytes = new Uint8Array(await existing.arrayBuffer());
+    const storedHash = createHash("sha256").update(Buffer.from(storedBytes)).digest("hex");
+    return { key: storagePath, hash: storedHash };
   } catch (err) {
     logger.error("[executed-contract] generation failed:", err);
     return null;

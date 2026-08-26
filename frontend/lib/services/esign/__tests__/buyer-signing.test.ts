@@ -38,6 +38,9 @@ interface Ctrl {
   emits: Array<{ event: string }>;
   buyerEmails: Array<Record<string, unknown>>;
   dealerPlaceholder: boolean;
+  // When set, findUnique returns this status instead of the row's actual status —
+  // simulating a stale read that a concurrent write has since changed (TOCTOU).
+  staleStatus?: string;
 }
 let ctrl: Ctrl;
 
@@ -103,7 +106,7 @@ mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
       eSignEnvelope: {
-        findUnique: async () => (ctrl.env ? { ...ctrl.env } : null),
+        findUnique: async () => (ctrl.env ? { ...ctrl.env, ...(ctrl.staleStatus ? { status: ctrl.staleStatus } : {}) } : null),
         findMany: async ({ where }: { where: Record<string, unknown> }) => {
           const list = ctrl.env ? [ctrl.env] : [];
           return list.filter((e) => matchesWhere(e, where ?? {})).map((e) => ({ ...e }));
@@ -331,6 +334,24 @@ test("expiry does not touch a COMPLETED envelope", async () => {
   const { expireIfElapsed } = await load();
   assert.equal(await expireIfElapsed("d1"), false);
   assert.equal(ctrl.env?.status, "COMPLETED");
+});
+
+test("expiry is CAS-guarded — a concurrent completion between read and write is never overwritten to EXPIRED", async () => {
+  // The row has actually COMPLETED, but expireIfElapsed observed a stale SENT read.
+  ctrl.env = { id: "env_1", ...defaultEnv(), status: "COMPLETED", signedAt: new Date(), expiresAt: new Date(Date.now() - 1000) };
+  ctrl.staleStatus = "SENT"; // findUnique returns SENT; the CAS then fails against the real COMPLETED
+  const { expireIfElapsed } = await load();
+  const result = await expireIfElapsed("d1");
+  assert.equal(result, false, "the stale expiry loses the CAS");
+  assert.equal(ctrl.env?.status, "COMPLETED", "the completed signed record is NOT overwritten to EXPIRED");
+});
+
+test("signing a lapsed-but-unswept envelope is rejected (TTL enforced) and records no signature", async () => {
+  ctrl.env = { id: "env_1", ...defaultEnv(), status: "SENT", documentVersionId: "cv_1", documentHash: hashOf("THE CONTRACT BYTES"), expiresAt: new Date(Date.now() - 1000) };
+  const { recordBuyerSignature, EnvelopeNotSignableError } = await load();
+  await assert.rejects(() => recordBuyerSignature(goodSig), (e: unknown) => e instanceof EnvelopeNotSignableError);
+  assert.equal(ctrl.env?.status, "EXPIRED", "the lapsed envelope is expired, not signed");
+  assert.equal(ctrl.env?.consentSnapshot, null, "no consent/signature recorded on a lapsed envelope");
 });
 
 test("certificate is generated once, corresponds to the signed document hash, and is idempotent", async () => {

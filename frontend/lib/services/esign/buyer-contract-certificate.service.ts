@@ -138,14 +138,17 @@ export async function generateAndUploadBuyerContractCertificate(
     const pdfBuffer = await buildCertificatePdf(payload);
     const storagePath = `buyer-contracts/${payload.dealId}/${payload.envelopeId}.pdf`;
     const supabase = createServiceSupabaseClient();
+    // upsert:FALSE — the evidence certificate is immutable. If a concurrent/prior
+    // generation already wrote this path, adopt it rather than overwriting.
     const { error } = await supabase.storage
       .from(STORAGE_BUCKET)
-      .upload(storagePath, pdfBuffer, { contentType: "application/pdf", upsert: true });
-    if (error) {
-      logger.error("[buyer-contract-certificate] upload failed:", error);
-      return null;
-    }
-    return storagePath;
+      .upload(storagePath, pdfBuffer, { contentType: "application/pdf", upsert: false });
+    if (!error) return storagePath;
+    // Upload failed — if the object already exists, treat it as authoritative.
+    const { data: existing } = await supabase.storage.from(STORAGE_BUCKET).download(storagePath);
+    if (existing) return storagePath;
+    logger.error("[buyer-contract-certificate] upload failed:", error);
+    return null;
   } catch (err) {
     logger.error("[buyer-contract-certificate] generation failed:", err);
     return null;

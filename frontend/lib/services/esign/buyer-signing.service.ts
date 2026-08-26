@@ -328,6 +328,13 @@ export async function recordBuyerSignature(params: RecordSignatureParams): Promi
   if (envelope.status !== "SENT" && envelope.status !== "DELIVERED" && envelope.status !== "PENDING") {
     throw new EnvelopeNotSignableError(envelope.status);
   }
+  // A lapsed signing window is not signable, even if the hourly sweep hasn't run
+  // yet: lazily expire it (CAS) and reject, so the TTL is actually enforced and no
+  // signature can land on an expired envelope.
+  if (envelope.expiresAt && envelope.expiresAt.getTime() < Date.now()) {
+    await expireIfElapsed(params.dealId);
+    throw new EnvelopeNotSignableError(ESignStatus.EXPIRED);
+  }
   if (!envelope.documentVersionId) throw new NoSignableDocumentError();
 
   const contract = await prisma.contractVersion.findUnique({ where: { id: envelope.documentVersionId } });
@@ -579,13 +586,20 @@ export async function reconcileSignedContracts(
   return { scanned: pendingEnvelopes.length, finalized, pending, stuck };
 }
 
-/** Lazy expiry: mark a prepared-but-unsigned envelope EXPIRED once past its TTL. */
+/** Lazy expiry: mark a prepared-but-unsigned envelope EXPIRED once past its TTL.
+ *  Compare-and-swap on the OBSERVED non-terminal status so a signature that
+ *  completes concurrently (SENT→COMPLETED between the read and the write) can never
+ *  be overwritten to EXPIRED — a terminal signed record stays immutable. */
 export async function expireIfElapsed(dealId: string): Promise<boolean> {
   const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
   if (!envelope || !envelope.expiresAt) return false;
   const signable = envelope.status === "SENT" || envelope.status === "DELIVERED" || envelope.status === "PENDING";
   if (signable && envelope.expiresAt.getTime() < Date.now()) {
-    await prisma.eSignEnvelope.update({ where: { dealId }, data: { status: ESignStatus.EXPIRED } });
+    const swap = await prisma.eSignEnvelope.updateMany({
+      where: { id: envelope.id, status: envelope.status }, // CAS: only if still the observed signable status
+      data: { status: ESignStatus.EXPIRED },
+    });
+    if (swap.count === 0) return false; // it changed under us (e.g. completed) — do not touch it
     await writeExceptionAudit(dealId, envelope.id, "ESIGN_ENVELOPE_EXPIRED", "Signing window elapsed");
     return true;
   }
@@ -729,12 +743,14 @@ async function ensureExecutedArtifact(envelope: EnvelopeRow): Promise<string | n
 }
 
 /**
- * Emit the buyer + dealer "your signed contract is ready" confirmations, exactly
- * once, only after the executed artifact + certificate are both available. Gated
- * by the one-way confirmationsSentAt marker; every channel is independently
- * idempotent (buyer email via EmailSendLog key; dealer notification deduped on a
- * stable metadata key), so a re-run never double-notifies. Returns true if this
- * call emitted (or confirmed) the confirmations.
+ * Emit the buyer + dealer "your signed contract is ready" confirmations, only
+ * after the executed artifact + certificate are both available. Gated by the
+ * one-way confirmationsSentAt marker so the normal re-drive path never re-sends.
+ * Each channel is independently idempotent against that path: the buyer email is
+ * exactly-once (EmailSendLog idempotency key); the dealer in-app notification is
+ * deduped on a stable metadata key (best-effort — a check-then-insert, so two
+ * truly-concurrent first runs could in principle create two rows; the CRM event is
+ * likewise at-least-once). Returns true if this call emitted (or confirmed) them.
  */
 async function emitSignatureConfirmations(dealId: string): Promise<boolean> {
   const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
