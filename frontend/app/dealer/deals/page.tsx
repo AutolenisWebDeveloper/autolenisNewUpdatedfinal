@@ -31,7 +31,7 @@ export default async function DealerDealsPage() {
     <PageContainer testId="dealer-deals-page">
       <PageHeader
         title="My Deals"
-        subtitle="Auctions you've won, tracked through contract, signing, and pickup."
+        subtitle="Auctions you've won, tracked through contract, buyer signing, and pickup."
         actions={<Badge variant="secondary">{deals.length}</Badge>}
       />
 

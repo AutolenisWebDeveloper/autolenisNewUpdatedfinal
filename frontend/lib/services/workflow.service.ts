@@ -24,7 +24,7 @@ const TRIGGER_TYPES: WorkflowTriggerType[] = [
   'auction_started',
   'offer_received',
   'offer_selected',
-  'docusign_signed',
+  'contract_signed',
   'purchase_completed',
   'refinance_inquiry',
   'dealer_invited',

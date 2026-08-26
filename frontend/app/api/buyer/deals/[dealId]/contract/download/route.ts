@@ -18,7 +18,7 @@ export async function GET(request: NextRequest, { params }: Props) {
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
   // ESignEnvelope does not yet store a document URL — it will be populated
-  // once the DocuSign envelope is completed and the PDF is retrieved.
+  // once the signature completes and the executed record is available.
   // For now, return a clear 404 so the UI can display an appropriate message.
   if (!deal.eSignEnvelope) {
     return errorResponse(
@@ -31,16 +31,17 @@ export async function GET(request: NextRequest, { params }: Props) {
   if (deal.eSignEnvelope.status !== "COMPLETED") {
     return errorResponse(
       "NOT_AVAILABLE",
-      "Contract document is not yet available. It will be accessible after all documents have been signed.",
+      "Your signed contract isn't available yet. It will be accessible once you've completed signing.",
       404
     );
   }
 
-  // documentKey is the private-bucket storage path of the executed signed PDF,
-  // populated on envelope-completed (esign.service). Null means retrieval hasn't
-  // succeeded yet — report a clear not-yet-available rather than a crash.
-  const documentKey = deal.eSignEnvelope.documentKey;
-  if (!documentKey) {
+  // The EXECUTED contract artifact (§4) — generated in-house from the pinned,
+  // hashed contract + the buyer's signature/consent evidence. Prefer it; fall
+  // back to the legacy DocuSign documentKey only for pre-cutover historical
+  // envelopes. Null on both means finalization hasn't completed yet.
+  const executedKey = deal.eSignEnvelope.executedDocumentKey ?? deal.eSignEnvelope.documentKey;
+  if (!executedKey) {
     return errorResponse(
       "NOT_AVAILABLE",
       "Your signed contract is being finalized and will be available shortly. Please check back soon.",
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest, { params }: Props) {
     const supabase = createServiceSupabaseClient();
     const { data, error } = await supabase.storage
       .from("contracts")
-      .createSignedUrl(documentKey, 900);
+      .createSignedUrl(executedKey, 900);
     if (error || !data?.signedUrl) {
       return errorResponse("STORAGE_ERROR", "Could not generate download link.", 500);
     }

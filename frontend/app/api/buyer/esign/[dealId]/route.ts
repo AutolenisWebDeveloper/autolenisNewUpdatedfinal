@@ -2,57 +2,72 @@ import { NextRequest } from "next/server";
 import { logger } from "@/lib/logger";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
-import { createDealerEnvelopeFromTemplate } from "@/lib/services/esign/envelope-template.service";
 import { advanceDealStatus, DealTransitionError } from "@/lib/services/deal/deal.service";
-
-// Sentinel value stored by old sandbox mock path — used to detect stale mock envelopes
-const MOCK_ENVELOPE_SENTINEL = "mock-envelope-id";
+import {
+  prepareBuyerSigningEnvelope,
+  getContractViewUrl,
+  ensureDealSigned,
+  expireIfElapsed,
+  NoSignableDocumentError,
+} from "@/lib/services/esign/buyer-signing.service";
+import { toBuyerEnvelopeSummary } from "@/lib/services/esign/esign-dto";
 
 interface Props { params: Promise<{ dealId: string }> }
 
+// GET — buyer reads their in-house signing state. Returns the envelope, the
+// deal status, and (when signable) a short-lived URL to VIEW the contract being
+// signed. Self-heals a completed-but-not-yet-SIGNED deal and lazily expires a
+// stale signing window — no reconciliation cron needed.
 export async function GET(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
+
   const deal = await prisma.deal.findFirst({ where: { id: dealId, buyerId: buyer.id }, include: { eSignEnvelope: true } });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
-  return successResponse({ envelope: deal.eSignEnvelope, dealStatus: deal.status });
+
+  await expireIfElapsed(dealId);
+  if (deal.eSignEnvelope?.status === "COMPLETED") await ensureDealSigned(dealId, buyer.id);
+
+  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  let contractViewUrl: string | null = null;
+  const signable = envelope?.status === "SENT" || envelope?.status === "DELIVERED" || envelope?.status === "PENDING";
+  if (signable && envelope?.documentVersionId) {
+    // Record first-view evidence (best-effort) and mint a view URL.
+    if (!envelope.viewedAt) await prisma.eSignEnvelope.update({ where: { dealId }, data: { viewedAt: new Date() } }).catch(() => {});
+    const contract = await prisma.contractVersion.findUnique({ where: { id: envelope.documentVersionId } });
+    if (contract) contractViewUrl = await getContractViewUrl(contract.documentUrl);
+  }
+
+  const fresh = await prisma.deal.findUnique({ where: { id: dealId }, select: { status: true } });
+  // §11: return ONLY a buyer-safe summary — never the raw envelope (which carries
+  // IP, user-agent, the consent snapshot's forensic attribution, and internal
+  // identifiers). `status` is surfaced top-level for the ceremony client.
+  const summary = toBuyerEnvelopeSummary(envelope);
+  return successResponse({
+    status: summary?.status ?? null,
+    envelope: summary,
+    dealStatus: fresh?.status ?? deal.status,
+    contractViewUrl,
+    signable: !!signable,
+  });
 }
 
-// POST /api/buyer/esign/[dealId] — create a DocuSign envelope for the deal.
+// POST — begin signing: prepare the in-house envelope (bound to the approved
+// contract by hash) and move the deal to SIGNING_PENDING. Contract Shield hard
+// gate enforced. No external provider, no signing URL — the buyer signs in-app.
 export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
   const deal = await prisma.deal.findFirst({
-    where:   { id: dealId, buyerId: buyer.id },
-    include: { eSignEnvelope: true },
+    where: { id: dealId, buyerId: buyer.id },
+    include: { buyer: { include: { user: { select: { email: true } } } } },
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
-  // If envelope already created and has a valid DocuSign ID, generate a fresh signing URL
-  if (
-    deal.eSignEnvelope?.docusignEnvelopeId &&
-    deal.eSignEnvelope.docusignEnvelopeId !== MOCK_ENVELOPE_SENTINEL &&
-    deal.eSignEnvelope.status !== "COMPLETED"
-  ) {
-    try {
-      const result = await createDealerEnvelopeFromTemplate(dealId);
-      if (result.signingUrl) {
-        return successResponse({
-          envelopeId: result.envelopeId,
-          signingUrl:  result.signingUrl,
-          mock:        false,
-        });
-      }
-    } catch {
-      // Fall through to create new envelope
-    }
-  }
-
-  // Contract Shield hard gate: a deal can only reach SIGNING_PENDING once it has
-  // been CONTRACT_APPROVED. advanceDealStatus rejects any other source state.
+  // Contract Shield hard gate: signing is available only after CONTRACT_APPROVED.
   if (deal.status !== "CONTRACT_APPROVED" && deal.status !== "SIGNING_PENDING") {
     return errorResponse(
       "CONTRACT_NOT_APPROVED",
@@ -62,29 +77,35 @@ export async function POST(request: NextRequest, { params }: Props) {
   }
 
   try {
-    const result = await createDealerEnvelopeFromTemplate(dealId);
-
-    if (result.error && !result.envelopeId) {
-      return errorResponse("DOCUSIGN_ERROR", result.error, 503);
-    }
-
-    try {
-      await advanceDealStatus(dealId, "SIGNING_PENDING", { actorRole: "BUYER" });
-    } catch (err) {
-      if (err instanceof DealTransitionError) {
-        return errorResponse("CONTRACT_NOT_APPROVED", "Signing is not available from the current deal state.", 409);
-      }
-      throw err;
-    }
-
-    return successResponse({
-      envelopeId: result.envelopeId,
-      signingUrl:  result.signingUrl,
-      error:       result.error,
-      mock:        false,
+    const signerName = [deal.buyer?.firstName, deal.buyer?.lastName].filter(Boolean).join(" ") || null;
+    const prepared = await prepareBuyerSigningEnvelope(dealId, {
+      signerUserId: buyer.id,
+      signerName: signerName ?? undefined,
+      signerEmail: deal.buyer?.user?.email ?? undefined,
     });
+
+    if (deal.status === "CONTRACT_APPROVED") {
+      try {
+        await advanceDealStatus(dealId, "SIGNING_PENDING", { actorId: buyer.id, actorRole: "BUYER" });
+      } catch (err) {
+        if (err instanceof DealTransitionError) {
+          return errorResponse("CONTRACT_NOT_APPROVED", "Signing is not available from the current deal state.", 409);
+        }
+        throw err;
+      }
+    }
+
+    const contract = prepared.documentVersionId
+      ? await prisma.contractVersion.findUnique({ where: { id: prepared.documentVersionId } })
+      : null;
+    const contractViewUrl = contract ? await getContractViewUrl(contract.documentUrl) : null;
+
+    return successResponse({ envelopeId: prepared.envelopeId, status: prepared.status, contractViewUrl });
   } catch (err) {
-    logger.error("[buyer/esign] failed to create signing envelope:", err);
+    if (err instanceof NoSignableDocumentError) {
+      return errorResponse("NO_SIGNABLE_DOCUMENT", "The approved contract is not available to sign yet. Please try again shortly.", 409);
+    }
+    logger.error("[buyer/esign] failed to prepare in-house signing:", err);
     return errorResponse("INTERNAL_ERROR", "We couldn't start the signing process. Please try again.", 500);
   }
 }

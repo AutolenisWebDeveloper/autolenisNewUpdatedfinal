@@ -8,7 +8,7 @@ import { logger } from "@/lib/logger";
 import { getContractShieldResult } from "@/lib/constants";
 import { trackViolationPattern } from "./violation-pattern.service";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
-import { createEnvelope } from "@/lib/services/esign/esign.service";
+import { prepareBuyerSigningEnvelope, NoSignableDocumentError } from "@/lib/services/esign/buyer-signing.service";
 import {
   sendContractShieldAlertEmail,
   sendContractApprovedEmail,
@@ -192,7 +192,7 @@ export async function scanContract(dealId: string, contractText: string, dealerI
   notifyBuyerContractScan(dealId, status, fixList.length).catch(() => {});
 
   // G2 — on a high-confidence PASS, auto-advance the deal to CONTRACT_APPROVED
-  // through the guarded seam and fire the DocuSign envelope, removing the manual
+  // through the guarded seam and prepare the in-house signing envelope, removing the manual
   // admin approve click. WARNING/FAIL still hold for human review. Self-contained
   // and idempotent — it never breaks the scan result.
   await autoAdvanceContractOnPass(dealId, status);
@@ -203,7 +203,7 @@ export async function scanContract(dealId: string, contractText: string, dealerI
 /**
  * Pure decision core for Contract Shield auto-advance. Given the deal's current
  * status and the scan classification, return the ordered legal transitions to
- * apply and whether to fire the DocuSign envelope.
+ * apply and whether to prepare the in-house signing envelope.
  *
  * - Only a PASS advances anything (WARNING/FAIL hold for human review).
  * - The deal is walked forward only from the contract-review states along the
@@ -227,8 +227,9 @@ export function planContractAutoAdvance(
 
 /**
  * Impure auto-approval seam: on PASS, walk the deal to CONTRACT_APPROVED through
- * the guarded (non-forced) `advanceDealStatus` seam, fire the DocuSign envelope
- * once (dealId-unique upsert makes `createEnvelope` safe under re-scan), and
+ * the guarded (non-forced) `advanceDealStatus` seam, prepare the in-house signing
+ * envelope once (dealId-unique upsert makes `prepareBuyerSigningEnvelope` safe
+ * under re-scan), and
  * create the caller-owned buyer/dealer CONTRACT_APPROVED in-app notifications
  * (the comms orchestrator treats CONTRACT_APPROVED as caller-owned, so this seam
  * must write them). Self-contained: swallows its own errors so a notification or
@@ -261,13 +262,18 @@ export async function autoAdvanceContractOnPass(dealId: string, scanStatus: stri
       const buyerEmail = deal.buyer?.user?.email ?? undefined;
       const buyerName =
         `${deal.buyer?.firstName ?? ""} ${deal.buyer?.lastName ?? ""}`.trim() || undefined;
-      if (buyerEmail) {
-        await createEnvelope(dealId, buyerEmail, buyerName).catch((err) =>
-          logger.error("[contract-shield] auto createEnvelope failed:", err),
-        );
-      } else {
-        logger.error(`[contract-shield] auto-approve: no buyer email for deal ${dealId}; envelope not sent`);
-      }
+      // Best-effort pre-warm of the in-house signing envelope (bound to the
+      // approved contract by hash; safe under re-scan via the dealId-unique
+      // upsert). This runs before the ContractVersion row is flipped to APPROVED,
+      // so a NoSignableDocumentError here is EXPECTED and benign — the envelope is
+      // prepared for real when the buyer opens /buyer/esign (or an admin sends it).
+      await prepareBuyerSigningEnvelope(dealId, { signerName: buyerName, signerEmail: buyerEmail }).catch((err) => {
+        if (err instanceof NoSignableDocumentError) {
+          logger.info(`[contract-shield] signing envelope deferred to buyer-initiated prep for deal ${dealId}`);
+        } else {
+          logger.error("[contract-shield] auto prepare signing envelope failed:", err);
+        }
+      });
 
       await createContractApprovedNotifications(dealId, deal.buyerId, deal.offer?.dealer?.id ?? null);
     }
@@ -298,7 +304,7 @@ async function createContractApprovedNotifications(
           type: "CONTRACT_APPROVED",
           title: "Contract approved",
           body: "Your purchase agreement passed review. Your signing link is ready.",
-          actionUrl: `/buyer/deal/${dealId}/sign`,
+          actionUrl: `/buyer/esign`,
           metadata: { key: buyerKey },
         },
       });
@@ -355,16 +361,9 @@ async function notifyBuyerContractScan(
   }
 }
 
-export async function overrideContractShield(dealId: string, _adminId: string, _reason: string): Promise<void> {
-  const existingScans = await prisma.contractScan.findMany({ where: { dealId }, orderBy: { version: "desc" }, take: 1 });
-  const version = (existingScans[0]?.version ?? 0) + 1;
-
-  await prisma.contractScan.create({
-    data: { dealId, score: 100, status: "PASS", fixList: [], version, scannedAt: new Date() },
-  });
-
-  await prisma.deal.update({
-    where: { id: dealId },
-    data: { contractShieldScore: 100, contractShieldStatus: "PASS" },
-  });
-}
+// NOTE: the standalone `overrideContractShield()` helper was removed in Program 4.
+// It wrote a synthetic PASS scan and mutated the Deal WITHOUT an audit-log entry
+// and WITHOUT routing through the guarded state machine — an unaudited override
+// footgun that had zero callers. The ONLY sanctioned Contract Shield override is
+// the admin route POST /api/admin/contract-shield/[reviewId], which is
+// role-gated (SUPER_ADMIN / OPERATIONS_ADMIN) and writes an AdminAuditLog entry.

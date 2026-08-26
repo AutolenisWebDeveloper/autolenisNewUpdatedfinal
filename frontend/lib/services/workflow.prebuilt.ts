@@ -197,9 +197,9 @@ const pickupPrep: PrebuiltWorkflow = {
   category: 'buyer',
   name: 'Pickup Preparation',
   description: 'Pickup checklist, directions, and confirmation after signing.',
-  trigger_type: 'docusign_signed',
+  trigger_type: 'contract_signed',
   graph: build(() => linear([
-    trigger('docusign_signed'),
+    trigger('contract_signed'),
     email('pickup_checklist_email'),
     delay('1d'),
     sms('{{firstName}}, your pickup details are ready. Check your email for the full checklist.'),

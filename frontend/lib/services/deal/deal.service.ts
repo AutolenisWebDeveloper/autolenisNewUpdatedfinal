@@ -6,6 +6,7 @@
 import { prisma } from "@/lib/prisma";
 import { DealStatus, InsuranceStatus, Prisma } from "@prisma/client";
 import { emitDealStatusComms } from "../notifications/acquisition-comms";
+import { emitDealCompletionEvent } from "./deal-completion-event.service";
 
 // Valid forward state transitions. CANCELLED/REFUNDED are handled separately in
 // canTransition() because they are reachable from (almost) any state.
@@ -107,10 +108,24 @@ export async function advanceDealStatus(
     }
   }
 
-  await prisma.deal.update({
-    where: { id: dealId },
+  // Compare-and-swap: advance ONLY while the deal is still in the state we read
+  // and guarded against. This serializes concurrent transitions without a row
+  // lock (the same optimistic CAS the pickup-coordination and deposit-state
+  // machines use). The loser of a race matches 0 rows and re-resolves once from
+  // the fresh state — so everything below (history, comms, the exactly-once
+  // completion event) runs for the WINNING transition only. Autopilot fires the
+  // same transition from a webhook, a cron reconciler, and an admin action; this
+  // is what keeps "COMPLETED" (and every other advance) idempotent under replay.
+  const swap = await prisma.deal.updateMany({
+    where: { id: dealId, status: deal.status },
     data: { status: newStatus, ...(opts.data ?? {}) },
   });
+  if (swap.count === 0) {
+    // Another writer moved the deal between our read and our write. Re-resolve
+    // against the fresh state: if it already reached the target this collapses to
+    // the idempotent no-op at the top; otherwise the guard re-checks legality.
+    return advanceDealStatus(dealId, newStatus, opts);
+  }
 
   await prisma.dealStatusHistory.create({
     data: {
@@ -140,6 +155,16 @@ export async function advanceDealStatus(
   // throws and de-dupes per (deal, status, buyer), so a retried or concurrent
   // transition cannot double-message the customer.
   await emitDealStatusComms(dealId, newStatus);
+
+  // Canonical completion condition — emitted EXACTLY ONCE, here at the seam, the
+  // moment a deal enters COMPLETED. The CAS above guarantees only the winning
+  // transition reaches this line, so a replay/concurrent completion cannot
+  // double-emit. This is the single completion event Program 5 (Affiliate Growth
+  // + Settlement) consumes; individual completion routes no longer emit it.
+  // Best-effort: emitDealCompletionEvent never throws (the deal is committed).
+  if (newStatus === DealStatus.COMPLETED) {
+    await emitDealCompletionEvent(dealId);
+  }
 }
 
 export async function getDealForBuyer(buyerId: string, dealId?: string) {

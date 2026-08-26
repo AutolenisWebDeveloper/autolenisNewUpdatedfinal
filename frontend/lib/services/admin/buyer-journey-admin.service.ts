@@ -69,7 +69,7 @@ const STAGE_META: Record<StageId, { label: string; description: string; route: s
   "fee":         { label: "Service Fee",  route: "/buyer/fee",             description: "Buyer paid AutoLenis Service Fee. deal.feePaidAt is set." },
   "insurance":   { label: "Insurance",    route: "/buyer/insurance",       description: "Insurance step engaged. deal.insuranceStatus != NOT_STARTED." },
   "contract":    { label: "Contract",     route: "/buyer/contracts",       description: "Contract Shield passed. deal.contractShieldStatus = PASS." },
-  "sign":        { label: "Sign",         route: "/buyer/esign",           description: "DocuSign complete. deal.status = PICKUP_SCHEDULED or COMPLETED." },
+  "sign":        { label: "Sign",         route: "/buyer/esign",           description: "E-signature complete. deal.status = PICKUP_SCHEDULED or COMPLETED." },
   "pickup":      { label: "Pickup",       route: "/buyer/pickup",          description: "Vehicle delivered. deal.status = COMPLETED." },
 };
 

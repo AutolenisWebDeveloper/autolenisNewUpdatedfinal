@@ -268,7 +268,7 @@ export class OperationsService {
   //
   // Live-pingable services (Supabase, Stripe) are reached with a short timeout
   // and report healthy/degraded. Credential-gated services with no cheap ping
-  // (Resend, Twilio, DocuSign) report healthy when configured and `unknown`
+  // (Resend, Twilio) report healthy when configured and `unknown`
   // when their credentials are absent — we cannot confirm reachability without
   // a billable call. Automated-job execution is the internal Vercel-Cron
   // substrate, monitored separately by the cron liveness / dead-cron detector.
@@ -334,7 +334,6 @@ export class OperationsService {
       stripe,
       credentialCheck('resend', 'Resend', ['RESEND_API_KEY']),
       credentialCheck('twilio', 'Twilio', ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN']),
-      credentialCheck('docusign', 'DocuSign', ['DOCUSIGN_INTEGRATION_KEY', 'DOCUSIGN_ACCOUNT_ID']),
     ];
   }
 

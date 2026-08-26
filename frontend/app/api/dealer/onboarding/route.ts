@@ -1,7 +1,6 @@
 // PATCH /api/dealer/onboarding — save onboarding step data, set ACTIVE on final step
 // GET   /api/dealer/onboarding — return current persisted onboarding values for hydration
 
-import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse, after } from "next/server";
 import { requireDealerFromRequest } from "@/lib/auth/dealer-session";
 import { prisma } from "@/lib/prisma";
@@ -168,7 +167,7 @@ export async function PATCH(request: NextRequest) {
 
   if (data.step === "AGREEMENT") {
     // Idempotent: if onboarding is already complete, do not re-record the
-    // signature or re-fire the DocuSign envelope / activation event.
+    // signature or re-fire the signing envelope / activation event.
     if (dealer.onboardingStep === "COMPLETE") {
       return NextResponse.json({ success: true, nextStep: "COMPLETE", redirect: "/dealer/dashboard" });
     }
@@ -211,17 +210,9 @@ export async function PATCH(request: NextRequest) {
       include: { user: { select: { email: true } } },
     });
 
-    // Belt-and-suspenders DocuSign marketplace envelope — fire-and-forget.
-    const { sendDealerMarketplaceAgreement } = await import(
-      "@/lib/services/esign/dealer-marketplace-agreement.service"
-    );
-    void sendDealerMarketplaceAgreement({
-      dealerId: updatedDealer.id,
-      email: updatedDealer.user?.email ?? "",
-      name: updatedDealer.dealershipName ?? "Dealer",
-    }).catch((err) => {
-      logger.error("[dealer-onboarding/agreement] DocuSign send failed:", err);
-    });
+    // The dealer network agreement is signed in-house (DealerAgreementSignature,
+    // recorded earlier in this route via recordDealerAgreementSignature). The
+    // legacy DocuSign "belt-and-suspenders" marketplace envelope was removed.
 
     // CRM spine: onboarding complete → timeline + Make (non-blocking, never throws).
     if (updatedDealer.user?.email) {

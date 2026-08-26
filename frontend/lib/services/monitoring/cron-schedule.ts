@@ -47,6 +47,7 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "health-check": { intervalMinutes: 5 },
   "workflow-automation": { intervalMinutes: 5 },
   "social-publish-queue": { intervalMinutes: 5 },
+  "esign-artifact-reconcile": { intervalMinutes: 5 }, // re-drive executed artifact/cert/confirmations for COMPLETED envelopes
   // ── every 10 / 15 / 30 minutes ──
   "holds": { intervalMinutes: 10 },
   "social-video-queue": { intervalMinutes: 10 },
@@ -54,7 +55,6 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "dlq-drain": { intervalMinutes: 15 },
   "inventory-stale-sweep": { intervalMinutes: 30 },
   "sla-check": { intervalMinutes: 30 },
-  "signed-contract-refetch": { intervalMinutes: 30 }, // Batch 6 durability: re-fetch a missing signed PDF (dormant without real DocuSign)
   "refinance-outreach-drain": { intervalMinutes: 15 }, // QStash non-deal parity (dormant: no producer until owner cutover)
   "outreach-touch-drain": { intervalMinutes: 15 }, // QStash non-deal parity: affiliate/referral touches (dormant until owner cutover)
   "lifecycle-touch-drain": { intervalMinutes: 15 }, // QStash lifecycle-comms parity: the 12 deferred lifecycle jobs (dormant until owner cutover)
@@ -66,6 +66,7 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "inventory-sync-priority": { intervalMinutes: HOUR },
   "trust-check": { intervalMinutes: HOUR },
   "vehicle-offer-expire": { intervalMinutes: HOUR },
+  "esign-envelope-expiry": { intervalMinutes: HOUR }, // stale prepared-but-unsigned signing envelopes → EXPIRED
   "inactivity-scan": { intervalMinutes: HOUR }, // migrated off Inngest cron `0 * * * *`
   // ── multi-hour ──
   "social-status-sync": { intervalMinutes: 2 * HOUR },

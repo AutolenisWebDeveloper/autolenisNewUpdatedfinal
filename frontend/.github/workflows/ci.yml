@@ -50,9 +50,6 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: placeholder_service_key
           STRIPE_SECRET_KEY: sk_test_placeholder
           STRIPE_WEBHOOK_SECRET: whsec_placeholder
-          DOCUSIGN_CLIENT_ID: placeholder
-          DOCUSIGN_CLIENT_SECRET: placeholder
-          DOCUSIGN_PRIVATE_KEY_BASE64: placeholder
           MICROBILT_CLIENT_ID: placeholder
           MICROBILT_CLIENT_SECRET: placeholder
           MICROBILT_IPREDICT_BASE_URL: https://placeholder.microbilt.com

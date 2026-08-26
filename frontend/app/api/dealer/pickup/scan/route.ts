@@ -3,7 +3,6 @@
 // On success: pickup.status=COMPLETED, deal.status=COMPLETED, completedAt timestamps,
 // BuyerActivityEvent emitted, Resend completion email fired (best-effort).
 
-import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
@@ -103,31 +102,10 @@ export async function POST(request: NextRequest) {
            <p>Thank you for choosing AutoLenis.</p>`,
   }).catch(() => { /* non-fatal */ });
 
-  // CRM event spine — emit purchase_completed for the buyer after the deal has
-  // been marked COMPLETED. Keyed on dealId so this path and the admin-override
-  // path collapse to one logical event. Additive tail call: a failure never
-  // affects the scan, which has already committed.
-  try {
-    const { emitDomainEvent } = await import("@/lib/events/emit");
-    await emitDomainEvent("purchase_completed", {
-      domainEntityId: pickup.dealId,
-      contact: {
-        email: pickup.deal.buyer.user.email ?? null,
-        phone: pickup.deal.buyer.phone ?? null,
-        firstName: pickup.deal.buyer.firstName,
-        lastName: pickup.deal.buyer.lastName,
-        source: "buyer_signup",
-      },
-      data: {
-        deal_id: pickup.dealId,
-        buyer_id: pickup.deal.buyerId,
-        pickup_id: pickup.id,
-        completed_via: "dealer_qr_scan",
-      },
-    });
-  } catch (err) {
-    logger.error("[pickup/scan] purchase_completed emit failed:", err);
-  }
+  // The canonical `purchase_completed` domain event is emitted EXACTLY ONCE by
+  // the deal state-machine seam (advanceDealStatus → COMPLETED, above), so this
+  // route no longer emits it — that keeps the completion signal single-sourced
+  // and replay-safe regardless of which path completes the deal.
 
   return successResponse({
     success: true,

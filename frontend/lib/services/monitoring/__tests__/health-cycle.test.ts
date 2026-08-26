@@ -57,8 +57,8 @@ const baseReport = {
   activeAuctions: 3,
   pendingOFAC: 0,
   contractFails: 2,
-  integrations: { stripe: true, docusign: false, resend: true, microbilt: true },
-  alerts: ["P1: DocuSign configuration incomplete — missing required env vars"],
+  integrations: { stripe: true, resend: true, microbilt: true },
+  alerts: [],
   timestamp: new Date("2026-08-19T12:00:00.000Z"),
 };
 

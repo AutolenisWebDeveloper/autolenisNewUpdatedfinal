@@ -16,6 +16,11 @@ export async function POST(request: NextRequest, { params }: Props) {
   if (!envelope) return adminError("NOT_FOUND", "Envelope not found", 404);
   if (envelope.status === "COMPLETED") return adminError("CONFLICT", "Envelope is already completed", 409);
   if (envelope.status === "VOIDED") return adminError("CONFLICT", "Cannot resend a voided envelope", 409);
+  // DECLINED / EXPIRED are terminal, immutable records. A new signing attempt must
+  // go through the buyer signing flow (which archives the terminal record).
+  if (envelope.status === "DECLINED" || envelope.status === "EXPIRED") {
+    return adminError("CONFLICT", `Cannot resend a ${envelope.status.toLowerCase()} envelope — start a new signing attempt instead.`, 409);
+  }
 
   await resendEnvelope(dealId);
 

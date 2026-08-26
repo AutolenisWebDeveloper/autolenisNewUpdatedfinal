@@ -55,6 +55,11 @@ export interface DealerDealDetail {
     scheduledAt: Date | null;
     qrCodeData: string | null;
   } | null;
+  // Whether the buyer-signed EXECUTED contract copy is available to this dealer.
+  // A privacy-safe boolean only (§11) — the storage key/hash and any signer
+  // forensic evidence are never exposed here; the copy is fetched via the
+  // role-scoped, signed-URL download route.
+  executedContractAvailable: boolean;
 }
 
 /**
@@ -121,6 +126,9 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
           qrCodeData: true,
         },
       },
+      // Executed-copy availability only — never the storage key/hash or forensic
+      // signer evidence (§11).
+      eSignEnvelope: { select: { status: true, executedDocumentKey: true } },
     },
   });
   if (!deal) return null;
@@ -133,6 +141,8 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
     contractShieldStatus: deal.contractShieldStatus,
     financingPath: deal.financingPath,
     offer: deal.offer,
+    executedContractAvailable:
+      deal.eSignEnvelope?.status === "COMPLETED" && !!deal.eSignEnvelope?.executedDocumentKey,
     buyer: deal.buyer
       ? {
           firstName: deal.buyer.firstName,

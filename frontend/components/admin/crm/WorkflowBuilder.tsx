@@ -76,7 +76,7 @@ const TRIGGER_OPTIONS: { value: WorkflowTriggerType; label: string; description:
   { value: 'auction_started', label: 'Auction started', description: 'When an auction goes live' },
   { value: 'offer_received', label: 'Offer received', description: 'When a dealer submits an offer' },
   { value: 'offer_selected', label: 'Offer selected', description: 'When a buyer selects a winning offer' },
-  { value: 'docusign_signed', label: 'Contract signed', description: 'When DocuSign envelope is completed' },
+  { value: 'contract_signed', label: 'Contract signed', description: 'When the contract is signed' },
   { value: 'purchase_completed', label: 'Purchase completed', description: 'When the deal is finalized' },
   { value: 'refinance_inquiry', label: 'Refinance inquiry', description: 'When a refi lead is captured' },
   { value: 'dealer_invited', label: 'Dealer invited', description: 'When a dealer joins the platform' },

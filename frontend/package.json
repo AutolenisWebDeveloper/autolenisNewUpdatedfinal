@@ -70,7 +70,7 @@
     "test:inventory": "tsx --test --experimental-test-module-mocks lib/services/inventory/__tests__/*.test.ts",
     "test:vehicle-request": "tsx --test --experimental-test-module-mocks lib/services/vehicle-request/__tests__/*.test.ts",
     "test:dealer-onboarding": "tsx --test --experimental-test-module-mocks lib/services/dealer/__tests__/batch2/*.test.ts lib/services/agreement/__tests__/*.test.ts",
-    "test:esign": "tsx --test --experimental-test-module-mocks lib/services/esign/__tests__/*.test.ts",
+    "test:esign": "tsx --test --experimental-test-module-mocks lib/services/esign/__tests__/*.test.ts app/api/buyer/esign/__tests__/*.test.ts app/api/dealer/deals/__tests__/*.test.ts",
     "test:admin-payments": "tsx --test --experimental-test-module-mocks app/api/admin/payments/__tests__/*.test.ts app/api/buyer/deposit/__tests__/*.test.ts lib/services/payment/__tests__/*.test.ts",
     "test:precheckout": "tsx --test --experimental-test-module-mocks lib/services/buyer/__tests__/request-resume-token.test.ts app/api/public/request/__tests__/*.test.ts"
   },

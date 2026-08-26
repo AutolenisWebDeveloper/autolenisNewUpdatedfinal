@@ -14,22 +14,6 @@ declare namespace NodeJS {
     NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: string;
 
     // DocuSign
-    DOCUSIGN_CLIENT_ID: string;
-    DOCUSIGN_INTEGRATION_KEY: string;
-    DOCUSIGN_CLIENT_SECRET: string;
-    DOCUSIGN_PRIVATE_KEY_BASE64: string; // Base64-encoded PEM
-    DOCUSIGN_ACCOUNT_ID: string;
-    DOCUSIGN_USER_ID: string;
-    DOCUSIGN_AUTH_SERVER: string;
-    DOCUSIGN_OAUTH_BASE_URL: string;
-    DOCUSIGN_BASE_URL: string;
-    DOCUSIGN_BASE_PATH: string;
-    DOCUSIGN_ENV: string; // sandbox | production
-    DOCUSIGN_DEALER_TEMPLATE_ID: string;
-    DOCUSIGN_RETURN_URL: string;
-    DOCUSIGN_WEBHOOK_SECRET: string;
-    DOCUSIGN_CONNECT_SECRET: string;
-    DOCUSIGN_CONFIGURATION_ID: string;
 
     // MicroBilt iPredict
     MICROBILT_CLIENT_ID: string;
