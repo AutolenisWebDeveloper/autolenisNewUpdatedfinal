@@ -38,7 +38,7 @@
 
 import { logger } from "@/lib/logger";
 import { notifyContact, renderEmail, NOTIFY_APP_URL } from "@/lib/qstash/notify";
-import { depositConversionResolved, preCheckoutResolved, hasSelectedOffer } from "@/lib/qstash/state";
+import { depositConversionResolved, preCheckoutResolved, hasSelectedOffer, hasLiveAuction } from "@/lib/qstash/state";
 import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -114,9 +114,25 @@ const DASH = `${NOTIFY_APP_URL}/buyer/dashboard`;
 const DEPOSIT_CHECKOUT = `${NOTIFY_APP_URL}/buyer/deposit`;
 
 // Message bodies ported verbatim from app/api/jobs/<name>/route.ts, EXCEPT the
-// deposit-reminder set below, which the $99-conversion program deliberately
-// re-cadences (+1h/+6h/+24h/+72h, 4 touches) and re-copies (truthful,
-// conversion-focused, CTA → the $99 checkout). See deposit_reminder_1 header.
+// deposit-reminder set (re-cadenced 4 touches + truthful $99 copy, CTA → the
+// $99 checkout) and the pre-checkout form_submitted/check_form_completion set
+// (truthful $99 copy + a secure resume link). See deposit_reminder_1 /
+// form_submitted headers.
+//
+// Live-auction eligibility guard for the auction-active / -midpoint / -closing
+// touches (Program 2 §10 truthfulness invariant). Re-reads authoritative state
+// at drain time and CANCELS the touch (no send, no chain) when the buyer has
+// either converted (selected an offer / has a deal) OR no longer has a genuinely
+// LIVE (ACTIVE) auction. This closes two gaps at once:
+//   • a buyer whose auction already CLOSED/expired/cancelled is never told it is
+//     "live / dealers are bidding / closing soon";
+//   • a concierge-converted auction (minted already CLOSED with offers, never a
+//     live competitive auction) can never receive live-auction copy, even as a
+//     defense-in-depth backstop should a producer ever enqueue one.
+// Root producer exclusion is the primary control (the concierge branch never
+// enqueues these sequences); this drain-time guard is the second line.
+const auctionLiveGuard = async (buyerId: string): Promise<boolean> =>
+  (await hasSelectedOffer(buyerId)) || !(await hasLiveAuction(buyerId));
 const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
   // ── $99 deposit conversion (4 touches: +1h/+6h/+24h/+72h) ─────────────────
   // Producer enrolls deposit_reminder_1 at run_at = now + 1h (the intentional
@@ -191,6 +207,9 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
   // ── auction lifecycle (active → midpoint → closing) ───────────────────────
   auction_active: {
     entityType: "buyer",
+    // §10: only send "your auction is LIVE" when a live ACTIVE auction truly
+    // exists (never for a converted buyer or a concierge CLOSED auction).
+    guard: auctionLiveGuard,
     render: ({ firstName }) => ({
       sms: `Your auction is LIVE ${firstName}! Dealers are competing for your vehicle. Check offers: autolenis.com/buyer/dashboard`,
       emailSubject: "Your dealer auction is live",
@@ -205,7 +224,9 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
   },
   auction_midpoint: {
     entityType: "buyer",
-    guard: hasSelectedOffer,
+    // §10: "halfway done and dealers are still bidding" must be true — require a
+    // live ACTIVE auction and an unconverted buyer.
+    guard: auctionLiveGuard,
     render: ({ firstName }) => ({
       sms: `${firstName}, your AutoLenis auction is halfway done and dealers are still bidding. See the latest offers: autolenis.com/buyer/dashboard`,
       emailSubject: "Your auction is halfway done",
@@ -221,8 +242,10 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
   auction_closing: {
     entityType: "buyer",
     // FIX: the QStash `auction-closing` job had NO guard and sent even after the
-    // buyer selected an offer. Parity-correct: skip a converted buyer.
-    guard: hasSelectedOffer,
+    // buyer selected an offer. §10: also require a live ACTIVE auction so a buyer
+    // whose auction already closed (or a concierge CLOSED auction) is never told
+    // "your auction closes soon".
+    guard: auctionLiveGuard,
     render: ({ firstName }) => ({
       sms: `${firstName} — your auction closes soon. Compare your dealer offers now: autolenis.com/buyer/dashboard`,
       emailSubject: "Your auction results are ready",
@@ -549,11 +572,12 @@ export async function cancelDepositReminderTouches(
   return { canceled: Array.isArray(data) ? data.length : 0, status: "OK" };
 }
 
-// Stable base_key for a buyer's $99 PRE-CHECKOUT conversion enrollment. Distinct
-// from the post-checkout deposit-reminder chain so the handoff can cancel one
-// without touching the other.
+// Stable base_key for a buyer's $99 PRE-CHECKOUT enrollment. MUST match the key
+// the lifecycle-scheduler's `form_submitted` workload enqueues under
+// (`form-submitted:{buyerId}`) so the handoff cancel targets the right rows;
+// distinct from the post-checkout `deposit-reminder:{buyerId}` chain.
 export function preCheckoutBaseKey(buyerId: string): string {
-  return `precheckout:${buyerId}`;
+  return `form-submitted:${buyerId}`;
 }
 
 const PRE_CHECKOUT_SEQUENCES: LifecycleSequence[] = [

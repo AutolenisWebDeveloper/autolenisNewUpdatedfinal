@@ -18,7 +18,7 @@ import { convertConciergeOfferToClosedAuction } from "@/lib/services/concierge/c
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { writeServiceFeePayment } from "@/lib/services/deal/service-fee.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
-import { dispatch } from "@/lib/qstash/dispatch";
+import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
 import { allowedPredecessors } from "@/lib/payments/deposit-state";
 
@@ -168,10 +168,10 @@ export async function POST(request: NextRequest) {
             // authoritative on its own): a paid buyer must NEVER receive another
             // "$99 payment required" message. Best-effort; DORMANT-safe.
             try {
-              const { cancelDepositReminderEnrollment } = await import(
-                "@/lib/services/payment/deposit-reminder-enrollment"
+              const { cancelDepositReminderTouches } = await import(
+                "@/lib/services/crm/lifecycle-touch-drain.service"
               );
-              await cancelDepositReminderEnrollment(deposit.buyerId, "deposit_paid");
+              await cancelDepositReminderTouches(deposit.buyerId, { reason: "deposit_paid" });
             } catch (err) {
               logger.error("[stripe/webhook] deposit reminder cancel failed:", err);
             }
@@ -219,16 +219,18 @@ export async function POST(request: NextRequest) {
               }
               syncGhlTag(buyerEmail, "deposit-paid");
 
-              // QStash — auction-live sequence (immediate + midpoint/closing checks).
+              // Lifecycle — auction-live sequence (immediate + midpoint/closing
+              // checks). Only the STANDARD deposit branch reaches here; the
+              // concierge branch never launches a live auction, so it never
+              // schedules this sequence (Program 2 §10). Internal vs QStash is
+              // chosen per the auction activation flag (default QStash).
               if (createdAuction) {
-                dispatch({
-                  path: "/api/jobs/auction-active",
-                  body: {
-                    buyerId: deposit.buyerId,
-                    firstName: deposit.buyer?.firstName ?? "there",
-                    email: buyerEmail,
-                    auctionId: createdAuction.id,
-                  },
+                scheduleLifecycleWorkload({
+                  workload: "auction_active",
+                  buyerId: deposit.buyerId,
+                  firstName: deposit.buyer?.firstName ?? "there",
+                  email: buyerEmail,
+                  auctionId: createdAuction.id,
                 }).catch(() => {});
               }
             }

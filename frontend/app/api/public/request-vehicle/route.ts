@@ -21,7 +21,7 @@ import {
   sendVehicleRequestReceived,
   sendSocialLeadWelcomeEmail,
 } from "@/lib/services/email/resend.service";
-import { enrollPreCheckout } from "@/lib/services/payment/precheckout-enrollment";
+import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import {
   intakeBuyerRequest,
   type UnifiedIntakeInput,
@@ -574,12 +574,13 @@ export async function POST(request: NextRequest) {
   }
 
   // $99 PRE-CHECKOUT conversion — enroll the saved competitive request into the
-  // welcome + reminder chain that truthfully drives to the $99 checkout (secure
-  // resume link). Single-authority selector: QStash by default, internal
-  // lifecycle_touch once PRECHECKOUT_CONVERSION_INTERNAL_ENABLED is cut over.
-  // Best-effort tail — never affects the submission response.
+  // form_submitted → check_form_completion chain that truthfully drives to the
+  // $99 checkout (secure resume link). Routed through the lifecycle scheduler
+  // (single authority: QStash by default; internal lifecycle_touch once the
+  // LIFECYCLE_INTERNAL_FORM_SUBMITTED flag is cut over). Best-effort tail.
   if (buyerId) {
-    enrollPreCheckout({
+    scheduleLifecycleWorkload({
+      workload: "form_submitted",
       buyerId,
       firstName: data.firstName,
       email: data.email,

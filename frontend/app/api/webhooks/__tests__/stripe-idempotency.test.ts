@@ -151,8 +151,8 @@ mock.module("@/lib/services/deal/deal.service", {
 mock.module("@/lib/services/ghl/tag-sync", { namedExports: { syncGhlTag: () => {} } });
 mock.module("@/lib/qstash/dispatch", { namedExports: { dispatch: async () => {} } });
 let reminderCancels = 0;
-mock.module("@/lib/services/payment/deposit-reminder-enrollment", {
-  namedExports: { cancelDepositReminderEnrollment: async () => { reminderCancels += 1; } },
+mock.module("@/lib/services/crm/lifecycle-touch-drain.service", {
+  namedExports: { cancelDepositReminderTouches: async () => { reminderCancels += 1; return { canceled: 0, status: "OK" }; } },
 });
 mock.module("@/lib/analytics/content-attribution.server", {
   namedExports: { markContentConversion: async () => {} },

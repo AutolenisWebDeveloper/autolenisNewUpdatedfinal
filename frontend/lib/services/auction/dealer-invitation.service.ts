@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { sendDealerAuctionInvitationEmail } from "@/lib/services/email/resend.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { AUCTION_DURATION_HOURS } from "@/lib/constants";
-import { dispatch } from "@/lib/qstash/dispatch";
+import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import { geocodeZip } from "@/lib/services/integrations/geocoding.service";
 import { lookupCity, type LatLng } from "@/lib/utils/zip-coords";
 import { getPreferredMakes } from "@/lib/services/auction/auction-capacity.service";
@@ -312,17 +312,19 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
       );
     }
 
-    // QStash — dealer invitation notification + bid-deadline reminders.
+    // Lifecycle — dealer invitation notification. NOTE: on the internal path the
+    // bid-deadline reminder is NOT chained here — the endsAt-driven, idempotent
+    // cron/dealer-invitation-reminder (which only targets ACTIVE auctions) owns
+    // it, so QStash dealer-bid-reminder is retired at cutover. Internal vs QStash
+    // is chosen per the dealer-invited activation flag (default QStash).
     if (dealer?.user?.email) {
-      dispatch({
-        path: "/api/jobs/dealer-invited",
-        body: {
-          dealerId,
-          firstName: dealer.dealershipName ?? "Dealer",
-          email: dealer.user.email,
-          auctionId,
-          expiresAt: auctionForBuyer?.endsAt?.toISOString() ?? null,
-        },
+      scheduleLifecycleWorkload({
+        workload: "dealer_invited",
+        dealerId,
+        firstName: dealer.dealershipName ?? "Dealer",
+        email: dealer.user.email,
+        auctionId,
+        expiresAt: auctionForBuyer?.endsAt?.toISOString() ?? null,
       }).catch(() => {});
     }
 

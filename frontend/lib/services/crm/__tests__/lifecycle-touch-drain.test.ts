@@ -38,6 +38,7 @@ interface Ctrl {
   depositResolved: boolean;
   preCheckoutResolved: boolean;
   selectedOffer: boolean;
+  liveAuction: boolean;
   scheduled: Array<Record<string, unknown>>;
   nextScheduled: Array<Record<string, unknown>>;
   statusUpdates: Array<{ id: string | undefined; payload: Record<string, unknown> }>;
@@ -63,6 +64,7 @@ function freshCtrl(): Ctrl {
     depositResolved: false,
     preCheckoutResolved: false,
     selectedOffer: false,
+    liveAuction: true,
     scheduled: [],
     nextScheduled: [],
     statusUpdates: [],
@@ -160,6 +162,7 @@ mock.module("@/lib/qstash/state", {
     preCheckoutResolved: async () => ctrl.preCheckoutResolved,
     hasSelectedOffer: async () => ctrl.selectedOffer,
     hasDealerBid: async () => false,
+    hasLiveAuction: async () => ctrl.liveAuction,
   },
 });
 
@@ -365,6 +368,55 @@ test("auction_closing sends when no offer selected, terminal (no next)", async (
   assert.equal(ctrl.nextScheduled.length, 0);
 });
 
+// ── §10 live-auction truthfulness guard (auction_active/-midpoint/-closing) ──
+test("§10: auction_active is CANCELED when the buyer has no live ACTIVE auction (concierge CLOSED / already closed)", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row({ sequence: "auction_active", base_key: "auction:a1" }) };
+  ctrl.selectedOffer = false; // not converted…
+  ctrl.liveAuction = false; // …but no live auction → must NOT send "your auction is LIVE"
+  const { drainDueLifecycleTouches } = await load();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.canceled, 1);
+  assert.equal(r.sent, 0);
+  assert.equal(ctrl.notifies.length, 0);
+  assert.equal(ctrl.nextScheduled.length, 0); // no chain to midpoint
+});
+
+test("§10: auction_active SENDS + chains midpoint when a live ACTIVE auction exists and buyer unconverted", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row({ sequence: "auction_active", base_key: "auction:a1" }) };
+  ctrl.selectedOffer = false;
+  ctrl.liveAuction = true;
+  const { drainDueLifecycleTouches } = await load();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.sent, 1);
+  assert.equal(ctrl.notifies[0].entityType, "buyer");
+  assert.equal(ctrl.nextScheduled.length, 1);
+  assert.equal(ctrl.nextScheduled[0].sequence, "auction_midpoint");
+});
+
+test("§10: auction_midpoint is CANCELED once the auction is no longer live", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row({ sequence: "auction_midpoint", base_key: "auction:a1" }) };
+  ctrl.selectedOffer = false;
+  ctrl.liveAuction = false;
+  const { drainDueLifecycleTouches } = await load();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.canceled, 1);
+  assert.equal(ctrl.notifies.length, 0);
+});
+
+test("§10: auction_closing is CANCELED once the auction is no longer live (as well as on offer-selected)", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row({ sequence: "auction_closing", base_key: "auction:a1" }) };
+  ctrl.selectedOffer = false;
+  ctrl.liveAuction = false;
+  const { drainDueLifecycleTouches } = await load();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.canceled, 1);
+  assert.equal(ctrl.notifies.length, 0);
+});
+
 test("check_form_completion_1 delivers via contact resolution — no email/phone passed (QStash parity)", async () => {
   ctrl.dueRows = [{ id: "r1" }];
   ctrl.rowsById = {
@@ -567,12 +619,14 @@ test("pre-checkout STOPS (guard preCheckoutResolved) once checkout started / req
 
 test("cancelPreCheckoutTouches cancels the pre-checkout chain (handoff)", async () => {
   const { cancelPreCheckoutTouches, preCheckoutBaseKey } = await load();
-  assert.equal(preCheckoutBaseKey("b1"), "precheckout:b1");
+  // MUST match the lifecycle-scheduler's form_submitted base_key so the handoff
+  // cancel targets the right rows.
+  assert.equal(preCheckoutBaseKey("b1"), "form-submitted:b1");
   const { supabase, calls } = cancelFake({ data: [{ id: "x1" }], error: null });
   const r = await cancelPreCheckoutTouches("b1", { supabase, reason: "checkout_started" });
   assert.equal(r.status, "OK");
   assert.equal(r.canceled, 1);
   assert.equal(calls.payload?.status, "canceled");
   assert.equal(calls.payload?.last_error, "checkout_started");
-  assert.ok(calls.filters.some((f) => f[1] === "base_key" && f[2] === "precheckout:b1"));
+  assert.ok(calls.filters.some((f) => f[1] === "base_key" && f[2] === "form-submitted:b1"));
 });

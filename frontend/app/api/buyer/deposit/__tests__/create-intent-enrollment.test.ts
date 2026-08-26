@@ -91,18 +91,15 @@ mock.module("@/lib/services/prequal/prequal.service", {
   namedExports: { isPrequalValid: () => ctrl.prequalValid },
 });
 
-mock.module("@/lib/services/payment/deposit-reminder-enrollment", {
+mock.module("@/lib/services/crm/lifecycle-scheduler", {
   namedExports: {
-    enrollDepositReminder: async (input: Record<string, unknown>) => {
-      ctrl.enrollCalls.push(input);
-      return { authority: "qstash", enrolled: true };
-    },
+    scheduleLifecycleWorkload: async (input: Record<string, unknown>) => { ctrl.enrollCalls.push(input); },
   },
 });
 
-mock.module("@/lib/services/payment/precheckout-enrollment", {
+mock.module("@/lib/services/crm/lifecycle-touch-drain.service", {
   namedExports: {
-    cancelPreCheckoutEnrollment: async (buyerId: string) => { ctrl.preCheckoutCancels.push(buyerId); },
+    cancelPreCheckoutTouches: async (buyerId: string) => { ctrl.preCheckoutCancels.push(buyerId); return { canceled: 0, status: "OK" }; },
   },
 });
 
