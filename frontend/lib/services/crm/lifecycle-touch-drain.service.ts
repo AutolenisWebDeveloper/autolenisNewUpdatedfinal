@@ -38,9 +38,19 @@
 
 import { logger } from "@/lib/logger";
 import { notifyContact, renderEmail, NOTIFY_APP_URL } from "@/lib/qstash/notify";
-import { hasPaidDeposit, depositConversionResolved, hasSelectedOffer } from "@/lib/qstash/state";
+import { depositConversionResolved, preCheckoutResolved, hasSelectedOffer } from "@/lib/qstash/state";
 import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+// PRE-CHECKOUT resume link: mint a fresh, single-use, hashed resume token per send
+// (raw token lives only in this email; only its SHA-256 hash is persisted) and
+// build the opaque resume URL. The link carries NO PII and no capability — it
+// deep-links to the auth-gated $99 checkout for the preserved request.
+async function preCheckoutResumeUrl(buyerId: string): Promise<{ resumeUrl: string }> {
+  const { issueResumeToken } = await import("@/lib/services/buyer/request-resume-token.service");
+  const { rawToken } = await issueResumeToken({ buyerId });
+  return { resumeUrl: `${NOTIFY_APP_URL}/api/public/request/resume/${rawToken}` };
+}
 
 const SEC = 1000;
 const MIN = 60 * SEC;
@@ -68,6 +78,8 @@ interface RowContext {
   entityId: string;
   firstName: string;
   email: string;
+  /** Populated by a sequence's `prepare` hook (e.g. the pre-checkout resume link). */
+  resumeUrl?: string;
 }
 
 interface SequenceConfig {
@@ -75,6 +87,12 @@ interface SequenceConfig {
   // Re-checked at drain time. Returns true when the buyer has already converted
   // (deposit paid / offer selected) → the touch is canceled, never sent.
   guard?: (entityId: string) => Promise<boolean>;
+  // Optional async pre-render step run AFTER the guard passes and BEFORE render.
+  // Its result is merged into the render context (e.g. pre-checkout mints a fresh
+  // resume token and returns { resumeUrl }). A throw here fails the touch like a
+  // send failure (bounded retry) — a converted/ineligible buyer never reaches it
+  // because the guard already canceled the touch.
+  prepare?: (entityId: string) => Promise<Partial<RowContext>>;
   render: (ctx: RowContext) => RenderedTouch;
   // The next touch to chain, or null if terminal. delayMs mirrors the QStash delay.
   next: { sequence: LifecycleSequence; delayMs: number } | null;
@@ -335,70 +353,95 @@ const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
     },
   },
 
-  // ── form-submitted → check-form-completion (3 touches, guard hasPaidDeposit) ─
+  // ── $99 PRE-CHECKOUT conversion (form_submitted → check_form_completion) ───
+  // Stage 1 of the same $99 funnel, for a saved request whose lead has NOT yet
+  // reached checkout (no PENDING/PAID deposit). Every touch:
+  //   • re-reads live state (guard preCheckoutResolved) and STOPS the chain the
+  //     moment a Deposit exists (hand off to post-checkout deposit_reminder) or the
+  //     request is cancelled/expired — the two stages never run together;
+  //   • mints a fresh single-use SECURE resume link (prepare) — no PII in the URL,
+  //     returns the lead to their preserved request → auth/claim → the $99 checkout,
+  //     no vehicle re-entry;
+  //   • is TRUTHFUL: the request is saved and paying the $99 activates AutoLenis
+  //     fulfillment + dealer competition. No claim that dealers are already
+  //     waiting/competing/bidding, no offers/savings, no false scarcity.
   form_submitted: {
     entityType: "buyer",
-    render: ({ firstName, email }) => {
-      const completeUrl = `${NOTIFY_APP_URL}/thank-you?email=${encodeURIComponent(email)}&complete=true`;
+    guard: preCheckoutResolved,
+    prepare: preCheckoutResumeUrl,
+    render: ({ firstName, resumeUrl }) => {
+      const cta = resumeUrl ?? DEPOSIT_CHECKOUT;
       return {
-        sms: `Hey ${firstName}! Thanks for reaching out to AutoLenis. Your vehicle request was received. Complete your vehicle details so dealers can compete: ${completeUrl}`,
-        emailSubject: "Welcome to AutoLenis — your request is in",
+        sms: `Hi ${firstName} — your AutoLenis vehicle request is saved. Complete your ${DEPOSIT_AMOUNT_USD} Auction Access Deposit to activate dealer competition: ${cta}`,
+        emailSubject: "Your vehicle request is saved — one step left",
         emailHtml: renderEmail({
-          heading: `Welcome to AutoLenis, ${firstName}`,
-          bodyHtml: `<p>Thanks for reaching out — your vehicle request is in.</p><p>Complete your vehicle details here to help dealers submit their best offers:</p><p><a href="${completeUrl}" style="color:#0B5FD1;font-weight:600">${completeUrl}</a></p><p>The next step after that is to activate your private dealer auction so local dealers can start competing for your business.</p>`,
-          ctaText: "Complete your vehicle details",
-          ctaUrl: completeUrl,
+          heading: `Your vehicle request is saved, ${firstName}`,
+          bodyHtml: `<p>Thanks for reaching out — your vehicle request is saved.</p><p>The next step is your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong>. Paying it activates AutoLenis and starts a private auction where local dealers compete for your vehicle. You can pick up right where you left off — nothing to re-enter.</p>`,
+          ctaText: `Complete your ${DEPOSIT_AMOUNT_USD} deposit`,
+          ctaUrl: cta,
         }),
       };
     },
-    next: { sequence: "check_form_completion_1", delayMs: 3600 * SEC },
+    next: { sequence: "check_form_completion_1", delayMs: 3600 * SEC }, // +1h
   },
   check_form_completion_1: {
     entityType: "buyer",
-    guard: hasPaidDeposit,
+    guard: preCheckoutResolved,
+    prepare: preCheckoutResumeUrl,
     deliverToContactOnly: true,
-    render: ({ firstName }) => ({
-      sms: `${firstName}, dealers are waiting for you on AutoLenis. Activate your auction to let them compete: autolenis.com/buyer/dashboard`,
-      emailSubject: "Dealers are waiting for you",
-      emailHtml: renderEmail({
-        heading: "Dealers are waiting for you",
-        bodyHtml: `<p>Hi ${firstName},</p><p>Local dealers are ready to compete for your vehicle — but your auction isn't active yet. Finish activating to get them bidding.</p>`,
-        ctaText: "Activate my auction",
-        ctaUrl: DASH,
-      }),
-    }),
-    next: { sequence: "check_form_completion_2", delayMs: 82800 * SEC },
+    render: ({ firstName, resumeUrl }) => {
+      const cta = resumeUrl ?? DEPOSIT_CHECKOUT;
+      return {
+        sms: `${firstName}, your AutoLenis vehicle request is saved and ready. Complete your ${DEPOSIT_AMOUNT_USD} Auction Access Deposit to activate dealer competition: ${cta}`,
+        emailSubject: "One step to activate your dealer auction",
+        emailHtml: renderEmail({
+          heading: "Your request is ready to activate",
+          bodyHtml: `<p>Hi ${firstName},</p><p>Your vehicle request is saved. Completing your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong> is all that's left — it activates AutoLenis and starts the dealer competition for your vehicle.</p>`,
+          ctaText: `Complete your ${DEPOSIT_AMOUNT_USD} deposit`,
+          ctaUrl: cta,
+        }),
+      };
+    },
+    next: { sequence: "check_form_completion_2", delayMs: 82800 * SEC }, // +23h → ~+24h
   },
   check_form_completion_2: {
     entityType: "buyer",
-    guard: hasPaidDeposit,
+    guard: preCheckoutResolved,
+    prepare: preCheckoutResumeUrl,
     deliverToContactOnly: true,
-    render: ({ firstName }) => ({
-      sms: `${firstName}, your AutoLenis auction room is still empty. Activate now and let dealers compete: autolenis.com/buyer/dashboard`,
-      emailSubject: "The auction room is still empty",
-      emailHtml: renderEmail({
-        heading: "The auction room is still empty",
-        bodyHtml: `<p>Hi ${firstName},</p><p>No dealers can bid until you activate your auction. It only takes a minute and puts dealers to work for you.</p>`,
-        ctaText: "Activate my auction",
-        ctaUrl: DASH,
-      }),
-    }),
-    next: { sequence: "check_form_completion_3", delayMs: 259200 * SEC },
+    render: ({ firstName, resumeUrl }) => {
+      const cta = resumeUrl ?? DEPOSIT_CHECKOUT;
+      return {
+        sms: `${firstName}, your saved AutoLenis request is still waiting. Complete your ${DEPOSIT_AMOUNT_USD} Auction Access Deposit to put dealers to work: ${cta}`,
+        emailSubject: "Your vehicle request is still waiting",
+        emailHtml: renderEmail({
+          heading: "Your vehicle request is still waiting",
+          bodyHtml: `<p>Hi ${firstName},</p><p>Your request is saved and ready. When you complete your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong>, AutoLenis activates and dealers begin competing for your vehicle — you keep everything you entered, no need to start over.</p>`,
+          ctaText: `Complete your ${DEPOSIT_AMOUNT_USD} deposit`,
+          ctaUrl: cta,
+        }),
+      };
+    },
+    next: { sequence: "check_form_completion_3", delayMs: 259200 * SEC }, // +72h
   },
   check_form_completion_3: {
     entityType: "buyer",
-    guard: hasPaidDeposit,
+    guard: preCheckoutResolved,
+    prepare: preCheckoutResumeUrl,
     deliverToContactOnly: true,
-    render: ({ firstName }) => ({
-      sms: `${firstName}, last chance — we'll close your AutoLenis file soon. Activate to keep dealers competing: autolenis.com/buyer/dashboard`,
-      emailSubject: "Last chance — we will close your file",
-      emailHtml: renderEmail({
-        heading: "Last chance — we will close your file",
-        bodyHtml: `<p>Hi ${firstName},</p><p>This is the final reminder. If you don't activate soon we'll close out your request. You can pick back up any time by activating your auction.</p>`,
-        ctaText: "Activate before we close it",
-        ctaUrl: DASH,
-      }),
-    }),
+    render: ({ firstName, resumeUrl }) => {
+      const cta = resumeUrl ?? DEPOSIT_CHECKOUT;
+      return {
+        sms: `${firstName}, this is our last reminder — your AutoLenis request is saved. Complete your ${DEPOSIT_AMOUNT_USD} Auction Access Deposit whenever you're ready: ${cta}`,
+        emailSubject: "Last reminder: your saved vehicle request",
+        emailHtml: renderEmail({
+          heading: "Last reminder about your saved request",
+          bodyHtml: `<p>Hi ${firstName},</p><p>This is the last reminder we'll send. Your vehicle request is still saved, and your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong> is the only step left to activate AutoLenis and let dealers compete for your vehicle. You can complete it any time.</p>`,
+          ctaText: `Complete your ${DEPOSIT_AMOUNT_USD} deposit`,
+          ctaUrl: cta,
+        }),
+      };
+    },
     next: null,
   },
 };
@@ -506,6 +549,46 @@ export async function cancelDepositReminderTouches(
   return { canceled: Array.isArray(data) ? data.length : 0, status: "OK" };
 }
 
+// Stable base_key for a buyer's $99 PRE-CHECKOUT conversion enrollment. Distinct
+// from the post-checkout deposit-reminder chain so the handoff can cancel one
+// without touching the other.
+export function preCheckoutBaseKey(buyerId: string): string {
+  return `precheckout:${buyerId}`;
+}
+
+const PRE_CHECKOUT_SEQUENCES: LifecycleSequence[] = [
+  "form_submitted", "check_form_completion_1", "check_form_completion_2", "check_form_completion_3",
+];
+
+// Proactively cancel a buyer's remaining PRE-CHECKOUT touches. Called at the
+// handoff moment — when checkout creates the competitive PENDING deposit
+// (create-intent) — so the pre-checkout stage stops the instant the post-checkout
+// deposit_reminder takes over. Belt-and-suspenders with the send-time guard
+// (preCheckoutResolved), which is authoritative on its own. Idempotent;
+// DORMANT-safe (missing table swallowed).
+export async function cancelPreCheckoutTouches(
+  buyerId: string,
+  opts: { supabase?: SupabaseClient; reason?: string } = {},
+): Promise<{ canceled: number; status: "OK" | "NO_TABLE" }> {
+  const supabase = opts.supabase ?? (await serviceClient());
+  const { data, error } = await supabase
+    .from("lifecycle_touch_schedule")
+    .update({
+      status: "canceled",
+      last_error: opts.reason ?? "checkout_started",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("base_key", preCheckoutBaseKey(buyerId))
+    .in("sequence", PRE_CHECKOUT_SEQUENCES)
+    .in("status", ["pending", "sending"])
+    .select("id");
+  if (error) {
+    if (isMissingTable(error)) return { canceled: 0, status: "NO_TABLE" };
+    throw new Error(`lifecycle_touch_cancel_failed: ${error.message}`);
+  }
+  return { canceled: Array.isArray(data) ? data.length : 0, status: "OK" };
+}
+
 interface TouchRow {
   id: string;
   base_key: string;
@@ -560,6 +643,14 @@ async function processTouch(supabase: SupabaseClient, row: TouchRow): Promise<"S
     firstName: row.first_name ?? "there",
     email: row.email,
   };
+
+  // Optional async pre-render step (runs only AFTER the guard passed, so a
+  // converted/ineligible buyer never mints a resume token). A throw propagates to
+  // the drain loop as a bounded retry — safe, since nothing has been sent yet.
+  if (cfg.prepare) {
+    Object.assign(ctx, await cfg.prepare(row.entity_id));
+  }
+
   const content = cfg.render(ctx);
 
   // notifyContact fails closed (returns {false,false}) on a gated/suppressed/

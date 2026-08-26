@@ -22,6 +22,7 @@ const REVIEW_TOKEN = "rev_tok_123";
 
 interface Ctrl {
   enrollCalls: Array<Record<string, unknown>>;
+  preCheckoutCancels: string[];
   emitCalls: string[];
   reviewRow: Record<string, unknown> | null;
   existingDeposit: Record<string, unknown> | null;
@@ -99,6 +100,12 @@ mock.module("@/lib/services/payment/deposit-reminder-enrollment", {
   },
 });
 
+mock.module("@/lib/services/payment/precheckout-enrollment", {
+  namedExports: {
+    cancelPreCheckoutEnrollment: async (buyerId: string) => { ctrl.preCheckoutCancels.push(buyerId); },
+  },
+});
+
 mock.module("@/lib/events/emit", {
   namedExports: {
     emitDomainEvent: async (name: string) => { ctrl.emitCalls.push(name); },
@@ -122,6 +129,7 @@ function req(body: Record<string, unknown> = {}): NextRequest {
 beforeEach(() => {
   ctrl = {
     enrollCalls: [],
+    preCheckoutCancels: [],
     emitCalls: [],
     reviewRow: null,
     existingDeposit: null,
@@ -140,6 +148,8 @@ test("COMPETITIVE path enrolls the buyer exactly once (#1)", async () => {
   assert.equal(ctrl.enrollCalls[0].buyerId, BUYER_ID);
   assert.equal(ctrl.enrollCalls[0].email, BUYER_EMAIL);
   assert.ok(ctrl.emitCalls.includes("deposit_pending"), "competitive emits deposit_pending nurture event");
+  // HANDOFF: a competitive PENDING deposit now exists → pre-checkout stage cancelled.
+  assert.deepEqual(ctrl.preCheckoutCancels, [BUYER_ID], "pre-checkout handed off to deposit_reminder");
 });
 
 test("CONCIERGE path does NOT enroll (#2) — no reminder, no deposit_pending", async () => {
@@ -153,6 +163,7 @@ test("CONCIERGE path does NOT enroll (#2) — no reminder, no deposit_pending", 
   assert.equal(res.ok, true);
   assert.equal(ctrl.enrollCalls.length, 0, "concierge buyer must NOT get the generic reminder");
   assert.equal(ctrl.emitCalls.length, 0, "concierge buyer must NOT feed the abandoned-deposit nurture");
+  assert.equal(ctrl.preCheckoutCancels.length, 0, "concierge path does not touch the pre-checkout funnel");
 });
 
 test("already-paid buyer is rejected before any enrollment (#19 guard at intake)", async () => {

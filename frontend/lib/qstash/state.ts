@@ -34,6 +34,34 @@ export async function depositConversionResolved(buyerId: string): Promise<boolea
   return hasPaid || !hasPending;
 }
 
+// PRE-CHECKOUT stop/handoff guard for the $99 conversion funnel. Re-read live at
+// drain time immediately before every pre-checkout touch. Returns true (STOP the
+// whole pre-checkout chain) when the lead has left the pre-checkout stage:
+//   • ANY Deposit (PENDING or PAID) exists — checkout has STARTED. Ownership hands
+//     off to the post-checkout deposit_reminder sequence (which itself handles
+//     PENDING→PAID). The two stages must NEVER run against the same buyer at once,
+//     so the moment a PENDING deposit appears the pre-checkout stage stops.
+//   • no OPEN vehicle request remains — every request is cancelled / expired /
+//     already promoted to a deal, so there is nothing left to convert.
+// Concierge leads are excluded from this funnel at enrollment, so a concierge
+// deposit never reaches a pre-checkout enrollment to stop.
+export async function preCheckoutResolved(buyerId: string): Promise<boolean> {
+  const [deposit, openRequest] = await Promise.all([
+    prisma.deposit.findFirst({
+      where: { buyerId, status: { in: ["PENDING", "PAID"] } },
+      select: { id: true },
+    }),
+    prisma.vehicleRequest.findFirst({
+      where: {
+        buyerId,
+        status: { notIn: ["CANCELLED", "EXPIRED", "DEAL_CREATED", "CLOSED_NO_MATCH"] },
+      },
+      select: { id: true },
+    }),
+  ]);
+  return deposit !== null || openRequest === null;
+}
+
 // Buyer has selected/accepted a dealer offer (an accepted offer or a created
 // deal both signal the auction has converted).
 export async function hasSelectedOffer(buyerId: string): Promise<boolean> {

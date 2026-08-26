@@ -36,6 +36,7 @@ interface Ctrl {
   chainThrows: boolean;
   paidDeposit: boolean;
   depositResolved: boolean;
+  preCheckoutResolved: boolean;
   selectedOffer: boolean;
   scheduled: Array<Record<string, unknown>>;
   nextScheduled: Array<Record<string, unknown>>;
@@ -60,6 +61,7 @@ function freshCtrl(): Ctrl {
     chainThrows: false,
     paidDeposit: false,
     depositResolved: false,
+    preCheckoutResolved: false,
     selectedOffer: false,
     scheduled: [],
     nextScheduled: [],
@@ -155,8 +157,17 @@ mock.module("@/lib/qstash/state", {
   namedExports: {
     hasPaidDeposit: async () => ctrl.paidDeposit,
     depositConversionResolved: async () => ctrl.depositResolved,
+    preCheckoutResolved: async () => ctrl.preCheckoutResolved,
     hasSelectedOffer: async () => ctrl.selectedOffer,
     hasDealerBid: async () => false,
+  },
+});
+
+// Pre-checkout `prepare` mints a resume token; mock the raw token so the resume
+// URL is deterministic (raw token lives only in the email — hash-at-rest).
+mock.module("@/lib/services/buyer/request-resume-token.service", {
+  namedExports: {
+    issueResumeToken: async () => ({ rawToken: "RAWTOKEN", expiresAt: new Date(Date.now() + 86400000) }),
   },
 });
 
@@ -522,4 +533,46 @@ test("cancelDepositReminderTouches is DORMANT-safe — a missing table is a no-o
   const r = await cancelDepositReminderTouches("b1", { supabase });
   assert.equal(r.status, "NO_TABLE");
   assert.equal(r.canceled, 0);
+});
+
+// ── $99 PRE-CHECKOUT conversion (form_submitted / check_form_completion) ─────
+test("form_submitted mints a SECURE resume link, drives to $99, no 'dealers waiting' claim", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row({ sequence: "form_submitted", base_key: "precheckout:b1" }) };
+  const { drainDueLifecycleTouches } = await load();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.sent, 1);
+  const sms = String(ctrl.notifies[0].sms);
+  // CTA is the opaque resume deep-link (no PII, no /thank-you?email=).
+  assert.match(sms, /\/api\/public\/request\/resume\/RAWTOKEN/, "secure resume link in the touch");
+  assert.doesNotMatch(sms, /thank-you\?email=|@/, "no PII/insecure link");
+  assert.match(sms, /\$99/, "names the $99 deposit");
+  // Truthful — no claim that dealers are already waiting/competing/bidding.
+  assert.doesNotMatch(sms.toLowerCase(), /dealers are waiting|are competing|get them bidding|room is still empty/);
+  // Chains the first follow-up at +1h.
+  assert.equal(ctrl.nextScheduled[0].sequence, "check_form_completion_1");
+});
+
+test("pre-checkout STOPS (guard preCheckoutResolved) once checkout started / request gone — no send, no mint", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row({ sequence: "check_form_completion_1", base_key: "precheckout:b1" }) };
+  ctrl.preCheckoutResolved = true; // a Deposit now exists (handoff) or no open request
+  const { drainDueLifecycleTouches } = await load();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.canceled, 1);
+  assert.equal(r.sent, 0);
+  assert.equal(ctrl.notifies.length, 0, "resolved lead is not messaged");
+  assert.equal(ctrl.nextScheduled.length, 0, "no further pre-checkout touch chained");
+});
+
+test("cancelPreCheckoutTouches cancels the pre-checkout chain (handoff)", async () => {
+  const { cancelPreCheckoutTouches, preCheckoutBaseKey } = await load();
+  assert.equal(preCheckoutBaseKey("b1"), "precheckout:b1");
+  const { supabase, calls } = cancelFake({ data: [{ id: "x1" }], error: null });
+  const r = await cancelPreCheckoutTouches("b1", { supabase, reason: "checkout_started" });
+  assert.equal(r.status, "OK");
+  assert.equal(r.canceled, 1);
+  assert.equal(calls.payload?.status, "canceled");
+  assert.equal(calls.payload?.last_error, "checkout_started");
+  assert.ok(calls.filters.some((f) => f[1] === "base_key" && f[2] === "precheckout:b1"));
 });

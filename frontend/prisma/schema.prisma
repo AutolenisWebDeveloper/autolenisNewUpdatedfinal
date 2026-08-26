@@ -3334,6 +3334,29 @@ model DealerAccountClaimToken {
   @@map("dealer_account_claim_tokens")
 }
 
+// ─── $99 pre-checkout conversion: secure request-resume token ──────────────
+// Replaces the insecure /thank-you?email= resume link. A pre-checkout deposit-
+// conversion reminder embeds a raw token; we persist ONLY its SHA-256 hash so a
+// DB leak cannot reconstruct the emailed link. The token is a DEEP-LINK only — it
+// confers NO authenticated capability: the resume route validates+consumes it and
+// 302-redirects to the auth-gated /buyer/deposit, where the clicker's own Supabase
+// session (and the existing guest-request email transfer) remain the real boundary.
+// Scoped to one buyer (+ optional request), expiring, single-use (race-safe).
+model BuyerRequestClaimToken {
+  id               String    @id @default(uuid())
+  // SHA-256 hash of the raw token. The raw token is never persisted.
+  tokenHash        String    @unique @map("token_hash")
+  buyerId          String    @map("buyer_id")
+  vehicleRequestId String?   @map("vehicle_request_id")
+  expiresAt        DateTime  @map("expires_at")
+  consumedAt       DateTime? @map("consumed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@index([tokenHash])
+  @@index([buyerId])
+  @@map("buyer_request_claim_tokens")
+}
+
 // ─── Vehicle Offer System ─────────────────────────────────────────────────
 // Admin-generated dealer offer links. Multiple dealers can submit competing
 // offers for one buyer request. Each submission may include up to 3 vehicle

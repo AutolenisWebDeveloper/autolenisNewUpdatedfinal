@@ -21,7 +21,7 @@ import {
   sendVehicleRequestReceived,
   sendSocialLeadWelcomeEmail,
 } from "@/lib/services/email/resend.service";
-import { dispatch } from "@/lib/qstash/dispatch";
+import { enrollPreCheckout } from "@/lib/services/payment/precheckout-enrollment";
 import {
   intakeBuyerRequest,
   type UnifiedIntakeInput,
@@ -573,17 +573,18 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // QStash — kick off the buyer welcome + activation-recovery sequence.
+  // $99 PRE-CHECKOUT conversion — enroll the saved competitive request into the
+  // welcome + reminder chain that truthfully drives to the $99 checkout (secure
+  // resume link). Single-authority selector: QStash by default, internal
+  // lifecycle_touch once PRECHECKOUT_CONVERSION_INTERNAL_ENABLED is cut over.
+  // Best-effort tail — never affects the submission response.
   if (buyerId) {
-    dispatch({
-      path: "/api/jobs/form-submitted",
-      body: {
-        buyerId,
-        firstName: data.firstName,
-        email: data.email,
-        phone: data.phone,
-        campaign: data.campaign ?? "default",
-      },
+    enrollPreCheckout({
+      buyerId,
+      firstName: data.firstName,
+      email: data.email,
+      phone: data.phone,
+      campaign: data.campaign ?? "default",
     }).catch(() => {});
   }
 

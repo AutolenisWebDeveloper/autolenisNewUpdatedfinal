@@ -7,6 +7,7 @@ import { getStripe } from "@/lib/stripe";
 import { limitPaymentIntent, clientIpKey } from "@/lib/security/rate-limit";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { enrollDepositReminder } from "@/lib/services/payment/deposit-reminder-enrollment";
+import { cancelPreCheckoutEnrollment } from "@/lib/services/payment/precheckout-enrollment";
 
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
@@ -221,6 +222,14 @@ export async function POST(request: NextRequest) {
           phone: buyerContact.phone,
         }).catch((err) => logger.error("[deposit/create-intent] reminder enrollment failed:", err));
       }
+
+      // HANDOFF: a competitive PENDING deposit now exists → the pre-checkout stage
+      // hands off to deposit_reminder. Cancel any remaining pre-checkout touches so
+      // the two stages never run against the same buyer at once (the send-time
+      // preCheckoutResolved guard is the authoritative backstop). Best-effort.
+      cancelPreCheckoutEnrollment(buyer.id).catch((err) =>
+        logger.error("[deposit/create-intent] pre-checkout cancel failed:", err),
+      );
 
       // F-037 — emit the deposit_pending domain event. It was defined in the
       // WorkflowTriggerType union but never fired, so the prebuilt 1h→24h→72h

@@ -82,3 +82,33 @@ Observations captured during task-oriented work.
 **Suggested improvement:** payments-and-ledger's pre-activation-gate guidance should say the gate audit must enumerate ALL dealer-facing send helpers (grep the email/notification service for every `sendDealer*` / dealer-recipient function), not just the known prospect-outreach entry, and route each through `isFulfillmentUnlocked`.
 
 **Principle:** A "find every X" coverage audit keyed on one function name misses siblings; enumerate by the capability (every send whose recipient is a dealer) and by the shared gate every such site must call, not by a single known symbol.
+
+### Observation 6: "Conversion nurture" that names no price/checkout is not a conversion funnel
+
+**Status:** OPEN
+**Date:** 2026-08-26
+**Session context:** Closing the $99 pre-checkout conversion gap
+**Skill:** autolenis-buyer-journey / autolenis-communications-consent
+**Type:** internal
+**Phase/Area:** pre-checkout nurture (form_submitted/check_form_completion)
+
+**Issue:** The existing form_submitted/check_form_completion "activation" nurture was widely assumed to drive the $99 deposit, but on inspection it named no price, no deposit, and no checkout URL — it drove to a profile-completion form and /buyer/dashboard, with pre-payment "dealers are waiting/competing/bidding" copy that is false before any paid deposit. It self-stopped only on PAID (never on a PENDING deposit), so it overlapped the real deposit_reminder with no handoff.
+
+**Suggested improvement:** buyer-journey should require that any sequence claimed as "$99 conversion" explicitly name the deposit + link to the checkout, and that two funnel stages keyed off the same buyer coordinate a handoff (stop stage 1 when stage 2's state — a PENDING deposit — appears) rather than both self-stopping only on the terminal (PAID) state.
+
+**Principle:** Verify a nurture's ACTUAL copy and CTA before treating it as a conversion step; a sequence that never names the price or the checkout is awareness/nurture, not conversion, and rebadging it hides both the gap and any fabricated urgency it carries.
+
+### Observation 7: Anonymous-lead resume needs a capability-free deep-link token, not a session-forging claim
+
+**Status:** OPEN
+**Date:** 2026-08-26
+**Session context:** Closing the $99 pre-checkout conversion gap — secure resume link
+**Skill:** autolenis-auth-security-privacy
+**Type:** internal
+**Phase/Area:** buyer resume/claim tokens
+
+**Issue:** The only competitive-request "resume" was /thank-you?email=<plaintext> — enumerable, PII-in-URL, and it drove a by-email mutation with no ownership proof. Building a full guest→Supabase session-forging claim was tempting but high-risk and unverifiable without live Supabase. The safer design: a hashed/expiring/single-use deep-link token that confers NO capability — it validates+consumes and redirects to the auth-gated checkout, leaving the buyer's own Supabase auth (+ existing guest-request email transfer) as the real boundary.
+
+**Suggested improvement:** auth-security-privacy should record the "capability-free deep-link token" pattern (opaque, hashed-at-rest, expiring, single-use, redirects to an auth-gated destination) as the preferred way to make an emailed resume/deeplink secure without forging a session — distinct from a credential-bearing claim token (DealerAccountClaimToken) which sets a password/session and carries much higher blast radius.
+
+**Principle:** A link emailed to an unauthenticated recipient should carry the minimum authority that accomplishes the task; a deep-link that only routes to an auth-gated page needs no session and cannot be escalated, so prefer it over a credential token unless setting a password/session is genuinely required.
