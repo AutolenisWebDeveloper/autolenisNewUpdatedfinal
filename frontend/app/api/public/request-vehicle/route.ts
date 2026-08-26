@@ -19,7 +19,6 @@ import {
 } from "@/lib/services/email/vehicle-offers.email";
 import {
   sendVehicleRequestReceived,
-  sendDealerNewBuyerOpportunityEmail,
   sendSocialLeadWelcomeEmail,
 } from "@/lib/services/email/resend.service";
 import { dispatch } from "@/lib/qstash/dispatch";
@@ -27,12 +26,11 @@ import {
   intakeBuyerRequest,
   type UnifiedIntakeInput,
 } from "@/lib/services/acquisition/unified-buyer-intake.service";
+import { notifyActiveDealersOfOpportunity } from "@/lib/services/acquisition/dealer-opportunity-notification.service";
 import {
   getAttributionFromCookieHeader,
   recordContentAttribution,
 } from "@/lib/analytics/content-attribution.server";
-
-const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
 const ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -664,30 +662,22 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Notify active dealers of the new buyer opportunity — non-blocking per dealer.
+  // Notify active dealers of the new buyer opportunity — DEALER-FACING, so it is
+  // held behind the $99 pre-activation cost gate (notifyActiveDealersOfOpportunity
+  // no-ops until the buyer has an authoritative PAID deposit). Best-effort tail.
   if (notificationId) {
     const vehicleInterest = [
       data.preferredMake,
       data.preferredModel,
       data.customMakeModel,
     ].filter(Boolean).join(" ") || data.vehicleType;
-    const activeDealers = await prisma.dealer.findMany({
-      where: { status: "ACTIVE" },
-      include: { user: { select: { email: true } } },
-      take: 20,
-    }).catch(() => [] as Array<{ id: string; dealershipName: string; user: { email: string } | null }>);
-    for (const dealer of activeDealers) {
-      if (!dealer.user?.email) continue;
-      await sendDealerNewBuyerOpportunityEmail({
-        to: dealer.user.email,
-        contactName: dealer.dealershipName,
-        vehicleInterest,
-        buyerCity: data.city,
-        buyerState: data.state,
-        opportunityUrl: `${APP_URL}/dealer/opportunities`,
-        opportunityId: notificationId,
-      }).catch(() => { /* silent per-dealer */ });
-    }
+    await notifyActiveDealersOfOpportunity({
+      buyerId: buyerId || null,
+      opportunityId: notificationId,
+      vehicleInterest,
+      buyerCity: data.city,
+      buyerState: data.state,
+    }).catch((err) => logger.error("[request-vehicle] dealer opportunity notify failed:", err));
   }
 
   return NextResponse.json({ success: true, buyerOpportunityId, vehicleRequestId });

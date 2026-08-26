@@ -67,3 +67,18 @@ Observations captured during task-oriented work.
 **Suggested improvement:** communications-consent skill should add a truthfulness rule for conversion/nurture copy: no fabricated scarcity, urgency, deadlines, dealer interest, bidding, offers, or savings unless the claim maps to a real system fact.
 
 **Principle:** Automated conversion copy must be traceable to a real system state; invented urgency/scarcity is both a trust and a compliance risk, and it outlives the person who wrote it.
+
+### Observation 5: Un-gated ACTIVE-dealer notification fan-out on public request submission
+
+**Status:** OPEN
+**Date:** 2026-08-26
+**Session context:** Vehicle-request form coverage audit for the $99 pre-activation gate
+**Skill:** autolenis-payments-and-ledger / autolenis-dealer-marketplace
+**Type:** internal
+**Phase/Area:** pre-payment cost gate — dealer-facing notifications
+
+**Issue:** The prior pre-payment-gate audit found the intake pipeline's prospect `dealer_outreach` (via sendDealerEmail) as "the gap" and gated it, but MISSED a second dealer-facing path: `app/api/public/request-vehicle/route.ts` emailed up to 20 ACTIVE marketplace dealers (`sendDealerNewBuyerOpportunityEmail`) on every public submission, inline and un-gated. Because the first audit searched on `sendDealerEmail`, a differently-named dealer-notification helper slipped through. All public landing-page forms (dedicated page, shared SEO city forms, paid LP forms) submit to this route, so every unpaid public lead was broadcast to dealers.
+
+**Suggested improvement:** payments-and-ledger's pre-activation-gate guidance should say the gate audit must enumerate ALL dealer-facing send helpers (grep the email/notification service for every `sendDealer*` / dealer-recipient function), not just the known prospect-outreach entry, and route each through `isFulfillmentUnlocked`.
+
+**Principle:** A "find every X" coverage audit keyed on one function name misses siblings; enumerate by the capability (every send whose recipient is a dealer) and by the shared gate every such site must call, not by a single known symbol.
