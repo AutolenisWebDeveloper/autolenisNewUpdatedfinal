@@ -263,6 +263,10 @@
     {
       "path": "/api/cron/signed-contract-refetch",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/esign-envelope-reconcile",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

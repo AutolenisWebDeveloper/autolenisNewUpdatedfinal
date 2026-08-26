@@ -355,16 +355,9 @@ async function notifyBuyerContractScan(
   }
 }
 
-export async function overrideContractShield(dealId: string, _adminId: string, _reason: string): Promise<void> {
-  const existingScans = await prisma.contractScan.findMany({ where: { dealId }, orderBy: { version: "desc" }, take: 1 });
-  const version = (existingScans[0]?.version ?? 0) + 1;
-
-  await prisma.contractScan.create({
-    data: { dealId, score: 100, status: "PASS", fixList: [], version, scannedAt: new Date() },
-  });
-
-  await prisma.deal.update({
-    where: { id: dealId },
-    data: { contractShieldScore: 100, contractShieldStatus: "PASS" },
-  });
-}
+// NOTE: the standalone `overrideContractShield()` helper was removed in Program 4.
+// It wrote a synthetic PASS scan and mutated the Deal WITHOUT an audit-log entry
+// and WITHOUT routing through the guarded state machine — an unaudited override
+// footgun that had zero callers. The ONLY sanctioned Contract Shield override is
+// the admin route POST /api/admin/contract-shield/[reviewId], which is
+// role-gated (SUPER_ADMIN / OPERATIONS_ADMIN) and writes an AdminAuditLog entry.

@@ -222,3 +222,92 @@ export async function voidEnvelope(dealId: string, reason: string): Promise<void
 export async function resendEnvelope(dealId: string): Promise<void> {
   await sendEnvelope(dealId);
 }
+
+// Fetch the AUTHORITATIVE envelope status straight from DocuSign (the provider is
+// the source of truth for whether a document is signed, declined, or voided —
+// never our own SENT record). Returns the lowercased DocuSign status
+// ("sent" | "delivered" | "completed" | "declined" | "voided" | …), or null in
+// the mock/unconfigured path (no real envelope to poll). Throws on a real fetch
+// failure so the reconciler can count it and retry next run. Used ONLY by the
+// envelope reconciliation cron to recover a dropped webhook — it never marks a
+// document signed on its own; it drives the same idempotent handlers the webhook
+// does.
+export async function getEnvelopeStatus(docusignEnvelopeId: string): Promise<string | null> {
+  if (!isDocuSignConfigured()) return null;
+  const config = getDocuSignConfig();
+  const accessToken = await getDocuSignAccessToken();
+  const url = `${config.baseUrl}/v2.1/accounts/${config.accountId}/envelopes/${docusignEnvelopeId}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } });
+  if (!res.ok) throw new Error(`DocuSign envelope status fetch failed (${res.status})`);
+  const data = (await res.json()) as { status?: string };
+  const status = (data.status ?? "").toLowerCase();
+  return status || null;
+}
+
+// Authoritative DocuSign "declined" — the signer declined to sign. This is a
+// truthful terminal exception: the envelope becomes DECLINED and the deal is
+// deliberately LEFT at SIGNING_PENDING (never advanced to SIGNED), so the buyer
+// and admin see the real state and an operator can void/resend or re-review.
+// No silent limbo, no false SIGNED. Idempotent: a replayed decline is a no-op,
+// and a COMPLETED envelope is authoritative and never downgraded.
+export async function handleEnvelopeDeclined(docusignEnvelopeId: string, reason?: string): Promise<void> {
+  const envelope = await prisma.eSignEnvelope.findFirst({ where: { docusignEnvelopeId } });
+  if (!envelope) return;
+  if (envelope.status === ESignStatus.DECLINED) return; // idempotent replay
+  if (envelope.status === ESignStatus.COMPLETED) return; // completed is authoritative
+  await prisma.eSignEnvelope.update({
+    where: { id: envelope.id },
+    data: { status: ESignStatus.DECLINED, voidReason: reason ?? "Declined by signer at DocuSign" },
+  });
+  await surfaceEsignException(envelope.dealId, "declined", docusignEnvelopeId, envelope.id, reason);
+}
+
+// Authoritative DocuSign "voided" (envelope voided at the provider, e.g. expired
+// or cancelled). Same truthful-exception treatment as decline: mark VOIDED, do
+// NOT advance the deal, surface it. Idempotent; never downgrades a COMPLETED
+// envelope. Distinct from the admin `voidEnvelope(dealId)` path — this is the
+// provider-initiated void seen by the webhook/reconciler (keyed by envelope id).
+export async function handleEnvelopeVoidedByProvider(docusignEnvelopeId: string, reason?: string): Promise<void> {
+  const envelope = await prisma.eSignEnvelope.findFirst({ where: { docusignEnvelopeId } });
+  if (!envelope) return;
+  if (envelope.status === ESignStatus.VOIDED) return; // idempotent replay
+  if (envelope.status === ESignStatus.COMPLETED) return; // completed is authoritative
+  await prisma.eSignEnvelope.update({
+    where: { id: envelope.id },
+    data: { status: ESignStatus.VOIDED, voidedAt: new Date(), voidReason: reason ?? "Voided at DocuSign" },
+  });
+  await surfaceEsignException(envelope.dealId, "voided", docusignEnvelopeId, envelope.id, reason);
+}
+
+// Shared truthful-exception surface for a declined/voided envelope: notify the
+// buyer (in-app) and write an audit-log entry an operator can act on. Best-effort
+// tail (never throws) — the envelope status change above has already committed.
+async function surfaceEsignException(
+  dealId: string,
+  kind: "declined" | "voided",
+  docusignEnvelopeId: string,
+  envelopeId: string,
+  reason?: string,
+): Promise<void> {
+  const deal = await prisma.deal.findUnique({ where: { id: dealId }, select: { buyerId: true } });
+  if (deal) {
+    await prisma.notification.create({
+      data: {
+        buyerId: deal.buyerId,
+        title: "Signing could not be completed",
+        body: `Your signing request was ${kind === "declined" ? "declined" : "cancelled"} and was not completed. Our team will follow up with next steps.`,
+        type: "DEAL_STAGE_CHANGED",
+      },
+    }).catch(() => {});
+  }
+  await prisma.adminAuditLog.create({
+    data: {
+      adminId: "system",
+      adminEmail: "system@autolenis.com",
+      action: kind === "declined" ? "ESIGN_ENVELOPE_DECLINED" : "ESIGN_ENVELOPE_VOIDED",
+      entityType: "Deal",
+      entityId: dealId,
+      metadata: { docusignEnvelopeId, envelopeId, reason: reason ?? null },
+    },
+  }).catch(() => {});
+}

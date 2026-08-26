@@ -16,8 +16,18 @@ import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
-import { handleEnvelopeCompleted } from "@/lib/services/esign/esign.service";
+import {
+  handleEnvelopeCompleted,
+  handleEnvelopeDeclined,
+  handleEnvelopeVoidedByProvider,
+} from "@/lib/services/esign/esign.service";
 import { handleDealerMarketplaceEnvelopeCompleted } from "@/lib/services/esign/dealer-marketplace-agreement.service";
+
+// DocuSign Connect events we act on. `envelope-completed` drives the deal to
+// SIGNED; `envelope-declined` / `envelope-voided` resolve the envelope to a
+// truthful terminal exception (never a false SIGNED). Any other event is acked
+// so DocuSign stops retrying.
+const HANDLED_EVENTS = new Set(["envelope-completed", "envelope-declined", "envelope-voided"]);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,7 +73,7 @@ export async function POST(request: NextRequest) {
   const event = body?.event;
   const envelopeId = body?.data?.envelopeId;
 
-  if (event !== "envelope-completed" || !envelopeId) {
+  if (!event || !HANDLED_EVENTS.has(event) || !envelopeId) {
     // Acknowledge other event types without side effects so DocuSign stops retrying.
     return NextResponse.json({ received: true });
   }
@@ -103,9 +113,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const handledByDealer = await handleDealerMarketplaceEnvelopeCompleted(envelopeId);
-    if (!handledByDealer) {
-      await handleEnvelopeCompleted(envelopeId);
+    if (event === "envelope-completed") {
+      const handledByDealer = await handleDealerMarketplaceEnvelopeCompleted(envelopeId);
+      if (!handledByDealer) {
+        await handleEnvelopeCompleted(envelopeId);
+      }
+    } else if (event === "envelope-declined") {
+      await handleEnvelopeDeclined(envelopeId);
+    } else if (event === "envelope-voided") {
+      await handleEnvelopeVoidedByProvider(envelopeId);
     }
 
     await prisma.paymentProviderEvent.update({
