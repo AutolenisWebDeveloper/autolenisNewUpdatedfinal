@@ -112,3 +112,48 @@ Observations captured during task-oriented work.
 **Suggested improvement:** auth-security-privacy should record the "capability-free deep-link token" pattern (opaque, hashed-at-rest, expiring, single-use, redirects to an auth-gated destination) as the preferred way to make an emailed resume/deeplink secure without forging a session — distinct from a credential-bearing claim token (DealerAccountClaimToken) which sets a password/session and carries much higher blast radius.
 
 **Principle:** A link emailed to an unauthenticated recipient should carry the minimum authority that accomplishes the task; a deep-link that only routes to an auth-gated page needs no session and cannot be escalated, so prefer it over a credential token unless setting a password/session is genuinely required.
+
+### Observation 8: Deal-creation has 4 entry points; admin starts at ACTIVE, buyers at FINANCING_PENDING
+
+**Status:** OPEN
+**Date:** 2026-08-26
+**Session context:** Program 4 Deal Completion Autopilot — enumerating Deal-creation entry points (Section 2)
+**Skill:** autolenis-deal-lifecycle
+**Type:** internal
+**Phase/Area:** Deal creation / convergence
+
+**Issue:** The skill documents createDealFromOffer as the entry point, but the running code has FOUR: (A) commitOfferSelection (auction, tx+FOR UPDATE, @FINANCING_PENDING), (B) vehicle-request accept respond route (@FINANCING_PENDING via vehicleRequestOfferId, NOT through commitOfferSelection), (C) admin POST /api/admin/deals (@ACTIVE — different start status), (D) seed. Concierge converges onto (A) via concierge-conversion. The admin path starting at ACTIVE vs buyers at FINANCING_PENDING is a real (if benign — ACTIVE→FINANCING_PENDING is legal) inconsistency; the vehicle-request path is a second legitimate creation site the skill doesn't mention.
+
+**Suggested improvement:** autolenis-deal-lifecycle "Architecture & key files" should enumerate all real Deal-creation entry points and their starting DealStatus, and note the two convergence patterns (offer→commitOfferSelection vs vehicleRequestOffer accept), so future work doesn't assume a single createDealFromOffer seam.
+
+**Principle:** When a skill names one canonical entry point for an operation, verify against the code whether other legitimate entry points exist; enumerating all of them (with their invariants) prevents a change from silently missing a path.
+
+### Observation 9: Exactly-once domain events at a terminal-state seam need no dedup store if the write is a CAS
+
+**Status:** OPEN
+**Date:** 2026-08-26
+**Session context:** Program 4 — emitting the canonical completion event exactly once
+**Skill:** autolenis-deal-lifecycle
+**Type:** open-source
+**Phase/Area:** state-machine seam / domain-event emission
+
+**Issue:** The pre-existing purchase_completed emit lived at two completion ROUTES, keyed on dealId, "effectively once" but not structurally so (emitDomainEvent is not replay-idempotent — it inserts a timeline row per call). Moving emission into the state-machine seam and gating it on the terminal transition, AFTER a compare-and-swap status write, makes it exactly-once for free: only the CAS winner runs the body, and re-entry into the terminal state short-circuits on the idempotent no-op. No extra dedup table/column needed.
+
+**Suggested improvement:** autolenis-deal-lifecycle (and architecture) should record the pattern: to emit a lifecycle domain event exactly-once, emit it from the guarded transition seam gated on the target status, and make the status write a CAS (updateMany guarded on the observed status) so concurrent/replayed transitions collapse to a single body execution — rather than emitting from each route or adding a dedup marker.
+
+**Principle:** Exactly-once side effects on a state transition are cheapest to guarantee at the single guarded seam that owns the transition, using an optimistic compare-and-swap plus the terminal-state no-op — not by deduping at each call site.
+
+### Observation 10: Webhook-driven completion needs a provider-status reconciliation cron sharing the webhook's dedup key
+
+**Status:** OPEN
+**Date:** 2026-08-26
+**Session context:** Program 4 — DocuSign envelope completion could be stranded by a dropped webhook
+**Skill:** autolenis-integrations
+**Type:** open-source
+**Phase/Area:** provider webhooks / reconciliation
+
+**Issue:** DocuSign signature completion was webhook-only; a dropped envelope-completed webhook left the deal stuck at SIGNING_PENDING with no recovery (the existing signed-contract-refetch cron only re-fetches PDFs for already-COMPLETED envelopes). Also, declined/voided-at-provider events were ignored entirely (silent limbo). Fix: a reconciliation cron that polls the provider for authoritative status of stale in-flight envelopes and drives the SAME idempotent handlers the webhook uses — guarded by claimProviderEvent on the EXACT dedup key the webhook uses (provider:${id}:${event}), giving cross-path idempotency so the reconciler and a late webhook can never both fire.
+
+**Suggested improvement:** autolenis-integrations should state that any webhook whose delivery advances a state machine needs a reconciliation poll for missed delivery, and that the reconciler must share the webhook's dedup key (via the provider-event-dedup helper) rather than inventing its own, so the two paths are mutually idempotent.
+
+**Principle:** A webhook that drives an irreversible state advance is not complete without a reconciliation path for non-delivery; make the reconciler idempotent against the webhook by reusing the exact same dedup key, not a parallel one.
