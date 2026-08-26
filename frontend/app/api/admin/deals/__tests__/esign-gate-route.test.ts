@@ -7,12 +7,12 @@
 // tsx resolves from tsconfig paths without shell globbing.
 //
 // Regression target (Wave 2B): this route was admin-authenticated but created a
-// DocuSign envelope WITHOUT verifying the deal passed Contract Shield review.
+// signing envelope WITHOUT verifying the deal passed Contract Shield review.
 // An admin could send an envelope before legal review — a compliance-gate
-// bypass. These tests pin the gate: an envelope is only created when the deal is
+// bypass. These tests pin the gate: an envelope is only prepared when the deal is
 // CONTRACT_APPROVED (or already SIGNING_PENDING, the re-send case), in parity
 // with the buyer path (app/api/buyer/esign/[dealId]/route.ts). Any earlier state
-// must short-circuit with 409 and never reach createEnvelope.
+// must short-circuit with 409 and never reach envelope preparation.
 //
 // Run with:
 //   npx tsx --test --experimental-test-module-mocks \
@@ -22,7 +22,7 @@ import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest, NextResponse } from "next/server";
 
-// ── Controllable deal state + createEnvelope spy ─────────────────────────────
+// ── Controllable deal state + prepare-envelope spy ───────────────────────────
 let dealStatus: string | null = "CONTRACT_APPROVED";
 let createEnvelopeCalls = 0;
 
@@ -44,12 +44,14 @@ mock.module("@/lib/prisma", {
   },
 });
 
-mock.module("@/lib/services/esign/esign.service", {
+mock.module("@/lib/services/esign/buyer-signing.service", {
   namedExports: {
-    createEnvelope: async () => {
+    // In-house signing envelope preparation (replaces DocuSign createEnvelope).
+    prepareBuyerSigningEnvelope: async () => {
       createEnvelopeCalls += 1;
-      return { envelopeId: "env_1", signingUrl: "https://sign.example/x", isMock: true };
+      return { envelopeId: "env_1", documentVersionId: "cv_1", documentHash: "hash", status: "SENT" };
     },
+    NoSignableDocumentError: class NoSignableDocumentError extends Error {},
   },
 });
 

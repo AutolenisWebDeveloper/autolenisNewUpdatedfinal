@@ -1,5 +1,5 @@
 // lib/services/email/templates/dealer-esign-initiated.tsx
-// Dealer E-Sign Initiated — sent when a DocuSign envelope is created for a deal.
+// Dealer E-Sign Initiated — sent when a secure e-signature request is created for a deal.
 // Uses plain HTML string — no react-dom/server import (not compatible with Next.js App Router).
 
 export const DEALER_ESIGN_INITIATED_SUBJECT =
@@ -39,7 +39,7 @@ export function renderDealerEsignInitiatedEmail({
           <tr>
             <td style="padding:40px 40px 24px 40px;color:#333333;font-size:15px;line-height:1.6;">
               <p style="margin:0 0 16px 0;">Hi ${contactName},</p>
-              <p style="margin:0 0 16px 0;">A DocuSign e-signature envelope has been created for the deal associated with <strong>${vehicleRef}</strong>.</p>
+              <p style="margin:0 0 16px 0;">A secure e-signature request has been created for the deal associated with <strong>${vehicleRef}</strong>.</p>
               <p style="margin:0 0 24px 0;font-size:14px;color:#555555;">Please sign your documents promptly to keep the deal moving forward. Delays in signing may affect your deal timeline.</p>
               <!-- CTA Button -->
               <table cellpadding="0" cellspacing="0" style="margin:0 0 24px 0;">

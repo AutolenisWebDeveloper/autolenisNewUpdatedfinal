@@ -1,5 +1,5 @@
 // POST /api/admin/deals/[dealId]/esign/void
-// Voids an existing DocuSign envelope. Requires reason (min 10 chars).
+// Voids an existing signing envelope. Requires reason (min 10 chars).
 import { requirePermission } from "@/lib/auth/permissions";
 import { NextRequest } from "next/server";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";

@@ -121,7 +121,7 @@ export interface DealerVerificationState {
 /**
  * Snapshot of the verification/agreement records that gate activation. A signature
  * counts whether it came through the in-house flow (DealerAgreementSignature) or
- * the DocuSign marketplace envelope (marketplaceAgreementSignedAt).
+ * the legacy/historical DocuSign marketplace field (marketplaceAgreementSignedAt).
  */
 export async function getDealerVerificationState(dealerId: string): Promise<DealerVerificationState> {
   const [dealer, signature, verification] = await Promise.all([

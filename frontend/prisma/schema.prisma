@@ -666,21 +666,57 @@ model ViolationPatternRecord {
 model ESignEnvelope {
   id                 String      @id @default(uuid())
   dealId             String      @unique @map("deal_id")
+  // Historical/deprecated: the external DocuSign envelope id for records signed
+  // before AutoLenis moved to in-house signing. Retained for backward
+  // compatibility with pre-cutover deals; never written by the in-house flow.
   docusignEnvelopeId String?     @unique @map("docusign_envelope_id")
   status             ESignStatus @default(PENDING)
-  // Storage key of the executed/combined signed PDF in the private "contracts"
-  // bucket, populated on envelope-completed so the buyer can download their
-  // executed contract. Null until DocuSign reports completion (or if retrieval
-  // is still pending).
+  // Storage key of the executed/combined signed PDF (legacy DocuSign completion
+  // path). Retained for historical envelopes; the in-house flow uses the
+  // document hash + certificate below as the durable executed-contract evidence.
   documentKey        String?     @map("document_key")
   sentAt             DateTime?   @map("sent_at")
   completedAt        DateTime?   @map("completed_at")
   voidedAt           DateTime?   @map("voided_at")
   voidReason         String?     @map("void_reason")
+
+  // ── In-house electronic-signature evidence (Program 4 correction) ──────────
+  // The document actually presented for signature, bound immutably by hash. The
+  // ContractVersion is the Contract-Shield-approved contract; documentHash is a
+  // SHA-256 over the exact stored document bytes presented at signing, so a
+  // later mutation of the contract can never be represented by this signature.
+  documentVersionId  String?     @map("document_version_id")
+  documentHash       String?     @map("document_hash")
+  // Signer attribution — resolved server-side from the authenticated session,
+  // never from the client. signerRole is "BUYER" for the purchase contract.
+  signerUserId       String?     @map("signer_user_id")
+  signerRole         String?     @map("signer_role")
+  signerName         String?     @map("signer_name")
+  signerEmail        String?     @map("signer_email")
+  // Affirmative electronic-signature/electronic-records consent, captured as its
+  // own action with its own timestamp (distinct from the signing timestamp).
+  consentedToElectronic Boolean  @default(false) @map("consented_to_electronic")
+  consentedAt        DateTime?   @map("consented_at")
+  // Adoption evidence: the exact typed name the signer adopted as their
+  // signature, plus the authoritative server signing timestamp.
+  signatureText      String?     @map("signature_text")
+  signedAt           DateTime?   @map("signed_at")
+  // Ceremony evidence.
+  viewedAt           DateTime?   @map("viewed_at")
+  ipAddress          String?     @map("ip_address")
+  userAgent          String?     @db.Text @map("user_agent")
+  // Truthful terminal-exception detail and expiry.
+  declineReason      String?     @map("decline_reason")
+  expiresAt          DateTime?   @map("expires_at")
+  // Durable evidence artifact (tamper-evident certificate PDF) reference.
+  certificatePdfPath     String?  @map("certificate_pdf_path")
+  certificateGeneratedAt DateTime? @map("certificate_generated_at")
+
   createdAt          DateTime    @default(now()) @map("created_at")
   updatedAt          DateTime    @updatedAt @map("updated_at")
   deal               Deal        @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
+  @@index([documentVersionId])
   @@map("e_sign_envelopes")
 }
 
@@ -1412,6 +1448,7 @@ enum ESignStatus {
   COMPLETED
   DECLINED
   VOIDED
+  EXPIRED
 }
 
 enum PickupStatus {

@@ -27,7 +27,7 @@ export default async function AdminDealESignPage({ params }: Props) {
             <p className="font-semibold text-slate-800">Envelope Status</p>
             <Badge variant={deal.eSignEnvelope.status === "COMPLETED" ? "green" : "amber"}>{deal.eSignEnvelope.status}</Badge>
           </div>
-          <p className="text-sm text-slate-500">DocuSign ID: {deal.eSignEnvelope.docusignEnvelopeId ?? "Not yet sent"}</p>
+          <p className="text-sm text-slate-500">Legacy E-Sign ID: {deal.eSignEnvelope.docusignEnvelopeId ?? "—"}</p>
           {deal.eSignEnvelope.sentAt && <p className="text-sm text-slate-500">Sent: {deal.eSignEnvelope.sentAt.toLocaleDateString()}</p>}
           {deal.eSignEnvelope.completedAt && <p className="text-sm text-slate-500">Completed: {deal.eSignEnvelope.completedAt.toLocaleDateString()}</p>}
           <AdminESignActions dealId={dealId} envelopeStatus={deal.eSignEnvelope.status} />

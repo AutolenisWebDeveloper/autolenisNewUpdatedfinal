@@ -82,7 +82,7 @@ export function buildSystemPromptFromContext(ctx: PlatformContext, agentRole: st
   const platformInfo = `AutoLenis Platform:
 - $${DEPOSIT_AMOUNT_CENTS / 100} deposit → ${AUCTION_DURATION_HOURS}h private auction → select deal → $${PREMIUM_FEE_CENTS / 100} flat concierge fee
 - Contract Shield reviews every document before signing
-- DocuSign e-signing — no paperwork at dealership`;
+- secure in-app e-signing — no paperwork at dealership`;
 
   if (ctx.role === "BUYER") {
     const budgetStr = ctx.prequal?.maxOtdCents ? `$${(ctx.prequal.maxOtdCents / 100).toLocaleString()}` : "not yet determined (prequal needed)";

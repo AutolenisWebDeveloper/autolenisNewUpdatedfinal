@@ -140,7 +140,7 @@ export type TimelineEventType =
   | 'deposit_initiated' | 'deposit_paid' | 'deposit_refunded'
   | 'auction_started' | 'auction_closed'
   | 'offer_received' | 'offer_selected' | 'offer_expired'
-  | 'contract_sent' | 'docusign_signed' | 'docusign_declined'
+  | 'contract_sent' | 'contract_signed' | 'contract_declined'
   | 'dealer_action' | 'affiliate_action'
   | 'admin_action' | 'automation_triggered' | 'automation_completed' | 'automation_exited'
   | 'campaign_sent' | 'campaign_opened' | 'campaign_clicked';
@@ -344,7 +344,7 @@ export type WorkflowTriggerType =
   | 'auction_started'
   | 'offer_received'
   | 'offer_selected'
-  | 'docusign_signed'
+  | 'contract_signed'
   | 'purchase_completed'
   | 'refinance_inquiry'
   | 'dealer_invited'

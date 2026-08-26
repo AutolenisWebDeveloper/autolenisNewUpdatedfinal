@@ -70,7 +70,7 @@ export const EVENT_TO_STAGE: Record<DomainEventType, LifecycleStage> = {
   // closest existing stage is offer_received. Forward-only means these are a
   // no-op once the contact is already at/past offer_received.
   offer_selected: 'offer_received',
-  docusign_signed: 'offer_received',
+  contract_signed: 'offer_received',
   purchase_completed: 'purchase_completed',
 
   // Explicit exception — see resolveStageAdvance.

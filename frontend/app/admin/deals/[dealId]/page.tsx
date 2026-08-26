@@ -101,7 +101,7 @@ function buildDealTimeline(deal: DealForTimeline) {
     deal.feePaidAt ? { stage: "FEE PAID", timestamp: deal.feePaidAt, description: `$${(deal.feeAmountCents ?? PREMIUM_FEE_CENTS) / 100} concierge fee paid` } : null,
     deal.insuranceStatus !== "NOT_STARTED" ? { stage: "INSURANCE", timestamp: deal.updatedAt, description: `Status: ${deal.insuranceStatus.replace(/_/g, " ")}` } : null,
     deal.contractShieldStatus ? { stage: `CONTRACT SHIELD: ${deal.contractShieldStatus}`, timestamp: deal.updatedAt, description: `Score: ${deal.contractShieldScore}` } : null,
-    deal.eSignEnvelope?.sentAt ? { stage: "SENT FOR SIGNING", timestamp: deal.eSignEnvelope.sentAt, description: "DocuSign envelope sent to buyer" } : null,
+    deal.eSignEnvelope?.sentAt ? { stage: "SENT FOR SIGNING", timestamp: deal.eSignEnvelope.sentAt, description: "Signing envelope sent to buyer" } : null,
     deal.eSignEnvelope?.completedAt ? { stage: "SIGNED", timestamp: deal.eSignEnvelope.completedAt, description: "All documents signed" } : null,
     deal.pickup?.scheduledAt ? { stage: "PICKUP SCHEDULED", timestamp: deal.pickup.scheduledAt, description: "Vehicle pickup scheduled" } : null,
     deal.pickup?.completedAt ? { stage: "PICKUP COMPLETE", timestamp: deal.pickup.completedAt, description: "Vehicle delivered to buyer" } : null,

@@ -36,12 +36,6 @@ export async function GET(request: NextRequest) {
       if (!key) throw new Error("not configured");
       await getStripe().paymentMethods.list({ limit: 1 });
     }),
-    // DocuSign: check if env vars are set (no API call — avoids OAuth overhead)
-    check("docusign", async () => {
-      if (!process.env.DOCUSIGN_INTEGRATION_KEY || !process.env.DOCUSIGN_ACCOUNT_ID) {
-        throw new Error("not configured");
-      }
-    }),
     // Resend: check if API key is set (Resend has no cheap ping endpoint)
     check("resend", async () => {
       if (!process.env.RESEND_API_KEY) throw new Error("not configured");

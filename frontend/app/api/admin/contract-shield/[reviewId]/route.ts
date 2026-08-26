@@ -7,7 +7,7 @@ import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { createEnvelope } from "@/lib/services/esign/esign.service";
+import { prepareBuyerSigningEnvelope } from "@/lib/services/esign/buyer-signing.service";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import {
   sendContractApprovedEmail,
@@ -82,21 +82,20 @@ export async function POST(request: NextRequest, { params }: Props) {
         data: { contractShieldStatus: "PASS", contractShieldScore: scan.score },
       });
 
-      // Trigger the DocuSign envelope to the buyer (mock-safe when DocuSign unconfigured).
+      // Prepare the in-house signing envelope (buyer signs in-app). Bound to the
+      // approved contract by hash; safe under re-run (dealId-unique upsert).
       let envelopeId: string | null = null;
-      if (buyerEmail) {
-        const envelope = await createEnvelope(deal.id, buyerEmail, buyerName)
-          .catch(err => { logger.error("[contract-shield] createEnvelope failed:", err); return null; });
-        envelopeId = envelope?.envelopeId ?? null;
-      }
+      const prepared = await prepareBuyerSigningEnvelope(deal.id, { signerName: buyerName, signerEmail: buyerEmail })
+        .catch(err => { logger.error("[contract-shield] prepare signing envelope failed:", err); return null; });
+      envelopeId = prepared?.envelopeId ?? null;
 
       await prisma.notification.create({
         data: {
           buyerId: deal.buyerId,
           type: "CONTRACT_APPROVED",
           title: "Contract approved",
-          body: "Your purchase agreement passed review. Your signing link is ready.",
-          actionUrl: `/buyer/deal/${deal.id}/sign`,
+          body: "Your purchase agreement passed review. You can review and sign it now.",
+          actionUrl: `/buyer/esign`,
         },
       }).catch(() => {});
       if (buyerEmail) {

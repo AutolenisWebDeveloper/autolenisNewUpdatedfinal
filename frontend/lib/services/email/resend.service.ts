@@ -770,8 +770,8 @@ export async function sendDepositConfirmationEmail(to: string, firstName: string
   });
 }
 
-// "Contract signed" confirmation. Sent on DocuSign envelope.completed.
-// Idempotency-keyed on the DocuSign envelope id so retried webhook deliveries
+// "Contract signed" confirmation. Sent when the in-house signature completes.
+// Idempotency-keyed on the envelope id so retried sends
 // cannot re-send the email.
 export async function sendContractSignedEmail(params: {
   to: string;
@@ -829,7 +829,7 @@ export async function sendConciergeFeeConfirmationEmail(params: {
           <ol style="margin:8px 0 24px;padding-left:20px;color:#4B5563">
             <li>We review your financing details (if applicable)</li>
             <li>Your purchase contract is prepared</li>
-            <li>You receive a DocuSign link to e-sign your agreement</li>
+            <li>You receive a secure link to e-sign your agreement</li>
             <li>Once signed, we coordinate vehicle pickup</li>
           </ol>
           <a href="${dealUrl}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">Track your deal →</a>
@@ -955,7 +955,7 @@ export async function sendContractApprovedEmail(params: {
   dealId: string;
 }) {
   const { to, firstName, dealId } = params;
-  const signUrl = `${APP_URL}/buyer/deal/${dealId}/sign`;
+  const signUrl = `${APP_URL}/buyer/esign`;
   return sendIdempotent({
     idempotencyKey: `contract-approved-${dealId}`,
     to,

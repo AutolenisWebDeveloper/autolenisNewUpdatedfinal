@@ -261,7 +261,7 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
             {deal.eSignEnvelope ? (
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-slate-500">Status</span><Badge variant={deal.eSignEnvelope.status === "COMPLETED" ? "green" : "amber"}>{deal.eSignEnvelope.status}</Badge></div>
-                <div className="flex justify-between"><span className="text-slate-500">DocuSign ID</span><code className="text-xs font-mono text-slate-600">{deal.eSignEnvelope.docusignEnvelopeId ?? "—"}</code></div>
+                <div className="flex justify-between"><span className="text-slate-500">Legacy E-Sign ID</span><code className="text-xs font-mono text-slate-600">{deal.eSignEnvelope.docusignEnvelopeId ?? "—"}</code></div>
                 {deal.eSignEnvelope.sentAt && <div className="flex justify-between"><span className="text-slate-500">Sent</span><span>{new Date(deal.eSignEnvelope.sentAt).toLocaleDateString()}</span></div>}
                 {deal.eSignEnvelope.completedAt && <div className="flex justify-between"><span className="text-slate-500">Completed</span><span>{new Date(deal.eSignEnvelope.completedAt).toLocaleDateString()}</span></div>}
               </div>

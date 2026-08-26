@@ -66,7 +66,7 @@ test("getDealerVerificationEligibility reports precise reasons", async () => {
   assert.deepEqual(e.reasons, ["agreement_not_signed", "license_not_verified"]);
 });
 
-test("marketplace DocuSign signature satisfies the signature requirement", async () => {
+test("legacy marketplace agreement signature satisfies the signature requirement", async () => {
   states.d4 = { sig: false, verified: true, marketplace: new Date() };
   const { getDealerVerificationEligibility } = await load();
   const e = await getDealerVerificationEligibility("d4");

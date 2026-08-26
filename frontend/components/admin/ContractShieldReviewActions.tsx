@@ -16,7 +16,7 @@ const ACTION_META: Record<ReviewAction, { title: string; verb: string; intent: s
     intent: "bg-green-600 hover:bg-green-700",
     needsReason: false,
     needsIssues: false,
-    description: "Marks the contract as passed, advances the deal to the signing stage, and sends the buyer their DocuSign signing link. The dealer is notified of approval.",
+    description: "Marks the contract as passed, advances the deal to the signing stage, and sends the buyer their secure in-app signing link. The dealer is notified of approval.",
   },
   FLAG: {
     title: "Flag Contract",

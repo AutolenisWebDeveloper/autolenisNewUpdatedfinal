@@ -18,7 +18,7 @@ export async function GET(request: NextRequest, { params }: Props) {
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
   // ESignEnvelope does not yet store a document URL — it will be populated
-  // once the DocuSign envelope is completed and the PDF is retrieved.
+  // once the signature completes and the executed record is available.
   // For now, return a clear 404 so the UI can display an appropriate message.
   if (!deal.eSignEnvelope) {
     return errorResponse(

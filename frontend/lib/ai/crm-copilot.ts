@@ -28,7 +28,7 @@ export const WORKFLOW_TRIGGER_TYPES = [
   'auction_started',
   'offer_received',
   'offer_selected',
-  'docusign_signed',
+  'contract_signed',
   'purchase_completed',
   'refinance_inquiry',
   'dealer_invited',

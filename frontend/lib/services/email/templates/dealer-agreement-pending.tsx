@@ -1,5 +1,5 @@
 // lib/services/email/templates/dealer-agreement-pending.tsx
-// Dealer Agreement Pending — sent when a DocuSign envelope is ready for signing.
+// Dealer Agreement Pending — sent when the agreement is ready for signing.
 // Uses plain HTML string — no react-dom/server import (not compatible with Next.js App Router).
 
 export const DEALER_AGREEMENT_PENDING_SUBJECT =
@@ -39,7 +39,7 @@ export function renderDealerAgreementPendingEmail({
           <tr>
             <td style="padding:40px 40px 24px 40px;color:#333333;font-size:15px;line-height:1.6;">
               <p style="margin:0 0 16px 0;">Hi ${contactName},</p>
-              <p style="margin:0 0 16px 0;">Your AutoLenis Dealer Agreement for <strong>${dealershipName}</strong> is ready for your signature via DocuSign.</p>
+              <p style="margin:0 0 16px 0;">Your AutoLenis Dealer Agreement for <strong>${dealershipName}</strong> is ready for your signature.</p>
               <p style="margin:0 0 24px 0;">Please sign the agreement at your earliest convenience. Your dealer account will be fully activated once the agreement is signed and countersigned.</p>
               <!-- CTA Button -->
               <table cellpadding="0" cellspacing="0" style="margin:0 0 24px 0;">

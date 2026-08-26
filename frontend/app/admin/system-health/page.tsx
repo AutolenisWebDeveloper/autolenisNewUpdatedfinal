@@ -4,13 +4,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Activity, CheckCircle2, AlertTriangle, XCircle, RefreshCw, Database, ShieldCheck, BarChart2, CreditCard, FileSignature, Mail, Building2, Loader2 } from "lucide-react";
+import { Activity, CheckCircle2, AlertTriangle, XCircle, RefreshCw, Database, ShieldCheck, BarChart2, CreditCard, Mail, Building2, Loader2 } from "lucide-react";
 import { api } from "@/lib/api/client";
 import { useAutoRefresh } from "@/lib/hooks/use-auto-refresh";
 
 interface IntegrationStatus {
   stripe: boolean;
-  docusign: boolean;
   resend: boolean;
   microbilt: boolean;
 }
@@ -128,7 +127,6 @@ export default function AdminSystemHealthPage() {
 
   const EXTERNAL_INTEGRATIONS = [
     { name: "Stripe (Payment)",       icon: CreditCard,     liveKey: "stripe",    testid: "health-stripe" },
-    { name: "DocuSign (E-Sign)",      icon: FileSignature,  liveKey: "docusign",  testid: "health-docusign" },
     { name: "Resend (Email)",         icon: Mail,           liveKey: "resend",    testid: "health-resend" },
     { name: "MicroBilt (PreQual)",    icon: Building2,      liveKey: "microbilt", testid: "health-microbilt" },
   ];

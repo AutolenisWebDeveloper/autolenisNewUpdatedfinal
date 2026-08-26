@@ -2,14 +2,14 @@ import 'server-only';
 import { prisma } from '@/lib/prisma';
 
 // Provider-webhook replay dedup — the ONE shared implementation of the claim /
-// settle pattern the Stripe and DocuSign handlers each hand-rolled inline against
+// settle pattern the Stripe handler and the former DocuSign handler each hand-rolled inline against
 // the existing `PaymentProviderEvent` ledger (unique on `eventId`). It exists to
 // close the verified idempotency gap in the other inbound webhooks (Higgsfield,
 // MicroBilt, Twilio) WITHOUT adding a second dedup table: the same
 // `payment_provider_events` row, namespaced by provider, cannot collide with a
-// Stripe event id (`docusign:*` already proves the pattern).
+// Stripe event id (the former `docusign:*` keys proved the pattern).
 //
-// It is deliberately NOT retro-fitted onto the Stripe/DocuSign handlers — their
+// It is deliberately NOT retro-fitted onto the Stripe handler — its
 // money/e-sign flows have their own audited claim logic and are out of scope to
 // churn. New consumers use this helper so the pattern lives in one place.
 //

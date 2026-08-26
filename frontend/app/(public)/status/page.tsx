@@ -41,7 +41,7 @@ const COMPONENTS = [
   { key: "database", label: "Database" },
   { key: "inventory", label: "Inventory Sync" },
   { key: "payments", label: "Payments (Stripe)" },
-  { key: "esign", label: "E-Sign (DocuSign)" },
+  { key: "esign", label: "E-Sign" },
   { key: "email", label: "Email (Resend)" },
   { key: "prequal", label: "Pre-Qualification" },
 ] as const;

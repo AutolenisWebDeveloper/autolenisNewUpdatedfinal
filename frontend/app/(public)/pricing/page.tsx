@@ -22,7 +22,7 @@ const STANDARD_FEATURES = [
   "Up to 8 dealer invitations",
   "Best Price Engine (Cash, Monthly, Overall)",
   "Contract Shield document review",
-  "DocuSign e-signing",
+  "Secure e-signing",
   "QR code vehicle pickup",
   "Standard support",
 ];

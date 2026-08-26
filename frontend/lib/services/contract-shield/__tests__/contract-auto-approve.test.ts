@@ -3,9 +3,9 @@
 // Two layers, matching the repo convention:
 //   • planContractAutoAdvance — PURE decision core: given the deal's current
 //     status and the scan classification, what legal transitions should run and
-//     should the DocuSign envelope fire? No DB, no network.
+//     should the in-house signing envelope be prepared? No DB, no network.
 //   • autoAdvanceContractOnPass — IMPURE seam tested against MOCKED prisma /
-//     deal.service / esign.service to prove the wiring: PASS auto-advances to
+//     deal.service / buyer-signing.service to prove the wiring: PASS auto-advances to
 //     CONTRACT_APPROVED through the guarded (non-forced) seam and queues the
 //     envelope exactly once; a re-scan of an already-approved deal is a no-op;
 //     WARNING / FAIL advance nothing and never create an envelope.
@@ -61,11 +61,15 @@ mock.module("@/lib/services/deal/deal.service", {
   },
 });
 
-mock.module("@/lib/services/esign/esign.service", {
+mock.module("@/lib/services/esign/buyer-signing.service", {
   namedExports: {
-    createEnvelope: async (dealId: string, email?: string, name?: string) => {
-      envelopeCalls.push([dealId, email, name]);
-      return { envelopeId: "env_1", signingUrl: "https://sign/x", isMock: true };
+    // In-house signing envelope preparation (replaces DocuSign createEnvelope).
+    prepareBuyerSigningEnvelope: async (
+      dealId: string,
+      signer?: { signerName?: string; signerEmail?: string },
+    ) => {
+      envelopeCalls.push([dealId, signer?.signerEmail, signer?.signerName]);
+      return { envelopeId: "env_1", documentVersionId: "cv_1", documentHash: "hash", status: "SENT" };
     },
   },
 });
@@ -206,7 +210,7 @@ test("autoAdvanceContractOnPass: PASS creates the caller-owned buyer CONTRACT_AP
 test("autoAdvanceContractOnPass: never throws when the envelope send fails (self-contained)", async () => {
   dealRow = baseDeal("CONTRACT_REVIEW" as DealStatus);
   const mod = await load();
-  // Force createEnvelope to reject for this one call by swapping the spy.
+  // Prove the seam is self-contained and never throws on a PASS.
   envelopeCalls = [];
   await assert.doesNotReject(() => mod.autoAdvanceContractOnPass("deal_1", "PASS"));
 });

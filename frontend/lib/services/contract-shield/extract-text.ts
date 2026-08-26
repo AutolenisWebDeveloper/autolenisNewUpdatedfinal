@@ -11,8 +11,10 @@ import { extractText, getDocumentProxy } from "unpdf";
 
 const CONTRACT_BUCKET = "dealer-contracts";
 
-/** Fetch the raw PDF bytes for a documentUrl (http URL or Supabase storage path). */
-async function loadPdfBytes(documentUrl: string): Promise<Uint8Array> {
+/** Fetch the raw PDF bytes for a documentUrl (http URL or Supabase storage path).
+ * Exported so the in-house signing flow hashes the EXACT bytes Contract Shield
+ * scanned/approved (one source of truth for the signed document). */
+export async function loadContractPdfBytes(documentUrl: string): Promise<Uint8Array> {
   if (/^https?:\/\//i.test(documentUrl)) {
     const res = await fetch(documentUrl);
     if (!res.ok) throw new Error(`Contract fetch failed (${res.status})`);
@@ -32,7 +34,7 @@ async function loadPdfBytes(documentUrl: string): Promise<Uint8Array> {
  * run" and fail closed (never auto-approve on a failed extraction).
  */
 export async function extractContractText(documentUrl: string): Promise<string> {
-  const bytes = await loadPdfBytes(documentUrl);
+  const bytes = await loadContractPdfBytes(documentUrl);
   const pdf = await getDocumentProxy(bytes);
   const { text } = await extractText(pdf, { mergePages: true });
   const merged = Array.isArray(text) ? text.join("\n") : text;

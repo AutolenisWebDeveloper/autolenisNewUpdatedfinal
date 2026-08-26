@@ -41,7 +41,6 @@ const SOURCING_ALERT_PREFIXES = {
 
 export interface IntegrationStatus {
   stripe: boolean;
-  docusign: boolean;
   resend: boolean;
   microbilt: boolean;
 }
@@ -68,11 +67,6 @@ async function checkStripe(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function checkDocuSign(): boolean {
-  const required = ["DOCUSIGN_INTEGRATION_KEY", "DOCUSIGN_ACCOUNT_ID", "DOCUSIGN_USER_ID", "DOCUSIGN_PRIVATE_KEY_BASE64"];
-  return required.every(k => !!process.env[k]);
 }
 
 function checkResend(): boolean {
@@ -105,7 +99,6 @@ export async function runHealthCheck(): Promise<HealthReport> {
 
   const integrations: IntegrationStatus = {
     stripe: stripeOk,
-    docusign: checkDocuSign(),
     resend: checkResend(),
     microbilt: checkMicroBilt(),
   };
@@ -116,7 +109,6 @@ export async function runHealthCheck(): Promise<HealthReport> {
   if (inventoryHealth < INVENTORY_HEALTH_P1_THRESHOLD) alerts.push(`P1: Inventory health at ${inventoryHealth}% — below threshold`);
   if (contractFails > 5) alerts.push(`P1: ${contractFails} contract scan failures unresolved`);
   if (!integrations.stripe) alerts.push("P1: Stripe API key invalid or unreachable");
-  if (!integrations.docusign) alerts.push("P1: DocuSign configuration incomplete — missing required env vars");
   if (!integrations.resend) alerts.push("P1: Resend API key missing");
   if (!integrations.microbilt) alerts.push("P1: MicroBilt credentials missing");
 

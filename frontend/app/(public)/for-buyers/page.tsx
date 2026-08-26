@@ -72,7 +72,7 @@ const STEPS = [
     number: "04",
     title: "Sign, Pay & Drive Away",
     description:
-      "DocuSign from your phone. QR code pickup at the lot. No paperwork surprises.",
+      "Secure e-signing from your phone. QR code pickup at the lot. No paperwork surprises.",
     Icon: Smartphone,
   },
 ];
@@ -101,7 +101,7 @@ const FEATURES = [
   },
   {
     Icon: FileText,
-    title: "DocuSign E-Signing",
+    title: "Secure E-Signing",
     description:
       "Review and sign your purchase documents from your phone, tablet, or laptop — no dealer office required.",
     tag: "Sign from anywhere",

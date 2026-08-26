@@ -255,7 +255,7 @@ export default function HowItWorksPage() {
           <CitationBlock
             id="how-autolenis-works"
             question="How does AutoLenis work?"
-            answer="AutoLenis works in 6 steps: (1) Get pre-qualified online with a soft credit pull. (2) Browse and shortlist vehicles. (3) Pay a $99 Limited-Time Auction Access Deposit (refund available on request if no valuable offer is received). (4) AutoLenis launches a private 48-hour dealer auction. (5) Review competing dealer offers side-by-side. (6) Select the best offer and sign via DocuSign. Because dealers compete privately for your business, the auction is designed to surface their most competitive pricing — actual results vary by vehicle, market, and dealer participation."
+            answer="AutoLenis works in 6 steps: (1) Get pre-qualified online with a soft credit pull. (2) Browse and shortlist vehicles. (3) Pay a $99 Limited-Time Auction Access Deposit (refund available on request if no valuable offer is received). (4) AutoLenis launches a private 48-hour dealer auction. (5) Review competing dealer offers side-by-side. (6) Select the best offer and sign securely online. Because dealers compete privately for your business, the auction is designed to surface their most competitive pricing — actual results vary by vehicle, market, and dealer participation."
             sourceLabel="AutoLenis Official"
             lastUpdated="2025-01-01"
           />
