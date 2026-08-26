@@ -157,3 +157,33 @@ Observations captured during task-oriented work.
 **Suggested improvement:** autolenis-integrations should state that any webhook whose delivery advances a state machine needs a reconciliation poll for missed delivery, and that the reconciler must share the webhook's dedup key (via the provider-event-dedup helper) rather than inventing its own, so the two paths are mutually idempotent.
 
 **Principle:** A webhook that drives an irreversible state advance is not complete without a reconciliation path for non-delivery; make the reconciler idempotent against the webhook by reusing the exact same dedup key, not a parallel one.
+
+### Observation 11: Provider removal must trace the failure model, not just swap the call — a webhook reconciler may vanish
+
+**Status:** OPEN
+**Date:** 2026-08-26
+**Session context:** Program 4 correction — removing DocuSign, completing in-house ESignEnvelope signing
+**Skill:** autolenis-integrations
+**Type:** open-source
+**Phase/Area:** provider replacement / recovery model
+
+**Issue:** When an external e-signature provider (DocuSign) was replaced by a synchronous in-house signing transaction, the two DocuSign-era reliability crons (completion-webhook reconciler + signed-PDF refetch) became not just provider-specific but conceptually unnecessary: an in-house signature records evidence and advances the deal in one transaction, so there is no dropped-webhook failure mode to reconcile. Mechanically porting the reconciler cron to the new provider would have preserved a cron that recovers a failure that can no longer happen. The correct move was to re-derive the failure model (partial commit, cert-gen failure, post-commit advance failure) and cover it with a transaction + a self-healing read-path check + on-demand certificate regeneration — no cron.
+
+**Suggested improvement:** autolenis-integrations should state that removing/replacing a provider requires re-deriving the failure model of the replacement, not porting the old provider's recovery jobs; a synchronous in-house transaction often makes an async reconciliation cron unnecessary, and keeping it is dead reliability theater.
+
+**Principle:** Recovery infrastructure exists to cover a specific failure mode; when a rearchitecture eliminates that failure mode, delete the recovery job rather than re-pointing it — verify the new failure model and cover exactly it.
+
+### Observation 12: Cross-both-directions parity tests make cron removal safe and self-checking
+
+**Status:** OPEN
+**Date:** 2026-08-26
+**Session context:** Program 4 correction — removing two DocuSign crons from vercel.json + CRON_STALENESS
+**Skill:** autolenis-observability-sre
+**Type:** internal
+**Phase/Area:** cron registry / staleness monitoring
+
+**Issue:** Removing a cron required deleting it from BOTH vercel.json and the CRON_STALENESS registry; the existing bidirectional parity test (every scheduled cron is monitored AND every monitored cron is scheduled) immediately catches a half-done removal. This made the removal self-verifying — the test fails if you forget either side.
+
+**Suggested improvement:** autolenis-observability-sre should note that the vercel.json↔CRON_STALENESS bidirectional parity test is the safety net for BOTH adding and removing crons, and that a cron change is not complete until both registries agree (the test proves it).
+
+**Principle:** A bidirectional registry-parity invariant turns an easy-to-half-do change (add/remove in two places) into a self-checking one; lean on it rather than manual cross-checking.
