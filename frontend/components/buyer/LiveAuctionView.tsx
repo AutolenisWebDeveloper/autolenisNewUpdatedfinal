@@ -6,8 +6,8 @@
 
 import { useState, useEffect } from "react";
 import useSWR from "swr";
-import { Badge } from "@/components/ui/badge";
 import { Zap } from "lucide-react";
+import { deriveAuctionEngagement } from "@/lib/services/auction/auction-engagement";
 
 interface LiveAuctionViewProps {
   auctionId: string;
@@ -48,6 +48,15 @@ export default function LiveAuctionView({
 }: LiveAuctionViewProps) {
   const [remaining, setRemaining] = useState(new Date(endsAt).getTime() - Date.now());
 
+  // Truthful fallback (before the first poll returns): derive the same engagement
+  // signal the API produces from the initial counts, so we never briefly show an
+  // optimistic "Active" when no dealer has actually submitted an offer.
+  const fallbackEngagement = deriveAuctionEngagement({
+    status: "ACTIVE",
+    dealersInvited: initialDealersInvited,
+    offerCount: initialOfferCount,
+  });
+
   // Feature 12 — SWR polling every 30 seconds against the live-status API
   const { data } = useSWR<LiveStatusData>(
     `/api/buyer/auctions/${auctionId}/live-status`,
@@ -57,7 +66,8 @@ export default function LiveAuctionView({
       fallbackData: {
         offerCount: initialOfferCount,
         dealersInvited: initialDealersInvited,
-        engagementLevel: "Active",
+        engagementLevel: fallbackEngagement.engagementLevel,
+        socialProof: fallbackEngagement.socialProof,
       },
       revalidateOnFocus: false,
     },
@@ -65,8 +75,8 @@ export default function LiveAuctionView({
 
   const offerCount = data?.offerCount ?? initialOfferCount;
   const dealersInvited = data?.dealersInvited ?? initialDealersInvited;
-  const engagement = data?.engagementLevel ?? "Active";
-  const socialProof = data?.socialProof;
+  const engagement = data?.engagementLevel ?? fallbackEngagement.engagementLevel;
+  const socialProof = data?.socialProof ?? fallbackEngagement.socialProof;
 
   // Countdown timer — client-side from endsAt timestamp
   useEffect(() => {
@@ -128,8 +138,10 @@ export default function LiveAuctionView({
         <p className="font-semibold text-white mb-1.5">What happens next</p>
         {offerCount > 0 ? (
           <p>When your auction closes, you&apos;ll choose from ranked offers — Best Cash, Best Monthly, and Best Overall Value.</p>
+        ) : dealersInvited > 0 ? (
+          <p>Invited dealers have until the deadline to submit their best offer. Offer count updates every 30 seconds.</p>
         ) : (
-          <p>Dealers are reviewing your request and preparing their best offers. Offer count updates every 30 seconds.</p>
+          <p>We&apos;re finding qualified dealers for your request. This updates every 30 seconds.</p>
         )}
       </div>
 
