@@ -600,6 +600,7 @@ model Deal {
   offer                 Offer?               @relation(fields: [offerId], references: [id])
   vehicleRequestOffer   VehicleRequestOffer? @relation(fields: [vehicleRequestOfferId], references: [id])
   eSignEnvelope         ESignEnvelope?
+  eSignEnvelopeHistory  ESignEnvelopeHistory[]
   pickup                Pickup?
   financing             Financing?
   creditApplications    CreditApplication[] // Phase 5 — lender decisioning applications
@@ -712,12 +713,62 @@ model ESignEnvelope {
   certificatePdfPath     String?  @map("certificate_pdf_path")
   certificateGeneratedAt DateTime? @map("certificate_generated_at")
 
+  // Monotonic per-deal signing-attempt counter. The ESignEnvelope row is the
+  // CURRENT attempt (one per deal, @unique); prior TERMINAL attempts are archived
+  // immutably into ESignEnvelopeHistory before this row is re-used for a new
+  // attempt, so terminal signing evidence is never mutated or recycled.
+  attemptNumber      Int         @default(1) @map("attempt_number")
+
   createdAt          DateTime    @default(now()) @map("created_at")
   updatedAt          DateTime    @updatedAt @map("updated_at")
   deal               Deal        @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
   @@index([documentVersionId])
   @@map("e_sign_envelopes")
+}
+
+// Append-only, immutable archive of every SUPERSEDED terminal signing attempt
+// (VOIDED / DECLINED / EXPIRED). When an authorized new signing attempt reuses
+// the one-per-deal ESignEnvelope working row, the prior terminal record is first
+// snapshotted here — so terminal signing evidence remains immutable historical
+// evidence and each attempt is a distinct record. A COMPLETED envelope is never
+// superseded or archived: the signed evidence stays permanently on ESignEnvelope.
+// Rows here are INSERT-only; they are never updated or deleted (except the Deal
+// cascade). The canonical Deal relationship is preserved via dealId.
+model ESignEnvelopeHistory {
+  id                 String      @id @default(uuid())
+  dealId             String      @map("deal_id")
+  envelopeId         String      @map("envelope_id")
+  attemptNumber      Int         @map("attempt_number")
+  status             ESignStatus
+  documentVersionId  String?     @map("document_version_id")
+  documentHash       String?     @map("document_hash")
+  signerUserId       String?     @map("signer_user_id")
+  signerRole         String?     @map("signer_role")
+  signerName         String?     @map("signer_name")
+  signerEmail        String?     @map("signer_email")
+  consentedToElectronic Boolean  @default(false) @map("consented_to_electronic")
+  consentedAt        DateTime?   @map("consented_at")
+  signatureText      String?     @map("signature_text")
+  signedAt           DateTime?   @map("signed_at")
+  viewedAt           DateTime?   @map("viewed_at")
+  ipAddress          String?     @map("ip_address")
+  userAgent          String?     @db.Text @map("user_agent")
+  declineReason      String?     @map("decline_reason")
+  voidedAt           DateTime?   @map("voided_at")
+  voidReason         String?     @map("void_reason")
+  expiresAt          DateTime?   @map("expires_at")
+  completedAt        DateTime?   @map("completed_at")
+  certificatePdfPath String?     @map("certificate_pdf_path")
+  sentAt             DateTime?   @map("sent_at")
+  // When this terminal attempt was archived (superseded by a new attempt).
+  supersededAt       DateTime    @default(now()) @map("superseded_at")
+  createdAt          DateTime    @default(now()) @map("created_at")
+  deal               Deal        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId])
+  @@index([envelopeId])
+  @@map("e_sign_envelope_history")
 }
 
 model Pickup {

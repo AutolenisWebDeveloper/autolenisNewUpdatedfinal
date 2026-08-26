@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { createHash } from "crypto";
 
 interface Env {
-  id: string; dealId: string; status: string;
+  id: string; dealId: string; status: string; attemptNumber: number;
   documentVersionId: string | null; documentHash: string | null;
   signerUserId: string | null; signerRole: string | null; signerName: string | null; signerEmail: string | null;
   signatureText: string | null; signedAt: Date | null; consentedToElectronic: boolean;
@@ -21,6 +21,7 @@ interface Env {
 }
 interface Ctrl {
   env: Env | null;
+  history: Array<Record<string, unknown>>; // append-only archive of superseded terminal attempts
   contract: { id: string; dealId: string; documentUrl: string; version: number; status: string } | null;
   dealStatus: string;
   bytes: string; // controllable document content (hash source)
@@ -60,6 +61,7 @@ mock.module("@/lib/prisma", {
       },
       deal: { findUnique: async () => ({ status: ctrl.dealStatus, buyerId: "b1" }) },
       adminAuditLog: { create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.audits.push(data); } },
+      eSignEnvelopeHistory: { create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.history.push(data); } },
       $transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb({
         eSignEnvelope: {
           updateMany: async ({ where, data }: { where: { status?: string }; data: Record<string, unknown> }) => {
@@ -67,6 +69,7 @@ mock.module("@/lib/prisma", {
             return { count: 0 };
           },
         },
+        eSignEnvelopeHistory: { create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.history.push(data); } },
         adminAuditLog: { create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.audits.push(data); } },
       }),
     },
@@ -94,7 +97,7 @@ mock.module("@/lib/logger", { namedExports: { logger: { error: () => {}, warn: (
 
 function defaultEnv(): Omit<Env, "id"> {
   return {
-    dealId: "d1", status: "PENDING", documentVersionId: null, documentHash: null,
+    dealId: "d1", status: "PENDING", attemptNumber: 1, documentVersionId: null, documentHash: null,
     signerUserId: null, signerRole: null, signerName: null, signerEmail: null, signatureText: null, signedAt: null,
     consentedToElectronic: false, consentedAt: null, ipAddress: null, userAgent: null,
     certificatePdfPath: null, certificateGeneratedAt: null, voidedAt: null, voidReason: null,
@@ -112,6 +115,7 @@ const goodSig = {
 beforeEach(() => {
   ctrl = {
     env: null,
+    history: [],
     contract: { id: "cv_1", dealId: "d1", documentUrl: "path/contract.pdf", version: 1, status: "APPROVED" },
     dealStatus: "CONTRACT_APPROVED",
     bytes: "THE CONTRACT BYTES",
@@ -240,4 +244,103 @@ test("self-heal: a COMPLETED envelope with a lagging deal is driven to SIGNED (r
   const { ensureDealSigned } = await load();
   await ensureDealSigned("d1", "b1");
   assert.deepEqual(ctrl.advanceCalls.map(c => c.to), ["SIGNED"]);
+});
+
+// ── Terminal-record immutability & distinct-attempt archival ────────────────
+
+function terminalEnv(status: string, extra: Partial<Env> = {}): Env {
+  return {
+    id: "env_1", ...defaultEnv(), status, attemptNumber: 1,
+    documentVersionId: "cv_1", documentHash: hashOf("ORIGINAL BYTES"),
+    ...extra,
+  } as Env;
+}
+
+test("prepare NEVER resets/archives a COMPLETED envelope (final signed evidence is immutable)", async () => {
+  ctrl.env = terminalEnv("COMPLETED", { signedAt: new Date(), signatureText: "Sam Buyer", signerUserId: "b1" });
+  const before = { ...ctrl.env };
+  const { prepareBuyerSigningEnvelope } = await load();
+  const r = await prepareBuyerSigningEnvelope("d1", { signerUserId: "b1" });
+  assert.equal(r.status, "COMPLETED");
+  assert.equal(ctrl.history.length, 0, "a COMPLETED envelope is never archived");
+  assert.deepEqual(ctrl.env, before, "the COMPLETED row is returned untouched (not reset)");
+});
+
+for (const terminal of ["VOIDED", "DECLINED", "EXPIRED"]) {
+  test(`prepare on a ${terminal} record archives it immutably and starts a DISTINCT new attempt`, async () => {
+    const stamp = new Date("2026-01-01T00:00:00Z");
+    ctrl.env = terminalEnv(terminal, {
+      voidedAt: terminal === "VOIDED" ? stamp : null,
+      voidReason: terminal === "VOIDED" ? "admin void" : null,
+      declineReason: terminal === "DECLINED" ? "buyer declined" : null,
+      signerName: "Sam Buyer",
+    });
+    const { prepareBuyerSigningEnvelope } = await load();
+    const r = await prepareBuyerSigningEnvelope("d1", { signerUserId: "b1", signerName: "Sam Buyer", signerEmail: "sam@example.com" });
+
+    // (1) the previous terminal record is preserved as a distinct immutable archive row
+    assert.equal(ctrl.history.length, 1, "the terminal record is archived exactly once");
+    const archived = ctrl.history[0]!;
+    assert.equal(archived.status, terminal, "archived with its terminal status");
+    assert.equal(archived.attemptNumber, 1, "archived as attempt 1");
+    assert.equal(archived.envelopeId, "env_1");
+    assert.equal(archived.documentHash, hashOf("ORIGINAL BYTES"), "archived with its own bound hash");
+    if (terminal === "VOIDED") { assert.equal(archived.voidReason, "admin void"); assert.deepEqual(archived.voidedAt, stamp); }
+    if (terminal === "DECLINED") assert.equal(archived.declineReason, "buyer declined");
+
+    // (2) the working row is a fresh, distinct attempt (not the terminal record)
+    assert.equal(r.status, "SENT");
+    assert.equal(ctrl.env?.status, "SENT");
+    assert.equal(ctrl.env?.attemptNumber, 2, "a distinct new attempt");
+    assert.equal(ctrl.env?.documentHash, hashOf("THE CONTRACT BYTES"), "re-bound to the current approved document");
+    // (3) no stale terminal evidence carried onto the new attempt
+    assert.equal(ctrl.env?.voidedAt, null);
+    assert.equal(ctrl.env?.voidReason, null);
+    assert.equal(ctrl.env?.declineReason, null);
+    assert.equal(ctrl.env?.signedAt, null);
+    assert.equal(ctrl.env?.consentedToElectronic, false);
+  });
+}
+
+test("tamper VOID → new signing attempt preserves BOTH records (voided archive + completed new attempt)", async () => {
+  // Attempt 1: SENT, bound to ORIGINAL BYTES; the contract then changes.
+  ctrl.env = terminalEnv("SENT", { documentHash: hashOf("ORIGINAL BYTES") });
+  ctrl.bytes = "TAMPERED BYTES";
+  const mod = await load();
+  await assert.rejects(() => mod.recordBuyerSignature(goodSig), (e: unknown) => e instanceof mod.DocumentChangedError);
+  assert.equal(ctrl.env?.status, "VOIDED", "the tampered attempt is voided");
+
+  // A new authorized attempt against the (now current) document.
+  ctrl.contract = { id: "cv_2", dealId: "d1", documentUrl: "path/contract-v2.pdf", version: 2, status: "APPROVED" };
+  await mod.prepareBuyerSigningEnvelope("d1", { signerUserId: "b1", signerName: "Sam Buyer", signerEmail: "sam@example.com" });
+  assert.equal(ctrl.history.length, 1, "the VOIDED attempt is archived");
+  assert.equal(ctrl.history[0]!.status, "VOIDED");
+  assert.equal(ctrl.env?.status, "SENT");
+  assert.equal(ctrl.env?.attemptNumber, 2);
+  assert.equal(ctrl.env?.documentVersionId, "cv_2", "new attempt bound to the current version");
+
+  // Attempt 2 completes; the archived VOIDED record is untouched, both preserved.
+  ctrl.dealStatus = "SIGNING_PENDING";
+  const r = await mod.recordBuyerSignature(goodSig);
+  assert.equal(r.status, "COMPLETED");
+  assert.equal(ctrl.env?.status, "COMPLETED", "the new attempt is the signed record");
+  assert.equal(ctrl.history.length, 1, "the VOIDED archive is still exactly one, untouched");
+  assert.equal(ctrl.history[0]!.status, "VOIDED");
+});
+
+test("decline is a no-op on an already-terminal record (no cross-terminal mutation)", async () => {
+  ctrl.env = terminalEnv("VOIDED", { voidReason: "admin void", voidedAt: new Date() });
+  const { declineBuyerSignature } = await load();
+  await declineBuyerSignature("d1", "late decline");
+  assert.equal(ctrl.env?.status, "VOIDED", "a VOIDED record is not overwritten to DECLINED");
+  assert.equal(ctrl.env?.voidReason, "admin void");
+  assert.equal(ctrl.audits.length, 0);
+});
+
+test("void is a no-op on an already-terminal record (no cross-terminal mutation)", async () => {
+  ctrl.env = terminalEnv("DECLINED", { declineReason: "buyer declined" });
+  const { voidEnvelopeInternal } = await load();
+  await voidEnvelopeInternal("d1", "late void");
+  assert.equal(ctrl.env?.status, "DECLINED", "a DECLINED record is not overwritten to VOIDED");
+  assert.equal(ctrl.env?.declineReason, "buyer declined");
 });

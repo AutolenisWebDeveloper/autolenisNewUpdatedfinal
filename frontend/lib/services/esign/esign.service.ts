@@ -10,12 +10,26 @@
 
 import { prisma } from "@/lib/prisma";
 import { ESignStatus } from "@prisma/client";
+import { isTerminalStatus } from "./buyer-signing.service";
+
+// Class of error surfaced when an admin action would mutate an immutable terminal
+// signing record. Terminal records are historical evidence — a new attempt must
+// go through prepareBuyerSigningEnvelope (which archives the terminal record).
+export class TerminalEnvelopeError extends Error {
+  code = "TERMINAL_ENVELOPE";
+  constructor(public readonly status: ESignStatus) {
+    super(`Signing envelope is in a terminal state (${status}) and cannot be modified`);
+    this.name = "TerminalEnvelopeError";
+  }
+}
 
 // Notify the buyer their in-house signing package is ready (admin "resend" uses
 // this). Marks the envelope SENT so the buyer's signing page becomes actionable.
+// Refuses to resurrect a TERMINAL record (immutable historical evidence).
 export async function sendEnvelope(dealId: string): Promise<void> {
   const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
   if (!envelope) throw new Error("Envelope not found");
+  if (isTerminalStatus(envelope.status)) throw new TerminalEnvelopeError(envelope.status);
   await prisma.eSignEnvelope.update({ where: { dealId }, data: { status: ESignStatus.SENT, sentAt: new Date() } });
   const deal = await prisma.deal.findUnique({ where: { id: dealId } });
   if (deal) {
@@ -30,10 +44,13 @@ export async function sendEnvelope(dealId: string): Promise<void> {
   }
 }
 
-// Void an envelope (admin action). Provider-neutral DB status change.
+// Void an envelope (admin action). Provider-neutral DB status change. No-op on an
+// already-terminal record (a terminal signing record is immutable).
 export async function voidEnvelope(dealId: string, reason: string): Promise<void> {
-  await prisma.eSignEnvelope.update({
-    where: { dealId },
+  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  if (!envelope || isTerminalStatus(envelope.status)) return;
+  await prisma.eSignEnvelope.updateMany({
+    where: { id: envelope.id, status: envelope.status },
     data: { status: ESignStatus.VOIDED, voidedAt: new Date(), voidReason: reason },
   });
 }

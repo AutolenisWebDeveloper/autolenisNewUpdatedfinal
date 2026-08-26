@@ -69,17 +69,69 @@ export interface PrepareResult {
   status: ESignStatus;
 }
 
+// A terminal signing record is immutable historical evidence. Once an envelope
+// reaches any of these states it is never mutated in place; a new attempt must
+// archive it (VOIDED/DECLINED/EXPIRED) or is disallowed entirely (COMPLETED).
+const TERMINAL_STATUSES: ESignStatus[] = [
+  ESignStatus.COMPLETED,
+  ESignStatus.VOIDED,
+  ESignStatus.DECLINED,
+  ESignStatus.EXPIRED,
+];
+export function isTerminalStatus(status: ESignStatus): boolean {
+  return TERMINAL_STATUSES.includes(status);
+}
+
+// Every evidence field the current row carries — copied verbatim into the
+// immutable history record and cleared on the working row for a fresh attempt.
+type EnvelopeRow = NonNullable<Awaited<ReturnType<typeof prisma.eSignEnvelope.findUnique>>>;
+
+function historySnapshot(e: EnvelopeRow) {
+  return {
+    dealId: e.dealId,
+    envelopeId: e.id,
+    attemptNumber: e.attemptNumber,
+    status: e.status,
+    documentVersionId: e.documentVersionId,
+    documentHash: e.documentHash,
+    signerUserId: e.signerUserId,
+    signerRole: e.signerRole,
+    signerName: e.signerName,
+    signerEmail: e.signerEmail,
+    consentedToElectronic: e.consentedToElectronic,
+    consentedAt: e.consentedAt,
+    signatureText: e.signatureText,
+    signedAt: e.signedAt,
+    viewedAt: e.viewedAt,
+    ipAddress: e.ipAddress,
+    userAgent: e.userAgent,
+    declineReason: e.declineReason,
+    voidedAt: e.voidedAt,
+    voidReason: e.voidReason,
+    expiresAt: e.expiresAt,
+    completedAt: e.completedAt,
+    certificatePdfPath: e.certificatePdfPath,
+    sentAt: e.sentAt,
+  };
+}
+
 /**
  * Ensure a prepared in-house signing envelope for a deal, bound to the approved
- * contract by hash. Idempotent per deal (dealId @unique). A COMPLETED envelope is
- * returned unchanged. Fails closed if there is no approved document to sign.
- * Optionally provide signer identity (from the authenticated buyer).
+ * contract by hash. A COMPLETED envelope is final signed evidence — returned
+ * unchanged, never reset. A superseded TERMINAL attempt (VOIDED/DECLINED/EXPIRED)
+ * is snapshotted into the immutable ESignEnvelopeHistory archive BEFORE the
+ * one-per-deal working row is re-initialized as a distinct new attempt, so
+ * terminal records are never mutated or recycled. A still-live non-terminal
+ * attempt (PENDING/SENT/DELIVERED) is re-bound in place (same attempt). Fails
+ * closed if there is no approved document to sign.
  */
 export async function prepareBuyerSigningEnvelope(
   dealId: string,
   signer?: { signerUserId?: string; signerName?: string; signerEmail?: string },
 ): Promise<PrepareResult> {
   const existing = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+
+  // COMPLETED signed evidence is permanent — never superseded, never reset.
   if (existing?.status === "COMPLETED") {
     return {
       envelopeId: existing.id,
@@ -95,6 +147,60 @@ export async function prepareBuyerSigningEnvelope(
   const documentHash = await computeDocumentHash(contract.documentUrl);
   const expiresAt = new Date(Date.now() + SIGNING_TTL_MS);
 
+  // Fresh-attempt state: bind the current approved document and CLEAR every field
+  // from a prior attempt so no stale evidence carries onto the new transaction.
+  const freshAttempt = {
+    status: ESignStatus.SENT,
+    sentAt: new Date(),
+    documentVersionId: contract.id,
+    documentHash,
+    signerRole: SIGNER_ROLE,
+    signerUserId: signer?.signerUserId ?? null,
+    signerName: signer?.signerName ?? null,
+    signerEmail: signer?.signerEmail ?? null,
+    consentedToElectronic: false,
+    consentedAt: null,
+    signatureText: null,
+    signedAt: null,
+    viewedAt: null,
+    ipAddress: null,
+    userAgent: null,
+    declineReason: null,
+    voidedAt: null,
+    voidReason: null,
+    completedAt: null,
+    certificatePdfPath: null,
+    certificateGeneratedAt: null,
+    expiresAt,
+  };
+
+  // Superseding a TERMINAL attempt: preserve it immutably in history, then
+  // re-initialize the working row as a distinct new attempt — atomically. A CAS
+  // on the observed terminal status ensures exactly one concurrent prepare wins
+  // the supersede (so a terminal record is archived exactly once, never twice).
+  if (existing && isTerminalStatus(existing.status)) {
+    const won = await prisma.$transaction(async (tx) => {
+      const swap = await tx.eSignEnvelope.updateMany({
+        where: { id: existing.id, status: existing.status },
+        data: { ...freshAttempt, attemptNumber: existing.attemptNumber + 1 },
+      });
+      if (swap.count === 0) return false; // a concurrent prepare already superseded it
+      await tx.eSignEnvelopeHistory.create({ data: historySnapshot(existing) });
+      return true;
+    });
+    const current = await prisma.eSignEnvelope.findUnique({ where: { id: existing.id } });
+    if (!current) throw new NoSignableDocumentError();
+    void won;
+    return {
+      envelopeId: current.id,
+      documentVersionId: current.documentVersionId ?? contract.id,
+      documentHash: current.documentHash ?? documentHash,
+      status: current.status,
+    };
+  }
+
+  // No envelope yet, or a still-live non-terminal attempt (PENDING/SENT/DELIVERED)
+  // re-bound to the current approved document — same attempt, safe in place.
   const envelope = await prisma.eSignEnvelope.upsert({
     where: { dealId },
     create: {
@@ -110,8 +216,6 @@ export async function prepareBuyerSigningEnvelope(
       expiresAt,
     },
     update: {
-      // Re-prepare a not-yet-signed envelope against the current approved
-      // document (a new contract version resets the binding + any prior decline).
       status: ESignStatus.SENT,
       sentAt: new Date(),
       documentVersionId: contract.id,
@@ -271,25 +375,32 @@ export async function ensureDealSigned(dealId: string, actorId?: string): Promis
   }
 }
 
-/** Buyer declines to sign — truthful terminal exception; deal is NOT advanced. */
+/** Buyer declines to sign — truthful terminal exception; deal is NOT advanced.
+ *  No-op on an already-terminal record: a terminal signing record is immutable and
+ *  never cross-transitioned (e.g. VOIDED must not become DECLINED). */
 export async function declineBuyerSignature(dealId: string, reason?: string): Promise<void> {
   const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
-  if (!envelope || envelope.status === "COMPLETED" || envelope.status === "DECLINED") return;
-  await prisma.eSignEnvelope.update({
-    where: { dealId },
+  if (!envelope || isTerminalStatus(envelope.status)) return;
+  // CAS on the observed non-terminal status so we can never overwrite a record
+  // that became terminal concurrently.
+  const swap = await prisma.eSignEnvelope.updateMany({
+    where: { id: envelope.id, status: envelope.status },
     data: { status: ESignStatus.DECLINED, declineReason: reason ?? "Declined by buyer" },
   });
+  if (swap.count === 0) return;
   await writeExceptionAudit(dealId, envelope.id, "ESIGN_ENVELOPE_DECLINED", reason);
 }
 
-/** Void a signing envelope (admin action or internal re-issue). Deal not advanced. */
+/** Void a signing envelope (admin action or internal re-issue). Deal not advanced.
+ *  No-op on an already-terminal record — terminal signing records are immutable. */
 export async function voidEnvelopeInternal(dealId: string, reason: string): Promise<void> {
   const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
-  if (!envelope || envelope.status === "COMPLETED" || envelope.status === "VOIDED") return;
-  await prisma.eSignEnvelope.update({
-    where: { dealId },
+  if (!envelope || isTerminalStatus(envelope.status)) return;
+  const swap = await prisma.eSignEnvelope.updateMany({
+    where: { id: envelope.id, status: envelope.status },
     data: { status: ESignStatus.VOIDED, voidedAt: new Date(), voidReason: reason },
   });
+  if (swap.count === 0) return;
   await writeExceptionAudit(dealId, envelope.id, "ESIGN_ENVELOPE_VOIDED", reason);
 }
 
