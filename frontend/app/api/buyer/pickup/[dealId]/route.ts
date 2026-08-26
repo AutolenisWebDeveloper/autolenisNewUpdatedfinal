@@ -37,7 +37,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   if (deal.eSignEnvelope?.status !== "COMPLETED") {
     return errorResponse(
       "PREREQUISITE_NOT_MET",
-      "Pickup can only be scheduled after all documents have been signed.",
+      "Pickup can only be scheduled after you've signed your contract.",
       400
     );
   }

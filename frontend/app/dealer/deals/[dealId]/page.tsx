@@ -50,7 +50,10 @@ export default async function DealerDealDetailPage({ params }: Props) {
         return { label: "Awaiting Contract Shield review", href: "/dealer/contracts" };
       case "CONTRACT_APPROVED":
       case "SIGNING_PENDING":
-        return { label: "Sign contract", href: "/dealer/contracts" };
+        // The BUYER signs the purchase contract — the dealer does not sign it.
+        // There is no dealer action here; the dealer is awaiting the buyer's
+        // signature, after which an executed copy becomes available below.
+        return null;
       case "SIGNED":
       case "PICKUP_SCHEDULED":
         return { label: "Coordinate pickup", href: "/dealer/pickups" };
@@ -180,6 +183,25 @@ export default async function DealerDealDetailPage({ params }: Props) {
           <p className="text-xs text-slate-500 mt-2">
             Reviewed by AutoLenis. You&apos;ll be notified when the review completes.
           </p>
+        </div>
+      )}
+
+      {/* Executed contract copy — available once the BUYER has signed. The dealer
+          receives a copy; the dealer does not sign the purchase contract. */}
+      {deal.executedContractAvailable && (
+        <div className={cn(CARD, "p-5 mb-6")} data-testid="executed-contract-section">
+          <p className="text-sm font-semibold text-slate-800 mb-1">Executed purchase contract</p>
+          <p className="text-xs text-slate-500 mb-3">
+            The buyer has electronically signed. Download your copy of the executed contract.
+          </p>
+          <Button
+            href={`/api/dealer/deals/${deal.id}/contract`}
+            variant="secondary"
+            className="text-sm min-h-[44px]"
+            data-testid="dealer-download-executed"
+          >
+            Download executed contract
+          </Button>
         </div>
       )}
 

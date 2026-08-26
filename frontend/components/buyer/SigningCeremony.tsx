@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, FileText, ShieldCheck, AlertTriangle, Loader2 } from "lucide-react";
+import { getActiveConsentPolicy, type ConsentAckKey } from "@/lib/services/esign/consent-policy";
 
 interface Presentation {
   status: string | null;
@@ -22,10 +23,17 @@ type Phase = "loading" | "review" | "completed" | "unavailable" | "error";
 export default function SigningCeremony({ dealId }: { dealId: string }) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [data, setData] = useState<Presentation | null>(null);
-  const [consent, setConsent] = useState(false);
+  // The four required acknowledgments — NONE preselected. "Continue to Sign"
+  // stays disabled until every one is affirmatively checked (server re-validates).
+  const consentPolicy = useMemo(() => getActiveConsentPolicy(), []);
+  const [acks, setAcks] = useState<Record<string, boolean>>({});
   const [typedName, setTypedName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const allAcknowledged = consentPolicy.acknowledgments.every((a) => acks[a.key] === true);
+  const toggleAck = (key: ConsentAckKey, checked: boolean) =>
+    setAcks((prev) => ({ ...prev, [key]: checked }));
 
   const load = useCallback(async () => {
     try {
@@ -62,7 +70,10 @@ export default function SigningCeremony({ dealId }: { dealId: string }) {
       const res = await fetch(`/api/buyer/esign/${dealId}/sign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ consentedToElectronic: true, signatureText: typedName.trim() }),
+        body: JSON.stringify({
+          acknowledgments: consentPolicy.acknowledgments.map((a) => ({ key: a.key, accepted: acks[a.key] === true })),
+          signatureText: typedName.trim(),
+        }),
       });
       const json = await res.json();
       if (res.ok && (json?.data?.status === "COMPLETED" || json?.status === "COMPLETED")) {
@@ -151,24 +162,31 @@ export default function SigningCeremony({ dealId }: { dealId: string }) {
         <div className="flex items-start gap-2 mb-4">
           <ShieldCheck size={18} className="text-al-primary mt-0.5" aria-hidden="true" />
           <p className="text-xs text-slate-600">
-            By signing electronically you agree that your electronic signature is legally binding and that you have
-            reviewed the contract above. Your IP address, device, and the exact contract you signed are recorded for
-            your protection.
+            Please read and confirm each acknowledgment below before signing. The exact contract you sign is recorded
+            for your protection.
           </p>
         </div>
 
-        <label className="flex items-start gap-3 mb-4 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={consent}
-            onChange={(e) => setConsent(e.target.checked)}
-            className="mt-1 h-4 w-4 rounded border-slate-300 text-al-primary focus:ring-al-primary"
-            data-testid="esign-consent"
-          />
-          <span className="text-sm text-slate-700">
-            I consent to sign this purchase contract electronically and to receive contract records electronically.
-          </span>
-        </label>
+        <fieldset className="mb-4" data-testid="esign-consents">
+          <legend className="text-sm font-medium text-slate-700 mb-2">Signing acknowledgments</legend>
+          <div className="space-y-3">
+            {consentPolicy.acknowledgments.map((ack) => (
+              <label key={ack.key} className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={acks[ack.key] === true}
+                  onChange={(e) => toggleAck(ack.key, e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-al-primary focus:ring-al-primary"
+                  data-testid={`esign-consent-${ack.key}`}
+                />
+                <span className="text-sm text-slate-700">
+                  <span className="font-medium text-slate-900">{ack.title}. </span>
+                  {ack.text}
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
         <label htmlFor="esign-adopt" className="block text-sm font-medium text-slate-700 mb-1">
           Type your full legal name to adopt your signature
@@ -193,11 +211,11 @@ export default function SigningCeremony({ dealId }: { dealId: string }) {
 
         <Button
           onClick={submit}
-          disabled={!consent || typedName.trim().length < 2 || submitting}
+          disabled={!allAcknowledged || typedName.trim().length < 2 || submitting}
           className="w-full"
           data-testid="esign-submit"
         >
-          {submitting ? "Recording your signature…" : "Sign contract"}
+          {submitting ? "Recording your signature…" : "Continue to Sign"}
         </Button>
       </div>
     </div>

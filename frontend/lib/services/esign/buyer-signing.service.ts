@@ -21,11 +21,20 @@
 //    advanceDealStatus CAS guarantees it).
 
 import { prisma } from "@/lib/prisma";
-import { ESignStatus, Prisma } from "@prisma/client";
+import { ESignStatus, NotificationType, Prisma } from "@prisma/client";
 import { createHash } from "crypto";
 import { logger } from "@/lib/logger";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import { loadContractPdfBytes } from "@/lib/services/contract-shield/extract-text";
+import {
+  CONSENT_POLICY_VERSION,
+  validateAcknowledgments,
+  buildConsentSnapshot,
+  IncompleteConsentError,
+  type AcknowledgmentInput,
+  type ConsentSnapshot,
+} from "./consent-policy";
+import { generateAndUploadExecutedContract } from "./executed-contract.service";
 
 const CONTRACT_BUCKET = "dealer-contracts";
 const SIGNING_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
@@ -46,6 +55,17 @@ export class DocumentChangedError extends Error {
 export class EnvelopeNotSignableError extends Error {
   code = "ENVELOPE_NOT_SIGNABLE";
   constructor(public readonly status: ESignStatus) { super(`Envelope is not in a signable state (${status})`); this.name = "EnvelopeNotSignableError"; }
+}
+
+/** Validate the four required consent acknowledgments, normalizing the detailed
+ *  IncompleteConsentError to the route-mapped ConsentRequiredError (§1 fail-closed). */
+function validateConsentOrThrow(acknowledgments: AcknowledgmentInput[]): void {
+  try {
+    validateAcknowledgments(acknowledgments ?? []);
+  } catch (err) {
+    if (err instanceof IncompleteConsentError) throw new ConsentRequiredError();
+    throw err;
+  }
 }
 
 /** SHA-256 (hex) over the exact stored contract bytes — the tamper-evidence anchor. */
@@ -112,6 +132,13 @@ function historySnapshot(e: EnvelopeRow) {
     completedAt: e.completedAt,
     certificatePdfPath: e.certificatePdfPath,
     sentAt: e.sentAt,
+    // Consent record + executed-artifact refs travel with the archived attempt so
+    // the frozen consent snapshot and executed copy survive supersession intact.
+    consentPolicyVersion: e.consentPolicyVersion,
+    consentSnapshot: (e.consentSnapshot ?? Prisma.DbNull) as Prisma.InputJsonValue | typeof Prisma.DbNull,
+    executedDocumentKey: e.executedDocumentKey,
+    executedDocumentHash: e.executedDocumentHash,
+    executedGeneratedAt: e.executedGeneratedAt,
   };
 }
 
@@ -171,6 +198,14 @@ export async function prepareBuyerSigningEnvelope(
     completedAt: null,
     certificatePdfPath: null,
     certificateGeneratedAt: null,
+    // Clear the prior attempt's consent record + executed artifact so nothing
+    // carries onto the new transaction (consent is never reused across attempts).
+    consentPolicyVersion: null,
+    consentSnapshot: Prisma.DbNull,
+    executedDocumentKey: null,
+    executedDocumentHash: null,
+    executedGeneratedAt: null,
+    confirmationsSentAt: null,
     expiresAt,
   };
 
@@ -253,7 +288,10 @@ export interface RecordSignatureParams {
   signerName: string;
   signerEmail: string;
   signatureText: string;
-  consentedToElectronic: boolean;
+  // The four required electronic-signature acknowledgments (§1). Each must be
+  // affirmatively accepted; validated server-side against the active consent
+  // policy. A typed name / view / click is never consent on its own.
+  acknowledgments: AcknowledgmentInput[];
   ipAddress: string;
   userAgent: string;
 }
@@ -272,7 +310,10 @@ export interface RecordSignatureResult {
  * SIGNED. Idempotent: a second submission on a COMPLETED envelope is a no-op.
  */
 export async function recordBuyerSignature(params: RecordSignatureParams): Promise<RecordSignatureResult> {
-  if (!params.consentedToElectronic) throw new ConsentRequiredError();
+  // Consent gate (§1): every required acknowledgment must be affirmatively
+  // accepted. Fails closed (ConsentRequiredError) before anything is recorded.
+  // A typed name alone is not consent — but an empty adopted name is still invalid.
+  validateConsentOrThrow(params.acknowledgments);
   if (!params.signatureText?.trim()) throw new ConsentRequiredError();
 
   const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId: params.dealId } });
@@ -296,7 +337,9 @@ export async function recordBuyerSignature(params: RecordSignatureParams): Promi
     throw new DocumentChangedError();
   }
 
-  // Tamper check: the bytes signed MUST match the bytes bound at prepare time.
+  // Tamper check (§3): the bytes signed MUST match the bytes bound at prepare
+  // time. Recomputed immediately before completion; consent is then bound to THIS
+  // exact hash + version, so it can never be reattributed to a changed document.
   const currentHash = await computeDocumentHash(contract.documentUrl);
   if (currentHash !== envelope.documentHash) {
     await voidEnvelopeInternal(params.dealId, "Contract document changed after signing began");
@@ -304,6 +347,22 @@ export async function recordBuyerSignature(params: RecordSignatureParams): Promi
   }
 
   const now = new Date();
+  // Frozen per-attempt consent snapshot, bound to the exact version + hash just
+  // validated. Persisted verbatim (append-only) — a future policy change never
+  // rewrites it.
+  const consentSnapshot = buildConsentSnapshot({
+    signerUserId: params.signerUserId,
+    signerName: params.signerName,
+    signerRole: SIGNER_ROLE,
+    signerEmail: params.signerEmail,
+    documentVersionId: contract.id,
+    documentVersion: contract.version,
+    documentHash: currentHash,
+    consentedAt: now,
+    ipAddress: params.ipAddress,
+    userAgent: params.userAgent,
+  });
+
   await prisma.$transaction(async (tx) => {
     // Compare-and-swap on the prepared status so a concurrent double-submit
     // cannot both complete (only one moves SENT/DELIVERED/PENDING → COMPLETED).
@@ -315,6 +374,8 @@ export async function recordBuyerSignature(params: RecordSignatureParams): Promi
         signedAt: now,
         consentedToElectronic: true,
         consentedAt: now,
+        consentPolicyVersion: CONSENT_POLICY_VERSION,
+        consentSnapshot: consentSnapshot as unknown as Prisma.InputJsonValue,
         signatureText: params.signatureText.trim(),
         signerUserId: params.signerUserId,
         signerRole: SIGNER_ROLE,
@@ -329,6 +390,30 @@ export async function recordBuyerSignature(params: RecordSignatureParams): Promi
       // Lost the race — another submission completed it. Treat as idempotent.
       return;
     }
+    // Append-only CONSENT_ACCEPTED audit event (§2) — the full attribution + the
+    // exact acknowledgments, bound to the document version + hash.
+    await tx.adminAuditLog.create({
+      data: {
+        adminId: "system",
+        adminEmail: "system@autolenis.com",
+        action: "CONSENT_ACCEPTED",
+        entityType: "ESignEnvelope",
+        entityId: envelope.id,
+        reason: `Buyer accepted all e-signature consent acknowledgments (${CONSENT_POLICY_VERSION})`,
+        metadata: {
+          dealId: params.dealId,
+          signerUserId: params.signerUserId,
+          signerRole: SIGNER_ROLE,
+          consentPolicyVersion: CONSENT_POLICY_VERSION,
+          documentVersionId: contract.id,
+          documentVersion: contract.version,
+          documentHash: currentHash,
+          acknowledgments: consentSnapshot.acknowledgments.map((a) => ({ key: a.key, accepted: a.accepted })),
+          consentedAt: now.toISOString(),
+          ipAddress: params.ipAddress,
+        } as Prisma.InputJsonValue,
+      },
+    });
     await tx.adminAuditLog.create({
       data: {
         adminId: "system",
@@ -404,6 +489,96 @@ export async function voidEnvelopeInternal(dealId: string, reason: string): Prom
   await writeExceptionAudit(dealId, envelope.id, "ESIGN_ENVELOPE_VOIDED", reason);
 }
 
+// ── Scheduled sweeps (§8/§9) ─────────────────────────────────────────────────
+
+/** Statuses a still-live signing attempt can be in (non-terminal, expirable). */
+const EXPIRABLE_STATUSES: ESignStatus[] = [ESignStatus.SENT, ESignStatus.DELIVERED, ESignStatus.PENDING];
+
+/**
+ * Bulk expiry sweep (§9): transition every prepared-but-unsigned envelope past its
+ * expiresAt to EXPIRED. Per-row compare-and-swap on the observed non-terminal
+ * status, so it can NEVER expire a COMPLETED (or any other terminal) record or
+ * mutate a state that changed concurrently. Idempotent (already-EXPIRED rows are
+ * excluded by the status filter) and audited per transition. Terminal-history is
+ * preserved: an EXPIRED record stays the current attempt until a subsequent
+ * authorized prepare archives it — this sweep never writes history directly.
+ */
+export async function sweepExpiredEnvelopes(limit = 500): Promise<{ scanned: number; expired: number }> {
+  const now = new Date();
+  const candidates = await prisma.eSignEnvelope.findMany({
+    where: { status: { in: EXPIRABLE_STATUSES }, expiresAt: { lt: now } },
+    select: { id: true, dealId: true, status: true },
+    take: limit,
+  });
+  let expired = 0;
+  for (const c of candidates) {
+    const swap = await prisma.eSignEnvelope.updateMany({
+      where: { id: c.id, status: c.status }, // CAS: only if still the observed non-terminal status
+      data: { status: ESignStatus.EXPIRED },
+    });
+    if (swap.count === 1) {
+      expired += 1;
+      await writeExceptionAudit(c.dealId, c.id, "ESIGN_ENVELOPE_EXPIRED", "Signing window elapsed");
+    }
+  }
+  return { scanned: candidates.length, expired };
+}
+
+/**
+ * Durability reconciliation sweep (§8): for every COMPLETED envelope still missing
+ * its executed artifact, certificate, or confirmations, re-drive
+ * finalizeSignedContract from the frozen evidence. Idempotent and immutable-safe
+ * (guarded writes never touch an existing artifact). Repeated/unrecoverable
+ * failures are surfaced via logger.error (Sentry — the existing operational-
+ * exception rail): a COMPLETED envelope that stays unfinalized past the grace
+ * window is logged as an operational exception rather than silently retried
+ * forever. No new recovery engine.
+ */
+export async function reconcileSignedContracts(
+  limit = 100,
+): Promise<{ scanned: number; finalized: number; pending: number; stuck: number }> {
+  const STUCK_AFTER_MS = 60 * 60 * 1000; // 1 hour
+  const now = Date.now();
+  const pendingEnvelopes = await prisma.eSignEnvelope.findMany({
+    where: {
+      status: ESignStatus.COMPLETED,
+      // In-house envelopes only — a legacy DocuSign-completed envelope has no
+      // documentVersionId and no in-house executed artifact to generate, so it
+      // must never be picked up here (it would reconcile forever and log noise).
+      documentVersionId: { not: null },
+      OR: [
+        { executedDocumentKey: null },
+        { certificatePdfPath: null },
+        { confirmationsSentAt: null },
+      ],
+    },
+    select: { dealId: true, completedAt: true },
+    take: limit,
+  });
+
+  let finalized = 0;
+  let pending = 0;
+  let stuck = 0;
+  for (const env of pendingEnvelopes) {
+    const result = await finalizeSignedContract(env.dealId);
+    if (result.artifactReady && result.certificateReady && result.confirmationsSent) {
+      finalized += 1;
+    } else {
+      pending += 1;
+      const ageMs = env.completedAt ? now - env.completedAt.getTime() : 0;
+      if (ageMs > STUCK_AFTER_MS) {
+        stuck += 1;
+        logger.error(
+          `[esign-artifact-reconcile] COMPLETED envelope for deal ${env.dealId} still unfinalized after ` +
+            `${Math.round(ageMs / 60000)}m (artifact=${result.artifactReady} cert=${result.certificateReady} ` +
+            `confirmations=${result.confirmationsSent}) — operational exception, manual review needed`,
+        );
+      }
+    }
+  }
+  return { scanned: pendingEnvelopes.length, finalized, pending, stuck };
+}
+
 /** Lazy expiry: mark a prepared-but-unsigned envelope EXPIRED once past its TTL. */
 export async function expireIfElapsed(dealId: string): Promise<boolean> {
   const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
@@ -458,6 +633,191 @@ export async function finalizeBuyerSignatureCertificate(dealId: string): Promise
     logger.error("[buyer-signing] certificate finalize failed (non-fatal):", err);
     return null;
   }
+}
+
+// ── Executed-contract artifact + confirmation sequencing (§4/§5/§7/§8) ────────
+
+export interface FinalizeSignedContractResult {
+  artifactReady: boolean;
+  certificateReady: boolean;
+  confirmationsSent: boolean;
+}
+
+/**
+ * Finalize a COMPLETED signature in the correct order (§7): generate + store the
+ * executed contract artifact FIRST, then the evidence certificate, then — only
+ * once BOTH are durably available — emit the buyer/dealer "signed contract is
+ * ready" confirmations exactly once. A generation failure never discards the
+ * (already-committed) signature evidence; it simply leaves confirmations unsent so
+ * the reconciliation cron re-drives (§8). Idempotent and safe to re-run: the
+ * artifact write is guarded (immutable once set), and confirmations are gated by a
+ * one-way marker + per-channel idempotency. Best-effort — never throws.
+ */
+export async function finalizeSignedContract(dealId: string): Promise<FinalizeSignedContractResult> {
+  const notReady: FinalizeSignedContractResult = { artifactReady: false, certificateReady: false, confirmationsSent: false };
+  try {
+    const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+    if (!envelope || envelope.status !== "COMPLETED") return notReady;
+
+    // 1) Executed artifact — generated from FROZEN evidence, immutable once set.
+    const artifactKey = await ensureExecutedArtifact(envelope);
+    if (!artifactKey) return notReady; // gen failed → do NOT confirm; cron re-drives
+
+    // 2) Evidence certificate (idempotent).
+    const certPath = await finalizeBuyerSignatureCertificate(dealId);
+    if (!certPath) return { artifactReady: true, certificateReady: false, confirmationsSent: false };
+
+    // 3) Confirmations — only now that artifact + certificate both exist.
+    const confirmationsSent = await emitSignatureConfirmations(dealId);
+    return { artifactReady: true, certificateReady: true, confirmationsSent };
+  } catch (err) {
+    logger.error("[buyer-signing] finalizeSignedContract failed (non-fatal):", err);
+    return notReady;
+  }
+}
+
+/**
+ * Ensure the executed-contract artifact exists for a COMPLETED envelope, returning
+ * its storage key (or null if it can't be produced yet). Generated from the frozen
+ * attempt evidence (pinned ContractVersion + hash + consent snapshot + adopted
+ * signature). The DB reference is written with a null-only guard so a completed
+ * artifact is NEVER overwritten/regenerated by later app-data changes (§5).
+ */
+async function ensureExecutedArtifact(envelope: EnvelopeRow): Promise<string | null> {
+  if (envelope.executedDocumentKey) return envelope.executedDocumentKey; // already set → immutable
+  if (!envelope.documentVersionId || !envelope.documentHash || !envelope.signedAt) return null;
+
+  const contract = await prisma.contractVersion.findUnique({ where: { id: envelope.documentVersionId } });
+  if (!contract) return null;
+
+  const consentSnapshot = (envelope.consentSnapshot as unknown as ConsentSnapshot | null) ?? null;
+  const result = await generateAndUploadExecutedContract({
+    envelopeId: envelope.id,
+    dealId: envelope.dealId,
+    signerName: envelope.signerName ?? "AutoLenis Buyer",
+    signerEmail: envelope.signerEmail ?? "",
+    signerUserId: envelope.signerUserId ?? "",
+    signerRole: envelope.signerRole ?? SIGNER_ROLE,
+    documentVersionId: envelope.documentVersionId,
+    documentVersion: contract.version,
+    documentUrl: contract.documentUrl,
+    documentHash: envelope.documentHash,
+    signatureText: envelope.signatureText ?? "",
+    signedAt: envelope.signedAt,
+    consentedAt: envelope.consentedAt ?? envelope.signedAt,
+    consentPolicyVersion: envelope.consentPolicyVersion,
+    consentSnapshot,
+    certificateReference: envelope.certificatePdfPath ?? envelope.id,
+  });
+  if (!result) return null;
+
+  // Guarded null-only write — immutable: a concurrent finalize or a later app-data
+  // change can never clobber an already-recorded executed artifact.
+  await prisma.eSignEnvelope.updateMany({
+    where: { id: envelope.id, executedDocumentKey: null },
+    data: {
+      executedDocumentKey: result.key,
+      executedDocumentHash: result.hash,
+      executedGeneratedAt: new Date(),
+    },
+  });
+  const fresh = await prisma.eSignEnvelope.findUnique({
+    where: { id: envelope.id },
+    select: { executedDocumentKey: true },
+  });
+  return fresh?.executedDocumentKey ?? result.key;
+}
+
+/**
+ * Emit the buyer + dealer "your signed contract is ready" confirmations, exactly
+ * once, only after the executed artifact + certificate are both available. Gated
+ * by the one-way confirmationsSentAt marker; every channel is independently
+ * idempotent (buyer email via EmailSendLog key; dealer notification deduped on a
+ * stable metadata key), so a re-run never double-notifies. Returns true if this
+ * call emitted (or confirmed) the confirmations.
+ */
+async function emitSignatureConfirmations(dealId: string): Promise<boolean> {
+  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  if (!envelope || envelope.status !== "COMPLETED") return false;
+  if (!envelope.executedDocumentKey || !envelope.certificatePdfPath) return false; // artifact not ready
+  if (envelope.confirmationsSentAt) return true; // already sent
+
+  const deal = await prisma.deal.findUnique({
+    where: { id: dealId },
+    include: {
+      buyer: { include: { user: { select: { email: true } } } },
+      offer: { select: { dealerId: true, dealer: { select: { isSystemPlaceholder: true } } } },
+    },
+  });
+  if (!deal) return false;
+
+  const buyerEmail = deal.buyer?.user?.email ?? envelope.signerEmail ?? "";
+  const firstName = deal.buyer?.firstName ?? "there";
+
+  // Buyer CRM event (best-effort).
+  try {
+    const { emitDomainEvent } = await import("@/lib/events/emit");
+    await emitDomainEvent("contract_signed", {
+      domainEntityId: dealId,
+      contact: {
+        email: buyerEmail || null,
+        phone: deal.buyer?.phone ?? null,
+        firstName: deal.buyer?.firstName,
+        lastName: deal.buyer?.lastName,
+        source: "buyer_signup",
+      },
+      data: { deal_id: dealId, envelope_id: envelope.id, buyer_id: deal.buyerId },
+    });
+  } catch (err) {
+    logger.error("[buyer-signing] contract_signed emit failed (non-fatal):", err);
+  }
+
+  // Buyer confirmation email (idempotent).
+  try {
+    if (buyerEmail) {
+      const { sendContractSignedEmail } = await import("@/lib/services/email/resend.service");
+      await sendContractSignedEmail({ to: buyerEmail, firstName, dealId, envelopeId: envelope.id });
+    }
+  } catch (err) {
+    logger.error("[buyer-signing] buyer confirmation email failed (non-fatal):", err);
+  }
+
+  // Dealer notification — contract EXECUTED (dealer did not sign; a copy is
+  // available). Registered dealers only; deduped on a stable metadata key.
+  try {
+    const dealerId = deal.offer?.dealerId ?? null;
+    const isPlaceholder = deal.offer?.dealer?.isSystemPlaceholder ?? false;
+    if (dealerId && !isPlaceholder) {
+      const dedupeKey = `esign-executed:${dealId}:${envelope.id}`;
+      const existing = await prisma.notification.findFirst({
+        where: { dealerId, metadata: { path: ["key"], equals: dedupeKey } },
+        select: { id: true },
+      });
+      if (!existing) {
+        await prisma.notification.create({
+          data: {
+            dealerId,
+            type: NotificationType.DEAL_STAGE_CHANGED,
+            title: "Purchase contract executed",
+            body:
+              "The buyer has electronically signed the purchase contract. " +
+              "An executed copy is available in your deal record.",
+            actionUrl: `/dealer/deals/${dealId}`,
+            metadata: { key: dedupeKey, dealId, envelopeId: envelope.id, kind: "ESIGN_EXECUTED" },
+          },
+        });
+      }
+    }
+  } catch (err) {
+    logger.error("[buyer-signing] dealer execution notification failed (non-fatal):", err);
+  }
+
+  // One-way marker (guarded) so confirmations are not re-sent on the next re-drive.
+  await prisma.eSignEnvelope.updateMany({
+    where: { id: envelope.id, confirmationsSentAt: null },
+    data: { confirmationsSentAt: new Date() },
+  });
+  return true;
 }
 
 async function writeExceptionAudit(dealId: string, envelopeId: string, action: string, reason?: string): Promise<void> {

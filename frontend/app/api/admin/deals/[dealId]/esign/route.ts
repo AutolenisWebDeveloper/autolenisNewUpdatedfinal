@@ -53,14 +53,16 @@ export async function POST(request: NextRequest, { params }: Props) {
     return adminError("INTERNAL_ERROR", "Could not prepare the signing envelope.", 500);
   }
 
-  // Notify the dealer side that the e-sign flow has started — non-blocking.
+  // Notify the dealer that BUYER signing has started — informational only. The
+  // dealer does not sign; they'll receive an executed copy once the buyer signs.
+  // Link to the dealer's own deal page (never a buyer signing URL).
   const dealerEmail = deal.offer?.dealer?.user?.email;
   if (dealerEmail) {
     await sendDealerEsignInitiatedEmail({
       to: dealerEmail,
       contactName: deal.offer?.dealer?.dealershipName ?? "",
       vehicleRef: `Deal ${dealId.slice(0, 8)}`,
-      signingUrl: `${APP_URL}/buyer/esign`,
+      dealUrl: `${APP_URL}/dealer/deals/${dealId}`,
       dealId,
     }).catch(err => logger.error("[esign] dealer notification failed:", err));
   }

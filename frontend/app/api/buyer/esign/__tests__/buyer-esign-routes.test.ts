@@ -41,7 +41,7 @@ mock.module("@/lib/prisma", {
 mock.module("@/lib/services/esign/buyer-signing.service", {
   namedExports: {
     recordBuyerSignature: async (params: Record<string, unknown>) => { signCalls.push(params); return { status: "COMPLETED", envelopeId: "env_1", alreadySigned: false }; },
-    finalizeBuyerSignatureCertificate: async () => "path.pdf",
+    finalizeSignedContract: async () => ({ artifactReady: true, certificateReady: true, confirmationsSent: true }),
     prepareBuyerSigningEnvelope: async () => ({ envelopeId: "env_1", documentVersionId: "cv_1", documentHash: "h", status: "SENT" }),
     getContractViewUrl: async () => "https://signed/view",
     ensureDealSigned: async () => {},
@@ -66,6 +66,14 @@ function req(body?: unknown) {
   });
 }
 const params = { params: Promise.resolve({ dealId: "d1" }) };
+
+// The four required acknowledgments, all affirmatively accepted.
+const ALL_ACKS = [
+  "ELECTRONIC_RECORDS_AND_SIGNATURE",
+  "CONTRACT_REVIEW_AND_INDEPENDENT_ADVICE",
+  "ACCEPTANCE_AND_INTENT_TO_BE_BOUND",
+  "ELECTRONIC_COPY_AND_ACCESS",
+].map((key) => ({ key, accepted: true }));
 
 beforeEach(() => { buyer = { id: "b1" }; dealRow = { id: "d1", status: "CONTRACT_APPROVED" }; signCalls = []; });
 
@@ -93,20 +101,27 @@ test("POST begin requires CONTRACT_APPROVED (409 before approval)", async () => 
 test("sign requires authentication (401)", async () => {
   buyer = null;
   const { POST } = await import("@/app/api/buyer/esign/[dealId]/sign/route");
-  const res = await POST(req({ consentedToElectronic: true, signatureText: "Sam Buyer" }), params);
+  const res = await POST(req({ acknowledgments: ALL_ACKS, signatureText: "Sam Buyer" }), params);
   assert.equal(res.status, 401);
 });
 
-test("sign without affirmative consent is rejected (400) and records no signature", async () => {
+test("sign with an invalid acknowledgment key is rejected (400) and records no signature", async () => {
   const { POST } = await import("@/app/api/buyer/esign/[dealId]/sign/route");
-  const res = await POST(req({ consentedToElectronic: false, signatureText: "Sam Buyer" }), params);
+  const res = await POST(req({ acknowledgments: [{ key: "BOGUS", accepted: true }], signatureText: "Sam Buyer" }), params);
   assert.equal(res.status, 400);
-  assert.equal(signCalls.length, 0, "no signature recorded without consent");
+  assert.equal(signCalls.length, 0, "no signature recorded on an invalid consent payload");
+});
+
+test("sign with no acknowledgments is rejected (400)", async () => {
+  const { POST } = await import("@/app/api/buyer/esign/[dealId]/sign/route");
+  const res = await POST(req({ acknowledgments: [], signatureText: "Sam Buyer" }), params);
+  assert.equal(res.status, 400);
+  assert.equal(signCalls.length, 0);
 });
 
 test("sign without a typed name is rejected (400)", async () => {
   const { POST } = await import("@/app/api/buyer/esign/[dealId]/sign/route");
-  const res = await POST(req({ consentedToElectronic: true, signatureText: "" }), params);
+  const res = await POST(req({ acknowledgments: ALL_ACKS, signatureText: "" }), params);
   assert.equal(res.status, 400);
   assert.equal(signCalls.length, 0);
 });
@@ -114,17 +129,18 @@ test("sign without a typed name is rejected (400)", async () => {
 test("sign on a deal the buyer does not own → 404 (IDOR blocked, no signature)", async () => {
   buyer = { id: "someone-else" };
   const { POST } = await import("@/app/api/buyer/esign/[dealId]/sign/route");
-  const res = await POST(req({ consentedToElectronic: true, signatureText: "Sam Buyer" }), params);
+  const res = await POST(req({ acknowledgments: ALL_ACKS, signatureText: "Sam Buyer" }), params);
   assert.equal(res.status, 404);
   assert.equal(signCalls.length, 0);
 });
 
-test("valid consented signature is recorded server-side (200) with server attribution", async () => {
+test("valid consented signature is recorded server-side (200) with server attribution + all acknowledgments", async () => {
   const { POST } = await import("@/app/api/buyer/esign/[dealId]/sign/route");
-  const res = await POST(req({ consentedToElectronic: true, signatureText: "Sam Buyer" }), params);
+  const res = await POST(req({ acknowledgments: ALL_ACKS, signatureText: "Sam Buyer" }), params);
   assert.equal(res.status, 200);
   assert.equal(signCalls.length, 1);
   assert.equal(signCalls[0]?.signerUserId, "b1", "signer identity from session, not the body");
   assert.equal(signCalls[0]?.ipAddress, "1.2.3.4", "IP from server attribution");
   assert.equal(signCalls[0]?.userAgent, "UA");
+  assert.equal((signCalls[0]?.acknowledgments as unknown[])?.length, 4, "all four acknowledgments forwarded");
 });

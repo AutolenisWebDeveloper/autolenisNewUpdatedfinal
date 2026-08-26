@@ -145,6 +145,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/cron/esign-envelope-expiry",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/cron/dealer-followup",
       "schedule": "0 14 * * 1-5"
     },
@@ -239,6 +243,10 @@
     {
       "path": "/api/cron/dealer-award-dispatch",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/esign-artifact-reconcile",
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/campaign-dispatch",

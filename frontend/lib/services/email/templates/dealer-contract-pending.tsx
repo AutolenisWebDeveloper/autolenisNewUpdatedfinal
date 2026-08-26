@@ -42,7 +42,7 @@ export function renderDealerContractPendingEmail({
             <td style="padding:40px 40px 24px 40px;color:#333333;font-size:15px;line-height:1.6;">
               <p style="margin:0 0 16px 0;">Hi ${contactName},</p>
               <p style="margin:0 0 16px 0;">The deal for <strong>${vehicleRef}</strong> is now in the contract stage. Please upload the signed sale contract to keep the deal moving forward.</p>
-              <p style="margin:0 0 24px 0;font-size:14px;color:#555555;">Upload the completed sale contract using the button below. The contract will be reviewed and countersigned by AutoLenis before the deal proceeds.</p>
+              <p style="margin:0 0 24px 0;font-size:14px;color:#555555;">Upload the completed sale contract using the button below. AutoLenis Contract Shield will review it, and the buyer will then electronically sign it before the deal proceeds.</p>
               <!-- CTA Button -->
               <table cellpadding="0" cellspacing="0" style="margin:0 0 24px 0;">
                 <tr>

@@ -1701,14 +1701,14 @@ export async function sendDealerContractIssuesEmail(params: {
 }
 
 export async function sendDealerEsignInitiatedEmail(params: {
-  to: string; contactName: string; vehicleRef: string; signingUrl: string; dealId: string;
+  to: string; contactName: string; vehicleRef: string; dealUrl: string; dealId: string;
 }) {
   return sendIdempotent({
     idempotencyKey: `dealer-esign-initiated-${params.dealId}`,
     to: params.to,
     templateId: "dealer-esign-initiated",
     subject: DEALER_ESIGN_INITIATED_SUBJECT,
-    html: renderDealerEsignInitiatedEmail({ contactName: params.contactName, vehicleRef: params.vehicleRef, signingUrl: params.signingUrl }),
+    html: renderDealerEsignInitiatedEmail({ contactName: params.contactName, vehicleRef: params.vehicleRef, dealUrl: params.dealUrl }),
   });
 }
 

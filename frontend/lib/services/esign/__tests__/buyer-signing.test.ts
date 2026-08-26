@@ -18,6 +18,10 @@ interface Env {
   certificatePdfPath: string | null; certificateGeneratedAt: Date | null;
   voidedAt: Date | null; voidReason: string | null; declineReason: string | null;
   expiresAt: Date | null; viewedAt: Date | null; completedAt: Date | null; sentAt: Date | null;
+  // Program 4 e-sign completion — consent record + executed artifact + sequencing.
+  consentPolicyVersion: string | null; consentSnapshot: Record<string, unknown> | null;
+  executedDocumentKey: string | null; executedDocumentHash: string | null; executedGeneratedAt: Date | null;
+  confirmationsSentAt: Date | null;
 }
 interface Ctrl {
   env: Env | null;
@@ -28,6 +32,12 @@ interface Ctrl {
   advanceCalls: Array<{ to: string }>;
   audits: Array<Record<string, unknown>>;
   certPayloads: Array<Record<string, unknown>>;
+  executedPayloads: Array<Record<string, unknown>>;
+  executedFails: boolean; // when true, executed-artifact generation returns null
+  notifications: Array<Record<string, unknown>>;
+  emits: Array<{ event: string }>;
+  buyerEmails: Array<Record<string, unknown>>;
+  dealerPlaceholder: boolean;
 }
 let ctrl: Ctrl;
 
@@ -35,40 +45,100 @@ function hashOf(s: string) { return createHash("sha256").update(Buffer.from(new 
 
 const envUpdate = (data: Record<string, unknown>) => { if (ctrl.env) Object.assign(ctrl.env, data); };
 
+// Guarded/CAS-aware updateMany used both inside and outside the transaction.
+type UM = { where: Record<string, unknown>; data: Record<string, unknown> };
+const NULL_GUARD_KEYS = ["certificatePdfPath", "executedDocumentKey", "confirmationsSentAt"] as const;
+function envUpdateMany({ where, data }: UM): { count: number } {
+  if (!ctrl.env) return { count: 0 };
+  // id + status compare-and-swap (supersede, per-row sweep).
+  if (where.id !== undefined && where.status !== undefined) {
+    if (ctrl.env.id === where.id && ctrl.env.status === where.status) { envUpdate(data); return { count: 1 }; }
+    return { count: 0 };
+  }
+  // status-only CAS.
+  if (where.status !== undefined) {
+    if (ctrl.env.status === where.status) { envUpdate(data); return { count: 1 }; }
+    return { count: 0 };
+  }
+  // null-only guarded writes (immutability / one-way markers).
+  for (const key of NULL_GUARD_KEYS) {
+    if ((where as Record<string, unknown>)[key] === null) {
+      if ((ctrl.env as unknown as Record<string, unknown>)[key] == null) { envUpdate(data); return { count: 1 }; }
+      return { count: 0 };
+    }
+  }
+  return { count: 0 };
+}
+
+// Minimal Prisma-where matcher for findMany (sweeps + reconcile queries).
+function matchesWhere(e: Env, where: Record<string, unknown>): boolean {
+  for (const [k, v] of Object.entries(where)) {
+    if (k === "OR") {
+      const clauses = v as Array<Record<string, unknown>>;
+      if (!clauses.some((c) => matchesWhere(e, c))) return false;
+      continue;
+    }
+    const actual = (e as unknown as Record<string, unknown>)[k];
+    if (v && typeof v === "object") {
+      const cond = v as Record<string, unknown>;
+      if ("in" in cond && !(cond.in as unknown[]).includes(actual)) return false;
+      if ("lt" in cond) {
+        const lt = cond.lt as Date;
+        if (!(actual instanceof Date) || !(actual.getTime() < lt.getTime())) return false;
+      }
+      if ("not" in cond) {
+        if (cond.not === null && actual == null) return false;
+        else if (cond.not !== null && actual === cond.not) return false;
+      }
+    } else if (v === null) {
+      if (actual != null) return false;
+    } else if (actual !== v) {
+      return false;
+    }
+  }
+  return true;
+}
+
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
       eSignEnvelope: {
         findUnique: async () => (ctrl.env ? { ...ctrl.env } : null),
+        findMany: async ({ where }: { where: Record<string, unknown> }) => {
+          const list = ctrl.env ? [ctrl.env] : [];
+          return list.filter((e) => matchesWhere(e, where ?? {})).map((e) => ({ ...e }));
+        },
         upsert: async ({ create, update }: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
           if (!ctrl.env) ctrl.env = { id: "env_1", ...defaultEnv(), ...(create as object) } as Env;
           else Object.assign(ctrl.env, update);
           return { ...ctrl.env };
         },
         update: async ({ data }: { data: Record<string, unknown> }) => { envUpdate(data); return { ...(ctrl.env as Env) }; },
-        updateMany: async ({ where, data }: { where: { status?: string; certificatePdfPath?: null }; data: Record<string, unknown> }) => {
-          if (where.status !== undefined) {
-            if (ctrl.env && ctrl.env.status === where.status) { envUpdate(data); return { count: 1 }; }
-            return { count: 0 };
-          }
-          if (where.certificatePdfPath === null && ctrl.env?.certificatePdfPath == null) { envUpdate(data); return { count: 1 }; }
-          return { count: 0 };
-        },
+        updateMany: async (args: UM) => envUpdateMany(args),
       },
       contractVersion: {
         findFirst: async () => (ctrl.contract ? { ...ctrl.contract } : null),
         findUnique: async () => (ctrl.contract ? { ...ctrl.contract } : null),
       },
-      deal: { findUnique: async () => ({ status: ctrl.dealStatus, buyerId: "b1" }) },
+      deal: {
+        findUnique: async () => ({
+          status: ctrl.dealStatus,
+          buyerId: "b1",
+          buyer: { firstName: "Sam", lastName: "Buyer", phone: null, user: { email: "sam@example.com" } },
+          offer: { dealerId: "dealer_1", dealer: { isSystemPlaceholder: ctrl.dealerPlaceholder } },
+        }),
+      },
+      notification: {
+        findFirst: async ({ where }: { where: { metadata?: { equals?: string } } }) => {
+          const key = where?.metadata?.equals;
+          return ctrl.notifications.find((n) => (n.metadata as { key?: string })?.key === key) ?? null;
+        },
+        create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.notifications.push(data); return data; },
+      },
       adminAuditLog: { create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.audits.push(data); } },
       eSignEnvelopeHistory: { create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.history.push(data); } },
       $transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb({
-        eSignEnvelope: {
-          updateMany: async ({ where, data }: { where: { status?: string }; data: Record<string, unknown> }) => {
-            if (ctrl.env && ctrl.env.status === where.status) { envUpdate(data); return { count: 1 }; }
-            return { count: 0 };
-          },
-        },
+        eSignEnvelope: { updateMany: async (args: UM) => envUpdateMany(args) },
         eSignEnvelopeHistory: { create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.history.push(data); } },
         adminAuditLog: { create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.audits.push(data); } },
       }),
@@ -95,6 +165,25 @@ mock.module("@/lib/services/esign/buyer-contract-certificate.service", {
 
 mock.module("@/lib/logger", { namedExports: { logger: { error: () => {}, warn: () => {}, info: () => {} } } });
 
+mock.module("@/lib/services/esign/executed-contract.service", {
+  namedExports: {
+    generateAndUploadExecutedContract: async (payload: Record<string, unknown>) => {
+      ctrl.executedPayloads.push(payload);
+      if (ctrl.executedFails) return null;
+      return { key: `executed/d1/${payload.envelopeId}.pdf`, hash: "executed-sha256" };
+    },
+    getExecutedContractUrl: async () => "https://signed/executed",
+  },
+});
+
+mock.module("@/lib/events/emit", {
+  namedExports: { emitDomainEvent: async (event: string) => { ctrl.emits.push({ event }); } },
+});
+
+mock.module("@/lib/services/email/resend.service", {
+  namedExports: { sendContractSignedEmail: async (p: Record<string, unknown>) => { ctrl.buyerEmails.push(p); } },
+});
+
 function defaultEnv(): Omit<Env, "id"> {
   return {
     dealId: "d1", status: "PENDING", attemptNumber: 1, documentVersionId: null, documentHash: null,
@@ -102,14 +191,27 @@ function defaultEnv(): Omit<Env, "id"> {
     consentedToElectronic: false, consentedAt: null, ipAddress: null, userAgent: null,
     certificatePdfPath: null, certificateGeneratedAt: null, voidedAt: null, voidReason: null,
     declineReason: null, expiresAt: null, viewedAt: null, completedAt: null, sentAt: null,
+    consentPolicyVersion: null, consentSnapshot: null,
+    executedDocumentKey: null, executedDocumentHash: null, executedGeneratedAt: null, confirmationsSentAt: null,
   };
 }
 
 async function load() { return import("@/lib/services/esign/buyer-signing.service"); }
 
+// The four required consent acknowledgments (DRAFT_V1), all affirmatively accepted.
+const ACK_KEYS = [
+  "ELECTRONIC_RECORDS_AND_SIGNATURE",
+  "CONTRACT_REVIEW_AND_INDEPENDENT_ADVICE",
+  "ACCEPTANCE_AND_INTENT_TO_BE_BOUND",
+  "ELECTRONIC_COPY_AND_ACCESS",
+] as const;
+const allAcks = () => ACK_KEYS.map((key) => ({ key, accepted: true }));
+const missingOneAck = () => ACK_KEYS.slice(0, 3).map((key) => ({ key, accepted: true }));
+const oneUnchecked = () => ACK_KEYS.map((key, i) => ({ key, accepted: i !== 1 }));
+
 const goodSig = {
   dealId: "d1", signerUserId: "b1", signerName: "Sam Buyer", signerEmail: "sam@example.com",
-  signatureText: "Sam Buyer", consentedToElectronic: true, ipAddress: "1.2.3.4", userAgent: "Mozilla/5.0",
+  signatureText: "Sam Buyer", acknowledgments: allAcks(), ipAddress: "1.2.3.4", userAgent: "Mozilla/5.0",
 };
 
 beforeEach(() => {
@@ -120,6 +222,8 @@ beforeEach(() => {
     dealStatus: "CONTRACT_APPROVED",
     bytes: "THE CONTRACT BYTES",
     advanceCalls: [], audits: [], certPayloads: [],
+    executedPayloads: [], executedFails: false, notifications: [], emits: [], buyerEmails: [],
+    dealerPlaceholder: false,
   };
 });
 
@@ -140,10 +244,12 @@ test("prepare fails closed when no approved contract exists", async () => {
   await assert.rejects(() => prepareBuyerSigningEnvelope("d1"), (e: unknown) => e instanceof NoSignableDocumentError);
 });
 
-test("consent is required — no consent throws and records no signature", async () => {
+test("consent is required — missing an acknowledgment throws and records no signature", async () => {
   ctrl.env = { id: "env_1", ...defaultEnv(), status: "SENT", documentVersionId: "cv_1", documentHash: hashOf("THE CONTRACT BYTES") };
   const { recordBuyerSignature, ConsentRequiredError } = await load();
-  await assert.rejects(() => recordBuyerSignature({ ...goodSig, consentedToElectronic: false }), (e: unknown) => e instanceof ConsentRequiredError);
+  await assert.rejects(() => recordBuyerSignature({ ...goodSig, acknowledgments: missingOneAck() }), (e: unknown) => e instanceof ConsentRequiredError);
+  await assert.rejects(() => recordBuyerSignature({ ...goodSig, acknowledgments: oneUnchecked() }), (e: unknown) => e instanceof ConsentRequiredError);
+  await assert.rejects(() => recordBuyerSignature({ ...goodSig, acknowledgments: [] }), (e: unknown) => e instanceof ConsentRequiredError);
   assert.equal(ctrl.env?.status, "SENT", "unsigned");
 });
 
@@ -163,7 +269,9 @@ test("a valid signature captures full evidence server-side and drives SIGNED", a
   assert.ok(ctrl.env?.consentedAt, "consent timestamp set");
   assert.equal(ctrl.env?.documentHash, hashOf("THE CONTRACT BYTES"), "exact document hash stored");
   assert.deepEqual(ctrl.advanceCalls.map(c => c.to), ["SIGNED"]);
-  assert.equal(ctrl.audits[0]?.action, "ESIGN_SIGNED");
+  const actions = ctrl.audits.map((a) => a.action);
+  assert.ok(actions.includes("CONSENT_ACCEPTED"), "append-only CONSENT_ACCEPTED audit written");
+  assert.ok(actions.includes("ESIGN_SIGNED"), "ESIGN_SIGNED audit written");
 });
 
 test("from CONTRACT_APPROVED the record walks SIGNING_PENDING → SIGNED", async () => {
@@ -343,4 +451,211 @@ test("void is a no-op on an already-terminal record (no cross-terminal mutation)
   await voidEnvelopeInternal("d1", "late void");
   assert.equal(ctrl.env?.status, "DECLINED", "a DECLINED record is not overwritten to VOIDED");
   assert.equal(ctrl.env?.declineReason, "buyer declined");
+});
+
+// ── §1/§2/§3 Consent record ──────────────────────────────────────────────────
+
+test("all four acknowledgments are captured as a frozen snapshot bound to the document + a CONSENT_ACCEPTED audit", async () => {
+  ctrl.env = { id: "env_1", ...defaultEnv(), status: "SENT", documentVersionId: "cv_1", documentHash: hashOf("THE CONTRACT BYTES") };
+  ctrl.dealStatus = "SIGNING_PENDING";
+  const { recordBuyerSignature } = await load();
+  await recordBuyerSignature(goodSig);
+
+  // consent snapshot persisted with policy version + exact acknowledgments
+  const snap = ctrl.env?.consentSnapshot as Record<string, unknown> | null;
+  assert.ok(snap, "consent snapshot persisted");
+  assert.equal(ctrl.env?.consentPolicyVersion, "DRAFT_V1");
+  assert.equal(snap!.policyVersion, "DRAFT_V1");
+  const acks = snap!.acknowledgments as Array<{ key: string; accepted: boolean; text: string }>;
+  assert.equal(acks.length, 4, "all four acknowledgments recorded");
+  assert.ok(acks.every((a) => a.accepted === true), "every acknowledgment marked accepted");
+  assert.ok(acks.every((a) => typeof a.text === "string" && a.text.length > 0), "exact consent text captured per acknowledgment");
+  // bound to the exact document version + hash
+  assert.equal(snap!.documentVersionId, "cv_1");
+  assert.equal(snap!.documentHash, hashOf("THE CONTRACT BYTES"));
+  // full attribution
+  assert.equal(snap!.signerUserId, "b1");
+  assert.equal(snap!.signerRole, "BUYER");
+  assert.equal(snap!.ipAddress, "1.2.3.4");
+  assert.equal(snap!.userAgent, "Mozilla/5.0");
+  assert.ok(snap!.consentedAt, "consent timestamp captured");
+  // append-only CONSENT_ACCEPTED audit with the acknowledgments + binding
+  const consentAudit = ctrl.audits.find((a) => a.action === "CONSENT_ACCEPTED");
+  assert.ok(consentAudit, "CONSENT_ACCEPTED audit written");
+  const meta = consentAudit!.metadata as Record<string, unknown>;
+  assert.equal(meta.consentPolicyVersion, "DRAFT_V1");
+  assert.equal(meta.documentHash, hashOf("THE CONTRACT BYTES"));
+});
+
+test("a changed document blocks signing before any consent is recorded (fails closed)", async () => {
+  ctrl.env = { id: "env_1", ...defaultEnv(), status: "SENT", documentVersionId: "cv_1", documentHash: hashOf("ORIGINAL BYTES") };
+  ctrl.bytes = "CHANGED BYTES";
+  const { recordBuyerSignature, DocumentChangedError } = await load();
+  await assert.rejects(() => recordBuyerSignature(goodSig), (e: unknown) => e instanceof DocumentChangedError);
+  assert.equal(ctrl.env?.consentSnapshot, null, "no consent snapshot on a changed document");
+  assert.equal(ctrl.env?.status, "VOIDED");
+});
+
+// ── §4/§5 Executed contract artifact ─────────────────────────────────────────
+
+function completedEnv(extra: Partial<Env> = {}): Env {
+  return {
+    id: "env_1", ...defaultEnv(), status: "COMPLETED", documentVersionId: "cv_1",
+    documentHash: hashOf("THE CONTRACT BYTES"), signedAt: new Date(), consentedAt: new Date(),
+    signatureText: "Sam Buyer", signerName: "Sam Buyer", signerEmail: "sam@example.com", signerUserId: "b1",
+    signerRole: "BUYER", consentPolicyVersion: "DRAFT_V1",
+    consentSnapshot: { policyVersion: "DRAFT_V1", acknowledgments: allAcks().map((a) => ({ ...a, text: "x" })) },
+    ...extra,
+  } as Env;
+}
+
+test("finalize generates the executed artifact from FROZEN evidence and records its key + hash", async () => {
+  ctrl.env = completedEnv();
+  ctrl.dealStatus = "SIGNED";
+  const { finalizeSignedContract } = await load();
+  const r = await finalizeSignedContract("d1");
+  assert.equal(r.artifactReady, true);
+  assert.equal(ctrl.executedPayloads.length, 1, "executed artifact generated once");
+  const p = ctrl.executedPayloads[0]!;
+  assert.equal(p.documentHash, hashOf("THE CONTRACT BYTES"), "generated from the pinned signed hash");
+  assert.equal(p.documentVersionId, "cv_1");
+  assert.equal(p.signatureText, "Sam Buyer", "adopted signature embedded");
+  assert.ok(p.consentSnapshot, "consent snapshot embedded");
+  assert.equal(ctrl.env?.executedDocumentKey, "executed/d1/env_1.pdf");
+  assert.equal(ctrl.env?.executedDocumentHash, "executed-sha256");
+});
+
+test("an existing executed artifact is IMMUTABLE — later finalize never regenerates or overwrites it", async () => {
+  ctrl.env = completedEnv({ executedDocumentKey: "executed/d1/env_1.pdf", executedDocumentHash: "frozen-hash", certificatePdfPath: "cert.pdf", confirmationsSentAt: new Date() });
+  const { finalizeSignedContract } = await load();
+  await finalizeSignedContract("d1");
+  assert.equal(ctrl.executedPayloads.length, 0, "no regeneration when an executed artifact already exists");
+  assert.equal(ctrl.env?.executedDocumentHash, "frozen-hash", "the recorded artifact hash is never overwritten");
+});
+
+// ── §7 Confirmation sequencing ───────────────────────────────────────────────
+
+test("confirmations NEVER precede the executed artifact — a failed generation sends nothing", async () => {
+  ctrl.env = completedEnv();
+  ctrl.executedFails = true;
+  const { finalizeSignedContract } = await load();
+  const r = await finalizeSignedContract("d1");
+  assert.equal(r.artifactReady, false);
+  assert.equal(r.confirmationsSent, false);
+  assert.equal(ctrl.buyerEmails.length, 0, "no buyer confirmation before the artifact exists");
+  assert.equal(ctrl.notifications.length, 0, "no dealer notification before the artifact exists");
+  assert.equal(ctrl.env?.confirmationsSentAt, null);
+});
+
+test("on success: artifact → certificate → confirmations, emitted exactly once; dealer notified", async () => {
+  ctrl.env = completedEnv();
+  ctrl.dealStatus = "SIGNED";
+  const { finalizeSignedContract } = await load();
+  const r = await finalizeSignedContract("d1");
+  assert.equal(r.artifactReady, true);
+  assert.equal(r.certificateReady, true);
+  assert.equal(r.confirmationsSent, true);
+  assert.equal(ctrl.env?.certificatePdfPath, "buyer-contracts/d1/env_1.pdf");
+  assert.equal(ctrl.buyerEmails.length, 1, "buyer confirmation sent once");
+  assert.equal(ctrl.emits.filter((e) => e.event === "contract_signed").length, 1);
+  const dealerNote = ctrl.notifications.find((n) => (n.metadata as { kind?: string })?.kind === "ESIGN_EXECUTED");
+  assert.ok(dealerNote, "dealer notified the contract was executed");
+  assert.ok(ctrl.env?.confirmationsSentAt, "confirmations marker set");
+
+  // Idempotent re-run: no duplicate confirmations / notifications.
+  ctrl.buyerEmails = []; ctrl.emits = [];
+  await finalizeSignedContract("d1");
+  assert.equal(ctrl.buyerEmails.length, 0, "no duplicate buyer confirmation");
+  assert.equal(ctrl.notifications.filter((n) => (n.metadata as { kind?: string })?.kind === "ESIGN_EXECUTED").length, 1, "dealer notified only once");
+});
+
+test("a placeholder (outside) dealer receives no in-app execution notification", async () => {
+  ctrl.env = completedEnv();
+  ctrl.dealerPlaceholder = true;
+  const { finalizeSignedContract } = await load();
+  await finalizeSignedContract("d1");
+  assert.equal(ctrl.notifications.length, 0, "no in-app notification for a placeholder dealer");
+});
+
+// ── §8 Durability reconciliation ─────────────────────────────────────────────
+
+test("reconcile re-drives a COMPLETED envelope missing its artifact/cert/confirmations", async () => {
+  ctrl.env = completedEnv();
+  ctrl.dealStatus = "SIGNED";
+  const { reconcileSignedContracts } = await load();
+  const r = await reconcileSignedContracts();
+  assert.equal(r.finalized, 1, "the pending envelope was finalized");
+  assert.equal(ctrl.env?.executedDocumentKey, "executed/d1/env_1.pdf");
+  assert.ok(ctrl.env?.confirmationsSentAt);
+});
+
+test("reconcile is idempotent — a fully finalized envelope is not re-processed", async () => {
+  ctrl.env = completedEnv({ executedDocumentKey: "executed/d1/env_1.pdf", executedDocumentHash: "h", certificatePdfPath: "cert.pdf", confirmationsSentAt: new Date() });
+  const { reconcileSignedContracts } = await load();
+  const r = await reconcileSignedContracts();
+  assert.equal(r.scanned, 0, "no fully-finalized envelope is scanned");
+  assert.equal(ctrl.executedPayloads.length, 0);
+});
+
+test("reconcile ignores a legacy DocuSign-completed envelope (no documentVersionId)", async () => {
+  // Legacy: COMPLETED with a documentKey but NO in-house documentVersionId.
+  ctrl.env = { id: "env_1", ...defaultEnv(), status: "COMPLETED", documentVersionId: null, completedAt: new Date() };
+  const { reconcileSignedContracts } = await load();
+  const r = await reconcileSignedContracts();
+  assert.equal(r.scanned, 0, "a legacy envelope is never reconciled");
+  assert.equal(ctrl.executedPayloads.length, 0);
+});
+
+// ── §9 Expiry sweep ──────────────────────────────────────────────────────────
+
+test("sweep expires stale SENT/DELIVERED/PENDING envelopes and audits each", async () => {
+  ctrl.env = { id: "env_1", ...defaultEnv(), status: "SENT", expiresAt: new Date(Date.now() - 1000) };
+  const { sweepExpiredEnvelopes } = await load();
+  const r = await sweepExpiredEnvelopes();
+  assert.equal(r.expired, 1);
+  assert.equal(ctrl.env?.status, "EXPIRED");
+  assert.ok(ctrl.audits.some((a) => a.action === "ESIGN_ENVELOPE_EXPIRED"));
+});
+
+test("sweep NEVER expires a COMPLETED envelope (terminal, not expirable)", async () => {
+  ctrl.env = { id: "env_1", ...defaultEnv(), status: "COMPLETED", expiresAt: new Date(Date.now() - 1000) };
+  const { sweepExpiredEnvelopes } = await load();
+  const r = await sweepExpiredEnvelopes();
+  assert.equal(r.expired, 0);
+  assert.equal(ctrl.env?.status, "COMPLETED");
+});
+
+test("sweep NEVER mutates another terminal state (VOIDED stays VOIDED)", async () => {
+  ctrl.env = { id: "env_1", ...defaultEnv(), status: "VOIDED", expiresAt: new Date(Date.now() - 1000) };
+  const { sweepExpiredEnvelopes } = await load();
+  const r = await sweepExpiredEnvelopes();
+  assert.equal(r.expired, 0);
+  assert.equal(ctrl.env?.status, "VOIDED");
+});
+
+// ── §10 Consent + executed refs survive archival ─────────────────────────────
+
+test("consent snapshot + executed-artifact refs are preserved on archival of a superseded terminal attempt", async () => {
+  ctrl.env = terminalEnv("EXPIRED", {
+    consentPolicyVersion: "DRAFT_V1",
+    consentSnapshot: { policyVersion: "DRAFT_V1", acknowledgments: [] },
+    executedDocumentKey: "executed/d1/env_1.pdf",
+    executedDocumentHash: "executed-sha256",
+    executedGeneratedAt: new Date(),
+  });
+  const { prepareBuyerSigningEnvelope } = await load();
+  await prepareBuyerSigningEnvelope("d1", { signerUserId: "b1", signerName: "Sam Buyer", signerEmail: "sam@example.com" });
+  assert.equal(ctrl.history.length, 1);
+  const archived = ctrl.history[0]!;
+  assert.equal(archived.consentPolicyVersion, "DRAFT_V1", "consent policy version survives archival");
+  assert.ok(archived.consentSnapshot, "consent snapshot survives archival");
+  assert.equal(archived.executedDocumentKey, "executed/d1/env_1.pdf", "executed key stays with the archived attempt");
+  assert.equal(archived.executedDocumentHash, "executed-sha256");
+  // and the new attempt clears them (never carried forward). consentSnapshot is a
+  // JSON column, so it is cleared via Prisma.DbNull rather than a bare null.
+  const cleared = ctrl.env?.consentSnapshot as { acknowledgments?: unknown } | null;
+  assert.ok(!cleared?.acknowledgments, "the prior consent snapshot is not carried onto the new attempt");
+  assert.equal(ctrl.env?.consentPolicyVersion, null);
+  assert.equal(ctrl.env?.executedDocumentKey, null);
+  assert.equal(ctrl.env?.attemptNumber, 2, "monotonic attempt number");
 });

@@ -10,6 +10,7 @@ import {
   expireIfElapsed,
   NoSignableDocumentError,
 } from "@/lib/services/esign/buyer-signing.service";
+import { toBuyerEnvelopeSummary } from "@/lib/services/esign/esign-dto";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -39,7 +40,17 @@ export async function GET(request: NextRequest, { params }: Props) {
   }
 
   const fresh = await prisma.deal.findUnique({ where: { id: dealId }, select: { status: true } });
-  return successResponse({ envelope, dealStatus: fresh?.status ?? deal.status, contractViewUrl, signable: !!signable });
+  // §11: return ONLY a buyer-safe summary — never the raw envelope (which carries
+  // IP, user-agent, the consent snapshot's forensic attribution, and internal
+  // identifiers). `status` is surfaced top-level for the ceremony client.
+  const summary = toBuyerEnvelopeSummary(envelope);
+  return successResponse({
+    status: summary?.status ?? null,
+    envelope: summary,
+    dealStatus: fresh?.status ?? deal.status,
+    contractViewUrl,
+    signable: !!signable,
+  });
 }
 
 // POST — begin signing: prepare the in-house envelope (bound to the approved
