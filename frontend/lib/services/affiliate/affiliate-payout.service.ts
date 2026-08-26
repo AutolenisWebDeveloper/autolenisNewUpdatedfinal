@@ -2,6 +2,89 @@
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
+// F-002/F-003 — a commission that could not be claimed for settlement: it was
+// missing, already settled, or lost the compare-and-set race to a concurrent
+// settlement. Typed so the route can map it to a clean 409.
+export class CommissionNotClaimableError extends Error {
+  constructor(commissionId: string) {
+    super(
+      `Commission ${commissionId} is not claimable for settlement (missing, already settled, or concurrently claimed).`,
+    );
+    this.name = "CommissionNotClaimableError";
+  }
+}
+
+export interface SettleCommissionResult {
+  commissionId: string;
+  payoutId: string;
+  affiliateId: string;
+  amountCents: number;
+  settledAt: Date;
+}
+
+// F-002/F-003 — the single, concurrency-safe settlement unit for one APPROVED
+// commission. It runs ONE interactive transaction that:
+//   1. reads the commission (to source the affiliate + amount for the payout);
+//   2. creates a real AffiliatePayout(PAID);
+//   3. flips the commission APPROVED→PAID and links payoutId via a
+//      compare-and-set (`updateMany where status = APPROVED`).
+//
+// The compare-and-set is the correctness guarantee, NOT the initial read: under
+// Postgres READ COMMITTED two concurrent settlements both read APPROVED and both
+// create a payout row, but only one `updateMany` matches — the second blocks on
+// the row lock, re-evaluates `status = APPROVED` against the now-committed PAID
+// row, matches 0, and we throw to roll the loser's payout back. So one commission
+// can never be linked to two payouts and a retry/double-click can never double-pay
+// (invariants: eligible commission settles exactly once; no double payout).
+export async function settleApprovedCommission(input: {
+  commissionId: string;
+  paymentMethod: string;
+  paymentReference: string;
+}): Promise<SettleCommissionResult> {
+  const { commissionId, paymentMethod, paymentReference } = input;
+  const settledAt = new Date();
+
+  return prisma.$transaction(async (tx) => {
+    const commission = await tx.commission.findUnique({ where: { id: commissionId } });
+    if (!commission || commission.status !== "APPROVED") {
+      // Fast fail before any write; the compare-and-set below is the real guard
+      // against the concurrent case the read cannot see.
+      throw new CommissionNotClaimableError(commissionId);
+    }
+
+    const payout = await tx.affiliatePayout.create({
+      data: {
+        affiliateId: commission.affiliateId,
+        amountCents: commission.amountCents,
+        status: "PAID",
+        method: paymentMethod,
+        reference: paymentReference,
+        periodStart: commission.createdAt,
+        periodEnd: settledAt,
+        processedAt: settledAt,
+      },
+    });
+
+    const claimed = await tx.commission.updateMany({
+      where: { id: commissionId, status: "APPROVED" },
+      data: { status: "PAID", paidAt: settledAt, payoutId: payout.id },
+    });
+    if (claimed.count !== 1) {
+      // Another settlement won the race between our read and our claim. Throwing
+      // rolls back the payout we just created — no orphaned money-out record.
+      throw new CommissionNotClaimableError(commissionId);
+    }
+
+    return {
+      commissionId,
+      payoutId: payout.id,
+      affiliateId: commission.affiliateId,
+      amountCents: commission.amountCents,
+      settledAt,
+    };
+  });
+}
+
 // F-002/F-003 — the self-serve batch payout rail is DISABLED.
 //
 // It previously created an AffiliatePayout(PENDING) that nothing could ever
