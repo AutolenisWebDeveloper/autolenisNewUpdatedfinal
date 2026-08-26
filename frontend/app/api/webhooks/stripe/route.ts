@@ -162,6 +162,20 @@ export async function POST(request: NextRequest) {
             // alerted via logger.error → Sentry rather than retried by Stripe
             // (the money state above has already committed).
 
+            // Section 6 — suppress/cancel any remaining $99 deposit-conversion
+            // reminders now that the deposit is authoritatively PAID. This is
+            // belt-and-suspenders with the send-time guard (which is
+            // authoritative on its own): a paid buyer must NEVER receive another
+            // "$99 payment required" message. Best-effort; DORMANT-safe.
+            try {
+              const { cancelDepositReminderEnrollment } = await import(
+                "@/lib/services/payment/deposit-reminder-enrollment"
+              );
+              await cancelDepositReminderEnrollment(deposit.buyerId, "deposit_paid");
+            } catch (err) {
+              logger.error("[stripe/webhook] deposit reminder cancel failed:", err);
+            }
+
             // BUG1 FIX: Launch auction and invite dealers (was missing — dealers were never notified)
             if (createdAuction && !existingAuction) {
               await launchAuction(createdAuction.id).catch((err: unknown) =>

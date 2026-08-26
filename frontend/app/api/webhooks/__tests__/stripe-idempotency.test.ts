@@ -150,6 +150,10 @@ mock.module("@/lib/services/deal/deal.service", {
 });
 mock.module("@/lib/services/ghl/tag-sync", { namedExports: { syncGhlTag: () => {} } });
 mock.module("@/lib/qstash/dispatch", { namedExports: { dispatch: async () => {} } });
+let reminderCancels = 0;
+mock.module("@/lib/services/payment/deposit-reminder-enrollment", {
+  namedExports: { cancelDepositReminderEnrollment: async () => { reminderCancels += 1; } },
+});
 mock.module("@/lib/analytics/content-attribution.server", {
   namedExports: { markContentConversion: async () => {} },
 });
@@ -181,6 +185,7 @@ beforeEach(() => {
   };
   failAuctionCreate = false;
   launches = 0;
+  reminderCancels = 0;
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -193,6 +198,7 @@ test("fresh deposit success: marks PAID, creates auction, claims event, launches
   assert.equal(db.notifications.length, 1);
   assert.equal(db.events[0].processed, true);
   assert.equal(launches, 1);
+  assert.equal(reminderCancels, 1, "paid → remaining $99 reminders suppressed (Section 6)");
 });
 
 test("replay of a processed event is a duplicate ack with zero side effects", async () => {
@@ -204,6 +210,7 @@ test("replay of a processed event is a duplicate ack with zero side effects", as
   assert.equal(json.duplicate, true);
   assert.equal(JSON.stringify(db), before, "no state may change on replay");
   assert.equal(launches, 1, "post-commit effects must not re-run on replay");
+  assert.equal(reminderCancels, 1, "reminder suppression is not re-run on replay (exactly once)");
 });
 
 test("out-of-order: late success never resurrects a REFUNDED deposit", async () => {

@@ -4,9 +4,9 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import { DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
-import { dispatch } from "@/lib/qstash/dispatch";
 import { limitPaymentIntent, clientIpKey } from "@/lib/security/rate-limit";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
+import { enrollDepositReminder } from "@/lib/services/payment/deposit-reminder-enrollment";
 
 export async function POST(request: NextRequest) {
   const buyer = await getRequestBuyer(request);
@@ -199,50 +199,55 @@ export async function POST(request: NextRequest) {
       update: {},
     });
 
-    // QStash — start the deposit-activation reminder sequence. The job
-    // self-stops once the deposit is PAID, so re-creating an intent is safe.
-    const buyerContact = await prisma.buyer.findUnique({
-      where: { id: buyer.id },
-      select: { firstName: true, lastName: true, phone: true, user: { select: { email: true } } },
-    });
-    if (buyerContact?.user?.email) {
-      dispatch({
-        path: "/api/jobs/deposit-reminder",
-        body: {
+    // CONCIERGE EXCLUSION (Section 2): concierge deposits (reviewToken present)
+    // have their own review-link CTA and must NEVER also receive the generic
+    // "$99 deposit" reminder sequence or the abandoned-deposit nurture. Only the
+    // normal competitive path enrolls — everything below is gated on !concierge.
+    if (!conciergeReviewToken) {
+      // Start the $99 deposit-conversion reminder sequence via the single-authority
+      // selector (QStash by default; internal lifecycle_touch once the owner cuts
+      // over DEPOSIT_REMINDER_INTERNAL_ENABLED). The sequence self-stops once the
+      // deposit is PAID (send-time guard) so re-creating an intent is safe.
+      const buyerContact = await prisma.buyer.findUnique({
+        where: { id: buyer.id },
+        select: { firstName: true, lastName: true, phone: true, user: { select: { email: true } } },
+      });
+      if (buyerContact?.user?.email) {
+        // Best-effort tail — never affects the payment response.
+        enrollDepositReminder({
           buyerId: buyer.id,
           firstName: buyerContact.firstName,
           email: buyerContact.user.email,
-          touchNumber: 1,
-        },
-        delaySeconds: 86400,
-      }).catch(() => {});
-    }
+          phone: buyerContact.phone,
+        }).catch((err) => logger.error("[deposit/create-intent] reminder enrollment failed:", err));
+      }
 
-    // F-037 — emit the deposit_pending domain event. It was defined in the
-    // WorkflowTriggerType union but never fired, so the prebuilt 1h→24h→72h
-    // abandoned-deposit nurture (workflow.prebuilt.ts) was dead. Emitting it
-    // here (deposit intent created, not yet paid) revives that recovery
-    // sequence. Tail call: never throws, never affects the payment response.
-    if (buyerContact) {
-      try {
-        const { emitDomainEvent } = await import("@/lib/events/emit");
-        await emitDomainEvent("deposit_pending", {
-          domainEntityId: buyer.id,
-          contact: {
-            email: buyerContact.user?.email ?? null,
-            phone: buyerContact.phone,
-            firstName: buyerContact.firstName,
-            lastName: buyerContact.lastName,
-            source: "buyer_signup",
-          },
-          data: {
-            buyer_id: buyer.id,
-            amount_cents: DEPOSIT_AMOUNT_CENTS,
-            deposit_url: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/deposit`,
-          },
-        });
-      } catch (err) {
-        logger.error("[deposit/create-intent] deposit_pending emit failed:", err);
+      // F-037 — emit the deposit_pending domain event. It was defined in the
+      // WorkflowTriggerType union but never fired, so the prebuilt 1h→24h→72h
+      // abandoned-deposit nurture (workflow.prebuilt.ts) was dead. Emitting it
+      // here (deposit intent created, not yet paid) revives that recovery
+      // sequence. Tail call: never throws, never affects the payment response.
+      if (buyerContact) {
+        try {
+          const { emitDomainEvent } = await import("@/lib/events/emit");
+          await emitDomainEvent("deposit_pending", {
+            domainEntityId: buyer.id,
+            contact: {
+              email: buyerContact.user?.email ?? null,
+              phone: buyerContact.phone,
+              firstName: buyerContact.firstName,
+              lastName: buyerContact.lastName,
+              source: "buyer_signup",
+            },
+            data: {
+              buyer_id: buyer.id,
+              amount_cents: DEPOSIT_AMOUNT_CENTS,
+              deposit_url: `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/buyer/deposit`,
+            },
+          });
+        } catch (err) {
+          logger.error("[deposit/create-intent] deposit_pending emit failed:", err);
+        }
       }
     }
 

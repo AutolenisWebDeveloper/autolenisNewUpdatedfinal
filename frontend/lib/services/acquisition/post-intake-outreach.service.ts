@@ -19,6 +19,7 @@ import { prisma } from "@/lib/prisma"
 import { generateBuyerOpportunityEmail } from "@/lib/services/dealer-recruitment/email-template.service"
 import { sendDealerEmail } from "@/lib/services/dealer-recruitment/dealer-email-send.service"
 import { collapseByInbox } from "@/lib/services/dealer-recruitment/shared-inbox"
+import { isFulfillmentUnlocked } from "@/lib/services/payment/fulfillment-gate"
 
 const APP_URL = (
   process.env.NEXT_PUBLIC_APP_URL ?? "https://www.autolenis.com"
@@ -146,6 +147,20 @@ export async function runPostIntakeOutreach(
         `[post-intake-outreach] Opportunity ${buyerOpportunityId} has no make — skipping outreach`,
       )
       return { dealersContacted: 0, status: "SKIPPED" }
+    }
+
+    // $99 PRE-ACTIVATION COST GATE (Section 5): dealer outreach is cost-bearing,
+    // dealer-facing fulfillment and must NOT fire before an authoritative PAID
+    // $99 deposit. Discovery (cost-free, data AutoLenis already owns) has already
+    // run in an earlier stage; this stops the progression into outreach. SKIPPED
+    // (not FAILED) is a valid terminal stage, so intake still completes — no
+    // dealer is contacted for a buyer who has not paid. Program 3 owns paid dealer
+    // supply/targeting/outreach after the boundary is crossed.
+    if (!(await isFulfillmentUnlocked(opportunity.buyerId))) {
+      logger.info(
+        `[post-intake-outreach] Opportunity ${buyerOpportunityId} has no PAID $99 deposit — outreach gated (awaiting_deposit)`,
+      )
+      return { dealersContacted: 0, status: "SKIPPED", reason: "awaiting_deposit_gate" }
     }
 
     // 2. Resolve the buyer's city/state for the dealer-facing location. The

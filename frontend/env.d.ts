@@ -140,6 +140,12 @@ declare namespace NodeJS {
     QSTASH_CURRENT_SIGNING_KEY: string;
     QSTASH_NEXT_SIGNING_KEY: string;
 
+    // $99 deposit-reminder authority selector (single-authority cutover, default
+    // OFF = QStash). "true" routes enrollment to the internal lifecycle_touch
+    // scheduler (+1h/+6h/+24h/+72h) and retires the QStash producer — flip only
+    // after applying lifecycle_touch_schedule.sql. Never leave both enabled.
+    DEPOSIT_REMINDER_INTERNAL_ENABLED?: string;
+
     // Twilio — transactional SMS (consent-gated) + voice receptionist
     TWILIO_ACCOUNT_SID?: string;
     TWILIO_AUTH_TOKEN?: string;

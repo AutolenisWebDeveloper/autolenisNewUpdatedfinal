@@ -13,6 +13,27 @@ export async function hasPaidDeposit(buyerId: string): Promise<boolean> {
   return deposit !== null;
 }
 
+// Deposit-conversion STOP guard for the $99 reminder sequence. Re-read live at
+// drain time immediately before every send (Section 4 — the send-time guard is
+// authoritative, not just row cancellation). Returns true when the buyer no
+// longer owes the competitive $99, so the touch is canceled and all remaining
+// touches stop:
+//   • a PAID deposit exists — CONVERTED. A paid buyer must NEVER be asked to pay
+//     again, even if payment landed seconds before the drain claimed the row.
+//   • no PENDING deposit remains — the competitive intent was cancelled, expired,
+//     or otherwise abandoned/failed (nothing left to complete → not eligible).
+//     If the buyer later restarts checkout, create-intent re-enrolls idempotently.
+// A single query fetches both facts so the guard is one round-trip.
+export async function depositConversionResolved(buyerId: string): Promise<boolean> {
+  const deposits = await prisma.deposit.findMany({
+    where: { buyerId, status: { in: ["PAID", "PENDING"] } },
+    select: { status: true },
+  });
+  const hasPaid = deposits.some((d) => d.status === "PAID");
+  const hasPending = deposits.some((d) => d.status === "PENDING");
+  return hasPaid || !hasPending;
+}
+
 // Buyer has selected/accepted a dealer offer (an accepted offer or a created
 // deal both signal the auction has converted).
 export async function hasSelectedOffer(buyerId: string): Promise<boolean> {

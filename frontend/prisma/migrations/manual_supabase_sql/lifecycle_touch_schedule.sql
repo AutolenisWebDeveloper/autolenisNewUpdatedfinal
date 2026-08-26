@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS lifecycle_touch_schedule (
   base_key       text        NOT NULL,
   sequence       text        NOT NULL
                              CHECK (sequence IN (
-                               'deposit_reminder_1','deposit_reminder_2','deposit_reminder_3',
+                               'deposit_reminder_1','deposit_reminder_2','deposit_reminder_3','deposit_reminder_4',
                                'auction_active','auction_midpoint','auction_closing',
                                'dealer_invited',
                                'offer_received','offer_follow_up_1','offer_follow_up_2',
@@ -81,5 +81,32 @@ CREATE INDEX IF NOT EXISTS idx_lifecycle_touch_due
   ON lifecycle_touch_schedule (run_at)
   WHERE status IN ('pending','sending');
 
+-- ── $99 deposit-conversion cadence extension (idempotent) ────────────────────
+-- The $99 deposit-conversion program adds a 4th deposit reminder touch
+-- (deposit_reminder_4) and re-cadences to +1h/+6h/+24h/+72h. On a FRESH install
+-- the CREATE TABLE above already allows deposit_reminder_4. On an EXISTING table
+-- the inline column CHECK (auto-named lifecycle_touch_schedule_sequence_check)
+-- still rejects it, so widen it here. Safe to run repeatedly and safe to run
+-- before the table exists (guarded on to_regclass).
+DO $$
+BEGIN
+  IF to_regclass('public.lifecycle_touch_schedule') IS NOT NULL THEN
+    ALTER TABLE lifecycle_touch_schedule
+      DROP CONSTRAINT IF EXISTS lifecycle_touch_schedule_sequence_check;
+    ALTER TABLE lifecycle_touch_schedule
+      DROP CONSTRAINT IF EXISTS lifecycle_touch_sequence_allowed;
+    ALTER TABLE lifecycle_touch_schedule
+      ADD CONSTRAINT lifecycle_touch_sequence_allowed CHECK (sequence IN (
+        'deposit_reminder_1','deposit_reminder_2','deposit_reminder_3','deposit_reminder_4',
+        'auction_active','auction_midpoint','auction_closing',
+        'dealer_invited',
+        'offer_received','offer_follow_up_1','offer_follow_up_2',
+        'deal_complete','review_request',
+        'form_submitted','check_form_completion_1','check_form_completion_2','check_form_completion_3'
+      ));
+  END IF;
+END $$;
+
 -- Verification:
 --   SELECT to_regclass('public.lifecycle_touch_schedule');
+--   SELECT conname FROM pg_constraint WHERE conname = 'lifecycle_touch_sequence_allowed';

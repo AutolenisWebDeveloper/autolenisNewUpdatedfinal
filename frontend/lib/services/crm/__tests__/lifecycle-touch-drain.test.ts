@@ -35,6 +35,7 @@ interface Ctrl {
   notifyThrows: boolean;
   chainThrows: boolean;
   paidDeposit: boolean;
+  depositResolved: boolean;
   selectedOffer: boolean;
   scheduled: Array<Record<string, unknown>>;
   nextScheduled: Array<Record<string, unknown>>;
@@ -58,6 +59,7 @@ function freshCtrl(): Ctrl {
     notifyThrows: false,
     chainThrows: false,
     paidDeposit: false,
+    depositResolved: false,
     selectedOffer: false,
     scheduled: [],
     nextScheduled: [],
@@ -152,6 +154,7 @@ mock.module("@/lib/qstash/notify", {
 mock.module("@/lib/qstash/state", {
   namedExports: {
     hasPaidDeposit: async () => ctrl.paidDeposit,
+    depositConversionResolved: async () => ctrl.depositResolved,
     hasSelectedOffer: async () => ctrl.selectedOffer,
     hasDealerBid: async () => false,
   },
@@ -182,6 +185,7 @@ beforeEach(() => {
 });
 
 const SEC = 1000;
+const HR = 60 * 60 * SEC;
 const DAY = 24 * 60 * 60 * SEC;
 
 function row(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
@@ -261,7 +265,7 @@ test("drain returns NO_TABLE (dormant) when the table doesn't exist yet", async 
   assert.equal(r.status, "NO_TABLE");
 });
 
-test("deposit_reminder_1 sends (buyer), marks done, chains deposit_reminder_2 at +1d", async () => {
+test("deposit_reminder_1 sends (buyer), marks done, chains deposit_reminder_2 at +5h (→+6h from enroll)", async () => {
   ctrl.dueRows = [{ id: "r1" }];
   ctrl.rowsById = { r1: row() };
   const { drainDueLifecycleTouches } = await load();
@@ -272,25 +276,60 @@ test("deposit_reminder_1 sends (buyer), marks done, chains deposit_reminder_2 at
   assert.equal(ctrl.notifies.length, 1);
   assert.equal(ctrl.notifies[0].entityType, "buyer");
   assert.equal(ctrl.notifies[0].entityId, "b1");
+  // #5 — the CTA returns the buyer directly to the $99 checkout for the preserved request.
+  assert.match(String(ctrl.notifies[0].sms), /\/buyer\/deposit/, "SMS CTA points at the $99 checkout");
   assert.ok(ctrl.statusUpdates.some((u) => u.id === "r1" && u.payload.status === "done"));
   assert.equal(ctrl.nextScheduled.length, 1);
   const np = ctrl.nextScheduled[0];
   assert.equal(np.sequence, "deposit_reminder_2");
   assert.equal(np.base_key, "deposit-reminder:b1", "chain reuses base_key");
   const runAt = new Date(np.run_at as string).getTime();
-  assert.ok(runAt >= before + DAY - 10000 && runAt <= Date.now() + DAY + 10000, "next ≈ +1d");
+  assert.ok(runAt >= before + 5 * HR - 10000 && runAt <= Date.now() + 5 * HR + 10000, "next ≈ +5h");
 });
 
-test("CONVERSION GUARD: deposit_reminder_1 with a paid deposit is canceled — no send, no chain", async () => {
+test("payment before Touch 2 stops Touch 2–4 (guard cancels a later touch too) (#8)", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row({ sequence: "deposit_reminder_2" }) };
+  ctrl.depositResolved = true;
+  const { drainDueLifecycleTouches } = await load();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.canceled, 1);
+  assert.equal(ctrl.notifies.length, 0);
+  assert.equal(ctrl.nextScheduled.length, 0, "no Touch 3 is chained after conversion");
+});
+
+test("deposit_reminder_3 chains deposit_reminder_4 at +48h (→+72h from enroll)", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row({ sequence: "deposit_reminder_3" }) };
+  const { drainDueLifecycleTouches } = await load();
+  const before = Date.now();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.sent, 1);
+  assert.equal(ctrl.nextScheduled.length, 1);
+  assert.equal(ctrl.nextScheduled[0].sequence, "deposit_reminder_4");
+  const runAt = new Date(ctrl.nextScheduled[0].run_at as string).getTime();
+  assert.ok(runAt >= before + 48 * HR - 10000, "next ≈ +48h");
+});
+
+test("deposit_reminder_4 is terminal — sends, no further chain", async () => {
+  ctrl.dueRows = [{ id: "r1" }];
+  ctrl.rowsById = { r1: row({ sequence: "deposit_reminder_4" }) };
+  const { drainDueLifecycleTouches } = await load();
+  const r = await drainDueLifecycleTouches();
+  assert.equal(r.sent, 1);
+  assert.equal(ctrl.nextScheduled.length, 0, "4th touch ends the conversion window");
+});
+
+test("CONVERSION GUARD: deposit_reminder_1 stops when depositConversionResolved (paid/no-pending) — no send, no chain", async () => {
   ctrl.dueRows = [{ id: "r1" }];
   ctrl.rowsById = { r1: row() };
-  ctrl.paidDeposit = true;
+  ctrl.depositResolved = true; // paid, or the pending intent is gone
   const { drainDueLifecycleTouches } = await load();
   const r = await drainDueLifecycleTouches();
   assert.equal(r.canceled, 1);
   assert.equal(r.sent, 0);
-  assert.equal(ctrl.notifies.length, 0, "converted buyer is not messaged");
-  assert.equal(ctrl.nextScheduled.length, 0, "no chain after conversion");
+  assert.equal(ctrl.notifies.length, 0, "resolved buyer is not messaged");
+  assert.equal(ctrl.nextScheduled.length, 0, "no chain after resolution");
   assert.ok(ctrl.statusUpdates.some((u) => u.id === "r1" && u.payload.status === "canceled" && u.payload.last_error === "converted"));
 });
 
@@ -441,4 +480,46 @@ test("drain throws on a real (non-missing-table) due-query error", async () => {
   ctrl.queryError = { code: "57014", message: "statement timeout" };
   const { drainDueLifecycleTouches } = await load();
   await assert.rejects(() => drainDueLifecycleTouches(), /lifecycle_touch_due_query_failed: statement timeout/);
+});
+
+// ── cancelDepositReminderTouches / depositReminderBaseKey ────────────────────
+// A hand-rolled chainable supabase that records the update payload + filters and
+// returns a controllable result (the shared fake models only the drain's claim).
+function cancelFake(result: { data: unknown; error: unknown }) {
+  const calls: { payload?: Record<string, unknown>; filters: Array<[string, unknown, unknown]> } = { filters: [] };
+  const b: Record<string, unknown> = {
+    update: (d: Record<string, unknown>) => { calls.payload = d; return b; },
+    eq: (c: string, v: unknown) => { calls.filters.push(["eq", c, v]); return b; },
+    in: (c: string, v: unknown) => { calls.filters.push(["in", c, v]); return b; },
+    select: () => b,
+    then: (res: (v: unknown) => void) => res(result),
+  };
+  return { supabase: { from: () => b } as never, calls };
+}
+
+test("depositReminderBaseKey is stable per buyer", async () => {
+  const { depositReminderBaseKey } = await load();
+  assert.equal(depositReminderBaseKey("b1"), "deposit-reminder:b1");
+});
+
+test("cancelDepositReminderTouches moves pending/sending deposit_reminder_* rows to canceled", async () => {
+  const { cancelDepositReminderTouches } = await load();
+  const { supabase, calls } = cancelFake({ data: [{ id: "x1" }, { id: "x2" }], error: null });
+  const r = await cancelDepositReminderTouches("b1", { supabase, reason: "deposit_paid" });
+  assert.equal(r.status, "OK");
+  assert.equal(r.canceled, 2);
+  assert.equal(calls.payload?.status, "canceled");
+  assert.equal(calls.payload?.last_error, "deposit_paid");
+  // scoped to this buyer's chain, the 4 deposit sequences, and only in-flight rows
+  assert.ok(calls.filters.some((f) => f[1] === "base_key" && f[2] === "deposit-reminder:b1"));
+  assert.ok(calls.filters.some((f) => f[0] === "in" && f[1] === "sequence"));
+  assert.ok(calls.filters.some((f) => f[0] === "in" && f[1] === "status"));
+});
+
+test("cancelDepositReminderTouches is DORMANT-safe — a missing table is a no-op", async () => {
+  const { cancelDepositReminderTouches } = await load();
+  const { supabase } = cancelFake({ data: null, error: { code: "42P01", message: "does not exist" } });
+  const r = await cancelDepositReminderTouches("b1", { supabase });
+  assert.equal(r.status, "NO_TABLE");
+  assert.equal(r.canceled, 0);
 });

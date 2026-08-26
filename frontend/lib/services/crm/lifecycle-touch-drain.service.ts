@@ -38,7 +38,7 @@
 
 import { logger } from "@/lib/logger";
 import { notifyContact, renderEmail, NOTIFY_APP_URL } from "@/lib/qstash/notify";
-import { hasPaidDeposit, hasSelectedOffer } from "@/lib/qstash/state";
+import { hasPaidDeposit, depositConversionResolved, hasSelectedOffer } from "@/lib/qstash/state";
 import { DEPOSIT_AMOUNT_USD } from "@/lib/constants";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -49,7 +49,7 @@ const STALE_MS = 10 * MIN; // > drain maxDuration; a stale 'sending' row is recl
 const MAX_ATTEMPTS = 4;
 
 export type LifecycleSequence =
-  | "deposit_reminder_1" | "deposit_reminder_2" | "deposit_reminder_3"
+  | "deposit_reminder_1" | "deposit_reminder_2" | "deposit_reminder_3" | "deposit_reminder_4"
   | "auction_active" | "auction_midpoint" | "auction_closing"
   | "dealer_invited"
   | "offer_received" | "offer_follow_up_1" | "offer_follow_up_2"
@@ -91,51 +91,80 @@ interface SequenceConfig {
 }
 
 const DASH = `${NOTIFY_APP_URL}/buyer/dashboard`;
+// The $99 conversion CTA returns the buyer DIRECTLY to the existing checkout for
+// their preserved competitive request (Section 2/9), not the dashboard.
+const DEPOSIT_CHECKOUT = `${NOTIFY_APP_URL}/buyer/deposit`;
 
-// Message bodies ported verbatim from app/api/jobs/<name>/route.ts.
+// Message bodies ported verbatim from app/api/jobs/<name>/route.ts, EXCEPT the
+// deposit-reminder set below, which the $99-conversion program deliberately
+// re-cadences (+1h/+6h/+24h/+72h, 4 touches) and re-copies (truthful,
+// conversion-focused, CTA → the $99 checkout). See deposit_reminder_1 header.
 const SEQUENCES: Record<LifecycleSequence, SequenceConfig> = {
-  // ── deposit-reminder (3 touches, guard hasPaidDeposit) ────────────────────
+  // ── $99 deposit conversion (4 touches: +1h/+6h/+24h/+72h) ─────────────────
+  // Producer enrolls deposit_reminder_1 at run_at = now + 1h (the intentional
+  // first-touch grace: never chase a buyer who may still be completing checkout).
+  // Each touch's guard (depositConversionResolved) re-reads live state at send
+  // time and cancels the whole chain the instant the buyer no longer owes the $99
+  // (paid, or the pending intent is gone). Every message is truthful: the request
+  // is saved, the $99 is the next step, and dealer/auction fulfillment begins
+  // only AFTER payment — no fabricated dealer interest, bidding, offers, savings,
+  // urgency, or scarcity. CTA → the $99 checkout for the preserved request.
   deposit_reminder_1: {
     entityType: "buyer",
-    guard: hasPaidDeposit,
+    guard: depositConversionResolved,
     render: ({ firstName }) => ({
-      sms: `Hey ${firstName} — your AutoLenis auction slot is reserved. Activate it for ${DEPOSIT_AMOUNT_USD}: autolenis.com/buyer/dashboard`,
-      emailSubject: "Your dealer auction is ready to launch",
+      sms: `Hi ${firstName} — your AutoLenis vehicle request is saved. Complete your ${DEPOSIT_AMOUNT_USD} Auction Access Deposit to start: autolenis.com/buyer/deposit`,
+      emailSubject: "Your vehicle request is saved — one step left",
       emailHtml: renderEmail({
-        heading: "Your dealer auction is ready to launch",
-        bodyHtml: `<p>Hi ${firstName},</p><p>Your auction slot is reserved. Activate it for ${DEPOSIT_AMOUNT_USD} and local dealers will start competing for your vehicle.</p>`,
-        ctaText: `Activate for ${DEPOSIT_AMOUNT_USD}`,
-        ctaUrl: DASH,
+        heading: "Your vehicle request is saved",
+        bodyHtml: `<p>Hi ${firstName},</p><p>Your vehicle request is saved. The next step is your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong>. Once it's paid, local dealers begin competing for your vehicle in a private auction.</p>`,
+        ctaText: `Complete your ${DEPOSIT_AMOUNT_USD} deposit`,
+        ctaUrl: DEPOSIT_CHECKOUT,
       }),
     }),
-    next: { sequence: "deposit_reminder_2", delayMs: 86400 * SEC },
+    next: { sequence: "deposit_reminder_2", delayMs: 5 * 60 * MIN }, // +5h → +6h from enrollment
   },
   deposit_reminder_2: {
     entityType: "buyer",
-    guard: hasPaidDeposit,
+    guard: depositConversionResolved,
     render: ({ firstName }) => ({
-      sms: `${firstName}, your AutoLenis auction slot is still on hold. Activate for ${DEPOSIT_AMOUNT_USD} before it's released: autolenis.com/buyer/dashboard`,
-      emailSubject: "Your reserved auction slot is still waiting",
+      sms: `${firstName}, your saved AutoLenis request is ready. The ${DEPOSIT_AMOUNT_USD} Auction Access Deposit is the next step to let dealers compete: autolenis.com/buyer/deposit`,
+      emailSubject: "One step to activate your dealer auction",
       emailHtml: renderEmail({
-        heading: "Your reserved auction slot is still waiting",
-        bodyHtml: `<p>Hi ${firstName},</p><p>We're still holding your auction slot. Activate for ${DEPOSIT_AMOUNT_USD} to put dealers to work before the hold expires.</p>`,
-        ctaText: `Activate for ${DEPOSIT_AMOUNT_USD}`,
-        ctaUrl: DASH,
+        heading: "Your request is ready to activate",
+        bodyHtml: `<p>Hi ${firstName},</p><p>Your vehicle request is still saved. Completing your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong> is all that's left — dealer bidding begins right after payment.</p>`,
+        ctaText: `Complete your ${DEPOSIT_AMOUNT_USD} deposit`,
+        ctaUrl: DEPOSIT_CHECKOUT,
       }),
     }),
-    next: { sequence: "deposit_reminder_3", delayMs: 172800 * SEC },
+    next: { sequence: "deposit_reminder_3", delayMs: 18 * 60 * MIN }, // +18h → +24h from enrollment
   },
   deposit_reminder_3: {
     entityType: "buyer",
-    guard: hasPaidDeposit,
+    guard: depositConversionResolved,
     render: ({ firstName }) => ({
-      sms: `${firstName}, your AutoLenis auction slot expires soon. Activate for ${DEPOSIT_AMOUNT_USD} now: autolenis.com/buyer/dashboard`,
-      emailSubject: "Your auction slot expires soon",
+      sms: `${firstName}, your AutoLenis request is still saved. Complete the ${DEPOSIT_AMOUNT_USD} Auction Access Deposit to activate your dealer auction: autolenis.com/buyer/deposit`,
+      emailSubject: "Your vehicle request is still waiting",
       emailHtml: renderEmail({
-        heading: "Your auction slot expires soon",
-        bodyHtml: `<p>Hi ${firstName},</p><p>This is your final reminder — your reserved auction slot is about to be released. Activate for ${DEPOSIT_AMOUNT_USD} to keep it.</p>`,
-        ctaText: `Activate for ${DEPOSIT_AMOUNT_USD}`,
-        ctaUrl: DASH,
+        heading: "Your vehicle request is still waiting",
+        bodyHtml: `<p>Hi ${firstName},</p><p>Your request is saved and ready. When you complete your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong>, dealers start competing for your vehicle — you keep everything you've entered, no need to start over.</p>`,
+        ctaText: `Complete your ${DEPOSIT_AMOUNT_USD} deposit`,
+        ctaUrl: DEPOSIT_CHECKOUT,
+      }),
+    }),
+    next: { sequence: "deposit_reminder_4", delayMs: 48 * 60 * MIN }, // +48h → +72h from enrollment
+  },
+  deposit_reminder_4: {
+    entityType: "buyer",
+    guard: depositConversionResolved,
+    render: ({ firstName }) => ({
+      sms: `${firstName}, this is our last reminder — your AutoLenis request is saved. Complete the ${DEPOSIT_AMOUNT_USD} Auction Access Deposit whenever you're ready: autolenis.com/buyer/deposit`,
+      emailSubject: "Last reminder: your saved vehicle request",
+      emailHtml: renderEmail({
+        heading: "Last reminder about your saved request",
+        bodyHtml: `<p>Hi ${firstName},</p><p>This is the last reminder we'll send. Your vehicle request is still saved, and your <strong>${DEPOSIT_AMOUNT_USD} Auction Access Deposit</strong> is the only step left to let dealers compete. You can complete it any time.</p>`,
+        ctaText: `Complete your ${DEPOSIT_AMOUNT_USD} deposit`,
+        ctaUrl: DEPOSIT_CHECKOUT,
       }),
     }),
     next: null,
@@ -433,6 +462,48 @@ export async function enqueueLifecycleTouch(
     .select("id");
   if (error) throw new Error(`lifecycle_touch_enqueue_failed: ${error.message}`);
   return { scheduled: Array.isArray(data) && data.length > 0 };
+}
+
+// Stable base_key for a buyer's $99 deposit-conversion enrollment. One chain per
+// buyer (the competitive deposit is per-buyer, built from the shortlist), so this
+// key both dedupes enrollment (UNIQUE(base_key, sequence)) and addresses the chain
+// for cancellation.
+export function depositReminderBaseKey(buyerId: string): string {
+  return `deposit-reminder:${buyerId}`;
+}
+
+const DEPOSIT_REMINDER_SEQUENCES: LifecycleSequence[] = [
+  "deposit_reminder_1", "deposit_reminder_2", "deposit_reminder_3", "deposit_reminder_4",
+];
+
+// Proactively cancel a buyer's remaining $99 deposit-conversion touches (Section
+// 4/6). Called on authoritative payment (webhook), and available for cancellation
+// on request-cancel/expire. Idempotent: only pending/sending rows are moved to
+// 'canceled'; already-done/canceled/failed rows are untouched, and a converted
+// buyer whose row races past this is still caught by the send-time guard
+// (depositConversionResolved) — the guard, not this cancel, is authoritative.
+// DORMANT-safe: a missing table is swallowed (the internal path is not yet cut over).
+export async function cancelDepositReminderTouches(
+  buyerId: string,
+  opts: { supabase?: SupabaseClient; reason?: string } = {},
+): Promise<{ canceled: number; status: "OK" | "NO_TABLE" }> {
+  const supabase = opts.supabase ?? (await serviceClient());
+  const { data, error } = await supabase
+    .from("lifecycle_touch_schedule")
+    .update({
+      status: "canceled",
+      last_error: opts.reason ?? "deposit_converted",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("base_key", depositReminderBaseKey(buyerId))
+    .in("sequence", DEPOSIT_REMINDER_SEQUENCES)
+    .in("status", ["pending", "sending"])
+    .select("id");
+  if (error) {
+    if (isMissingTable(error)) return { canceled: 0, status: "NO_TABLE" };
+    throw new Error(`lifecycle_touch_cancel_failed: ${error.message}`);
+  }
+  return { canceled: Array.isArray(data) ? data.length : 0, status: "OK" };
 }
 
 interface TouchRow {
