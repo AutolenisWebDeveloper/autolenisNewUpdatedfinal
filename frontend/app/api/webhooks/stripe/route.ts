@@ -22,8 +22,51 @@ import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-schedule
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
 import { allowedPredecessors } from "@/lib/payments/deposit-state";
 
+// PaymentIntent metadata types this endpoint can actually fulfil. A
+// signature-valid payment whose type is not in this set is a real charge the
+// platform cannot route — acknowledged (retrying cannot fix bad metadata) but
+// never silently, because "200 OK and nothing happened" is exactly how a broken
+// money path stays invisible.
+const ROUTABLE_PI_TYPES = new Set(["deposit", "concierge_deposit", "concierge_fee", "service_fee"]);
+
+// Ops-only SYSTEM_ALERT for a payment this endpoint accepted but could not
+// route. Reuses the existing alert rail (surfaced on /admin/operations), deduped
+// per PaymentIntent, and best-effort — alerting must never fail an
+// already-acknowledged webhook.
+async function raiseUnroutablePaymentException(pi: Stripe.PaymentIntent, reason: string) {
+  const title = `Unroutable Stripe payment — no platform effect: ${pi.id}`;
+  try {
+    const existing = await prisma.notification.findFirst({
+      where: { title, type: "SYSTEM_ALERT" },
+      select: { id: true },
+    });
+    if (existing) return;
+    await prisma.notification.create({
+      data: {
+        title,
+        body: `Stripe reported payment_intent.succeeded for ${pi.id} (${pi.amount ?? "unknown"} minor units), but ${reason}. NOTHING ran: no deposit was flipped, no auction created, no deal advanced. Money moved at Stripe with no corresponding platform state. Identify the intent in the Stripe Dashboard, then converge it by hand through the owning admin path — do NOT fabricate a provider event. Review via /admin/operations.`,
+        type: "SYSTEM_ALERT",
+        actionUrl: "/admin/operations",
+      },
+    });
+  } catch (err) {
+    logger.error(`[stripe/webhook] unroutable-payment alert failed for ${pi.id} (best-effort):`, err);
+  }
+}
+
 export async function POST(request: NextRequest) {
-  const stripe = getStripe();
+  // getStripe() throws hard when STRIPE_SECRET_KEY is unset. Uncaught, that
+  // surfaces as an opaque framework 500 with nothing in the app log naming the
+  // cause — the endpoint looks "broken" from Stripe's delivery log and silent
+  // from ours. Catch it here so the misconfiguration is as legible as the
+  // missing-webhook-secret case below.
+  let stripe: Stripe;
+  try {
+    stripe = getStripe();
+  } catch (err) {
+    logger.error("[stripe/webhook] STRIPE_SECRET_KEY is not set — cannot verify webhooks:", err);
+    return new NextResponse("Webhook not configured", { status: 500 });
+  }
   const body = await request.text();
   const sig = request.headers.get("stripe-signature");
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -70,6 +113,10 @@ export async function POST(request: NextRequest) {
       case "payment_intent.succeeded": {
         const pi = event.data.object as Stripe.PaymentIntent;
         const { buyerId, type } = pi.metadata;
+        // Set true only by a branch that matched this payment's type AND resolved
+        // the row it is meant to act on. Left false, this is a real charge that
+        // changed nothing — the failure mode a bare 200 hides best.
+        let routed = false;
 
         if (type === "deposit") {
           // Phase 0.5-3: the deposit money-cluster (PI link → deposit PAID →
@@ -156,6 +203,7 @@ export async function POST(request: NextRequest) {
           }
 
           const { deposit, createdAuction, isNewAuction } = outcome;
+          routed = deposit !== null;
           const existingAuction = isNewAuction ? null : createdAuction;
           if (deposit) {
             // Post-commit effects: idempotent or best-effort; failures are
@@ -346,6 +394,7 @@ export async function POST(request: NextRequest) {
           }
 
           const { deposit, auctionId, reused } = outcome;
+          routed = deposit !== null;
           if (deposit && auctionId && !reused) {
             // Post-commit, best-effort effects (money already committed).
             const buyerEmail = deposit.buyer?.user?.email;
@@ -411,6 +460,7 @@ export async function POST(request: NextRequest) {
           // authoritative payment fact, so the forward transition is forced and the
           // change is recorded in DealStatusHistory.
           const feeDeal = await prisma.deal.findFirst({ where: whereClause });
+          routed = feeDeal !== null;
           if (feeDeal) {
             // Net of the $99 deposit credit — the amount actually captured.
             const feeData = { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_REMAINING_CENTS, stripeFeePIId: pi.id };
@@ -498,6 +548,23 @@ export async function POST(request: NextRequest) {
               }
             }
           }
+        }
+
+        // Nothing above claimed this payment. Two ways to get here, both of
+        // which used to end in a bare 200 with no trace: the metadata type
+        // matches no branch at all, or a branch matched but the row it needed
+        // (Deposit for this PaymentIntent, Deal for this dealId) does not exist.
+        // Stripe is still acknowledged — a retry cannot conjure the missing row
+        // or repair metadata — but the charge is surfaced as an operational
+        // exception instead of being acked into silence.
+        if (!routed) {
+          const reason = ROUTABLE_PI_TYPES.has(type ?? "")
+            ? `metadata.type="${type}" matched a fulfillment branch, but no matching record was found for this payment`
+            : `metadata.type="${type ?? "absent"}" matched no fulfillment branch`;
+          logger.error(
+            `[stripe/webhook] unroutable payment_intent.succeeded ${pi.id} — ${reason}; no platform state changed`,
+          );
+          await raiseUnroutablePaymentException(pi, reason);
         }
         break;
       }

@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/prisma";
+import { logger } from "@/lib/logger";
+import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
 
 // ---------------------------------------------------------------------------
 // $99 PRE-ACTIVATION COST GATE — the single authoritative predicate.
@@ -34,4 +36,68 @@ export async function isFulfillmentUnlocked(
     select: { id: true },
   });
   return paid !== null;
+}
+
+// ---------------------------------------------------------------------------
+// WHICH fulfillment a settled $99 belongs to.
+//
+// Two tracks share the Deposit table and the same $99 amount:
+//   • standard  — competitive: a LIVE auction is launched and dealers are invited.
+//   • concierge — a CLOSED auction whose Offers are converted from an
+//                 admin-curated review; dealers are NEVER invited to compete.
+//
+// The Deposit row carries no discriminator, so the authoritative signal is the
+// SAME one the Stripe webhook branches on: `pi.metadata.type`, stamped at intent
+// creation by every path that mints a deposit intent (buyer self-service, admin
+// create-intent, admin send-link Checkout Session). Reading it here — rather
+// than inferring a track from surrounding rows — keeps the admin/reconciler
+// paths in literal parity with the webhook instead of guessing.
+//
+// Callers must FAIL CLOSED on "unknown": an indeterminate track may never be
+// treated as standard, because running the competitive cascade on a concierge
+// deposit invites dealers to bid on a deal that was never competitive.
+// ---------------------------------------------------------------------------
+
+export type DepositFulfillmentTrack = "standard" | "concierge" | "unknown";
+
+/** Sandbox short-circuit intents (create-intent, non-production) — never real Stripe. */
+const SANDBOX_INTENT_PREFIX = "pi_sandbox_mock_";
+
+/**
+ * Resolve the fulfillment track of a deposit. READ-ONLY: never writes a deposit,
+ * an auction, or a PaymentProviderEvent.
+ *
+ * A deposit with no PaymentIntent is admin-minted and therefore standard by
+ * construction — every concierge deposit is created through the buyer
+ * create-intent path with a real PI stamped `type: "concierge_deposit"`.
+ */
+export async function resolveDepositFulfillmentTrack(
+  depositId: string,
+): Promise<DepositFulfillmentTrack> {
+  const deposit = await prisma.deposit.findUnique({
+    where: { id: depositId },
+    select: { stripePaymentIntentId: true },
+  });
+  if (!deposit) return "unknown";
+
+  const pi = deposit.stripePaymentIntentId;
+  if (!pi || pi.startsWith(SANDBOX_INTENT_PREFIX)) return "standard";
+
+  try {
+    const intent = await retrievePaymentIntent(pi);
+    const type = intent?.metadata?.type;
+    if (type === "concierge_deposit") return "concierge";
+    if (type === "deposit") return "standard";
+    logger.warn(
+      `[fulfillment-gate] deposit ${depositId} intent ${pi} carries no recognised metadata.type ` +
+        `(${type ?? "absent"}) — track indeterminate, callers fail closed`,
+    );
+    return "unknown";
+  } catch (err) {
+    // A provider outage must not be read as "standard" — that is the optimistic
+    // answer, and the optimistic answer is the one that invites dealers to a
+    // concierge deal.
+    logger.warn(`[fulfillment-gate] could not resolve track for deposit ${depositId} from ${pi}:`, err);
+    return "unknown";
+  }
 }

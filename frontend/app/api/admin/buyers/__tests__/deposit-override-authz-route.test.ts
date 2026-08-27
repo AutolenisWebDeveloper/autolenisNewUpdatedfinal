@@ -57,6 +57,13 @@ mock.module("@/lib/services/admin/buyer-crm-sync", {
   namedExports: { syncBuyerLifecycleToCrm: async () => undefined },
 });
 
+// The route hands a minted deposit to the canonical activation cascade. Stub it:
+// these tests are about the authorization gate, and the real service is
+// server-only (importing it here would fail before any assertion runs).
+mock.module("@/lib/services/auction/deposit-activation.service", {
+  namedExports: { reconcileDepositActivation: async () => "invited" },
+});
+
 // requirePermission is SHADOW-ONLY by design: it returns the authenticated admin
 // even when the role is outside the permission's allow-list. Mocking that real
 // behaviour is the point — it proves the route's own hard check is what blocks.
