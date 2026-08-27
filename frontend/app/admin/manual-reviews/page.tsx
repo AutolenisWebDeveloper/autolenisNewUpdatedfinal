@@ -5,7 +5,8 @@ import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import { listOpenReviewTasks } from "@/lib/services/financing/review-queue.service";
 import Link from "next/link";
-import { ShieldAlert, Clock, ArrowRight, ClipboardCheck, Banknote } from "lucide-react";
+import { ShieldAlert, Clock, ArrowRight, ClipboardCheck, Banknote, PlugZap } from "lucide-react";
+import { PREQUAL_PROVIDER_FAILURE_EVENT } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
@@ -38,11 +39,37 @@ function ageInHours(d: Date) {
   return Math.floor((Date.now() - new Date(d).getTime()) / (1000 * 60 * 60));
 }
 
-function DecisionBadge({ decision }: { decision: string }) {
-  const cls =
-    decision === "OFAC_ESCALATED" || decision === "OFAC_REVIEW"
-      ? "bg-red-50 text-red-700 border-red-200"
-      : "bg-amber-50 text-amber-700 border-amber-200";
+function DecisionBadge({
+  decision,
+  providerFailureReason,
+}: {
+  decision: string;
+  providerFailureReason?: string;
+}) {
+  // A provider failure is NOT an adjudicable review. The bureau returned no
+  // data, so there is nothing for a human to weigh — the row is here only
+  // because the decision correctly failed closed. Labelling it as a risk review
+  // sends an operator hunting for a judgement they cannot make.
+  //
+  // OFAC WINS. A response can omit the DECISION and still carry a sanctions
+  // hit, so a row can be both a provider failure and an OFAC review. The
+  // sanctions flag is the urgent, actionable one — never let "nothing to
+  // adjudicate" hide it.
+  const isOfacDecision = decision === "OFAC_ESCALATED" || decision === "OFAC_REVIEW";
+  if (providerFailureReason && !isOfacDecision) {
+    return (
+      <span
+        className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-slate-100 text-slate-700 border-slate-300"
+        title={`MicroBilt returned no usable data (${providerFailureReason}). Not a risk decision — fix the integration, then re-run.`}
+        data-testid="badge-provider-failed"
+      >
+        PROVIDER FAILED
+      </span>
+    );
+  }
+  const cls = isOfacDecision
+    ? "bg-red-50 text-red-700 border-red-200"
+    : "bg-amber-50 text-amber-700 border-amber-200";
   return (
     <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border ${cls}`}>
       {decision.replace(/_/g, " ")}
@@ -87,10 +114,41 @@ export default async function AdminManualReviewsPage() {
     take: 100,
   });
 
-  const ofacCount = reviews.filter(
-    (r) => r.decision === "OFAC_ESCALATED" || r.decision === "OFAC_REVIEW",
+  // Which of these rows are an INTEGRATION OUTAGE rather than a risk hold.
+  // Both land as MANUAL_REVIEW (correctly — the decision fails closed either
+  // way), so without this marker an operator cannot tell "the bureau returned
+  // nothing" from "this buyer needs a compliance decision", and ends up trying
+  // to adjudicate an outage by hand. Newest event per prequal wins.
+  const providerFailureEvents = reviews.length
+    ? await prisma.complianceEvent.findMany({
+        where: {
+          eventType: PREQUAL_PROVIDER_FAILURE_EVENT,
+          prequalApplicationId: { in: reviews.map((r) => r.id) },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { prequalApplicationId: true, metadata: true },
+      })
+    : [];
+
+  const providerFailureReasons = new Map<string, string>();
+  for (const e of providerFailureEvents) {
+    if (!e.prequalApplicationId || providerFailureReasons.has(e.prequalApplicationId)) continue;
+    const reason = (e.metadata as { providerReason?: unknown } | null)?.providerReason;
+    providerFailureReasons.set(
+      e.prequalApplicationId,
+      typeof reason === "string" ? reason : "unknown",
+    );
+  }
+
+  // Buckets are mutually exclusive and OFAC-first, matching the badge, so the
+  // three tiles always sum to the queue length even for a row that is both a
+  // provider failure and a sanctions hit.
+  const isOfacReview = (d: string) => d === "OFAC_ESCALATED" || d === "OFAC_REVIEW";
+  const ofacCount = reviews.filter((r) => isOfacReview(r.decision)).length;
+  const providerFailureCount = reviews.filter(
+    (r) => !isOfacReview(r.decision) && providerFailureReasons.has(r.id),
   ).length;
-  const manualCount = reviews.length - ofacCount;
+  const manualCount = reviews.length - ofacCount - providerFailureCount;
 
   return (
     <div className="p-6 md:p-8 max-w-6xl" data-testid="admin-manual-reviews-page">
@@ -105,12 +163,40 @@ export default async function AdminManualReviewsPage() {
       </div>
 
       {/* Stat tiles — canonical StatCard pattern */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <StatCard icon={ClipboardCheck} label="Awaiting Review" value={String(reviews.length)} tone="neutral" testId="stat-total-reviews" />
         <StatCard icon={ShieldAlert} label="OFAC Escalations" value={String(ofacCount)} tone="danger" testId="stat-ofac-reviews" />
         <StatCard icon={Clock} label="Manual Review" value={String(manualCount)} tone="warning" testId="stat-manual-reviews" />
+        <StatCard
+          icon={PlugZap}
+          label="Provider Failed"
+          value={String(providerFailureCount)}
+          sub="not adjudicable"
+          tone={providerFailureCount > 0 ? "danger" : "neutral"}
+          testId="stat-provider-failed-reviews"
+        />
         <StatCard icon={Banknote} label="Financing Reviews" value={String(financingTasks.length)} tone="warning" testId="stat-financing-reviews" />
       </div>
+
+      {/* Integration-outage callout — these rows are NOT a compliance backlog. */}
+      {providerFailureCount > 0 && (
+        <div
+          className="flex items-start gap-3 px-4 py-3 mb-6 rounded-xl border border-red-200 bg-red-50 text-red-800"
+          role="status"
+          data-testid="provider-failure-callout"
+        >
+          <PlugZap size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <p className="text-sm">
+            <strong>
+              {providerFailureCount} prequalification{providerFailureCount === 1 ? "" : "s"} could
+              not be decided because MicroBilt returned no usable data.
+            </strong>{" "}
+            These are an integration failure, not a risk review — there is nothing to adjudicate.
+            Fix the iPredict connection, then have the buyer re-submit. No buyer can be approved,
+            and no deposit can be taken, while this persists.
+          </p>
+        </div>
+      )}
 
       {/* Financing review tasks — links out to the financing resolve queue */}
       {financingTasks.length > 0 && (
@@ -196,7 +282,7 @@ export default async function AdminManualReviewsPage() {
                   <p className="text-xs text-slate-400">{fmtCents(r.maxOtdAmountCents)} budget</p>
                 </div>
                 <span className="text-xs text-slate-500 truncate">{r.buyer.user.email}</span>
-                <DecisionBadge decision={r.decision} />
+                <DecisionBadge decision={r.decision} providerFailureReason={providerFailureReasons.get(r.id)} />
                 <span className="text-xs text-slate-500">{fmtDate(r.createdAt)}</span>
                 <span
                   className={`inline-flex items-center gap-1 text-xs font-medium ${

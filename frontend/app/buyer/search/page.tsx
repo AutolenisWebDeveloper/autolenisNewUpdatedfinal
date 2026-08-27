@@ -5,7 +5,8 @@ export const metadata: Metadata = { title: "Vehicle Search" };
 import { Suspense } from "react";
 import { getAuthenticatedBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import BuyerSearchClient from "@/components/buyer/BuyerSearchClient";
+import BuyerSearchClient, { type PrequalBudgetState } from "@/components/buyer/BuyerSearchClient";
+import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +30,37 @@ async function getModelsByMake(): Promise<Record<string, string[]>> {
   }
 }
 
+/**
+ * Describe the buyer's prequal WITHOUT inventing a budget.
+ *
+ * `maxOtdAmountCents` is 0 on every non-approved row, so reading it
+ * unconditionally (as this page used to) turns "not decided yet" into an
+ * approved budget of $0. A number is returned only for a live approval.
+ */
+function resolvePrequalBudget(
+  prequal: { decision: string; expiresAt: Date; maxOtdAmountCents: number } | null,
+): { maxBudgetCents: number | null; prequalState: PrequalBudgetState } {
+  if (isPrequalValid(prequal) && prequal !== null) {
+    // A zero amount on an APPROVED row is an anomaly, never a real budget of
+    // nothing. Report the approval without claiming a figure rather than
+    // rendering "$0" — the banner simply stays silent in that case.
+    const maxBudgetCents = prequal.maxOtdAmountCents > 0 ? prequal.maxOtdAmountCents : null;
+    return { maxBudgetCents, prequalState: "APPROVED" };
+  }
+  if (!prequal) return { maxBudgetCents: null, prequalState: "NONE" };
+  if (prequal.decision === "DECLINED") return { maxBudgetCents: null, prequalState: "DECLINED" };
+  // APPROVED but past expiresAt — a real approval that has simply lapsed.
+  if (prequal.decision === "APPROVED") return { maxBudgetCents: null, prequalState: "EXPIRED" };
+  // PENDING / MANUAL_REVIEW / OFAC_REVIEW / OFAC_ESCALATED all read to the buyer
+  // as "still being reviewed" — the OFAC cause is never surfaced.
+  return { maxBudgetCents: null, prequalState: "PENDING" };
+}
+
 export default async function SearchPage() {
   const buyer            = await getAuthenticatedBuyer();
-  const maxBudgetCents   = buyer?.preQualification?.maxOtdAmountCents ?? null;
+  const { maxBudgetCents, prequalState } = resolvePrequalBudget(
+    buyer?.preQualification ?? null,
+  );
   const buyerZip         = buyer?.zip ?? null;
   const availableModelsByMake = await getModelsByMake();
 
@@ -39,6 +68,7 @@ export default async function SearchPage() {
     <Suspense fallback={<SearchSkeleton />}>
       <BuyerSearchClient
         maxBudgetCents={maxBudgetCents}
+        prequalState={prequalState}
         buyerZip={buyerZip}
         availableModelsByMake={availableModelsByMake}
       />

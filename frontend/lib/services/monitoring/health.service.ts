@@ -1,7 +1,7 @@
 // lib/services/monitoring/health.service.ts — System 23 health monitoring
 
 import { prisma } from "@/lib/prisma";
-import { INVENTORY_HEALTH_P1_THRESHOLD } from "@/lib/constants";
+import { INVENTORY_HEALTH_P1_THRESHOLD, PREQUAL_PROVIDER_FAILURE_EVENT } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
 import { logger } from "@/lib/logger";
 import {
@@ -73,8 +73,50 @@ function checkResend(): boolean {
   return !!process.env.RESEND_API_KEY;
 }
 
-function checkMicroBilt(): boolean {
-  return !!(process.env.MICROBILT_CLIENT_ID && process.env.MICROBILT_CLIENT_SECRET);
+// Window over which recorded MicroBilt call outcomes decide whether the
+// integration is actually working.
+const MICROBILT_FAILURE_WINDOW_HOURS = 24;
+
+/**
+ * MicroBilt is healthy only when it is BOTH configured AND not currently failing.
+ *
+ * This used to return true whenever the two credential env vars were non-empty.
+ * Credentials were present throughout an ~8-week outage in which every iPredict
+ * call failed upstream, so thousands of consecutive health checks reported
+ * "healthy" while no buyer could be prequalified and no deposit could be taken.
+ * The presence of a secret is not evidence that a call succeeds; the recorded
+ * outcome of real calls is.
+ */
+async function checkMicroBilt(): Promise<boolean> {
+  const configured = !!(
+    process.env.MICROBILT_CLIENT_ID && process.env.MICROBILT_CLIENT_SECRET
+  );
+  if (!configured) return false;
+
+  try {
+    const since = new Date(Date.now() - MICROBILT_FAILURE_WINDOW_HOURS * 60 * 60 * 1000);
+    const failures = await prisma.complianceEvent.count({
+      where: { eventType: PREQUAL_PROVIDER_FAILURE_EVENT, createdAt: { gte: since } },
+    });
+    // ANY failure in the window marks the integration unhealthy — deliberately
+    // not a rate or a streak. Prequal volume is low (single digits per month),
+    // so a "3 failures before we call it down" rule would never trip during a
+    // total outage and would recreate exactly the silent-green failure this
+    // check exists to prevent. There is also no acceptable failure rate here:
+    // each failed pull is a buyer who cannot be approved and a deposit that
+    // cannot be taken. The signal self-clears once calls stop failing.
+    //
+    // This is intentionally stricter than the PlatformAlert escalation in
+    // prequal.service, which waits for a sustained failure before paging at P0.
+    // The two answer different questions: "is the integration serving its
+    // purpose right now?" versus "how loudly should we page about it?".
+    return failures === 0;
+  } catch (err) {
+    // An unreadable outcome log is not evidence of provider failure — do not
+    // flap the integration status on a transient query error.
+    logger.warn("[health] MicroBilt outcome check failed (reporting configured state):", err);
+    return configured;
+  }
 }
 
 export async function runHealthCheck(): Promise<HealthReport> {
@@ -88,19 +130,28 @@ export async function runHealthCheck(): Promise<HealthReport> {
     alerts.push("P0: Database connection failed");
   }
 
-  const [activeAuctions, pendingOFAC, contractFails, inventoryCount, activeInventory, stripeOk] = await Promise.all([
+  const [
+    activeAuctions,
+    pendingOFAC,
+    contractFails,
+    inventoryCount,
+    activeInventory,
+    stripeOk,
+    microbiltOk,
+  ] = await Promise.all([
     prisma.auction.count({ where: { status: "ACTIVE" } }),
     prisma.preQualification.count({ where: { checkOfacAlert: true, decision: "OFAC_ESCALATED" } }),
     prisma.contractScan.count({ where: { status: "FAIL" } }),
     prisma.inventoryItem.count(),
     prisma.inventoryItem.count({ where: { isActive: true } }),
     checkStripe(),
+    checkMicroBilt(),
   ]);
 
   const integrations: IntegrationStatus = {
     stripe: stripeOk,
     resend: checkResend(),
-    microbilt: checkMicroBilt(),
+    microbilt: microbiltOk,
   };
 
   const inventoryHealth = inventoryCount > 0 ? Math.round((activeInventory / inventoryCount) * 100) : 100;
@@ -110,7 +161,15 @@ export async function runHealthCheck(): Promise<HealthReport> {
   if (contractFails > 5) alerts.push(`P1: ${contractFails} contract scan failures unresolved`);
   if (!integrations.stripe) alerts.push("P1: Stripe API key invalid or unreachable");
   if (!integrations.resend) alerts.push("P1: Resend API key missing");
-  if (!integrations.microbilt) alerts.push("P1: MicroBilt credentials missing");
+  if (!integrations.microbilt) {
+    // Distinguishes "never configured" from "configured but failing every call" —
+    // the second is what silently blocked all prequals (and all revenue) for weeks.
+    alerts.push(
+      process.env.MICROBILT_CLIENT_ID && process.env.MICROBILT_CLIENT_SECRET
+        ? "P0: MicroBilt prequalification calls are failing — no buyer can be prequalified"
+        : "P1: MicroBilt credentials missing",
+    );
+  }
 
   const status = !dbOk ? "down" : alerts.some(a => a.startsWith("P0")) ? "degraded" : "healthy";
 

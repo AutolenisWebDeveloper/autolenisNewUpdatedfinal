@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useTransition, useMemo, useRef } from
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
 import {
-  Search, MapPin, X, SlidersHorizontal, Loader2, Crosshair, Heart,
+  Search, MapPin, X, SlidersHorizontal, Loader2, Crosshair, Heart, Clock, ShieldCheck,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -75,13 +75,30 @@ interface Toast {
   type: "success" | "error";
 }
 
+/**
+ * How the buyer's pre-qualification should be described on this page.
+ *
+ * Deliberately separate from `maxBudgetCents`: a budget number exists ONLY in
+ * the APPROVED state. Every other state renders an honest description of where
+ * the buyer actually is — never a number, and never a $0 standing in for
+ * "we don't know yet".
+ */
+export type PrequalBudgetState = "APPROVED" | "PENDING" | "DECLINED" | "EXPIRED" | "NONE";
+
 interface Props {
+  /** Non-null ONLY for a live APPROVED prequal. Never defaulted, never 0-as-unknown. */
   maxBudgetCents: number | null;
+  prequalState: PrequalBudgetState;
   buyerZip: string | null;
   availableModelsByMake: Record<string, string[]>;
 }
 
-export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableModelsByMake }: Props) {
+export default function BuyerSearchClient({
+  maxBudgetCents,
+  prequalState,
+  buyerZip,
+  availableModelsByMake,
+}: Props) {
   const router   = useRouter();
   const pathname = usePathname();
   const sp       = useSearchParams();
@@ -296,16 +313,100 @@ export default function BuyerSearchClient({ maxBudgetCents, buyerZip, availableM
         </Link>
       </div>
 
-      {/* Budget badge — always visible when prequal exists */}
-      {budgetDollars !== null && (
+      {/* ── Budget banner ────────────────────────────────────────────────────
+          A number is shown ONLY for a live approval. Previously this rendered
+          whenever a prequal ROW existed, so a buyer still under review was told
+          "your $0 pre-qualified budget" — presenting an undetermined budget as
+          an approved one, and an empty result list as their entitlement. Each
+          state below states plainly where the buyer actually stands. */}
+      {prequalState === "APPROVED" && budgetDollars !== null ? (
         <div
           data-testid="budget-badge"
-          className="flex items-center gap-2 px-4 py-3 mb-4 rounded-xl bg-al-primary/10 border border-al-primary/20 text-al-primary text-sm font-medium"
+          className="flex items-start gap-2 px-4 py-3 mb-4 rounded-xl bg-al-primary/10 border border-al-primary/20 text-al-primary text-sm font-medium"
         >
-          <span className="text-al-primary">💜</span>
-          Showing vehicles within your <strong>${budgetDollars.toLocaleString()}</strong> pre-qualified budget
+          <ShieldCheck size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>
+            Showing vehicles within your <strong>${budgetDollars.toLocaleString()}</strong>{" "}
+            pre-qualified budget
+          </span>
         </div>
-      )}
+      ) : prequalState === "PENDING" ? (
+        <div
+          data-testid="budget-pending-note"
+          role="status"
+          className="flex items-start gap-2 px-4 py-3 mb-4 rounded-xl bg-al-warning-subtle border border-al-warning/30 text-al-warning-fg text-sm"
+        >
+          <Clock size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>
+            <strong className="font-semibold">Your pre-qualification is still under review.</strong>{" "}
+            We haven&apos;t set your budget yet, so you&apos;re seeing every available vehicle. Your
+            pre-qualified budget will appear here once the review is complete.{" "}
+            <Link
+              href="/buyer/prequal"
+              className="font-semibold underline underline-offset-2 hover:no-underline"
+              data-testid="budget-pending-link"
+            >
+              Check status
+            </Link>
+          </span>
+        </div>
+      ) : prequalState === "EXPIRED" ? (
+        <div
+          data-testid="budget-expired-note"
+          role="status"
+          className="flex items-start gap-2 px-4 py-3 mb-4 rounded-xl bg-al-warning-subtle border border-al-warning/30 text-al-warning-fg text-sm"
+        >
+          <Clock size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>
+            <strong className="font-semibold">Your pre-qualification has expired.</strong>{" "}
+            You&apos;re seeing every available vehicle.{" "}
+            <Link
+              href="/buyer/prequal"
+              className="font-semibold underline underline-offset-2 hover:no-underline"
+              data-testid="budget-expired-link"
+            >
+              Renew it
+            </Link>{" "}
+            to shop against your budget again.
+          </span>
+        </div>
+      ) : prequalState === "NONE" ? (
+        <div
+          data-testid="budget-none-note"
+          className="flex items-start gap-2 px-4 py-3 mb-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 text-sm"
+        >
+          <ShieldCheck size={16} className="mt-0.5 shrink-0 text-slate-400" aria-hidden="true" />
+          <span>
+            You&apos;re browsing all available vehicles.{" "}
+            <Link
+              href="/buyer/prequal"
+              className="font-semibold text-al-primary underline underline-offset-2 hover:no-underline"
+              data-testid="budget-none-link"
+            >
+              Get pre-qualified
+            </Link>{" "}
+            to see your buying power — a soft pull, with no impact on your credit score.
+          </span>
+        </div>
+      ) : prequalState === "DECLINED" ? (
+        <div
+          data-testid="budget-declined-note"
+          className="flex items-start gap-2 px-4 py-3 mb-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 text-sm"
+        >
+          <ShieldCheck size={16} className="mt-0.5 shrink-0 text-slate-400" aria-hidden="true" />
+          <span>
+            You&apos;re browsing all available vehicles.{" "}
+            <Link
+              href="/buyer/prequal"
+              className="font-semibold text-al-primary underline underline-offset-2 hover:no-underline"
+              data-testid="budget-declined-link"
+            >
+              See your pre-qualification result
+            </Link>{" "}
+            for details and next steps.
+          </span>
+        </div>
+      ) : null}
 
       {/* Search bar row */}
       <div className="flex items-center gap-2 mb-3">
