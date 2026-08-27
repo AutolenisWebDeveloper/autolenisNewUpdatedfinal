@@ -5,6 +5,7 @@
 import { groqChat, ChatMessage } from "@/lib/ai/groq-client";
 import { prisma } from "@/lib/prisma";
 import { ZURA_SYSTEM_PROMPT, ZURA_BUYER_CONTEXT_PREFIX } from "@/lib/ai/zura-knowledge";
+import { buildActorGuidance, isActionIntentSurfaceEnabled } from "@/lib/services/ai/action-intent";
 
 interface BuyerDealContext {
   buyerName: string;
@@ -86,7 +87,13 @@ ACCOUNT-SPECIFIC RULES:
 - If asked about specific financial products (loans, APR), explain general concepts but recommend consulting a licensed professional
 - Proactively offer next steps based on the buyer's current stage
 
-${ZURA_SYSTEM_PROMPT}`;
+${ZURA_SYSTEM_PROMPT}${
+    // Dormant by default: the ActionIntent recognition guidance is injected ONLY
+    // when the owner has enabled the surface. While dormant, this prompt is
+    // unchanged. The AI never executes — it recognises and proposes; deterministic
+    // code authorizes, requires human approval, and invokes canonical services.
+    isActionIntentSurfaceEnabled() ? `\n\n${buildActorGuidance("BUYER")}` : ""
+  }`;
 }
 
 // Main buyer concierge chat function

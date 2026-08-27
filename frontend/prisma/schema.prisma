@@ -3457,6 +3457,64 @@ model AiChatMessage {
   @@map("ai_chat_messages")
 }
 
+// Program 6 — durable ActionIntent lifecycle record. The single mutable store
+// for the AI→business control boundary: PROPOSED → APPROVAL_REQUIRED →
+// APPROVED/REJECTED → EXECUTING → COMPLETED/FAILED. No existing model can hold
+// this without corrupting its semantics (AuditLog/AdminAuditLog are append-only;
+// FinancingReviewTask/BuyerOfferReview/ExternalPreApproval carry required
+// domain FKs and 3-state review enums). Ships DORMANT — no rows are written
+// until an actor+intent is owner-activated. Audit trail links via AuditLog
+// rows with entity_type = "AiActionIntent", entity_id = this id.
+model AiActionIntent {
+  id                    String               @id @default(uuid())
+  intentType            String               @map("intent_type")
+  status                AiActionIntentStatus @default(PROPOSED)
+  // Requesting agent surface + authenticated principal (server-resolved).
+  actorType             String               @map("actor_type")
+  actorId               String               @map("actor_id")
+  authenticatedRole     String               @map("authenticated_role")
+  subjectId             String?              @map("subject_id")
+  // Validated, safe parameter representation (never raw secrets/PII).
+  parameters            Json
+  consequence           String
+  requiresHumanApproval Boolean              @map("requires_human_approval")
+  // Proposal/idempotency identity — one record per key (dedup replayed proposals).
+  idempotencyKey        String?              @unique @map("idempotency_key")
+  rationale             String?
+  // Deterministic policy outcome captured at proposal time.
+  policyResult          Json?                @map("policy_result")
+  // Approver identity + authorization (server-authoritative human approval).
+  approverId            String?              @map("approver_id")
+  approverRole          String?              @map("approver_role")
+  approvedAt            DateTime?            @map("approved_at")
+  rejectedAt            DateTime?            @map("rejected_at")
+  rejectionCode         String?              @map("rejection_code")
+  // Atomic execution claim + attempts (exactly-once under concurrency/replay).
+  executionClaimedAt    DateTime?            @map("execution_claimed_at")
+  executionAttempts     Int                  @default(0) @map("execution_attempts")
+  // Authoritative result / failure (never model output).
+  result                Json?
+  failureReason         String?              @map("failure_reason")
+  completedAt           DateTime?            @map("completed_at")
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([actorType, actorId])
+  @@index([status, requiresHumanApproval])
+  @@map("ai_action_intents")
+}
+
+enum AiActionIntentStatus {
+  PROPOSED
+  APPROVAL_REQUIRED
+  APPROVED
+  REJECTED
+  EXECUTING
+  COMPLETED
+  FAILED
+}
+
 model InsuranceProvider {
   id              String   @id @default(uuid())
   name            String   @unique
