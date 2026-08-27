@@ -32,7 +32,7 @@
     "test:dealer": "tsx --test lib/services/dealer/__tests__/*.test.ts",
     "test:amips": "tsx --test lib/amips/intelligence/__tests__/*.test.ts",
     "test:admin-deals": "tsx --test --experimental-test-module-mocks app/api/admin/deals/__tests__/*.test.ts",
-    "test:admin-authz": "tsx --test --experimental-test-module-mocks app/api/admin/affiliates/__tests__/*.test.ts app/api/admin/buyers/__tests__/*.test.ts",
+    "test:admin-authz": "tsx --test --experimental-test-module-mocks app/api/admin/affiliates/__tests__/*.test.ts app/api/admin/buyers/__tests__/*.test.ts app/api/admin/crm/__tests__/*.test.ts",
     "test:admin-auctions": "tsx --test --experimental-test-module-mocks app/api/admin/auctions/__tests__/*.test.ts",
     "test:offer": "tsx --test --experimental-test-module-mocks lib/services/offer/__tests__/*.test.ts",
     "test:comms": "tsx --test --experimental-test-module-mocks lib/services/notifications/__tests__/*.test.ts",
