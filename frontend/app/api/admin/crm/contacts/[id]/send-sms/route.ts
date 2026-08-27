@@ -3,7 +3,7 @@ import { getServiceSupabase } from '@/lib/supabase-service';
 import { ContactService } from '@/lib/services/contact.service';
 import { SuppressionService } from '@/lib/services/suppression.service';
 import { enqueueSms } from '@/lib/services/comms/comms-outbox.service';
-import { requirePermissionActor } from '@/lib/auth/permissions';
+import { requirePermissionActorStrict } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
@@ -17,8 +17,14 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const actor = await requirePermissionActor("comms.bulk_send");
-  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+  const auth = await requirePermissionActorStrict("comms.bulk_send");
+  if (!auth.ok) {
+    return NextResponse.json(
+      { error: auth.status === 403 ? 'FORBIDDEN' : 'UNAUTHORIZED' },
+      { status: auth.status },
+    );
+  }
+  const actor = auth.actor;
 
   let payload: SendSmsBody;
   try {

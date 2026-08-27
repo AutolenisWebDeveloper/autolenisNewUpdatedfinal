@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import twilio from 'twilio';
 import { getServiceSupabase } from '@/lib/supabase-service';
-import { requirePermissionActor } from '@/lib/auth/permissions';
+import { requirePermissionActorStrict } from '@/lib/auth/permissions';
 import { SuppressionService } from '@/lib/services/suppression.service';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
@@ -20,8 +20,14 @@ export async function POST(
   }
 
   const isInternalNote = !!body.is_internal_note;
-  const actor = await requirePermissionActor("comms.reply");
-  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+  const auth = await requirePermissionActorStrict("comms.reply");
+  if (!auth.ok) {
+    return NextResponse.json(
+      { error: auth.status === 403 ? 'FORBIDDEN' : 'UNAUTHORIZED' },
+      { status: auth.status },
+    );
+  }
+  const actor = auth.actor;
   const adminId = actor.adminId;
   const supabase = getServiceSupabase();
 
