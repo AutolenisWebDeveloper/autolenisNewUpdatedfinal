@@ -17,10 +17,16 @@ const schema = z.object({
   note:             z.string().max(500).optional(),
 });
 
+// requirePermission is shadow-only (it records a would-be denial and allows), so
+// settling a real affiliate payout needs this hard check — same gate the reverse/
+// and clawback/ siblings already enforce.
+const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "FINANCE_ADMIN"]);
+
 export async function POST(request: NextRequest, { params }: Props) {
   const { commissionId } = await params;
   const admin = await requirePermission(request, "finance.commissions.settle");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or FINANCE_ADMIN required", 403);
 
   const commission = await prisma.commission.findUnique({
     where: { id: commissionId },
