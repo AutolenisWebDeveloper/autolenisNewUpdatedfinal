@@ -15,23 +15,46 @@ declare namespace NodeJS {
 
     // DocuSign
 
-    // MicroBilt iPredict
+    // ── MicroBilt iPredict (prequalification soft pull) ───────────────────────
+    // Only variables that lib/services/prequal/microbilt.service.ts actually
+    // reads are declared here. Three previously-declared names
+    // (MICROBILT_IPREDICT_BASE_URL, IPREDICT_REPORT_PERFORMANCE_URL,
+    // IPREDICT_GET_ARCHIVE_REPORT_URL) had ZERO reads anywhere in the repo while
+    // being typed as required — the runbooks then told the operator to set them
+    // at production cutover, so following the runbook did not configure the
+    // integration at all. Do not re-add a name until something reads it.
+    //
+    // Required: without credentials the adapter routes every prequal to
+    // MANUAL_REVIEW (CONFIG_ERROR) — no buyer can be approved.
     MICROBILT_CLIENT_ID: string;
     MICROBILT_CLIENT_SECRET: string;
-    MICROBILT_IPREDICT_BASE_URL: string;
-    MICROBILT_OAUTH_TOKEN_URL: string;
-    IPREDICT_GET_REPORT_URL: string;
-    IPREDICT_REPORT_PERFORMANCE_URL: string;
-    IPREDICT_GET_ARCHIVE_REPORT_URL: string;
-    MICROBILT_SANDBOX?: string; // "true" — bypass real MicroBilt and return mock APPROVED result
-    // iPredict Advantage production cutover (iPredict_6.yaml spec).
-    // *_BASE_URL must include the POST /GetReport suffix per spec.
+
+    // Endpoint URLs. Conditionally required, hence optional: which pair is read
+    // depends on MICROBILT_SANDBOX, and the legacy names below are still
+    // honoured as fallbacks. Production requires MICROBILT_BASE_URL +
+    // MICROBILT_OAUTH_BASE_URL (or their legacy equivalents) — a missing one is
+    // URL_NOT_CONFIGURED, a report URL not ending in /GetReport is
+    // REPORT_URL_INVALID. The value is used VERBATIM; nothing appends the path.
     MICROBILT_BASE_URL?: string;          // e.g. https://api.microbilt.com/iPredict/GetReport
-    MICROBILT_SANDBOX_URL?: string;       // e.g. https://apitest.microbilt.com/iPredict/GetReport
     MICROBILT_OAUTH_BASE_URL?: string;    // e.g. https://api.microbilt.com/OAuth/Token
+    MICROBILT_SANDBOX_URL?: string;       // e.g. https://apitest.microbilt.com/iPredict/GetReport
     MICROBILT_OAUTH_SANDBOX_URL?: string; // e.g. https://apitest.microbilt.com/OAuth/Token
-    MICROBILT_PRODUCT?: string;           // "IPredict Advantage"
-    MICROBILT_CAID?: string;              // MicroBilt account identifier (e.g. 29922)
+    // Legacy fallbacks, read only when the *_BASE_URL names above are unset.
+    IPREDICT_GET_REPORT_URL?: string;     // legacy fallback for MICROBILT_BASE_URL
+    MICROBILT_OAUTH_TOKEN_URL?: string;   // legacy fallback for MICROBILT_OAUTH_BASE_URL
+
+    MICROBILT_SANDBOX?: string; // "true" — bypass real MicroBilt and return mock APPROVED result
+    MICROBILT_PRODUCT?: string; // X-Product header; defaults to "IPredict Advantage"
+    MICROBILT_CAID?: string;    // X-CAID header; MicroBilt account identifier (e.g. 29922)
+
+    // MsgRqHdr identity fields. OPTIONAL and opt-in: each is added to the
+    // request only when set, so an unset var leaves the payload byte-identical
+    // to today's. The iPredict request contract is NOT yet confirmed by
+    // MicroBilt — these are plumbing for that confirmation, not a commitment.
+    MICROBILT_PRODUCT_ID?: string; // MsgRqHdr.ProductID
+    MICROBILT_MEMBER_ID?: string;  // MsgRqHdr.MemberId
+    MICROBILT_MEMBER_PWD?: string; // MsgRqHdr.MemberPwd — SECRET; adapter-only, never logged
+    MICROBILT_USERNAME?: string;   // MsgRqHdr.UserName
 
     // Communication (Resend ONLY)
     RESEND_API_KEY: string;

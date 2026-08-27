@@ -14,6 +14,8 @@ import {
   callIPredict,
   FCRA_CONSENT_TEXT,
   isProviderErrorReason,
+  classifyProviderFailure,
+  type ProviderFailureClass,
   type MicroBiltBuyerPII,
 } from "./microbilt.service";
 import { createAlertOnce } from "@/lib/services/monitoring/health-alert.service";
@@ -38,6 +40,20 @@ const PROVIDER_FAILURE_WINDOW_HOURS = 24;
 // At/above this many failures inside the window the integration is treated as
 // down rather than flaky, and the alert escalates to P0 (owner-visible).
 const PROVIDER_FAILURE_P0_THRESHOLD = 3;
+
+// What the classification means for the person reading the page. Kept next to
+// the alert so the wording and the classification can never drift apart.
+const FAILURE_CLASS_GUIDANCE: Record<ProviderFailureClass, string> = {
+  REQUEST_REJECTED:
+    "MicroBilt REJECTED our request (malformed payload, bad credentials, or a " +
+    "misconfigured URL) — this cannot be fixed by retrying and needs an engineer.",
+  PROVIDER_UNAVAILABLE:
+    "The provider was unavailable or unwell — this class of failure is transient " +
+    "and the same request may succeed on retry.",
+  UNKNOWN:
+    "The failure could not be classified as either a rejected request or a " +
+    "transient outage — inspect the encrypted rawResponse on the prequal row.",
+};
 const PROVIDER_FAILURE_TITLE_P1 = "MicroBilt prequalification call failed";
 const PROVIDER_FAILURE_TITLE_P0 =
   "MicroBilt prequalification integration DOWN — repeated failures";
@@ -61,6 +77,10 @@ async function recordProviderFailure(args: {
   reason: string;
   decision: PreQualDecision;
 }): Promise<void> {
+  // "Is this ours or theirs?" is the operator's first question at 2am, and the
+  // two need opposite responses: a rejected request needs an engineer now and
+  // will never fix itself; an unavailable provider usually needs nobody.
+  const failureClass = classifyProviderFailure(args.reason);
   try {
     await prisma.complianceEvent.create({
       data: {
@@ -70,6 +90,7 @@ async function recordProviderFailure(args: {
         metadata: {
           provider: "microbilt",
           providerReason: args.reason,
+          providerFailureClass: failureClass,
           decision: args.decision,
         },
       },
@@ -88,6 +109,7 @@ async function recordProviderFailure(args: {
       isDown ? HealthAlertLevel.P0 : HealthAlertLevel.P1,
       isDown ? PROVIDER_FAILURE_TITLE_P0 : PROVIDER_FAILURE_TITLE_P1,
       `MicroBilt iPredict returned no usable data (reason: ${args.reason}). ` +
+        `${FAILURE_CLASS_GUIDANCE[failureClass]} ` +
         `The prequalification was held at ${args.decision} — fail-closed, no approval issued. ` +
         `${recent} failure(s) in the last ${PROVIDER_FAILURE_WINDOW_HOURS}h. ` +
         `No buyer can be approved, and therefore no deposit can be taken, while this persists. ` +
