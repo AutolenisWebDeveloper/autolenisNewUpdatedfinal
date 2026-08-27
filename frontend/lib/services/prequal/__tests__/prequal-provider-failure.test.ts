@@ -25,7 +25,10 @@ import assert from "node:assert/strict";
 import { PreQualDecision, PreQualTier } from "@prisma/client";
 // Imported BEFORE mock.module below, so the orchestrator is exercised against
 // the REAL reason classifier rather than a test-local restatement of it.
-import { isProviderErrorReason } from "@/lib/services/prequal/microbilt.service";
+import {
+  isProviderErrorReason,
+  classifyProviderFailure,
+} from "@/lib/services/prequal/microbilt.service";
 
 // Stands in for the AES-256-GCM consumer-report blob. A distinctive value so
 // the privacy assertion below cannot pass by accident on a short substring.
@@ -103,6 +106,7 @@ mock.module("@/lib/services/prequal/microbilt.service", {
     callIPredict: async () => cap.ipredict,
     FCRA_CONSENT_TEXT: "consent",
     isProviderErrorReason,
+    classifyProviderFailure,
   },
 });
 
@@ -333,4 +337,70 @@ test("neither the compliance event nor the alert carries credit/identity PII", a
     !serialisedAlerts.includes(BUYER.user.email),
     "the operational alert must not carry the buyer's email address",
   );
+});
+
+// ── 6. "Our request is wrong" vs "their service blipped" ────────────────────
+// Both were recorded identically, so an operator paged at 2am could not tell a
+// permanently malformed request (which no amount of waiting fixes) from a
+// transient provider outage (which needs nobody). MicroBilt's own
+// RESPONSE.STATUS.error.type drives the distinction where it gives one.
+
+const FAILURE_CLASS_CASES: Array<[string, string]> = [
+  ["HTTP_400:APPLICATION:MB1042", "REQUEST_REJECTED"],
+  ["IPREDICT_ERROR:APPLICATION:MB2001", "REQUEST_REJECTED"],
+  ["REPORT_URL_INVALID", "REQUEST_REJECTED"],
+  ["CONFIG_ERROR", "REQUEST_REJECTED"],
+  ["IPREDICT_ERROR:SYSTEM:MB9000", "PROVIDER_UNAVAILABLE"],
+  ["HTTP_503", "PROVIDER_UNAVAILABLE"],
+  ["TIMEOUT", "PROVIDER_UNAVAILABLE"],
+  ["OAUTH_FAILED", "UNKNOWN"],
+  ["EMPTY_RESPONSE", "UNKNOWN"],
+];
+
+for (const [reason, expectedClass] of FAILURE_CLASS_CASES) {
+  test(`compliance event records the failure class for ${reason} (${expectedClass})`, async () => {
+    await run(providerFailure(reason));
+    const metadata = providerFailureEvents()[0]!.metadata as Record<string, unknown>;
+    assert.equal(metadata.providerReason, reason, "the exact reason is preserved");
+    assert.equal(
+      metadata.providerFailureClass,
+      expectedClass,
+      "ops must be able to tell a malformed request from a transient outage",
+    );
+  });
+}
+
+test("a malformed-request failure says so in the alert an operator actually reads", async () => {
+  await run(providerFailure("HTTP_400:APPLICATION:MB1042"));
+  const body = cap.alerts.map((a) => a.body).join("\n");
+  assert.match(body, /HTTP_400:APPLICATION:MB1042/, "the alert names the exact reason");
+  assert.match(
+    body,
+    /retry/i,
+    "the alert states whether retrying can help — that is the operator's first question",
+  );
+  assert.ok(
+    !/JANE|DOE|123 MAIN|712/i.test(body),
+    "no consumer PII or credit data reaches the alert body",
+  );
+});
+
+test("a transient failure is described as retryable, not as a broken request", async () => {
+  await run(providerFailure("IPREDICT_ERROR:SYSTEM:MB9000"));
+  const body = cap.alerts.map((a) => a.body).join("\n");
+  assert.match(body, /IPREDICT_ERROR:SYSTEM:MB9000/);
+  assert.ok(
+    !/cannot be fixed by retrying/i.test(body),
+    "a transient outage must not be reported as a permanent request defect",
+  );
+});
+
+test("detail-suffixed reasons are still recognised as provider failures end to end", async () => {
+  await run(providerFailure("HTTP_400:APPLICATION:MB1042"));
+  assert.equal(
+    providerFailureEvents().length,
+    1,
+    "adding a diagnostic suffix must never stop a failure from being recorded",
+  );
+  assert.ok(cap.alerts.length >= 1, "…nor from raising the operational exception");
 });

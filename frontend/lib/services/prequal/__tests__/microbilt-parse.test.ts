@@ -203,12 +203,22 @@ test("APPROVED but no loan amount ⇒ MANUAL_REVIEW (cannot issue a reliable bud
   assert.equal(res.maxOtdAmountCents, 0);
 });
 
-test("ERROR via RESPONSE.STATUS.type ⇒ MANUAL_REVIEW with IPREDICT_ERROR reason", async () => {
+test("ERROR via RESPONSE.STATUS.type ⇒ MANUAL_REVIEW with an IPREDICT_ERROR reason", async () => {
   const res = await callWith({
     RESPONSE: { STATUS: { type: "ERROR", error: { code: "E01", message: "bad request", type: "APPLICATION" } } },
   });
   assert.equal(res.decision, "MANUAL_REVIEW");
-  assert.equal(res.reason, "IPREDICT_ERROR");
+  // The reason now carries MicroBilt's own APPLICATION/SYSTEM verdict and error
+  // code as diagnostics. The BASE is unchanged, so classification (and every
+  // consumer that keys on it) is unaffected — only the detail is richer.
+  assert.equal(res.reason, "IPREDICT_ERROR:APPLICATION:E01");
+  const { providerReasonBase, isProviderErrorReason } = await import(
+    "@/lib/services/prequal/microbilt.service"
+  );
+  assert.equal(providerReasonBase(res.reason!), "IPREDICT_ERROR");
+  assert.equal(isProviderErrorReason(res.reason), true);
+  // The free-text message stays out of the plaintext reason.
+  assert.ok(!res.reason!.includes("bad request"));
 });
 
 test("ERROR via MsgRsHdr.Status.Severity=Error ⇒ MANUAL_REVIEW (not a silent empty parse)", async () => {

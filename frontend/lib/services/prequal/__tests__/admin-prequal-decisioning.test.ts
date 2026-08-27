@@ -9,6 +9,7 @@
 import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { PreQualDecision, PreQualTier } from "@prisma/client";
+import { isProviderErrorReason } from "@/lib/services/prequal/microbilt.service";
 
 const cap = {
   ipredict: {} as Record<string, unknown>,
@@ -46,7 +47,14 @@ function ipredictResult(overrides: Record<string, unknown>): Record<string, unkn
 }
 
 mock.module("@/lib/services/prequal/microbilt.service", {
-  namedExports: { callIPredict: async () => cap.ipredict, FCRA_CONSENT_TEXT: "consent" },
+  namedExports: {
+    callIPredict: async () => cap.ipredict,
+    FCRA_CONSENT_TEXT: "consent",
+    // The REAL classifier — the admin queue must not keep its own copy of the
+    // provider-failure vocabulary (it drifted and silently mislabelled two
+    // reasons as ordinary manual reviews).
+    isProviderErrorReason,
+  },
 });
 mock.module("@/lib/services/prequal/prequal.service", {
   namedExports: { isPrequalValid: () => false },
@@ -146,4 +154,48 @@ test("admin path: high-risk / suspicious address ⇒ MANUAL_REVIEW (fraud signal
   const persisted = cap.upserts[0]!;
   assert.equal(persisted.decision, "MANUAL_REVIEW");
   assert.equal(persisted.maxOtdAmountCents, 0);
+});
+
+// ── Provider-failure taxonomy: ONE source of truth ──────────────────────────
+// admin-prequal.service.ts kept a private duplicate of the provider-failure
+// reason set. It had already drifted — EMPTY_RESPONSE and UNPARSEABLE_RESPONSE
+// were missing — so a genuine integration outage was displayed to the operator
+// as an ordinary MANUAL_REVIEW, which is the exact failure the taxonomy was
+// centralised to prevent. Every reason the adapter can emit must map to
+// PROVIDER_ERROR here, including the new detail-suffixed ones.
+for (const reason of [
+  "TIMEOUT",
+  "HTTP_401",
+  "EMPTY_RESPONSE",
+  "UNPARSEABLE_RESPONSE",
+  "REPORT_URL_INVALID",
+  "IPREDICT_ERROR:APPLICATION:MB1042",
+  "IPREDICT_ERROR:SYSTEM:MB9000",
+  "HTTP_400:APPLICATION:MB1042",
+]) {
+  test(`admin path: provider failure ${reason} is surfaced as PROVIDER_ERROR`, async () => {
+    const res = await run({
+      decision: PreQualDecision.MANUAL_REVIEW,
+      tier: null,
+      maxOtdAmountCents: 0,
+      ofacFlagged: null,
+      creditScore: null,
+      reason,
+    });
+    assert.equal(
+      res.status,
+      "PROVIDER_ERROR",
+      "an integration failure must never be shown to the operator as a plain review",
+    );
+    assert.equal(res.providerReason, reason, "the operator is told WHICH failure occurred");
+  });
+}
+
+test("admin path: a real risk-triggered review is NOT labelled a provider error", async () => {
+  const res = await run({
+    decision: PreQualDecision.APPROVED,
+    ofacFlagged: false,
+    highRiskAddressFlag: true,
+  });
+  assert.equal(res.status, "MANUAL_REVIEW", "a compliance hold is not an outage");
 });

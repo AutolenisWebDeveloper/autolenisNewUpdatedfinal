@@ -14,7 +14,10 @@ import assert from "node:assert/strict";
 import { PreQualDecision, PreQualTier } from "@prisma/client";
 // Imported BEFORE the mock.module call below so the orchestrator runs against
 // the REAL provider-failure classifier rather than a restatement of it.
-import { isProviderErrorReason } from "@/lib/services/prequal/microbilt.service";
+import {
+  isProviderErrorReason,
+  classifyProviderFailure,
+} from "@/lib/services/prequal/microbilt.service";
 
 interface Captured {
   ipredict: Record<string, unknown>;
@@ -73,6 +76,7 @@ mock.module("@/lib/services/prequal/microbilt.service", {
     callIPredict: async () => cap.ipredict,
     FCRA_CONSENT_TEXT: "consent",
     isProviderErrorReason,
+    classifyProviderFailure,
   },
 });
 

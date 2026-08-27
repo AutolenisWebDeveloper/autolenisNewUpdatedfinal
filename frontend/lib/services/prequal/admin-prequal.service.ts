@@ -23,7 +23,7 @@
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { PreQualDecision, PreQualTier } from "@prisma/client";
-import { callIPredict } from "./microbilt.service";
+import { callIPredict, isProviderErrorReason } from "./microbilt.service";
 import { isPrequalValid } from "./prequal.service";
 import {
   sendPrequalApprovedEmail,
@@ -205,25 +205,18 @@ function inferPrequalSource(rawResponse: string | null): string {
   return "ipredict";
 }
 
-const PROVIDER_ERROR_REASONS = new Set([
-  "TIMEOUT",
-  "NETWORK_ERROR",
-  "OAUTH_FAILED",
-  "IPREDICT_ERROR",
-  "CONFIG_ERROR",
-  "CONFIG_MISMATCH",
-  "URL_NOT_CONFIGURED",
-]);
-
+// The provider-failure vocabulary is owned by the adapter (microbilt.service).
+// This file used to keep its own copy of the set, and it had already drifted:
+// EMPTY_RESPONSE and UNPARSEABLE_RESPONSE were added to the adapter but never
+// here, so a genuine integration outage was shown to the operator as an
+// ordinary MANUAL_REVIEW — the precise failure the shared taxonomy exists to
+// prevent. Classify through isProviderErrorReason and nothing else.
 function mapFinalDecisionToRunStatus(
   decision: PreQualDecision,
   mocked: boolean,
   providerReason: string | undefined
 ): AdminIPredictRunStatus {
-  if (
-    (providerReason !== undefined && PROVIDER_ERROR_REASONS.has(providerReason)) ||
-    providerReason?.startsWith("HTTP_")
-  ) {
+  if (isProviderErrorReason(providerReason)) {
     return "PROVIDER_ERROR";
   }
   if (mocked) return "MOCKED";

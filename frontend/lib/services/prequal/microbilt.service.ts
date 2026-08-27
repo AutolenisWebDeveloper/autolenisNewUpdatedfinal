@@ -7,7 +7,7 @@
 // logged and downgraded to MANUAL_REVIEW — never thrown to the buyer.
 
 import { logger } from "@/lib/logger";
-import { createCipheriv, randomBytes } from "crypto";
+import { createCipheriv, randomBytes, randomUUID } from "node:crypto";
 import { PreQualDecision, PreQualTier } from "@prisma/client";
 import {
   computeIncomeGate,
@@ -34,16 +34,120 @@ export const PROVIDER_ERROR_REASONS: ReadonlySet<string> = new Set([
   "CONFIG_ERROR",
   "CONFIG_MISMATCH",
   "URL_NOT_CONFIGURED",
+  // The report URL is present but does not address the spec's POST /GetReport
+  // endpoint. getReportUrl() returns the env value verbatim (no concatenation),
+  // so this would otherwise POST the consumer-report request to the wrong path.
+  "REPORT_URL_INVALID",
   // The provider answered 200 but gave us nothing usable. Both were previously
   // swallowed into a plain MANUAL_REVIEW carrying no reason at all.
   "EMPTY_RESPONSE",
   "UNPARSEABLE_RESPONSE",
 ]);
 
+// A recorded reason has the grammar  BASE[:TYPE][:CODE]  where BASE is one of
+// PROVIDER_ERROR_REASONS (or HTTP_<status>), TYPE is MicroBilt's
+// RESPONSE.STATUS.error.type, and CODE is its error code. The detail suffixes
+// are diagnostics only — classification always keys on BASE, so adding detail
+// can never reclassify a failure or slip one past the orchestrator's alerting.
+
+/** The stable classification token of a reason, stripped of any detail suffix. */
+export function providerReasonBase(reason: string): string {
+  const i = reason.indexOf(":");
+  return i === -1 ? reason : reason.slice(0, i);
+}
+
 /** True when `reason` denotes an upstream provider failure rather than a decision. */
 export function isProviderErrorReason(reason: string | undefined | null): boolean {
   if (!reason) return false;
-  return PROVIDER_ERROR_REASONS.has(reason) || reason.startsWith("HTTP_");
+  const base = providerReasonBase(reason);
+  return PROVIDER_ERROR_REASONS.has(base) || base.startsWith("HTTP_");
+}
+
+/**
+ * How ops should treat a provider failure.
+ *
+ *  REQUEST_REJECTED     — the request we sent is wrong (malformed payload, bad
+ *                         credentials, misconfigured URL). Retrying it
+ *                         unchanged cannot help; an engineer must fix it.
+ *  PROVIDER_UNAVAILABLE — MicroBilt was reachable-but-unwell or unreachable.
+ *                         The same request may succeed later.
+ *  UNKNOWN              — we genuinely cannot tell. Never guessed either way:
+ *                         claiming "transient" for a permanent break is how an
+ *                         outage stays invisible.
+ */
+export type ProviderFailureClass = "REQUEST_REJECTED" | "PROVIDER_UNAVAILABLE" | "UNKNOWN";
+
+// Config faults are ours, not the provider's — a retry cannot fix them.
+const REQUEST_REJECTED_BASES: ReadonlySet<string> = new Set([
+  "CONFIG_ERROR",
+  "CONFIG_MISMATCH",
+  "URL_NOT_CONFIGURED",
+  "REPORT_URL_INVALID",
+]);
+const PROVIDER_UNAVAILABLE_BASES: ReadonlySet<string> = new Set(["TIMEOUT", "NETWORK_ERROR"]);
+
+export function classifyProviderFailure(
+  reason: string | undefined | null,
+): ProviderFailureClass {
+  if (!reason || !isProviderErrorReason(reason)) return "UNKNOWN";
+
+  // MicroBilt's own verdict wins when it gave one. `type` occupies the slot
+  // right after BASE; a bare error code can only land there when no type was
+  // returned, and a code literally named APPLICATION/SYSTEM carries the same
+  // meaning as the type would, so the classification is right either way.
+  const declaredType = reason.split(":")[1];
+  if (declaredType === "APPLICATION") return "REQUEST_REJECTED";
+  if (declaredType === "SYSTEM") return "PROVIDER_UNAVAILABLE";
+
+  const base = providerReasonBase(reason);
+  if (REQUEST_REJECTED_BASES.has(base)) return "REQUEST_REJECTED";
+  if (PROVIDER_UNAVAILABLE_BASES.has(base)) return "PROVIDER_UNAVAILABLE";
+
+  if (base.startsWith("HTTP_")) {
+    const status = Number(base.slice("HTTP_".length));
+    if (!Number.isFinite(status)) return "UNKNOWN";
+    // 429 is a 4xx but is explicitly "come back later".
+    if (status === 429 || status >= 500) return "PROVIDER_UNAVAILABLE";
+    if (status >= 400) return "REQUEST_REJECTED";
+  }
+
+  // OAUTH_FAILED covers both bad credentials and a transient token-endpoint
+  // failure; EMPTY/UNPARSEABLE/untyped IPREDICT_ERROR are ambiguous by nature.
+  return "UNKNOWN";
+}
+
+// ─── Provider error detail (diagnostics that are safe in cleartext) ──────────
+// MicroBilt echoes request data on some errors, and a recorded reason travels
+// to ComplianceEvent metadata and the admin alert EMAIL in cleartext. Only a
+// short opaque token may be promoted there; anything free-form (a message with
+// spaces, a long string) stays exclusively in the encrypted rawResponse.
+const PROVIDER_TOKEN_MAX_CHARS = 32;
+
+function sanitizeProviderToken(value: string | undefined | null): string | null {
+  if (!value) return null;
+  const token = value.trim().toUpperCase();
+  if (!token || token.length > PROVIDER_TOKEN_MAX_CHARS) return null;
+  return /^[A-Z0-9_.-]+$/.test(token) ? token : null;
+}
+
+interface ProviderErrorDetail {
+  type: string | null;
+  code: string | null;
+}
+
+/** Pull the (sanitized) error type + code out of a RESPONSE.STATUS node. */
+function extractProviderErrorDetail(status: IPredictErrorStatus | undefined): ProviderErrorDetail {
+  const declared = status?.error?.type;
+  return {
+    // Only the two values the spec defines are trusted as a type.
+    type: declared === "APPLICATION" || declared === "SYSTEM" ? declared : null,
+    code: sanitizeProviderToken(status?.error?.code),
+  };
+}
+
+/** Compose `BASE[:TYPE][:CODE]`. */
+function buildProviderReason(base: string, detail: ProviderErrorDetail): string {
+  return [base, detail.type, detail.code].filter(Boolean).join(":");
 }
 
 // AES-256-GCM key for encrypting consumer-report rawResponse at rest.
@@ -324,6 +428,81 @@ function errorResultWithBody(reason: string, body: unknown): IPredicResult {
   };
 }
 
+// A hostile or broken upstream can return an unbounded body (an HTML error page
+// behind a gateway). rawResponse is a single TEXT column read by an operator, so
+// the stored copy is capped — truncated explicitly rather than silently.
+const MAX_STORED_ERROR_BODY_CHARS = 16_000;
+
+// The fetch AbortController's timer is cleared as soon as the response HEADERS
+// arrive, so it does NOT cover reading the body. A response whose body never
+// completes would hold the buyer's prequal request open forever, so the read
+// carries its own bound. Losing the body costs us only diagnostics — the
+// failure is still classified and still fail-closed.
+const ERROR_BODY_READ_TIMEOUT_MS = 5_000;
+
+/**
+ * Read a non-2xx response body for storage. JSON is kept as JSON so the
+ * offending-field detail stays queryable after decryption; anything else is
+ * kept as text. Never throws and never hangs — a failure to read the body must
+ * not turn a classified provider failure into an unhandled exception or a
+ * stalled request.
+ */
+async function readErrorBody(res: Response, controller: AbortController): Promise<unknown> {
+  const TIMED_OUT = Symbol("timed-out");
+
+  // The catch is attached here so that aborting below rejects into it rather
+  // than surfacing as an unhandled rejection.
+  const readPromise: Promise<string | null> = res.text().catch((err: unknown) => {
+    logger.error("[microbilt] could not read the iPredict error body:", err);
+    return null;
+  });
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<typeof TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), ERROR_BODY_READ_TIMEOUT_MS);
+  });
+
+  let result: string | null | typeof TIMED_OUT;
+  try {
+    result = await Promise.race([readPromise, timeoutPromise]);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (result === TIMED_OUT) {
+    logger.error(
+      "[microbilt] timed out reading the iPredict error body — releasing the connection",
+    );
+    // Abort the ORIGINAL fetch controller rather than cancelling res.body:
+    // res.text() has already locked the stream, so cancel() would throw and the
+    // socket would stay open. Aborting tears the connection down and rejects the
+    // pending read into the catch attached above.
+    controller.abort();
+    return null;
+  }
+
+  const text = result;
+  if (!text) return null;
+  if (text.length > MAX_STORED_ERROR_BODY_CHARS) {
+    return {
+      truncated: true,
+      originalLength: text.length,
+      text: text.slice(0, MAX_STORED_ERROR_BODY_CHARS),
+    };
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
+/** The RESPONSE.STATUS node of a stored error body, when it has one. */
+function errorStatusOf(body: unknown): IPredictErrorStatus | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  return (body as { RESPONSE?: { STATUS?: IPredictErrorStatus } }).RESPONSE?.STATUS;
+}
+
 /** Absent, or present-but-blank — both mean "the provider told us nothing here". */
 function isBlank(v: string | undefined | null): boolean {
   return v == null || v.trim() === "";
@@ -376,15 +555,45 @@ interface CallIPredictArgs {
 }
 
 /**
+ * MsgRqHdr identity fields, included ONLY for the env vars that are actually
+ * set. MicroBilt has not yet confirmed the request contract, so this is
+ * plumbing, not a commitment: with every var unset the spread contributes
+ * nothing and the request stays byte-identical to the one we send today. A
+ * blank value counts as unset — an empty ProductID on the wire is worse than
+ * an absent one.
+ *
+ * MICROBILT_MEMBER_PWD is a credential: it is read here and nowhere else, and
+ * is never logged nor returned by getMicroBiltConfigStatus().
+ */
+function identityHeaderFields(): Record<string, string> {
+  const fields: Record<string, string> = {};
+  const add = (key: string, raw: string | undefined) => {
+    const value = raw?.trim();
+    if (value) fields[key] = value;
+  };
+  add("ProductID", process.env.MICROBILT_PRODUCT_ID);
+  add("MemberId",  process.env.MICROBILT_MEMBER_ID);
+  add("MemberPwd", process.env.MICROBILT_MEMBER_PWD);
+  add("UserName",  process.env.MICROBILT_USERNAME);
+  return fields;
+}
+
+/**
  * Build the MicroBilt iPredict request payload. Employment fields are NEVER
  * included. Names + address fields are uppercased per MicroBilt's ingest spec.
+ *
+ * DEFERRED, awaiting a confirmed request example from MicroBilt support: the
+ * MBCLVRq envelope, ContactInfo object-vs-array, and whether the X-CAID /
+ * X-Product headers are read at all. Changing several unknowns at once would
+ * make the next failure uninterpretable, so none of them is changed here.
  */
 function buildPayload(buyer: MicroBiltBuyerPII, gate: IncomeGateResult) {
   return {
     MsgRqHdr: {
       RequestType: "N",
       ReasonCode:  "3",
-      RefNum:      crypto.randomUUID(),
+      RefNum:      randomUUID(),
+      ...identityHeaderFields(),
     },
     RequestedAmt: {
       // Income-derived: represents what the buyer can afford at 20% DTI/7%/72mo.
@@ -443,18 +652,25 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
       );
       return errorResult("CONFIG_MISMATCH");
     }
-    if (!reportUrl?.endsWith("/GetReport")) {
-      logger.warn(
-        "[microbilt] WARNING: report URL does not end with /GetReport — " +
-        "verify configuration against spec."
-      );
-    }
+    // Missing is checked BEFORE malformed, so an unset var reports the right
+    // root cause instead of "invalid suffix" on an empty string.
     if (!reportUrl || !oauthUrl) {
       logger.error(
         "[microbilt] CRITICAL: missing production URLs. reportUrl=" +
         !!reportUrl + " oauthUrl=" + !!oauthUrl
       );
       return errorResult("URL_NOT_CONFIGURED");
+    }
+    // getReportUrl() returns the env value VERBATIM — nothing appends the spec
+    // path — so a URL that does not address POST /GetReport silently sends the
+    // consumer-report request somewhere else. That was a warning; it is a hard
+    // config error, because a warning in a Vercel log is not a control.
+    if (!reportUrl.endsWith("/GetReport")) {
+      logger.error(
+        "[microbilt] CRITICAL: report URL does not address the spec endpoint " +
+        "POST /GetReport. Refusing to send the request. Routing to MANUAL_REVIEW."
+      );
+      return errorResult("REPORT_URL_INVALID");
     }
   }
 
@@ -568,12 +784,22 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   }
 
   if (!res.ok) {
-    // Do NOT log the response body: on some errors MicroBilt echoes the request
-    // (name/address/DOB) back, which would write consumer PII to app logs in
-    // cleartext. The status code is enough to triage; the encrypted rawResponse
-    // (below, on parseable bodies) holds detail for authorized inspection.
-    logger.error(`[microbilt] iPredict HTTP ${res.status} (body suppressed — may contain PII)`);
-    return errorResult(`HTTP_${res.status}`);
+    // Keep the body. For a 400 it names the offending field, and discarding it
+    // is why eight weeks of production failures were unreadable. It goes into
+    // the SAME AES-256-GCM encrypted rawResponse the 200-error path already
+    // uses — never into an app log, because on some errors MicroBilt echoes the
+    // request (name/address/DOB) back and that would write consumer PII in
+    // cleartext. Only the status and a short opaque provider token are logged.
+    const body = await readErrorBody(res, controller);
+    const reason = buildProviderReason(
+      `HTTP_${res.status}`,
+      extractProviderErrorDetail(errorStatusOf(body)),
+    );
+    logger.error(
+      `[microbilt] iPredict ${reason} — response body stored encrypted in rawResponse ` +
+        `(suppressed here: may contain PII)`,
+    );
+    return errorResultWithBody(reason, body);
   }
 
   // A body that is not valid JSON is a provider failure, not an empty report.
@@ -604,8 +830,15 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
     statusNode?.action === "RESEND" ||
     raw.MsgRsHdr?.Status?.Severity === "Error";
   if (isIpredictError) {
-    logger.error("[microbilt] iPredict returned ERROR:", statusNode ?? raw.MsgRsHdr?.Status);
-    return errorResultWithBody("IPREDICT_ERROR", raw);
+    // APPLICATION = our request is malformed (a retry cannot help, an engineer
+    // must fix it). SYSTEM = the provider blipped (retryable). The type was
+    // declared on the response interface but never read, so both looked
+    // identical to ops and to the admin queue.
+    const reason = buildProviderReason("IPREDICT_ERROR", extractProviderErrorDetail(statusNode));
+    logger.error(
+      `[microbilt] iPredict returned ERROR (${reason}) — body stored encrypted in rawResponse`,
+    );
+    return errorResultWithBody(reason, raw);
   }
 
   // ── STEP 3: Parse MicroBilt response ──────────────────────────────────────
@@ -879,6 +1112,23 @@ export const FCRA_CONSENT_TEXT =
   'I understand that by clicking on the I AGREE button immediately following this notice, I am providing "written instructions" to AutoLenis under the Fair Credit Reporting Act authorizing AutoLenis to obtain information from my personal credit profile or other information from MicroBilt. I authorize AutoLenis to obtain such information solely to prequalify me for credit options. Credit Information accessed for my pre-qualification request may be different than the Credit Information accessed by a credit grantor on a date after the date of my original pre-qualification request to make the credit decision.';
 
 // ─── Response shape — iPredict_6.yaml spec (subset we read) ──────────────────
+
+/**
+ * RESPONSE.STATUS. `error.type` is the request-vs-provider verdict: APPLICATION
+ * means MicroBilt rejected what we sent (malformed / missing field), SYSTEM
+ * means their side failed. It is read by extractProviderErrorDetail.
+ */
+interface IPredictErrorStatus {
+  applicationNumber?: string;
+  type?: "SUCCESS" | "ERROR";
+  action?: "RESEND" | "DONE";
+  error?: {
+    message?: string;
+    code?: string;
+    type?: "APPLICATION" | "SYSTEM";
+  };
+}
+
 interface IPredictResponse {
   MBCLVRq?: unknown; // echoed request
   MsgRsHdr?: {
@@ -892,16 +1142,7 @@ interface IPredictResponse {
   RESPONSE?: {
     REQUESTINGSYSTEM?: unknown;
     HEADER?: unknown;
-    STATUS?: {
-      applicationNumber?: string;
-      type?: "SUCCESS" | "ERROR";
-      action?: "RESEND" | "DONE";
-      error?: {
-        message?: string;
-        code?: string;
-        type?: "APPLICATION" | "SYSTEM";
-      };
-    };
+    STATUS?: IPredictErrorStatus;
     CONTENT?: {
       DECISION?: {
         decision?: {

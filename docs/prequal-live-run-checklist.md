@@ -11,11 +11,21 @@ party — that lacks a permissible purpose under the FCRA.**
 From MicroBilt (iPredict Advantage), obtain:
 
 - **OAuth2 client credentials** — `client_id`, `client_secret` (grant type `client_credentials`).
-- **CAID** — your MicroBilt account identifier (sent as the `X-CAID` header).
-- **Product name** — e.g. `IPredict Advantage` (sent as `X-Product`).
-- **Endpoint URLs** — the OAuth token URL (`…/OAuth/Token`) and the report URL (`…/iPredict/GetReport`).
-  MicroBilt provides separate **sandbox** (`apitest.microbilt.com`) and **production**
-  (`api.microbilt.com`) hosts.
+- **Endpoint URLs** — the OAuth token URL (`…/OAuth/Token`) and the report URL
+  (`…/iPredict/GetReport`). MicroBilt provides separate **sandbox**
+  (`apitest.microbilt.com`) and **production** (`api.microbilt.com`) hosts.
+- **A worked request example.** Ask MicroBilt support for one. The exact request
+  contract is **not confirmed**: iPredict has never returned a parsed report in
+  production, and the probable causes are payload-shaped (the `MsgRqHdr` identity
+  fields, whether an `MBCLVRq` envelope is required, and whether `ContactInfo` is
+  an object or an array). Do not guess at the shape — see §6 and §7.
+
+> **Not confirmed as required:** the adapter also sends `X-CAID` and `X-Product`
+> headers, populated from `MICROBILT_CAID` / `MICROBILT_PRODUCT`. **The published
+> iPredict spec does not define either header**, so obtaining a CAID may not be
+> necessary at all; both are optional in code and default harmlessly. They are
+> left in place until MicroBilt's example confirms or refutes them — do not
+> block a cutover on getting a CAID.
 
 ## 2. Environment variables (set in the target environment, e.g. Vercel project env)
 
@@ -23,18 +33,25 @@ From MicroBilt (iPredict Advantage), obtain:
 | --- | --- | --- |
 | `PREQUAL_ENCRYPTION_KEY` | AES-256-GCM key encrypting the stored `rawResponse` | **64-char hex.** Must be the SAME key already in prod — do **not** rotate, or existing encrypted reports won't decrypt. Fail-fast: a missing/short key refuses to encrypt. |
 | `MICROBILT_SANDBOX` | `true` → hardcoded APPROVED mock, no network/OAuth; `false` → real call | Start `true`, then flip to `false`. |
-| `MICROBILT_BASE_URL` | Production report URL | **Must end in `/GetReport`.** Must NOT contain `apitest.` (guard routes to MANUAL_REVIEW if it does). |
+| `MICROBILT_BASE_URL` | Production report URL — the **full URL including `/GetReport`** | The value is used **verbatim**; nothing appends the spec path. **Must end in `/GetReport`** or the call is refused as `REPORT_URL_INVALID`. Must NOT contain `apitest.` (refused as `CONFIG_MISMATCH`). A missing URL is `URL_NOT_CONFIGURED`. All three route to MANUAL_REVIEW — fail-closed, never an approval. |
 | `MICROBILT_OAUTH_BASE_URL` | Production OAuth token URL | `…/OAuth/Token`. |
 | `MICROBILT_SANDBOX_URL` | Sandbox report URL | Used only when `MICROBILT_SANDBOX=true` (returns the mock before any network call, so optional for the mock path). |
 | `MICROBILT_OAUTH_SANDBOX_URL` | Sandbox OAuth token URL | As above. |
 | `MICROBILT_CLIENT_ID` | OAuth client id | Must NOT contain the literal `placeholder` (guard → MANUAL_REVIEW). |
 | `MICROBILT_CLIENT_SECRET` | OAuth client secret | Read only inside the adapter; never logged or sent to the client. |
-| `MICROBILT_CAID` | `X-CAID` header | |
-| `MICROBILT_PRODUCT` | `X-Product` header | Defaults to `IPredict Advantage` if unset. |
+| `MICROBILT_CAID` | `X-CAID` header | **Optional / unverified** — not defined by the published iPredict spec. Safe to leave unset. |
+| `MICROBILT_PRODUCT` | `X-Product` header | **Optional / unverified** — as above. Defaults to `IPredict Advantage` if unset. |
+| `MICROBILT_PRODUCT_ID` | `MsgRqHdr.ProductID` | **Optional, opt-in.** Sent only when set; unset leaves the request byte-identical to today's. Awaiting MicroBilt's confirmed example — do not set speculatively. |
+| `MICROBILT_MEMBER_ID` | `MsgRqHdr.MemberId` | As above. |
+| `MICROBILT_MEMBER_PWD` | `MsgRqHdr.MemberPwd` | As above. **Secret** — read only inside the adapter; never logged, never returned by the health endpoint. |
+| `MICROBILT_USERNAME` | `MsgRqHdr.UserName` | As above. |
 | `CURRENT_TERMS_VERSION` | Stamped on the `PrequalConsent` audit row | Optional; defaults to `2026-01-01`. |
 
 Legacy fallbacks still honored: `IPREDICT_GET_REPORT_URL` (report), `MICROBILT_OAUTH_TOKEN_URL` (OAuth).
-Prefer the `MICROBILT_*_BASE_URL` names.
+Prefer the `MICROBILT_*_BASE_URL` names. **These are the only MicroBilt variables the
+code reads** — `MICROBILT_IPREDICT_BASE_URL`, `IPREDICT_REPORT_PERFORMANCE_URL` and
+`IPREDICT_GET_ARCHIVE_REPORT_URL` appeared in older runbooks but have never been read
+anywhere in the repo; setting them configures nothing.
 
 ## 3. Consent + permissible purpose (must be in place BEFORE the pull)
 
@@ -85,6 +102,51 @@ Prefer the `MICROBILT_*_BASE_URL` names.
   → `OFAC_REVIEW` (silent to the buyer) + ops alert.
 - **Deceased indicator, MLA covered borrower, or a fraud warning** → `MANUAL_REVIEW`.
 
+## 6. Reading a failure (what to do when a pull does not come back with a report)
+
+Every failure is recorded, fail-closed, and diagnosable without a live retry:
+
+1. **Find the reason.** `PreQualification.reason` (also on the
+   `PREQUAL_PROVIDER_FAILURE` compliance event and in the admin alert email) has the
+   grammar `BASE[:TYPE][:CODE]` — e.g. `HTTP_400:APPLICATION:MB1042`.
+   - `BASE` is the failure kind (`HTTP_<status>`, `IPREDICT_ERROR`, `TIMEOUT`,
+     `EMPTY_RESPONSE`, `REPORT_URL_INVALID`, …).
+   - `TYPE` is MicroBilt's own `RESPONSE.STATUS.error.type`: **`APPLICATION` = our
+     request is malformed** (retrying it unchanged cannot help — an engineer must fix
+     it); **`SYSTEM` = their service failed** (transient, may succeed on retry).
+   - `CODE` is MicroBilt's error code. Only a short opaque token is promoted here —
+     free-text messages are deliberately kept out of the plaintext reason because it
+     travels into alert emails and MicroBilt echoes request data on some errors.
+2. **Read the body.** The full response body of a failed call — including the 400 that
+   names the offending field — is stored in `PreQualification.rawResponse`,
+   AES-256-GCM encrypted with `PREQUAL_ENCRYPTION_KEY`. Decrypt it with:
+
+   ```
+   npx tsx scripts/decrypt-prequal-error.ts '<base64 rawResponse>'
+   ```
+
+   It is **never** written to an application log in cleartext. The stored copy is
+   capped at 16,000 characters and marks itself `truncated` if it was longer.
+3. **Check the config first on a `REQUEST_REJECTED` class.** `GET /api/admin/health/integrations`
+   reports mode, URLs, product/CAID and whether credentials are present — no secrets.
+
+## 7. Deferred: the request payload shape (do not change these speculatively)
+
+iPredict has never returned a parsed report in production. Control-flow analysis of the
+stored reasons rules out sandbox/host/credential/OAuth causes, which points at the request
+payload. The following are **suspected but unconfirmed** and are deliberately **not**
+changed until MicroBilt supplies a working request example:
+
+- **`MsgRqHdr` identity fields** — `ProductID` / `MemberId` / `MemberPwd` / `UserName`.
+  The env plumbing exists (§2) and each field is sent **only when its var is set**, so the
+  request is unchanged until you deliberately set one.
+- **The `MBCLVRq` envelope** — whether the request must be wrapped. Not added.
+- **`ContactInfo` arity** — object (today) vs array. Not changed.
+- **`X-CAID` / `X-Product` headers** — not defined by the published spec. Not removed.
+
+Change **one** of these at a time. Changing several at once makes the next failure
+uninterpretable, which is how the original eight-week outage stayed unexplained.
+
 ## Known non-blocking follow-ups (documented, not fixed in this pass)
 
 - `mlaCovered` is stored as `false` when a response omits MLA data (the schema column is
@@ -92,3 +154,7 @@ Prefer the `MICROBILT_*_BASE_URL` names.
   making it tri-state would need a migration. Tracked, deferred.
 - `highRiskAddressFlag` is parsed from the response but has no column, so it is not persisted (used
   nowhere). Add a column only if you want to store/act on it.
+- The sandbox path cannot currently reach a real MicroBilt sandbox: `MICROBILT_SANDBOX=true`
+  returns the hardcoded mock before any network call, while production mode refuses any
+  `apitest.` URL. No configuration therefore produces a real sandbox call. This is a real
+  finding, deliberately left alone — reopening it is its own decision, not a diagnostics fix.
