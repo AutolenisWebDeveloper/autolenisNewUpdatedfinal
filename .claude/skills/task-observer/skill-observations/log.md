@@ -187,3 +187,94 @@ Observations captured during task-oriented work.
 **Suggested improvement:** autolenis-observability-sre should note that the vercel.json↔CRON_STALENESS bidirectional parity test is the safety net for BOTH adding and removing crons, and that a cron change is not complete until both registries agree (the test proves it).
 
 **Principle:** A bidirectional registry-parity invariant turns an easy-to-half-do change (add/remove in two places) into a self-checking one; lean on it rather than manual cross-checking.
+
+### Observation 13: Dead schema table treated as diagnostic evidence
+
+**Status:** OPEN
+**Date:** 2026-08-27
+**Session context:** Diagnosing a silently non-delivering Stripe webhook from production row counts
+**Skill:** autolenis-debugging
+**Type:** open-source
+**Phase/Area:** Evidence gathering — "trace the actual execution path"
+
+**Issue:** An incident report cited two zero row counts as corroborating evidence of the
+same failure. One of the two tables has no writer anywhere in the codebase, so its count is
+zero unconditionally and carries no information about the failure. Only the other count was
+actually diagnostic. Reasoning from the dead table would have widened the suspected blast
+radius incorrectly.
+
+**Suggested improvement:** In the evidence-gathering section, add a step: for every table,
+metric, or log stream cited as evidence, first confirm a writer exists on the path being
+diagnosed (grep for writes to it). A zero from a table nothing writes to is not a signal.
+
+**Principle:** Absence-of-data is only evidence when something would have written the data
+had the system worked. Before reasoning from a zero, verify the write path exists.
+
+### Observation 14: Alert invariants need a false-positive analysis before shipping
+
+**Status:** OPEN
+**Date:** 2026-08-27
+**Session context:** Adding an operational exception for a payment intent stranded without a provider event
+**Skill:** autolenis-observability-sre
+**Type:** open-source
+**Phase/Area:** Alerting / operational exceptions
+
+**Issue:** The obvious formulation of a "we never heard back from the provider" invariant
+("record is PENDING with a provider id and has no provider event past a window") also matches
+the far more common benign case — the user simply abandoned checkout and never paid. Shipping
+it as written would have produced a permanently noisy alert that operators learn to ignore,
+which is the same outcome as having no alert at all.
+
+**Suggested improvement:** Add a rule to the alerting guidance: for every new invariant,
+enumerate the benign states that also satisfy the predicate and either exclude them or
+reconcile against the authoritative external source before alerting. State the expected
+steady-state alert volume.
+
+**Principle:** An invariant that fires on the normal case is not monitoring, it is noise.
+Design the exclusion set at the same time as the predicate, not after the first false page.
+
+### Observation 15: A discriminator that lives only in the provider's payload
+
+**Status:** OPEN
+**Date:** 2026-08-27
+**Session context:** Adding isolation between two fulfillment tracks that share one payments table
+**Skill:** autolenis-domain-model
+**Type:** open-source
+**Phase/Area:** Entity design — status/kind fields
+
+**Issue:** Two materially different fulfillment tracks shared one table and one amount,
+distinguished only by a metadata field on the external provider's object. Every internal
+path that had to tell them apart therefore needed a network round-trip to the provider, and
+any path that forgot would silently run the wrong fulfillment. The webhook could branch
+correctly because the provider payload was in hand; no other path could.
+
+**Suggested improvement:** Add a rule: when a single entity serves two or more downstream
+workflows, the discriminator must be a persisted column on the entity, written at creation.
+A field readable only from an external payload is not a discriminator — it is a lookup, and
+every consumer inherits the provider's availability and latency.
+
+**Principle:** If two rows in the same table mean different things, the difference belongs in
+the row. Provider payloads are evidence, not schema.
+
+### Observation 16: Adding a collaborator import silently breaks sibling route tests
+
+**Status:** OPEN
+**Date:** 2026-08-27
+**Session context:** Wiring an existing service into a route that previously did not import it
+**Skill:** autolenis-testing-quality-gates
+**Type:** open-source
+**Phase/Area:** Route-handler test harnesses
+
+**Issue:** Adding one import to a route handler broke six unrelated tests in a sibling file.
+The tests exercised the route's authorization gate and returned before ever reaching the new
+call, but the import itself pulled in a server-only module at load time. The per-file mock
+registration meant the file that mocked the new collaborator passed while the older file
+failed, and the failure message named a framework constraint rather than the cause.
+
+**Suggested improvement:** In the route-handler testing guidance, note that route tests mock
+the module graph, not just the call path: after adding an import to a route, re-run every
+test file that imports that route, not only the one for the behaviour being changed. Grep
+for the route path across test files as part of the change.
+
+**Principle:** A route test depends on everything the route imports, including code the test
+never executes. Import-time coupling is coupling.

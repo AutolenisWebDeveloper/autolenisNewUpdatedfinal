@@ -13,6 +13,7 @@ import {
   type ActivationAction,
   type ActivationState,
 } from "@/lib/services/auction/deposit-activation-policy";
+import { resolveDepositFulfillmentTrack } from "@/lib/services/payment/fulfillment-gate";
 
 // Re-export the pure policy so existing importers and tests can reach it.
 export { classifyActivation };
@@ -60,20 +61,19 @@ interface LoadedState {
   auctionId: string | null;
 }
 
-// Raise an operator-facing exception when a PAID $99 deposit converges to a
-// terminal no-dealer close — Section-9 invariant "PAID deposit with no downstream
-// progression." This is the ONE human-required outcome of this reconciler: the
-// buyer paid and no dealers competed, which the automation cannot resolve and
-// policy forbids resolving automatically (the $99 is retained; a refund is
-// request-only and manually reviewed — never auto-issued here).
+// Shared emitter for this reconciler's operator-facing exceptions — the outcomes
+// the automation cannot resolve and policy forbids resolving automatically (the
+// $99 is retained; a refund is request-only and manually reviewed, never
+// auto-issued here). Section-9 invariant "PAID deposit with no downstream
+// progression."
 //
 // It reuses the existing SYSTEM_ALERT Notification rail (the same channel dead-cron
 // / SLA checks use, surfaced on /admin/operations + /admin/queues) rather than a
-// new exception store. Ops-only: NO buyerId, so the buyer is never notified that
-// their auction found no dealers. Idempotent per deposit and best-effort — it must
-// never throw into or roll back the reconciler's terminal close.
-async function raiseStrandedDepositException(depositId: string, auctionId: string): Promise<void> {
-  const title = `Stranded $99 deposit — no dealers: ${depositId}`;
+// new exception store. Ops-only: NO buyerId, so the buyer is never told their
+// deposit is stuck. Deduped on the exact title (each caller keys its title per
+// deposit) and best-effort — it must never throw into or roll back the
+// reconciler's decision.
+async function raiseOpsException(depositId: string, title: string, body: string): Promise<void> {
   try {
     const existing = await prisma.notification.findFirst({
       where: { title, type: "SYSTEM_ALERT" },
@@ -81,16 +81,39 @@ async function raiseStrandedDepositException(depositId: string, auctionId: strin
     });
     if (existing) return;
     await prisma.notification.create({
-      data: {
-        title,
-        body: `A PAID $99 Auction Access Deposit converged to a no-dealer close (deposit ${depositId}, auction ${auctionId}). No dealers competed; the automation cannot recover this. The $99 is retained per policy — do NOT auto-refund. Review for manual dealer outreach or a policy-compliant refund decision via /admin/operations.`,
-        type: "SYSTEM_ALERT",
-        actionUrl: "/admin/operations",
-      },
+      data: { title, body, type: "SYSTEM_ALERT", actionUrl: "/admin/operations" },
     });
   } catch (err) {
-    logger.error(`[deposit-activation] stranded-deposit exception raise failed for ${depositId} (best-effort):`, err);
+    logger.error(`[deposit-activation] ops exception raise failed for ${depositId} (best-effort):`, err);
   }
+}
+
+async function raiseStrandedDepositException(depositId: string, auctionId: string): Promise<void> {
+  await raiseOpsException(
+    depositId,
+    `Stranded $99 deposit — no dealers: ${depositId}`,
+    `A PAID $99 Auction Access Deposit converged to a no-dealer close (deposit ${depositId}, auction ${auctionId}). No dealers competed; the automation cannot recover this. The $99 is retained per policy — do NOT auto-refund. Review for manual dealer outreach or a policy-compliant refund decision via /admin/operations.`,
+  );
+}
+
+// A PAID deposit with no auction that is NOT on the standard competitive track.
+// The reconciler deliberately refuses to converge it: creating + launching +
+// inviting would drag a concierge buyer (or a deposit whose track could not be
+// established) into a competitive auction it was never sold. That refusal is a
+// human-required outcome, so it is surfaced rather than logged and dropped.
+async function raiseUnconvergableTrackException(
+  depositId: string,
+  track: "concierge" | "unknown",
+): Promise<void> {
+  const detail =
+    track === "concierge"
+      ? `It is a CONCIERGE deposit: its auction is minted CLOSED with offers converted from the curated review the buyer acted on, and dealers are never invited to compete. A concierge deposit with no auction means the conversion did not run (most often a payment intent missing its reviewToken). Re-run the concierge conversion for the correct review — do NOT launch a competitive auction.`
+      : `Its fulfillment track could NOT be established from the payment intent (metadata unreadable or the provider was unreachable), so the reconciler failed closed rather than assume the competitive track. Confirm the intent's metadata.type against Stripe, then converge it by hand.`;
+  await raiseOpsException(
+    depositId,
+    `PAID deposit not convergable by the activation reconciler: ${depositId}`,
+    `Deposit ${depositId} is PAID with no auction, and the reconciler will not create one. ${detail} The $99 is retained per policy — do NOT auto-refund. Review via /admin/operations.`,
+  );
 }
 
 async function loadState(depositId: string): Promise<LoadedState | null> {
@@ -159,6 +182,28 @@ export async function reconcileDepositActivation(depositId: string): Promise<Act
       if (action === 'skip') return 'skip';
 
       if (action === 'create_auction') {
+        // CONCIERGE ISOLATION. Creating the auction here is the ONE step that
+        // decides a deposit is competitive, so it is the one step that must
+        // confirm the deposit actually IS. Normally a concierge deposit never
+        // reaches this branch — the webhook mints its CLOSED auction inside the
+        // money-cluster transaction — but two paths can present a PAID concierge
+        // deposit with no auction: a concierge intent missing its reviewToken
+        // (the webhook records PAID and creates nothing), and an admin marking
+        // one PAID by hand. Either would launch a live auction and invite
+        // dealers to bid on a deal that was never competitive.
+        //
+        // FAIL CLOSED: only an explicitly standard track converges. The check
+        // lives here, not at the loop head, so the launch/invite/close steps of
+        // an already-created auction never pay for a provider round-trip (and a
+        // provider outage can never block them).
+        const track = await resolveDepositFulfillmentTrack(depositId).catch(() => 'unknown' as const);
+        if (track !== 'standard') {
+          logger.warn(
+            `[deposit-activation] refusing to create a competitive auction for deposit ${depositId} (track=${track})`,
+          );
+          await raiseUnconvergableTrackException(depositId, track);
+          return 'skip';
+        }
         await createAuction(loaded.buyerId, depositId);
         continue;
       }

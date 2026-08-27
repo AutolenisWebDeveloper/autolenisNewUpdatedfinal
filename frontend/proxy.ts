@@ -335,10 +335,25 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // Maintenance mode gate — must run before any other check so an outage
   // cannot be bypassed by hitting an authenticated route.
   if (process.env.MAINTENANCE_MODE === "true") {
-    // Always allow: static assets, /maintenance page itself, admin auth
+    // Always allow: static assets, /maintenance page itself, admin auth,
+    // provider webhooks, and cron.
+    //
+    // Webhooks and cron are exempt because a 307 to /maintenance is NOT a
+    // delivery a provider can act on: Stripe (and Twilio/DocuSign/Resend) do not
+    // follow redirects, so the attempt is recorded as failed and the event is
+    // retried until it is abandoned — money-path facts silently lost, with the
+    // loss surfacing only in the provider's dashboard. Neither surface is
+    // session-authenticated, so exempting them widens nothing: every handler
+    // under /api/webhooks/ authenticates its own caller before acting (Stripe
+    // and Higgsfield HMAC signatures, Svix for Resend, the Twilio request
+    // signature, a shared secret for MicroBilt, the cron secret for
+    // content-conversion), and cron routes are checked against the cron secret
+    // by step 2 below.
     if (
       !pathname.startsWith("/_next/") &&
       !pathname.startsWith("/api/admin/auth/") &&
+      !pathname.startsWith("/api/webhooks/") &&
+      !isCronRoute(pathname) &&
       pathname !== "/maintenance"
     ) {
       return NextResponse.redirect(new URL("/maintenance", request.url));
