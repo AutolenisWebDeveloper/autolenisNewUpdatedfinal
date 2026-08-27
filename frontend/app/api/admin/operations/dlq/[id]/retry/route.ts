@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { OperationsService } from '@/lib/services/operations.service';
-import { requirePermissionActor } from '@/lib/auth/permissions';
+import { requirePermissionActorStrict } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 
 export const dynamic = 'force-dynamic';
@@ -14,8 +14,14 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const actor = await requirePermissionActor("ops.replay");
-  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+  const auth = await requirePermissionActorStrict("ops.replay");
+  if (!auth.ok) {
+    return NextResponse.json(
+      { error: auth.status === 403 ? 'FORBIDDEN' : 'UNAUTHORIZED' },
+      { status: auth.status },
+    );
+  }
+  const actor = auth.actor;
   const supabase = getServiceSupabase();
   const ops = new OperationsService(supabase);
 

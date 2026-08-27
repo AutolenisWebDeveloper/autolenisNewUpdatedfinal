@@ -12,10 +12,16 @@ import { toAdminEvidencePackage } from "@/lib/services/esign/esign-dto";
 
 interface Props { params: Promise<{ dealId: string }> }
 
+// requirePermission is shadow-only (it records a would-be denial and allows), so
+// exporting the raw forensic package (IP, user-agent, consent snapshot) needs this
+// hard check to be the OPS gate the header above describes.
+const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "OPERATIONS_ADMIN"]);
+
 export async function GET(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
   const admin = await requirePermission(request, "deals.esign.void");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or OPERATIONS_ADMIN required", 403);
 
   const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
   if (!envelope) return adminError("NOT_FOUND", "No signing record for this deal", 404);

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase-service';
 import { SuppressionService } from '@/lib/services/suppression.service';
 import { enqueueEmail, enqueueSms } from '@/lib/services/comms/comms-outbox.service';
-import { requirePermissionActor } from '@/lib/auth/permissions';
+import { requirePermissionActorStrict } from '@/lib/auth/permissions';
 import { writeCrmAuditLog } from '@/lib/services/admin/crm-audit';
 import type { Contact } from '@/lib/types/crm';
 
@@ -24,8 +24,14 @@ type BulkSendBody = {
 // comms-outbox sends the single-contact send endpoints use — every gate (DNC,
 // consent, suppression) is enforced by the comms-outbox dispatcher.
 export async function POST(req: Request) {
-  const actor = await requirePermissionActor("comms.bulk_send");
-  if (!actor) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+  const auth = await requirePermissionActorStrict("comms.bulk_send");
+  if (!auth.ok) {
+    return NextResponse.json(
+      { error: auth.status === 403 ? 'FORBIDDEN' : 'UNAUTHORIZED' },
+      { status: auth.status },
+    );
+  }
+  const actor = auth.actor;
   let body: BulkSendBody;
   try {
     body = (await req.json()) as BulkSendBody;

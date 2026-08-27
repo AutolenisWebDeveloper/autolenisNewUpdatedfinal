@@ -13,10 +13,16 @@ const schema = z.object({
   reason: z.string().min(10, "Reason must be at least 10 characters"),
 });
 
+// requirePermission is shadow-only (it records a would-be denial and allows), so
+// voiding a live signing envelope needs this hard check. OPS-scoped, matching
+// PERMISSION_ROLES["deals.esign.void"] and the sibling deals/[dealId]/action gate.
+const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "OPERATIONS_ADMIN"]);
+
 export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;
   const admin = await requirePermission(request, "deals.esign.void");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or OPERATIONS_ADMIN required", 403);
 
   let body: unknown;
   try { body = await request.json(); } catch { return adminError("VALIDATION_ERROR", "Invalid JSON", 400); }

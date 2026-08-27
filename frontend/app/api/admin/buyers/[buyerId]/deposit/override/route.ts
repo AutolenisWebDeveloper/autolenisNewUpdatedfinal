@@ -19,10 +19,17 @@ const schema = z.object({
   reason: z.string().min(1, "Override reason is required"),
 });
 
+// requirePermission is shadow-only (it records a would-be denial and allows), so
+// minting a PAID deposit with no Stripe payment behind it needs this hard check —
+// the same gate every payments/deposit/* route already enforces, including the
+// equivalent action at payments/deposit/[depositId]/mark-paid.
+const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "FINANCE_ADMIN"]);
+
 export async function POST(request: NextRequest, { params }: Props) {
   const { buyerId } = await params;
   const admin = await requirePermission(request, "finance.deposit.override");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or FINANCE_ADMIN required", 403);
 
   const buyer = await prisma.buyer.findUnique({
     where: { id: buyerId },
