@@ -3,6 +3,7 @@ import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api"
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { lookupZip, haversineMiles, boundingBox } from "@/lib/utils/zip-coords";
+import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 
 export const dynamic = "force-dynamic";
 
@@ -45,10 +46,27 @@ export async function GET(request: NextRequest) {
   // Default to 50 miles when a zip is present
   const radiusMiles = paramRadius ?? (zip ? 50 : null);
 
-  // Hard-enforce prequal budget ceiling server-side — never client-controlled
+  // Hard-enforce prequal budget ceiling server-side — never client-controlled.
+  //
+  // The ceiling comes from an APPROVED, unexpired prequal ONLY. Gating on the
+  // mere existence of a row was a truthfulness bug: a PENDING / MANUAL_REVIEW /
+  // DECLINED row carries maxOtdAmountCents = 0, which then propagated as an
+  // approved budget of $0 — filtering every vehicle out of the buyer's search
+  // and reporting "your $0 pre-qualified budget" for a decision that had not
+  // been made. A buyer without a live approval simply has no ceiling yet; we
+  // never invent one, and never default one.
   const prequal = await prisma.preQualification.findUnique({ where: { buyerId: buyer.id } });
-  const maxBudgetCents: number | null = prequal?.maxOtdAmountCents ?? null;
-  // User-requested price max is capped at prequal ceiling (or ignored if no prequal)
+  // The `> 0` guard is defence in depth, not dead code: a zero ceiling can only
+  // ever mean "not determined" — it can never legitimately mean "this buyer may
+  // spend nothing". Enforcing it would filter the entire catalogue to nothing,
+  // which is precisely the failure this fix exists to remove, so an anomalous
+  // APPROVED-with-zero row is treated as having no ceiling rather than a $0 one.
+  const maxBudgetCents: number | null =
+    isPrequalValid(prequal) && prequal !== null && prequal.maxOtdAmountCents > 0
+      ? prequal.maxOtdAmountCents
+      : null;
+  // User-requested price max is capped at the approved ceiling (or stands alone
+  // when there is no approved ceiling to cap it against).
   const paramPriceMax = searchParams.get("priceMax") ? Math.round(parseFloat(searchParams.get("priceMax")!) * 100) : null;
   const priceCap = maxBudgetCents !== null
     ? (paramPriceMax !== null ? Math.min(paramPriceMax, maxBudgetCents) : maxBudgetCents)
@@ -56,7 +74,7 @@ export async function GET(request: NextRequest) {
 
   const where: Prisma.InventoryItemWhereInput = { isActive: true };
 
-  // Budget ceiling — always enforced when a prequal exists
+  // Budget ceiling — always enforced when the buyer has a valid approval
   if (priceCap !== null) {
     where.priceCents = { ...(priceMinCents !== null ? { gte: priceMinCents } : {}), lte: priceCap };
   } else if (priceMinCents !== null) {

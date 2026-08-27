@@ -16,6 +16,36 @@ import {
   type IncomeGateResult,
 } from "./income-gate";
 
+// ─── Provider-failure taxonomy ──────────────────────────────────────────────
+// The adapter owns the vocabulary for "we did not get a usable answer from the
+// provider". It is exported (rather than restated by callers) so a newly added
+// failure mode is classified as a provider failure everywhere at once — the
+// orchestrator previously kept its own copy of this list, and any reason added
+// here but forgotten there would silently degrade back into an unlabelled
+// MANUAL_REVIEW indistinguishable from a compliance hold.
+//
+// NOTE: a business outcome (e.g. INCOME_BELOW_MINIMUM) is deliberately NOT in
+// this set — that is a real decision, not an integration failure.
+export const PROVIDER_ERROR_REASONS: ReadonlySet<string> = new Set([
+  "TIMEOUT",
+  "NETWORK_ERROR",
+  "OAUTH_FAILED",
+  "IPREDICT_ERROR",
+  "CONFIG_ERROR",
+  "CONFIG_MISMATCH",
+  "URL_NOT_CONFIGURED",
+  // The provider answered 200 but gave us nothing usable. Both were previously
+  // swallowed into a plain MANUAL_REVIEW carrying no reason at all.
+  "EMPTY_RESPONSE",
+  "UNPARSEABLE_RESPONSE",
+]);
+
+/** True when `reason` denotes an upstream provider failure rather than a decision. */
+export function isProviderErrorReason(reason: string | undefined | null): boolean {
+  if (!reason) return false;
+  return PROVIDER_ERROR_REASONS.has(reason) || reason.startsWith("HTTP_");
+}
+
 // AES-256-GCM key for encrypting consumer-report rawResponse at rest.
 // Fail-fast: there is NO default. A missing or malformed key must never
 // silently degrade to a known/guessable key (which would make "encrypted"
@@ -284,6 +314,21 @@ function errorResult(reason: string): IPredicResult {
   };
 }
 
+// Provider failure that also has a response body worth keeping for diagnosis.
+// The reason is kept INSIDE the stored payload so an operator decrypting the
+// blob still learns which failure it was — the body alone does not say.
+function errorResultWithBody(reason: string, body: unknown): IPredicResult {
+  return {
+    ...errorResult(reason),
+    rawResponse: encryptRawResponse(JSON.stringify({ referred: true, reason, response: body })),
+  };
+}
+
+/** Absent, or present-but-blank — both mean "the provider told us nothing here". */
+function isBlank(v: string | undefined | null): boolean {
+  return v == null || v.trim() === "";
+}
+
 // Tri-state OFAC screening result. Returns:
 //   true  — a sanctions hit (either signal is exactly "Y")
 //   false — screening ran and AFFIRMATIVELY cleared (a signal is exactly "N")
@@ -531,7 +576,19 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
     return errorResult(`HTTP_${res.status}`);
   }
 
-  const raw = (await res.json().catch(() => ({}))) as IPredictResponse;
+  // A body that is not valid JSON is a provider failure, not an empty report.
+  // This previously degraded to `{}` and flowed on as an unlabelled
+  // MANUAL_REVIEW, hiding gateway/HTML error pages behind a 200. Do NOT log the
+  // body — it may echo consumer PII.
+  let raw: IPredictResponse;
+  try {
+    raw = (await res.json()) as IPredictResponse;
+  } catch {
+    logger.error(
+      "[microbilt] iPredict 200 with an unparseable body (body suppressed — may contain PII)",
+    );
+    return errorResult("UNPARSEABLE_RESPONSE");
+  }
 
   // Detect ALL of iPredict's error shapes, not just RESPONSE.STATUS.type. A
   // response can signal failure via the message header severity, a RESPONSE
@@ -548,7 +605,7 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
     raw.MsgRsHdr?.Status?.Severity === "Error";
   if (isIpredictError) {
     logger.error("[microbilt] iPredict returned ERROR:", statusNode ?? raw.MsgRsHdr?.Status);
-    return { ...errorResult("IPREDICT_ERROR"), rawResponse: encryptRawResponse(JSON.stringify(raw)) };
+    return errorResultWithBody("IPREDICT_ERROR", raw);
   }
 
   // ── STEP 3: Parse MicroBilt response ──────────────────────────────────────
@@ -618,6 +675,38 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   const bankruptcyFlag = idv?.bankruptcyFlag === "Y";
   const highRiskAddressFlag =
     idv?.highRiskAddress === "Y" || idv?.suspiciousAddress === "Y";
+
+  // ── No decision content at all ⇒ a provider failure, not a review ─────────
+  // A 200 whose body carries no DECISION (neither code nor value, blanks
+  // included) means the provider returned nothing we can act on. Previously
+  // `mapDecision(undefined, undefined)` folded this into a plain MANUAL_REVIEW
+  // carrying NO reason, making an integration outage look identical to a
+  // compliance hold. The decision is unchanged (still MANUAL_REVIEW, still
+  // fail-closed) — only the labelling is now honest.
+  //
+  // This deliberately runs AFTER the risk parsing above and carries those
+  // signals through: a response can lack a DECISION while still reporting a
+  // sanctions hit or a deceased indicator, and resetting those to
+  // INDETERMINATE would lose a positive OFAC hit (and its ops alert) on the way
+  // out. Only the decision is missing — whatever risk data did arrive still
+  // reaches the gates.
+  if (isBlank(decisionCode) && isBlank(decisionValue)) {
+    logger.error(
+      "[microbilt] iPredict 200 carried no DECISION content — recording as a provider failure",
+    );
+    return {
+      ...errorResultWithBody("EMPTY_RESPONSE", raw),
+      ofacFlagged,
+      creditScore,
+      idvScore,
+      mlaCovered,
+      fraudWarning,
+      adverseReasonCodes,
+      deceasedFlag,
+      bankruptcyFlag,
+      highRiskAddressFlag,
+    };
+  }
 
   // ── STEP 4: Two-gate minimum — income gate vs credit gate ─────────────────
   // Final OTD = min(income-computed max, MicroBilt-approved amount)

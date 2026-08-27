@@ -9,12 +9,15 @@
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { PreQualDecision, PreQualTier } from "@prisma/client";
+import { HealthAlertLevel, PreQualDecision, PreQualTier } from "@prisma/client";
 import {
   callIPredict,
   FCRA_CONSENT_TEXT,
+  isProviderErrorReason,
   type MicroBiltBuyerPII,
 } from "./microbilt.service";
+import { createAlertOnce } from "@/lib/services/monitoring/health-alert.service";
+import { PREQUAL_PROVIDER_FAILURE_EVENT } from "@/lib/constants";
 import {
   sendPrequalApprovedEmail,
   sendAdverseActionEmail,
@@ -22,19 +25,78 @@ import {
   sendAdminPrequalAlertEmail,
 } from "@/lib/services/email/resend.service";
 
-const PROVIDER_ERROR_REASONS = new Set([
-  "TIMEOUT",
-  "NETWORK_ERROR",
-  "OAUTH_FAILED",
-  "IPREDICT_ERROR",
-  "CONFIG_ERROR",
-  "CONFIG_MISMATCH",
-  "URL_NOT_CONFIGURED",
-]);
+// ── Provider-failure observability ──────────────────────────────────────────
+// A MicroBilt failure and a risk-triggered compliance hold both land as
+// MANUAL_REVIEW — correctly, because the decision is fail-closed either way.
+// They are NOT the same operational event, though, and for ~8 weeks nothing
+// distinguished them: every buyer prequal silently failed while the only signal
+// was a fire-and-forget admin email that is skipped outright when
+// ADMIN_NOTIFICATION_EMAIL is unset. These constants back a durable, queryable
+// record plus an operational exception on the existing PlatformAlert rail.
+const PROVIDER_FAILURE_ALERT_SOURCE = "prequal-microbilt";
+const PROVIDER_FAILURE_WINDOW_HOURS = 24;
+// At/above this many failures inside the window the integration is treated as
+// down rather than flaky, and the alert escalates to P0 (owner-visible).
+const PROVIDER_FAILURE_P0_THRESHOLD = 3;
+const PROVIDER_FAILURE_TITLE_P1 = "MicroBilt prequalification call failed";
+const PROVIDER_FAILURE_TITLE_P0 =
+  "MicroBilt prequalification integration DOWN — repeated failures";
 
-function isProviderErrorReason(reason: string | undefined): boolean {
-  if (!reason) return false;
-  return PROVIDER_ERROR_REASONS.has(reason) || reason.startsWith("HTTP_");
+/**
+ * Record a provider failure distinctly from a risk-triggered manual review, and
+ * raise an operational exception.
+ *
+ * Deliberately best-effort: the buyer's prequal decision is already committed
+ * and must never be rolled back or delayed by an observability write. Both
+ * halves are independently guarded so a failure in one still leaves the other.
+ *
+ * PRIVACY: prequal data is FCRA-protected consumer information. Only the
+ * operational reason, the decision, and opaque record ids go into the event
+ * metadata or the alert body — never a name, address, DOB, income, score, or
+ * any part of the consumer report.
+ */
+async function recordProviderFailure(args: {
+  buyerId: string;
+  prequalId: string;
+  reason: string;
+  decision: PreQualDecision;
+}): Promise<void> {
+  try {
+    await prisma.complianceEvent.create({
+      data: {
+        eventType: PREQUAL_PROVIDER_FAILURE_EVENT,
+        buyerId: args.buyerId,
+        prequalApplicationId: args.prequalId,
+        metadata: {
+          provider: "microbilt",
+          providerReason: args.reason,
+          decision: args.decision,
+        },
+      },
+    });
+  } catch (err) {
+    logger.error("[prequal] failed to record provider-failure compliance event:", err);
+  }
+
+  try {
+    const since = new Date(Date.now() - PROVIDER_FAILURE_WINDOW_HOURS * 60 * 60 * 1000);
+    const recent = await prisma.complianceEvent.count({
+      where: { eventType: PREQUAL_PROVIDER_FAILURE_EVENT, createdAt: { gte: since } },
+    });
+    const isDown = recent >= PROVIDER_FAILURE_P0_THRESHOLD;
+    await createAlertOnce(
+      isDown ? HealthAlertLevel.P0 : HealthAlertLevel.P1,
+      isDown ? PROVIDER_FAILURE_TITLE_P0 : PROVIDER_FAILURE_TITLE_P1,
+      `MicroBilt iPredict returned no usable data (reason: ${args.reason}). ` +
+        `The prequalification was held at ${args.decision} — fail-closed, no approval issued. ` +
+        `${recent} failure(s) in the last ${PROVIDER_FAILURE_WINDOW_HOURS}h. ` +
+        `No buyer can be approved, and therefore no deposit can be taken, while this persists. ` +
+        `Prequal record: ${args.prequalId}.`,
+      PROVIDER_FAILURE_ALERT_SOURCE,
+    );
+  } catch (err) {
+    logger.error("[prequal] failed to raise provider-failure operational alert:", err);
+  }
 }
 
 // Single source of truth for prequal approval gating across the platform.
@@ -602,9 +664,23 @@ export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSub
     }
   }
 
+  // ── Provider failure: record + alert, distinctly from a risk review ────────
+  // The DECISION above is unchanged and still fail-closed. What changes here is
+  // only that an integration outage is now recorded as one and raises an
+  // operational exception, instead of being indistinguishable from a buyer who
+  // is legitimately held for compliance review.
+  const isProviderError = isProviderErrorReason(result.reason);
+  if (isProviderError && result.reason) {
+    await recordProviderFailure({
+      buyerId: buyer.id,
+      prequalId: prequal.id,
+      reason: result.reason,
+      decision: finalDecision,
+    });
+  }
+
   // Admin ops alert: needs-review OR upstream provider error. Failure to send
   // must never block the buyer response.
-  const isProviderError = isProviderErrorReason(result.reason);
   if (needsReview || isProviderError) {
     try {
       await sendAdminPrequalAlertEmail({
