@@ -126,7 +126,7 @@ export async function proposeIntent(
 
   // 3. Persist the proposal record.
   const id = deps.genId();
-  let record = await deps.store.create({
+  const created = await deps.store.create({
     id,
     intentType: definition.type,
     status: "PROPOSED",
@@ -139,7 +139,16 @@ export async function proposeIntent(
     requiresHumanApproval: definition.requiresHumanApproval,
     idempotencyKey: proposal.idempotencyKey,
     rationale: proposal.rationale,
+    policyResult: { allowed: true },
   });
+  // Concurrent idempotency collapse: another proposal with the same key won the
+  // insert (the store returned the existing row, whose id differs from ours).
+  // Return its current authoritative state instead of re-driving it — no throw,
+  // no duplicate execution.
+  if (created.id !== id) {
+    return outcomeFromRecord(created);
+  }
+  let record = created;
   await deps.audit.record({ intentId: id, intentType: definition.type, status: "PROPOSED", actor: proposal.actor });
 
   // 4. Consequential intents STOP here awaiting server-authoritative human
@@ -181,7 +190,10 @@ export async function approveIntent(
   // outcome idempotently rather than surfacing an exception.
   let approved: ActionIntentRecord;
   try {
-    approved = await deps.store.transition(intentId, "APPROVAL_REQUIRED", "APPROVED", { approverId: approver.actorId });
+    approved = await deps.store.transition(intentId, "APPROVAL_REQUIRED", "APPROVED", {
+      approverId: approver.actorId,
+      approverRole: approver.authenticatedRole,
+    });
   } catch {
     const current = await deps.store.get(intentId);
     if (current && current.status === "APPROVED") return executeRecord(current, "APPROVED", deps);
@@ -267,6 +279,33 @@ export async function rejectIntent(
   return { status: "REJECTED", code: "POLICY_DENIED", message: reason, intentId };
 }
 
+// ─── Revalidate (deterministic re-check against CURRENT authoritative state) ──
+// Reconstructs the proposal from the durable record and re-runs the SAME
+// deterministic authorization (catalog, availability, actor, role, schema,
+// activation) and business policy (ownership/IDOR, eligibility, money/state
+// gates) that gated the proposal — now, immediately before execution. Nothing
+// here is prompt-driven; it reads the canonical authorities.
+async function revalidate(
+  record: ActionIntentRecord,
+  deps: EngineDeps,
+): Promise<{ ok: true } | { ok: false; code: RejectionCode; reason: string }> {
+  const proposal: ActionIntentProposal = {
+    intentType: record.intentType,
+    parameters: record.parameters,
+    actor: actorFromRecord(record),
+    idempotencyKey: record.idempotencyKey,
+  };
+  const authz = await authorizeProposal(proposal, { activation: deps.activation });
+  if (!authz.ok) {
+    return { ok: false, code: authz.code, reason: `revalidation failed (${authz.code}): ${authz.message}` };
+  }
+  const policyRes = await evaluatePolicy(record.intentType, { params: authz.params, actor: proposal.actor }, deps.policyDeps);
+  if (!policyRes.allowed) {
+    return { ok: false, code: policyRes.code ?? "POLICY_DENIED", reason: `revalidation policy denied: ${policyRes.reason ?? "no reason"}` };
+  }
+  return { ok: true };
+}
+
 // ─── Execute (single-execution via CAS; delegates idempotency to the command) ─
 async function executeRecord(
   record: ActionIntentRecord,
@@ -283,6 +322,19 @@ async function executeRecord(
     return current ? outcomeFromRecord(current) : { status: "FAILED", intentId: record.id, failureReason: "lost race" };
   }
   await deps.audit.record({ intentId: record.id, intentType: record.intentType, status: "EXECUTING", actor: actorFromRecord(record) });
+
+  // REVALIDATE immediately before the canonical command. Approval is not a
+  // licence to run stale work: an intent that was valid at proposal time may be
+  // invalid now (deactivated, ownership changed, deposit refunded, auction
+  // closed, deal advanced). Re-run the deterministic authorization + policy
+  // against CURRENT authoritative state; on any failure, fail closed with zero
+  // consequential execution and persist the truthful failure.
+  const reval = await revalidate(executing, deps);
+  if (!reval.ok) {
+    await deps.store.transition(record.id, "EXECUTING", "FAILED", { failureReason: reval.reason, rejectionCode: reval.code });
+    await deps.audit.record({ intentId: record.id, intentType: record.intentType, status: "FAILED", actor: actorFromRecord(record), code: reval.code, reason: reval.reason });
+    return { status: "FAILED", intentId: record.id, failureReason: reval.reason };
+  }
 
   const command = deps.commands[record.intentType];
   if (!command) {

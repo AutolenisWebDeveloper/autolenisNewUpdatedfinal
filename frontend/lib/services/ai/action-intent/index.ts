@@ -47,3 +47,10 @@ export {
   type ProposalOutcome,
 } from "./engine";
 export { buildActorGuidance } from "./guidance";
+export {
+  PrismaActionIntentStore,
+  createDurableEngineDeps,
+  type AiActionIntentDelegate,
+  type AiActionIntentRow,
+} from "./prisma-store";
+export { shapeIntentForAdmin, type AdminIntentView } from "./api-shape";

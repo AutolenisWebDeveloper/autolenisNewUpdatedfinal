@@ -155,7 +155,11 @@ export interface ActionIntentRecord {
   requiresHumanApproval: boolean;
   idempotencyKey?: string;
   rationale?: string;
+  /** Deterministic policy outcome captured at proposal time (safe summary). */
+  policyResult?: Record<string, unknown>;
   approverId?: string;
+  /** Authenticated role of the human approver (for the audit trail). */
+  approverRole?: string;
   rejectionCode?: RejectionCode;
   failureReason?: string;
   /** Authoritative result from the canonical command (never model output). */
