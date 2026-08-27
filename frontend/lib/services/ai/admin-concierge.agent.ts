@@ -3,6 +3,7 @@
 // Groq ONLY | Kill switch required
 import { groqChat, ChatMessage } from "@/lib/ai/groq-client";
 import { prisma } from "@/lib/prisma";
+import { buildActorGuidance, isActionIntentSurfaceEnabled } from "@/lib/services/ai/action-intent";
 
 async function getAdminContext() {
   const [buyers, dealers, activeAuctions, pendingDeals] = await Promise.all([
@@ -42,7 +43,9 @@ WHAT YOU CAN HELP WITH:
 RULES:
 - You have access to aggregate platform data only — never share individual PII in responses
 - For security incidents, escalate to the engineering team immediately
-- Always recommend human review for financial or legal decisions`;
+- Always recommend human review for financial or legal decisions${
+    isActionIntentSurfaceEnabled() ? `\n\n${buildActorGuidance("ADMIN")}` : ""
+  }`;
 }
 
 export async function adminConciergeChat(
