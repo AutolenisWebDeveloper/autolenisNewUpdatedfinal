@@ -130,7 +130,9 @@ it does not modify existing skills automatically.
 4. **Plan before coding** on non-trivial work: run the reuse-before-create protocol
    (`autolenis-system-architecture` → `reference/capability-index.md`) and write down the owning
    service, models touched, state transitions affected, tests that will prove it, and the rollback.
-5. Inspect the existing implementation (service, models, routes, tests) — **read before write**.
+5. Inspect the existing implementation (service, models, routes, tests) — **read before write**,
+   including work in flight: list the open PRs touching those files and read any that overlap.
+   A codebase search cannot see an unmerged branch.
 6. Confirm the plan extends (not replaces) existing systems; say what you searched for if you are
    adding something genuinely new.
 7. Create or update tests first (`autolenis-testing-quality-gates`).

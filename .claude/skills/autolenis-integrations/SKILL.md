@@ -82,8 +82,16 @@ Real vendor adapters (ground truth):
    module top (Turbopack/`next build` evaluates module scope before runtime env
    exists). A missing critical secret throws — never a placeholder that silently
    sends bad requests.
-3. **Every outbound call has a hard timeout.** Use an `AbortController` (e.g.
-   MicroBilt's 10s) or the SDK's timeout option. No unbounded awaits.
+3. **Every outbound call has a hard timeout — and the timer covers the response
+   HEADERS, not the body.** Use an `AbortController` (e.g. MicroBilt's 10s) or
+   the SDK's timeout option. No unbounded awaits. The usual shape clears the
+   timer in a `finally` immediately after `await fetch(...)`, so **any body read
+   added after that point (`.text()`, `.json()`) is a NEW unbounded await**: a
+   response whose headers arrive but whose body never completes holds the
+   request open forever. Give the body read its own bound, and release a stalled
+   connection by aborting the original controller — never by `res.body.cancel()`,
+   which throws on a stream a reader has already locked and leaves the socket
+   open. Losing a body costs only diagnostics; a hung request costs the user.
 4. **Retry with exponential backoff on transient/rate-limited failures.**
    8s / 16s / 32s per the platform standard; cap attempts; jitter where
    possible. Non-idempotent operations only retry behind an idempotency key.
@@ -179,6 +187,12 @@ truth; the webhook is signature-verified + idempotent.
   setTimeout(() => ac.abort(), 10_000); ... fetch(url, { signal: ac.signal });`
   then `clearTimeout(t)` — MicroBilt returns `MANUAL_REVIEW` on abort, never
   throws to the buyer.
+- Bounded body read after that timer is cleared (`microbilt.service.ts`
+  `readErrorBody`): race `res.text()` against a second short timer, and on
+  timeout call `ac.abort()` — keep the controller in scope for exactly this.
+  Attach the `.catch()` to the read promise up front so the abort rejects into
+  it rather than surfacing as an unhandled rejection. Cap what you store from
+  an untrusted body; mark it `truncated` rather than silently cutting it.
 - Idempotency convergence (`lib/inngest/idempotency.ts`): a `23505`
   unique-violation on the `idempotency_keys` insert means another worker owns the
   key → return, don't duplicate.

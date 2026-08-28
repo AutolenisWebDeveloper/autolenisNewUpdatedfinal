@@ -82,6 +82,24 @@ placeholders · TODOs · mocks or stubs left in production paths.
 Use the `/code-review` capability for line-level review; use `autolenis-system-architecture` to
 catch architectural damage introduced by the change itself.
 
+**After any merge or rebase, review the merged ARTIFACT — never the conflict list.** Version
+control conflicts on overlapping *text*; correctness breaks on overlapping *meaning*, so the
+dangerous file is the one git reports as applying **cleanly**, because nothing prompts anyone to
+look at it. Observed: two branches added the same capability to one function by different means;
+a 3-way apply conflicted on five files (all trivial comment wording) and applied the central file
+cleanly — leaving *both* implementations alive, the second spread over the first inside one object
+literal, so correctly-resolved values would have been silently overwritten by ones read from
+different environment variables. A second defect landed the same way: one branch added a member to
+an enumeration, the other added a classifier switching over that enumeration; the merge compiled,
+passed every existing test, and mis-classified the new member. So, concretely:
+
+- Grep the merged result for **both** sides' new symbols; where they are alternatives, confirm
+  only one survives.
+- Where one side adds a member to a set and the other adds a function over that set, assert
+  completeness **with a test** — an entry that must be either classified or explicitly listed as
+  ambiguous — rather than by inspection.
+- Re-read every hunk the tool applied without conflict in a file both sides touched.
+
 ### STEP 3 — RUN VERIFICATION
 
 Run every applicable executable check in the repository. **Code that looks correct is not

@@ -79,8 +79,24 @@ app/**            → thin route handlers & Server Components (no business logic
    protocol** in [`reference/capability-index.md`](reference/capability-index.md). Reuse or extend
    what you find. A parallel implementation is a defect even if it works — and if you do create
    something new, state in the PR what you searched for and why nothing matched.
-2. **Read before write.** Read the current implementation and its callers before changing it. Never
-   overwrite a system you have not read.
+
+   **Centralising is not finished until every duplicate is deleted.** When you pull a shared
+   value, vocabulary, or rule into one owner, grep for *every* remaining copy across *all*
+   consumers and delete them in the same change — then add a test that drives each consumer
+   through the shared symbol rather than a restatement of it. A comment warning against
+   duplication only protects the file it is written in: a set centralised into an adapter, with
+   a prominent comment explaining that one consumer "previously kept its own copy", still left a
+   *second* consumer holding a stale copy that had already drifted by two values — so a real
+   integration outage displayed to operators as an ordinary manual review. Enforcement is a test,
+   never a comment.
+2. **Read before write — including work in flight.** Read the current implementation and its
+   callers before changing it. Never overwrite a system you have not read. A codebase search
+   cannot see an unmerged branch, so it is blind to the likeliest source of a conflicting
+   change: someone solving the same problem right now. Before starting non-trivial work, list
+   the open PRs touching the files you are about to change and read any that overlap. If one
+   does, say so in your plan and in the PR description, and put a conflicting *decision* to the
+   user before building — two PRs that each make a defensible but opposite call on the same
+   question cost a manual reconciliation neither author scoped.
 3. **Business logic lives in `lib/services/**`.** Route handlers and components stay thin. No raw
    third-party SDK calls in `app/**` or `components/**` — go through the service/adapter (see
    `autolenis-integrations`).
@@ -111,6 +127,9 @@ app/**            → thin route handlers & Server Components (no business logic
 1. Load this skill, then the relevant `autolenis-<domain>` skill(s).
 2. Run the reuse-before-create protocol ([`reference/capability-index.md`](reference/capability-index.md))
    and inspect the existing implementation (service, models, routes, tests) — read before write.
+   **Also check work in flight:** list open PRs touching those files and read any that overlap
+   (`list_pull_requests` + `get_files`, or a path filter). Surface a conflicting decision before
+   building, not after pushing.
 3. Produce a written plan for non-trivial work: the owning service, the models touched, the
    transitions affected, the tests that will prove it, and the rollback.
 4. Write/adjust tests first (see `autolenis-testing-quality-gates`).

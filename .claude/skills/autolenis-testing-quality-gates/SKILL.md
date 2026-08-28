@@ -103,6 +103,18 @@ build, by design.
    MicroBilt/Twilio/Resend, and Prisma/Supabase. Use
    `--experimental-test-module-mocks` where module mocking is needed (see the
    existing `test:*` scripts). No live external calls in tests.
+
+   **A `mock.module` allowlist fails OPEN on additions — adding an export to a
+   mocked module is a change to every mock of it.** `namedExports` replaces the
+   whole module, so a symbol you newly export and import in production code
+   resolves to `undefined` in every suite that mocks it: typecheck stays green
+   (the real module *does* have the export) and the defect surfaces only as a
+   runtime `TypeError`, in whichever suite happens to reach that line. When you
+   add an export that production code imports, grep for every `mock.module` of
+   that module and extend its `namedExports` in the same change. **Prefer
+   importing the REAL symbol into the double over restating it** — a hand-written
+   stand-in (`isProviderErrorReason: (r) => !!r`) silently drifts from the
+   implementation and then proves nothing.
 8. **UI changes on public pages** get a Playwright visual check
    (`test:visual`); update snapshots deliberately (`test:visual:update`), never
    blindly.
