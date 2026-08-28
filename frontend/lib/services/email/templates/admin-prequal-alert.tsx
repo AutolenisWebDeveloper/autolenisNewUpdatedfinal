@@ -2,8 +2,10 @@
 //
 // Ops-addressed notification on (a) a new prequal resolving to
 // MANUAL_REVIEW / OFAC_REVIEW / OFAC_ESCALATED, or (b) a MicroBilt provider
-// failure (TIMEOUT / NETWORK_ERROR / OAUTH_FAILED / IPREDICT_ERROR /
-// CONFIG_ERROR / HTTP_*).
+// failure — the reasons in PROVIDER_ERROR_REASONS (microbilt.service, the single
+// source of truth) plus HTTP_*: TIMEOUT / NETWORK_ERROR / OAUTH_FAILED /
+// IPREDICT_ERROR / CONFIG_ERROR / CONFIG_MISMATCH / URL_NOT_CONFIGURED /
+// EMPTY_RESPONSE / UNPARSEABLE_RESPONSE / IDENTITY_NOT_CONFIGURED.
 //
 // Discreet on OFAC — content never confirms an OFAC hit, only that a case
 // requires manual review. Actionable: deep-links to the buyer record.

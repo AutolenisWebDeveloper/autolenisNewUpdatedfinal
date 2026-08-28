@@ -2,10 +2,10 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
-import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { z } from "zod";
 import { reschedulePickup } from "@/lib/services/pickup/scheduling.service";
 import { proposePickup, coordHttp } from "@/lib/services/pickup/pickup-coordination.service";
+import { LEGACY_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -31,8 +31,7 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id },
-    // Narrowed through the schema gate (see lib/services/esign/envelope-schema).
-    include: { eSignEnvelope: { select: esignEnvelopeSelect() } },
+    include: { eSignEnvelope: { select: LEGACY_ENVELOPE_SELECT } },
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 

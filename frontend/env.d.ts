@@ -47,14 +47,16 @@ declare namespace NodeJS {
     MICROBILT_PRODUCT?: string; // X-Product header; defaults to "IPredict Advantage"
     MICROBILT_CAID?: string;    // X-CAID header; MicroBilt account identifier (e.g. 29922)
 
-    // MsgRqHdr identity fields. OPTIONAL and opt-in: each is added to the
-    // request only when set, so an unset var leaves the payload byte-identical
-    // to today's. The iPredict request contract is NOT yet confirmed by
-    // MicroBilt — these are plumbing for that confirmation, not a commitment.
-    MICROBILT_PRODUCT_ID?: string; // MsgRqHdr.ProductID
-    MICROBILT_MEMBER_ID?: string;  // MsgRqHdr.MemberId
-    MICROBILT_MEMBER_PWD?: string; // MsgRqHdr.MemberPwd — SECRET; adapter-only, never logged
-    MICROBILT_USERNAME?: string;   // MsgRqHdr.UserName
+    // MsgRqHdr identity + product routing (iPredict_6.yaml). The spec's security
+    // scheme is `oauth: []` only, so the Bearer token identifies the CALLER but
+    // selects neither the member account nor the product — these body fields do.
+    // All four are account-specific values issued by MicroBilt. Typed optional
+    // because sandbox mode never reads them, but in production the adapter fails
+    // closed to MANUAL_REVIEW (IDENTITY_NOT_CONFIGURED) if any is missing.
+    MICROBILT_MEMBER_ID?: string;       // MsgRqHdr.MemberId
+    MICROBILT_MEMBER_PASSWORD?: string; // MsgRqHdr.MemberPwd — CREDENTIAL, never logged
+    MICROBILT_USERNAME?: string;        // MsgRqHdr.UserName
+    MICROBILT_PRODUCT_ID?: string;      // MsgRqHdr.ProductID — selects IPredict Advantage
 
     // Communication (Resend ONLY)
     RESEND_API_KEY: string;

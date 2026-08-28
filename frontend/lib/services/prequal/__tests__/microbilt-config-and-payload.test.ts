@@ -14,11 +14,14 @@
 //     the adapter's try/catch and escapes unhandled. It now comes from
 //     `node:crypto`.
 //
-//  3. The MsgRqHdr identity fields (ProductID / MemberId / MemberPwd /
-//     UserName) are plumbed but NOT yet committed to: they appear ONLY when the
-//     matching env var is set, and the request must be byte-identical to
-//     today's when they are not. MicroBilt has not yet confirmed the payload
-//     contract, so an unset var must change nothing.
+//  3. The MsgRqHdr identity fields (MemberId / MemberPwd / UserName /
+//     ProductID) are REQUIRED: the spec's security scheme is `oauth: []` only,
+//     so the Bearer token identifies the caller but selects neither the member
+//     account nor the product. A missing one fails closed BEFORE the call
+//     rather than spending a real inquiry on an unroutable request.
+//     (This file originally asserted the opposite — an opt-in shape that left
+//     the request byte-identical when unset. That was deliberate caution while
+//     the contract was unconfirmed; it is superseded here.)
 //
 // Run: pnpm test   (globs lib/services/prequal/__tests__/*.test.ts)
 
@@ -63,17 +66,22 @@ const OK_BODY = JSON.stringify({
 
 // Fixture value for MsgRqHdr.MemberPwd. NOT a credential — a `test-` prefixed
 // placeholder, matching the MICROBILT_CLIENT_SECRET fixture above, so a secret
-// scanner does not read it as a real password. Production's MICROBILT_MEMBER_PWD
-// IS a real secret, which is precisely why the hygiene test at the bottom of
-// this file exists.
+// scanner does not read it as a real password. Production's
+// MICROBILT_MEMBER_PASSWORD IS a real secret, which is precisely why the hygiene
+// test at the bottom of this file exists.
 const TEST_MEMBER_PWD = "test-member-pwd";
 
-const IDENTITY_ENV = [
-  "MICROBILT_PRODUCT_ID",
-  "MICROBILT_MEMBER_ID",
-  "MICROBILT_MEMBER_PWD",
-  "MICROBILT_USERNAME",
-] as const;
+// The four MsgRqHdr identity vars and the values these tests configure them
+// with. Every test that must REACH the provider needs all four set, because the
+// adapter now refuses to call GetReport without them.
+const IDENTITY_FIXTURE = {
+  MICROBILT_MEMBER_ID: "29922",
+  MICROBILT_MEMBER_PASSWORD: TEST_MEMBER_PWD,
+  MICROBILT_USERNAME: "autolenis_api",
+  MICROBILT_PRODUCT_ID: "IPREDICT_ADV",
+} as const;
+
+const IDENTITY_ENV = Object.keys(IDENTITY_FIXTURE) as Array<keyof typeof IDENTITY_FIXTURE>;
 
 let lastReportBody: string | null = null;
 let reportCallCount = 0;
@@ -106,7 +114,7 @@ beforeEach(() => {
   process.env.MICROBILT_OAUTH_BASE_URL = GOOD_OAUTH_URL;
   delete process.env.IPREDICT_GET_REPORT_URL;
   delete process.env.MICROBILT_OAUTH_TOKEN_URL;
-  for (const k of IDENTITY_ENV) delete process.env[k];
+  for (const k of IDENTITY_ENV) process.env[k] = IDENTITY_FIXTURE[k];
 });
 
 after(() => {
@@ -206,14 +214,22 @@ test("the request is built without globalThis.crypto (Node 18.18 floor)", async 
   }
 });
 
-// ─── 3. MsgRqHdr identity fields: opt-in only, no-op when unset ──────────────
+// ─── 3. MsgRqHdr identity fields are REQUIRED ───────────────────────────────
 
-// The exact request today's code sends, with RefNum normalised. Any change to
-// this string is a change to the wire contract with MicroBilt and must be
-// deliberate — the payload shape is NOT settled and is awaiting a confirmed
-// example from MicroBilt support.
-const EXPECTED_BASELINE_REQUEST = JSON.stringify({
-  MsgRqHdr: { RequestType: "N", ReasonCode: "3", RefNum: "<uuid>" },
+// The exact request this code sends, with RefNum and the income-derived amount
+// normalised. Any change to this string is a change to the wire contract with
+// MicroBilt and must be deliberate. Field ORDER is part of the snapshot: the
+// identity fields lead MsgRqHdr per the spec's field order.
+const EXPECTED_REQUEST = JSON.stringify({
+  MsgRqHdr: {
+    MemberId: "29922",
+    MemberPwd: TEST_MEMBER_PWD,
+    UserName: "autolenis_api",
+    ProductID: "IPREDICT_ADV",
+    RequestType: "N",
+    ReasonCode: "3",
+    RefNum: "<uuid>",
+  },
   RequestedAmt: { Amt: "<amt>", CurCode: "USD" },
   PersonInfo: {
     PersonName: { FirstName: "JANE", LastName: "DOE" },
@@ -234,54 +250,46 @@ function normalise(body: string): string {
   return JSON.stringify(p);
 }
 
-test("with the identity env UNSET the request is byte-identical to today's", async () => {
+test("the full request we put on the wire matches the expected contract exactly", async () => {
   await call();
   assert.equal(
     normalise(lastReportBody!),
-    EXPECTED_BASELINE_REQUEST,
-    "an unset identity var must change nothing about the request we send today",
+    EXPECTED_REQUEST,
+    "the wire contract changed — if that is intended, update EXPECTED_REQUEST deliberately",
   );
 });
 
-test("identity fields appear in MsgRqHdr only when their env vars are set", async () => {
-  process.env.MICROBILT_PRODUCT_ID = "IPREDICT_ADV";
-  process.env.MICROBILT_MEMBER_ID = "29922";
-  process.env.MICROBILT_MEMBER_PWD = TEST_MEMBER_PWD;
-  process.env.MICROBILT_USERNAME = "autolenis_api";
-  await call();
-  const hdr = (JSON.parse(lastReportBody!) as { MsgRqHdr: Record<string, string> }).MsgRqHdr;
-  assert.equal(hdr.ProductID, "IPREDICT_ADV");
-  assert.equal(hdr.MemberId, "29922");
-  assert.equal(hdr.MemberPwd, TEST_MEMBER_PWD);
-  assert.equal(hdr.UserName, "autolenis_api");
-  // The pre-existing fields are untouched.
-  assert.equal(hdr.RequestType, "N");
-  assert.equal(hdr.ReasonCode, "3");
-  assert.ok(hdr.RefNum);
+test("a missing identity var fails closed BEFORE the call, never spending an inquiry", async () => {
+  // Per-field coverage (each var individually required, whitespace treated as
+  // unset, and the ops log naming the missing vars) lives in
+  // microbilt-parse.test.ts. What this file adds is the interaction with the
+  // URL guards above: identity is checked AFTER them, so a deployment with
+  // several faults reports the most specific cause first.
+  delete process.env.MICROBILT_PRODUCT_ID;
+  const res = await call();
+  assert.equal(res.reason, "IDENTITY_NOT_CONFIGURED");
+  assertFailClosed(res);
+  assert.equal(reportCallCount, 0, "must not spend a real inquiry on an unroutable request");
 });
 
-test("a partially configured identity adds only the vars that are set", async () => {
-  process.env.MICROBILT_MEMBER_ID = "29922";
-  await call();
-  const hdr = (JSON.parse(lastReportBody!) as { MsgRqHdr: Record<string, string> }).MsgRqHdr;
-  assert.equal(hdr.MemberId, "29922");
-  assert.ok(!("ProductID" in hdr), "an unset var must not appear at all — not even as empty");
-  assert.ok(!("MemberPwd" in hdr));
-  assert.ok(!("UserName" in hdr));
-});
-
-test("a blank identity env var is treated as unset (no empty field on the wire)", async () => {
-  process.env.MICROBILT_PRODUCT_ID = "   ";
-  await call();
-  const hdr = (JSON.parse(lastReportBody!) as { MsgRqHdr: Record<string, string> }).MsgRqHdr;
-  assert.ok(!("ProductID" in hdr), "a blank var must not send an empty ProductID");
+test("a URL fault is reported ahead of a missing identity (most specific cause wins)", async () => {
+  process.env.MICROBILT_BASE_URL = "https://api.microbilt.example/iPredict";
+  delete process.env.MICROBILT_MEMBER_ID;
+  const res = await call();
+  assert.equal(
+    res.reason,
+    "REPORT_URL_INVALID",
+    "the URL guard runs first — an operator fixing config needs the nearest cause",
+  );
+  assert.equal(reportCallCount, 0);
 });
 
 test("the payload envelope and ContactInfo arity are deliberately unchanged", async () => {
-  // Explicit guard on the three deferred payload questions (MBCLVRq envelope,
-  // ContactInfo object-vs-array, X-CAID/X-Product headers). Changing several
-  // unknowns at once makes the next failure uninterpretable — these await
-  // MicroBilt's confirmed request example.
+  // Explicit guard on the payload questions that remain UNCONFIRMED (MBCLVRq
+  // envelope, ContactInfo object-vs-array, X-CAID/X-Product headers). The
+  // MsgRqHdr identity fields are no longer among them — they are now sent and
+  // required. Changing several remaining unknowns at once would make the next
+  // failure uninterpretable, so these still await MicroBilt's example.
   await call();
   const p = JSON.parse(lastReportBody!) as Record<string, unknown> & {
     PersonInfo: { ContactInfo: unknown };
@@ -293,13 +301,11 @@ test("the payload envelope and ContactInfo arity are deliberately unchanged", as
 // ─── Secret hygiene ─────────────────────────────────────────────────────────
 
 test("the member password is never exposed by the admin config snapshot", async () => {
-  process.env.MICROBILT_MEMBER_PWD = TEST_MEMBER_PWD;
-  process.env.MICROBILT_MEMBER_ID = "29922";
   const { getMicroBiltConfigStatus } = await import("@/lib/services/prequal/microbilt.service");
   const snapshot = JSON.stringify(getMicroBiltConfigStatus());
   assert.ok(
     !snapshot.includes(TEST_MEMBER_PWD),
-    "MICROBILT_MEMBER_PWD must never leave the adapter",
+    "MICROBILT_MEMBER_PASSWORD must never leave the adapter",
   );
   assert.ok(!snapshot.includes("test-client-secret"), "the OAuth secret must never leave the adapter");
 });

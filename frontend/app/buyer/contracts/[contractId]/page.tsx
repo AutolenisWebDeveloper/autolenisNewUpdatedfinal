@@ -4,13 +4,13 @@ export const metadata: Metadata = { title: "Contract", robots: { index: false, f
 
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { buyerFacingDealerName } from "@/lib/services/offer/dealer-display";
 import { notFound } from "next/navigation";
 import { Shield, CheckCircle2, AlertTriangle, XCircle, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import ContractPdfViewer from "@/components/buyer/ContractPdfViewer";
+import { BUYER_SAFE_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 export const dynamic = "force-dynamic";
 interface Props { params: Promise<{ contractId: string }> }
@@ -24,8 +24,7 @@ export default async function ContractDetailPage({ params }: Props) {
     where: { buyerId: buyer.id },
     include: {
       contractScans: { orderBy: { scannedAt: "desc" } },
-      // Narrowed through the schema gate (see lib/services/esign/envelope-schema).
-      eSignEnvelope: { select: esignEnvelopeSelect() },
+      eSignEnvelope: { select: BUYER_SAFE_ENVELOPE_SELECT },
       offer: { include: { dealer: { select: { dealershipName: true, tier: true, isSystemPlaceholder: true } } } },
       vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
     },

@@ -3,16 +3,17 @@ import { logger } from "@/lib/logger";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { advanceDealStatus, DealTransitionError } from "@/lib/services/deal/deal.service";
-import { EsignExtendedSchemaUnavailableError } from "@/lib/services/esign/envelope-schema";
 import {
   prepareBuyerSigningEnvelope,
   getContractViewUrl,
   ensureDealSigned,
   expireIfElapsed,
   NoSignableDocumentError,
+  ESignSchemaUnavailableError,
+  readEnvelopeForDeal,
 } from "@/lib/services/esign/buyer-signing.service";
 import { toBuyerEnvelopeSummary } from "@/lib/services/esign/esign-dto";
-import { esignEnvelopeSelect, toEnvelopeView } from "@/lib/services/esign/envelope-schema";
+import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -25,24 +26,30 @@ export async function GET(request: NextRequest, { params }: Props) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
+  // Explicit projection: `include: { eSignEnvelope: true }` selects every envelope
+  // scalar, including the columns migrations 20261014/20261015 add but production
+  // does not yet have. Only the status is needed here.
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id },
-    // Narrowed through the schema gate (see lib/services/esign/envelope-schema).
-    include: { eSignEnvelope: { select: esignEnvelopeSelect() } },
+    select: { id: true, status: true, eSignEnvelope: { select: { status: true } } },
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
   await expireIfElapsed(dealId);
   if (deal.eSignEnvelope?.status === "COMPLETED") await ensureDealSigned(dealId, buyer.id);
 
-  const envelope = toEnvelopeView(
-    await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: esignEnvelopeSelect() }),
-  );
+  const envelope = await readEnvelopeForDeal(dealId);
   let contractViewUrl: string | null = null;
-  const signable = envelope?.status === "SENT" || envelope?.status === "DELIVERED" || envelope?.status === "PENDING";
+  // recordBuyerSignature fails closed while the schema gate is closed, so a
+  // "signable" envelope would render a ceremony whose submit can only 503. Report
+  // it truthfully as not signable instead.
+  const signable =
+    isExecutedArtifactEnabled() &&
+    (envelope?.status === "SENT" || envelope?.status === "DELIVERED" || envelope?.status === "PENDING");
   if (signable && envelope?.documentVersionId) {
     // Record first-view evidence (best-effort) and mint a view URL.
-    if (!envelope.viewedAt) await prisma.eSignEnvelope.update({ where: { dealId }, data: { viewedAt: new Date() } }).catch(() => {});
+    // Narrowed RETURNING — an unprojected update returns every scalar.
+    if (!envelope.viewedAt) await prisma.eSignEnvelope.update({ where: { dealId }, data: { viewedAt: new Date() }, select: { id: true } }).catch(() => {});
     const contract = await prisma.contractVersion.findUnique({ where: { id: envelope.documentVersionId } });
     if (contract) contractViewUrl = await getContractViewUrl(contract.documentUrl);
   }
@@ -110,29 +117,12 @@ export async function POST(request: NextRequest, { params }: Props) {
 
     return successResponse({ envelopeId: prepared.envelopeId, status: prepared.status, contractViewUrl });
   } catch (err) {
+    if (err instanceof ESignSchemaUnavailableError) {
+      logger.warn("[buyer/esign] prepare refused — e-sign schema gate closed:", err);
+      return errorResponse("ESIGN_UNAVAILABLE", "Electronic signing is temporarily unavailable while contract e-signature compliance review is completed. Your deal is unaffected — our team will reach out with next steps.", 503);
+    }
     if (err instanceof NoSignableDocumentError) {
       return errorResponse("NO_SIGNABLE_DOCUMENT", "The approved contract is not available to sign yet. Please try again shortly.", 409);
-    }
-    // Re-issuing over a terminal (expired/voided/declined) attempt needs the
-    // ESignEnvelopeHistory archive, which this database does not have, so
-    // prepareBuyerSigningEnvelope fails closed rather than overwrite immutable
-    // terminal signing evidence. That is the correct refusal — but "Please try
-    // again" would be a lie: retrying can never succeed, and the buyer would be
-    // stuck re-clicking forever. Say so honestly and raise it as the operational
-    // exception it is, so it reaches a human instead of the buyer's patience.
-    if (err instanceof EsignExtendedSchemaUnavailableError) {
-      logger.error(
-        "[buyer/esign] OPERATIONAL EXCEPTION — signing cannot be re-issued for deal " +
-          `${dealId}: the e-sign consent/history schema is not applied. A previous ` +
-          "signing attempt is terminal and cannot be archived. Requires migrations " +
-          "20261014000000 + 20261015000000 and ESIGN_EXTENDED_SCHEMA_ENABLED=true.",
-        err,
-      );
-      return errorResponse(
-        "SIGNING_UNAVAILABLE",
-        "Signing is temporarily unavailable for this deal. Our team has been notified and will reach out — you do not need to try again.",
-        503,
-      );
     }
     logger.error("[buyer/esign] failed to prepare in-house signing:", err);
     return errorResponse("INTERNAL_ERROR", "We couldn't start the signing process. Please try again.", 500);

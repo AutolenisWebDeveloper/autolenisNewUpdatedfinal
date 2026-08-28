@@ -6,9 +6,9 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
-import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { PREMIUM_FEE_CENTS } from "@/lib/constants";
 import AdminDealTabs from "@/components/admin/AdminDealTabs";
+import { LEGACY_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 export const dynamic = "force-dynamic";
 interface Props { params: Promise<{ dealId: string }> }
@@ -28,7 +28,7 @@ export default async function AdminDealDetailPage({ params }: Props) {
       buyer: { include: { user: true } },
       offer: { include: { dealer: { include: { user: true } }, auction: { include: { deposit: true } } } },
       contractScans: { orderBy: { scannedAt: "desc" } },
-      eSignEnvelope: { select: esignEnvelopeSelect() },
+      eSignEnvelope: { select: LEGACY_ENVELOPE_SELECT },
       pickup: true,
     },
   });

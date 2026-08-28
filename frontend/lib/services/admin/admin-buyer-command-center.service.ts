@@ -3,7 +3,6 @@
 // V4 requirement: Admin console is command-and-control, not passive reporting.
 
 import { prisma } from "@/lib/prisma";
-import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { DealStatus } from "@prisma/client";
 import { canTransition } from "@/lib/services/deal/deal.service";
 
@@ -337,8 +336,10 @@ export async function getAdminBuyerDetailData(buyerId: string) {
               dealer: { select: { dealershipName: true, city: true, state: true } },
             },
           },
-          // Narrowed through the schema gate (lib/services/esign/envelope-schema).
-          eSignEnvelope: { select: esignEnvelopeSelect() },
+          // Explicit projection — `eSignEnvelope: true` selects every scalar,
+          // including the columns migrations 20261014/20261015 add but production
+          // does not yet have. Only these four are serialized below.
+          eSignEnvelope: { select: { status: true, docusignEnvelopeId: true, sentAt: true, completedAt: true } },
           pickup: true,
           financing: true,
           contractVersions: { orderBy: { uploadedAt: "desc" }, take: 1 },

@@ -9,11 +9,8 @@ import { requirePermission } from "@/lib/auth/permissions";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { toAdminEvidencePackage } from "@/lib/services/esign/esign-dto";
-import {
-  esignEnvelopeSelect,
-  toEnvelopeView,
-  canQueryExtendedEnvelopeFields,
-} from "@/lib/services/esign/envelope-schema";
+import { readEnvelopeForDeal } from "@/lib/services/esign/buyer-signing.service";
+import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -28,21 +25,17 @@ export async function GET(request: NextRequest, { params }: Props) {
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
   if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or OPERATIONS_ADMIN required", 403);
 
-  const envelope = toEnvelopeView(
-    await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: esignEnvelopeSelect() }),
-  );
+  const envelope = await readEnvelopeForDeal(dealId);
   if (!envelope) return adminError("NOT_FOUND", "No signing record for this deal", 404);
 
-  // ESignEnvelopeHistory is created by an unapplied migration
-  // (20261014000000_esign_envelope_history); the table does not exist in this
-  // database, and prepareBuyerSigningEnvelope refuses to supersede a terminal
-  // attempt without it, so there are no archived attempts to return. Query it
-  // only behind the gate rather than 500-ing this export.
-  const history = canQueryExtendedEnvelopeFields()
-    ? await prisma.eSignEnvelopeHistory.findMany({
-        where: { dealId },
-        orderBy: { attemptNumber: "asc" },
-      })
+  // e_sign_envelope_history only exists once migration 20261014 is applied and the
+  // gate is opened. While it is closed the archive is genuinely absent, so the
+  // export reports `historyAvailable: false` rather than presenting an empty array
+  // as "this deal has no superseded attempts" — an admin reading a forensic export
+  // must be able to tell an empty archive from an absent one.
+  const historyAvailable = isExecutedArtifactEnabled();
+  const history = historyAvailable
+    ? await prisma.eSignEnvelopeHistory.findMany({ where: { dealId }, orderBy: { attemptNumber: "asc" } })
     : [];
 
   // Audit the forensic export itself (who exported the full package, when).
@@ -50,8 +43,8 @@ export async function GET(request: NextRequest, { params }: Props) {
     action: "ESIGN_EVIDENCE_EXPORTED",
     entityType: "ESignEnvelope",
     entityId: envelope.id,
-    metadata: { dealId, attempts: history.length + 1 },
+    metadata: { dealId, attempts: history.length + 1, historyAvailable },
   });
 
-  return adminSuccess(toAdminEvidencePackage(envelope, history));
+  return adminSuccess(toAdminEvidencePackage(envelope, history, historyAvailable));
 }

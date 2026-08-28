@@ -4,7 +4,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import { prepareBuyerSigningEnvelope, NoSignableDocumentError } from "@/lib/services/esign/buyer-signing.service";
+import { prepareBuyerSigningEnvelope, NoSignableDocumentError, ESignSchemaUnavailableError } from "@/lib/services/esign/buyer-signing.service";
 import { sendDealerEsignInitiatedEmail } from "@/lib/services/email/resend.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -46,6 +46,15 @@ export async function POST(request: NextRequest, { params }: Props) {
     const prepared = await prepareBuyerSigningEnvelope(dealId, { signerName, signerEmail: signerEmail ?? undefined });
     envelopeId = prepared.envelopeId;
   } catch (err) {
+    if (err instanceof ESignSchemaUnavailableError) {
+      logger.warn("[esign] admin prepare refused — e-sign schema gate closed:", err);
+      return adminError(
+        "ESIGN_UNAVAILABLE",
+        "Electronic signing is disabled: ESIGN_EXECUTED_ARTIFACT_ENABLED is off because the consent / " +
+          "executed-artifact migrations (20261014, 20261015) are not applied to this database.",
+        503,
+      );
+    }
     if (err instanceof NoSignableDocumentError) {
       return adminError("NO_SIGNABLE_DOCUMENT", "No approved contract is available to sign for this deal yet.", 409);
     }

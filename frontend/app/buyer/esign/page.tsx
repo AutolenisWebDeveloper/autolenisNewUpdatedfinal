@@ -4,9 +4,9 @@ export const metadata: Metadata = { title: "Sign Documents", robots: { index: fa
 
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { PenLine } from "lucide-react";
 import SigningCeremony from "@/components/buyer/SigningCeremony";
+import { BUYER_SAFE_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +14,7 @@ export default async function ESignPage() {
   const buyer = await requireBuyer();
   const deal = await prisma.deal.findFirst({
     where: { buyerId: buyer.id },
-    // Narrowed through the schema gate — a bare `include: true` selects every
-    // scalar on the model, including columns this database does not have.
-    include: { eSignEnvelope: { select: esignEnvelopeSelect() } },
+    include: { eSignEnvelope: { select: BUYER_SAFE_ENVELOPE_SELECT } },
     orderBy: { createdAt: "desc" },
   });
 

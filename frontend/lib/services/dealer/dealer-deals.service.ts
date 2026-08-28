@@ -3,8 +3,8 @@
 // All queries scope by dealerId via offer.dealerId to ensure ownership.
 
 import { prisma } from "@/lib/prisma";
-import { esignEnvelopeSelect, toEnvelopeView } from "@/lib/services/esign/envelope-schema";
 import { PickupStatus, type DealStatus } from "@prisma/client";
+import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
 
 export interface DealerDealSummary {
   id: string;
@@ -128,11 +128,14 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
         },
       },
       // Executed-copy availability only — never the storage key/hash or forensic
-      // signer evidence (§11).
-      // executedDocumentKey only exists behind the e-sign schema gate; the
-      // narrowed select keeps this query valid against the live schema and
-      // toEnvelopeView below reports the executed copy as unavailable.
-      eSignEnvelope: { select: esignEnvelopeSelect() },
+      // signer evidence (§11). executedDocumentKey is projected ONLY while the
+      // executed-artifact schema gate is open; with migrations 20261014/20261015
+      // unapplied the column does not exist and no executed copy can exist either.
+      eSignEnvelope: {
+        select: isExecutedArtifactEnabled()
+          ? { status: true, executedDocumentKey: true }
+          : { status: true },
+      },
     },
   });
   if (!deal) return null;
@@ -145,13 +148,9 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
     contractShieldStatus: deal.contractShieldStatus,
     financingPath: deal.financingPath,
     offer: deal.offer,
-    executedContractAvailable: (() => {
-      // toEnvelopeView reports executedDocumentKey as null when the e-sign
-      // schema gate is off, which is truthful: with the migration unapplied no
-      // executed artifact is ever generated, so none is available to offer.
-      const env = toEnvelopeView(deal.eSignEnvelope);
-      return env?.status === "COMPLETED" && !!env.executedDocumentKey;
-    })(),
+    executedContractAvailable:
+      deal.eSignEnvelope?.status === "COMPLETED" &&
+      !!(deal.eSignEnvelope as { executedDocumentKey?: string | null } | null)?.executedDocumentKey,
     buyer: deal.buyer
       ? {
           firstName: deal.buyer.firstName,

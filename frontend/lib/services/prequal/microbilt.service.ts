@@ -42,6 +42,9 @@ export const PROVIDER_ERROR_REASONS: ReadonlySet<string> = new Set([
   // swallowed into a plain MANUAL_REVIEW carrying no reason at all.
   "EMPTY_RESPONSE",
   "UNPARSEABLE_RESPONSE",
+  // MsgRqHdr identity/routing env vars missing — an ops config failure caught
+  // before the call, so it must page rather than sit as an ordinary review.
+  "IDENTITY_NOT_CONFIGURED",
 ]);
 
 // A recorded reason has the grammar  BASE[:TYPE][:CODE]  where BASE is one of
@@ -78,11 +81,17 @@ export function isProviderErrorReason(reason: string | undefined | null): boolea
 export type ProviderFailureClass = "REQUEST_REJECTED" | "PROVIDER_UNAVAILABLE" | "UNKNOWN";
 
 // Config faults are ours, not the provider's — a retry cannot fix them.
+// Keep this in step with PROVIDER_ERROR_REASONS: a reason added there but not
+// classified here silently degrades to UNKNOWN, which tells an operator the
+// failure "could not be classified" for what is in fact a plain missing env
+// var. microbilt-provider-outcome.test.ts enforces that every reason is either
+// classified or explicitly listed as ambiguous.
 const REQUEST_REJECTED_BASES: ReadonlySet<string> = new Set([
   "CONFIG_ERROR",
   "CONFIG_MISMATCH",
   "URL_NOT_CONFIGURED",
   "REPORT_URL_INVALID",
+  "IDENTITY_NOT_CONFIGURED",
 ]);
 const PROVIDER_UNAVAILABLE_BASES: ReadonlySet<string> = new Set(["TIMEOUT", "NETWORK_ERROR"]);
 
@@ -178,6 +187,9 @@ function getEncryptionKey(): Buffer {
 // OAuth lives on a SEPARATE path (NOT under /iPredict): /OAuth/Token
 // New *_BASE_URL / *_SANDBOX_URL env vars must include the full /GetReport (or
 // /OAuth/Token) suffix. Legacy vars are kept as fallback for backward compat.
+// Account identity + product routing are NOT URL/header concerns — they live in
+// the request body's MsgRqHdr and come from MICROBILT_MEMBER_ID /
+// MICROBILT_MEMBER_PASSWORD / MICROBILT_USERNAME / MICROBILT_PRODUCT_ID.
 
 function isSandboxMode(): boolean {
   return process.env.MICROBILT_SANDBOX === "true";
@@ -204,13 +216,69 @@ function getOAuthUrl(): string | null {
   );
 }
 
+// ─── MsgRqHdr identity & product routing (iPredict_6.yaml spec) ──────────────
+// The spec's security scheme is `oauth: []` ONLY. The Bearer token authenticates
+// the CALLER, but carries no indication of which member account or which product
+// the request is for — that routing lives in the request BODY's MsgRqHdr. A
+// request without it cannot be routed and is rejected by MicroBilt.
+//
+// All four values are account-specific and issued by MicroBilt. There is no safe
+// default for any of them, so each is required rather than defaulted.
+//
+// MemberPwd is a CREDENTIAL: read only inside this adapter, never logged, and
+// never surfaced by getMicroBiltConfigStatus().
+const IDENTITY_ENV = {
+  MemberId:  "MICROBILT_MEMBER_ID",
+  MemberPwd: "MICROBILT_MEMBER_PASSWORD",
+  UserName:  "MICROBILT_USERNAME",
+  ProductID: "MICROBILT_PRODUCT_ID",
+} as const;
+
+interface MicroBiltIdentity {
+  MemberId:  string;
+  MemberPwd: string;
+  UserName:  string;
+  ProductID: string;
+}
+
+/**
+ * Resolve the four MsgRqHdr identity fields from env.
+ *
+ * A value that is absent OR only whitespace counts as MISSING: a blank identity
+ * field is worse than an absent one, because it looks configured while still
+ * being unroutable — the same class of bug as sending an empty header.
+ *
+ * Returns the env var NAMES that are missing (never their values) so callers can
+ * tell ops exactly what to set without leaking a credential into a log line.
+ */
+function resolveIdentity(): { identity: MicroBiltIdentity | null; missing: string[] } {
+  const read = (envName: string): string | null => process.env[envName]?.trim() || null;
+
+  const MemberId  = read(IDENTITY_ENV.MemberId);
+  const MemberPwd = read(IDENTITY_ENV.MemberPwd);
+  const UserName  = read(IDENTITY_ENV.UserName);
+  const ProductID = read(IDENTITY_ENV.ProductID);
+
+  const missing: string[] = [];
+  if (!MemberId)  missing.push(IDENTITY_ENV.MemberId);
+  if (!MemberPwd) missing.push(IDENTITY_ENV.MemberPwd);
+  if (!UserName)  missing.push(IDENTITY_ENV.UserName);
+  if (!ProductID) missing.push(IDENTITY_ENV.ProductID);
+
+  if (MemberId && MemberPwd && UserName && ProductID) {
+    return { identity: { MemberId, MemberPwd, UserName, ProductID }, missing };
+  }
+  return { identity: null, missing };
+}
+
 /**
  * Non-secret MicroBilt configuration snapshot for the admin system-health page.
- * Never returns client secret or token — only URLs, product, CAID, and a
- * boolean indicating whether credentials are present.
+ * Never returns client secret, token, or MemberPwd — only URLs, product, CAID,
+ * and booleans indicating whether each credential is present.
  */
 export function getMicroBiltConfigStatus() {
   const clientId = process.env.MICROBILT_CLIENT_ID;
+  const { missing: missingIdentity } = resolveIdentity();
   return {
     mode: isSandboxMode() ? ("SANDBOX" as const) : ("PRODUCTION" as const),
     reportUrl: getReportUrl(),
@@ -222,7 +290,48 @@ export function getMicroBiltConfigStatus() {
       process.env.MICROBILT_CLIENT_SECRET &&
       !clientId.includes("placeholder")
     ),
+    // MsgRqHdr identity/routing readiness. Presence booleans only — MemberPwd is
+    // a credential and must never appear here. ProductID is a product SELECTOR,
+    // not a secret, and ops needs its value to confirm the right product is
+    // configured, so it is the one identity value returned verbatim.
+    identity: {
+      memberIdPresent:  !!process.env[IDENTITY_ENV.MemberId]?.trim(),
+      memberPwdPresent: !!process.env[IDENTITY_ENV.MemberPwd]?.trim(),
+      userNamePresent:  !!process.env[IDENTITY_ENV.UserName]?.trim(),
+      productId:        process.env[IDENTITY_ENV.ProductID]?.trim() || null,
+      missing:          missingIdentity,
+    },
   };
+}
+
+// ─── Credential redaction before the report is persisted ────────────────────
+// iPredict echoes the submitted request back in the response (`MBCLVRq`), so our
+// own MsgRqHdr.MemberPwd can return inside the body we store. The stored
+// rawResponse is decryptable by an authorized operator (scripts/decrypt-prequal-
+// error.ts prints the whole document), and it lives on a consumer-report record
+// subject to retention and disclosure rules — a place a MicroBilt account
+// password has no business being, even encrypted.
+//
+// Redaction is keyed on the FIELD NAME rather than a fixed path, because we do
+// not control how the provider nests the echo.
+const REDACTED_RESPONSE_KEYS = new Set(["memberpwd", "memberpassword", "password"]);
+const MAX_REDACT_DEPTH = 20;
+
+function redactCredentials(value: unknown, depth = 0): unknown {
+  if (value === null || typeof value !== "object" || depth > MAX_REDACT_DEPTH) return value;
+  if (Array.isArray(value)) return value.map((v) => redactCredentials(v, depth + 1));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    out[k] = REDACTED_RESPONSE_KEYS.has(k.toLowerCase())
+      ? "[REDACTED]"
+      : redactCredentials(v, depth + 1);
+  }
+  return out;
+}
+
+/** Serialize a provider response for storage, with credentials stripped. */
+function serializeRawResponse(raw: unknown): string {
+  return JSON.stringify(redactCredentials(raw));
 }
 
 // AES-256-GCM encryption for rawResponse
@@ -424,7 +533,11 @@ function errorResult(reason: string): IPredicResult {
 function errorResultWithBody(reason: string, body: unknown): IPredicResult {
   return {
     ...errorResult(reason),
-    rawResponse: encryptRawResponse(JSON.stringify({ referred: true, reason, response: body })),
+    // redactCredentials: iPredict echoes our request (MBCLVRq), which now carries
+    // MsgRqHdr.MemberPwd. Strip it before this is encrypted and persisted.
+    rawResponse: encryptRawResponse(
+      JSON.stringify({ referred: true, reason, response: redactCredentials(body) }),
+    ),
   };
 }
 
@@ -555,45 +668,37 @@ interface CallIPredictArgs {
 }
 
 /**
- * MsgRqHdr identity fields, included ONLY for the env vars that are actually
- * set. MicroBilt has not yet confirmed the request contract, so this is
- * plumbing, not a commitment: with every var unset the spread contributes
- * nothing and the request stays byte-identical to the one we send today. A
- * blank value counts as unset — an empty ProductID on the wire is worse than
- * an absent one.
- *
- * MICROBILT_MEMBER_PWD is a credential: it is read here and nowhere else, and
- * is never logged nor returned by getMicroBiltConfigStatus().
- */
-function identityHeaderFields(): Record<string, string> {
-  const fields: Record<string, string> = {};
-  const add = (key: string, raw: string | undefined) => {
-    const value = raw?.trim();
-    if (value) fields[key] = value;
-  };
-  add("ProductID", process.env.MICROBILT_PRODUCT_ID);
-  add("MemberId",  process.env.MICROBILT_MEMBER_ID);
-  add("MemberPwd", process.env.MICROBILT_MEMBER_PWD);
-  add("UserName",  process.env.MICROBILT_USERNAME);
-  return fields;
-}
-
-/**
  * Build the MicroBilt iPredict request payload. Employment fields are NEVER
  * included. Names + address fields are uppercased per MicroBilt's ingest spec.
  *
- * DEFERRED, awaiting a confirmed request example from MicroBilt support: the
- * MBCLVRq envelope, ContactInfo object-vs-array, and whether the X-CAID /
+ * The MsgRqHdr identity fields are REQUIRED and resolved by resolveIdentity()
+ * before this is called — the spec's security scheme is `oauth: []` only, so the
+ * Bearer token identifies the caller but selects neither the member account nor
+ * the product. callIPredict fails closed (IDENTITY_NOT_CONFIGURED) rather than
+ * spending an inquiry on a request MicroBilt cannot route.
+ *
+ * STILL DEFERRED, awaiting a confirmed request example from MicroBilt support:
+ * the MBCLVRq envelope, ContactInfo object-vs-array, and whether the X-CAID /
  * X-Product headers are read at all. Changing several unknowns at once would
- * make the next failure uninterpretable, so none of them is changed here.
+ * make the next failure uninterpretable, so none of those is changed here.
  */
-function buildPayload(buyer: MicroBiltBuyerPII, gate: IncomeGateResult) {
+function buildPayload(
+  buyer: MicroBiltBuyerPII,
+  gate: IncomeGateResult,
+  identity: MicroBiltIdentity,
+) {
   return {
     MsgRqHdr: {
+      // Identity + product routing (spec field order). Without these MicroBilt
+      // cannot resolve the member account or select IPredict Advantage, and
+      // rejects the request regardless of a valid Bearer token.
+      MemberId:    identity.MemberId,
+      MemberPwd:   identity.MemberPwd,
+      UserName:    identity.UserName,
+      ProductID:   identity.ProductID,
       RequestType: "N",
       ReasonCode:  "3",
       RefNum:      randomUUID(),
-      ...identityHeaderFields(),
     },
     RequestedAmt: {
       // Income-derived: represents what the buyer can afford at 20% DTI/7%/72mo.
@@ -633,6 +738,7 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   const reportUrl = getReportUrl();
   const oauthUrl  = getOAuthUrl();
   const clientId  = process.env.MICROBILT_CLIENT_ID;
+  const { identity, missing: missingIdentity } = resolveIdentity();
 
   // ── Production URL safety guards (iPredict_6.yaml cutover) ──────────────────
   // Sandbox mode already returned above, so we are in production here. Refuse to
@@ -681,6 +787,21 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
       "Routing prequalification to MANUAL_REVIEW until deployment env is fixed.",
     );
     return errorResult("CONFIG_ERROR");
+  }
+
+  // ── MsgRqHdr identity guard (fail closed BEFORE spending an inquiry) ───────
+  // A GetReport call missing MemberId / MemberPwd / UserName / ProductID cannot
+  // be routed to the member account or the product, so MicroBilt rejects it —
+  // which historically surfaced only as an opaque HTTP_<status>. Stop here
+  // instead and name exactly which env vars ops must set. Only the variable
+  // NAMES are logged; the values (one of which is a credential) never are.
+  if (!identity) {
+    logger.error(
+      "[microbilt] CRITICAL: MsgRqHdr identity/routing is incomplete — missing " +
+        missingIdentity.join(", ") +
+        ". Routing to MANUAL_REVIEW without calling GetReport.",
+    );
+    return errorResult("IDENTITY_NOT_CONFIGURED");
   }
 
   // ── STEP 1: Compute income gate (PASS 1 — UNKNOWN tier, 10.5% APR) ─────────
@@ -757,7 +878,7 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
     return errorResult("OAUTH_FAILED");
   }
 
-  const payload = buildPayload(args.buyer, gate);
+  const payload = buildPayload(args.buyer, gate, identity);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), MICROBILT_TIMEOUT_MS);
@@ -1005,7 +1126,7 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
     maxLoanAmountCents,
     ofacFlagged,
     expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-    rawResponse: encryptRawResponse(JSON.stringify(raw)),
+    rawResponse: encryptRawResponse(serializeRawResponse(raw)),
     mocked: false,
     // Decision detail comes from the FINAL (tier-aware) income gate.
     frontEndDtiBps:               hasIncome ? finalGate.frontEndDtiBps : null,

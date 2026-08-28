@@ -2,7 +2,6 @@
 
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
-import { esignEnvelopeSelect, toEnvelopeView } from "@/lib/services/esign/envelope-schema";
 import { Badge } from "@/components/ui/badge";
 import { PenLine, AlertTriangle } from "lucide-react";
 import ESignHubRowActions from "@/components/admin/ESignHubRowActions";
@@ -11,17 +10,25 @@ export const dynamic = "force-dynamic";
 export default async function AdminESignPage() {
   await requireAdmin();
 
-  let envelopes: Awaited<ReturnType<typeof prisma.eSignEnvelope.findMany<{ include: { deal: { include: { buyer: true } } } }>>> = [];
+  // Explicit projection — an `include` does NOT narrow the parent's scalar list, so
+  // a bare include would still select the columns migrations 20261014/20261015 add
+  // but production does not have. Only these fields are rendered below.
+  const ENVELOPE_LIST_SELECT = {
+    id: true,
+    dealId: true,
+    status: true,
+    docusignEnvelopeId: true,
+    createdAt: true,
+    deal: { select: { buyer: { select: { firstName: true, lastName: true } } } },
+  } as const;
+  let envelopes: Awaited<ReturnType<typeof prisma.eSignEnvelope.findMany<{ select: typeof ENVELOPE_LIST_SELECT }>>> = [];
   let loadError: string | null = null;
 
   try {
-    envelopes = (await prisma.eSignEnvelope.findMany({
-      // Narrowed through the schema gate (lib/services/esign/envelope-schema):
-      // a bare findMany selects every scalar, including the columns the
-      // unapplied e-sign migration would add.
-      select: { ...esignEnvelopeSelect(), deal: { include: { buyer: true } } },
+    envelopes = await prisma.eSignEnvelope.findMany({
+      select: ENVELOPE_LIST_SELECT,
       orderBy: { createdAt: "desc" }, take: 50,
-    })).map((e) => toEnvelopeView(e)!) as typeof envelopes;
+    });
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Unknown error loading envelopes";
   }

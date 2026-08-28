@@ -1,10 +1,10 @@
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
-import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { PenLine } from "lucide-react";
 import { AdminESignActions } from "@/components/admin/AdminESignActions";
+import { LEGACY_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
 export const dynamic = "force-dynamic";
@@ -14,7 +14,7 @@ export default async function AdminDealESignPage({ params }: Props) {
   await requireAdmin();
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
-    include: { buyer: true, eSignEnvelope: { select: esignEnvelopeSelect() } },
+    include: { buyer: true, eSignEnvelope: { select: LEGACY_ENVELOPE_SELECT } },
   });
   if (!deal) notFound();
 

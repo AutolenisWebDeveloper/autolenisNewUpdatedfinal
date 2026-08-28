@@ -14,11 +14,16 @@ From MicroBilt (iPredict Advantage), obtain:
 - **Endpoint URLs** — the OAuth token URL (`…/OAuth/Token`) and the report URL
   (`…/iPredict/GetReport`). MicroBilt provides separate **sandbox**
   (`apitest.microbilt.com`) and **production** (`api.microbilt.com`) hosts.
-- **A worked request example.** Ask MicroBilt support for one. The exact request
-  contract is **not confirmed**: iPredict has never returned a parsed report in
-  production, and the probable causes are payload-shaped (the `MsgRqHdr` identity
-  fields, whether an `MBCLVRq` envelope is required, and whether `ContactInfo` is
-  an object or an array). Do not guess at the shape — see §6 and §7.
+- **The four `MsgRqHdr` identity values** — `MemberId`, `MemberPwd`, `UserName` and
+  `ProductID`. The spec's security scheme is `oauth: []` only: the Bearer token
+  identifies the *caller* but selects neither the member account nor the product,
+  so these travel in the request body. All four are account-specific and issued by
+  MicroBilt. Without them the adapter refuses to call GetReport at all (§5).
+- **A worked request example.** Ask MicroBilt support for one. Parts of the request
+  contract remain **unconfirmed**: iPredict has never returned a parsed report in
+  production, and the remaining suspects are payload-shaped (whether an `MBCLVRq`
+  envelope is required, and whether `ContactInfo` is an object or an array). Do not
+  guess at those — see §6 and §7.
 
 > **Not confirmed as required:** the adapter also sends `X-CAID` and `X-Product`
 > headers, populated from `MICROBILT_CAID` / `MICROBILT_PRODUCT`. **The published
@@ -39,12 +44,12 @@ From MicroBilt (iPredict Advantage), obtain:
 | `MICROBILT_OAUTH_SANDBOX_URL` | Sandbox OAuth token URL | As above. |
 | `MICROBILT_CLIENT_ID` | OAuth client id | Must NOT contain the literal `placeholder` (guard → MANUAL_REVIEW). |
 | `MICROBILT_CLIENT_SECRET` | OAuth client secret | Read only inside the adapter; never logged or sent to the client. |
-| `MICROBILT_CAID` | `X-CAID` header | **Optional / unverified** — not defined by the published iPredict spec. Safe to leave unset. |
+| `MICROBILT_MEMBER_ID` | `MsgRqHdr.MemberId` | **Required for a real pull.** From MicroBilt. |
+| `MICROBILT_MEMBER_PASSWORD` | `MsgRqHdr.MemberPwd` | **Required.** A credential — read only inside the adapter, never logged, never shown on the health page, and stripped from the stored report before encryption. |
+| `MICROBILT_USERNAME` | `MsgRqHdr.UserName` | **Required.** From MicroBilt. |
+| `MICROBILT_PRODUCT_ID` | `MsgRqHdr.ProductID` | **Required.** The value that selects IPredict Advantage. |
+| `MICROBILT_CAID` | `X-CAID` header | **Optional / unverified** — not defined by the published iPredict spec; the product is selected by `MsgRqHdr.ProductID`, not this header. Safe to leave unset. |
 | `MICROBILT_PRODUCT` | `X-Product` header | **Optional / unverified** — as above. Defaults to `IPredict Advantage` if unset. |
-| `MICROBILT_PRODUCT_ID` | `MsgRqHdr.ProductID` | **Optional, opt-in.** Sent only when set; unset leaves the request byte-identical to today's. Awaiting MicroBilt's confirmed example — do not set speculatively. |
-| `MICROBILT_MEMBER_ID` | `MsgRqHdr.MemberId` | As above. |
-| `MICROBILT_MEMBER_PWD` | `MsgRqHdr.MemberPwd` | As above. **Secret** — read only inside the adapter; never logged, never returned by the health endpoint. |
-| `MICROBILT_USERNAME` | `MsgRqHdr.UserName` | As above. |
 | `CURRENT_TERMS_VERSION` | Stamped on the `PrequalConsent` audit row | Optional; defaults to `2026-01-01`. |
 
 Legacy fallbacks still honored: `IPREDICT_GET_REPORT_URL` (report), `MICROBILT_OAUTH_TOKEN_URL` (OAuth).
@@ -69,6 +74,10 @@ anywhere in the repo; setting them configures nothing.
 
 ## 4. Exact steps for one real test pull (on yourself / a consenting subject)
 
+0. **Set the four `MsgRqHdr` identity vars** (`MICROBILT_MEMBER_ID`, `MICROBILT_MEMBER_PASSWORD`,
+   `MICROBILT_USERNAME`, `MICROBILT_PRODUCT_ID`). Without all four the adapter refuses to call
+   GetReport at all. Confirm via the admin integrations health check that
+   `identity.missing` is empty.
 1. **Sandbox smoke test first.** Set `MICROBILT_SANDBOX=true`, submit one prequal at
    `/buyer/prequal`. Confirm it returns APPROVED (mock) with no network/OAuth. This proves the app
    wiring end-to-end without spending a real inquiry.
@@ -88,13 +97,19 @@ anywhere in the repo; setting them configures nothing.
    - A `ComplianceEvent` was logged (approval / adverse-action / under-review as appropriate), and the
      corresponding email was sent.
 6. **Inspect the raw response (authorized only).** Use `scripts/decrypt-prequal-error.ts` with
-   `PREQUAL_ENCRYPTION_KEY` to decrypt the stored `rawResponse` for troubleshooting.
+   `PREQUAL_ENCRYPTION_KEY` to decrypt the stored `rawResponse` for troubleshooting. If iPredict
+   echoed the request back, `MemberPwd` is stored as `[REDACTED]` — the credential is stripped
+   before encryption, so it is never persisted on the consumer-report record.
 
 ## 5. Fail-closed behavior you should expect (not bugs)
 
 - **Missing/placeholder credentials or an `apitest.` URL in production** → the pull routes to
   `MANUAL_REVIEW` (reason `CONFIG_ERROR` / `CONFIG_MISMATCH` / `URL_NOT_CONFIGURED`) and alerts ops —
   it never silently fake-approves.
+- **Any of the four `MsgRqHdr` identity vars missing or blank** → `MANUAL_REVIEW` with reason
+  `IDENTITY_NOT_CONFIGURED`, **before** the GetReport call, so a misconfigured deployment never
+  spends a real inquiry on a request MicroBilt cannot route. The ops log names exactly which
+  environment variables are unset (names only — never their values).
 - **Timeout (10s), OAuth failure, network error, HTTP error, or an iPredict ERROR body** →
   `MANUAL_REVIEW` with a provider-error reason + admin alert; never thrown to the buyer.
 - **OFAC screening data absent on an otherwise-approved response** → treated as **indeterminate** and
@@ -110,7 +125,7 @@ Every failure is recorded, fail-closed, and diagnosable without a live retry:
    `PREQUAL_PROVIDER_FAILURE` compliance event and in the admin alert email) has the
    grammar `BASE[:TYPE][:CODE]` — e.g. `HTTP_400:APPLICATION:MB1042`.
    - `BASE` is the failure kind (`HTTP_<status>`, `IPREDICT_ERROR`, `TIMEOUT`,
-     `EMPTY_RESPONSE`, `REPORT_URL_INVALID`, …).
+     `EMPTY_RESPONSE`, `REPORT_URL_INVALID`, `IDENTITY_NOT_CONFIGURED`, …).
    - `TYPE` is MicroBilt's own `RESPONSE.STATUS.error.type`: **`APPLICATION` = our
      request is malformed** (retrying it unchanged cannot help — an engineer must fix
      it); **`SYSTEM` = their service failed** (transient, may succeed on retry).
@@ -126,7 +141,10 @@ Every failure is recorded, fail-closed, and diagnosable without a live retry:
    ```
 
    It is **never** written to an application log in cleartext. The stored copy is
-   capped at 16,000 characters and marks itself `truncated` if it was longer.
+   capped at 16,000 characters and marks itself `truncated` if it was longer. If
+   iPredict echoed our request back, `MemberPwd` reads `[REDACTED]` — the credential
+   is stripped *before* encryption, so it is never persisted on the consumer-report
+   record even though that record is decryptable by an authorized operator.
 3. **Check the config first on a `REQUEST_REJECTED` class.** `GET /api/admin/health/integrations`
    reports mode, URLs, product/CAID and whether credentials are present — no secrets.
 
@@ -134,12 +152,11 @@ Every failure is recorded, fail-closed, and diagnosable without a live retry:
 
 iPredict has never returned a parsed report in production. Control-flow analysis of the
 stored reasons rules out sandbox/host/credential/OAuth causes, which points at the request
-payload. The following are **suspected but unconfirmed** and are deliberately **not**
-changed until MicroBilt supplies a working request example:
+payload. The **`MsgRqHdr` identity fields are no longer on this list** — they are now sent
+and required (§2, §5), on the spec's own reading that `oauth: []` cannot select a member
+account or product. The following remain **suspected but unconfirmed** and are deliberately
+**not** changed until MicroBilt supplies a working request example:
 
-- **`MsgRqHdr` identity fields** — `ProductID` / `MemberId` / `MemberPwd` / `UserName`.
-  The env plumbing exists (§2) and each field is sent **only when its var is set**, so the
-  request is unchanged until you deliberately set one.
 - **The `MBCLVRq` envelope** — whether the request must be wrapped. Not added.
 - **`ContactInfo` arity** — object (today) vs array. Not changed.
 - **`X-CAID` / `X-Product` headers** — not defined by the published spec. Not removed.
