@@ -169,48 +169,49 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
     }
   }
 
-  // Fetch shortlist item count — only needed when prequal is approved
+  // Gather ALL journey facts unconditionally, exactly as
+  // /api/buyer/journey-status does, so the two genuinely compute the same stage
+  // from the same facts (M-3).
+  //
+  // These reads used to sit behind two nested short-circuits — the shortlist
+  // count only when prequal was approved, and the deal/deposit/auction records
+  // only when that count was > 0 — which broke the very invariant the comment
+  // claimed. A buyer mid-deal whose prequal had EXPIRED, or whose shortlist
+  // items were removed, produced deal = null here while the API still saw the
+  // deal, so the layout silently regressed their stage. Now that the sidebar
+  // gates on this stage, that regression would LOCK the entire Auction & Deal
+  // nav for a buyer who is in the middle of a deal.
   let shortlistCount = 0;
-  if (prequalApproved) {
-    try {
-      const shortlist = await prisma.shortlist.findUnique({
-        where: { buyerId: buyer.id },
-        select: { _count: { select: { items: true } } },
-      });
-      shortlistCount = shortlist?._count.items ?? 0;
-    } catch {
-      // Non-fatal: fall back to 0 so journey stage degrades gracefully
-      shortlistCount = 0;
-    }
-  }
-
-  // Fetch active deal for later-stage progression. Select the deal FACTS the
-  // shared journey machine keys on (not just status), plus the deposit/auction
-  // records — so this layout and /api/buyer/journey-status compute the SAME
-  // stage from the same facts (M-3).
   let activeDeal:
     | { status: string; financingPath: string | null; feePaidAt: Date | null; insuranceStatus: string; contractShieldStatus: string | null }
     | null = null;
   let depositPaid = false;
   let activeAuction = false;
-  if (shortlistCount > 0) {
-    try {
-      const [deal, deposit, auction] = await Promise.all([
-        prisma.deal.findFirst({
-          where: { buyerId: buyer.id },
-          orderBy: { createdAt: "desc" },
-          select: { status: true, financingPath: true, feePaidAt: true, insuranceStatus: true, contractShieldStatus: true },
-        }),
-        prisma.deposit.findFirst({ where: { buyerId: buyer.id, status: "PAID" }, select: { id: true } }),
-        prisma.auction.findFirst({ where: { buyerId: buyer.id, status: "ACTIVE" }, select: { id: true } }),
-      ]);
-      activeDeal = deal;
-      depositPaid = !!deposit;
-      activeAuction = !!auction;
-    } catch {
-      // Non-fatal: treat as no active deal
-      activeDeal = null;
-    }
+  // When the facts cannot be read at all, the stage computed from zeros is not
+  // "early journey" — it is UNKNOWN. Nav then fails OPEN (journey = null →
+  // every item rendered as a link) rather than confidently locking a buyer out
+  // of their own deal; each page still enforces its own access server-side.
+  let journeyFactsKnown = true;
+  try {
+    const [shortlist, deal, deposit, auction] = await Promise.all([
+      prisma.shortlist.findUnique({
+        where: { buyerId: buyer.id },
+        select: { _count: { select: { items: true } } },
+      }),
+      prisma.deal.findFirst({
+        where: { buyerId: buyer.id },
+        orderBy: { createdAt: "desc" },
+        select: { status: true, financingPath: true, feePaidAt: true, insuranceStatus: true, contractShieldStatus: true },
+      }),
+      prisma.deposit.findFirst({ where: { buyerId: buyer.id, status: "PAID" }, select: { id: true } }),
+      prisma.auction.findFirst({ where: { buyerId: buyer.id, status: "ACTIVE" }, select: { id: true } }),
+    ]);
+    shortlistCount = shortlist?._count.items ?? 0;
+    activeDeal = deal;
+    depositPaid = !!deposit;
+    activeAuction = !!auction;
+  } catch {
+    journeyFactsKnown = false;
   }
 
   // ── Journey stage (shared machine) ────────────────────────────────────────
@@ -263,7 +264,9 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
         {/* Journey-aware nav (lib/services/buyer/nav-gating): the sidebar renders
             items the buyer cannot reach yet as explained LOCKED entries instead
             of live links that silently redirect. */}
-        <BuyerSidebar journey={{ currentStage, completedStages, unlockedStages }} />
+        <BuyerSidebar
+          journey={journeyFactsKnown ? { currentStage, completedStages, unlockedStages } : null}
+        />
         <div className="flex-1 flex flex-col overflow-hidden pt-14 lg:pt-0">
           {/* Feature 3: Journey Navigator — suppressed on /buyer/requests/* by component itself */}
           <JourneyNavigator
