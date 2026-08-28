@@ -4,6 +4,7 @@ import { requirePermission } from "@/lib/auth/permissions";
 import { NextRequest } from "next/server";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { z } from "zod";
 import { voidEnvelope } from "@/lib/services/esign/esign.service";
 
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const { reason } = parsed.data;
 
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: esignEnvelopeSelect() });
   if (!envelope) return adminError("NOT_FOUND", "Envelope not found", 404);
   if (envelope.status === "VOIDED") return adminError("CONFLICT", "Envelope is already voided", 409);
   if (envelope.status === "COMPLETED") return adminError("CONFLICT", "Cannot void a completed envelope", 409);

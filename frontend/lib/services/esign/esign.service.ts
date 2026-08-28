@@ -9,6 +9,7 @@
 // no external e-signature provider.
 
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { ESignStatus } from "@prisma/client";
 import { isTerminalStatus } from "./buyer-signing.service";
 
@@ -27,7 +28,7 @@ export class TerminalEnvelopeError extends Error {
 // this). Marks the envelope SENT so the buyer's signing page becomes actionable.
 // Refuses to resurrect a TERMINAL record (immutable historical evidence).
 export async function sendEnvelope(dealId: string): Promise<void> {
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: esignEnvelopeSelect() });
   if (!envelope) throw new Error("Envelope not found");
   if (isTerminalStatus(envelope.status)) throw new TerminalEnvelopeError(envelope.status);
   await prisma.eSignEnvelope.update({ where: { dealId }, data: { status: ESignStatus.SENT, sentAt: new Date() } });
@@ -47,7 +48,7 @@ export async function sendEnvelope(dealId: string): Promise<void> {
 // Void an envelope (admin action). Provider-neutral DB status change. No-op on an
 // already-terminal record (a terminal signing record is immutable).
 export async function voidEnvelope(dealId: string, reason: string): Promise<void> {
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: esignEnvelopeSelect() });
   if (!envelope || isTerminalStatus(envelope.status)) return;
   await prisma.eSignEnvelope.updateMany({
     where: { id: envelope.id, status: envelope.status },

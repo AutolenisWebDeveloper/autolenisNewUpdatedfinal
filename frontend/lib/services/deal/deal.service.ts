@@ -4,6 +4,7 @@
 // CONTRACT_PENDING → CONTRACT_REVIEW → CONTRACT_APPROVED → SIGNING_PENDING
 
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { DealStatus, InsuranceStatus, Prisma } from "@prisma/client";
 import { emitDealStatusComms } from "../notifications/acquisition-comms";
 import { emitDealCompletionEvent } from "./deal-completion-event.service";
@@ -171,12 +172,12 @@ export async function getDealForBuyer(buyerId: string, dealId?: string) {
   if (dealId) {
     return prisma.deal.findFirst({
       where: { id: dealId, buyerId },
-      include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelope: true, pickup: true },
+      include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelope: { select: esignEnvelopeSelect() }, pickup: true },
     });
   }
   return prisma.deal.findFirst({
     where: { buyerId, status: { notIn: [DealStatus.COMPLETED, DealStatus.CANCELLED, DealStatus.REFUNDED] } },
-    include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelope: true, pickup: true },
+    include: { offer: { include: { dealer: true } }, contractScans: { orderBy: { scannedAt: "desc" }, take: 1 }, eSignEnvelope: { select: esignEnvelopeSelect() }, pickup: true },
     orderBy: { createdAt: "desc" },
   });
 }

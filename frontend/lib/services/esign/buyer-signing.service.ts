@@ -35,6 +35,14 @@ import {
   type ConsentSnapshot,
 } from "./consent-policy";
 import { generateAndUploadExecutedContract } from "./executed-contract.service";
+import {
+  isEsignExtendedSchemaEnabled,
+  esignEnvelopeSelect,
+  toEnvelopeView,
+  gateEnvelopeWrite,
+  canQueryExtendedEnvelopeFields,
+  EsignExtendedSchemaUnavailableError,
+} from "./envelope-schema";
 
 const CONTRACT_BUCKET = "dealer-contracts";
 const SIGNING_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
@@ -106,6 +114,12 @@ export function isTerminalStatus(status: ESignStatus): boolean {
 // immutable history record and cleared on the working row for a fresh attempt.
 type EnvelopeRow = NonNullable<Awaited<ReturnType<typeof prisma.eSignEnvelope.findUnique>>>;
 
+/** Read one envelope through the schema gate (never selects a missing column). */
+async function findEnvelopeByDeal(dealId: string): Promise<EnvelopeRow | null> {
+  const row = await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: esignEnvelopeSelect() });
+  return toEnvelopeView(row) as EnvelopeRow | null;
+}
+
 function historySnapshot(e: EnvelopeRow) {
   return {
     dealId: e.dealId,
@@ -156,7 +170,7 @@ export async function prepareBuyerSigningEnvelope(
   dealId: string,
   signer?: { signerUserId?: string; signerName?: string; signerEmail?: string },
 ): Promise<PrepareResult> {
-  const existing = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const existing = await findEnvelopeByDeal(dealId);
 
   // COMPLETED signed evidence is permanent — never superseded, never reset.
   if (existing?.status === "COMPLETED") {
@@ -214,16 +228,28 @@ export async function prepareBuyerSigningEnvelope(
   // on the observed terminal status ensures exactly one concurrent prepare wins
   // the supersede (so a terminal record is archived exactly once, never twice).
   if (existing && isTerminalStatus(existing.status)) {
+    // Superseding a terminal attempt is the ONE path that cannot degrade. It
+    // must archive the prior attempt into ESignEnvelopeHistory before re-using
+    // the one-per-deal working row; without that table the re-init would
+    // overwrite immutable terminal signing evidence in place. Fail closed
+    // rather than destroy evidence — the caller surfaces an operational error.
+    if (!isEsignExtendedSchemaEnabled()) {
+      throw new EsignExtendedSchemaUnavailableError(
+        `Re-issuing a signing envelope over a ${existing.status} attempt for deal ${dealId}`,
+      );
+    }
     const won = await prisma.$transaction(async (tx) => {
       const swap = await tx.eSignEnvelope.updateMany({
         where: { id: existing.id, status: existing.status },
-        data: { ...freshAttempt, attemptNumber: existing.attemptNumber + 1 },
+        data: gateEnvelopeWrite({ ...freshAttempt, attemptNumber: existing.attemptNumber + 1 }),
       });
       if (swap.count === 0) return false; // a concurrent prepare already superseded it
       await tx.eSignEnvelopeHistory.create({ data: historySnapshot(existing) });
       return true;
     });
-    const current = await prisma.eSignEnvelope.findUnique({ where: { id: existing.id } });
+    const current = toEnvelopeView(
+      await prisma.eSignEnvelope.findUnique({ where: { id: existing.id }, select: esignEnvelopeSelect() }),
+    );
     if (!current) throw new NoSignableDocumentError();
     void won;
     return {
@@ -262,6 +288,9 @@ export async function prepareBuyerSigningEnvelope(
       declineReason: null,
       expiresAt,
     },
+    // An upsert RETURNS the row, so without this narrowing it would select every
+    // scalar on the model — including the columns this database does not have.
+    select: esignEnvelopeSelect(),
   });
 
   return { envelopeId: envelope.id, documentVersionId: contract.id, documentHash, status: envelope.status };
@@ -316,7 +345,7 @@ export async function recordBuyerSignature(params: RecordSignatureParams): Promi
   validateConsentOrThrow(params.acknowledgments);
   if (!params.signatureText?.trim()) throw new ConsentRequiredError();
 
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId: params.dealId } });
+  const envelope = await findEnvelopeByDeal(params.dealId);
   if (!envelope) throw new NoSignableDocumentError();
 
   // Idempotent: already signed → no-op (never double-sign / double-advance).
@@ -375,7 +404,12 @@ export async function recordBuyerSignature(params: RecordSignatureParams): Promi
     // cannot both complete (only one moves SENT/DELIVERED/PENDING → COMPLETED).
     const swap = await tx.eSignEnvelope.updateMany({
       where: { id: envelope.id, status: envelope.status },
-      data: {
+      // The consent snapshot columns may not exist (see envelope-schema). The
+      // consent evidence itself is NOT lost when they are absent: the
+      // CONSENT_ACCEPTED audit event written below carries the full attribution,
+      // the exact acknowledgments, and the document version + hash they were
+      // bound to. Only the denormalized copy on the envelope is skipped.
+      data: gateEnvelopeWrite({
         status: ESignStatus.COMPLETED,
         completedAt: now,
         signedAt: now,
@@ -391,7 +425,7 @@ export async function recordBuyerSignature(params: RecordSignatureParams): Promi
         ipAddress: params.ipAddress,
         userAgent: params.userAgent,
         documentHash: currentHash,
-      },
+      }),
     });
     if (swap.count === 0) {
       // Lost the race — another submission completed it. Treat as idempotent.
@@ -471,7 +505,7 @@ export async function ensureDealSigned(dealId: string, actorId?: string): Promis
  *  No-op on an already-terminal record: a terminal signing record is immutable and
  *  never cross-transitioned (e.g. VOIDED must not become DECLINED). */
 export async function declineBuyerSignature(dealId: string, reason?: string): Promise<void> {
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = await findEnvelopeByDeal(dealId);
   if (!envelope || isTerminalStatus(envelope.status)) return;
   // CAS on the observed non-terminal status so we can never overwrite a record
   // that became terminal concurrently.
@@ -486,7 +520,7 @@ export async function declineBuyerSignature(dealId: string, reason?: string): Pr
 /** Void a signing envelope (admin action or internal re-issue). Deal not advanced.
  *  No-op on an already-terminal record — terminal signing records are immutable. */
 export async function voidEnvelopeInternal(dealId: string, reason: string): Promise<void> {
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = await findEnvelopeByDeal(dealId);
   if (!envelope || isTerminalStatus(envelope.status)) return;
   const swap = await prisma.eSignEnvelope.updateMany({
     where: { id: envelope.id, status: envelope.status },
@@ -543,9 +577,17 @@ export async function sweepExpiredEnvelopes(limit = 500): Promise<{ scanned: num
  */
 export async function reconcileSignedContracts(
   limit = 100,
-): Promise<{ scanned: number; finalized: number; pending: number; stuck: number }> {
+): Promise<{ scanned: number; finalized: number; pending: number; stuck: number; skipped?: string }> {
   const STUCK_AFTER_MS = 60 * 60 * 1000; // 1 hour
   const now = Date.now();
+  // The sweep's WHERE filters on executedDocumentKey and confirmationsSentAt —
+  // columns this database does not have. Querying them is what has failed this
+  // cron on every run. With the gate off there is no executed-artifact pipeline
+  // to reconcile at all, so report an honest empty sweep rather than throwing:
+  // the caller records a COMPLETED run with scanned: 0, which is exactly true.
+  if (!canQueryExtendedEnvelopeFields()) {
+    return { scanned: 0, finalized: 0, pending: 0, stuck: 0, skipped: "esign_extended_schema_disabled" };
+  }
   const pendingEnvelopes = await prisma.eSignEnvelope.findMany({
     where: {
       status: ESignStatus.COMPLETED,
@@ -591,7 +633,7 @@ export async function reconcileSignedContracts(
  *  completes concurrently (SENT→COMPLETED between the read and the write) can never
  *  be overwritten to EXPIRED — a terminal signed record stays immutable. */
 export async function expireIfElapsed(dealId: string): Promise<boolean> {
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = await findEnvelopeByDeal(dealId);
   if (!envelope || !envelope.expiresAt) return false;
   const signable = envelope.status === "SENT" || envelope.status === "DELIVERED" || envelope.status === "PENDING";
   if (signable && envelope.expiresAt.getTime() < Date.now()) {
@@ -615,7 +657,7 @@ export async function expireIfElapsed(dealId: string): Promise<boolean> {
  */
 export async function finalizeBuyerSignatureCertificate(dealId: string): Promise<string | null> {
   try {
-    const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+    const envelope = await findEnvelopeByDeal(dealId);
     if (!envelope || envelope.status !== "COMPLETED") return null;
     if (envelope.certificatePdfPath) return envelope.certificatePdfPath; // idempotent
     if (!envelope.documentVersionId || !envelope.documentHash || !envelope.signedAt) return null;
@@ -670,8 +712,20 @@ export interface FinalizeSignedContractResult {
 export async function finalizeSignedContract(dealId: string): Promise<FinalizeSignedContractResult> {
   const notReady: FinalizeSignedContractResult = { artifactReady: false, certificateReady: false, confirmationsSent: false };
   try {
-    const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+    const envelope = await findEnvelopeByDeal(dealId);
     if (!envelope || envelope.status !== "COMPLETED") return notReady;
+
+    // The executed-artifact reference and the confirmation marker both live in
+    // columns this database does not have (see envelope-schema). Without the
+    // marker the artifact would be regenerated on every re-drive and the
+    // "your signed contract is ready" confirmations could not be de-duplicated —
+    // i.e. the buyer and dealer would be emailed again on every reconciliation
+    // tick. Skip truthfully instead: the signature evidence is already committed,
+    // and the certificate (whose column DOES exist) is still generated below.
+    if (!isEsignExtendedSchemaEnabled()) {
+      const certOnly = await finalizeBuyerSignatureCertificate(dealId);
+      return { artifactReady: false, certificateReady: !!certOnly, confirmationsSent: false };
+    }
 
     // 1) Executed artifact — generated from FROZEN evidence, immutable once set.
     const artifactKey = await ensureExecutedArtifact(envelope);
@@ -753,7 +807,7 @@ async function ensureExecutedArtifact(envelope: EnvelopeRow): Promise<string | n
  * likewise at-least-once). Returns true if this call emitted (or confirmed) them.
  */
 async function emitSignatureConfirmations(dealId: string): Promise<boolean> {
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = await findEnvelopeByDeal(dealId);
   if (!envelope || envelope.status !== "COMPLETED") return false;
   if (!envelope.executedDocumentKey || !envelope.certificatePdfPath) return false; // artifact not ready
   if (envelope.confirmationsSentAt) return true; // already sent

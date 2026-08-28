@@ -9,6 +9,11 @@ import { requirePermission } from "@/lib/auth/permissions";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { toAdminEvidencePackage } from "@/lib/services/esign/esign-dto";
+import {
+  esignEnvelopeSelect,
+  toEnvelopeView,
+  canQueryExtendedEnvelopeFields,
+} from "@/lib/services/esign/envelope-schema";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -23,13 +28,22 @@ export async function GET(request: NextRequest, { params }: Props) {
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
   if (!ALLOWED_ROLES.has(admin.role)) return adminError("FORBIDDEN", "SUPER_ADMIN or OPERATIONS_ADMIN required", 403);
 
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = toEnvelopeView(
+    await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: esignEnvelopeSelect() }),
+  );
   if (!envelope) return adminError("NOT_FOUND", "No signing record for this deal", 404);
 
-  const history = await prisma.eSignEnvelopeHistory.findMany({
-    where: { dealId },
-    orderBy: { attemptNumber: "asc" },
-  });
+  // ESignEnvelopeHistory is created by an unapplied migration
+  // (20261014000000_esign_envelope_history); the table does not exist in this
+  // database, and prepareBuyerSigningEnvelope refuses to supersede a terminal
+  // attempt without it, so there are no archived attempts to return. Query it
+  // only behind the gate rather than 500-ing this export.
+  const history = canQueryExtendedEnvelopeFields()
+    ? await prisma.eSignEnvelopeHistory.findMany({
+        where: { dealId },
+        orderBy: { attemptNumber: "asc" },
+      })
+    : [];
 
   // Audit the forensic export itself (who exported the full package, when).
   await createAuditLog(admin, request, {

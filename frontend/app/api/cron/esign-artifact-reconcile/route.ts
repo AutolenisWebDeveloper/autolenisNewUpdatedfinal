@@ -16,6 +16,17 @@ export async function GET(request: NextRequest) {
 
   const run = await withCronRun("esign-artifact-reconcile", async () => {
     const result = await reconcileSignedContracts();
+    // When the e-sign consent/artifact schema is not applied there is no
+    // executed-artifact pipeline to reconcile, and the sweep's own filter
+    // columns do not exist. reconcileSignedContracts reports that truthfully
+    // instead of querying them — which is what failed this job on 283 of 283
+    // runs with "The column e_sign_envelopes.executed_document_key does not
+    // exist in the current database". An honest empty sweep is a COMPLETED run,
+    // not a FAILED one, so cron health stops reporting a false outage.
+    if (result.skipped) {
+      logger.info(`[esign-artifact-reconcile] skipped: ${result.skipped}`);
+      return result;
+    }
     logger.info(
       `[esign-artifact-reconcile] finalized ${result.finalized}/${result.scanned} ` +
         `(pending=${result.pending}, stuck=${result.stuck})`,

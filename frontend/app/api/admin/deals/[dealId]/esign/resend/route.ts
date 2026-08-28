@@ -3,6 +3,7 @@
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { resendEnvelope } from "@/lib/services/esign/esign.service";
 
 interface Props { params: Promise<{ dealId: string }> }
@@ -12,7 +13,7 @@ export async function POST(request: NextRequest, { params }: Props) {
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: esignEnvelopeSelect() });
   if (!envelope) return adminError("NOT_FOUND", "Envelope not found", 404);
   if (envelope.status === "COMPLETED") return adminError("CONFLICT", "Envelope is already completed", 409);
   if (envelope.status === "VOIDED") return adminError("CONFLICT", "Cannot resend a voided envelope", 409);

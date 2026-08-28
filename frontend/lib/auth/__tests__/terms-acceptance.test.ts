@@ -34,18 +34,39 @@ import {
   needsTermsAcceptance,
 } from "../terms";
 
-// env.d.ts types CURRENT_TERMS_VERSION as a required string, so `delete` is a
-// type error — assign through the index signature to simulate "unset".
+// env.d.ts types CURRENT_TERMS_VERSION as a required string, so `delete` on
+// process.env directly is a type error. Go through a Record view, where the
+// values are optional and `delete` is allowed.
+//
+// `delete` is essential here, NOT an assignment: `process.env.X = undefined`
+// stores the STRING "undefined", which is a non-empty value and would make
+// getCurrentTermsVersion return "undefined" instead of exercising the unset
+// fallback these tests exist to prove.
 const env = process.env as Record<string, string | undefined>;
+
+function setEnv(value: string | undefined) {
+  if (value === undefined) delete env.CURRENT_TERMS_VERSION;
+  else env.CURRENT_TERMS_VERSION = value;
+}
 
 function withEnv(value: string | undefined, fn: () => void) {
   const previous = env.CURRENT_TERMS_VERSION;
-  env.CURRENT_TERMS_VERSION = value;
+  setEnv(value);
   try {
     fn();
   } finally {
-    env.CURRENT_TERMS_VERSION = previous;
+    setEnv(previous);
   }
+}
+
+// Guard the guard: if this ever stops being true, every "unset" assertion below
+// would silently be testing the string "undefined" instead.
+import assertStrict from "node:assert/strict";
+{
+  const before = env.CURRENT_TERMS_VERSION;
+  setEnv(undefined);
+  assertStrict.equal(env.CURRENT_TERMS_VERSION, undefined, "setEnv(undefined) must UNSET, not stringify");
+  setEnv(before);
 }
 
 test("getCurrentTermsVersion returns the configured version", () => {

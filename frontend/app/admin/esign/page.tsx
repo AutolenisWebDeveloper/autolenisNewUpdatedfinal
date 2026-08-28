@@ -2,6 +2,7 @@
 
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect, toEnvelopeView } from "@/lib/services/esign/envelope-schema";
 import { Badge } from "@/components/ui/badge";
 import { PenLine, AlertTriangle } from "lucide-react";
 import ESignHubRowActions from "@/components/admin/ESignHubRowActions";
@@ -14,10 +15,13 @@ export default async function AdminESignPage() {
   let loadError: string | null = null;
 
   try {
-    envelopes = await prisma.eSignEnvelope.findMany({
-      include: { deal: { include: { buyer: true } } },
+    envelopes = (await prisma.eSignEnvelope.findMany({
+      // Narrowed through the schema gate (lib/services/esign/envelope-schema):
+      // a bare findMany selects every scalar, including the columns the
+      // unapplied e-sign migration would add.
+      select: { ...esignEnvelopeSelect(), deal: { include: { buyer: true } } },
       orderBy: { createdAt: "desc" }, take: 50,
-    });
+    })).map((e) => toEnvelopeView(e)!) as typeof envelopes;
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Unknown error loading envelopes";
   }

@@ -11,6 +11,7 @@ import {
   NoSignableDocumentError,
 } from "@/lib/services/esign/buyer-signing.service";
 import { toBuyerEnvelopeSummary } from "@/lib/services/esign/esign-dto";
+import { esignEnvelopeSelect, toEnvelopeView } from "@/lib/services/esign/envelope-schema";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -23,13 +24,19 @@ export async function GET(request: NextRequest, { params }: Props) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
-  const deal = await prisma.deal.findFirst({ where: { id: dealId, buyerId: buyer.id }, include: { eSignEnvelope: true } });
+  const deal = await prisma.deal.findFirst({
+    where: { id: dealId, buyerId: buyer.id },
+    // Narrowed through the schema gate (see lib/services/esign/envelope-schema).
+    include: { eSignEnvelope: { select: esignEnvelopeSelect() } },
+  });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
   await expireIfElapsed(dealId);
   if (deal.eSignEnvelope?.status === "COMPLETED") await ensureDealSigned(dealId, buyer.id);
 
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = toEnvelopeView(
+    await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: esignEnvelopeSelect() }),
+  );
   let contractViewUrl: string | null = null;
   const signable = envelope?.status === "SENT" || envelope?.status === "DELIVERED" || envelope?.status === "PENDING";
   if (signable && envelope?.documentVersionId) {

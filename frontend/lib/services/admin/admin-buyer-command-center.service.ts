@@ -3,6 +3,7 @@
 // V4 requirement: Admin console is command-and-control, not passive reporting.
 
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { DealStatus } from "@prisma/client";
 import { canTransition } from "@/lib/services/deal/deal.service";
 
@@ -336,7 +337,8 @@ export async function getAdminBuyerDetailData(buyerId: string) {
               dealer: { select: { dealershipName: true, city: true, state: true } },
             },
           },
-          eSignEnvelope: true,
+          // Narrowed through the schema gate (lib/services/esign/envelope-schema).
+          eSignEnvelope: { select: esignEnvelopeSelect() },
           pickup: true,
           financing: true,
           contractVersions: { orderBy: { uploadedAt: "desc" }, take: 1 },

@@ -4,6 +4,7 @@ export const metadata: Metadata = { title: "Vehicle Pickup", robots: { index: fa
 
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { Button } from "@/components/ui/button";
 import { MapPin, QrCode, CheckCircle2, FileSignature, Clock, Hourglass, LifeBuoy } from "lucide-react";
 import PickupScheduleForm from "@/components/buyer/PickupScheduleForm";
@@ -26,7 +27,12 @@ export default async function PickupPage() {
   const buyer = await requireBuyer();
   const deal = await prisma.deal.findFirst({
     where: { buyerId: buyer.id },
-    include: { pickup: true, eSignEnvelope: true, offer: { select: { dealerId: true } } },
+    include: {
+      pickup: true,
+      // Narrowed through the schema gate (see lib/services/esign/envelope-schema).
+      eSignEnvelope: { select: esignEnvelopeSelect() },
+      offer: { select: { dealerId: true } },
+    },
     orderBy: { createdAt: "desc" },
   });
 

@@ -6,6 +6,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { PREMIUM_FEE_CENTS } from "@/lib/constants";
 import AdminDealTabs from "@/components/admin/AdminDealTabs";
 
@@ -27,7 +28,7 @@ export default async function AdminDealDetailPage({ params }: Props) {
       buyer: { include: { user: true } },
       offer: { include: { dealer: { include: { user: true } }, auction: { include: { deposit: true } } } },
       contractScans: { orderBy: { scannedAt: "desc" } },
-      eSignEnvelope: true,
+      eSignEnvelope: { select: esignEnvelopeSelect() },
       pickup: true,
     },
   });

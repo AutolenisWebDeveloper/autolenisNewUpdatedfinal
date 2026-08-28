@@ -1,5 +1,6 @@
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { PenLine } from "lucide-react";
@@ -13,7 +14,7 @@ export default async function AdminDealESignPage({ params }: Props) {
   await requireAdmin();
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
-    include: { buyer: true, eSignEnvelope: true },
+    include: { buyer: true, eSignEnvelope: { select: esignEnvelopeSelect() } },
   });
   if (!deal) notFound();
 

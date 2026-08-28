@@ -3,6 +3,7 @@
 // All queries scope by dealerId via offer.dealerId to ensure ownership.
 
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect, toEnvelopeView } from "@/lib/services/esign/envelope-schema";
 import { PickupStatus, type DealStatus } from "@prisma/client";
 
 export interface DealerDealSummary {
@@ -128,7 +129,10 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
       },
       // Executed-copy availability only — never the storage key/hash or forensic
       // signer evidence (§11).
-      eSignEnvelope: { select: { status: true, executedDocumentKey: true } },
+      // executedDocumentKey only exists behind the e-sign schema gate; the
+      // narrowed select keeps this query valid against the live schema and
+      // toEnvelopeView below reports the executed copy as unavailable.
+      eSignEnvelope: { select: esignEnvelopeSelect() },
     },
   });
   if (!deal) return null;
@@ -141,8 +145,13 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
     contractShieldStatus: deal.contractShieldStatus,
     financingPath: deal.financingPath,
     offer: deal.offer,
-    executedContractAvailable:
-      deal.eSignEnvelope?.status === "COMPLETED" && !!deal.eSignEnvelope?.executedDocumentKey,
+    executedContractAvailable: (() => {
+      // toEnvelopeView reports executedDocumentKey as null when the e-sign
+      // schema gate is off, which is truthful: with the migration unapplied no
+      // executed artifact is ever generated, so none is available to offer.
+      const env = toEnvelopeView(deal.eSignEnvelope);
+      return env?.status === "COMPLETED" && !!env.executedDocumentKey;
+    })(),
     buyer: deal.buyer
       ? {
           firstName: deal.buyer.firstName,

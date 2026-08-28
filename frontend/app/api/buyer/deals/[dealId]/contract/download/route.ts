@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestBuyer, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect, toEnvelopeView } from "@/lib/services/esign/envelope-schema";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -10,12 +11,15 @@ export async function GET(request: NextRequest, { params }: Props) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
-  const deal = await prisma.deal.findFirst({
+  const dealRow = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id },
-    include: { eSignEnvelope: true },
+    // Narrowed through the schema gate (see lib/services/esign/envelope-schema):
+    // executedDocumentKey below is one of the columns this database may not have.
+    include: { eSignEnvelope: { select: esignEnvelopeSelect() } },
   });
 
-  if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
+  if (!dealRow) return errorResponse("NOT_FOUND", "Deal not found", 404);
+  const deal = { ...dealRow, eSignEnvelope: toEnvelopeView(dealRow.eSignEnvelope) };
 
   // ESignEnvelope does not yet store a document URL — it will be populated
   // once the signature completes and the executed record is available.

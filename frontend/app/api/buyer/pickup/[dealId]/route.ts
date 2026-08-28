@@ -2,6 +2,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { esignEnvelopeSelect } from "@/lib/services/esign/envelope-schema";
 import { z } from "zod";
 import { reschedulePickup } from "@/lib/services/pickup/scheduling.service";
 import { proposePickup, coordHttp } from "@/lib/services/pickup/pickup-coordination.service";
@@ -30,7 +31,8 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id },
-    include: { eSignEnvelope: true },
+    // Narrowed through the schema gate (see lib/services/esign/envelope-schema).
+    include: { eSignEnvelope: { select: esignEnvelopeSelect() } },
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 

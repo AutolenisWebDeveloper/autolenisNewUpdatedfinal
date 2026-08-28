@@ -9,6 +9,18 @@ import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "crypto";
 
+// These tests exercise the FULL ESignEnvelope schema — the consent snapshot,
+// the executed artifact, the confirmation marker, the attempt counter, and the
+// ESignEnvelopeHistory archive. That schema only exists once migrations
+// 20261014000000 and 20261015000000 are applied, and the service now refuses to
+// name those columns otherwise (see lib/services/esign/envelope-schema).
+//
+// The mocked Prisma below models the applied-migration database, so the gate is
+// switched ON here to make that long-standing assumption explicit rather than
+// implicit. envelope-schema.test.ts covers the gated-OFF behaviour against the
+// physical production schema; the two together cover both worlds.
+(process.env as Record<string, string | undefined>).ESIGN_EXTENDED_SCHEMA_ENABLED = "true";
+
 interface Env {
   id: string; dealId: string; status: string; attemptNumber: number;
   documentVersionId: string | null; documentHash: string | null;
