@@ -588,7 +588,7 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
       {/* ─── Hero Header ─────────────────────────────────────────────────────── */}
       <div className="bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-5">
         <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-4">
-          <Link href="/admin" className="hover:text-purple-600 transition-colors">Admin</Link>
+          <Link href="/admin/dashboard" className="hover:text-purple-600 transition-colors">Admin</Link>
           <ChevronRight size={12} />
           <Link href="/admin/affiliates" className="hover:text-purple-600 transition-colors">Affiliates</Link>
           <ChevronRight size={12} />

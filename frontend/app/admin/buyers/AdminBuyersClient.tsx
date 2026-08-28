@@ -9,7 +9,7 @@ import {
   ChevronDown, Eye, Edit2, Bell, UserCheck, PlayCircle,
   CreditCard, Briefcase, Flag, SlidersHorizontal, X,
   CheckCircle2, Clock, Zap, TrendingUp, ShieldAlert,
-  Archive, ArchiveRestore, Lock, Unlock, Trash2,
+  Archive, ArchiveRestore, Lock, Unlock, Trash2, ClipboardList,
 } from "lucide-react";
 import type { AdminBuyerKpis } from "@/lib/services/admin/admin-buyer-command-center.service";
 import { api, apiErrorMessage } from "@/lib/api/client";
@@ -411,12 +411,25 @@ export function AdminBuyersClient({ initialBuyers, initialTotal, kpis }: Props) 
             <p className="text-xs text-slate-500 mt-0.5">{total.toLocaleString()} total buyers</p>
           </div>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="flex items-center gap-2 bg-al-primary hover:bg-purple-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-sm"
-        >
-          <UserPlus size={15} /> Create Buyer
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Batch 2 IA: Journey Map lost its sidebar entry; the buyer list is
+              its canonical parent. The route and its buyer-search landing are
+              unchanged. */}
+          <Link
+            href="/admin/journey"
+            data-testid="admin-buyers-journey-link"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-slate-200 hover:border-[#93C5FD] hover:bg-al-primary/5 text-slate-700 hover:text-al-primary rounded-lg text-xs font-semibold transition-colors"
+          >
+            <ClipboardList size={13} />
+            Journey Map
+          </Link>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex items-center gap-2 bg-al-primary hover:bg-purple-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors shadow-sm"
+          >
+            <UserPlus size={15} /> Create Buyer
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards */}

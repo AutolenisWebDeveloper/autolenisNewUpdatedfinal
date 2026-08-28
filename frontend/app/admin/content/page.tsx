@@ -74,6 +74,24 @@ export default async function AdminContentPage({ searchParams }: PageProps) {
         <Newspaper size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Content Engine</h1>
         <Badge variant="secondary">Phase C3</Badge>
+        {/* Batch 2 IA: bulk generation and attribution lost their separate
+            sidebar entries; the Content Engine is their canonical parent. */}
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          <Link
+            href="/admin/content/bulk"
+            data-testid="admin-content-bulk-link"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:border-[#93C5FD] hover:bg-al-primary/5 text-slate-600 hover:text-al-primary rounded-lg text-xs font-semibold transition-colors"
+          >
+            Bulk Articles
+          </Link>
+          <Link
+            href="/admin/content/attribution"
+            data-testid="admin-content-attribution-link"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:border-[#93C5FD] hover:bg-al-primary/5 text-slate-600 hover:text-al-primary rounded-lg text-xs font-semibold transition-colors"
+          >
+            Attribution
+          </Link>
+        </div>
       </div>
       <p className="text-sm text-slate-500 mb-6">
         National SEO content management — {fmt(stats.total)} of {fmt(stats.keywordTotal)} Wave 1

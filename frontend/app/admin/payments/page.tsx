@@ -3,6 +3,7 @@
 // Server component — loads data server-side, renders action panels via AdminPaymentActionsClient.
 
 import type { Metadata } from "next";
+import { AdminRelatedLinks } from "@/components/admin/AdminRelatedLinks";
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { getAdminDepositList, getAdminConciergeFeeList } from "@/lib/services/admin/admin-payments.service";
 import AdminPaymentsClient from "./AdminPaymentsClient";
@@ -30,9 +31,22 @@ export default async function AdminPaymentsPage() {
             Manage deposits, service fees, affiliate commissions, and refunds
           </p>
         </div>
-        <a href="/admin/payments/reconciliation" className="text-sm font-medium text-al-primary hover:underline" data-testid="reconciliation-link">
-          Reconciliation →
-        </a>
+        {/* Batch 2 IA: the searchable deposit and refund views used to be
+            reachable only from a buyer record or a reconciliation row, so the
+            Hub's own tabs were the only entry point an operator could find.
+            These are their canonical parent links. */}
+        <AdminRelatedLinks
+          label="Payment views"
+          links={[
+            { href: "/admin/payments/deposits", label: "Deposits", testId: "deposits-link" },
+            { href: "/admin/payments/refunds", label: "Refunds", testId: "refunds-link" },
+            {
+              href: "/admin/payments/reconciliation",
+              label: "Reconciliation \u2192",
+              testId: "reconciliation-link",
+            },
+          ]}
+        />
       </div>
       <AdminPaymentsClient deposits={deposits} conciergeFees={conciergeFees} />
     </div>
