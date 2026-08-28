@@ -10,7 +10,8 @@ import { sendDealerWelcomeEmail } from "@/lib/services/email/resend.service";
 import { ContactService } from "@/lib/services/contact.service";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { z } from "zod";
-import { validateInvitationToken } from "@/lib/services/dealer-recruitment/invitation-token.service";
+import { validateInvitationToken, consumeInvitationToken } from "@/lib/services/dealer-recruitment/invitation-token.service";
+import { getInvitationSchemaCapabilities } from "@/lib/services/dealer-recruitment/invitation-schema-compat";
 
 const schema = z.object({
   token: z.string().min(1),
@@ -70,6 +71,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "An account with this email already exists. Please sign in." }, { status: 409 });
   }
 
+  // Resolve the physical-schema capabilities BEFORE opening the transaction
+  // below, so the (cached) probe never needs a second pooled connection while a
+  // transaction is holding one. validateInvitationToken has already warmed it;
+  // this makes the ordering a stated requirement rather than an accident.
+  await getInvitationSchemaCapabilities();
+
   const supabase = adminSupabase();
   const { data: created, error: authErr } = await supabase.auth.admin.createUser({
     email: invitation.email.toLowerCase(),
@@ -102,25 +109,25 @@ export async function POST(request: NextRequest) {
         },
       });
       dealerId = dealer.id;
-      // Conditional on consumedAt: null so two concurrent claims of the same
-      // link cannot both create a dealer. The loser's transaction aborts.
-      const consumed = await tx.dealerInvitation.updateMany({
-        where: { id: invitation.id, consumedAt: null },
-        data: {
-          status: "ACCEPTED",
-          acceptedAt: new Date(),
-          consumedAt: new Date(),
-          dealerId: dealer.id,
-        },
-      });
-      if (consumed.count !== 1) {
+      // Consumed through the service, inside THIS transaction, so two concurrent
+      // claims of the same link cannot both create a dealer — the loser's
+      // transaction aborts and its Supabase user is deleted below. The service
+      // owns the predicate because which columns exist depends on whether
+      // migration 20260828000000 has been applied.
+      const consumed = await consumeInvitationToken(invitation.id, dealer.id, new Date(), tx);
+      if (!consumed) {
         throw new Error("INVITATION_ALREADY_CONSUMED");
       }
     });
   } catch (err) {
     await supabase.auth.admin.deleteUser(supabaseUserId).catch(() => {});
     if (err instanceof Error && err.message === "INVITATION_ALREADY_CONSUMED") {
-      return NextResponse.json({ error: "Invitation already accepted" }, { status: 409 });
+      // Lost the race: the invitation was accepted, cancelled, or swept to
+      // EXPIRED between validation and consumption. No dealer was created.
+      return NextResponse.json(
+        { error: "This invitation is no longer available. Please request a new one." },
+        { status: 409 },
+      );
     }
     logger.error("[dealer/invite/claim] DB error:", err);
     return NextResponse.json({ error: "Database error" }, { status: 500 });
