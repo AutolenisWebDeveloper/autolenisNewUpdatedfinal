@@ -65,8 +65,45 @@ export async function requireBuyer() {
   // rather than silently signing them out at the buyer dashboard.
   if (!user.email_confirmed_at) redirect("/auth/verify-email");
 
-  const buyer = await getAuthenticatedBuyer();
-  if (!buyer) redirect("/auth/signin");
+  let buyer = await getAuthenticatedBuyer();
+
+  // No Prisma Buyer for a verified, authenticated Supabase user means the
+  // auth-callback provisioning never completed. Redirecting to /auth/signin here
+  // produced an inescapable ping-pong: proxy.ts step 9 bounces an authenticated
+  // user OFF /auth/signin back to /buyer/dashboard, which lands here again.
+  // Production holds two such accounts, and they can currently never reach the
+  // portal or see any explanation.
+  //
+  // Heal through the SAME provisioning path the auth callback uses
+  // (ensurePrismaUser is idempotent and returns an existing row untouched)
+  // rather than adding a second account-creation path, then re-read.
+  if (!buyer && user.email) {
+    const role = (user.user_metadata?.role as string | undefined) ?? "BUYER";
+    if (role === "BUYER") {
+      try {
+        const { ensurePrismaUser } = await import("@/lib/auth/actions");
+        const { UserRole, BuyerPlan } = await import("@prisma/client");
+        await ensurePrismaUser(
+          user.id,
+          user.email,
+          UserRole.BUYER,
+          user.user_metadata?.plan === "PREMIUM" ? BuyerPlan.PREMIUM : BuyerPlan.STANDARD,
+          user.user_metadata?.firstName as string | undefined,
+          user.user_metadata?.lastName as string | undefined,
+          (user.user_metadata?.termsAcceptedAt as string | undefined) ?? null,
+          (user.user_metadata?.termsVersion as string | undefined) ?? null,
+        );
+        buyer = await getAuthenticatedBuyer();
+      } catch (err) {
+        logger.error("[auth/session] buyer self-heal failed:", err);
+      }
+    }
+  }
+
+  // Still nothing: send them somewhere that is NOT an auth route (so proxy.ts
+  // cannot bounce them straight back into the loop) and that offers sign-out —
+  // the one action that reliably escapes a broken authenticated state.
+  if (!buyer) redirect("/auth/unauthorized?reason=account_setup");
   if (buyer.isSuspended) redirect("/buyer/suspended");
   return buyer;
 }

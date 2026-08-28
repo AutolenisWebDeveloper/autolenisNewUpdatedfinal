@@ -3,6 +3,7 @@ import { logger } from "@/lib/logger";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { advanceDealStatus, DealTransitionError } from "@/lib/services/deal/deal.service";
+import { EsignExtendedSchemaUnavailableError } from "@/lib/services/esign/envelope-schema";
 import {
   prepareBuyerSigningEnvelope,
   getContractViewUrl,
@@ -111,6 +112,27 @@ export async function POST(request: NextRequest, { params }: Props) {
   } catch (err) {
     if (err instanceof NoSignableDocumentError) {
       return errorResponse("NO_SIGNABLE_DOCUMENT", "The approved contract is not available to sign yet. Please try again shortly.", 409);
+    }
+    // Re-issuing over a terminal (expired/voided/declined) attempt needs the
+    // ESignEnvelopeHistory archive, which this database does not have, so
+    // prepareBuyerSigningEnvelope fails closed rather than overwrite immutable
+    // terminal signing evidence. That is the correct refusal — but "Please try
+    // again" would be a lie: retrying can never succeed, and the buyer would be
+    // stuck re-clicking forever. Say so honestly and raise it as the operational
+    // exception it is, so it reaches a human instead of the buyer's patience.
+    if (err instanceof EsignExtendedSchemaUnavailableError) {
+      logger.error(
+        "[buyer/esign] OPERATIONAL EXCEPTION — signing cannot be re-issued for deal " +
+          `${dealId}: the e-sign consent/history schema is not applied. A previous ` +
+          "signing attempt is terminal and cannot be archived. Requires migrations " +
+          "20261014000000 + 20261015000000 and ESIGN_EXTENDED_SCHEMA_ENABLED=true.",
+        err,
+      );
+      return errorResponse(
+        "SIGNING_UNAVAILABLE",
+        "Signing is temporarily unavailable for this deal. Our team has been notified and will reach out — you do not need to try again.",
+        503,
+      );
     }
     logger.error("[buyer/esign] failed to prepare in-house signing:", err);
     return errorResponse("INTERNAL_ERROR", "We couldn't start the signing process. Please try again.", 500);

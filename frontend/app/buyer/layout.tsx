@@ -27,6 +27,25 @@ function getPreviewSecret() {
 }
 
 export default async function BuyerLayout({ children }: { children: React.ReactNode }) {
+  // ── Suspension notice: bypass the portal shell ─────────────────────────────
+  // /buyer/suspended must render for a SUSPENDED buyer — that is its entire
+  // purpose. But it lives under app/buyer/, so this layout wraps it, and
+  // requireBuyer() below redirects a suspended buyer to /buyer/suspended: the
+  // page redirects to itself forever and the notice can never appear. The page
+  // author anticipated exactly this ("do NOT call requireBuyer() which would
+  // redirect suspended buyers") and guarded the page — but a child cannot opt
+  // out of its parent layout, so the guard was defeated from above.
+  //
+  // The page does its own authentication (getAuthenticatedBuyer, redirecting
+  // unauthenticated visitors to sign-in and non-suspended buyers to the
+  // dashboard) and renders a standalone full-screen notice, so returning it
+  // bare is both safe and what its design intends. proxy.ts already exempts
+  // this path from the edge suspension redirect for the same reason.
+  const layoutPathname = (await headers()).get("x-pathname") ?? "";
+  if (layoutPathname === "/buyer/suspended") {
+    return <>{children}</>;
+  }
+
   // ── Admin preview mode ─────────────────────────────────────────────────────
   // Check for a valid admin preview token cookie before normal buyer auth.
   // If present and valid: load buyer data by token's buyerId, render with banner.
@@ -241,7 +260,10 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
         </div>
       )}
       <div className="flex flex-col lg:flex-row h-screen bg-[#F8F9FA]" data-testid="buyer-portal">
-        <BuyerSidebar />
+        {/* Journey-aware nav (lib/services/buyer/nav-gating): the sidebar renders
+            items the buyer cannot reach yet as explained LOCKED entries instead
+            of live links that silently redirect. */}
+        <BuyerSidebar journey={{ currentStage, completedStages, unlockedStages }} />
         <div className="flex-1 flex flex-col overflow-hidden pt-14 lg:pt-0">
           {/* Feature 3: Journey Navigator — suppressed on /buyer/requests/* by component itself */}
           <JourneyNavigator

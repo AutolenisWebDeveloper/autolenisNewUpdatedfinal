@@ -4,7 +4,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { UserRole } from "@prisma/client";
 import { BUYER_BACKWARD_SAFE_SELECT } from "@/lib/auth/buyer-select";
-import { isBuyerAccessDisabled } from "@/lib/auth/buyer-status";
+import { isBuyerBlockedFromApi } from "@/lib/auth/buyer-status";
 
 // Standard API response shapes
 export function successResponse<T>(data: T, status = 200) {
@@ -75,7 +75,9 @@ export async function resolveAuthorizedBuyer(supabaseUserId: string) {
     });
     if (!buyer) return null;
     // Deny disabled/purged buyers at the shared boundary.
-    if (isBuyerAccessDisabled(buyer)) return null;
+    // Denies admin-disabled, purged AND suspended buyers — see
+    // isBuyerBlockedFromApi for why suspension has to be enforced here too.
+    if (isBuyerBlockedFromApi(buyer)) return null;
     return buyer;
   } catch (primaryErr) {
     // Migration 20260603000000_add_buyer_lifecycle_fields may not be applied yet.
@@ -96,6 +98,9 @@ export async function resolveAuthorizedBuyer(supabaseUserId: string) {
         select: BUYER_BACKWARD_SAFE_SELECT,
       });
       if (!row) return null;
+      // The lifecycle columns are unreadable on this path, but isSuspended IS in
+      // the backward-safe select — so suspension stays enforced even here.
+      if (row.isSuspended) return null;
       return {
         ...row,
         archivedAt: null as Date | null,
