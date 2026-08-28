@@ -42,6 +42,10 @@ interface Ctrl {
   lastFindWhere: Record<string, unknown> | null;
   createThrows: Error | null;
   findThrows: Error | null;
+  alerts: Array<Record<string, unknown>>;
+  existingAlerts: Array<{ title: string; createdAt: Date }>;
+  lastAlertFindWhere: Record<string, unknown> | null;
+  alertCreateThrows: Error | null;
 }
 let ctrl: Ctrl;
 
@@ -69,6 +73,23 @@ mock.module("@/lib/prisma", {
           return row;
         },
       },
+      notification: {
+        findFirst: async (args: { where: Record<string, unknown> }) => {
+          ctrl.lastAlertFindWhere = args.where;
+          const w = args.where as { title?: string; createdAt?: { gt?: Date } };
+          return (
+            ctrl.existingAlerts.find(
+              (a) => a.title === w.title && (!w.createdAt?.gt || a.createdAt > w.createdAt.gt),
+            ) ?? null
+          );
+        },
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          if (ctrl.alertCreateThrows) throw ctrl.alertCreateThrows;
+          ctrl.alerts.push(data);
+          ctrl.existingAlerts.push({ title: String(data.title), createdAt: new Date() });
+          return data;
+        },
+      },
     },
   },
 });
@@ -82,7 +103,10 @@ async function load() {
 }
 
 beforeEach(() => {
-  ctrl = { rows: [], lastFindWhere: null, createThrows: null, findThrows: null };
+  ctrl = {
+    rows: [], lastFindWhere: null, createThrows: null, findThrows: null,
+    alerts: [], existingAlerts: [], lastAlertFindWhere: null, alertCreateThrows: null,
+  };
 });
 
 // ---------------------------------------------------------------------------
@@ -205,4 +229,89 @@ test("a failed throttle lookup also never throws", async () => {
     hasSignatureHeader: true,
   });
   assert.equal(res, "failed");
+});
+
+// ---------------------------------------------------------------------------
+// It is visible to an operator, not just to SQL
+// ---------------------------------------------------------------------------
+//
+// A row nobody looks at is a log file in a database. /admin/operations reads
+// SYSTEM_ALERT notifications, so the rejection has to reach that rail to close
+// the loop the original failure exposed: nobody knew for months.
+
+test("a recorded rejection also raises an operator alert", async () => {
+  const { recordWebhookRejection } = await load();
+  await recordWebhookRejection({
+    source: "stripe",
+    reason: "signature_invalid",
+    bodyBytes: 3241,
+    hasSignatureHeader: true,
+  });
+
+  assert.equal(ctrl.alerts.length, 1);
+  assert.equal(ctrl.alerts[0].type, "SYSTEM_ALERT");
+  assert.equal(ctrl.alerts[0].actionUrl, "/admin/operations");
+  assert.equal(ctrl.alerts[0].buyerId, null, "ops-only — never a buyer-facing notification");
+  assert.match(String(ctrl.alerts[0].title), /stripe/i);
+});
+
+test("the alert names the reason-specific fix, not a generic failure", async () => {
+  const { recordWebhookRejection } = await load();
+  await recordWebhookRejection({
+    source: "stripe",
+    reason: "signature_invalid",
+    bodyBytes: 3241,
+    hasSignatureHeader: true,
+  });
+
+  const body = String(ctrl.alerts[0].body);
+  assert.match(body, /signing secret/i, "the operator must be told which knob to turn");
+  assert.match(body, /3241/, "and the evidence that Stripe really is delivering");
+});
+
+test("every rejection reason alerts — all three mean the webhook cannot work", async () => {
+  const { recordWebhookRejection } = await load();
+  await recordWebhookRejection({ source: "stripe", reason: "webhook_secret_missing", bodyBytes: 10, hasSignatureHeader: true });
+  await recordWebhookRejection({ source: "stripe", reason: "provider_client_unavailable", bodyBytes: 0, hasSignatureHeader: false });
+
+  assert.equal(ctrl.alerts.length, 2, "a missing secret is as invisible on the dashboard as a bad signature");
+});
+
+test("a throttled rejection raises NO alert — no row, no alarm", async () => {
+  const { recordWebhookRejection } = await load();
+  const input = { source: "stripe", reason: "signature_invalid" as const, bodyBytes: 10, hasSignatureHeader: true };
+
+  await recordWebhookRejection(input);
+  ctrl.alerts = []; // ignore the first, legitimate alert
+  const res = await recordWebhookRejection(input);
+
+  assert.equal(res, "throttled");
+  assert.equal(ctrl.alerts.length, 0);
+});
+
+test("the alert dedupes over a LONGER window than the row", async () => {
+  const { recordWebhookRejection, WEBHOOK_REJECTION_THROTTLE_MINUTES, WEBHOOK_REJECTION_ALERT_THROTTLE_MINUTES } = await load();
+  await recordWebhookRejection({ source: "stripe", reason: "signature_invalid", bodyBytes: 10, hasSignatureHeader: true });
+
+  assert.ok(
+    WEBHOOK_REJECTION_ALERT_THROTTLE_MINUTES > WEBHOOK_REJECTION_THROTTLE_MINUTES,
+    "rows give a timeline; alerts must not fire on every one or an outage becomes 96 alerts a day",
+  );
+  const where = ctrl.lastAlertFindWhere as { createdAt?: { gt?: Date } };
+  assert.ok(where?.createdAt?.gt instanceof Date, "the alert dedupe must also be a moving window, not 'ever'");
+});
+
+test("an alert failure never throws, and never loses the row", async () => {
+  ctrl.alertCreateThrows = new Error("db down");
+  const { recordWebhookRejection } = await load();
+
+  const res = await recordWebhookRejection({
+    source: "stripe",
+    reason: "signature_invalid",
+    bodyBytes: 10,
+    hasSignatureHeader: true,
+  });
+
+  assert.equal(res, "recorded", "the durable record is what matters; the alert is a courtesy on top");
+  assert.equal(ctrl.rows.length, 1);
 });
