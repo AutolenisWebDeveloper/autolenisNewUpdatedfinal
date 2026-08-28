@@ -8,6 +8,11 @@ import { createServerClient } from "@supabase/ssr";
 import type { User } from "@supabase/supabase-js";
 import { jwtVerify } from "jose";
 import { needsTermsAcceptance } from "@/lib/auth/terms";
+import {
+  ONBOARDING_PATH,
+  isOnboardingPath,
+  isOnboardingApiPath,
+} from "@/lib/auth/dealer-scope";
 
 // Per-system JWT secrets. Each prefers its dedicated secret and falls back to
 // the shared JWT_SECRET — mirroring lib/admin-auth.ts and lib/dealer-auth.ts
@@ -40,14 +45,24 @@ async function hasValidAdminSession(request: NextRequest): Promise<boolean> {
   }
 }
 
-async function hasValidDealerSession(request: NextRequest): Promise<boolean> {
+/**
+ * Verified dealer JWT claims, or null. `scope` mirrors the dealer's scope at mint
+ * time and drives the edge routing decision only — the authoritative check
+ * re-derives from Dealer.status server-side (lib/auth/dealer-session.ts). A token
+ * minted before `scope` existed has no claim; treat it as full, since the
+ * server-side gate still applies.
+ */
+async function getDealerSessionClaims(
+  request: NextRequest,
+): Promise<{ scope: "onboarding" | "full" } | null> {
   const token = request.cookies.get(DEALER_TOKEN_COOKIE)?.value;
-  if (!token) return false;
+  if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, DEALER_JWT_SECRET, { issuer: DEALER_JWT_ISSUER });
-    return payload.role === "DEALER";
+    if (payload.role !== "DEALER") return null;
+    return { scope: payload.scope === "onboarding" ? "onboarding" : "full" };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -134,9 +149,15 @@ const ADMIN_AUTH_ROUTES = [
   "/admin/auth/verify-mfa",
 ];
 
+// Dealer routes reachable WITHOUT a dealer session. The three claim routes are
+// token-authenticated: the raw token in the emailed link is the credential, and
+// each handler validates (and single-use consumes) it itself. Gating them behind
+// a dealer session is a deadlock — the account being claimed cannot yet sign in.
 const DEALER_AUTH_ROUTES = [
   "/dealer/signin",
   "/dealer/sign-in",
+  "/dealer/claim",
+  "/api/dealer/claim",
   "/dealer/invite/claim",
   "/dealer/forgot-password",
   "/dealer/reset-password",
@@ -194,6 +215,25 @@ function isAdminAuthRoute(pathname: string): boolean {
 function isDealerAuthRoute(pathname: string): boolean {
   return DEALER_AUTH_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
 }
+
+/**
+ * Dealer paths that carry their own token credential and are therefore exempt
+ * from the dealer-session requirement. Exported for test only via
+ * `__routeTestHooks` — the runtime decision stays inline in the handler below.
+ */
+function isTokenExemptDealerPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/dealer/invite/claim") ||
+    pathname.startsWith("/dealer/invite/complete")
+  );
+}
+
+/** Test seam — route predicates only, no request handling. */
+export const __routeTestHooks = {
+  isPublicRoute,
+  isDealerAuthRoute,
+  isTokenExemptDealerPath,
+};
 
 function isApiRoute(pathname: string): boolean {
   return pathname.startsWith("/api/");
@@ -453,15 +493,40 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     (pathname.startsWith("/dealer") || pathname.startsWith("/api/dealer/")) &&
     !isDealerAuthRoute(pathname);
   if (isDealerPath) {
-    if (await hasValidDealerSession(request)) {
+    const dealerSession = await getDealerSessionClaims(request);
+    if (dealerSession) {
+      // Onboarding-scoped session: admin approval granted permission to ONBOARD,
+      // not portal access. Confine it to onboarding at the edge. This is a
+      // routing decision only — lib/auth/dealer-session.ts re-derives scope from
+      // the live Dealer.status and is the authoritative gate.
+      if (dealerSession.scope === "onboarding") {
+        if (pathname.startsWith("/api/dealer/")) {
+          if (!isOnboardingApiPath(pathname)) {
+            return new NextResponse(
+              JSON.stringify({
+                error: {
+                  code: "ONBOARDING_REQUIRED",
+                  message: "Complete onboarding before using the dealer portal.",
+                },
+                correlationId: crypto.randomUUID(),
+              }),
+              { status: 403, headers: { "Content-Type": "application/json" } },
+            );
+          }
+          return response;
+        }
+        if (!isOnboardingPath(pathname)) {
+          return NextResponse.redirect(new URL(ONBOARDING_PATH, request.url));
+        }
+      }
       return response;
     }
-    // /dealer/invite/claim is public (token is auth)
-    // Token-validated public dealer routes
+    // Token-validated public dealer routes. The token in the emailed link is the
+    // credential; each handler validates it. /dealer/claim and /api/dealer/claim
+    // are covered by DEALER_AUTH_ROUTES above and never reach this branch.
     if (
       pathname.startsWith("/dealer/invite/claim") ||
-      pathname.startsWith("/dealer/invite/complete") ||
-      pathname.startsWith("/dealer/onboarding/fast-track")
+      pathname.startsWith("/dealer/invite/complete")
     ) {
       return response;
     }

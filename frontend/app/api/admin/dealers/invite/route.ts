@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { sendDealerInvitationEmail } from "@/lib/services/email/resend.service";
 import crypto from "crypto";
 import { z } from "zod";
+import { issueInvitationToken } from "@/lib/services/dealer-recruitment/invitation-token.service";
 
 const schema = z.object({
   dealershipName: z.string().min(1),
@@ -14,13 +15,6 @@ const schema = z.object({
   email: z.string().email(),
   personalMessage: z.string().max(500).optional(),
 });
-
-function generateInviteToken(email: string, dealershipName: string): string {
-  const secret = process.env.JWT_SECRET ?? "placeholder";
-  const data = `${email}:${dealershipName}:${Date.now()}`;
-  return crypto.createHmac("sha256", secret).update(data).digest("hex") +
-    crypto.randomBytes(8).toString("hex");
-}
 
 export async function POST(request: NextRequest) {
   const admin = await getAdminFromRequest(request);
@@ -42,8 +36,9 @@ export async function POST(request: NextRequest) {
   }
 
   const { dealershipName, contactName, email, personalMessage } = parsed.data;
-  const token = generateInviteToken(email, dealershipName);
-  const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72 hours
+  // Hashed at rest, 7-day TTL — same design as DealerAccountClaimToken. The raw
+  // token exists only in the emailed link below and is never persisted.
+  const { rawToken, tokenHash, expiresAt } = issueInvitationToken();
 
   const invitation = await prisma.dealerInvitation.create({
     data: {
@@ -51,7 +46,7 @@ export async function POST(request: NextRequest) {
       contactName,
       email: email.toLowerCase(),
       personalMessage: personalMessage ?? null,
-      token,
+      tokenHash,
       expiresAt,
       invitedBy: admin.adminId,
       status: "PENDING",
@@ -70,7 +65,7 @@ export async function POST(request: NextRequest) {
   }).catch(() => {});
 
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
-  const inviteUrl = `${appUrl}/dealer/invite/claim?token=${token}`;
+  const inviteUrl = `${appUrl}/dealer/invite/claim?token=${rawToken}`;
 
   try {
     await sendDealerInvitationEmail({ to: email, contactName, dealershipName, claimUrl: inviteUrl, expiresAt: expiresAt.toISOString() });
@@ -104,7 +99,6 @@ export async function POST(request: NextRequest) {
     success: true,
     data: {
       id: invitation.id,
-      token,
       expiresAt: expiresAt.toISOString(),
       inviteUrl,
     },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, apiErrorMessage } from "@/lib/api/client";
@@ -22,13 +22,21 @@ interface InventoryItem {
 }
 
 interface Props {
-  params: { id: string };
+  // Next 16 delivers client-segment params as a Promise. Typing this as a plain
+  // object made `params.id` undefined at runtime, so the page fetched
+  // /api/dealer/inventory/undefined and always 404'd.
+  params: Promise<{ id: string }>;
 }
 
-const CONDITIONS = ["Excellent", "Good", "Fair", "Poor"] as const;
+// Must match the API enum exactly (z.enum(["NEW","USED","CPO"])).
+const CONDITIONS = [
+  { value: "NEW", label: "New" },
+  { value: "USED", label: "Used" },
+  { value: "CPO", label: "Certified Pre-Owned" },
+] as const;
 
 export default function EditInventoryPage({ params }: Props) {
-  const { id } = params;
+  const { id } = use(params);
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
@@ -248,8 +256,8 @@ export default function EditInventoryPage({ params }: Props) {
                 data-testid="condition-select"
               >
                 {CONDITIONS.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
+                  <option key={c.value} value={c.value}>
+                    {c.label}
                   </option>
                 ))}
               </select>

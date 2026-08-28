@@ -2,7 +2,8 @@
 // GET   /api/dealer/onboarding — return current persisted onboarding values for hydration
 
 import { NextRequest, NextResponse, after } from "next/server";
-import { requireDealerFromRequest } from "@/lib/auth/dealer-session";
+import { requireOnboardingDealerFromRequest } from "@/lib/auth/dealer-session";
+import { signDealerJwt, DEALER_TOKEN_COOKIE } from "@/lib/dealer-auth";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { emitDomainEvent } from "@/lib/events/emit";
@@ -23,7 +24,7 @@ function clientAttribution(request: NextRequest): { ipAddress: string; userAgent
 }
 
 export async function GET(request: NextRequest) {
-  const dealer = await requireDealerFromRequest(request);
+  const dealer = await requireOnboardingDealerFromRequest(request);
   if (!dealer) {
     return NextResponse.json(
       { error: { code: "UNAUTHORIZED", message: "Not authenticated" } },
@@ -95,7 +96,7 @@ const bodySchema = z.discriminatedUnion("step", [
 ]);
 
 export async function PATCH(request: NextRequest) {
-  const dealer = await requireDealerFromRequest(request);
+  const dealer = await requireOnboardingDealerFromRequest(request);
   if (!dealer) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -201,12 +202,20 @@ export async function PATCH(request: NextRequest) {
       agreementHash: signature.agreementHash,
     }));
 
-    // Mark ACTIVE (idempotent — the dealer is typically already ACTIVE from admin
-    // approval). The verification GATE is NOT here: it governs auction eligibility
+    // ACTIVATION HAPPENS HERE, AND ONLY HERE.
+    //
+    // Admin approval of a DealerApplication grants permission to ONBOARD, not
+    // portal access: all three dealer-creation paths leave the dealer PENDING
+    // with an onboarding-scoped session. Signing the agreement is what earns
+    // ACTIVE. (The previous comment here claimed the dealer was "typically
+    // already ACTIVE from admin approval" — that was never true of any creation
+    // path and is not true under the current model.)
+    //
+    // The verification GATE is still NOT here: it governs auction eligibility
     // (see dealer-auction-eligibility.service.ts), not portal activation.
     const updatedDealer = await prisma.dealer.update({
       where: { id: dealer.id },
-      data: { status: "ACTIVE" },
+      data: { status: "ACTIVE", onboardingStep: "COMPLETE" },
       include: { user: { select: { email: true } } },
     });
 
@@ -223,7 +232,32 @@ export async function PATCH(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ success: true, nextStep: "COMPLETE", redirect: "/dealer/dashboard" });
+    // The dealer is now ACTIVE, but their cookie still carries scope
+    // "onboarding" — proxy.ts would keep bouncing them back here. Re-mint at
+    // full scope on this same response so the very next request lands on the
+    // dashboard. (The server-side gate already re-derives from Dealer.status,
+    // so this is a routing correction, not a privilege grant.)
+    const fullScopeToken = await signDealerJwt({
+      dealerId: updatedDealer.id,
+      userId: updatedDealer.userId,
+      email: updatedDealer.user?.email ?? "",
+      role: "DEALER",
+      scope: "full",
+    });
+
+    const activatedResponse = NextResponse.json({
+      success: true,
+      nextStep: "COMPLETE",
+      redirect: "/dealer/dashboard",
+    });
+    activatedResponse.cookies.set(DEALER_TOKEN_COOKIE, fullScopeToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 7,
+      path: "/",
+    });
+    return activatedResponse;
   }
 
   return NextResponse.json({ error: "Unknown step" }, { status: 400 });

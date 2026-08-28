@@ -9,6 +9,7 @@ import { authorizeCronRequest } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/prisma";
 import { sendDealerAuctionReminderEmail } from "@/lib/services/email/resend.service";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
+import { expireStaleInvitations } from "@/lib/services/dealer-recruitment/invitation-token.service";
 
 const APP_URL = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -113,8 +114,15 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Sweep invitations whose TTL elapsed. Expiry used to be applied only lazily,
+  // when someone happened to hit the token, which left PENDING rows sitting past
+  // their expiresAt indefinitely. Folded into this existing cron rather than a
+  // new job.
+  const invitationsExpired = await expireStaleInvitations(now);
+
   return {
     now: now.toISOString(),
+    invitationsExpired,
     auctionsInWindow: auctions.length,
     remindersAttempted,
     remindersSent,

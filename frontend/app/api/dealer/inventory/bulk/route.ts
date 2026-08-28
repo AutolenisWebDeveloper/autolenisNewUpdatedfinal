@@ -14,6 +14,7 @@ import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dea
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { parseCsvPriceToCents } from "@/lib/utils/csv-price";
 
 const STANDARD_FIELDS = ["VIN", "Year", "Make", "Model", "Trim", "Mileage", "Price", "Skip"] as const;
 type StandardField = (typeof STANDARD_FIELDS)[number];
@@ -90,8 +91,10 @@ function applyRawRows(
       errors.push(`Row ${idx + 1}: invalid Year "${yearStr}" for VIN ${vin}`);
       continue;
     }
-    const priceNum = parseFloat(priceStr.replace(/[$,]/g, ""));
-    if (Number.isNaN(priceNum) || priceNum <= 0) {
+    // Same parser as the standard-header client path, so the two CSV routes
+    // cannot drift on units again.
+    const priceCents = parseCsvPriceToCents(priceStr);
+    if (priceCents === null) {
       errors.push(`Row ${idx + 1}: invalid Price "${priceStr}" for VIN ${vin}`);
       continue;
     }
@@ -108,7 +111,7 @@ function applyRawRows(
       make,
       model,
       trim: picked.Trim,
-      priceCents: Math.round(priceNum * 100),
+      priceCents,
       mileage,
     });
   }

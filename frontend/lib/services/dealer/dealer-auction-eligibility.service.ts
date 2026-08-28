@@ -1,13 +1,21 @@
 // lib/services/dealer/dealer-auction-eligibility.service.ts — Batch 2
 //
 // The dealer VERIFICATION gate. FS-C's real harm is an unverified dealer BIDDING
-// on a real buyer auction — not a dealer logging in. In the actual lifecycle a
-// dealer is made ACTIVE by admin approval BEFORE onboarding (PENDING dealers can't
-// sign in), and only then collects a license + signs the agreement. So the gate
-// belongs at AUCTION ELIGIBILITY (who may be invited to compete), where it is both
-// satisfiable and correctly grandfather-shaped: an existing ACTIVE dealer keeps
-// portal access but, once the gate is enforced, is not invited to bid until it has
-// a signed agreement and an admin-verified license.
+// on a real buyer auction — not a dealer logging in.
+//
+// LIFECYCLE (corrected). An earlier version of this comment claimed a dealer "is
+// made ACTIVE by admin approval BEFORE onboarding (PENDING dealers can't sign
+// in)". Both halves were false. Admin approval grants permission to ONBOARD: all
+// three dealer-creation paths leave the dealer PENDING, a PENDING dealer signs in
+// at ONBOARDING scope (lib/auth/dealer-scope.ts) and is confined to
+// /dealer/onboarding, and ACTIVE is set only when the agreement step records a
+// signature (app/api/dealer/onboarding/route.ts).
+//
+// That does not move this gate. It still belongs at AUCTION ELIGIBILITY (who may
+// be invited to compete), where it is both satisfiable and correctly
+// grandfather-shaped: an existing ACTIVE dealer keeps portal access but, once the
+// gate is enforced, is not invited to bid until it has a signed agreement and an
+// admin-verified license.
 //
 // Flag-controlled (FLAGS.DEALER_VERIFICATION_GATE), DEFAULT OFF — with it off,
 // auction eligibility is unchanged (status ACTIVE + not placeholder, as before).
