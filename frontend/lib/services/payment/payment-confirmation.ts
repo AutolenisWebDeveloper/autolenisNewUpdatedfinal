@@ -1,7 +1,9 @@
-// lib/services/payment/deposit-confirmation.ts
+// lib/services/payment/payment-confirmation.ts
 //
 // The ONE decision that turns "what Stripe says about this PaymentIntent" plus
-// "what our Deposit row says" into what the buyer may truthfully be told.
+// "what our own settlement record says" into what the buyer may truthfully be
+// told. Used by BOTH buyer payments — the $99 deposit and the concierge fee —
+// because the truthfulness rule does not differ between them.
 //
 // Why this is a module and not an inline branch on the page: the $99 deposit
 // page previously made its claim from CLIENT state — `stripe.confirmPayment`
@@ -19,10 +21,12 @@
 /** Stripe PaymentIntent.status values this decision distinguishes. */
 export type PaymentIntentStatusInput = string | null | undefined;
 
-/** Deposit.status as stored by us; null when no Deposit row matches the intent. */
-export type DepositStatusInput = string | null | undefined;
+/** Our own settlement record for the payment ("PAID" when settled); null when
+ *  no matching record exists. Deposit.status for the $99, and the recorded fee
+ *  state for the concierge fee — the rule is the same for both. */
+export type RecordedStatusInput = string | null | undefined;
 
-export type DepositConfirmationOutcome =
+export type PaymentConfirmationOutcome =
   /** Stripe settled AND our Deposit is PAID. The only state that may claim success. */
   | "settled"
   /** The bank is still confirming. Nothing was promised; nothing has failed. */
@@ -41,11 +45,11 @@ export type DepositConfirmationOutcome =
   /** No payment reference to check, or the provider could not be reached. */
   | "unknown";
 
-export interface DepositConfirmationFacts {
+export interface PaymentConfirmationFacts {
   /** Stripe's PaymentIntent.status, or null if no reference / lookup failed. */
   intentStatus: PaymentIntentStatusInput;
-  /** Our Deposit.status for that intent, or null when no row matched. */
-  depositStatus: DepositStatusInput;
+  /** Our own settlement record, or null when nothing matched. */
+  recordedStatus: RecordedStatusInput;
   /** False when there was no payment reference or the provider lookup threw. */
   providerReachable?: boolean;
 }
@@ -59,14 +63,14 @@ export interface DepositConfirmationFacts {
  * is behind. Optimism is allowed about the buyer's money, never about our
  * fulfillment.
  */
-export function classifyDepositConfirmation(
-  facts: DepositConfirmationFacts,
-): DepositConfirmationOutcome {
+export function classifyPaymentConfirmation(
+  facts: PaymentConfirmationFacts,
+): PaymentConfirmationOutcome {
   if (facts.providerReachable === false) return "unknown";
   if (!facts.intentStatus) return "unknown";
 
   if (facts.intentStatus === "succeeded") {
-    return facts.depositStatus === "PAID" ? "settled" : "charged_unsettled";
+    return facts.recordedStatus === "PAID" ? "settled" : "charged_unsettled";
   }
   if (facts.intentStatus === "processing") return "processing";
   return "failed";
@@ -76,7 +80,7 @@ export function classifyDepositConfirmation(
  * True when the outcome means the buyer's card was charged. Used to guarantee no
  * surface offers a re-payment CTA for money that already moved.
  */
-export function wasCharged(outcome: DepositConfirmationOutcome): boolean {
+export function wasCharged(outcome: PaymentConfirmationOutcome): boolean {
   return outcome === "settled" || outcome === "charged_unsettled";
 }
 
@@ -84,6 +88,6 @@ export function wasCharged(outcome: DepositConfirmationOutcome): boolean {
  * True only when a surface may assert that the deposit is complete and
  * fulfillment has begun. Nothing else in the codebase may make that claim.
  */
-export function mayClaimActivation(outcome: DepositConfirmationOutcome): boolean {
+export function mayClaimActivation(outcome: PaymentConfirmationOutcome): boolean {
   return outcome === "settled";
 }

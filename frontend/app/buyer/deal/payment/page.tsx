@@ -7,7 +7,7 @@ import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Shield, Sparkles } from "lucide-react";
-import { PREMIUM_FEE_CENTS, DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
+import { PREMIUM_FEE_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import FeePaymentForm from "@/components/buyer/FeePaymentForm";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +21,19 @@ export default async function DealPaymentPage() {
   });
 
   if (!deal) return <div className="p-8 text-[#4B5563]" data-testid="payment-no-deal">No active deal.</div>;
+
+  // The "$99 already credited" line used to be printed from the constant with no
+  // deposit ever checked, so a buyer who never paid one was shown a credit they
+  // had not earned. Read the real record and only claim the credit when it
+  // exists. NOTE: the amount actually charged is decided server-side by
+  // /api/buyer/deals/[dealId]/fee/create-intent and is unchanged here — this
+  // only stops the page asserting a credit it cannot evidence.
+  const paidDeposit = await prisma.deposit.findFirst({
+    where: { buyerId: buyer.id, status: "PAID" },
+    orderBy: { createdAt: "desc" },
+    select: { amountCents: true },
+  });
+  const depositCreditCents = paidDeposit?.amountCents ?? 0;
 
   const isPremium = buyer.plan === "PREMIUM";
 
@@ -85,13 +98,21 @@ export default async function DealPaymentPage() {
       <div className="bg-white border border-[#E5E7EB] rounded-xl p-6 mb-6">
         <div className="space-y-3 text-sm">
           <div className="flex justify-between">
-            <span className="text-[#4B5563]">AutoLenis Service Fee (total)</span>
-            <span className="font-semibold text-[#111827]">${PREMIUM_FEE_CENTS / 100}</span>
+            <span className="text-[#4B5563]">
+              {depositCreditCents > 0 ? "AutoLenis Service Fee (total)" : "AutoLenis Service Fee"}
+            </span>
+            <span className="font-semibold text-[#111827]">
+              ${(depositCreditCents > 0 ? PREMIUM_FEE_CENTS : netFeeCents) / 100}
+            </span>
           </div>
-          <div className="flex justify-between text-[#1A6B18]">
-            <span>$99 Auction Access Deposit already credited</span>
-            <span>-${DEPOSIT_AMOUNT_CENTS / 100}</span>
-          </div>
+          {/* Only claimed when a PAID deposit actually exists — this line used
+              to be printed from the constant with no deposit ever checked. */}
+          {depositCreditCents > 0 && (
+            <div className="flex justify-between text-[#1A6B18]">
+              <span>${depositCreditCents / 100} Auction Access Deposit already credited</span>
+              <span>-${depositCreditCents / 100}</span>
+            </div>
+          )}
           <div className="flex justify-between font-bold text-base border-t border-al-primary-subtle pt-3">
             <span>Due today</span>
             <span className="text-al-primary">${netFeeCents / 100}</span>

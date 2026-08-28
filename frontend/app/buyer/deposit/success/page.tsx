@@ -8,10 +8,10 @@ import { CheckCircle2, XCircle, ArrowRight, Clock } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
 import {
-  classifyDepositConfirmation,
+  classifyPaymentConfirmation,
   mayClaimActivation,
-  type DepositConfirmationOutcome,
-} from "@/lib/services/payment/deposit-confirmation";
+  type PaymentConfirmationOutcome,
+} from "@/lib/services/payment/payment-confirmation";
 import { requireBuyer } from "@/lib/auth/session";
 import ContentConversionTracker from "@/components/analytics/ContentConversionTracker";
 
@@ -24,7 +24,7 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
   const intentId = params.payment_intent ?? null;
   const buyer    = await requireBuyer();
 
-  let outcome: DepositConfirmationOutcome = "unknown";
+  let outcome: PaymentConfirmationOutcome = "unknown";
   let errorMsg: string | null = null;
   let conversionValueCents: number | undefined;
   // Concierge deposits unlock an admin-curated set of offers; they do NOT launch
@@ -47,9 +47,9 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
 
       // The claim is decided by the shared pure rule, never inline here, so this
       // page cannot drift back into asserting more than the facts support.
-      outcome = classifyDepositConfirmation({
+      outcome = classifyPaymentConfirmation({
         intentStatus: intent.status,
-        depositStatus: deposit?.status ?? null,
+        recordedStatus: deposit?.status ?? null,
       });
 
       if (mayClaimActivation(outcome)) conversionValueCents = deposit?.amountCents;

@@ -26,14 +26,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  classifyDepositConfirmation,
+  classifyPaymentConfirmation,
   mayClaimActivation,
   wasCharged,
-} from "../deposit-confirmation";
+} from "../payment-confirmation";
 
 test("only provider-settled AND recorded-PAID may claim activation", () => {
   assert.equal(
-    classifyDepositConfirmation({ intentStatus: "succeeded", depositStatus: "PAID" }),
+    classifyPaymentConfirmation({ intentStatus: "succeeded", recordedStatus: "PAID" }),
     "settled",
   );
   assert.equal(mayClaimActivation("settled"), true);
@@ -42,9 +42,9 @@ test("only provider-settled AND recorded-PAID may claim activation", () => {
 test("succeeded intent with a still-PENDING deposit is NOT success", () => {
   // The live production condition: the webhook that flips PENDING → PAID has
   // never delivered, so this is what a real paying buyer hits.
-  const outcome = classifyDepositConfirmation({
+  const outcome = classifyPaymentConfirmation({
     intentStatus: "succeeded",
-    depositStatus: "PENDING",
+    recordedStatus: "PENDING",
   });
   assert.equal(outcome, "charged_unsettled");
   assert.equal(mayClaimActivation(outcome), false, "must not claim the auction is live");
@@ -54,9 +54,9 @@ test("succeeded intent with a still-PENDING deposit is NOT success", () => {
 test("succeeded intent with NO deposit row is charged, not failed", () => {
   // Regression for the duplicate-charge invitation: this case previously
   // rendered "Payment not confirmed → Return to Payment".
-  const outcome = classifyDepositConfirmation({
+  const outcome = classifyPaymentConfirmation({
     intentStatus: "succeeded",
-    depositStatus: null,
+    recordedStatus: null,
   });
   assert.equal(outcome, "charged_unsettled");
   assert.notEqual(outcome, "failed", "a succeeded charge must never be shown as a failure");
@@ -65,7 +65,7 @@ test("succeeded intent with NO deposit row is charged, not failed", () => {
 });
 
 test("a processing intent promises nothing and fails nothing", () => {
-  const outcome = classifyDepositConfirmation({ intentStatus: "processing", depositStatus: null });
+  const outcome = classifyPaymentConfirmation({ intentStatus: "processing", recordedStatus: null });
   assert.equal(outcome, "processing");
   assert.equal(mayClaimActivation(outcome), false);
   assert.equal(wasCharged(outcome), false);
@@ -73,7 +73,7 @@ test("a processing intent promises nothing and fails nothing", () => {
 
 test("terminal non-success statuses are failures", () => {
   for (const status of ["requires_payment_method", "canceled", "requires_action"]) {
-    const outcome = classifyDepositConfirmation({ intentStatus: status, depositStatus: null });
+    const outcome = classifyPaymentConfirmation({ intentStatus: status, recordedStatus: null });
     assert.equal(outcome, "failed", `${status} should be failed`);
     assert.equal(mayClaimActivation(outcome), false);
     assert.equal(wasCharged(outcome), false);
@@ -81,16 +81,16 @@ test("terminal non-success statuses are failures", () => {
 });
 
 test("no reference, or an unreachable provider, claims nothing", () => {
-  assert.equal(classifyDepositConfirmation({ intentStatus: null, depositStatus: null }), "unknown");
+  assert.equal(classifyPaymentConfirmation({ intentStatus: null, recordedStatus: null }), "unknown");
   assert.equal(
-    classifyDepositConfirmation({ intentStatus: undefined, depositStatus: "PAID" }),
+    classifyPaymentConfirmation({ intentStatus: undefined, recordedStatus: "PAID" }),
     "unknown",
     "a PAID row alone is not provider confirmation",
   );
   assert.equal(
-    classifyDepositConfirmation({
+    classifyPaymentConfirmation({
       intentStatus: "succeeded",
-      depositStatus: "PAID",
+      recordedStatus: "PAID",
       providerReachable: false,
     }),
     "unknown",
@@ -104,7 +104,7 @@ test("a locally-recorded PAID can never substitute for provider evidence", () =>
   // override writes PAID with NO PaymentProviderEvent, and that must not become
   // a provider-confirmed claim on a buyer-facing surface.
   for (const status of [null, undefined, "processing", "canceled"]) {
-    const outcome = classifyDepositConfirmation({ intentStatus: status, depositStatus: "PAID" });
+    const outcome = classifyPaymentConfirmation({ intentStatus: status, recordedStatus: "PAID" });
     assert.equal(
       mayClaimActivation(outcome),
       false,
@@ -116,9 +116,9 @@ test("a locally-recorded PAID can never substitute for provider evidence", () =>
 test("the two optimism rules are asymmetric on purpose", () => {
   // Optimism about the BUYER'S MONEY is required (acknowledge the charge);
   // optimism about OUR FULFILLMENT is forbidden (never claim dealers invited).
-  const outcome = classifyDepositConfirmation({
+  const outcome = classifyPaymentConfirmation({
     intentStatus: "succeeded",
-    depositStatus: "PENDING",
+    recordedStatus: "PENDING",
   });
   assert.equal(wasCharged(outcome), true);
   assert.equal(mayClaimActivation(outcome), false);
