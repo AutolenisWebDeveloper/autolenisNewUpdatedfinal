@@ -6,6 +6,7 @@
 // consumed_at, so a database leak was replayable and single use was not
 // structurally enforced.
 
+import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   hashToken,
@@ -61,7 +62,12 @@ export async function validateInvitationToken(
   if (invitation.consumedAt || invitation.status === "ACCEPTED") {
     return { ok: false, reason: "consumed" };
   }
-  if (invitation.expiresAt < now) return { ok: false, reason: "expired" };
+  // A row the expiry sweep has already retired is expired regardless of the
+  // timestamp. Without this, validate would pass a row that consume then
+  // refuses (it requires PENDING), and the caller would report the wrong reason.
+  if (invitation.status === "EXPIRED" || invitation.expiresAt < now) {
+    return { ok: false, reason: "expired" };
+  }
 
   return {
     ok: true,
@@ -72,19 +78,80 @@ export async function validateInvitationToken(
   };
 }
 
+/** Anything that can write dealer_invitations — the client or a transaction client. */
+export type InvitationWriteClient = Pick<PrismaClient, "dealerInvitation">;
+
 /**
- * Atomically consume an invitation. Conditional on `consumedAt: null` so two
- * concurrent claims can never both succeed — identical contract to
- * consumeClaimToken(). Returns true only if THIS call won.
+ * Atomically consume an invitation. Returns true only if THIS call won, so two
+ * concurrent claims of the same link can never both create a dealer.
+ *
+ * Guarded on `status: PENDING` as well as `consumedAt: null`. The status guard
+ * is exactly as atomic (the winner flips the row under a row lock) and it is
+ * additionally correct against a row the expiry sweep retired between
+ * validation and consumption, which a consumedAt-only guard would let through.
+ *
+ * Accepts a transaction client so the claim route can consume inside the same
+ * transaction that creates the User and Dealer — the guard is worthless if the
+ * caller writes its own unguarded update instead.
  */
 export async function consumeInvitationToken(
   invitationId: string,
   dealerId: string,
   now: Date = new Date(),
+  client: InvitationWriteClient = prisma,
 ): Promise<boolean> {
-  const res = await prisma.dealerInvitation.updateMany({
-    where: { id: invitationId, consumedAt: null },
+  const res = await client.dealerInvitation.updateMany({
+    where: { id: invitationId, status: "PENDING", consumedAt: null },
     data: { consumedAt: now, acceptedAt: now, status: "ACCEPTED", dealerId },
+  });
+  return res.count === 1;
+}
+
+/**
+ * Rotate an invitation's token and extend its TTL — the admin resend path.
+ *
+ * Invitations previously had a SECOND token scheme here: an HMAC of
+ * `email:dealershipName:now` with a 72h TTL, written in plaintext. That is
+ * replaced by the one scheme this module owns (256-bit random, hashed at rest,
+ * 7-day TTL), so there is one way an invitation token comes into existence.
+ *
+ * Rotation INVALIDATES the superseded link: the stored hash is replaced, and any
+ * residual plaintext `token` is nulled, so neither the old hashed link nor a
+ * pre-migration plaintext one still resolves.
+ *
+ * Guarded on status so a resend can never resurrect an ACCEPTED or CANCELLED
+ * invitation, even when the caller's earlier read raced with a claim. Returns
+ * the new raw token, or null when nothing was updated.
+ */
+export async function refreshInvitationToken(
+  invitationId: string,
+  now: Date = new Date(),
+): Promise<{ rawToken: string; expiresAt: Date } | null> {
+  const { rawToken, tokenHash, expiresAt } = issueInvitationToken(now);
+
+  const res = await prisma.dealerInvitation.updateMany({
+    where: { id: invitationId, status: { in: ["PENDING", "EXPIRED"] } },
+    data: { tokenHash, token: null, expiresAt, status: "PENDING" },
+  });
+
+  if (res.count !== 1) return null;
+  return { rawToken, expiresAt };
+}
+
+/**
+ * Cancel an invitation (admin action).
+ *
+ * Guarded on status for the same reason as the resend above: the route reads the
+ * invitation, decides it is cancellable, and only then writes. Without the guard
+ * a claim landing in that window would be silently undone — an ACCEPTED
+ * invitation, with a real dealer attached, flipped back to CANCELLED.
+ *
+ * @returns true only if a cancellable row was actually cancelled by this call.
+ */
+export async function cancelInvitation(invitationId: string): Promise<boolean> {
+  const res = await prisma.dealerInvitation.updateMany({
+    where: { id: invitationId, status: { in: ["PENDING", "EXPIRED"] } },
+    data: { status: "CANCELLED" },
   });
   return res.count === 1;
 }

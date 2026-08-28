@@ -10,7 +10,7 @@ import { sendDealerWelcomeEmail } from "@/lib/services/email/resend.service";
 import { ContactService } from "@/lib/services/contact.service";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { z } from "zod";
-import { validateInvitationToken } from "@/lib/services/dealer-recruitment/invitation-token.service";
+import { validateInvitationToken, consumeInvitationToken } from "@/lib/services/dealer-recruitment/invitation-token.service";
 
 const schema = z.object({
   token: z.string().min(1),
@@ -102,25 +102,24 @@ export async function POST(request: NextRequest) {
         },
       });
       dealerId = dealer.id;
-      // Conditional on consumedAt: null so two concurrent claims of the same
-      // link cannot both create a dealer. The loser's transaction aborts.
-      const consumed = await tx.dealerInvitation.updateMany({
-        where: { id: invitation.id, consumedAt: null },
-        data: {
-          status: "ACCEPTED",
-          acceptedAt: new Date(),
-          consumedAt: new Date(),
-          dealerId: dealer.id,
-        },
-      });
-      if (consumed.count !== 1) {
+      // Consumed through the service, inside THIS transaction, so the guard the
+      // service enforces (PENDING + not yet consumed) actually applies here and
+      // two concurrent claims of the same link cannot both create a dealer. The
+      // loser's transaction aborts and its Supabase user is deleted below.
+      const consumed = await consumeInvitationToken(invitation.id, dealer.id, new Date(), tx);
+      if (!consumed) {
         throw new Error("INVITATION_ALREADY_CONSUMED");
       }
     });
   } catch (err) {
     await supabase.auth.admin.deleteUser(supabaseUserId).catch(() => {});
     if (err instanceof Error && err.message === "INVITATION_ALREADY_CONSUMED") {
-      return NextResponse.json({ error: "Invitation already accepted" }, { status: 409 });
+      // Lost the race: the invitation was accepted, cancelled, or swept to
+      // EXPIRED between validation and consumption. No dealer was created.
+      return NextResponse.json(
+        { error: "This invitation is no longer available. Please request a new one." },
+        { status: 409 },
+      );
     }
     logger.error("[dealer/invite/claim] DB error:", err);
     return NextResponse.json({ error: "Database error" }, { status: 500 });

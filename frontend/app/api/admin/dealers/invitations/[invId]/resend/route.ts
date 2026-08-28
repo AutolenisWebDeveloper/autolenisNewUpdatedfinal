@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { sendDealerInvitationEmail } from "@/lib/services/email/resend.service";
-import crypto from "crypto";
+import { refreshInvitationToken } from "@/lib/services/dealer-recruitment/invitation-token.service";
 
 interface RouteContext { params: Promise<{ invId: string }> }
 
@@ -24,19 +24,18 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   if (inv.status === "ACCEPTED") return NextResponse.json({ error: "Already accepted" }, { status: 409 });
   if (inv.status === "CANCELLED") return NextResponse.json({ error: "Invitation was cancelled" }, { status: 409 });
 
-  const secret = process.env.JWT_SECRET ?? "placeholder";
-  const data = `${inv.email}:${inv.dealershipName}:${Date.now()}`;
-  const newToken = crypto.createHmac("sha256", secret).update(data).digest("hex") +
-    crypto.randomBytes(8).toString("hex");
-  const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
-
-  await prisma.dealerInvitation.update({
-    where: { id: invId },
-    data: { token: newToken, expiresAt, status: "PENDING" },
-  });
+  // One token scheme for invitations, owned by the service: 256-bit random,
+  // hashed at rest, 7-day TTL. Rotation invalidates the superseded link, and the
+  // status guard means this cannot resurrect an invitation that was accepted or
+  // cancelled between the read above and this write.
+  const rotated = await refreshInvitationToken(invId);
+  if (!rotated) {
+    return NextResponse.json({ error: "Invitation is no longer resendable" }, { status: 409 });
+  }
+  const { rawToken, expiresAt } = rotated;
 
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
-  const inviteUrl = `${appUrl}/dealer/invite/claim?token=${newToken}`;
+  const inviteUrl = `${appUrl}/dealer/invite/claim?token=${rawToken}`;
 
   try {
     await sendDealerInvitationEmail({ to: inv.email, contactName: inv.contactName, dealershipName: inv.dealershipName, claimUrl: inviteUrl, expiresAt: expiresAt.toISOString() });
