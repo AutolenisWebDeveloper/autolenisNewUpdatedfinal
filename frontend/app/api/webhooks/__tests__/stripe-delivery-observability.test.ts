@@ -29,6 +29,8 @@ const state = {
   existingAlertTitles: new Set<string>(),
   /** PaymentIntent id → the Deposit row the money-cluster should resolve, if any. */
   depositsByPi: {} as Record<string, Record<string, unknown>>,
+  /** Rows the delivery-rejection log persisted for this delivery. */
+  webhookRows: [] as Array<{ source: string; eventType: string; payload: Record<string, unknown> }>,
 };
 
 mock.module("@/lib/stripe", {
@@ -72,6 +74,13 @@ mock.module("@/lib/prisma", {
         create: async ({ data }: { data: Record<string, unknown> }) => {
           state.notifications.push(data);
           return { id: "n1" };
+        },
+      },
+      webhookEvent: {
+        findFirst: async () => null, // never throttled within a single test
+        create: async ({ data }: { data: { source: string; eventType: string; payload: Record<string, unknown> } }) => {
+          state.webhookRows.push({ source: data.source, eventType: data.eventType, payload: data.payload });
+          return data;
         },
       },
       deposit: { updateMany: async () => ({ count: 0 }), findFirst: async () => null },
@@ -161,6 +170,7 @@ beforeEach(() => {
   state.errors = [];
   state.existingAlertTitles = new Set<string>();
   state.depositsByPi = {};
+  state.webhookRows = [];
 });
 
 // ── 1. Misconfiguration is deliberate and logged, never an unhandled throw ────
@@ -260,5 +270,81 @@ test("non-payment_intent event types are unaffected by the unroutable check", as
   assert.equal(
     state.notifications.filter((n) => String(n.title ?? "").startsWith("Unroutable")).length,
     0,
+  );
+});
+
+// ── 3. A REJECTED delivery is persisted, not just logged ─────────────────────
+//
+// The app log is not queryable from the platform, and Vercel log retention is
+// short. Without a row, "Stripe never called us" and "Stripe called and we
+// rejected every one" are the same observation — with different fixes.
+
+test("an invalid signature is recorded, not silently 400'd", async () => {
+  const mod = await import("../stripe/route");
+  const req = new NextRequest("http://localhost/api/webhooks/stripe", {
+    method: "POST",
+    headers: { "stripe-signature": "t=1,v1=bogus" },
+    body: "not-json-so-verification-throws",
+  });
+  const res = await mod.POST(req);
+
+  assert.equal(res.status, 400);
+  const row = state.webhookRows.find((r) => r.eventType === "rejected.signature_invalid");
+  assert.ok(row, "this branch used to be entirely silent — no log, no row");
+  assert.equal(row!.source, "stripe");
+  assert.equal(row!.payload.hasSignatureHeader, true);
+  assert.equal(row!.payload.bodyBytes, "not-json-so-verification-throws".length);
+  assert.ok(
+    state.errors.some((e) => /signature verification FAILED/i.test(e)),
+    "and it must name the likely cause in the log too",
+  );
+});
+
+test("the recorded rejection never contains the unverified body", async () => {
+  const secret = "SENSITIVE-CARDHOLDER-PAYLOAD";
+  const mod = await import("../stripe/route");
+  const req = new NextRequest("http://localhost/api/webhooks/stripe", {
+    method: "POST",
+    headers: { "stripe-signature": "t=1,v1=bogus" },
+    body: secret,
+  });
+  await mod.POST(req);
+
+  const row = state.webhookRows.find((r) => r.eventType === "rejected.signature_invalid");
+  assert.ok(row);
+  assert.ok(
+    !JSON.stringify(row).includes(secret),
+    "an unverified body may be hostile or carry PII — only its size may be persisted",
+  );
+});
+
+test("a missing STRIPE_SECRET_KEY is recorded as its own diagnosis", async () => {
+  state.stripeThrows = true;
+  await deliver("evt_cfg3", "payment_intent.succeeded", { id: "pi_1", metadata: { type: "deposit" } });
+
+  const row = state.webhookRows.find((r) => r.eventType === "rejected.provider_client_unavailable");
+  assert.ok(row, "a 500 before verification must be distinguishable from a 400 after it");
+});
+
+test("a missing STRIPE_WEBHOOK_SECRET is recorded as its own diagnosis", async () => {
+  process.env.STRIPE_WEBHOOK_SECRET = "";
+  await deliver("evt_cfg4", "payment_intent.succeeded", { id: "pi_1", metadata: { type: "deposit" } });
+
+  const row = state.webhookRows.find((r) => r.eventType === "rejected.webhook_secret_missing");
+  assert.ok(row, "the three rejection causes have three different fixes");
+});
+
+test("an ACCEPTED delivery writes no rejection row — no duplicate ledger", async () => {
+  const res = await deliver("evt_ok", "payment_intent.succeeded", {
+    id: "pi_ok",
+    amount: 9900,
+    metadata: { type: "deposit", buyerId: "b1" },
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(
+    state.webhookRows.length,
+    0,
+    "successful deliveries already live in payment_provider_events; recording them again would be a second ledger of one fact",
   );
 });

@@ -21,6 +21,7 @@ import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 import { markContentConversion } from "@/lib/analytics/content-attribution.server";
 import { allowedPredecessors } from "@/lib/payments/deposit-state";
+import { recordWebhookRejection } from "@/lib/services/monitoring/webhook-delivery-log.service";
 
 // PaymentIntent metadata types this endpoint can actually fulfil. A
 // signature-valid payment whose type is not in this set is a real charge the
@@ -65,6 +66,14 @@ export async function POST(request: NextRequest) {
     stripe = getStripe();
   } catch (err) {
     logger.error("[stripe/webhook] STRIPE_SECRET_KEY is not set — cannot verify webhooks:", err);
+    // Persist the condition: the app log is not queryable from the platform, and
+    // this state is otherwise indistinguishable from "Stripe never delivered".
+    await recordWebhookRejection({
+      source: "stripe",
+      reason: "provider_client_unavailable",
+      bodyBytes: 0,
+      hasSignatureHeader: request.headers.get("stripe-signature") !== null,
+    });
     return new NextResponse("Webhook not configured", { status: 500 });
   }
   const body = await request.text();
@@ -75,6 +84,12 @@ export async function POST(request: NextRequest) {
     // is a deployment error, not a bad request. 500 keeps Stripe retrying so
     // no events are lost while ops fixes the env.
     logger.error("[stripe/webhook] STRIPE_WEBHOOK_SECRET is not set — rejecting webhook");
+    await recordWebhookRejection({
+      source: "stripe",
+      reason: "webhook_secret_missing",
+      bodyBytes: body.length,
+      hasSignatureHeader: sig !== null,
+    });
     return new NextResponse("Webhook not configured", { status: 500 });
   }
 
@@ -82,6 +97,21 @@ export async function POST(request: NextRequest) {
   try {
     event = stripe.webhooks.constructEvent(body, sig ?? "", webhookSecret);
   } catch {
+    // This branch used to be entirely silent — no log, no row. A signing-secret
+    // mismatch therefore looked exactly like Stripe never calling us at all,
+    // which is the ambiguity that let a dead money path go unnoticed. The body
+    // is unverified and possibly hostile, so only its SIZE is recorded.
+    logger.error(
+      `[stripe/webhook] signature verification FAILED (body ${body.length} bytes, ` +
+        `signature header ${sig ? "present" : "absent"}) — if Stripe is delivering, ` +
+        `the endpoint's signing secret does not match STRIPE_WEBHOOK_SECRET`,
+    );
+    await recordWebhookRejection({
+      source: "stripe",
+      reason: "signature_invalid",
+      bodyBytes: body.length,
+      hasSignatureHeader: sig !== null,
+    });
     return new NextResponse("Webhook signature invalid", { status: 400 });
   }
 
