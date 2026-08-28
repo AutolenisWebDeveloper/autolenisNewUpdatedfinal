@@ -9,6 +9,13 @@ import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "crypto";
 
+// This suite exercises the behaviour that exists once migrations 20261014 +
+// 20261015 are APPLIED: the consent snapshot, the executed-contract artifact, the
+// confirmation marker and the ESignEnvelopeHistory archive. The schema gate
+// therefore has to be open. Gate-CLOSED behaviour (production today, migrations
+// unapplied) is covered in ./esign-schema-gate.test.ts.
+process.env.ESIGN_EXECUTED_ARTIFACT_ENABLED = "true";
+
 interface Env {
   id: string; dealId: string; status: string; attemptNumber: number;
   documentVersionId: string | null; documentHash: string | null;

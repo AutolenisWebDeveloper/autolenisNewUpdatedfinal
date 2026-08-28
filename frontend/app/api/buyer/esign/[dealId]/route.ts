@@ -9,8 +9,11 @@ import {
   ensureDealSigned,
   expireIfElapsed,
   NoSignableDocumentError,
+  ESignSchemaUnavailableError,
+  readEnvelopeForDeal,
 } from "@/lib/services/esign/buyer-signing.service";
 import { toBuyerEnvelopeSummary } from "@/lib/services/esign/esign-dto";
+import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -23,18 +26,30 @@ export async function GET(request: NextRequest, { params }: Props) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
-  const deal = await prisma.deal.findFirst({ where: { id: dealId, buyerId: buyer.id }, include: { eSignEnvelope: true } });
+  // Explicit projection: `include: { eSignEnvelope: true }` selects every envelope
+  // scalar, including the columns migrations 20261014/20261015 add but production
+  // does not yet have. Only the status is needed here.
+  const deal = await prisma.deal.findFirst({
+    where: { id: dealId, buyerId: buyer.id },
+    select: { id: true, status: true, eSignEnvelope: { select: { status: true } } },
+  });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
   await expireIfElapsed(dealId);
   if (deal.eSignEnvelope?.status === "COMPLETED") await ensureDealSigned(dealId, buyer.id);
 
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = await readEnvelopeForDeal(dealId);
   let contractViewUrl: string | null = null;
-  const signable = envelope?.status === "SENT" || envelope?.status === "DELIVERED" || envelope?.status === "PENDING";
+  // recordBuyerSignature fails closed while the schema gate is closed, so a
+  // "signable" envelope would render a ceremony whose submit can only 503. Report
+  // it truthfully as not signable instead.
+  const signable =
+    isExecutedArtifactEnabled() &&
+    (envelope?.status === "SENT" || envelope?.status === "DELIVERED" || envelope?.status === "PENDING");
   if (signable && envelope?.documentVersionId) {
     // Record first-view evidence (best-effort) and mint a view URL.
-    if (!envelope.viewedAt) await prisma.eSignEnvelope.update({ where: { dealId }, data: { viewedAt: new Date() } }).catch(() => {});
+    // Narrowed RETURNING — an unprojected update returns every scalar.
+    if (!envelope.viewedAt) await prisma.eSignEnvelope.update({ where: { dealId }, data: { viewedAt: new Date() }, select: { id: true } }).catch(() => {});
     const contract = await prisma.contractVersion.findUnique({ where: { id: envelope.documentVersionId } });
     if (contract) contractViewUrl = await getContractViewUrl(contract.documentUrl);
   }
@@ -102,6 +117,10 @@ export async function POST(request: NextRequest, { params }: Props) {
 
     return successResponse({ envelopeId: prepared.envelopeId, status: prepared.status, contractViewUrl });
   } catch (err) {
+    if (err instanceof ESignSchemaUnavailableError) {
+      logger.warn("[buyer/esign] prepare refused — e-sign schema gate closed:", err);
+      return errorResponse("ESIGN_UNAVAILABLE", "Electronic signing is temporarily unavailable while contract e-signature compliance review is completed. Your deal is unaffected — our team will reach out with next steps.", 503);
+    }
     if (err instanceof NoSignableDocumentError) {
       return errorResponse("NO_SIGNABLE_DOCUMENT", "The approved contract is not available to sign yet. Please try again shortly.", 409);
     }

@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRequestDealer, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
 import { getExecutedContractUrl } from "@/lib/services/esign/executed-contract.service";
+import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -21,12 +22,24 @@ export async function GET(request: NextRequest, { params }: Props) {
   // Ownership gate: only a deal whose winning offer belongs to THIS dealer.
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, offer: { dealerId: dealer.id } },
-    select: { id: true, eSignEnvelope: { select: { status: true, executedDocumentKey: true } } },
+    select: { id: true, eSignEnvelope: { select: { id: true, status: true } } },
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
 
   const envelope = deal.eSignEnvelope;
-  if (!envelope || envelope.status !== "COMPLETED" || !envelope.executedDocumentKey) {
+  // executed_document_key only exists once migrations 20261014/20261015 are applied
+  // and the gate is opened; while it is closed no executed copy can exist, so the
+  // dealer correctly sees the same "not available yet" response.
+  const executedDocumentKey =
+    envelope && isExecutedArtifactEnabled()
+      ? (
+          await prisma.eSignEnvelope.findUnique({
+            where: { id: envelope.id },
+            select: { executedDocumentKey: true },
+          })
+        )?.executedDocumentKey ?? null
+      : null;
+  if (!envelope || envelope.status !== "COMPLETED" || !executedDocumentKey) {
     return errorResponse(
       "NOT_AVAILABLE",
       "The executed contract is not available yet. It will appear here once the buyer has signed.",
@@ -34,7 +47,7 @@ export async function GET(request: NextRequest, { params }: Props) {
     );
   }
 
-  const url = await getExecutedContractUrl(envelope.executedDocumentKey, 900);
+  const url = await getExecutedContractUrl(executedDocumentKey, 900);
   if (!url) return errorResponse("STORAGE_ERROR", "Could not generate a download link. Please try again.", 500);
   return NextResponse.redirect(url);
 }

@@ -10,7 +10,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { ESignStatus } from "@prisma/client";
-import { isTerminalStatus } from "./buyer-signing.service";
+import { isTerminalStatus, ESignSchemaUnavailableError } from "./buyer-signing.service";
+import { isExecutedArtifactEnabled } from "./esign-schema-gate";
 
 // Class of error surfaced when an admin action would mutate an immutable terminal
 // signing record. Terminal records are historical evidence — a new attempt must
@@ -27,10 +28,16 @@ export class TerminalEnvelopeError extends Error {
 // this). Marks the envelope SENT so the buyer's signing page becomes actionable.
 // Refuses to resurrect a TERMINAL record (immutable historical evidence).
 export async function sendEnvelope(dealId: string): Promise<void> {
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  // Signing itself fails closed while the schema gate is closed, so marking an
+  // envelope SENT and telling the buyer it is "ready to sign" would send them to a
+  // ceremony that can only 503. Refuse for the same reason.
+  if (!isExecutedArtifactEnabled()) throw new ESignSchemaUnavailableError();
+  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: { id: true, status: true } });
   if (!envelope) throw new Error("Envelope not found");
   if (isTerminalStatus(envelope.status)) throw new TerminalEnvelopeError(envelope.status);
-  await prisma.eSignEnvelope.update({ where: { dealId }, data: { status: ESignStatus.SENT, sentAt: new Date() } });
+  // Explicit projection: an unnarrowed update RETURNs every scalar, including the
+  // columns migrations 20261014/20261015 add but production does not yet have.
+  await prisma.eSignEnvelope.update({ where: { dealId }, data: { status: ESignStatus.SENT, sentAt: new Date() }, select: { id: true } });
   const deal = await prisma.deal.findUnique({ where: { id: dealId } });
   if (deal) {
     await prisma.notification.create({
@@ -47,7 +54,7 @@ export async function sendEnvelope(dealId: string): Promise<void> {
 // Void an envelope (admin action). Provider-neutral DB status change. No-op on an
 // already-terminal record (a terminal signing record is immutable).
 export async function voidEnvelope(dealId: string, reason: string): Promise<void> {
-  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId } });
+  const envelope = await prisma.eSignEnvelope.findUnique({ where: { dealId }, select: { id: true, status: true } });
   if (!envelope || isTerminalStatus(envelope.status)) return;
   await prisma.eSignEnvelope.updateMany({
     where: { id: envelope.id, status: envelope.status },
