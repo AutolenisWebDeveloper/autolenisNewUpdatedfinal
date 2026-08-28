@@ -4,10 +4,11 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { title: "Service Fee Payment", robots: { index: false, follow: false } };
 
 import Link from "next/link";
-import { CheckCircle2, XCircle, ArrowRight, Clock } from "lucide-react";
+import { CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
 import { requireBuyer } from "@/lib/auth/session";
+import PaymentUnsettledNotice from "@/components/buyer/PaymentUnsettledNotice";
 import {
   classifyPaymentConfirmation,
   mayClaimActivation,
@@ -76,56 +77,30 @@ export default async function DealPaymentSuccessPage({ searchParams }: Props) {
     ? `/buyer/deal/payment/success?payment_intent=${encodeURIComponent(intentId)}`
     : "/buyer/deal/payment/success";
 
+  // Both states render through the shared notice so this page and the fee form
+  // on /buyer/fee cannot drift apart on the one sentence that matters here:
+  // "do not pay again".
   if (outcome === "processing") {
     return (
-      <div className="p-6 md:p-8 max-w-xl text-center" data-testid="fee-processing-page">
-        <div className="w-20 h-20 rounded-full bg-al-primary-subtle border border-[#DBEAFE] flex items-center justify-center mx-auto mb-5">
-          <Clock size={40} className="text-al-primary" aria-hidden="true" />
-        </div>
-        <h1 className="text-2xl font-bold text-[#111827] mb-2">Payment processing…</h1>
-        <p className="text-[#4B5563] text-sm mb-6 leading-relaxed">
-          Your bank is still confirming this payment. Refresh in a moment — you do
-          not need to pay again.
-        </p>
-        <Link href={recheckHref}
-          className="inline-flex items-center gap-2 px-8 py-4 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors">
-          Check again <ArrowRight size={15} aria-hidden="true" />
-        </Link>
-      </div>
+      <PaymentUnsettledNotice
+        variant="processing"
+        context="fee"
+        paymentIntentId={intentId}
+        recheckHref={recheckHref}
+        testId="fee-processing-page"
+      />
     );
   }
 
   if (outcome === "charged_unsettled") {
     return (
-      <div className="p-6 md:p-8 max-w-xl text-center" data-testid="fee-charged-unsettled-page">
-        <div className="w-20 h-20 rounded-full bg-[#FFFBEB] border border-[#FDE68A] flex items-center justify-center mx-auto mb-5">
-          <Clock size={40} className="text-al-warning" aria-hidden="true" />
-        </div>
-        <h1 className="text-2xl font-bold text-[#111827] mb-2">Payment received — finishing up</h1>
-        <p className="text-[#4B5563] text-sm mb-6 leading-relaxed">
-          Your service fee payment went through. We haven&apos;t finished recording
-          it on our side yet.{" "}
-          <strong className="text-[#111827]">Do not pay again.</strong> This
-          usually resolves on its own within a few minutes.
-        </p>
-        <div className="bg-[#F8F9FB] border border-[#E5E7EB] rounded-xl p-4 mb-6 text-left text-sm text-[#4B5563]">
-          <p className="mb-1">
-            Payment reference: <span className="font-mono text-xs text-[#111827]">{intentId}</span>
-          </p>
-          <p>
-            If this page still says the same thing in 15 minutes, send that
-            reference to{" "}
-            <a href="mailto:support@autolenis.com" className="text-al-primary hover:underline">
-              support@autolenis.com
-            </a>{" "}
-            and we&apos;ll finish it for you.
-          </p>
-        </div>
-        <Link href={recheckHref}
-          className="inline-flex items-center gap-2 px-8 py-4 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors">
-          Check again <ArrowRight size={15} aria-hidden="true" />
-        </Link>
-      </div>
+      <PaymentUnsettledNotice
+        variant="charged"
+        context="fee"
+        paymentIntentId={intentId}
+        recheckHref={recheckHref}
+        testId="fee-charged-unsettled-page"
+      />
     );
   }
 

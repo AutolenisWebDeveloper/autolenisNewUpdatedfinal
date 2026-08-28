@@ -14,17 +14,32 @@ export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
   readonly correlationId?: string;
-  constructor(code: string, message: string, status: number, correlationId?: string) {
+  /** Machine-readable context some errors carry so the caller can act on them
+   *  rather than just print them — e.g. CHARGE_UNSETTLED ships the
+   *  PaymentIntent id the buyer must be shown instead of a second card form.
+   *  Mirrors the optional `details` bag in errorResponse (lib/auth/api). */
+  readonly details?: Record<string, unknown>;
+  constructor(
+    code: string,
+    message: string,
+    status: number,
+    correlationId?: string,
+    details?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.status = status;
     this.correlationId = correlationId;
+    this.details = details;
   }
 }
 
 type SuccessEnvelope<T> = { success: true; data: T };
-type ErrorEnvelope = { error?: { code?: string; message?: string }; correlationId?: string };
+type ErrorEnvelope = {
+  error?: { code?: string; message?: string; details?: Record<string, unknown> };
+  correlationId?: string;
+};
 
 async function parse<T>(res: Response): Promise<T> {
   // Some routes return an empty body on error paths; tolerate that.
@@ -33,7 +48,7 @@ async function parse<T>(res: Response): Promise<T> {
   if (!res.ok || !body || body.success !== true) {
     const code = body?.error?.code ?? `HTTP_${res.status}`;
     const message = body?.error?.message ?? "Something went wrong. Please try again.";
-    throw new ApiError(code, message, res.status, body?.correlationId);
+    throw new ApiError(code, message, res.status, body?.correlationId, body?.error?.details);
   }
   return body.data;
 }

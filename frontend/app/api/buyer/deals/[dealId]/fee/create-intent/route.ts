@@ -26,6 +26,22 @@ export async function POST(request: NextRequest, { params }: Props) {
     return errorResponse("ALREADY_PAID", "Concierge fee already paid for this deal", 400);
   }
   const { createFeePaymentIntent } = await import("@/lib/services/deal/service-fee.service");
-  const { clientSecret } = await createFeePaymentIntent(dealId, buyer.id);
-  return successResponse({ clientSecret });
+  const intent = await createFeePaymentIntent(dealId, buyer.id);
+
+  // `feePaidAt` above only catches a fee our own side has RECORDED, and the sole
+  // writer of that column is the Stripe webhook, which has never been delivered.
+  // The service therefore asks Stripe whether this deal's fee was already
+  // charged; when it was, no intent was created and no client secret exists.
+  // Same code and shape as the $99 deposit's guard, so the client can handle one
+  // contract rather than two.
+  if (intent.status === "charge_unsettled") {
+    return errorResponse(
+      "CHARGE_UNSETTLED",
+      "We've received your payment. It isn't recorded on our side yet — please do not pay again.",
+      409,
+      { paymentIntentId: intent.paymentIntentId, intentStatus: intent.intentStatus },
+    );
+  }
+
+  return successResponse({ clientSecret: intent.clientSecret });
 }
