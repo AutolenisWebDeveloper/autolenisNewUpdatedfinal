@@ -38,29 +38,47 @@ not evidence that the baseline is stale.
 run on demand (`workflow_dispatch`) against any branch, and comparison-only runs
 never push. A local failure is worth investigating only if CI agrees.
 
-## Known outstanding drift (as of 2026-08-28)
+## Baseline re-seed — 2026-08-28
 
-Running the workflow against `main` (`e7ede4e`) gives **9 passed, 1 failed**:
+The committed baseline was **deliberately deleted in this branch so `visual.yml`
+re-seeds it on the pinned runner.** This is the documented re-seed procedure, not
+an accident; see *Baseline provenance* below for why the gate is all-or-nothing.
 
-| Snapshot | State |
-| --- | --- |
-| `marketing-how-it-works-mobile` | **FAILS** — expected 412×12949, actual 412×12972 (+23px) |
-| the other nine | pass |
+### Why
+
+Running the workflow against `main` (`e7ede4e`) gave **9 passed, 1 failed** —
+only `marketing-how-it-works [mobile]`, expected 412x12949 vs actual 412x12972
+(**+23px**). The other nine matched exactly.
 
 Cause: commit `a3e4ec2` (in-house e-sign, DocuSign removed) changed frozen
-marketing copy on `/how-it-works` — "sign via DocuSign" → "sign securely
-online", plus a card title. At the 412px mobile width that wraps to one extra
-line; desktop is wide enough not to reflow, which is why only the mobile
-snapshot fails. The guardrail worked exactly as designed: it failed on four
-consecutive runs of that PR (runs #13–#16). The PR was merged with the check
-red, so `main` now carries an intentional-but-never-reviewed marketing diff.
+marketing copy on `/how-it-works` — "sign via DocuSign" -> "sign securely
+online", plus a card title `DocuSign E-Signing` -> `Secure E-Signing`. At the
+412px mobile width that wraps to one extra line; desktop is wide enough not to
+reflow, which is exactly why only the mobile snapshot failed.
 
-The copy change itself is correct — DocuSign is gone. Re-seeding is therefore
-the right remedy, but it is an **owner decision** because it re-freezes the
-marketing baseline: delete **all** `__baseline__/*.png` so `visual.yml` takes
-its seed path, or regenerate with `pnpm test:visual:update` on the pinned image
-and review the diff. Until that happens the suite stays red on this one
-snapshot, and that redness is accurate rather than noise.
+The guardrail worked as designed: it failed on four consecutive runs of that PR
+(runs #13-#16). The PR was merged with the check red, so `main` carried an
+intentional-but-never-reviewed marketing diff from 2026-08-26 until this re-seed.
+
+### What changed
+
+Only the frozen baseline. **No marketing page, component, or design token was
+touched** to produce it — the copy change that moved the pixels was `a3e4ec2`,
+already on `main`, and it is correct: DocuSign is genuinely gone. Reverting the
+copy to match a stale baseline would have reintroduced a false product claim, so
+re-freezing on the current, truthful render is the right direction.
+
+The nine snapshots that already matched are re-rendered on the same pinned image
+by the same seeding pass, so they should be byte-identical to what they replaced;
+the review to do on the seeding commit is the `how-it-works` mobile diff.
+
+### If you need to do this again
+
+Deleting a **subset** does not work — the seed step regenerates only when *no*
+baseline PNGs are committed, so a partial delete leaves the job on the
+compare-only path and fails on the missing snapshots. Delete all of them, or
+regenerate locally with `pnpm test:visual:update` on the pinned image and commit
+the result.
 
 ## Dashboard tier
 
