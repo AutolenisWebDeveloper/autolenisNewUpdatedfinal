@@ -4,6 +4,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { PickupStatus, type DealStatus } from "@prisma/client";
+import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
 
 export interface DealerDealSummary {
   id: string;
@@ -127,8 +128,14 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
         },
       },
       // Executed-copy availability only — never the storage key/hash or forensic
-      // signer evidence (§11).
-      eSignEnvelope: { select: { status: true, executedDocumentKey: true } },
+      // signer evidence (§11). executedDocumentKey is projected ONLY while the
+      // executed-artifact schema gate is open; with migrations 20261014/20261015
+      // unapplied the column does not exist and no executed copy can exist either.
+      eSignEnvelope: {
+        select: isExecutedArtifactEnabled()
+          ? { status: true, executedDocumentKey: true }
+          : { status: true },
+      },
     },
   });
   if (!deal) return null;
@@ -142,7 +149,8 @@ export async function getDealerDealById(dealId: string, dealerId: string): Promi
     financingPath: deal.financingPath,
     offer: deal.offer,
     executedContractAvailable:
-      deal.eSignEnvelope?.status === "COMPLETED" && !!deal.eSignEnvelope?.executedDocumentKey,
+      deal.eSignEnvelope?.status === "COMPLETED" &&
+      !!(deal.eSignEnvelope as { executedDocumentKey?: string | null } | null)?.executedDocumentKey,
     buyer: deal.buyer
       ? {
           firstName: deal.buyer.firstName,

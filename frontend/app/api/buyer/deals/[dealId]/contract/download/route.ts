@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestBuyer, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { isExecutedArtifactEnabled } from "@/lib/services/esign/esign-schema-gate";
 
 interface Props { params: Promise<{ dealId: string }> }
 
@@ -10,9 +11,12 @@ export async function GET(request: NextRequest, { params }: Props) {
   const buyer = await getRequestBuyer(request);
   if (!buyer) return errorResponse("UNAUTHORIZED", "Not authenticated", 401);
 
+  // Explicit projection: `include: { eSignEnvelope: true }` selects every envelope
+  // scalar, including the executed-artifact columns that do not exist while
+  // migrations 20261014/20261015 are unapplied.
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id },
-    include: { eSignEnvelope: true },
+    select: { id: true, eSignEnvelope: { select: { id: true, status: true, documentKey: true } } },
   });
 
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
@@ -40,7 +44,18 @@ export async function GET(request: NextRequest, { params }: Props) {
   // hashed contract + the buyer's signature/consent evidence. Prefer it; fall
   // back to the legacy DocuSign documentKey only for pre-cutover historical
   // envelopes. Null on both means finalization hasn't completed yet.
-  const executedKey = deal.eSignEnvelope.executedDocumentKey ?? deal.eSignEnvelope.documentKey;
+  // executed_document_key only exists once migrations 20261014/20261015 are
+  // applied and the gate is opened. While it is closed no executed artifact can
+  // exist, so fall back to the legacy DocuSign documentKey alone.
+  const executedDocumentKey = isExecutedArtifactEnabled()
+    ? (
+        await prisma.eSignEnvelope.findUnique({
+          where: { id: deal.eSignEnvelope.id },
+          select: { executedDocumentKey: true },
+        })
+      )?.executedDocumentKey ?? null
+    : null;
+  const executedKey = executedDocumentKey ?? deal.eSignEnvelope.documentKey;
   if (!executedKey) {
     return errorResponse(
       "NOT_AVAILABLE",

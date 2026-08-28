@@ -25,7 +25,23 @@ import type { EngineDeps } from "./engine";
 import { defaultPolicyDeps } from "./policy";
 import { COMMANDS } from "./commands";
 import { auditLogRecorder } from "./store";
-import { envActivationResolver } from "./activation";
+import { envActivationResolver, isActionIntentSurfaceEnabled } from "./activation";
+
+/**
+ * Raised when the durable ActionIntent store is asked to touch ai_action_intents
+ * while the surface is dormant — i.e. while migration 20261016 must be assumed
+ * unapplied. Fail-closed and explicit, never a silent success.
+ */
+export class ActionIntentStoreUnavailableError extends Error {
+  code = "ACTION_INTENT_STORE_UNAVAILABLE";
+  constructor() {
+    super(
+      "The durable ActionIntent store is unavailable: ACTION_INTENT_EXECUTION_ENABLED is off, " +
+        "so migration 20261016 (ai_action_intents) must be assumed unapplied.",
+    );
+    this.name = "ActionIntentStoreUnavailableError";
+  }
+}
 
 // ─── Minimal delegate the store needs (structurally satisfied by prisma.aiActionIntent) ─
 export interface AiActionIntentRow {
@@ -201,8 +217,21 @@ export class PrismaActionIntentStore implements ActionIntentStore {
 // importing this module never pulls prisma at load time (keeps the core + its
 // unit tests hermetic). The engine tests inject a fake delegate instead.
 function prismaDelegate(): AiActionIntentDelegate {
-  const load = async () =>
-    (await import("@/lib/prisma")).prisma.aiActionIntent as unknown as AiActionIntentDelegate;
+  const load = async () => {
+    // Deploy-ahead-of-migration guard. Migration 20261016 (ai_action_intents +
+    // the AiActionIntentStatus enum) is authored but NOT applied to production,
+    // so every query here would fail with 42P01 (undefined_table). The surface is
+    // already dormant behind ACTION_INTENT_EXECUTION_ENABLED and no production
+    // caller reaches this today, but proposeIntent consults the store for an
+    // idempotency key BEFORE authorization runs its activation check — so the
+    // gate is repeated here, at the last point before the query is issued. A
+    // named error is raised rather than an opaque Postgres error, and it can only
+    // be hit by wiring up a caller while the surface is off.
+    if (!isActionIntentSurfaceEnabled()) {
+      throw new ActionIntentStoreUnavailableError();
+    }
+    return (await import("@/lib/prisma")).prisma.aiActionIntent as unknown as AiActionIntentDelegate;
+  };
   return {
     create: async (a) => (await load()).create(a),
     findUnique: async (a) => (await load()).findUnique(a),

@@ -10,8 +10,12 @@ import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 
+// Executed copies only exist once migrations 20261014 + 20261015 are applied, so
+// the happy paths below run with the schema gate open. The final test closes it.
+process.env.ESIGN_EXECUTED_ARTIFACT_ENABLED = "true";
+
 let dealer: { id: string } | null = { id: "dealer_1" };
-let dealRow: { id: string; eSignEnvelope: { status: string; executedDocumentKey: string | null } | null } | null = null;
+let dealRow: { id: string; eSignEnvelope: { id: string; status: string; executedDocumentKey: string | null } | null } | null = null;
 let signedUrlCalls = 0;
 
 mock.module("@/lib/auth/dealer-api", {
@@ -31,6 +35,11 @@ mock.module("@/lib/prisma", {
         findFirst: async ({ where }: { where: { id: string; offer: { dealerId: string } } }) =>
           dealRow && where.offer.dealerId === "dealer_1" ? dealRow : null,
       },
+      // The executed-artifact key is read in a second, gate-guarded query so the
+      // column is never named while migrations 20261014/20261015 are unapplied.
+      eSignEnvelope: {
+        findUnique: async () => ({ executedDocumentKey: dealRow?.eSignEnvelope?.executedDocumentKey ?? null }),
+      },
     },
   },
 });
@@ -46,8 +55,9 @@ const request = () => new NextRequest("http://localhost/api/dealer/deals/d1/cont
 
 beforeEach(() => {
   dealer = { id: "dealer_1" };
-  dealRow = { id: "d1", eSignEnvelope: { status: "COMPLETED", executedDocumentKey: "executed/d1/env_1.pdf" } };
+  dealRow = { id: "d1", eSignEnvelope: { id: "env_1", status: "COMPLETED", executedDocumentKey: "executed/d1/env_1.pdf" } };
   signedUrlCalls = 0;
+  process.env.ESIGN_EXECUTED_ARTIFACT_ENABLED = "true";
 });
 
 test("requires authentication (401)", async () => {
@@ -74,7 +84,7 @@ test("a DIFFERENT dealer cannot retrieve the contract → 404 (IDOR blocked, no 
 });
 
 test("before the buyer signs (no executed artifact) → 404 not-available", async () => {
-  dealRow = { id: "d1", eSignEnvelope: { status: "SENT", executedDocumentKey: null } };
+  dealRow = { id: "d1", eSignEnvelope: { id: "env_1", status: "SENT", executedDocumentKey: null } };
   const { GET } = await import("@/app/api/dealer/deals/[dealId]/contract/route");
   const res = await GET(request(), params);
   assert.equal(res.status, 404);

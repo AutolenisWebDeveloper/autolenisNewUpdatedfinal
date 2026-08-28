@@ -24,6 +24,11 @@ import test, { mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest, NextResponse } from "next/server";
 
+// The evidence route reads its envelope through the e-sign schema gate in
+// buyer-signing.service, which transitively imports modules marked `server-only`;
+// neutralize it so the routes can be loaded under node:test.
+mock.module("server-only", { namedExports: {} });
+
 // ── Controllable caller role + side-effect spies ─────────────────────────────
 let callerRole = "OPERATIONS_ADMIN";
 let envelopeStatus = "SENT";

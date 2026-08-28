@@ -12,6 +12,7 @@ import {
   DocumentChangedError,
   EnvelopeNotSignableError,
   NoSignableDocumentError,
+  ESignSchemaUnavailableError,
 } from "@/lib/services/esign/buyer-signing.service";
 import { CONSENT_ACK_KEYS } from "@/lib/services/esign/consent-policy";
 
@@ -81,6 +82,10 @@ export async function POST(request: NextRequest, { params }: Props) {
 
     return successResponse({ status: result.status, envelopeId: result.envelopeId, alreadySigned: result.alreadySigned });
   } catch (err) {
+    if (err instanceof ESignSchemaUnavailableError) {
+      logger.warn("[buyer/esign/sign] signing refused — e-sign schema gate closed:", err);
+      return errorResponse("ESIGN_UNAVAILABLE", "Electronic signing is temporarily unavailable while contract e-signature compliance review is completed. Your deal is unaffected — our team will reach out with next steps.", 503);
+    }
     if (err instanceof ConsentRequiredError) return errorResponse("CONSENT_REQUIRED", "Please consent to electronic signing and type your name to sign.", 400);
     if (err instanceof DocumentChangedError) return errorResponse("DOCUMENT_CHANGED", "The contract changed and your signing session was reset. Please review and sign the updated contract.", 409);
     if (err instanceof EnvelopeNotSignableError) return errorResponse("NOT_SIGNABLE", "This signing request is no longer active. Please restart signing.", 409);

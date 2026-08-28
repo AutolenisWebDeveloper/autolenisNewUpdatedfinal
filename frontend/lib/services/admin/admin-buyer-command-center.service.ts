@@ -336,7 +336,10 @@ export async function getAdminBuyerDetailData(buyerId: string) {
               dealer: { select: { dealershipName: true, city: true, state: true } },
             },
           },
-          eSignEnvelope: true,
+          // Explicit projection — `eSignEnvelope: true` selects every scalar,
+          // including the columns migrations 20261014/20261015 add but production
+          // does not yet have. Only these four are serialized below.
+          eSignEnvelope: { select: { status: true, docusignEnvelopeId: true, sentAt: true, completedAt: true } },
           pickup: true,
           financing: true,
           contractVersions: { orderBy: { uploadedAt: "desc" }, take: 1 },

@@ -6,6 +6,7 @@ import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { PenLine } from "lucide-react";
 import SigningCeremony from "@/components/buyer/SigningCeremony";
+import { BUYER_SAFE_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export default async function ESignPage() {
   const buyer = await requireBuyer();
   const deal = await prisma.deal.findFirst({
     where: { buyerId: buyer.id },
-    include: { eSignEnvelope: true },
+    include: { eSignEnvelope: { select: BUYER_SAFE_ENVELOPE_SELECT } },
     orderBy: { createdAt: "desc" },
   });
 

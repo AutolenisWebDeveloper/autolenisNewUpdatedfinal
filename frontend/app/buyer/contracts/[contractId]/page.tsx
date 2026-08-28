@@ -10,6 +10,7 @@ import { Shield, CheckCircle2, AlertTriangle, XCircle, Clock } from "lucide-reac
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import ContractPdfViewer from "@/components/buyer/ContractPdfViewer";
+import { BUYER_SAFE_ENVELOPE_SELECT } from "@/lib/services/esign/esign-schema-gate";
 
 export const dynamic = "force-dynamic";
 interface Props { params: Promise<{ contractId: string }> }
@@ -23,7 +24,7 @@ export default async function ContractDetailPage({ params }: Props) {
     where: { buyerId: buyer.id },
     include: {
       contractScans: { orderBy: { scannedAt: "desc" } },
-      eSignEnvelope: true,
+      eSignEnvelope: { select: BUYER_SAFE_ENVELOPE_SELECT },
       offer: { include: { dealer: { select: { dealershipName: true, tier: true, isSystemPlaceholder: true } } } },
       vehicleRequestOffer: { select: { priceCents: true, vehicleInfo: true, notes: true } },
     },
