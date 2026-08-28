@@ -25,16 +25,42 @@ VISUAL_BASE_URL=https://<preview> pnpm test:visual
 Chromium is preinstalled in the CI/agent image; set `PW_CHROMIUM_PATH` if the
 default resolution fails. Do **not** run `playwright install`.
 
-## Status / known limitation
+## Only CI results are meaningful — never judge this suite locally
 
-Baselines are **not committed yet**: the development sandbox has no database and
-the app's `force-dynamic` pages cannot render there, so a real baseline must be
-captured from a live instance in CI or against a preview URL. Until the CI job
-lands, the affiliate token sweep relies on **exact-value token mapping**
-(each `#hex` → a token whose value equals that hex) plus review — equivalent by
-construction — and this harness gates from CI as soon as its baseline is
-captured. This limitation is called out to the owner explicitly rather than
-silently skipped.
+The baseline is rendered by, and pinned to, the `ubuntu-24.04` CI runner (see
+*Baseline provenance* below). Font and anti-aliasing rendering is
+environment-specific, so running `pnpm test:visual` in a dev container or agent
+sandbox typically fails **all ten** snapshots for reasons that have nothing to
+do with the code. That is an environment mismatch, not a regression — and it is
+not evidence that the baseline is stale.
+
+**The `Visual regression` workflow is the only authoritative result.** It can be
+run on demand (`workflow_dispatch`) against any branch, and comparison-only runs
+never push. A local failure is worth investigating only if CI agrees.
+
+## Known outstanding drift (as of 2026-08-28)
+
+Running the workflow against `main` (`e7ede4e`) gives **9 passed, 1 failed**:
+
+| Snapshot | State |
+| --- | --- |
+| `marketing-how-it-works-mobile` | **FAILS** — expected 412×12949, actual 412×12972 (+23px) |
+| the other nine | pass |
+
+Cause: commit `a3e4ec2` (in-house e-sign, DocuSign removed) changed frozen
+marketing copy on `/how-it-works` — "sign via DocuSign" → "sign securely
+online", plus a card title. At the 412px mobile width that wraps to one extra
+line; desktop is wide enough not to reflow, which is why only the mobile
+snapshot fails. The guardrail worked exactly as designed: it failed on four
+consecutive runs of that PR (runs #13–#16). The PR was merged with the check
+red, so `main` now carries an intentional-but-never-reviewed marketing diff.
+
+The copy change itself is correct — DocuSign is gone. Re-seeding is therefore
+the right remedy, but it is an **owner decision** because it re-freezes the
+marketing baseline: delete **all** `__baseline__/*.png` so `visual.yml` takes
+its seed path, or regenerate with `pnpm test:visual:update` on the pinned image
+and review the diff. Until that happens the suite stays red on this one
+snapshot, and that redness is accurate rather than noise.
 
 ## Dashboard tier
 

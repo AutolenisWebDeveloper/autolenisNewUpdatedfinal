@@ -50,6 +50,28 @@ const escape = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 // ─── Vehicle request (public form) ────────────────────────────────────────
+/**
+ * The admin destination for a new vehicle request.
+ *
+ * /admin/vehicle-requests/[id] resolves BOTH id spaces: a VehicleRequest id
+ * redirects to the canonical command view at /admin/requests/[id]; a
+ * Notification id renders the legacy read-only view. Prefer the VehicleRequest
+ * id so the operator lands on the surface that can actually ACTION the request
+ * (send to dealers, create an offer, change status) rather than the legacy view,
+ * which can only display it. Passing the Notification id made the link "work"
+ * while silently landing on the weaker surface — a failure no broken-link check
+ * would ever catch.
+ *
+ * Returns a PATH; the caller prefixes APP_URL.
+ */
+export function adminVehicleRequestPath(ids: {
+  vehicleRequestId?: string;
+  notificationId?: string;
+}): string {
+  const detailId = ids.vehicleRequestId ?? ids.notificationId;
+  return detailId ? `/admin/vehicle-requests/${detailId}` : "/admin/vehicle-requests";
+}
+
 export async function sendVehicleRequestAdminNotification(params: {
   fullName: string;
   email: string;
@@ -78,6 +100,8 @@ export async function sendVehicleRequestAdminNotification(params: {
   tradeModel?: string;
   notes?: string;
   notificationId?: string;
+  /** Canonical VehicleRequest id. Preferred over notificationId for the CTA. */
+  vehicleRequestId?: string;
 }) {
   const rows: [string, string][] = [
     ["Name", params.fullName],
@@ -115,9 +139,7 @@ export async function sendVehicleRequestAdminNotification(params: {
   }
   if (params.notes) rows.push(["Notes", params.notes]);
 
-  const detailUrl = params.notificationId
-    ? `${APP_URL}/admin/vehicle-requests/${params.notificationId}`
-    : `${APP_URL}/admin/vehicle-requests`;
+  const detailUrl = `${APP_URL}${adminVehicleRequestPath(params)}`;
 
   const inner = `
     <p style="color:#0B5FD1;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.12em;margin:0 0 4px">New Vehicle Request</p>

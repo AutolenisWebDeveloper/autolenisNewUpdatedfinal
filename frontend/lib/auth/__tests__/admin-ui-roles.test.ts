@@ -148,20 +148,91 @@ describe("admin UI role mirror — scope discipline", () => {
     }
   });
 
-  test("impersonation mirrors the route, not the stricter permission policy", () => {
-    // Owner ruling 10: server behaviour is unchanged and the disagreement
-    // between the route and PERMISSION_ROLES is reported, not resolved here.
-    // The UI matches observable behaviour so it never hides a control that
-    // actually works today.
-    assert.deepEqual([...ADMIN_UI_CAPABILITIES["support.impersonate"].roles].sort(), [
-      "SUPER_ADMIN",
-      "SUPPORT_ADMIN",
-    ]);
+  test("impersonation agrees with the ruled permission policy", () => {
+    // This capability once diverged: the routes admitted SUPPORT_ADMIN while
+    // PERMISSION_ROLES and ruled policies 1 and 4 said SUPER-only, and because
+    // requirePermission() is shadow-mode the ROUTE was what governed — so the
+    // grant the owner had explicitly withheld was live. The owner ruled to
+    // enforce the policy; mirror, routes and policy map now agree.
+    assert.deepEqual(
+      [...ADMIN_UI_CAPABILITIES["support.impersonate"].roles],
+      ["SUPER_ADMIN"],
+      "the UI must not offer impersonation to a role the server refuses",
+    );
     const permissions = readFileSync(join(process.cwd(), "lib/auth/permissions.ts"), "utf8");
     assert.match(
       permissions,
       /"support\.impersonate":\s*SUPER/,
-      "if the policy map changed, re-check this deliberate divergence",
+      "PERMISSION_ROLES must stay SUPER-only — it is the ruled policy",
+    );
+  });
+
+  // UI capability -> the ruled Permission that governs the same action. Only
+  // the pairs that genuinely correspond; the rest of the mirror has no named
+  // Permission and is governed by its route alone.
+  const CAPABILITY_TO_PERMISSION: Record<string, string> = {
+    "payments.mutate": "finance.refunds",
+    "affiliate.commission.settle": "finance.commissions.settle",
+    "deal.esign.void": "deals.esign.void",
+    "dealer.terminate": "dealers.terminate",
+    "support.impersonate": "support.impersonate",
+  };
+
+  test("no mirrored capability is LOOSER than the ruled permission policy", () => {
+    // The impersonation defect in one sentence: the route admitted a role the
+    // ruled policy withheld, and because requirePermission() is shadow-mode the
+    // ROUTE governed — so the withheld grant was live, and nothing compared the
+    // two. This does.
+    //
+    // The invariant is SUBSET, not equality. A route stricter than the policy is
+    // safe and intentional (dealer.terminate is SUPER-only in the route while
+    // the policy allows OPS). A route LOOSER than the policy grants access the
+    // owner ruled against — always a defect.
+    const permissions = readFileSync(join(process.cwd(), "lib/auth/permissions.ts"), "utf8");
+
+    /** Resolve `"perm": NAME` or `"perm": ["A","B"]` to role names. */
+    function ruledRoles(permission: string): string[] {
+      const esc = permission.replace(/\./g, "\\.");
+      const m = permissions.match(new RegExp(`"${esc}":\\s*(\\[[^\\]]*\\]|[A-Z_]+)`));
+      assert.ok(m, `PERMISSION_ROLES has no entry for "${permission}" — fix the map above`);
+      const named = m![1];
+      const source = named.startsWith("[")
+        ? named
+        : (() => {
+            const c = permissions.match(
+              new RegExp(`const ${named}:\\s*AdminRole\\[\\]\\s*=\\s*(\\[[^\\]]*\\])`),
+            );
+            assert.ok(c, `could not resolve the role constant ${named}`);
+            return c![1];
+          })();
+      const roles = [...source.matchAll(/"([A-Z_]+)"/g)].map((r) => r[1]);
+      assert.ok(roles.length > 0, `resolved no roles for "${permission}"`);
+      return roles;
+    }
+
+    const looser: string[] = [];
+    for (const [capability, permission] of Object.entries(CAPABILITY_TO_PERMISSION)) {
+      const spec = ADMIN_UI_CAPABILITIES[capability as AdminUiCapability];
+      assert.ok(spec, `${capability} is not a mirrored capability — fix the map above`);
+      const ruled = new Set(ruledRoles(permission));
+      const extra = (spec.roles as readonly string[]).filter((r) => !ruled.has(r));
+      if (extra.length > 0) {
+        looser.push(
+          `${capability} admits [${extra}] which "${permission}" does not admit: ` +
+            `route/UI [${[...spec.roles].sort()}] vs policy [${[...ruled].sort()}]`,
+        );
+      }
+    }
+    assert.deepEqual(
+      looser,
+      [],
+      "a route grants access the ruled policy withholds:\n" + looser.join("\n"),
+    );
+
+    assert.equal(
+      Object.keys(CAPABILITY_TO_PERMISSION).length,
+      5,
+      "the capability->permission map changed size — re-check the correspondences",
     );
   });
 });

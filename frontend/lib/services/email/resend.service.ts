@@ -386,6 +386,8 @@ export async function sendFounderHotLeadAlertEmail(params: {
   score: number;
   scoringReason: string;
   sessionId: string;
+  /** Admin path the CTA opens (see adminPathForOpportunity). */
+  adminPath: string;
 }) {
   return sendIdempotent({
     idempotencyKey: `founder-hot-lead-${params.sessionId}`,
@@ -403,6 +405,7 @@ export async function sendFounderHotLeadAlertEmail(params: {
       score: params.score,
       scoringReason: params.scoringReason,
       sessionId: params.sessionId,
+      adminPath: params.adminPath,
     }),
   });
 }

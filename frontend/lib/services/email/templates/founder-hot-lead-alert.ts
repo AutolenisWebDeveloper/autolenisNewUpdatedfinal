@@ -14,10 +14,12 @@ export function renderFounderHotLeadAlertEmail(params: {
   score: number;
   scoringReason: string;
   sessionId: string;
+  /** Admin path the CTA opens, resolved by the caller. Must be an existing page. */
+  adminPath: string;
 }): string {
   const {
     firstName, email, phone, vehicle, budget, timeline, zip,
-    score, scoringReason, sessionId,
+    score, scoringReason, sessionId, adminPath,
   } = params;
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com";
@@ -104,7 +106,7 @@ export function renderFounderHotLeadAlertEmail(params: {
 
       <!-- CTA -->
       <div style="text-align:center;margin:24px 0;">
-        <a href="${appUrl}/admin/opportunities/${escapeHtml(sessionId)}" style="display:inline-block;background:#111827;color:#fff;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;">
+        <a href="${appUrl}${escapeHtml(adminPath)}" style="display:inline-block;background:#111827;color:#fff;padding:14px 36px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;">
           View in Admin &rarr;
         </a>
       </div>
