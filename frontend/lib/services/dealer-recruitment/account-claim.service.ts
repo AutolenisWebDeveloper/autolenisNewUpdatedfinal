@@ -11,8 +11,30 @@ import { prisma } from "@/lib/prisma"
 
 const CLAIM_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
-export function hashClaimToken(rawToken: string): string {
+/**
+ * Invitation tokens now share this module's design (hash at rest, single use,
+ * TTL) instead of the plaintext scheme they used to have. 7 days matches the
+ * claim-token window — the previous 72h expired 6 of 11 production invitations
+ * before they were ever opened.
+ */
+export const INVITATION_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+/**
+ * SHA-256 hex of a raw token. Shared by every dealer token type so there is ONE
+ * hashing implementation, not one per token table.
+ */
+export function hashToken(rawToken: string): string {
   return crypto.createHash("sha256").update(rawToken).digest("hex")
+}
+
+/** @deprecated Use hashToken — kept so existing call sites keep working. */
+export function hashClaimToken(rawToken: string): string {
+  return hashToken(rawToken)
+}
+
+/** Mint a raw token with the same entropy as a claim token (256 bits). */
+export function generateRawToken(): string {
+  return crypto.randomBytes(32).toString("hex")
 }
 
 export interface IssuedClaimToken {
@@ -31,7 +53,7 @@ export async function issueClaimToken(params: {
   createdByAdminId: string
 }): Promise<IssuedClaimToken> {
   const rawToken = crypto.randomBytes(32).toString("hex")
-  const tokenHash = hashClaimToken(rawToken)
+  const tokenHash = hashToken(rawToken)
   const expiresAt = new Date(Date.now() + CLAIM_TOKEN_TTL_MS)
 
   await prisma.dealerAccountClaimToken.create({
@@ -57,7 +79,7 @@ export type ClaimTokenValidation =
 export async function validateClaimToken(
   rawToken: string,
 ): Promise<ClaimTokenValidation> {
-  const tokenHash = hashClaimToken(rawToken)
+  const tokenHash = hashToken(rawToken)
   const record = await prisma.dealerAccountClaimToken.findUnique({
     where: { tokenHash },
   })

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Upload } from "lucide-react";
 import { api, apiErrorMessage, ApiError } from "@/lib/api/client";
+import { parseCsvPriceToCents, isCentsHeader, formatCentsAsUsd } from "@/lib/utils/csv-price";
 
 type UploadState = "idle" | "file-selected" | "parsing" | "preview" | "uploading" | "committed" | "error";
 
@@ -14,6 +15,8 @@ interface CsvRow {
   make: string;
   model: string;
   price: string;
+  /** True when the source column was price_cents/pricecents (already integer cents). */
+  priceIsCents: boolean;
 }
 
 // Raw-row preview rendered when CSV headers don't match the standard set.
@@ -24,14 +27,7 @@ interface RawCsvData {
   rows: Array<Record<string, string>>;
 }
 
-function convertToPriceCents(priceStr: string): number {
-  const cleaned = priceStr.replace(/[^0-9.]/g, "");
-  const num = parseFloat(cleaned);
-  if (isNaN(num) || num <= 0) return 0;
-  // If value has a decimal point, treat as dollars; otherwise check if it looks like cents already
-  if (priceStr.includes(".")) return Math.round(num * 100);
-  return num < 10000 ? Math.round(num * 100) : Math.round(num);
-}
+
 
 function parseCsvLine(line: string): string[] {
   return line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
@@ -51,6 +47,9 @@ function parseCsv(text: string): CsvRow[] {
     throw new Error("CSV must have columns: vin, year, make, model, price (or pricecents/price_cents)");
   }
 
+  // A "price" column is dollars; only an explicit cents header is integer cents.
+  const priceIsCents = isCentsHeader(headers[priceIdx] ?? "");
+
   return lines.slice(1).map((line) => {
     const cols = parseCsvLine(line);
     return {
@@ -59,6 +58,7 @@ function parseCsv(text: string): CsvRow[] {
       make:  cols[makeIdx]  ?? "",
       model: cols[modelIdx] ?? "",
       price: cols[priceIdx] ?? "",
+      priceIsCents,
     };
   }).filter((r) => r.vin.length >= 11);
 }
@@ -145,7 +145,7 @@ export default function BulkUploadPage() {
           year: parseInt(r.year, 10),
           make: r.make,
           model: r.model,
-          priceCents: convertToPriceCents(r.price),
+          priceCents: parseCsvPriceToCents(r.price, r.priceIsCents) ?? 0,
         })).filter((r) => !isNaN(r.year) && r.priceCents > 0);
         body = { rows };
       } else {
@@ -250,7 +250,7 @@ export default function BulkUploadPage() {
                 <span className="text-slate-800">{row.year}</span>
                 <span className="text-slate-800">{row.make}</span>
                 <span className="text-slate-800">{row.model}</span>
-                <span className="text-slate-800">${parseInt(row.price).toLocaleString()}</span>
+                <span className="text-slate-800">{formatCentsAsUsd(parseCsvPriceToCents(row.price, row.priceIsCents) ?? 0)}</span>
               </div>
             ))}
           </div>
