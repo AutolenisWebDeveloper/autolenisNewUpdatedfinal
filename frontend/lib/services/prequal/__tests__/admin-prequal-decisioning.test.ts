@@ -50,9 +50,11 @@ mock.module("@/lib/services/prequal/microbilt.service", {
   namedExports: {
     callIPredict: async () => cap.ipredict,
     FCRA_CONSENT_TEXT: "consent",
-    // The REAL classifier — the admin queue must not keep its own copy of the
-    // provider-failure vocabulary (it drifted and silently mislabelled two
-    // reasons as ordinary manual reviews).
+    // The REAL classifier, not a restatement of it. node:test module mocks
+    // replace the whole module, so the double must supply this — and supplying
+    // the genuine predicate is what keeps the admin queue honest: it must not
+    // keep its own copy of the provider-failure vocabulary (it drifted once and
+    // silently mislabelled two reasons as ordinary manual reviews).
     isProviderErrorReason,
   },
 });
