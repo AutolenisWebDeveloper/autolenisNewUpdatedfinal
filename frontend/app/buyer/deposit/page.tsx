@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { Button } from "@/components/ui/button";
-import { Shield, ArrowRight, Sparkles } from "lucide-react";
+import { Shield, Sparkles, Loader2 } from "lucide-react";
 import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 
 import PreIntelligencePanel from "@/components/buyer/PreIntelligencePanel";
@@ -17,7 +17,19 @@ const stripePromise = STRIPE_PK && !STRIPE_PK.includes("placeholder")
   ? loadStripe(STRIPE_PK)
   : null;
 
-function DepositForm({ onSuccess }: { onSuccess: () => void }) {
+/** A Stripe client secret is `<paymentIntentId>_secret_<random>`. */
+function paymentIntentIdFromClientSecret(clientSecret: string): string | null {
+  const id = clientSecret.split("_secret_")[0];
+  return id.startsWith("pi_") ? id : null;
+}
+
+function DepositForm({
+  clientSecret,
+  onConfirmed,
+}: {
+  clientSecret: string;
+  onConfirmed: (paymentIntentId: string | null) => void;
+}) {
   const stripe = useStripe();
   const elements = useElements();
   const [loading, setLoading] = useState(false);
@@ -29,7 +41,19 @@ function DepositForm({ onSuccess }: { onSuccess: () => void }) {
     setLoading(true);
     setError(null);
 
-    const { error: stripeError } = await stripe.confirmPayment({
+    // `redirect: "if_required"` means the normal card path does NOT redirect, so
+    // the buyer stays here and this promise resolves locally. That resolution
+    // says only "Stripe accepted the confirmation" — it is NOT confirmation that
+    // the money settled, that our Deposit row flipped to PAID, or that an
+    // auction exists. This page previously treated a missing error as proof of
+    // all three and rendered "Auction activated! … Dealers are being invited."
+    // With zero Stripe webhook events ever recorded in production, that claim
+    // was false for every buyer who saw it.
+    //
+    // Nothing is asserted here. We hand off to /buyer/deposit/success, which
+    // re-retrieves the PaymentIntent from Stripe server-side and checks the
+    // Deposit row — the only place a claim about this payment can be made.
+    const { error: stripeError, paymentIntent } = await stripe.confirmPayment({
       elements,
       confirmParams: { return_url: `${window.location.origin}/buyer/deposit/success` },
       redirect: "if_required",
@@ -38,9 +62,12 @@ function DepositForm({ onSuccess }: { onSuccess: () => void }) {
     if (stripeError) {
       setError(stripeError.message ?? "Payment failed");
       setLoading(false);
-    } else {
-      onSuccess();
+      return;
     }
+
+    // Prefer the id Stripe just returned; fall back to the one embedded in the
+    // client secret so the verifying page always has a reference to check.
+    onConfirmed(paymentIntent?.id ?? paymentIntentIdFromClientSecret(clientSecret));
   }
 
   return (
@@ -48,7 +75,7 @@ function DepositForm({ onSuccess }: { onSuccess: () => void }) {
       <PaymentElement data-testid="stripe-payment-element" />
       {error && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-md" data-testid="deposit-error">{error}</p>}
       <Button type="submit" className="w-full" size="lg" disabled={!stripe || loading} data-testid="deposit-submit-btn">
-        {loading ? "Processing…" : `Pay $${DEPOSIT_AMOUNT_CENTS / 100} — Activate Auction`}
+        {loading ? "Confirming payment…" : `Pay $${DEPOSIT_AMOUNT_CENTS / 100} — Activate Auction`}
       </Button>
     </form>
   );
@@ -59,7 +86,7 @@ export default function DepositPage() {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [plan, setPlan] = useState<"STANDARD" | "PREMIUM">("STANDARD");
   // Concierge convergence: when the buyer arrives from a "?offer=<reviewToken>"
   // vehicle-offer review link, this deposit unlocks an admin-curated set of
@@ -108,23 +135,22 @@ export default function DepositPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (success) {
+  // Confirmation handed off to the server — show a neutral, truthful
+  // interstitial while the verifying page loads. It claims nothing about the
+  // payment, the auction, or dealer activity, because nothing is known yet.
+  if (confirming) {
     return (
-      <div className="p-6 md:p-8 max-w-lg text-center" data-testid="deposit-success">
-        <div className="w-16 h-16 rounded-full bg-[#50D14E]/15 flex items-center justify-center mx-auto mb-4">
-          <Shield size={28} className="text-[#1A6B18]" />
+      <div className="p-6 md:p-8 max-w-lg text-center" data-testid="deposit-confirming">
+        <div
+          className="w-16 h-16 rounded-full bg-al-primary-subtle flex items-center justify-center mx-auto mb-4"
+          aria-hidden="true"
+        >
+          <Loader2 size={28} className="text-al-primary motion-safe:animate-spin" />
         </div>
-        <h2 className="text-2xl font-bold text-[#111827] mb-2">
-          {isConcierge ? "Deposit received!" : "Auction activated!"}
-        </h2>
-        <p className="text-[#4B5563] text-sm mb-6">
-          {isConcierge
-            ? "Your offers are being prepared. Head to your offers to review them and choose the best one."
-            : "Your private 48-hour auction is now live. Dealers are being invited."}
+        <h2 className="text-2xl font-bold text-[#111827] mb-2">Confirming your payment…</h2>
+        <p className="text-[#4B5563] text-sm" role="status">
+          Hang tight — we&apos;re verifying this with our payment processor. Don&apos;t close this page.
         </p>
-        <Button href="/buyer/auctions" data-testid="goto-auction-btn">
-          {isConcierge ? "View My Offers" : "View My Auction"} <ArrowRight size={15} />
-        </Button>
       </div>
     );
   }
@@ -211,7 +237,20 @@ export default function DepositPage() {
         </div>
       ) : (clientSecret && (
         <Elements stripe={stripePromise} options={{ clientSecret }}>
-          <DepositForm onSuccess={() => setSuccess(true)} />
+          <DepositForm
+            clientSecret={clientSecret}
+            onConfirmed={(paymentIntentId) => {
+              setConfirming(true);
+              // The success page is the ONLY surface that may make a claim about
+              // this payment: it re-retrieves the PaymentIntent server-side and
+              // reads the Deposit row before saying anything.
+              router.push(
+                paymentIntentId
+                  ? `/buyer/deposit/success?payment_intent=${encodeURIComponent(paymentIntentId)}`
+                  : "/buyer/deposit/success",
+              );
+            }}
+          />
         </Elements>
       ))}
     </div>
