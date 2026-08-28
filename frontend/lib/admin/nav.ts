@@ -284,7 +284,11 @@ export const DETAIL_PARENTS: Readonly<Record<string, string>> = {
   "/admin/deals/[dealId]/pickup": "/admin/deals",
   "/admin/prequal/[id]": "/admin/prequal",
   "/admin/requests/[requestId]": "/admin/requests",
-  "/admin/vehicle-requests/[id]/send-to-dealers": "/admin/vehicle-requests/[id]",
+  // The canonical triage path is Requests → request detail → send to dealers.
+  // The legacy detail links here too, but it is an email-entry surface and not
+  // itself click-reachable, so naming it the parent would leave this page
+  // reachable only by typing a URL.
+  "/admin/vehicle-requests/[id]/send-to-dealers": "/admin/requests/[requestId]",
   "/admin/vehicle-offers/[id]": "/admin/vehicle-offers",
   "/admin/vehicle-offers/new": "/admin/vehicle-offers",
   "/admin/messages/[threadId]": "/admin/messages",

@@ -431,3 +431,104 @@ describe("admin IA — the rail orients on real URLs, not just route patterns", 
     }
   });
 });
+
+describe("admin IA — every page is reachable by clicking, never by typing a URL", () => {
+  // The owner's acceptance question: can an operator reach each surface of a
+  // representative workflow without hand-typing a URL? A per-page parent link
+  // is necessary but not sufficient — the chain has to actually terminate at a
+  // rail entry, or the "parent" is itself unreachable. This walks the transitive
+  // closure from the rail outward.
+  const rail = new Set(railHrefs().filter((h) => h.startsWith("/admin")));
+
+  function clickPathFrom(route: string): string[] | null {
+    const chain: string[] = [route];
+    const seen = new Set<string>([route]);
+    let cursor = route;
+    while (!rail.has(cursor)) {
+      const parent: string | undefined = HUB_PARENTS[cursor] ?? DETAIL_PARENTS[cursor];
+      if (!parent || seen.has(parent)) return null;
+      seen.add(parent);
+      chain.unshift(parent);
+      cursor = parent;
+    }
+    return chain;
+  }
+
+  test("every non-auth page resolves to a rail entry by following parent links", () => {
+    const unreachable: string[] = [];
+    for (const route of ROUTES) {
+      if (AUTH_ROUTES.includes(route)) continue; // pre-session, entered by redirect
+      if (route in EXTERNAL_ENTRY_ROUTES) continue; // asserted separately below
+      if (route in LEGACY_REDIRECTS) continue; // a bookmark, redirects to canonical
+      if (!clickPathFrom(route)) unreachable.push(route);
+    }
+    assert.deepEqual(
+      unreachable,
+      [],
+      `these pages cannot be reached by clicking from the sidebar:\n${unreachable.join("\n")}`,
+    );
+  });
+
+  test("no click path exceeds three steps from the rail", () => {
+    const deep: string[] = [];
+    for (const route of ROUTES) {
+      if (AUTH_ROUTES.includes(route) || route in EXTERNAL_ENTRY_ROUTES) continue;
+      if (route in LEGACY_REDIRECTS) continue;
+      const chain = clickPathFrom(route);
+      if (chain && chain.length > 3) deep.push(`${chain.join(" → ")} (${chain.length})`);
+    }
+    assert.deepEqual(deep, [], `click paths deeper than rail → hub → detail:\n${deep.join("\n")}`);
+  });
+
+  test("the representative workflows are click-complete end to end", () => {
+    const WORKFLOWS: Record<string, string[]> = {
+      "buyer/request → prequal → auction → deal → completion": [
+        "/admin/requests", "/admin/requests/[requestId]", "/admin/prequal", "/admin/prequal/[id]",
+        "/admin/buyers", "/admin/buyers/[buyerId]", "/admin/auctions", "/admin/auctions/[auctionId]",
+        "/admin/deals", "/admin/deals/[dealId]", "/admin/deals/[dealId]/esign",
+        "/admin/deals/[dealId]/pickup",
+      ],
+      "dealer sourcing → dealer → auction": [
+        "/admin/dealer-outreach", "/admin/dealer-outreach/[prospectId]", "/admin/dealers",
+        "/admin/dealers/applications", "/admin/dealers/applications/[appId]",
+        "/admin/dealers/[dealerId]", "/admin/dealers/health", "/admin/auctions",
+      ],
+      "payment → reconciliation": [
+        "/admin/payments", "/admin/payments/deposits", "/admin/payments/refunds",
+        "/admin/payments/reconciliation", "/admin/finance",
+      ],
+      "affiliate → commission/settlement": [
+        "/admin/affiliates", "/admin/affiliates/[affiliateId]", "/admin/affiliates/onboarding",
+        "/admin/referral-milestones", "/admin/payments",
+      ],
+      "exception → affected record → resolution": [
+        "/admin/queues", "/admin/manual-reviews", "/admin/financing-reviews",
+        "/admin/compliance/ofac", "/admin/operations", "/admin/audit-log",
+      ],
+      "CRM / communications": [
+        "/admin/crm", "/admin/crm/inbox", "/admin/crm/tasks", "/admin/crm/contacts",
+        "/admin/crm/contacts/[id]", "/admin/crm/campaigns", "/admin/crm/campaigns/new",
+        "/admin/crm/suppression", "/admin/messages", "/admin/messages/[threadId]",
+      ],
+      "inventory → vehicle detail": [
+        "/admin/inventory", "/admin/inventory/[id]", "/admin/inventory/[id]/edit",
+        "/admin/inventory/upload", "/admin/inventory/upload/history",
+      ],
+    };
+    const broken: string[] = [];
+    for (const [workflow, steps] of Object.entries(WORKFLOWS)) {
+      for (const step of steps) {
+        assert.ok(ROUTES.includes(step), `${workflow}: ${step} does not exist`);
+        if (!clickPathFrom(step)) broken.push(`${workflow}: ${step}`);
+      }
+    }
+    assert.deepEqual(broken, [], `workflow steps requiring a typed URL:\n${broken.join("\n")}`);
+  });
+
+  test("the one page not reachable by clicking is documented, and only that one", () => {
+    // /admin/vehicle-requests/[id] is entered from the new-request admin email
+    // (owner ruling 4). Its list deliberately routes rows to the canonical
+    // detail instead, and re-pointing them would change triage routing.
+    assert.deepEqual(Object.keys(EXTERNAL_ENTRY_ROUTES), ["/admin/vehicle-requests/[id]"]);
+  });
+});
