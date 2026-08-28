@@ -14,8 +14,8 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { join, relative, dirname } from "node:path";
 import {
   ADMIN_UI_CAPABILITIES,
   canUse,
@@ -162,6 +162,91 @@ describe("admin UI role mirror — scope discipline", () => {
       permissions,
       /"support\.impersonate":\s*SUPER/,
       "if the policy map changed, re-check this deliberate divergence",
+    );
+  });
+});
+
+/**
+ * The guard that would have caught the concierge "Refund Fee" miss.
+ *
+ * The mirror test above proves each MIRRORED allow-list matches its route. It
+ * cannot see a control that was never mirrored at all — and that is exactly how
+ * two ungated buttons shipped: a string replace matched one button's
+ * indentation and silently missed its sibling, and nothing failed.
+ *
+ * So: for every component that has opted into the mirror, every admin endpoint
+ * it calls that HARD-DENIES must be represented in ADMIN_UI_CAPABILITIES. A
+ * component that gates one money control and leaves its neighbour open now
+ * fails CI instead of reaching a reviewer.
+ *
+ * Scope is deliberately the opted-in components, not all 73 hard-denying admin
+ * routes: this asserts internal consistency of the surfaces Batch 2 gated, and
+ * does not silently claim console-wide coverage that does not exist.
+ */
+describe("admin UI role mirror — opted-in components gate every hard-denying endpoint they call", () => {
+  const ROOT = process.cwd();
+
+  function walk(dir: string, acc: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      if (entry === "node_modules" || entry === ".next") continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full, acc);
+      else if (/\.tsx?$/.test(entry)) acc.push(full);
+    }
+    return acc;
+  }
+
+  /** Route files under app/api/admin, as URL paths. */
+  const routeFiles = walk(join(ROOT, "app", "api", "admin")).filter((f) => f.endsWith("route.ts"));
+  const routeUrl = (file: string) =>
+    "/" + relative(join(ROOT, "app"), dirname(file)).split("\\").join("/");
+
+  function matches(routePath: string, url: string): boolean {
+    const rs = routePath.replace(/^\//, "").split("/");
+    const us = url.replace(/^\//, "").split("/");
+    if (rs.length !== us.length) return false;
+    return rs.every((s, i) => s.startsWith("[") || s === us[i]);
+  }
+
+  /** Components that imported the mirror — i.e. opted into role-aware UI. */
+  const optedIn = [
+    ...walk(join(ROOT, "app", "admin")),
+    ...walk(join(ROOT, "components", "admin")),
+  ].filter((f) => readFileSync(f, "utf8").includes("admin-ui-roles"));
+
+  const mirrored = new Set(
+    Object.values(ADMIN_UI_CAPABILITIES).flatMap((c) => c.sourceRoutes as readonly string[]),
+  );
+
+  test("there is at least one opted-in component to check", () => {
+    assert.ok(optedIn.length > 0, "no component imports admin-ui-roles — the guard would be vacuous");
+  });
+
+  test("every hard-denying endpoint called from a gated component is mirrored", () => {
+    const gaps: string[] = [];
+    for (const file of optedIn) {
+      const src = readFileSync(file, "utf8");
+      const called = new Set<string>();
+      for (const m of src.matchAll(/['"`](\/api\/admin\/[^'"`\s]*)['"`]/g)) {
+        called.add(m[1].split("?")[0].replace(/\$\{[^{}]*\}/g, "X").replace(/\/$/, ""));
+      }
+      for (const url of called) {
+        const routeFile = routeFiles.find((rf) => matches(routeUrl(rf), url));
+        if (!routeFile) continue;
+        const routeSrc = readFileSync(routeFile, "utf8");
+        const hardDenies =
+          enforcedRolesIn(routeSrc).size > 0 || routeSrc.includes("requirePermissionActorStrict");
+        if (!hardDenies) continue;
+        const rel = relative(ROOT, routeFile).split("\\").join("/");
+        if (!mirrored.has(rel)) {
+          gaps.push(`${relative(ROOT, file)} calls ${url} (${rel}) which hard-denies, but no capability mirrors it`);
+        }
+      }
+    }
+    assert.deepEqual(
+      gaps,
+      [],
+      `a gated component leaves a hard-denying control ungated:\n${gaps.join("\n")}`,
     );
   });
 });

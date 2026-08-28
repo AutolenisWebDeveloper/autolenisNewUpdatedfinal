@@ -61,9 +61,11 @@ export function StartImpersonationButton({
   );
 }
 
-export function EndImpersonationButton({ sessionId }: { sessionId: string }) {
+export function EndImpersonationButton({ sessionId, adminRole }: { sessionId: string; adminRole?: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  // Ending a session hard-denies on the same allow-list as starting one.
+  const mayImpersonate = canUse("support.impersonate", adminRole);
 
   async function end() {
     setBusy(true);
@@ -79,7 +81,9 @@ export function EndImpersonationButton({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <Button size="sm" variant="outline" disabled={busy} onClick={end} data-testid={`end-impersonation-${sessionId}`}>
+    <Button size="sm" variant="outline" disabled={busy || !mayImpersonate}
+      title={mayImpersonate ? undefined : deniedReason("support.impersonate")}
+      onClick={end} data-testid={`end-impersonation-${sessionId}`}>
       {busy && <Loader2 size={12} className="animate-spin mr-1" aria-hidden />}
       End session
     </Button>

@@ -52,6 +52,10 @@ export const ADMIN_UI_CAPABILITIES = {
       "app/api/admin/payments/deposit/[depositId]/mark-paid/route.ts",
       "app/api/admin/payments/deposit/create-intent/route.ts",
       "app/api/admin/payments/concierge-fee/create-intent/route.ts",
+      "app/api/admin/payments/concierge-fee/[dealId]/mark-paid/route.ts",
+      "app/api/admin/payments/concierge-fee/[dealId]/refund/route.ts",
+      // The "Waive Deposit" control posts here.
+      "app/api/admin/buyers/[buyerId]/deposit/override/route.ts",
     ],
   },
   /** Record a payout or claw a commission back. */
@@ -60,6 +64,8 @@ export const ADMIN_UI_CAPABILITIES = {
     sourceRoutes: [
       "app/api/admin/affiliates/commissions/[commissionId]/mark-paid/route.ts",
       "app/api/admin/affiliates/commissions/[commissionId]/clawback/route.ts",
+      "app/api/admin/affiliates/commissions/[commissionId]/approve/route.ts",
+      "app/api/admin/affiliates/commissions/[commissionId]/reject/route.ts",
     ],
   },
   /** Pay a referral milestone and edit milestone configuration. */
@@ -115,7 +121,10 @@ export const ADMIN_UI_CAPABILITIES = {
    */
   "support.impersonate": {
     roles: ["SUPER_ADMIN", "SUPPORT_ADMIN"] as const,
-    sourceRoutes: ["app/api/admin/support/impersonate/route.ts"],
+    sourceRoutes: [
+      "app/api/admin/support/impersonate/route.ts",
+      "app/api/admin/support/impersonation/[id]/end/route.ts",
+    ],
   },
 } as const satisfies Record<
   string,

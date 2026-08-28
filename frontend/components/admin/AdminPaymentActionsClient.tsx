@@ -305,7 +305,9 @@ export default function AdminPaymentActionsClient(props: Props) {
       {status === "PAID" && (
         <button
           onClick={() => setModal("refund")}
-          className="px-3 py-1.5 text-xs border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors"
+          disabled={!mayMutate}
+          title={mayMutate ? undefined : denied}
+          className="px-3 py-1.5 text-xs border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Refund Fee
         </button>

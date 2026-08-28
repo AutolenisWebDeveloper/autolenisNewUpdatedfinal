@@ -139,7 +139,7 @@ export default async function AdminSupportPage({
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="amber" className="text-xs">ACTIVE</Badge>
-                  <EndImpersonationButton sessionId={s.id} />
+                  <EndImpersonationButton sessionId={s.id} adminRole={admin.role} />
                 </div>
               </div>
             ))}
