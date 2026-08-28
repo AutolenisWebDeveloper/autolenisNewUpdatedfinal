@@ -3,11 +3,14 @@
 import { toast } from "sonner";
 import { useState } from "react";
 import { X, AlertTriangle } from "lucide-react";
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { api } from "@/lib/api/client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface DepositActionProps {
+  /** UX only — every mutating route below re-checks the role server-side. */
+  adminRole?: string;
   type: "deposit";
   depositId: string;
   buyerId: string;
@@ -16,6 +19,8 @@ export interface DepositActionProps {
 }
 
 export interface ConciergeFeeActionProps {
+  /** UX only — every mutating route below re-checks the role server-side. */
+  adminRole?: string;
   type: "concierge_fee";
   dealId: string;
   buyerId: string;
@@ -118,6 +123,11 @@ function ActionModal({ title, warning, onCancel, onConfirm }: ModalProps) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AdminPaymentActionsClient(props: Props) {
+  // UX only. mark-paid, waive (deposit/override) and refund all hard-deny
+  // outside ["SUPER_ADMIN","FINANCE_ADMIN"]; the send-link routes are auth-only
+  // and stay open to every admin.
+  const mayMutate = canUse("payments.mutate", props.adminRole);
+  const denied = deniedReason("payments.mutate");
   const [modal, setModal] = useState<string | null>(null);
   const [status, setStatus] = useState<string>(
     props.type === "deposit" ? props.status : props.feeStatus,
@@ -178,13 +188,17 @@ export default function AdminPaymentActionsClient(props: Props) {
             </button>
             <button
               onClick={() => setModal("mark-paid")}
-              className="px-3 py-1.5 text-xs border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
+              disabled={!mayMutate}
+              title={mayMutate ? undefined : denied}
+              className="px-3 py-1.5 text-xs border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Mark as Paid
             </button>
             <button
               onClick={() => setModal("waive")}
-              className="px-3 py-1.5 text-xs border border-slate-300 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors"
+              disabled={!mayMutate}
+              title={mayMutate ? undefined : denied}
+              className="px-3 py-1.5 text-xs border border-slate-300 text-slate-600 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Waive Deposit
             </button>
@@ -194,7 +208,9 @@ export default function AdminPaymentActionsClient(props: Props) {
         {status === "PAID" && (
           <button
             onClick={() => setModal("refund")}
-            className="px-3 py-1.5 text-xs border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors"
+            disabled={!mayMutate}
+            title={mayMutate ? undefined : denied}
+            className="px-3 py-1.5 text-xs border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Refund Deposit
           </button>
@@ -277,6 +293,8 @@ export default function AdminPaymentActionsClient(props: Props) {
           </button>
           <button
             onClick={() => setModal("mark-paid")}
+            disabled={!mayMutate}
+            title={mayMutate ? undefined : denied}
             className="px-3 py-1.5 text-xs border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
           >
             Mark as Paid
@@ -287,7 +305,9 @@ export default function AdminPaymentActionsClient(props: Props) {
       {status === "PAID" && (
         <button
           onClick={() => setModal("refund")}
-          className="px-3 py-1.5 text-xs border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors"
+          disabled={!mayMutate}
+          title={mayMutate ? undefined : denied}
+          className="px-3 py-1.5 text-xs border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Refund Fee
         </button>

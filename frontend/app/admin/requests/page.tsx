@@ -5,7 +5,7 @@ import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { ClipboardList, AlertTriangle, BarChart2 } from "lucide-react";
+import { ClipboardList, AlertTriangle, BarChart2, Inbox, Car } from "lucide-react";
 import { VehicleRequestStatus } from "@prisma/client";
 import { vehicleRequestStatusLabel } from "@/lib/domain/status-labels";
 
@@ -60,14 +60,35 @@ export default async function AdminRequestsPage() {
         <ClipboardList size={22} className="text-al-primary" />
         <h1 className="text-xl font-bold text-slate-900">Request a Car Queue (System 4C)</h1>
         {newCount > 0 && <Badge>{newCount} new</Badge>}
-        <Link
-          href="/admin/requests/analytics"
-          data-testid="admin-requests-analytics-link"
-          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:border-[#93C5FD] hover:bg-al-primary/5 text-slate-600 hover:text-al-primary rounded-lg text-xs font-semibold transition-colors"
-        >
-          <BarChart2 size={13} />
-          Analytics
-        </Link>
+        {/* Batch 2 IA: the public-request list and the offer builder lost
+            their duplicate sidebar entries, so this queue is their canonical
+            parent. */}
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          <Link
+            href="/admin/vehicle-requests"
+            data-testid="admin-requests-public-list-link"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:border-[#93C5FD] hover:bg-al-primary/5 text-slate-600 hover:text-al-primary rounded-lg text-xs font-semibold transition-colors"
+          >
+            <Inbox size={13} />
+            Public Requests
+          </Link>
+          <Link
+            href="/admin/vehicle-offers"
+            data-testid="admin-requests-vehicle-offers-link"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:border-[#93C5FD] hover:bg-al-primary/5 text-slate-600 hover:text-al-primary rounded-lg text-xs font-semibold transition-colors"
+          >
+            <Car size={13} />
+            Vehicle Offers
+          </Link>
+          <Link
+            href="/admin/requests/analytics"
+            data-testid="admin-requests-analytics-link"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:border-[#93C5FD] hover:bg-al-primary/5 text-slate-600 hover:text-al-primary rounded-lg text-xs font-semibold transition-colors"
+          >
+            <BarChart2 size={13} />
+            Analytics
+          </Link>
+        </div>
       </div>
 
       {loadError && (

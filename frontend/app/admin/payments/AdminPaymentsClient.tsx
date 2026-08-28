@@ -1,5 +1,6 @@
 "use client";
 
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { useState, useEffect } from "react";
 import {
   CreditCard, Link2, RotateCcw, CheckCircle2,
@@ -111,11 +112,14 @@ function SearchBar({
 
 // ─── Action Button ────────────────────────────────────────────────────────────
 
+// Role-aware controls. Server-side authorization is authoritative; this only
+// stops an under-privileged admin from opening a modal whose submit will 403.
+// "Send Link" is deliberately NOT gated — its route is auth-only.
 function ActionBtn({
-  icon: Icon, label, onClick, variant = "default", disabled,
+  icon: Icon, label, onClick, variant = "default", disabled, title,
 }: {
   icon: React.ElementType; label: string; onClick: () => void;
-  variant?: "default" | "danger" | "success" | "outline"; disabled?: boolean;
+  variant?: "default" | "danger" | "success" | "outline"; disabled?: boolean; title?: string;
 }) {
   const styles = {
     default: "bg-al-primary text-white hover:bg-[#0944a8]",
@@ -124,7 +128,7 @@ function ActionBtn({
     outline: "border border-slate-200 text-slate-700 hover:bg-slate-50",
   };
   return (
-    <button onClick={onClick} disabled={disabled}
+    <button onClick={onClick} disabled={disabled} title={title}
       className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${styles[variant]} disabled:opacity-40 disabled:cursor-not-allowed`}>
       <Icon size={12} />{label}
     </button>
@@ -297,7 +301,9 @@ type DepositModal =
   | { type: "new_charge_deposit" }
   | { type: "new_link_deposit" };
 
-function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
+function DepositsTab({ deposits, adminRole }: { deposits: DepositRow[]; adminRole?: string }) {
+  const mayMutate = canUse("payments.mutate", adminRole);
+  const denied = deniedReason("payments.mutate");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ALL");
   const [modal, setModal] = useState<DepositModal | null>(null);
@@ -392,14 +398,16 @@ function DepositsTab({ deposits }: { deposits: DepositRow[] }) {
             <div className="flex gap-1.5 flex-wrap">
               {(d.status === "PENDING" || d.status === "FAILED") && (
                 <>
-                  <ActionBtn icon={CreditCard} label="Charge Card"
+                  <ActionBtn icon={CreditCard} label="Charge Card" disabled={!mayMutate}
+                    title={mayMutate ? undefined : denied}
                     onClick={() => setModal({ type: "charge", depositId: d.depositId, buyerId: d.buyerId, buyerName: d.buyerName })} />
                   <ActionBtn icon={Link2} label="Send Link" variant="outline"
                     onClick={() => setModal({ type: "link", depositId: d.depositId, buyerId: d.buyerId, buyerName: d.buyerName, buyerEmail: d.buyerEmail })} />
                 </>
               )}
               {d.status === "PAID" && (
-                <ActionBtn icon={RotateCcw} label="Refund" variant="danger"
+                <ActionBtn icon={RotateCcw} label="Refund" variant="danger" disabled={!mayMutate}
+                  title={mayMutate ? undefined : denied}
                   onClick={() => setModal({ type: "refund", depositId: d.depositId, buyerName: d.buyerName, amountCents: d.amountCents })} />
               )}
             </div>
@@ -564,7 +572,9 @@ type FeeModal =
   | { type: "new_charge_fee" }
   | { type: "new_link_fee" };
 
-function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] }) {
+function ServiceFeesTab({ conciergeFees, adminRole }: { conciergeFees: ConciergeFeeRow[]; adminRole?: string }) {
+  const mayMutate = canUse("payments.mutate", adminRole);
+  const denied = deniedReason("payments.mutate");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ALL");
   const [modal, setModal] = useState<FeeModal | null>(null);
@@ -661,14 +671,16 @@ function ServiceFeesTab({ conciergeFees }: { conciergeFees: ConciergeFeeRow[] })
             <div className="flex gap-1.5 flex-wrap">
               {f.feeStatus === "PENDING" && (
                 <>
-                  <ActionBtn icon={CreditCard} label="Charge Card"
+                  <ActionBtn icon={CreditCard} label="Charge Card" disabled={!mayMutate}
+                    title={mayMutate ? undefined : denied}
                     onClick={() => setModal({ type: "charge", dealId: f.dealId, buyerId: f.buyerId, buyerName: f.buyerName })} />
                   <ActionBtn icon={Link2} label="Send Link" variant="outline"
                     onClick={() => setModal({ type: "link", dealId: f.dealId, buyerName: f.buyerName, buyerEmail: f.buyerEmail })} />
                 </>
               )}
               {f.feeStatus === "PAID" && (
-                <ActionBtn icon={RotateCcw} label="Refund" variant="danger"
+                <ActionBtn icon={RotateCcw} label="Refund" variant="danger" disabled={!mayMutate}
+                  title={mayMutate ? undefined : denied}
                   onClick={() => setModal({ type: "refund", dealId: f.dealId, buyerName: f.buyerName })} />
               )}
             </div>
@@ -847,7 +859,9 @@ type CommissionModal =
   | { type: "reject";  commissionId: string; affiliateName: string; amountCents: number }
   | { type: "paid";    commissionId: string; affiliateName: string; amountCents: number };
 
-function AffiliatePayoutsTab() {
+function AffiliatePayoutsTab({ adminRole }: { adminRole?: string }) {
+  const maySettle = canUse("affiliate.commission.settle", adminRole);
+  const denied = deniedReason("affiliate.commission.settle");
   const [commissions, setCommissions] = useState<CommissionRow[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [search, setSearch] = useState("");
@@ -953,14 +967,17 @@ function AffiliatePayoutsTab() {
             <div className="flex gap-1.5 flex-wrap">
               {c.status === "PENDING" && (
                 <>
-                  <ActionBtn icon={CheckCircle2} label="Approve" variant="success"
+                  <ActionBtn icon={CheckCircle2} label="Approve" variant="success" disabled={!maySettle}
+                    title={maySettle ? undefined : denied}
                     onClick={() => setModal({ type: "approve", commissionId: c.id, affiliateName: c.affiliateName, amountCents: c.amountCents })} />
-                  <ActionBtn icon={X} label="Reject" variant="danger"
+                  <ActionBtn icon={X} label="Reject" variant="danger" disabled={!maySettle}
+                    title={maySettle ? undefined : denied}
                     onClick={() => setModal({ type: "reject", commissionId: c.id, affiliateName: c.affiliateName, amountCents: c.amountCents })} />
                 </>
               )}
               {c.status === "APPROVED" && (
-                <ActionBtn icon={DollarSign} label="Mark as Paid"
+                <ActionBtn icon={DollarSign} label="Mark as Paid" disabled={!maySettle}
+                  title={maySettle ? undefined : denied}
                   onClick={() => setModal({ type: "paid", commissionId: c.id, affiliateName: c.affiliateName, amountCents: c.amountCents })} />
               )}
             </div>
@@ -1148,8 +1165,8 @@ function RefundsTab({ deposits, conciergeFees }: {
 // ─── Root Component ───────────────────────────────────────────────────────────
 
 export default function AdminPaymentsClient({
-  deposits, conciergeFees,
-}: { deposits: DepositRow[]; conciergeFees: ConciergeFeeRow[] }) {
+  deposits, conciergeFees, adminRole,
+}: { deposits: DepositRow[]; conciergeFees: ConciergeFeeRow[]; adminRole?: string }) {
   const [tab, setTab] = useState<Tab>("deposits");
 
   const TABS = [
@@ -1174,9 +1191,9 @@ export default function AdminPaymentsClient({
         ))}
       </div>
 
-      {tab === "deposits"   && <DepositsTab deposits={deposits} />}
-      {tab === "fees"       && <ServiceFeesTab conciergeFees={conciergeFees} />}
-      {tab === "affiliates" && <AffiliatePayoutsTab />}
+      {tab === "deposits"   && <DepositsTab deposits={deposits} adminRole={adminRole} />}
+      {tab === "fees"       && <ServiceFeesTab conciergeFees={conciergeFees} adminRole={adminRole} />}
+      {tab === "affiliates" && <AffiliatePayoutsTab adminRole={adminRole} />}
       {tab === "refunds"    && <RefundsTab deposits={deposits} conciergeFees={conciergeFees} />}
     </div>
   );

@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { AffiliateActionAvailability } from "@/lib/services/admin/admin-affiliate-command-center.service";
 import AdminDocumentActions from "@/components/admin/AdminDocumentActions";
+import { canUse } from "@/lib/auth/admin-ui-roles";
 import { api, apiErrorMessage } from "@/lib/api/client";
 
 // ─── Local Types ──────────────────────────────────────────────────────────────
@@ -114,6 +115,8 @@ interface Props {
   data: AffiliateDetail;
   availability: AffiliateActionAvailability;
   initialTab?: string;
+  /** UX only — the settle routes re-check the role server-side. */
+  adminRole?: string;
 }
 
 type ModalType =
@@ -438,7 +441,10 @@ function EditProfileModal({ affiliate, onClose, onSuccess }: {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function AdminAffiliateCommandCenter({ data, availability, initialTab }: Props) {
+export default function AdminAffiliateCommandCenter({ data, availability, initialTab, adminRole }: Props) {
+  // Money actions only. Approve / reject / suspend / reactivate / note have no
+  // server role check, so they stay exactly as they were.
+  const maySettle = canUse("affiliate.commission.settle", adminRole);
   const { affiliate, parent, children, commissions, payouts, auditLogs, supportNotes, complianceStatus, referralCount, convertedCount, documents } = data;
 
   const [modal, setModal] = useState<ModalType | null>(null);
@@ -588,7 +594,7 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
       {/* ─── Hero Header ─────────────────────────────────────────────────────── */}
       <div className="bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-5">
         <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-4">
-          <Link href="/admin" className="hover:text-purple-600 transition-colors">Admin</Link>
+          <Link href="/admin/dashboard" className="hover:text-purple-600 transition-colors">Admin</Link>
           <ChevronRight size={12} />
           <Link href="/admin/affiliates" className="hover:text-purple-600 transition-colors">Affiliates</Link>
           <ChevronRight size={12} />
@@ -892,8 +898,9 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
                   ))}
                 </div>
                 {commissions.map((c) => {
-                  const canPayout = c.status === "APPROVED";
-                  const canClawback = (c.status === "APPROVED" || c.status === "PAID") && c.amountCents > 0;
+                  const canPayout = c.status === "APPROVED" && maySettle;
+                  const canClawback =
+                    (c.status === "APPROVED" || c.status === "PAID") && c.amountCents > 0 && maySettle;
                   return (
                   <div key={c.id} className="grid lg:grid-cols-[1.6fr_0.5fr_0.5fr_0.9fr_0.9fr_0.9fr_0.9fr_1.4fr] gap-2 px-5 py-3.5 border-b border-slate-50 hover:bg-slate-50/70 transition-colors items-center">
                     <span className="text-xs font-mono text-slate-600">···{c.dealId.slice(-12)}</span>

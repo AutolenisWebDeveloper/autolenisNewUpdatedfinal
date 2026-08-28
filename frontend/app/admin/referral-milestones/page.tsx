@@ -8,7 +8,7 @@ import ReferralMilestoneConfigManager from "@/components/admin/ReferralMilestone
 export const dynamic = "force-dynamic";
 
 export default async function AdminReferralMilestonesPage() {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const [milestones, configs] = await Promise.all([
     prisma.referralMilestone.findMany({ orderBy: { createdAt: "desc" }, take: 50 }),
     prisma.referralMilestoneConfig.findMany({ orderBy: { threshold: "asc" } }),
@@ -36,7 +36,7 @@ export default async function AdminReferralMilestonesPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant={m.achieved ? "green" : "secondary"} className="text-xs">{m.achieved ? "Earned" : "Pending"}</Badge>
-                {m.achieved && !m.paidAt && <MilestonePayActionClient milestoneId={m.id} milestoneLabel={m.milestone.replace(/_/g, " ")} rewardValueCents={m.rewardValue} />}
+                {m.achieved && !m.paidAt && <MilestonePayActionClient milestoneId={m.id} milestoneLabel={m.milestone.replace(/_/g, " ")} rewardValueCents={m.rewardValue} adminRole={admin.role} />}
                 {m.paidAt && <Badge variant="green" className="text-xs">Paid {m.paidAt.toLocaleDateString()}</Badge>}
               </div>
             </div>

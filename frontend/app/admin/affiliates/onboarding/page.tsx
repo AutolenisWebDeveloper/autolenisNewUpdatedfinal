@@ -14,7 +14,7 @@ function statusVariant(status: string): "green" | "amber" | "destructive" | "sec
 }
 
 export default async function AdminAffiliateOnboardingPage() {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const reviews = await prisma.affiliateOnboardingReview.findMany({
     include: {
       affiliate: { include: { user: { select: { email: true } } } },
@@ -60,6 +60,7 @@ export default async function AdminAffiliateOnboardingPage() {
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     <AffiliateOnboardingReviewActions
+                      adminRole={admin.role}
                       affiliateId={review.affiliateId}
                       status={review.status}
                     />

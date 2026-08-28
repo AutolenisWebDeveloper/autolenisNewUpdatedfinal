@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "OFAC Review — Admin" };
 
 export default async function AdminOfacPage() {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const hits = await prisma.preQualification.findMany({
     where: { decision: { in: ["OFAC_REVIEW", "OFAC_ESCALATED"] } },
@@ -56,7 +56,7 @@ export default async function AdminOfacPage() {
                   </Badge>
                 </div>
                 <div className="mt-3">
-                  <OfacReviewActions prequalId={h.id} decision={h.decision} />
+                  <OfacReviewActions prequalId={h.id} decision={h.decision} adminRole={admin.role} />
                 </div>
               </div>
             );

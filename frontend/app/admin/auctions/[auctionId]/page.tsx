@@ -43,6 +43,7 @@ export default async function AdminAuctionDetailPage({ params }: Props) {
         auction={JSON.parse(JSON.stringify(auction))}
         auditLogs={JSON.parse(JSON.stringify(auditLogs))}
         adminId={admin.adminId}
+        adminRole={admin.role}
         adminEmail={admin.email}
       />
     </div>

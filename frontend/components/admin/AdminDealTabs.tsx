@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDialog } from "@/components/ui/kit";
 import { CheckCircle2, Clock, AlertTriangle, Loader2, StickyNote } from "lucide-react";
@@ -31,7 +32,7 @@ interface DealRecord { id: string; status: string; buyerId: string; financingPat
 interface TimelineItem { stage: string; timestamp: string; description: string }
 interface AuditLogItem { id: string; action: string; adminEmail: string; reason: string | null; createdAt: string }
 
-interface Props { deal: DealRecord; timeline: TimelineItem[]; auditLogs: AuditLogItem[]; adminId: string; adminEmail: string }
+interface Props { deal: DealRecord; timeline: TimelineItem[]; auditLogs: AuditLogItem[]; adminId: string; adminEmail: string; adminRole?: string }
 
 // Destructive/financial actions gate behind an explicit ConfirmDialog with
 // its own required reason (forwarded to the audit log) — single-click firing
@@ -54,7 +55,10 @@ const CONFIRMED_ACTIONS: Record<string, { title: string; description: string; co
   },
 };
 
-export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, adminEmail }: Props) {
+export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, adminEmail, adminRole }: Props) {
+  // UX only. /api/admin/deals/[dealId]/action re-checks the role server-side;
+  // every control in this panel posts to it.
+  const mayAct = canUse("deal.action", adminRole);
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("Overview");
   const [actionReason, setActionReason] = useState("");
@@ -439,6 +443,15 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
         <div className="bg-white border-2 border-al-primary/20 rounded-xl p-5 sticky top-6">
           <h3 className="font-semibold text-slate-800 text-sm mb-4">Admin Actions</h3>
 
+          {!mayAct && (
+            <p
+              className="text-xs px-3 py-2 rounded-lg mb-3 bg-slate-50 text-slate-600 border border-slate-200"
+              data-testid="deal-actions-role-note"
+            >
+              {deniedReason("deal.action")}
+            </p>
+          )}
+
           <div className="mb-4">
             <label className="text-xs text-slate-500 font-medium mb-1.5 block">Reason (required for all actions)</label>
             <Textarea
@@ -469,7 +482,7 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
                   <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
                 ))}
               </select>
-              <Button className="w-full mt-1.5" size="sm" variant="secondary" disabled={loading}
+              <Button className="w-full mt-1.5" size="sm" variant="secondary" disabled={loading || !mayAct}
                 data-testid="advance-stage-btn"
                 onClick={() => {
                   const sel = nextStage || DEAL_STAGES.filter(s => s !== deal.status)[0];
@@ -480,19 +493,19 @@ export default function AdminDealTabs({ deal, timeline, auditLogs, adminId, admi
             </div>
 
             {/* Override contract shield */}
-            <Button className="w-full" size="sm" variant="secondary" disabled={loading} data-testid="override-shield-btn"
+            <Button className="w-full" size="sm" variant="secondary" disabled={loading || !mayAct} data-testid="override-shield-btn"
               onClick={() => setConfirmAction("CONTRACT_SHIELD_OVERRIDDEN")}>
               Override Contract Shield
             </Button>
 
             {/* Cancel deal */}
-            <Button className="w-full" size="sm" variant="destructive" disabled={loading} data-testid="cancel-deal-btn"
+            <Button className="w-full" size="sm" variant="destructive" disabled={loading || !mayAct} data-testid="cancel-deal-btn"
               onClick={() => setConfirmAction("DEAL_CANCELLED")}>
               Cancel Deal
             </Button>
 
             {/* Trigger refund */}
-            <Button className="w-full" size="sm" variant="destructive" disabled={loading} data-testid="trigger-refund-btn"
+            <Button className="w-full" size="sm" variant="destructive" disabled={loading || !mayAct} data-testid="trigger-refund-btn"
               onClick={() => setConfirmAction("REFUND_TRIGGERED")}>
               Trigger Refund
             </Button>

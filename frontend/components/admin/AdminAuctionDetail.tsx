@@ -6,6 +6,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,7 @@ interface Invitation { id: string; dealer: { id: string; dealershipName: string;
 interface AuditLog { id: string; action: string; adminEmail: string; reason: string | null; createdAt: string }
 interface AuctionRecord { id: string; status: string; startedAt: string | null; endsAt: string | null; closedAt: string | null; buyer: { firstName: string; lastName: string; user: { email: string }; preQualification: { maxOtdAmountCents: number; tier: string | null } | null }; deposit: { amountCents: number; stripePaymentIntentId: string | null } | null; offers: Offer[]; invitations: Invitation[] }
 
-interface Props { auction: AuctionRecord; auditLogs: AuditLog[]; adminId: string; adminEmail: string }
+interface Props { auction: AuctionRecord; auditLogs: AuditLog[]; adminId: string; adminEmail: string; adminRole?: string }
 
 function computeBestPrice(offers: Offer[]): { bestCash: Offer | null; bestMonthly: Offer | null; bestOverall: Offer | null } {
   const submitted = offers.filter(o => o.status === "SUBMITTED");
@@ -41,7 +42,9 @@ function computeBestPrice(offers: Offer[]): { bestCash: Offer | null; bestMonthl
   };
 }
 
-export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminEmail }: Props) {
+export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminEmail, adminRole }: Props) {
+  // UX only — /api/admin/auctions/[auctionId]/action re-checks the role.
+  const mayAct = canUse("auction.action", adminRole);
   const router = useRouter();
   const [reason, setReason] = useState("");
   const [extendHours, setExtendHours] = useState("24");
@@ -254,7 +257,8 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
             )}
 
             <div className="space-y-2">
-              <Button className="w-full" size="sm" variant="secondary" disabled={loading || !isActive}
+              <Button className="w-full" size="sm" variant="secondary" disabled={loading || !isActive || !mayAct}
+                title={mayAct ? undefined : deniedReason("auction.action")}
                 data-testid="close-auction-btn" onClick={() => doAction("AUCTION_CLOSED")}>
                 {loading ? <Loader2 size={12} className="animate-spin" /> : "Close Auction"}
               </Button>
@@ -265,13 +269,15 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
                   <Input type="number" value={extendHours} onChange={e => setExtendHours(e.target.value)}
                     className="h-7 text-xs w-20" min="1" max="72" data-testid="extend-hours-input" />
                 </div>
-                <Button className="w-full" size="sm" variant="secondary" disabled={loading || !isActive}
+                <Button className="w-full" size="sm" variant="secondary" disabled={loading || !isActive || !mayAct}
+                title={mayAct ? undefined : deniedReason("auction.action")}
                   data-testid="extend-auction-btn" onClick={() => doAction("AUCTION_EXTENDED", { hours: parseInt(extendHours) })}>
                   Extend Deadline
                 </Button>
               </div>
 
-              <Button className="w-full" size="sm" variant="destructive" disabled={loading}
+              <Button className="w-full" size="sm" variant="destructive" disabled={loading || !mayAct}
+                title={mayAct ? undefined : deniedReason("auction.action")}
                 data-testid="auction-refund-btn" onClick={() => setConfirm({ kind: "refund" })}>
                 Trigger Refund (No Offers)
               </Button>
