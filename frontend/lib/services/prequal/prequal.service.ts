@@ -9,6 +9,7 @@
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { getCurrentTermsVersion } from "@/lib/auth/terms";
 import { HealthAlertLevel, PreQualDecision, PreQualTier } from "@prisma/client";
 import {
   callIPredict,
@@ -272,7 +273,7 @@ async function claimPrequalPull(
       consentText: FCRA_CONSENT_TEXT,
       ipAddress: input.ipAddress ?? null,
       userAgent: input.userAgent ?? null,
-      termsVersion: process.env.CURRENT_TERMS_VERSION ?? "2026-01-01",
+      termsVersion: getCurrentTermsVersion(),
     },
   });
   return "claimed";

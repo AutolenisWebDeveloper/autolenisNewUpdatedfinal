@@ -4,6 +4,7 @@
 import { NextRequest } from "next/server";
 import { getRequestBuyer, successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
+import { getCurrentTermsVersion } from "@/lib/auth/terms";
 import { scheduleLifecycleWorkload } from "@/lib/services/crm/lifecycle-scheduler";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
     data: {
       onboardingComplete: true,
       termsAcceptedAt: new Date(),
-      termsVersion: process.env.CURRENT_TERMS_VERSION ?? "2026-01-01",
+      termsVersion: getCurrentTermsVersion(),
     },
     select: { onboardingComplete: true, termsAcceptedAt: true, termsVersion: true },
   });

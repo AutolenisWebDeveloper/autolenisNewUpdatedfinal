@@ -13,6 +13,7 @@ import { isBuyerAccessDisabled } from "@/lib/auth/buyer-status";
 import { prisma } from "@/lib/prisma";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { computeJourney } from "@/lib/services/buyer/journey";
+import { needsTermsAcceptance } from "@/lib/auth/terms";
 import { jwtVerify } from "jose";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -109,12 +110,8 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
   // needed; /auth/accept-terms is outside this route group, so there is no
   // redirect loop. Mirrors requiresTermsAcceptance(): redirect when terms were
   // never accepted, or were accepted under an older version.
-  if (!isAdminPreview) {
-    const currentTermsVersion = process.env.CURRENT_TERMS_VERSION ?? "2026-01-01";
-    const needsTerms =
-      !buyer.termsAcceptedAt ||
-      (buyer.termsVersion != null && buyer.termsVersion !== currentTermsVersion);
-    if (needsTerms) redirect("/auth/accept-terms");
+  if (!isAdminPreview && needsTermsAcceptance(buyer.termsAcceptedAt, buyer.termsVersion)) {
+    redirect("/auth/accept-terms");
   }
 
   // Journey progression:
