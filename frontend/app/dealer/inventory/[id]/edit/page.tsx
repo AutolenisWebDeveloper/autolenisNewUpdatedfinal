@@ -140,7 +140,10 @@ export default function EditInventoryPage({ params }: Props) {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-5 text-sm">
+        <div
+          role="alert"
+          className="bg-al-danger-subtle border border-al-danger/30 text-al-danger-fg rounded-lg px-4 py-3 mb-5 text-sm"
+        >
           {error}
         </div>
       )}
