@@ -60,17 +60,41 @@ The guardrail worked as designed: it failed on four consecutive runs of that PR
 (runs #13-#16). The PR was merged with the check red, so `main` carried an
 intentional-but-never-reviewed marketing diff from 2026-08-26 until this re-seed.
 
-### What changed
+### What changed — four snapshots, not one
 
-Only the frozen baseline. **No marketing page, component, or design token was
-touched** to produce it — the copy change that moved the pixels was `a3e4ec2`,
-already on `main`, and it is correct: DocuSign is genuinely gone. Reverting the
-copy to match a stale baseline would have reintroduced a false product claim, so
-re-freezing on the current, truthful render is the right direction.
+The re-seed landed as `d7ce8eb` (run
+[#19](https://github.com/AutolenisWebDeveloper/autolenisNewUpdatedfinal/actions/runs/33188712755),
+seed + two-pass determinism check both passed). Comparing the new baseline
+against the old one byte-for-byte:
 
-The nine snapshots that already matched are re-rendered on the same pinned image
-by the same seeding pass, so they should be byte-identical to what they replaced;
-the review to do on the seeding commit is the `how-it-works` mobile diff.
+| Snapshot | Old | New | Change |
+| --- | --- | --- | --- |
+| `for-buyers-desktop` | 1280x7438 | 1280x7438 | bytes differ, **same size** |
+| `for-buyers-mobile` | 412x11836 | 412x11836 | bytes differ, **same size** |
+| `how-it-works-desktop` | 1280x8615 | 1280x8615 | bytes differ, **same size** |
+| `how-it-works-mobile` | 412x12949 | 412x12972 | **+23px — the one that failed** |
+| contact, home, refinance (6) | — | — | byte-identical |
+
+`a3e4ec2` changed copy on **both** `/for-buyers` and `/how-it-works`, so four
+snapshots carry real drift. Three of them swapped glyphs in place without
+reflowing, landing under the 0.1% `maxDiffPixelRatio` tolerance — so they
+**passed the gate while being genuinely stale**. Only the mobile
+`how-it-works` render reflowed to an extra line and crossed the threshold.
+
+Two things worth taking from that:
+
+- **A passing snapshot is not proof of an unchanged page.** The tolerance that
+  absorbs anti-aliasing noise also absorbs a small copy edit. The gate catches
+  layout movement reliably; it catches in-place text changes only when they are
+  large enough.
+- **The six byte-identical snapshots are the determinism evidence.** Re-rendering
+  reproduced them exactly, which is what makes the four that changed
+  trustworthy as real drift rather than environmental noise.
+
+No marketing page, component, or design token was touched to produce this
+baseline. The copy change that moved the pixels is `a3e4ec2`, already on `main`,
+and it is correct: DocuSign is genuinely gone. Reverting the copy to match a
+stale baseline would have reintroduced a false product claim.
 
 ### If you need to do this again
 
