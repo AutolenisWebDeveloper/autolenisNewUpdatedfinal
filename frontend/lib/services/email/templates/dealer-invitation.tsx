@@ -2,6 +2,34 @@
 // Dealer Invitation — sent to invite a dealer to claim their account.
 // Uses plain HTML string — no react-dom/server import (not compatible with Next.js App Router).
 
+/**
+ * Render the expiry instant for a person.
+ *
+ * The caller passes an ISO string, and this used to be interpolated raw next to
+ * a hardcoded "72 hours" — a machine timestamp beside a duration that had gone
+ * stale when the TTL moved to 7 days. Formatting the real instant here means the
+ * email states one expiry, taken from the value the caller computed, so it can
+ * never drift from INVITATION_TOKEN_TTL_MS again.
+ *
+ * UTC is stated explicitly: a bare clock time is ambiguous to a recipient in an
+ * unknown timezone, and we have no timezone for the dealer at send time.
+ * Anything unparseable is passed through untouched — a formatting failure must
+ * never reach a dealer as "Invalid Date".
+ */
+function formatExpiry(expiresAt: string): string {
+  const at = new Date(expiresAt);
+  if (Number.isNaN(at.getTime())) return expiresAt;
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(at);
+}
+
 export const DEALER_INVITATION_SUBJECT =
   "You've Been Invited to Join AutoLenis — Claim Your Account";
 
@@ -54,7 +82,7 @@ export function renderDealerInvitationEmail({
                   </td>
                 </tr>
               </table>
-              <p style="margin:0 0 32px 0;font-size:13px;color:#888888;">This invitation link expires in 72 hours (by ${expiresAt}). Please claim your account before it expires.</p>
+              <p style="margin:0 0 32px 0;font-size:13px;color:#888888;">This invitation link expires ${formatExpiry(expiresAt)}. Please claim your account before then.</p>
               <!-- Tier Benefits -->
               <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #eeeeee;padding-top:24px;margin-top:8px;">
                 <tr>
