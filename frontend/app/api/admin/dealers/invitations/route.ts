@@ -21,10 +21,24 @@ export async function GET(request: NextRequest) {
     data: { status: "EXPIRED" },
   });
 
+  // Columns are named explicitly. Prisma selects every model scalar by default,
+  // which would ask for token_hash / consumed_at — absent until migration
+  // 20260828000000 is applied — and fail the whole listing with P2022. Naming
+  // them also keeps token material out of a response that never needed it.
   const invitations = await prisma.dealerInvitation.findMany({
     where: status ? { status: status as "PENDING" | "ACCEPTED" | "EXPIRED" | "CANCELLED" } : undefined,
     orderBy: { createdAt: "desc" },
     take: 100,
+    select: {
+      id: true,
+      dealershipName: true,
+      contactName: true,
+      email: true,
+      status: true,
+      expiresAt: true,
+      acceptedAt: true,
+      createdAt: true,
+    },
   });
 
   return NextResponse.json({

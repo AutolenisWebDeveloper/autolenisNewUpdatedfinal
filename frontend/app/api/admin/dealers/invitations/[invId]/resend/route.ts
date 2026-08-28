@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { sendDealerInvitationEmail } from "@/lib/services/email/resend.service";
-import crypto from "crypto";
+import { refreshInvitationToken } from "@/lib/services/dealer-recruitment/invitation-token.service";
 
 interface RouteContext { params: Promise<{ invId: string }> }
 
@@ -19,24 +19,27 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
   const { invId } = await params;
 
-  const inv = await prisma.dealerInvitation.findUnique({ where: { id: invId } });
+  // Columns are named explicitly: an unqualified select would ask for token_hash
+  // / consumed_at, which do not exist until migration 20260828000000 is applied.
+  const inv = await prisma.dealerInvitation.findUnique({
+    where: { id: invId },
+    select: { id: true, email: true, contactName: true, dealershipName: true, status: true },
+  });
   if (!inv) return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
   if (inv.status === "ACCEPTED") return NextResponse.json({ error: "Already accepted" }, { status: 409 });
   if (inv.status === "CANCELLED") return NextResponse.json({ error: "Invitation was cancelled" }, { status: 409 });
 
-  const secret = process.env.JWT_SECRET ?? "placeholder";
-  const data = `${inv.email}:${inv.dealershipName}:${Date.now()}`;
-  const newToken = crypto.createHmac("sha256", secret).update(data).digest("hex") +
-    crypto.randomBytes(8).toString("hex");
-  const expiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000);
-
-  await prisma.dealerInvitation.update({
-    where: { id: invId },
-    data: { token: newToken, expiresAt, status: "PENDING" },
-  });
+  // One token scheme for invitations, owned by the service: 7-day TTL, hashed at
+  // rest where the schema allows, and guarded on status so this cannot resurrect
+  // an invitation accepted or cancelled since the read above.
+  const rotated = await refreshInvitationToken(invId);
+  if (!rotated) {
+    return NextResponse.json({ error: "Invitation is no longer resendable" }, { status: 409 });
+  }
+  const { rawToken, expiresAt } = rotated;
 
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim();
-  const inviteUrl = `${appUrl}/dealer/invite/claim?token=${newToken}`;
+  const inviteUrl = `${appUrl}/dealer/invite/claim?token=${rawToken}`;
 
   try {
     await sendDealerInvitationEmail({ to: inv.email, contactName: inv.contactName, dealershipName: inv.dealershipName, claimUrl: inviteUrl, expiresAt: expiresAt.toISOString() });
