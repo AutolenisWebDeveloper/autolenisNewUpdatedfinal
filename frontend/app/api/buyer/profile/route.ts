@@ -54,14 +54,19 @@ export async function PATCH(request: NextRequest) {
   const d = parsed.data;
   const updated = await prisma.buyer.update({
     where: { id: buyer.id },
+    // PATCH is a PARTIAL update. These five fields used to be written
+    // unconditionally, so any caller that sent only a subset — the onboarding
+    // wizard sends name fields alone — silently nulled the buyer's phone,
+    // address, city, state and ZIP. Only touch a field the caller actually sent;
+    // an explicit empty string still clears it.
     data: {
       ...(d.firstName ? { firstName: d.firstName } : {}),
       ...(d.lastName ? { lastName: d.lastName } : {}),
-      phone: d.phone || null,
-      address: d.address || null,
-      city: d.city || null,
-      state: d.state ? d.state.toUpperCase() : null,
-      zip: d.zip || null,
+      ...(d.phone !== undefined ? { phone: d.phone || null } : {}),
+      ...(d.address !== undefined ? { address: d.address || null } : {}),
+      ...(d.city !== undefined ? { city: d.city || null } : {}),
+      ...(d.state !== undefined ? { state: d.state ? d.state.toUpperCase() : null } : {}),
+      ...(d.zip !== undefined ? { zip: d.zip || null } : {}),
     },
     select: { firstName: true, lastName: true, phone: true, address: true, city: true, state: true, zip: true },
   });

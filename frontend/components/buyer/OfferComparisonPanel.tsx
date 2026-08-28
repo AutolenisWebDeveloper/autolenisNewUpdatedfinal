@@ -91,6 +91,34 @@ export default function OfferComparisonPanel({ auctionId }: OfferComparisonPanel
     return <div className="grid md:grid-cols-3 gap-6">{[1,2,3].map(i => <div key={i} className="h-64 bg-slate-100 rounded-xl animate-pulse" />)}</div>;
   }
 
+  // A FAILED fetch is not an empty result. This check has to come before the
+  // empty state: the error branch was rendered further down, so a failed load
+  // fell into "no offers yet" — telling a buyer whose dealers may well have bid
+  // that nobody had, and making the error banner unreachable.
+  if (error && offers.length === 0) {
+    return (
+      <div
+        className="text-center py-16 px-6 bg-red-50 rounded-2xl border border-red-200"
+        data-testid="offer-comparison-error"
+        role="alert"
+      >
+        <p className="font-semibold text-red-800 mb-1">We couldn&apos;t load your offers</p>
+        <p className="text-sm text-red-700 mb-5 max-w-sm mx-auto leading-relaxed">
+          This is a problem on our side, not a sign that no offers arrived. Please
+          refresh — if it keeps happening, contact support and we&apos;ll check for you.
+        </p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          data-testid="offer-comparison-retry-btn"
+          className="inline-flex items-center gap-2 px-6 py-3 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
   // Feature 13 — Best Price Engine empty state
   if (offers.length === 0) {
     return (

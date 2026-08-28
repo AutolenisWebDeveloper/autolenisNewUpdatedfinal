@@ -117,12 +117,26 @@ export default async function FeePage() {
   // ── Determine fee status ──────────────────────────────────────────────────
   // Priority: refunded > paid > pending > not-started > pre-fee blocker
   const feeRefunded = !!deal?.feeRefundedAt;
-  const feePaid =
-    !!deal?.feePaidAt ||
-    deal?.status === "FEE_PAID" ||
-    POST_FEE_STATUSES.has(deal?.status ?? "");
-  const feeAmountPaidCents =
-    deal?.feeAmountCents ?? serviceFeePayment?.netAmountCents ?? 0;
+
+  // "Paid" must mean a RECORDED payment, not an inferred one. This previously
+  // also counted deal.status === "FEE_PAID" and every POST_FEE status, so a deal
+  // advanced past the fee step by any other path rendered
+  // "Service Fee Paid — Payment Confirmed" with no payment behind it. Only two
+  // facts are evidence of money: the deal's own feePaidAt stamp, and a
+  // ServiceFeePayment row.
+  const feePaymentRecorded = !!deal?.feePaidAt || !!serviceFeePayment;
+  // Past the fee step without that evidence — a real state (a deal moved on
+  // without a recorded fee payment), but NOT a paid one.
+  const pastFeeStageUnrecorded =
+    !feePaymentRecorded &&
+    (deal?.status === "FEE_PAID" || POST_FEE_STATUSES.has(deal?.status ?? ""));
+  const feePaid = feePaymentRecorded;
+
+  // The amount actually recorded. Null when nothing was recorded — the paid
+  // panel then omits the line entirely rather than printing the price list's
+  // net figure as though it were a receipt, which is what it used to do.
+  const feeAmountPaidCents: number | null =
+    deal?.feeAmountCents ?? serviceFeePayment?.netAmountCents ?? null;
   const feePaidAt = deal?.feePaidAt ?? serviceFeePayment?.paidAt ?? null;
 
   const isPreFeeStage = deal ? PRE_FEE_STATUSES.has(deal.status) : false;
@@ -160,7 +174,12 @@ export default async function FeePage() {
     );
   }
 
-  // ── Fee paid (or past fee stage) ──────────────────────────────────────────
+  // ── Past the fee step with no recorded payment ────────────────────────────
+  if (pastFeeStageUnrecorded) {
+    return <FeePage_UnrecordedPayment isPremium={isPremium} dealStatus={deal.status} />;
+  }
+
+  // ── Fee paid (recorded) ───────────────────────────────────────────────────
   if (feePaid) {
     return (
       <FeePage_Paid
@@ -424,6 +443,66 @@ function FeePage_Due({
 // Sub-page: Fee paid
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Past the fee step, but nothing on record says the fee was paid.
+//
+// This state used to be rendered as "Service Fee Paid — Payment Confirmed" with
+// a fabricated amount, because `feePaid` was inferred from deal.status alone.
+// Claiming a payment we have no record of is the worst possible answer here: it
+// tells the buyer money moved when we cannot show that it did. Say what is
+// actually known instead, and route them to a human.
+function FeePage_UnrecordedPayment({
+  isPremium,
+  dealStatus,
+}: {
+  isPremium: boolean;
+  dealStatus: string;
+}) {
+  return (
+    <PageShell>
+      <HeroCard
+        icon={<Info size={28} className="text-amber-600" />}
+        iconBg="bg-amber-100"
+        title="We're checking your service fee"
+        subtitle={
+          isPremium
+            ? "Your deal has moved past the fee step, but we don't have a completed payment on record for it yet."
+            : "You're on the Standard plan, so no service fee applies to your deal."
+        }
+        status={{ text: "Needs review", color: "amber" }}
+      />
+      {isPremium && (
+        <div
+          className="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-sm text-slate-700"
+          data-testid="fee-unrecorded-payment"
+        >
+          <p className="mb-3 leading-relaxed">
+            This usually means a payment is still being confirmed on our side.
+            <strong className="text-slate-900"> Please don&apos;t pay again</strong> — if
+            you have already paid, paying twice would charge you twice.
+          </p>
+          <p className="leading-relaxed">
+            If you have not paid and think you should have been asked to, or this
+            doesn&apos;t clear within a few minutes, contact{" "}
+            <a href="mailto:support@autolenis.com" className="text-al-primary hover:underline">
+              support@autolenis.com
+            </a>{" "}
+            and we&apos;ll sort it out.
+          </p>
+          <p className="mt-3 text-xs text-slate-500">Deal status: {dealStatus}</p>
+        </div>
+      )}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <CtaLink href="/buyer/deal" testId="fee-unrecorded-goto-deal-btn">
+          Back to My Deal
+        </CtaLink>
+        <SecondaryLink href="/buyer/messages" testId="fee-unrecorded-support-btn">
+          Message support
+        </SecondaryLink>
+      </div>
+    </PageShell>
+  );
+}
+
 function FeePage_Paid({
   isPremium,
   feeAmountCents,
@@ -434,7 +513,7 @@ function FeePage_Paid({
   depositPaid,
 }: {
   isPremium: boolean;
-  feeAmountCents: number;
+  feeAmountCents: number | null;
   feePaidAt: Date | null;
   totalFeeCents: number;
   depositCreditCents: number;
@@ -468,14 +547,15 @@ function FeePage_Paid({
             </span>
           </div>
           <div className="space-y-2 text-sm">
-            <div className="flex justify-between text-slate-700">
-              <span>Amount paid</span>
-              <span className="font-semibold">
-                {feeAmountCents > 0
-                  ? formatCents(feeAmountCents)
-                  : formatCents(netFeeCents)}
-              </span>
-            </div>
+            {/* Only shown when an amount was actually recorded. The previous
+                fallback printed the price list's net figure as though it were a
+                receipt for money we had no record of receiving. */}
+            {feeAmountCents !== null && feeAmountCents > 0 && (
+              <div className="flex justify-between text-slate-700">
+                <span>Amount paid</span>
+                <span className="font-semibold">{formatCents(feeAmountCents)}</span>
+              </div>
+            )}
             {feePaidAt && (
               <div className="flex justify-between text-slate-500">
                 <span>Paid on</span>
@@ -517,7 +597,8 @@ function FeePage_Refunded({
   refundedAt,
 }: {
   isPremium: boolean;
-  feeAmountCents: number;
+  /** Null when no refund amount was recorded — never substitute a list price. */
+  feeAmountCents: number | null;
   refundedAt: Date;
 }) {
   return (
@@ -535,7 +616,11 @@ function FeePage_Refunded({
           <RotateCcw size={18} className="text-blue-500 mt-0.5 shrink-0" />
           <div>
             <p className="text-sm font-semibold text-slate-800 mb-1">
-              {isPremium ? formatCents(feeAmountCents) : "$0"} refunded
+              {isPremium
+                ? feeAmountCents !== null
+                  ? `${formatCents(feeAmountCents)} refunded`
+                  : "Refund issued"
+                : "$0 refunded"}
             </p>
             <p className="text-sm text-slate-600">
               Refunded on {formatDate(refundedAt)}. Please allow 5–10 business

@@ -13,6 +13,7 @@ import { isBuyerAccessDisabled } from "@/lib/auth/buyer-status";
 import { prisma } from "@/lib/prisma";
 import { isPrequalValid } from "@/lib/services/prequal/prequal.service";
 import { computeJourney } from "@/lib/services/buyer/journey";
+import { needsTermsAcceptance } from "@/lib/auth/terms";
 import { jwtVerify } from "jose";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -26,6 +27,25 @@ function getPreviewSecret() {
 }
 
 export default async function BuyerLayout({ children }: { children: React.ReactNode }) {
+  // ── Suspension notice: bypass the portal shell ─────────────────────────────
+  // /buyer/suspended must render for a SUSPENDED buyer — that is its entire
+  // purpose. But it lives under app/buyer/, so this layout wraps it, and
+  // requireBuyer() below redirects a suspended buyer to /buyer/suspended: the
+  // page redirects to itself forever and the notice can never appear. The page
+  // author anticipated exactly this ("do NOT call requireBuyer() which would
+  // redirect suspended buyers") and guarded the page — but a child cannot opt
+  // out of its parent layout, so the guard was defeated from above.
+  //
+  // The page does its own authentication (getAuthenticatedBuyer, redirecting
+  // unauthenticated visitors to sign-in and non-suspended buyers to the
+  // dashboard) and renders a standalone full-screen notice, so returning it
+  // bare is both safe and what its design intends. proxy.ts already exempts
+  // this path from the edge suspension redirect for the same reason.
+  const layoutPathname = (await headers()).get("x-pathname") ?? "";
+  if (layoutPathname === "/buyer/suspended") {
+    return <>{children}</>;
+  }
+
   // ── Admin preview mode ─────────────────────────────────────────────────────
   // Check for a valid admin preview token cookie before normal buyer auth.
   // If present and valid: load buyer data by token's buyerId, render with banner.
@@ -109,12 +129,8 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
   // needed; /auth/accept-terms is outside this route group, so there is no
   // redirect loop. Mirrors requiresTermsAcceptance(): redirect when terms were
   // never accepted, or were accepted under an older version.
-  if (!isAdminPreview) {
-    const currentTermsVersion = process.env.CURRENT_TERMS_VERSION ?? "2026-01-01";
-    const needsTerms =
-      !buyer.termsAcceptedAt ||
-      (buyer.termsVersion != null && buyer.termsVersion !== currentTermsVersion);
-    if (needsTerms) redirect("/auth/accept-terms");
+  if (!isAdminPreview && needsTermsAcceptance(buyer.termsAcceptedAt, buyer.termsVersion)) {
+    redirect("/auth/accept-terms");
   }
 
   // Journey progression:
@@ -153,48 +169,49 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
     }
   }
 
-  // Fetch shortlist item count — only needed when prequal is approved
+  // Gather ALL journey facts unconditionally, exactly as
+  // /api/buyer/journey-status does, so the two genuinely compute the same stage
+  // from the same facts (M-3).
+  //
+  // These reads used to sit behind two nested short-circuits — the shortlist
+  // count only when prequal was approved, and the deal/deposit/auction records
+  // only when that count was > 0 — which broke the very invariant the comment
+  // claimed. A buyer mid-deal whose prequal had EXPIRED, or whose shortlist
+  // items were removed, produced deal = null here while the API still saw the
+  // deal, so the layout silently regressed their stage. Now that the sidebar
+  // gates on this stage, that regression would LOCK the entire Auction & Deal
+  // nav for a buyer who is in the middle of a deal.
   let shortlistCount = 0;
-  if (prequalApproved) {
-    try {
-      const shortlist = await prisma.shortlist.findUnique({
-        where: { buyerId: buyer.id },
-        select: { _count: { select: { items: true } } },
-      });
-      shortlistCount = shortlist?._count.items ?? 0;
-    } catch {
-      // Non-fatal: fall back to 0 so journey stage degrades gracefully
-      shortlistCount = 0;
-    }
-  }
-
-  // Fetch active deal for later-stage progression. Select the deal FACTS the
-  // shared journey machine keys on (not just status), plus the deposit/auction
-  // records — so this layout and /api/buyer/journey-status compute the SAME
-  // stage from the same facts (M-3).
   let activeDeal:
     | { status: string; financingPath: string | null; feePaidAt: Date | null; insuranceStatus: string; contractShieldStatus: string | null }
     | null = null;
   let depositPaid = false;
   let activeAuction = false;
-  if (shortlistCount > 0) {
-    try {
-      const [deal, deposit, auction] = await Promise.all([
-        prisma.deal.findFirst({
-          where: { buyerId: buyer.id },
-          orderBy: { createdAt: "desc" },
-          select: { status: true, financingPath: true, feePaidAt: true, insuranceStatus: true, contractShieldStatus: true },
-        }),
-        prisma.deposit.findFirst({ where: { buyerId: buyer.id, status: "PAID" }, select: { id: true } }),
-        prisma.auction.findFirst({ where: { buyerId: buyer.id, status: "ACTIVE" }, select: { id: true } }),
-      ]);
-      activeDeal = deal;
-      depositPaid = !!deposit;
-      activeAuction = !!auction;
-    } catch {
-      // Non-fatal: treat as no active deal
-      activeDeal = null;
-    }
+  // When the facts cannot be read at all, the stage computed from zeros is not
+  // "early journey" — it is UNKNOWN. Nav then fails OPEN (journey = null →
+  // every item rendered as a link) rather than confidently locking a buyer out
+  // of their own deal; each page still enforces its own access server-side.
+  let journeyFactsKnown = true;
+  try {
+    const [shortlist, deal, deposit, auction] = await Promise.all([
+      prisma.shortlist.findUnique({
+        where: { buyerId: buyer.id },
+        select: { _count: { select: { items: true } } },
+      }),
+      prisma.deal.findFirst({
+        where: { buyerId: buyer.id },
+        orderBy: { createdAt: "desc" },
+        select: { status: true, financingPath: true, feePaidAt: true, insuranceStatus: true, contractShieldStatus: true },
+      }),
+      prisma.deposit.findFirst({ where: { buyerId: buyer.id, status: "PAID" }, select: { id: true } }),
+      prisma.auction.findFirst({ where: { buyerId: buyer.id, status: "ACTIVE" }, select: { id: true } }),
+    ]);
+    shortlistCount = shortlist?._count.items ?? 0;
+    activeDeal = deal;
+    depositPaid = !!deposit;
+    activeAuction = !!auction;
+  } catch {
+    journeyFactsKnown = false;
   }
 
   // ── Journey stage (shared machine) ────────────────────────────────────────
@@ -244,7 +261,12 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
         </div>
       )}
       <div className="flex flex-col lg:flex-row h-screen bg-[#F8F9FA]" data-testid="buyer-portal">
-        <BuyerSidebar />
+        {/* Journey-aware nav (lib/services/buyer/nav-gating): the sidebar renders
+            items the buyer cannot reach yet as explained LOCKED entries instead
+            of live links that silently redirect. */}
+        <BuyerSidebar
+          journey={journeyFactsKnown ? { currentStage, completedStages, unlockedStages } : null}
+        />
         <div className="flex-1 flex flex-col overflow-hidden pt-14 lg:pt-0">
           {/* Feature 3: Journey Navigator — suppressed on /buyer/requests/* by component itself */}
           <JourneyNavigator

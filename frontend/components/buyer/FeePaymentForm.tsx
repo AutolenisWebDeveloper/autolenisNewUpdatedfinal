@@ -27,10 +27,15 @@ function CheckoutForm({ netFeeCents }: { netFeeCents: number }) {
     setLoading(true);
     setError(null);
 
+    // return_url must land on a page that VERIFIES the payment server-side.
+    // It used to point at /buyer/deal, which ignores Stripe's redirect params
+    // entirely and renders from the DB state the (never-delivered) webhook would
+    // have written — so after a real $400 charge the buyer saw the fee still
+    // unpaid and this Pay button offered again, inviting a second charge.
     const { error: stripeError } = await stripe.confirmPayment({
       elements,
       confirmParams: {
-        return_url: `${window.location.origin}/buyer/deal`,
+        return_url: `${window.location.origin}/buyer/deal/payment/success`,
       },
     });
 
@@ -43,7 +48,7 @@ function CheckoutForm({ netFeeCents }: { netFeeCents: number }) {
   return (
     <form onSubmit={handleSubmit} data-testid="fee-payment-form">
       <PaymentElement className="mb-6" />
-      {error && <p className="text-xs text-red-600 mb-4">{error}</p>}
+      {error && <p role="alert" className="text-xs text-red-600 mb-4">{error}</p>}
       <button
         type="submit"
         disabled={!stripe || !elements || loading}

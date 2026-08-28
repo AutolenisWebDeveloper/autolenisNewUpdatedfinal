@@ -7,6 +7,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import type { User } from "@supabase/supabase-js";
 import { jwtVerify } from "jose";
+import { needsTermsAcceptance } from "@/lib/auth/terms";
 
 // Per-system JWT secrets. Each prefers its dedicated secret and falls back to
 // the shared JWT_SECRET — mirroring lib/admin-auth.ts and lib/dealer-auth.ts
@@ -306,14 +307,15 @@ function validateCronRequest(request: NextRequest): boolean {
 
 function requiresTermsAcceptance(
   pathname: string,
-  termsAccepted: boolean,
+  termsAcceptedAt: string | null | undefined,
   termsVersion: string | null | undefined,
 ): boolean {
   if (!pathname.startsWith("/buyer/")) return false;
-  if (!termsAccepted) return true;
-  const currentVersion = process.env.CURRENT_TERMS_VERSION ?? "2026-01-01";
-  if (termsVersion && termsVersion !== currentVersion) return true;
-  return false;
+  // Delegates to the shared predicate (lib/auth/terms) that app/buyer/layout.tsx
+  // and acceptTermsAction also use, so this edge gate and the server-side
+  // backstop can never disagree about the same buyer — which is what produced a
+  // permanent, invisible redirect loop when each resolved the version itself.
+  return needsTermsAcceptance(termsAcceptedAt, termsVersion);
 }
 
 // ─── Test Route Gating ────────────────────────────────────────────────────────
@@ -565,9 +567,9 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   // termsAcceptedAt is written to user_metadata by acceptTermsAction()
   // via a supabase.auth.admin.updateUserById() call so the edge can read it
   // without a Prisma round-trip.
-  const termsAccepted = Boolean(user.user_metadata?.termsAcceptedAt);
+  const termsAcceptedAt = user.user_metadata?.termsAcceptedAt as string | undefined;
   const termsVersion = user.user_metadata?.termsVersion as string | undefined;
-  if (requiresTermsAcceptance(pathname, termsAccepted, termsVersion)) {
+  if (requiresTermsAcceptance(pathname, termsAcceptedAt, termsVersion)) {
     const acceptUrl = new URL("/auth/accept-terms", request.url);
     // Preserve original destination so buyer lands there after accepting
     if (pathname !== "/auth/accept-terms") {

@@ -4,13 +4,21 @@ export const metadata: Metadata = { title: "Wallet", robots: { index: false, fol
 
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
-import { PREMIUM_FEE_REMAINING_CENTS, DEPOSIT_AMOUNT_CENTS } from "@/lib/constants";
+import { PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import { Wallet } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 export default async function DealWalletPage() {
   const buyer = await requireBuyer();
+  // The deposit line used to be printed from DEPOSIT_AMOUNT_CENTS with the
+  // Deposit table never queried, so a buyer who had paid nothing still saw
+  // "Auction Access Deposit paid +$99". Read the real record.
+  const paidDeposit = await prisma.deposit.findFirst({
+    where: { buyerId: buyer.id, status: "PAID" },
+    orderBy: { createdAt: "desc" },
+    select: { amountCents: true },
+  });
   const deal = await prisma.deal.findFirst({
     where: { buyerId: buyer.id },
     include: {
@@ -30,29 +38,35 @@ export default async function DealWalletPage() {
       {!deal ? (
         <p className="text-slate-500 text-sm" data-testid="wallet-no-deal">No active deal.</p>
       ) : (
-        <WalletBreakdown deal={deal} />
+        <WalletBreakdown deal={deal} paidDepositCents={paidDeposit?.amountCents ?? null} />
       )}
     </div>
   );
 }
 
-function WalletBreakdown({ deal }: {
+function WalletBreakdown({ deal, paidDepositCents }: {
   deal: {
     feePaidAt: Date | null;
     feeAmountCents: number | null;
     offer: { otdPriceCents: number } | null;
     vehicleRequestOffer: { priceCents: number } | null;
   }
+  /** Amount of the buyer's PAID deposit, or null when none is recorded. */
+  paidDepositCents: number | null;
 }) {
   const otdPriceCents = deal.offer?.otdPriceCents ?? deal.vehicleRequestOffer?.priceCents ?? 0;
+  const depositPaidCents = paidDepositCents ?? 0;
+  // The deposit is only credited against the fee once BOTH are actually paid.
+  const depositCreditCents = deal.feePaidAt && paidDepositCents !== null ? depositPaidCents : 0;
 
   const items = [
     { label: "Vehicle out-the-door price", amount: otdPriceCents, positive: false },
-    { label: "Auction Access Deposit paid", amount: DEPOSIT_AMOUNT_CENTS, positive: true },
-    // Service fee shown GROSS (= net charge + $99 deposit credit) so the credit
+    // Only claimed when a PAID deposit exists.
+    { label: "Auction Access Deposit paid", amount: depositPaidCents, positive: true },
+    // Service fee shown GROSS (= net charge + the deposit credit) so the credit
     // line below explains the net. feeAmountCents itself is the net charge.
-    { label: "Service fee", amount: deal.feePaidAt ? (deal.feeAmountCents ?? PREMIUM_FEE_REMAINING_CENTS) + DEPOSIT_AMOUNT_CENTS : 0, positive: false },
-    { label: "Net Auction Access Deposit credit", amount: deal.feePaidAt ? DEPOSIT_AMOUNT_CENTS : 0, positive: true },
+    { label: "Service fee", amount: deal.feePaidAt ? (deal.feeAmountCents ?? PREMIUM_FEE_REMAINING_CENTS) + depositCreditCents : 0, positive: false },
+    { label: "Net Auction Access Deposit credit", amount: depositCreditCents, positive: true },
   ];
 
   return (

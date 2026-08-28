@@ -2,7 +2,7 @@ import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { buyerFacingDealerName } from "@/lib/services/offer/dealer-display";
 import { notFound } from "next/navigation";
-import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { PREMIUM_FEE_CENTS } from "@/lib/constants";
 import ReceiptActions from "@/components/buyer/ReceiptActions";
 
 interface Props { params: Promise<{ dealId: string }> }
@@ -31,7 +31,20 @@ export default async function ReceiptPage({ params }: Props) {
   const isPlaceholderDealer = deal.offer?.dealer?.isSystemPlaceholder === true;
   const dealerCity = isPlaceholderDealer ? null : (deal.offer?.dealer?.city ?? null);
   const dealerState = isPlaceholderDealer ? null : (deal.offer?.dealer?.state ?? null);
-  const isPremium = buyer.plan === "PREMIUM";
+  // A receipt is a record of money that actually moved. These two lines used to
+  // be printed from PREMIUM_FEE_CENTS and DEPOSIT_AMOUNT_CENTS with neither the
+  // Deposit nor the fee ever checked, so a receipt could bill a $499 fee that
+  // was never charged and credit a $99 deposit that was never paid — and the
+  // total was wrong by $99 for every Standard-plan buyer.
+  const paidDeposit = await prisma.deposit.findFirst({
+    where: { buyerId: buyer.id, status: "PAID" },
+    orderBy: { createdAt: "desc" },
+    select: { amountCents: true },
+  });
+  const serviceFeeCents = deal.feePaidAt ? deal.feeAmountCents ?? PREMIUM_FEE_CENTS : 0;
+  // The deposit is only shown as CREDITED once the fee it offsets was paid.
+  const depositCreditCents = deal.feePaidAt ? paidDeposit?.amountCents ?? 0 : 0;
+  const totalCents = otdPriceCents + serviceFeeCents - depositCreditCents;
 
   return (
     <div className="p-6 md:p-8 max-w-2xl print:p-0" data-testid="receipt-page">
@@ -75,25 +88,26 @@ export default async function ReceiptPage({ params }: Props) {
               ${(otdPriceCents / 100).toLocaleString()}
             </span>
           </div>
-          {isPremium && (
+          {serviceFeeCents > 0 && (
             <div className="flex justify-between text-sm">
               <span className="text-[#4B5563]">AutoLenis Service Fee</span>
               <span className="text-[#111827]">
-                ${(PREMIUM_FEE_CENTS / 100).toFixed(2)}
+                ${(serviceFeeCents / 100).toFixed(2)}
               </span>
             </div>
           )}
-          <div className="flex justify-between text-sm">
-            <span className="text-[#4B5563]">Auction Access Deposit (credited)</span>
-            <span className="text-[#059669]">
-              −${(DEPOSIT_AMOUNT_CENTS / 100).toFixed(2)}
-            </span>
-          </div>
+          {depositCreditCents > 0 && (
+            <div className="flex justify-between text-sm">
+              <span className="text-[#4B5563]">Auction Access Deposit (credited)</span>
+              <span className="text-[#059669]">
+                −${(depositCreditCents / 100).toFixed(2)}
+              </span>
+            </div>
+          )}
           <div className="pt-3 border-t border-[#E5E7EB] flex justify-between">
             <span className="font-bold text-[#111827]">Total via AutoLenis</span>
             <span className="font-bold text-al-primary text-lg">
-              ${((otdPriceCents + (isPremium ? PREMIUM_FEE_CENTS : 0)
-                - DEPOSIT_AMOUNT_CENTS) / 100).toLocaleString()}
+              ${(totalCents / 100).toLocaleString()}
             </span>
           </div>
         </div>

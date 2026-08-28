@@ -15,6 +15,7 @@ import {
   getSafeAffiliateRedirect,
   getSafeDealerRedirect,
 } from "@/lib/auth/urls";
+import { getCurrentTermsVersion } from "@/lib/auth/terms";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -284,7 +285,7 @@ export async function signUpAction(formData: FormData): Promise<AuthResult> {
         referralCode,
         // Consent captured at signup — persisted by callback into Buyer record
         termsAcceptedAt: new Date().toISOString(),
-        termsVersion: process.env.CURRENT_TERMS_VERSION ?? "2026-01-01",
+        termsVersion: getCurrentTermsVersion(),
       },
     },
   });
@@ -540,21 +541,83 @@ export async function acceptTermsAction(formData: FormData): Promise<void> {
   if (!user) redirect("/auth/signin");
 
   const now = new Date();
-  const termsVersion = process.env.CURRENT_TERMS_VERSION ?? "2026-01-01";
+  const termsVersion = getCurrentTermsVersion();
+  const requestedRedirect = (formData.get("redirect") as string)?.trim() || null;
 
-  // 1. Persist to Prisma (source of truth)
-  await prisma.buyer.updateMany({
+  // Acceptance is a TWO-STORE write: Prisma (the source of truth the buyer
+  // layout reads) and Supabase user_metadata (what the edge gate reads, since
+  // the edge cannot call Prisma). Both gates bounce an unaccepted buyer back
+  // here, so a HALF-applied acceptance is a permanent redirect loop with
+  // nothing shown to the buyer. Every failure below therefore returns the buyer
+  // to this page with an actionable error instead of into the loop.
+  //
+  // /auth/accept-terms is deliberately NOT in proxy.ts's AUTH_ROUTES, so
+  // redirecting back here does not itself bounce.
+  const failTo = (code: string): never => {
+    const params = new URLSearchParams({ error: code });
+    if (requestedRedirect) params.set("redirect", requestedRedirect);
+    redirect(`/auth/accept-terms?${params.toString()}`);
+  };
+
+  // 1. Persist to Prisma (source of truth).
+  //
+  // updateMany matches 0 rows when the authenticated Supabase user has no
+  // Prisma Buyer — an account whose auth-callback provisioning did not
+  // complete. Discarding that count is what stranded such accounts: the write
+  // "succeeded", the layout still saw termsAcceptedAt = null, and the buyer
+  // looped forever. Heal it through the same provisioning path signup uses,
+  // then retry once, and fail loudly if it still does not apply.
+  let persisted = await prisma.buyer.updateMany({
     where: { user: { supabaseId: user.id } },
-    data: {
-      termsAcceptedAt: now,
-      termsVersion,
-    },
+    data: { termsAcceptedAt: now, termsVersion },
   });
 
-  // 2. Sync to Supabase user_metadata so the edge middleware can read it
-  //    without a Prisma call (edge cannot use Prisma). If this sync fails,
-  //    log loudly — the middleware will keep redirecting back to /auth/accept-terms
-  //    until the metadata is set, so a silent failure would create a redirect loop.
+  if (persisted.count === 0) {
+    const role = (user.user_metadata?.role as string | undefined) ?? "BUYER";
+    if (role !== "BUYER") {
+      logger.error(
+        "[acceptTermsAction] no Buyer row for non-BUYER user; refusing to provision one",
+        { supabaseId: user.id, role },
+      );
+      failTo("NO_BUYER_PROFILE");
+    }
+    if (!user.email) {
+      logger.error("[acceptTermsAction] authenticated user has no email; cannot provision buyer", {
+        supabaseId: user.id,
+      });
+      failTo("NO_BUYER_PROFILE");
+    }
+    try {
+      await ensurePrismaUser(
+        user.id,
+        user.email as string,
+        UserRole.BUYER,
+        (user.user_metadata?.plan as BuyerPlan | undefined) ?? BuyerPlan.STANDARD,
+        user.user_metadata?.firstName as string | undefined,
+        user.user_metadata?.lastName as string | undefined,
+        now.toISOString(),
+        termsVersion,
+      );
+    } catch (err) {
+      logger.error("[acceptTermsAction] buyer provisioning failed:", err);
+      failTo("NO_BUYER_PROFILE");
+    }
+    persisted = await prisma.buyer.updateMany({
+      where: { user: { supabaseId: user.id } },
+      data: { termsAcceptedAt: now, termsVersion },
+    });
+    if (persisted.count === 0) {
+      logger.error(
+        "[acceptTermsAction] acceptance did not apply after provisioning — buyer would loop",
+        { supabaseId: user.id },
+      );
+      failTo("NO_BUYER_PROFILE");
+    }
+  }
+
+  // 2. Sync to Supabase user_metadata so the edge gate agrees with Prisma.
+  //    A failure here leaves the edge gate still bouncing /buyer/* back to this
+  //    page, so it must NOT be swallowed — surface it and let the buyer retry.
   const adminClient = getAdminLinkGenerator();
   const { error: metadataError } = await adminClient.updateUserById(user.id, {
     user_metadata: {
@@ -568,13 +631,11 @@ export async function acceptTermsAction(formData: FormData): Promise<void> {
       "[acceptTermsAction] failed to sync user_metadata.termsAcceptedAt:",
       metadataError.message,
     );
+    failTo("SYNC_FAILED");
   }
 
-  // 3. Redirect to original destination, or buyer dashboard
-  const redirectTo = getSafeBuyerRedirect(
-    (formData.get("redirect") as string)?.trim() || null,
-  );
-  redirect(redirectTo ?? "/buyer/dashboard");
+  // 3. Both stores agree — redirect to original destination, or buyer dashboard
+  redirect(getSafeBuyerRedirect(requestedRedirect) ?? "/buyer/dashboard");
 }
 
 export { ensurePrismaUser, recordAffiliateAttribution };

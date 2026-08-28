@@ -28,6 +28,20 @@ export const NAV_STAGE_REQUIREMENT: Record<string, JourneyStage> = {
   "/buyer/pickup": "pickup",
 };
 
+/**
+ * The only hrefs app/buyer/layout.tsx permits before onboarding is complete —
+ * everything else is redirected to /buyer/onboarding. Mirrored here so the nav
+ * can show those items as LOCKED with a reason instead of rendering links that
+ * silently bounce. Keep in step with the layout's allowedWithoutOnboarding set.
+ */
+export const ONBOARDING_ALLOWED_HREFS: ReadonlySet<string> = new Set([
+  "/buyer/dashboard",
+  "/buyer/onboarding",
+  "/buyer/profile",
+  "/buyer/settings",
+  "/buyer/suspended",
+]);
+
 export interface JourneyView {
   currentStage: JourneyStage;
   completedStages: JourneyStage[];
@@ -43,6 +57,15 @@ const stageIndex = (s: JourneyStage) => JOURNEY_STAGES.indexOf(s);
  * reachable.
  */
 export function isNavItemReachable(href: string, journey: JourneyView): boolean {
+  // Onboarding gate first: until onboarding is complete the layout redirects
+  // every other /buyer/* route to /buyer/onboarding, so NOTHING outside the
+  // allowed set is actually reachable — not even the "ungated" account items.
+  // Treating them as reachable is what produced 20 sidebar links that silently
+  // bounced a new buyer with no explanation.
+  if (!journey.completedStages.includes("onboarding")) {
+    return ONBOARDING_ALLOWED_HREFS.has(href);
+  }
+
   const required = NAV_STAGE_REQUIREMENT[href];
   if (!required) return true; // ungated item
 
