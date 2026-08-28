@@ -9,6 +9,8 @@ import { Shield, Sparkles, Loader2 } from "lucide-react";
 import { DEPOSIT_AMOUNT_CENTS, PREMIUM_FEE_CENTS, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 
 import PreIntelligencePanel from "@/components/buyer/PreIntelligencePanel";
+import PaymentUnsettledNotice from "@/components/buyer/PaymentUnsettledNotice";
+import { classifyPaymentConfirmation } from "@/lib/services/payment/payment-confirmation";
 import { api } from "@/lib/api/client";
 
 // Inline Stripe checkout — NOT a redirect to Stripe URL
@@ -87,6 +89,13 @@ export default function DepositPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // Set when create-intent answers CHARGE_UNSETTLED: this buyer has already been
+  // charged (or a charge is in flight) on a deposit our side has not recorded,
+  // because the Stripe webhook never landed. Non-null here means no card form
+  // may render — see the early return below.
+  const [unsettled, setUnsettled] = useState<
+    { paymentIntentId: string | null; intentStatus: string | null } | null
+  >(null);
   const [plan, setPlan] = useState<"STANDARD" | "PREMIUM">("STANDARD");
   // Concierge convergence: when the buyer arrives from a "?offer=<reviewToken>"
   // vehicle-offer review link, this deposit unlocks an admin-curated set of
@@ -117,9 +126,26 @@ export default function DepositPage() {
       body: JSON.stringify(token ? { reviewToken: token } : {}),
     })
       .then(r => r.json())
-      .then((d: { success: boolean; data?: { clientSecret: string }; error?: { code?: string; message?: string } }) => {
+      .then((d: {
+        success: boolean;
+        data?: { clientSecret: string };
+        error?: {
+          code?: string;
+          message?: string;
+          details?: { paymentIntentId?: string; intentStatus?: string };
+        };
+      }) => {
         if (d.success && d.data) {
           setClientSecret(d.data.clientSecret);
+        } else if (d.error?.code === "CHARGE_UNSETTLED") {
+          // The buyer's money already moved — the server refused to mint a
+          // second PaymentIntent. Record the facts; the render path below turns
+          // them into the same honest state /buyer/deposit/success shows, and
+          // never reaches the card form.
+          setUnsettled({
+            paymentIntentId: d.error.details?.paymentIntentId ?? null,
+            intentStatus: d.error.details?.intentStatus ?? null,
+          });
         } else if (d.error?.code === "PREQUAL_REQUIRED") {
           setError("You need to complete prequalification before paying the Auction Access Deposit.");
           setTimeout(() => router.push("/buyer/prequal"), 2000);
@@ -152,6 +178,34 @@ export default function DepositPage() {
           Hang tight — we&apos;re verifying this with our payment processor. Don&apos;t close this page.
         </p>
       </div>
+    );
+  }
+
+  // A buyer who has already been charged must never be shown a card form, a
+  // "Total charged today $99.00" summary, or a "Pay $99" button — each of those
+  // is an invitation to a duplicate charge. Returning before the sales surface
+  // is what makes that structural rather than a matter of conditional styling.
+  //
+  // Which of the two states applies is decided by the same pure rule the
+  // verifying page uses, not by a second interpretation of Stripe's statuses
+  // written here: `recordedStatus` is null because our side has recorded nothing
+  // — that is precisely why the server refused to create another intent.
+  if (unsettled) {
+    const outcome = classifyPaymentConfirmation({
+      intentStatus: unsettled.intentStatus,
+      recordedStatus: null,
+    });
+    const recheckHref = unsettled.paymentIntentId
+      ? `/buyer/deposit/success?payment_intent=${encodeURIComponent(unsettled.paymentIntentId)}`
+      : "/buyer/deposit/success";
+    return (
+      <PaymentUnsettledNotice
+        variant={outcome === "processing" ? "processing" : "charged"}
+        paymentIntentId={unsettled.paymentIntentId}
+        recheckHref={recheckHref}
+        isConcierge={isConcierge}
+        testId="deposit-charge-unsettled-block"
+      />
     );
   }
 

@@ -11,9 +11,23 @@ export function successResponse<T>(data: T, status = 200) {
   return NextResponse.json({ success: true, data }, { status });
 }
 
-export function errorResponse(code: string, message: string, status = 400) {
+// `details` carries machine-readable context the client needs in order to act
+// correctly on the error — not prose. It exists because some failures are not
+// dead ends: CHARGE_UNSETTLED, for instance, must hand the caller the
+// PaymentIntent id so the buyer can be shown the reference for a payment that
+// already went through. Keep it small, keep it non-PII, and never put anything
+// in it that a message string could carry just as well.
+export function errorResponse(
+  code: string,
+  message: string,
+  status = 400,
+  details?: Record<string, unknown>,
+) {
   return NextResponse.json(
-    { error: { code, message }, correlationId: crypto.randomUUID() },
+    {
+      error: { code, message, ...(details ? { details } : {}) },
+      correlationId: crypto.randomUUID(),
+    },
     { status }
   );
 }

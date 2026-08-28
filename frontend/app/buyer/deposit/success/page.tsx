@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { title: "Auction Access Deposit Confirmed", robots: { index: false, follow: false } };
 
 import Link from "next/link";
-import { CheckCircle2, XCircle, ArrowRight, Clock } from "lucide-react";
+import { CheckCircle2, XCircle, ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { retrievePaymentIntent } from "@/lib/services/payment/stripe.service";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@/lib/services/payment/payment-confirmation";
 import { requireBuyer } from "@/lib/auth/session";
 import ContentConversionTracker from "@/components/analytics/ContentConversionTracker";
+import PaymentUnsettledNotice from "@/components/buyer/PaymentUnsettledNotice";
 
 export const dynamic = "force-dynamic";
 
@@ -76,56 +77,30 @@ export default async function DepositSuccessPage({ searchParams }: Props) {
     ? `/buyer/deposit/success?payment_intent=${encodeURIComponent(intentId)}`
     : "/buyer/deposit/success";
 
+  // Both of these are rendered by the shared notice so that this page and
+  // /buyer/deposit cannot drift apart on the one sentence that matters here:
+  // "do not pay again".
   if (pending) {
     return (
-      <div className="p-6 md:p-8 max-w-xl text-center" data-testid="deposit-processing-page">
-        <div className="w-20 h-20 rounded-full bg-al-primary-subtle border border-[#DBEAFE] flex items-center justify-center mx-auto mb-5">
-          <Clock size={40} className="text-al-primary" aria-hidden="true" />
-        </div>
-        <h1 className="text-2xl font-bold text-[#111827] mb-2">Payment processing…</h1>
-        <p className="text-[#4B5563] text-sm mb-6 leading-relaxed">
-          Your bank is still confirming this payment. This usually takes a few
-          seconds. Refresh this page in a moment — you do not need to pay again.
-        </p>
-        <Link href={recheckHref}
-          className="inline-flex items-center gap-2 px-8 py-4 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors">
-          Check again <ArrowRight size={15} aria-hidden="true" />
-        </Link>
-      </div>
+      <PaymentUnsettledNotice
+        variant="processing"
+        paymentIntentId={intentId}
+        recheckHref={recheckHref}
+        isConcierge={isConcierge}
+        testId="deposit-processing-page"
+      />
     );
   }
 
   if (chargedUnsettled) {
     return (
-      <div className="p-6 md:p-8 max-w-xl text-center" data-testid="deposit-charged-unsettled-page">
-        <div className="w-20 h-20 rounded-full bg-[#FFFBEB] border border-[#FDE68A] flex items-center justify-center mx-auto mb-5">
-          <Clock size={40} className="text-al-warning" aria-hidden="true" />
-        </div>
-        <h1 className="text-2xl font-bold text-[#111827] mb-2">Payment received — finishing setup</h1>
-        <p className="text-[#4B5563] text-sm mb-6 leading-relaxed">
-          Your $99 payment went through. We haven&apos;t finished recording it on
-          our side yet, so {isConcierge ? "your offers are not unlocked" : "your auction is not live"} just
-          this moment. <strong className="text-[#111827]">Do not pay again.</strong> This
-          usually resolves on its own within a few minutes.
-        </p>
-        <div className="bg-[#F8F9FB] border border-[#E5E7EB] rounded-xl p-4 mb-6 text-left text-sm text-[#4B5563]">
-          <p className="mb-1">
-            Payment reference: <span className="font-mono text-xs text-[#111827]">{intentId}</span>
-          </p>
-          <p>
-            If this page still says the same thing in 15 minutes, send that
-            reference to{" "}
-            <a href="mailto:support@autolenis.com" className="text-al-primary hover:underline">
-              support@autolenis.com
-            </a>{" "}
-            and we&apos;ll finish it for you.
-          </p>
-        </div>
-        <Link href={recheckHref}
-          className="inline-flex items-center gap-2 px-8 py-4 bg-al-primary text-white font-semibold text-sm rounded-xl hover:bg-al-primary-hover transition-colors">
-          Check again <ArrowRight size={15} aria-hidden="true" />
-        </Link>
-      </div>
+      <PaymentUnsettledNotice
+        variant="charged"
+        paymentIntentId={intentId}
+        recheckHref={recheckHref}
+        isConcierge={isConcierge}
+        testId="deposit-charged-unsettled-page"
+      />
     );
   }
 

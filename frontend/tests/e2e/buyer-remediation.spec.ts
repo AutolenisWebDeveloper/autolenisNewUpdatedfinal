@@ -116,6 +116,26 @@ test.describe("deposit truthfulness", () => {
     await expect(page.getByTestId("deposit-failed-page")).toHaveCount(0);
     await expect(page.locator("body")).not.toContainText(/auction is now live/i);
   });
+
+  test("a buyer who already paid is never shown another card form", async ({ page }) => {
+    test.skip(
+      !process.env.E2E_CHARGED_UNSETTLED_STORAGE_STATE,
+      "E2E_CHARGED_UNSETTLED_STORAGE_STATE not set — needs a signed-in buyer whose " +
+        "newest Deposit is PENDING while its Stripe TEST-MODE PaymentIntent already " +
+        "succeeded (the webhook-never-arrives case, on the deposit page itself)",
+    );
+    await page.context().storageState({ path: process.env.E2E_CHARGED_UNSETTLED_STORAGE_STATE });
+    await gotoOk(page, "/buyer/deposit");
+
+    // The honest state renders instead of the sales surface...
+    await expect(page.getByTestId("deposit-charge-unsettled-block")).toBeVisible();
+    await expect(page.locator("body")).toContainText(/do not pay again/i);
+
+    // ...and every route to a second $99 charge is absent, not merely disabled.
+    await expect(page.getByTestId("deposit-payment-form")).toHaveCount(0);
+    await expect(page.getByTestId("deposit-submit-btn")).toHaveCount(0);
+    await expect(page.locator("body")).not.toContainText(/total charged today/i);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
