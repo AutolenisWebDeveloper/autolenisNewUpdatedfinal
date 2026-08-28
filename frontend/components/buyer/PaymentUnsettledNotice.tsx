@@ -20,6 +20,11 @@ import { ArrowRight, Clock } from "lucide-react";
 
 export type PaymentUnsettledVariant = "processing" | "charged";
 
+/** Which payment this is about. Both buyer payments reach this same state for
+ *  the same reason (the webhook that would record them has never landed), so
+ *  they share the component — only the noun and the consequence differ. */
+export type PaymentUnsettledContext = "deposit" | "fee";
+
 interface Props {
   variant: PaymentUnsettledVariant;
   /** Stripe PaymentIntent id, shown so the buyer can quote it to support. */
@@ -28,6 +33,8 @@ interface Props {
   recheckHref: string;
   /** Concierge deposits unlock prepared offers; they never launch an auction. */
   isConcierge?: boolean;
+  /** Defaults to the $99 deposit. */
+  context?: PaymentUnsettledContext;
   /** Distinguishes the surface in tests. */
   testId: string;
 }
@@ -37,9 +44,11 @@ export default function PaymentUnsettledNotice({
   paymentIntentId,
   recheckHref,
   isConcierge = false,
+  context = "deposit",
   testId,
 }: Props) {
   const charged = variant === "charged";
+  const isFee = context === "fee";
 
   return (
     <div className="p-6 md:p-8 max-w-xl text-center" data-testid={testId}>
@@ -58,11 +67,20 @@ export default function PaymentUnsettledNotice({
       </div>
 
       <h1 className="text-2xl font-bold text-[#111827] mb-2">
-        {charged ? "Payment received — finishing setup" : "Payment processing…"}
+        {charged
+          ? `Payment received — finishing ${isFee ? "up" : "setup"}`
+          : "Payment processing…"}
       </h1>
 
       <p className="text-[#4B5563] text-sm mb-6 leading-relaxed" role="status">
-        {charged ? (
+        {charged && isFee ? (
+          <>
+            Your service fee payment went through. We haven&apos;t finished
+            recording it on our side yet.{" "}
+            <strong className="text-[#111827]">Do not pay again.</strong> This
+            usually resolves on its own within a few minutes.
+          </>
+        ) : charged ? (
           <>
             Your $99 payment went through. We haven&apos;t finished recording it on
             our side yet, so{" "}

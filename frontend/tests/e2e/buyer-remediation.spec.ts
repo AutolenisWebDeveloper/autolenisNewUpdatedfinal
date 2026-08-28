@@ -136,6 +136,24 @@ test.describe("deposit truthfulness", () => {
     await expect(page.getByTestId("deposit-submit-btn")).toHaveCount(0);
     await expect(page.locator("body")).not.toContainText(/total charged today/i);
   });
+
+  test("a buyer whose concierge fee already went through is never shown another card form", async ({ page }) => {
+    test.skip(
+      !process.env.E2E_FEE_CHARGED_UNSETTLED_STORAGE_STATE,
+      "E2E_FEE_CHARGED_UNSETTLED_STORAGE_STATE not set — needs a signed-in buyer on a " +
+        "deal whose concierge-fee Stripe TEST-MODE PaymentIntent already succeeded while " +
+        "deal.feePaidAt is still null (the webhook-never-arrives case, on the fee page)",
+    );
+    await page.context().storageState({ path: process.env.E2E_FEE_CHARGED_UNSETTLED_STORAGE_STATE });
+    await gotoOk(page, "/buyer/fee");
+
+    await expect(page.getByTestId("fee-charge-unsettled-block")).toBeVisible();
+    await expect(page.locator("body")).toContainText(/do not pay again/i);
+
+    // No route to a second $400 charge — absent, not disabled.
+    await expect(page.getByTestId("fee-payment-form")).toHaveCount(0);
+    await expect(page.getByTestId("submit-fee-payment-btn")).toHaveCount(0);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
