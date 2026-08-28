@@ -111,16 +111,14 @@ export const ADMIN_UI_CAPABILITIES = {
   /**
    * Start or end an impersonation session.
    *
-   * OWNER-GATED: the route admits ["SUPER_ADMIN","SUPPORT_ADMIN"], while
-   * PERMISSION_ROLES["support.impersonate"] is SUPER-only and policy 4 in
-   * permissions.ts says impersonation must be "one narrow role only — never
-   * default-admin". The route and the ruled policy disagree. Per owner ruling
-   * 10 the server behaviour is unchanged and the UI mirrors the ROUTE, so the
-   * UI matches observable behaviour. Resolving the disagreement is an
-   * authorization-policy decision, not an IA one.
+   * Batch 2 recorded this as an OWNER-GATED disagreement: the routes admitted
+   * ["SUPER_ADMIN","SUPPORT_ADMIN"] while PERMISSION_ROLES and ruled policies 1
+   * ("SUPPORT_ADMIN: ... no impersonation grant") and 4 ("one narrow role only")
+   * said SUPER-only. The owner has since ruled to enforce the policy, so the
+   * routes are SUPER-only and all three now agree.
    */
   "support.impersonate": {
-    roles: ["SUPER_ADMIN", "SUPPORT_ADMIN"] as const,
+    roles: SUPER,
     sourceRoutes: [
       "app/api/admin/support/impersonate/route.ts",
       "app/api/admin/support/impersonation/[id]/end/route.ts",

@@ -10,7 +10,14 @@ const schema = z.object({ targetUserId: z.string(), reason: z.string().min(10) }
 export async function POST(request: NextRequest) {
   const admin = await requirePermission(request, "support.impersonate");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
-  if (admin.role !== "SUPER_ADMIN" && admin.role !== "SUPPORT_ADMIN") return adminError("FORBIDDEN", "Insufficient permissions", 403);
+  // Ruled policies 1 and 4 (see lib/auth/permissions.ts): SUPPORT_ADMIN holds
+  // "no impersonation grant", and impersonation is "one narrow role only".
+  // PERMISSION_ROLES["support.impersonate"] encodes that as SUPER-only; this
+  // inline check is what actually enforces while requirePermission() is in
+  // shadow mode, so it must match. lib/auth/__tests__/admin-ui-roles.test.ts
+  // pins route, mirror and policy together — they diverged once and
+  // SUPPORT_ADMIN silently held a grant the owner had withheld.
+  if (admin.role !== "SUPER_ADMIN") return adminError("FORBIDDEN", "SUPER_ADMIN required", 403);
   const body = await request.json();
   const parsed = schema.safeParse(body);
   if (!parsed.success) return adminError("VALIDATION_ERROR", parsed.error.message, 400);

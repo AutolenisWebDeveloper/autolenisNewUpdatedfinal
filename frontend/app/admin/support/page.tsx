@@ -2,7 +2,7 @@
 // Audited impersonation sessions over the existing (previously orphaned)
 // /api/admin/support/impersonate + …/impersonation/[id]/end routes:
 // who / why / when is recorded per session; start requires a reason and the
-// routes are SUPER_ADMIN / SUPPORT_ADMIN gated server-side.
+// routes are SUPER_ADMIN gated server-side (ruled policies 1 and 4).
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import { LifeBuoy, Search } from "lucide-react";

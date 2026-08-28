@@ -10,8 +10,11 @@ export async function POST(request: NextRequest, { params }: Props) {
   const { id: impersonationId } = await params;
   const admin = await requirePermission(request, "support.impersonate");
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
-  if (admin.role !== "SUPER_ADMIN" && admin.role !== "SUPPORT_ADMIN") {
-    return adminError("FORBIDDEN", "Insufficient permissions", 403);
+  // Same allow-list as the start route (ruled policies 1 and 4). Ending is
+  // gated identically so the pair cannot drift apart; a session started before
+  // this tightening is still endable — by a SUPER_ADMIN.
+  if (admin.role !== "SUPER_ADMIN") {
+    return adminError("FORBIDDEN", "SUPER_ADMIN required", 403);
   }
   try {
     await endImpersonation(impersonationId);
