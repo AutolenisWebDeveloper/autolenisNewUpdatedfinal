@@ -89,12 +89,14 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     items: [
       { label: "Dealers", href: "/admin/dealers", icon: "Building2" },
       { label: "Dealer Recruitment", href: "/admin/dealer-outreach", icon: "Phone" },
+      { label: "Dealer Health", href: "/admin/dealers/health", icon: "TrendingUp" },
     ],
   },
   {
     label: "Affiliates",
     items: [
       { label: "Affiliates", href: "/admin/affiliates", icon: "Share2" },
+      { label: "Onboarding Reviews", href: "/admin/affiliates/onboarding", icon: "ClipboardCheck" },
       { label: "Referral Milestones", href: "/admin/referral-milestones", icon: "Trophy" },
     ],
   },
@@ -222,10 +224,8 @@ export const HUB_PARENTS: Readonly<Record<string, string>> = {
   // Dealers
   "/admin/dealers/applications": "/admin/dealers",
   "/admin/dealers/invite": "/admin/dealers",
-  "/admin/dealers/health": "/admin/dashboard",
   "/admin/inventory/dealer-discovery": "/admin/inventory",
   // Affiliates
-  "/admin/affiliates/onboarding": "/admin/affiliates",
   // Money
   "/admin/payments/deposits": "/admin/payments",
   "/admin/payments/refunds": "/admin/payments",
@@ -363,19 +363,66 @@ export function isNavItemVisible(item: NavItem, role?: string): boolean {
   return (item.visibleTo as readonly string[]).includes(role);
 }
 
-/** The section a pathname belongs to, used to auto-expand the rail. */
+/** Compiled matcher for a route pattern, so "[id]" matches a concrete id. */
+function patternToRegExp(pattern: string): RegExp {
+  const body = pattern
+    .replace(/^\//, "")
+    .split("/")
+    .map((s) => (s.startsWith("[") ? "[^/]+" : s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+    .join("/");
+  return new RegExp(`^/${body}$`);
+}
+
+const PARENTS: Readonly<Record<string, string>> = { ...HUB_PARENTS, ...DETAIL_PARENTS };
+const PARENT_PATTERNS: { re: RegExp; parent: string }[] = Object.entries(PARENTS)
+  .filter(([child]) => child.includes("["))
+  .map(([child, parent]) => ({ re: patternToRegExp(child), parent }));
+
+/** The parent of a pathname, matching "[id]" route patterns against real ids. */
+function parentOf(pathname: string): string | undefined {
+  const exact = PARENTS[pathname];
+  if (exact) return exact;
+  return PARENT_PATTERNS.find(({ re }) => re.test(pathname))?.parent;
+}
+
+/**
+ * The section a pathname belongs to, used to auto-expand the rail.
+ *
+ * Resolution order matters. A real pathname is "/admin/inventory/abc123", not
+ * "/admin/inventory/[id]", so a literal map lookup finds nothing — and
+ * "/admin/inventory" is an exact-match rail entry, so prefix matching finds
+ * nothing either. Without the pattern and ancestor steps below, the rail
+ * renders fully collapsed on precisely the drill-down pages this IA re-linked.
+ */
 export function sectionForPathname(pathname: string): string | null {
-  let best: { label: string; len: number } | null = null;
-  for (const section of ALL_SECTIONS) {
-    for (const item of section.items) {
-      if (isNavItemActive(item, pathname) && item.href.length > (best?.len ?? -1)) {
-        best = { label: section.label, len: item.href.length };
+  const seen = new Set<string>();
+  let current: string | null = pathname;
+
+  while (current && !seen.has(current)) {
+    seen.add(current);
+
+    // 1. The most specific rail entry that claims this path.
+    let best: { label: string; len: number } | null = null;
+    for (const section of ALL_SECTIONS) {
+      for (const item of section.items) {
+        if (isNavItemActive(item, current) && item.href.length > (best?.len ?? -1)) {
+          best = { label: section.label, len: item.href.length };
+        }
       }
     }
+    if (best) return best.label;
+
+    // 2. A declared hub/detail parent, matched as a route pattern.
+    const parent = parentOf(current);
+    if (parent) {
+      current = parent;
+      continue;
+    }
+
+    // 3. Otherwise walk up one path segment and try again.
+    const cut = current.lastIndexOf("/");
+    current = cut > "/admin".length - 1 ? current.slice(0, cut) : null;
   }
-  if (best) return best.label;
-  // Not a rail destination — fall back to the nearest hub/detail ancestor.
-  const parent = HUB_PARENTS[pathname] ?? DETAIL_PARENTS[pathname];
-  if (parent) return sectionForPathname(parent);
+
   return null;
 }

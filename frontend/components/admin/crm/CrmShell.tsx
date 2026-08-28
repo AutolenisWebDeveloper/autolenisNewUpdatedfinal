@@ -95,7 +95,11 @@ export function CrmShell({ children }: { children: React.ReactNode }) {
         </span>
       </header>
 
-      <main className="min-h-[calc(100vh-56px)] bg-[var(--crm-bg-secondary)]">{children}</main>
+      {/* A plain div, not <main>: app/admin/layout.tsx already provides the
+          page's single <main> landmark. Before Batch 2 this shell replaced the
+          admin chrome entirely and owned that landmark; now that it renders
+          inside it, a second <main> would nest two landmarks of the same role. */}
+      <div className="min-h-[calc(100vh-56px)] bg-[var(--crm-bg-secondary)]">{children}</div>
 
       <GlobalSearch
         open={searchOpen}

@@ -258,6 +258,7 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
 
             <div className="space-y-2">
               <Button className="w-full" size="sm" variant="secondary" disabled={loading || !isActive || !mayAct}
+                title={mayAct ? undefined : deniedReason("auction.action")}
                 data-testid="close-auction-btn" onClick={() => doAction("AUCTION_CLOSED")}>
                 {loading ? <Loader2 size={12} className="animate-spin" /> : "Close Auction"}
               </Button>
@@ -269,12 +270,14 @@ export default function AdminAuctionDetail({ auction, auditLogs, adminId, adminE
                     className="h-7 text-xs w-20" min="1" max="72" data-testid="extend-hours-input" />
                 </div>
                 <Button className="w-full" size="sm" variant="secondary" disabled={loading || !isActive || !mayAct}
+                title={mayAct ? undefined : deniedReason("auction.action")}
                   data-testid="extend-auction-btn" onClick={() => doAction("AUCTION_EXTENDED", { hours: parseInt(extendHours) })}>
                   Extend Deadline
                 </Button>
               </div>
 
               <Button className="w-full" size="sm" variant="destructive" disabled={loading || !mayAct}
+                title={mayAct ? undefined : deniedReason("auction.action")}
                 data-testid="auction-refund-btn" onClick={() => setConfirm({ kind: "refund" })}>
                 Trigger Refund (No Offers)
               </Button>

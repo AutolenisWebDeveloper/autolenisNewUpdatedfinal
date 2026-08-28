@@ -100,6 +100,7 @@ function Section({
   expanded,
   onToggle,
   onNavigate,
+  scope,
 }: {
   section: NavSection;
   pathname: string;
@@ -108,11 +109,14 @@ function Section({
   expanded: boolean;
   onToggle: () => void;
   onNavigate?: () => void;
+  /** Distinguishes the desktop rail from the mobile drawer: both render this
+   *  tree, and an aria-controls target id must be unique in the document. */
+  scope: string;
 }) {
   const items = section.items.filter((item) => isNavItemVisible(item, adminRole));
   if (items.length === 0) return null;
 
-  const panelId = `admin-nav-section-${section.label.toLowerCase().replace(/[^a-z]+/g, "-")}`;
+  const panelId = `admin-nav-${scope}-${section.label.toLowerCase().replace(/[^a-z]+/g, "-")}`;
   // A collapsed section still has to advertise attention it is holding,
   // otherwise collapsing the rail hides the unread count that made the badge
   // worth having.
@@ -127,7 +131,7 @@ function Section({
         onClick={onToggle}
         aria-expanded={expanded}
         aria-controls={panelId}
-        data-testid={`admin-nav-section-${section.label.toLowerCase().replace(/\s+/g, "-")}`}
+        data-testid={`admin-nav-section-${scope}-${section.label.toLowerCase().replace(/\s+/g, "-")}`}
         className="flex w-full items-center gap-1.5 px-3 pt-5 pb-1.5 text-[9px] font-bold text-[#94A3B8] uppercase tracking-[0.15em] hover:text-[#475569] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-primary rounded"
       >
         <ChevronRight
@@ -162,11 +166,13 @@ function Inner({
   adminRole,
   badges,
   onNavigate,
+  scope,
 }: {
   pathname: string;
   adminRole?: string;
   badges: Badges;
   onNavigate?: () => void;
+  scope: string;
 }) {
   const activeSection = useMemo(() => sectionForPathname(pathname), [pathname]);
 
@@ -220,6 +226,7 @@ function Inner({
             expanded={openSections.has(section.label)}
             onToggle={() => toggle(section.label)}
             onNavigate={onNavigate}
+            scope={scope}
           />
         ))}
       </nav>
@@ -275,7 +282,7 @@ export default function AdminSidebar({ adminRole }: { adminRole?: string }) {
         className="hidden lg:flex w-[220px] shrink-0 bg-white border-r border-[#E2E8F0] flex-col h-screen sticky top-0"
         data-testid="admin-sidebar"
       >
-        <Inner pathname={pathname} adminRole={adminRole} badges={badges} />
+        <Inner pathname={pathname} adminRole={adminRole} badges={badges} scope="desktop" />
       </aside>
       <div
         className="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between bg-white border-b border-[#E2E8F0] px-4 h-14 shadow-sm"
@@ -316,6 +323,7 @@ export default function AdminSidebar({ adminRole }: { adminRole?: string }) {
             pathname={pathname}
             adminRole={adminRole}
             badges={badges}
+            scope="mobile"
             onNavigate={() => setOpen(false)}
           />
         </DialogContent>

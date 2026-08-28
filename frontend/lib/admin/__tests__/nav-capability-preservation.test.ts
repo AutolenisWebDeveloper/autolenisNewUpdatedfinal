@@ -390,3 +390,44 @@ describe("admin IA — external entry points are real", () => {
     });
   }
 });
+
+describe("admin IA — the rail orients on real URLs, not just route patterns", () => {
+  // Regression: sectionForPathname originally looked HUB_PARENTS/DETAIL_PARENTS
+  // up by literal key. Real pathnames carry concrete ids ("/admin/inventory/abc"),
+  // which match no key, so the lookup returned null and the rail rendered fully
+  // COLLAPSED on exactly the drill-down pages this batch re-linked.
+  const cases: [string, string][] = [
+    ["/admin/inventory/abc123", "Inventory"],
+    ["/admin/inventory/abc123/edit", "Inventory"],
+    ["/admin/inventory/upload/history", "Inventory"],
+    ["/admin/vehicle-requests/req_1", "Pipeline"],
+    ["/admin/vehicle-requests/req_1/send-to-dealers", "Pipeline"],
+    ["/admin/vehicle-offers/off_1", "Pipeline"],
+    ["/admin/buyers/buy_1", "Pipeline"],
+    ["/admin/deals/deal_1/esign", "Pipeline"],
+    ["/admin/crm/contacts/c_1", "Engage"],
+    ["/admin/amips/metro/austin-tx", "Inventory"],
+    ["/admin/refinance/leads/lead_1", "Growth"],
+    ["/admin/dealers/applications/app_1", "Dealers"],
+    ["/admin/affiliates/aff_1", "Affiliates"],
+    ["/admin/payments/deposits", "Money"],
+    ["/admin/compliance/ofac", "Exceptions & Compliance"],
+  ];
+  for (const [pathname, expected] of cases) {
+    test(`${pathname} orients to ${expected}`, () => {
+      assert.equal(sectionForPathname(pathname), expected);
+    });
+  }
+
+  test("an unknown admin path does not throw and yields no section", () => {
+    assert.equal(sectionForPathname("/admin/not-a-real-page"), null);
+    assert.equal(sectionForPathname("/somewhere/else"), null);
+  });
+
+  test("resolution terminates — a parent chain cannot loop forever", () => {
+    // Every HUB/DETAIL parent must itself resolve, or the walk would recurse.
+    for (const child of [...Object.keys(HUB_PARENTS), ...Object.keys(DETAIL_PARENTS)]) {
+      assert.notEqual(sectionForPathname(child), undefined, `${child} did not resolve`);
+    }
+  });
+});
