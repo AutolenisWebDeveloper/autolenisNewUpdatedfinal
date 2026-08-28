@@ -7,15 +7,24 @@ import { headers } from "next/headers";
 import DealerSidebar from "@/components/dealer/DealerSidebar";
 import ChatWidget from "@/components/public/ChatWidget";
 import { requireDealer } from "@/lib/auth/dealer-session";
+import { isDealerPublicRoute } from "@/lib/auth/dealer-scope";
 
 // Single DEALER role — no sub-role checks, no permission filtering
 // All dealer portal sections accessible to the authenticated dealer account
 // Exception: /dealer/signin skips auth check
 export default async function DealerLayout({ children }: { children: React.ReactNode }) {
   const headersList = await headers();
-  const isDealerAuthPage = headersList.get("x-dealer-auth-route") === "true";
+  // Match on x-pathname (a forwarded REQUEST header, readable here) rather than
+  // x-dealer-auth-route, which proxy.ts sets on the RESPONSE and a Server
+  // Component therefore cannot reliably observe. Without this, /dealer/claim
+  // would render this layout, call requireDealer(), and bounce the very dealer
+  // who is trying to claim their account back to sign-in — the D1 failure again,
+  // one layer down.
+  const pathname = headersList.get("x-pathname");
+  const isDealerAuthPage =
+    headersList.get("x-dealer-auth-route") === "true" || isDealerPublicRoute(pathname);
 
-  // Skip auth check for dealer auth routes (signin)
+  // Skip auth for sign-in and the token-authenticated claim routes.
   if (isDealerAuthPage) {
     return <>{children}</>;
   }

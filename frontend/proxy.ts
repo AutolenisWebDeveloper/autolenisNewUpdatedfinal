@@ -10,6 +10,7 @@ import { jwtVerify } from "jose";
 import { needsTermsAcceptance } from "@/lib/auth/terms";
 import {
   ONBOARDING_PATH,
+  DEALER_PUBLIC_ROUTES,
   isOnboardingPath,
   isOnboardingApiPath,
 } from "@/lib/auth/dealer-scope";
@@ -149,19 +150,10 @@ const ADMIN_AUTH_ROUTES = [
   "/admin/auth/verify-mfa",
 ];
 
-// Dealer routes reachable WITHOUT a dealer session. The three claim routes are
-// token-authenticated: the raw token in the emailed link is the credential, and
-// each handler validates (and single-use consumes) it itself. Gating them behind
-// a dealer session is a deadlock — the account being claimed cannot yet sign in.
-const DEALER_AUTH_ROUTES = [
-  "/dealer/signin",
-  "/dealer/sign-in",
-  "/dealer/claim",
-  "/api/dealer/claim",
-  "/dealer/invite/claim",
-  "/dealer/forgot-password",
-  "/dealer/reset-password",
-];
+// Canonical list lives in lib/auth/dealer-scope.ts so proxy.ts (edge gate) and
+// app/dealer/layout.tsx (server gate) can never disagree about which dealer
+// routes are reachable without a session.
+const DEALER_AUTH_ROUTES = [...DEALER_PUBLIC_ROUTES];
 
 const PORTAL_PREFIXES = {
   buyer: "/buyer",

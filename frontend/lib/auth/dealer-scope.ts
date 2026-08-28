@@ -17,6 +17,37 @@ export const ONBOARDING_PATH = "/dealer/onboarding";
 export const ONBOARDING_API_PATH = "/api/dealer/onboarding";
 
 /**
+ * Dealer routes reachable WITHOUT a dealer session — sign-in and the
+ * token-authenticated claim links. Canonical list, imported by BOTH proxy.ts
+ * (edge gate) and app/dealer/layout.tsx (server gate), so the two cannot drift.
+ *
+ * The layout used to detect these via an `x-dealer-auth-route` header that
+ * proxy.ts sets on the RESPONSE; a Server Component's headers() reads the
+ * REQUEST, so that signal is not reliably observable. Matching on the forwarded
+ * `x-pathname` request header removes the ambiguity.
+ */
+export const DEALER_PUBLIC_ROUTES = [
+  "/dealer/signin",
+  "/dealer/sign-in",
+  "/dealer/claim",
+  "/api/dealer/claim",
+  "/dealer/invite/claim",
+  "/dealer/invite/complete",
+  "/dealer/forgot-password",
+  "/dealer/reset-password",
+  // Public application entry. It only redirects to /dealer-application now, but
+  // it still renders under app/dealer/layout.tsx, so without this an anonymous
+  // visitor would be bounced to sign-in before the redirect ever ran.
+  "/dealer/apply",
+] as const;
+
+/** Does this path reach a dealer surface that must work with no dealer session? */
+export function isDealerPublicRoute(pathname: string | null | undefined): boolean {
+  if (!pathname) return false;
+  return DEALER_PUBLIC_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+}
+
+/**
  * Derive the scope for a dealer row.
  *   PENDING              → ONBOARDING (may complete onboarding, nothing else)
  *   ACTIVE               → FULL

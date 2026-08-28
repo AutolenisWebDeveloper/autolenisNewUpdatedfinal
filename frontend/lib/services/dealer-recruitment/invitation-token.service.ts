@@ -47,6 +47,11 @@ export async function validateInvitationToken(
 ): Promise<InvitationValidation> {
   const tokenHash = hashToken(rawToken);
 
+  // MIGRATION WINDOW ONLY. The plaintext fallback keeps links already sitting in
+  // dealers' inboxes working until the backfill in
+  // prisma/migrations/20260828000000_dealer_invitation_token_hash has run.
+  // REMOVE THIS FALLBACK in the same change that drops the `token` column —
+  // leaving it after the drop would be a Prisma runtime error on an unknown field.
   const invitation =
     (await prisma.dealerInvitation.findUnique({ where: { tokenHash } })) ??
     (await prisma.dealerInvitation.findUnique({ where: { token: rawToken } }));
