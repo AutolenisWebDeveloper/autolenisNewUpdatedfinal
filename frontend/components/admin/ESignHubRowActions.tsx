@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/kit";
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 
 // Row actions for the central e-sign hub. Reuses the same per-deal routes as
 // AdminESignActions on the deal detail page (resend + reason-gated void, both
@@ -14,17 +15,24 @@ export default function ESignHubRowActions({
   dealId,
   envelopeId,
   status,
+  adminRole,
 }: {
   dealId: string;
   envelopeId: string;
   status: string;
+  /** UX only — the void route re-checks the role server-side. */
+  adminRole?: string;
 }) {
   const router = useRouter();
   const [resending, setResending] = useState(false);
   const [voidOpen, setVoidOpen] = useState(false);
 
   const canResend = status === "SENT" || status === "DELIVERED" || status === "PENDING";
-  const canVoid = canResend;
+  // Resend is intentionally ungated: its route is auth-only. Void hard-denies
+  // to everyone outside the mirrored allow-list, and voiding costs a confirm
+  // dialog plus a mandatory reason before the 403 would land.
+  const mayVoid = canUse("deal.esign.void", adminRole);
+  const canVoid = canResend && mayVoid;
 
   async function post(path: string, body?: Record<string, unknown>) {
     const res = await fetch(path, {
@@ -66,6 +74,7 @@ export default function ESignHubRowActions({
         variant="ghost"
         data-testid={`void-envelope-${envelopeId}`}
         disabled={!canVoid}
+        title={mayVoid ? undefined : deniedReason("deal.esign.void")}
         onClick={() => setVoidOpen(true)}
       >
         Void

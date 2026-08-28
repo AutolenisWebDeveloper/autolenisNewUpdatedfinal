@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/kit";
 import { api, apiErrorMessage } from "@/lib/api/client";
@@ -15,16 +16,24 @@ import { api, apiErrorMessage } from "@/lib/api/client";
 export function StartImpersonationButton({
   targetUserId,
   targetLabel,
+  adminRole,
 }: {
   targetUserId: string;
   targetLabel: string;
+  adminRole?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  // Mirrors the ROUTE's allow-list, which is broader than
+  // PERMISSION_ROLES["support.impersonate"]. That disagreement is reported as
+  // an owner-gated authorization decision; server behaviour is unchanged.
+  const mayImpersonate = canUse("support.impersonate", adminRole);
 
   return (
     <>
-      <Button size="sm" variant="secondary" onClick={() => setOpen(true)} data-testid={`impersonate-${targetUserId}`}>
+      <Button size="sm" variant="secondary" onClick={() => setOpen(true)} disabled={!mayImpersonate}
+        title={mayImpersonate ? undefined : deniedReason("support.impersonate")}
+        data-testid={`impersonate-${targetUserId}`}>
         Start session
       </Button>
       <ConfirmDialog

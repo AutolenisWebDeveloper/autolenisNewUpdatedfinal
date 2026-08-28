@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 };
 
 export default async function AdminPaymentsPage() {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   const [deposits, conciergeFees] = await Promise.all([
     getAdminDepositList(),
@@ -48,7 +48,7 @@ export default async function AdminPaymentsPage() {
           ]}
         />
       </div>
-      <AdminPaymentsClient deposits={deposits} conciergeFees={conciergeFees} />
+      <AdminPaymentsClient deposits={deposits} conciergeFees={conciergeFees} adminRole={admin.role} />
     </div>
   );
 }

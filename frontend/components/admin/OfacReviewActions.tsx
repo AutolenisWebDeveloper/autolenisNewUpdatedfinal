@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ShieldCheck, AlertTriangle, Loader2, X } from "lucide-react";
@@ -24,7 +25,9 @@ const META: Record<OfacAction, { title: string; verb: string; intent: string; de
   },
 };
 
-export default function OfacReviewActions({ prequalId, decision }: { prequalId: string; decision: string }) {
+export default function OfacReviewActions({ prequalId, decision, adminRole }: { prequalId: string; decision: string; adminRole?: string }) {
+  // UX only — /api/admin/compliance/ofac/[prequalId] re-checks server-side.
+  const mayReview = canUse("compliance.ofac.review", adminRole);
   const router = useRouter();
   const [open, setOpen] = useState<OfacAction | null>(null);
   const [reason, setReason] = useState("");
@@ -52,12 +55,22 @@ export default function OfacReviewActions({ prequalId, decision }: { prequalId: 
   return (
     <>
       <div className="flex flex-wrap gap-2" data-testid={`ofac-actions-${prequalId}`}>
-        <Button size="sm" variant="secondary" className="text-xs" data-testid={`ofac-clear-${prequalId}`}
+        <Button size="sm" variant="secondary" className="text-xs" disabled={!mayReview}
+          title={mayReview ? undefined : deniedReason("compliance.ofac.review")}
+          data-testid={`ofac-clear-${prequalId}`}
           onClick={() => setOpen("CLEAR")}>
           <ShieldCheck size={13} className="text-green-600" /> Clear Flag
         </Button>
-        <Button size="sm" variant="secondary" className="text-xs" data-testid={`ofac-escalate-${prequalId}`}
-          disabled={alreadyEscalated} title={alreadyEscalated ? "Already escalated to legal" : undefined}
+        <Button size="sm" variant="secondary" className="text-xs"
+          data-testid={`ofac-escalate-${prequalId}`}
+          disabled={alreadyEscalated || !mayReview}
+          title={
+            alreadyEscalated
+              ? "Already escalated to legal"
+              : mayReview
+                ? undefined
+                : deniedReason("compliance.ofac.review")
+          }
           onClick={() => setOpen("ESCALATE")}>
           <AlertTriangle size={13} className="text-red-600" /> {alreadyEscalated ? "Escalated" : "Escalate"}
         </Button>

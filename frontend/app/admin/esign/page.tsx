@@ -8,7 +8,7 @@ import ESignHubRowActions from "@/components/admin/ESignHubRowActions";
 
 export const dynamic = "force-dynamic";
 export default async function AdminESignPage() {
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   let envelopes: Awaited<ReturnType<typeof prisma.eSignEnvelope.findMany<{ include: { deal: { include: { buyer: true } } } }>>> = [];
   let loadError: string | null = null;
@@ -47,7 +47,7 @@ export default async function AdminESignPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant={env.status === "COMPLETED" ? "green" : env.status === "VOIDED" ? "destructive" : "amber"} className="text-xs">{env.status}</Badge>
-                <ESignHubRowActions dealId={env.dealId} envelopeId={env.id} status={env.status} />
+                <ESignHubRowActions dealId={env.dealId} envelopeId={env.id} status={env.status} adminRole={admin.role} />
               </div>
             </div>
           ))}

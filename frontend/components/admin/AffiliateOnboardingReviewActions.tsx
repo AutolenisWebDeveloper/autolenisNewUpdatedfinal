@@ -3,6 +3,7 @@
 import { toast } from "sonner";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Button } from "@/components/ui/button";
 import { api, apiErrorMessage } from "@/lib/api/client";
 
@@ -107,10 +108,15 @@ function ReviewModal({
 export default function AffiliateOnboardingReviewActions({
   affiliateId,
   status,
+  adminRole,
 }: {
   affiliateId: string;
   status: string;
+  /** UX only — the review route re-checks the role server-side. */
+  adminRole?: string;
 }) {
+  const mayReview = canUse("affiliate.onboarding.review", adminRole);
+  const denied = deniedReason("affiliate.onboarding.review");
   const router = useRouter();
   const [decision, setDecision] = useState<Decision | null>(null);
   const [loading, setLoading] = useState(false);
@@ -153,18 +159,23 @@ export default function AffiliateOnboardingReviewActions({
       <div className="flex items-center gap-1.5">
         <Button size="sm" variant="secondary"
           data-testid={`onb-approve-${affiliateId}`}
-          disabled={isApproved}
+          disabled={isApproved || !mayReview}
+          title={mayReview ? undefined : denied}
           onClick={() => setDecision("APPROVE")}>
           Approve
         </Button>
         <Button size="sm" variant="ghost"
           data-testid={`onb-correction-${affiliateId}`}
+          disabled={!mayReview}
+          title={mayReview ? undefined : denied}
           onClick={() => setDecision("REQUEST_CORRECTION")}>
           Corrections
         </Button>
         <Button size="sm" variant="ghost"
           data-testid={`onb-reject-${affiliateId}`}
           className="text-al-danger hover:text-al-danger"
+          disabled={!mayReview}
+          title={mayReview ? undefined : denied}
           onClick={() => setDecision("REJECT")}>
           Reject
         </Button>

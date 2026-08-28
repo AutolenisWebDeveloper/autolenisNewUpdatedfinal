@@ -19,7 +19,7 @@ export default async function AdminSupportPage({
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const { q } = await searchParams;
   const query = q?.trim() ?? "";
 
@@ -109,7 +109,7 @@ export default async function AdminSupportPage({
                       <p className="text-sm font-semibold text-slate-900">{name ?? u.email}</p>
                       <p className="text-xs text-slate-400">{u.email} · {u.role}</p>
                     </div>
-                    <StartImpersonationButton targetUserId={u.id} targetLabel={name ?? u.email} />
+                    <StartImpersonationButton targetUserId={u.id} targetLabel={name ?? u.email} adminRole={admin.role} />
                   </div>
                 );
               })}

@@ -70,6 +70,7 @@ export default async function AdminDealDetailPage({ params }: Props) {
         auditLogs={JSON.parse(JSON.stringify(auditLogs))}
         adminId={admin.adminId}
         adminEmail={admin.email}
+        adminRole={admin.role}
       />
     </div>
   );

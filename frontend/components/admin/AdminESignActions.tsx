@@ -4,13 +4,19 @@ import { toast } from "sonner";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 
 interface Props {
   dealId: string;
   envelopeStatus: string | null;
+  /** UX only — the void route re-checks the role server-side. */
+  adminRole?: string;
 }
 
-export function AdminESignActions({ dealId, envelopeStatus }: Props) {
+export function AdminESignActions({ dealId, envelopeStatus, adminRole }: Props) {
+  // Create and resend are auth-only routes and stay ungated; only void
+  // hard-denies outside the mirrored allow-list.
+  const mayVoid = canUse("deal.esign.void", adminRole);
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +116,9 @@ export function AdminESignActions({ dealId, envelopeStatus }: Props) {
             <Button size="sm" variant="secondary" data-testid="resend-envelope-btn" onClick={handleResend} disabled={loading === "resend"}>
               {loading === "resend" ? "Resending…" : "Resend to Buyer"}
             </Button>
-            <Button size="sm" variant="ghost" data-testid="void-envelope-btn" onClick={() => { setError(null); setVoidModal(true); }}>
+            <Button size="sm" variant="ghost" data-testid="void-envelope-btn" disabled={!mayVoid}
+              title={mayVoid ? undefined : deniedReason("deal.esign.void")}
+              onClick={() => { setError(null); setVoidModal(true); }}>
               Void Envelope
             </Button>
           </>

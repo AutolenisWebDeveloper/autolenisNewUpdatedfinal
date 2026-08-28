@@ -21,7 +21,7 @@ export default async function AdminAffiliateDetailPage({
 }: Props) {
   const { affiliateId } = await params;
   const { tab } = await searchParams;
-  await requireAdmin();
+  const admin = await requireAdmin();
 
   try {
     const [data, availability] = await Promise.all([
@@ -33,6 +33,7 @@ export default async function AdminAffiliateDetailPage({
 
     return (
       <AdminAffiliateCommandCenter
+        adminRole={admin.role}
         data={data}
         availability={availability}
         initialTab={tab}

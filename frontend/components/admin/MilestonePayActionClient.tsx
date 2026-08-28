@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { canUse, deniedReason } from "@/lib/auth/admin-ui-roles";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/kit";
 import { api, apiErrorMessage } from "@/lib/api/client";
@@ -15,13 +16,17 @@ export default function MilestonePayActionClient({
   milestoneId,
   milestoneLabel,
   rewardValueCents,
+  adminRole,
 }: {
   milestoneId: string;
   milestoneLabel: string;
   rewardValueCents: number;
+  adminRole?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  // UX only — the pay route re-checks the role server-side.
+  const mayPay = canUse("referral.milestone.pay", adminRole);
 
   return (
     <>
@@ -29,6 +34,8 @@ export default function MilestonePayActionClient({
         size="sm"
         variant="secondary"
         onClick={() => setOpen(true)}
+        disabled={!mayPay}
+        title={mayPay ? undefined : deniedReason("referral.milestone.pay")}
         data-testid={`pay-milestone-${milestoneId}`}
       >
         Mark paid
