@@ -30,6 +30,12 @@ process.env.MICROBILT_BASE_URL = "https://api.microbilt.example/iPredict/GetRepo
 process.env.MICROBILT_OAUTH_BASE_URL = "https://api.microbilt.example/OAuth/Token";
 process.env.MICROBILT_CLIENT_ID = "test-client-id";
 process.env.MICROBILT_CLIENT_SECRET = "test-client-secret";
+// MsgRqHdr identity/routing — required before the adapter will call GetReport.
+// These tests exercise outcomes AFTER that guard, so they need it satisfied.
+process.env.MICROBILT_MEMBER_ID = "test-member-id";
+process.env.MICROBILT_MEMBER_PASSWORD = "test-member-pwd";
+process.env.MICROBILT_USERNAME = "test-user-name";
+process.env.MICROBILT_PRODUCT_ID = "test-product-id";
 
 const BUYER = {
   firstName: "Jane",
@@ -477,4 +483,53 @@ test("a provider error code can never carry markup into the reason", async () =>
       "the reason must never contain markup, quotes, or whitespace",
     );
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Taxonomy completeness. Two changes landed independently: one added
+// IDENTITY_NOT_CONFIGURED to the reason set, the other added the failure
+// classifier — and neither knew about the other, so the new reason fell through
+// to UNKNOWN and the ops alert told an operator it "could not be classified"
+// for a plain missing env var. This test is the structural guard: every reason
+// in the set must be deliberately classified, and anything genuinely ambiguous
+// must be listed as such ON PURPOSE. Adding a reason without deciding fails here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("every provider-failure reason is deliberately classified", async () => {
+  const { PROVIDER_ERROR_REASONS, classifyProviderFailure } = await import(
+    "@/lib/services/prequal/microbilt.service"
+  );
+
+  // Reasons we genuinely cannot classify, listed explicitly rather than by
+  // omission. OAUTH_FAILED covers both bad credentials and a transient token
+  // endpoint; EMPTY/UNPARSEABLE/untyped IPREDICT_ERROR are ambiguous by nature.
+  const DELIBERATELY_AMBIGUOUS = new Set([
+    "OAUTH_FAILED",
+    "EMPTY_RESPONSE",
+    "UNPARSEABLE_RESPONSE",
+    "IPREDICT_ERROR",
+  ]);
+
+  for (const reason of PROVIDER_ERROR_REASONS) {
+    const verdict = classifyProviderFailure(reason);
+    if (DELIBERATELY_AMBIGUOUS.has(reason)) {
+      assert.equal(verdict, "UNKNOWN", `${reason} is listed as ambiguous`);
+    } else {
+      assert.notEqual(
+        verdict,
+        "UNKNOWN",
+        `${reason} is unclassified — add it to a classification set, or to ` +
+          "DELIBERATELY_AMBIGUOUS if it truly cannot be classified",
+      );
+    }
+  }
+});
+
+test("a missing identity var is a config fault an engineer must fix, not a blip", async () => {
+  const { classifyProviderFailure } = await import("@/lib/services/prequal/microbilt.service");
+  assert.equal(
+    classifyProviderFailure("IDENTITY_NOT_CONFIGURED"),
+    "REQUEST_REJECTED",
+    "an unset MsgRqHdr identity var cannot be fixed by retrying",
+  );
 });

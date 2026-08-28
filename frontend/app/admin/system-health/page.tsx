@@ -38,6 +38,15 @@ interface MicroBiltConfig {
   product: string;
   caid: string | null;
   credentialsPresent: boolean;
+  // MsgRqHdr identity/routing readiness. Presence booleans only — the member
+  // password is a credential and is never sent to the client.
+  identity?: {
+    memberIdPresent: boolean;
+    memberPwdPresent: boolean;
+    userNamePresent: boolean;
+    productId: string | null;
+    missing: string[];
+  };
 }
 
 function _StatusBadge({ ok, label }: { ok: boolean; label: string }) {
@@ -257,6 +266,26 @@ export default function AdminSystemHealthPage() {
                     {microbiltConfig.credentialsPresent ? "Present" : "Missing"}
                   </span>
                 }
+              />
+              <ConfigRow
+                label="Product ID"
+                value={microbiltConfig.identity?.productId ?? "— (not set)"}
+                mono
+              />
+              <ConfigRow
+                label="Identity (MsgRqHdr)"
+                value={
+                  microbiltConfig.identity == null ? (
+                    "— (unknown)"
+                  ) : microbiltConfig.identity.missing.length === 0 ? (
+                    <span className="text-emerald-700">Complete</span>
+                  ) : (
+                    <span className="text-red-600" data-testid="microbilt-identity-missing">
+                      Missing: {microbiltConfig.identity.missing.join(", ")}
+                    </span>
+                  )
+                }
+                full
               />
               <ConfigRow label="Report URL" value={microbiltConfig.reportUrl ?? "— (not configured)"} mono full />
               <ConfigRow label="OAuth URL" value={microbiltConfig.oauthUrl ?? "— (not configured)"} mono full />
