@@ -219,7 +219,11 @@ export default function AdminDealerInvitePage() {
       </form>
 
       <p className="text-xs text-slate-400 mt-4 text-center">
-        The invitation link expires in 72 hours. You can resend it from the invitations list.
+        {/* 7 days, per INVITATION_TOKEN_TTL_MS in account-claim.service.ts. Stated
+            as a literal because that constant lives in a Prisma-importing service
+            and this is a client component; the authoritative deadline the dealer
+            sees is the formatted expiry in the invitation email itself. */}
+        The invitation link expires in 7 days. You can resend it from the invitations list.
       </p>
     </div>
   );
