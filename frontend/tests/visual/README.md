@@ -25,6 +25,45 @@ VISUAL_BASE_URL=https://<preview> pnpm test:visual
 Chromium is preinstalled in the CI/agent image; set `PW_CHROMIUM_PATH` if the
 default resolution fails. Do **not** run `playwright install`.
 
+## Two gates: pixels and copy
+
+Each marketing page is asserted twice, because the two gates catch different
+things and neither covers the other.
+
+| Gate | Baseline | Catches | Blind to |
+| --- | --- | --- | --- |
+| `toHaveScreenshot` | `marketing-<page>-<project>.png` | layout movement, colour, spacing, token drift | an in-place copy edit small enough to fall under the tolerance |
+| `toMatchSnapshot` | `marketing-<page>-<project>.txt` | any change to visible copy, exactly | layout, colour, spacing |
+
+**Why the text gate exists.** The pixel gate runs at `maxDiffPixelRatio: 0.001`,
+a tolerance that exists to absorb anti-aliasing noise. That same tolerance also
+absorbs a small **in-place** copy edit: swapping a few words changes glyphs
+without moving layout, so the diff lands under 0.1% and passes.
+
+That is not hypothetical. Commit `a3e4ec2` changed marketing copy on
+`/for-buyers` and `/how-it-works`. **Four** snapshots drifted; only
+`how-it-works [mobile]` reflowed enough to cross the threshold and fail. The
+other three went green while genuinely stale, and the stale baseline sat on
+`main` for two days. Marketing copy here carries product claims, so a silent
+copy drift is a truthfulness risk, not a cosmetic one.
+
+Text is compared exactly and has no tolerance to hide behind. Changing copy is
+fine — it just has to be an intentional, reviewed baseline update, exactly like
+changing a pixel.
+
+**What the text gate does NOT cover.** It reads `document.body.innerText`, i.e.
+the copy a visitor actually sees. Image `alt` text, `aria-label`s, `<title>`,
+meta/OpenGraph tags and JSON-LD are outside it, and as of this writing nothing
+else freezes those for the marketing tier either (`test:seo` covers article
+bodies, CTAs and internal links, not page metadata). Treat that as a known gap,
+not as covered.
+
+**The capture settles before it reads.** The cookie-consent banner mounts
+client-side *after* `networkidle`, a ~283-character swing that appears in some
+runs and not others. The helper polls `document.body.innerText` until two
+consecutive reads match, which makes the capture deterministic (verified: three
+consecutive runs byte-identical on all five pages, both viewports).
+
 ## Only CI results are meaningful — never judge this suite locally
 
 The baseline is rendered by, and pinned to, the `ubuntu-24.04` CI runner (see
@@ -34,9 +73,15 @@ sandbox typically fails **all ten** snapshots for reasons that have nothing to
 do with the code. That is an environment mismatch, not a regression — and it is
 not evidence that the baseline is stale.
 
-**The `Visual regression` workflow is the only authoritative result.** It can be
-run on demand (`workflow_dispatch`) against any branch, and comparison-only runs
-never push. A local failure is worth investigating only if CI agrees.
+**The `Visual regression` workflow is the only authoritative result** *for the
+pixel gate*. It can be run on demand (`workflow_dispatch`) against any branch,
+and comparison-only runs never push. A local pixel failure is worth
+investigating only if CI agrees.
+
+**The text gate is different: it IS meaningful locally.** Copy depends on the
+DOM, not on fonts or anti-aliasing, so a `.txt` baseline is environment-
+independent and can be regenerated and verified anywhere the app runs. That
+asymmetry matters when updating baselines — see below.
 
 ## Baseline re-seed — 2026-08-28
 
@@ -103,6 +148,25 @@ baseline PNGs are committed, so a partial delete leaves the job on the
 compare-only path and fails on the missing snapshots. Delete all of them, or
 regenerate locally with `pnpm test:visual:update` on the pinned image and commit
 the result.
+
+### Updating the COPY baseline only
+
+`pnpm test:visual:update` rewrites **both** the `.txt` and the `.png` baselines.
+Off-runner, the regenerated PNGs are wrong (local fonts), so restore them and
+keep only the text:
+
+```bash
+# with the app running and VISUAL_BASE_URL pointed at it
+pnpm test:visual:update
+git restore tests/visual/__baseline__/*.png   # discard local pixel renders
+git status --short tests/visual/__baseline__/ # expect ONLY .txt changes
+```
+
+Then confirm no PNG moved before committing:
+
+```bash
+git diff --stat -- 'tests/visual/__baseline__/*.png'   # must be empty
+```
 
 ## Dashboard tier
 
