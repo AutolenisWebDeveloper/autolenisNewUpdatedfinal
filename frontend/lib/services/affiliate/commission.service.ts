@@ -182,6 +182,143 @@ export async function getCommissionSummary(affiliateId: string) {
   };
 }
 
+// ─── Refund/approval safety for fee-driven commissions (M2/M16) ──────────────
+
+// Fee-walk commissions are keyed `${paymentIntentId}-L${level}`.
+const FEE_EVENT_KEY = /^(pi_[A-Za-z0-9]+)-L[1-3]$/;
+
+// Called from the Stripe `charge.refunded` fee branch: flip this PI's
+// PENDING/APPROVED commissions to REVERSED via a status-guarded compare-and-set.
+// PAID commissions are NEVER auto-reversed — paying money back is a human
+// clawback decision — so their ids are returned for the caller to alert on.
+// NOTE (M16): the webhook has never recorded a production event, so in
+// production this is currently inert; approveMaturePendingCommissions below is
+// the effective guard until webhook delivery is fixed.
+export async function reverseCommissionsForPaymentIntent(
+  piId: string,
+): Promise<{ reversed: number; paidNeedingReview: string[] }> {
+  if (!piId) return { reversed: 0, paidNeedingReview: [] };
+  const keyPrefix = `${piId}-L`;
+
+  const reversed = await prisma.commission.updateMany({
+    where: { qualifyingEventId: { startsWith: keyPrefix }, status: { in: ["PENDING", "APPROVED"] } },
+    data: { status: "REVERSED" },
+  });
+
+  const paid = await prisma.commission.findMany({
+    where: { qualifyingEventId: { startsWith: keyPrefix }, status: "PAID" },
+    select: { id: true },
+  });
+
+  return { reversed: reversed.count, paidNeedingReview: paid.map((c) => c.id) };
+}
+
+export interface ApproveMatureResult {
+  candidates: number;
+  approved: number;
+  skippedPaymentState: number;
+  skippedDealState: number;
+  skippedUnverifiable: number;
+}
+
+// Hourly auto-approval (cron `affiliates`). A commission is approved only when
+// it is ≥7 days old AND the money it derives from is verifiably still good:
+//   • the fee PaymentIntent's charge is not refunded, partially refunded, or
+//     disputed — read from Stripe directly, per the deposit reconciler pattern,
+//     because webhook-delivered refund events have never been recorded in
+//     production (M16);
+//   • the linked deal is not CANCELLED/REFUNDED.
+// Unverifiable payment state (Stripe unreachable, no charge on the intent,
+// missing deal) fails CLOSED — the commission stays PENDING for a later run.
+export async function approveMaturePendingCommissions(now: Date = new Date()): Promise<ApproveMatureResult> {
+  const cutoff = new Date(now.getTime() - 7 * 24 * 3600000);
+  const candidates = await prisma.commission.findMany({
+    where: { status: "PENDING", createdAt: { lte: cutoff } },
+    select: { id: true, dealId: true, qualifyingEventId: true },
+    orderBy: { createdAt: "asc" },
+    take: 500,
+  });
+  const result: ApproveMatureResult = {
+    candidates: candidates.length,
+    approved: 0,
+    skippedPaymentState: 0,
+    skippedDealState: 0,
+    skippedUnverifiable: 0,
+  };
+  if (candidates.length === 0) return result;
+
+  const dealIds = [...new Set(candidates.map((c) => c.dealId))];
+  const deals = await prisma.deal.findMany({
+    where: { id: { in: dealIds } },
+    select: { id: true, status: true },
+  });
+  const dealStatusById = new Map(deals.map((d) => [d.id, d.status]));
+
+  // One Stripe read per unique PI; levels of the same fee share the verdict.
+  // true = money pulled back (block), false = clean, null = unverifiable.
+  const { retrievePaymentIntent } = await import("@/lib/services/payment/stripe.service");
+  const piVerdicts = new Map<string, boolean | null>();
+  const piIds = [...new Set(
+    candidates
+      .map((c) => FEE_EVENT_KEY.exec(c.qualifyingEventId)?.[1])
+      .filter((v): v is string => Boolean(v)),
+  )];
+  for (const piId of piIds) {
+    try {
+      const intent = (await retrievePaymentIntent(piId, { expand: ["latest_charge"] })) as {
+        latest_charge?: { refunded?: boolean; amount_refunded?: number; disputed?: boolean } | string | null;
+      };
+      const charge = intent.latest_charge && typeof intent.latest_charge !== "string" ? intent.latest_charge : null;
+      if (!charge) {
+        piVerdicts.set(piId, null);
+        continue;
+      }
+      piVerdicts.set(
+        piId,
+        Boolean(charge.refunded) || (charge.amount_refunded ?? 0) > 0 || Boolean(charge.disputed),
+      );
+    } catch (err) {
+      logger.warn("[commission] payment-state check unavailable — leaving PENDING (fail closed):", { piId, err });
+      piVerdicts.set(piId, null);
+    }
+  }
+
+  const approveIds: string[] = [];
+  for (const c of candidates) {
+    const dealStatus = dealStatusById.get(c.dealId);
+    if (!dealStatus) {
+      result.skippedUnverifiable += 1;
+      continue;
+    }
+    if (dealStatus === "CANCELLED" || dealStatus === "REFUNDED") {
+      result.skippedDealState += 1;
+      continue;
+    }
+    const piId = FEE_EVENT_KEY.exec(c.qualifyingEventId)?.[1];
+    if (piId) {
+      const verdict = piVerdicts.get(piId);
+      if (verdict === null || verdict === undefined) {
+        result.skippedUnverifiable += 1;
+        continue;
+      }
+      if (verdict) {
+        result.skippedPaymentState += 1;
+        continue;
+      }
+    }
+    approveIds.push(c.id);
+  }
+
+  if (approveIds.length > 0) {
+    const updated = await prisma.commission.updateMany({
+      where: { id: { in: approveIds }, status: "PENDING" },
+      data: { status: "APPROVED" },
+    });
+    result.approved = updated.count;
+  }
+  return result;
+}
+
 // Network tree size — max 3 levels. Three bounded queries total: the previous
 // version also issued one count() PER L1 child (N+1) whose results were fully
 // redundant with the L2 `in` query below.

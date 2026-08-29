@@ -1,7 +1,7 @@
 // affiliates — process pending commissions hourly
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeCronRequest } from "@/lib/security/cron-auth";
-import { prisma } from "@/lib/prisma";
+import { approveMaturePendingCommissions } from "@/lib/services/affiliate/commission.service";
 import { withCronRun } from "@/lib/services/monitoring/cron-monitor.service";
 
 export async function GET(request: NextRequest) {
@@ -9,13 +9,11 @@ export async function GET(request: NextRequest) {
   if (cronAuth) return cronAuth;
 
   const run = await withCronRun("affiliates", async () => {
-  // Move PENDING commissions to APPROVED for deals completed > 7 days ago
-  const cutoff = new Date(Date.now() - 7 * 24 * 3600000);
-  const result = await prisma.commission.updateMany({
-    where: { status: "PENDING", createdAt: { lte: cutoff } },
-    data: { status: "APPROVED" },
-  });
-  return { approved: result.count };
+    // M2: approval follows the money, not the calendar — ≥7 days old AND the
+    // fee charge is verifiably not refunded/disputed (read from Stripe; the
+    // webhook refund path is unreachable in production, M16) AND the deal is
+    // not CANCELLED/REFUNDED. Unverifiable state stays PENDING (fail closed).
+    return approveMaturePendingCommissions();
   });
   if (!run.ok) return NextResponse.json({ success: false, error: "affiliates_failed" }, { status: 500 });
 

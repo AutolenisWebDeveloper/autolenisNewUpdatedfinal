@@ -26,8 +26,13 @@ export async function refundPaymentIntent(
   );
 }
 
-export async function retrievePaymentIntent(paymentIntentId: string) {
-  return getStripe().paymentIntents.retrieve(paymentIntentId);
+export async function retrievePaymentIntent(
+  paymentIntentId: string,
+  params?: { expand?: string[] },
+) {
+  return params
+    ? getStripe().paymentIntents.retrieve(paymentIntentId, params)
+    : getStripe().paymentIntents.retrieve(paymentIntentId);
 }
 
 export async function constructWebhookEvent(body: string, signature: string, secret: string) {

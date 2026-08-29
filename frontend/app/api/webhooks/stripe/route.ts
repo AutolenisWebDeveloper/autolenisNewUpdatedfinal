@@ -10,7 +10,7 @@ import {
   sendConciergeFeeConfirmationEmail,
   sendRefundConfirmationEmail,
 } from "@/lib/services/email/resend.service";
-import { processFeeCommission } from "@/lib/services/affiliate/commission.service";
+import { processFeeCommission, reverseCommissionsForPaymentIntent } from "@/lib/services/affiliate/commission.service";
 import { launchAuction } from "@/lib/services/auction/auction.service";
 import { inviteDealersToAuction } from "@/lib/services/auction/dealer-invitation.service";
 import { getOrCreateOutsideDealerId } from "@/lib/services/offer/outside-dealer";
@@ -700,6 +700,38 @@ export async function POST(request: NextRequest) {
               metadata:   { piId, chargeId: charge.id },
             },
           }).catch(() => {});
+
+          // M2 — the fee was refunded, so its commissions must not stay
+          // payable: PENDING/APPROVED flip to REVERSED (status-guarded CAS
+          // inside the service). PAID commissions are never auto-reversed —
+          // pulling paid money back is a human clawback decision — so raise a
+          // deduped SYSTEM_ALERT naming them instead. Best-effort: a commission
+          // failure never un-acks the refund handling above.
+          try {
+            const { reversed, paidNeedingReview } = await reverseCommissionsForPaymentIntent(piId);
+            if (reversed > 0) {
+              logger.info(`[stripe/webhook] reversed ${reversed} commission(s) for refunded fee ${piId}`);
+            }
+            if (paidNeedingReview.length > 0) {
+              const title = `Refunded fee has PAID commissions — manual clawback needed: ${piId}`;
+              const existing = await prisma.notification.findFirst({
+                where: { title, type: "SYSTEM_ALERT" },
+                select: { id: true },
+              });
+              if (!existing) {
+                await prisma.notification.create({
+                  data: {
+                    title,
+                    body: `Stripe reported charge.refunded for fee PaymentIntent ${piId} (deal ${deal.id}), but commission(s) ${paidNeedingReview.join(", ")} were already PAID out. They were NOT auto-reversed. Review and claw back via the admin affiliate command center. /admin/operations`,
+                    type: "SYSTEM_ALERT",
+                    actionUrl: "/admin/operations",
+                  },
+                });
+              }
+            }
+          } catch (err) {
+            logger.error("[stripe/webhook] commission reversal for refunded fee failed:", err);
+          }
 
           // Receipt to the buyer for the concierge / service fee refund.
           try {
