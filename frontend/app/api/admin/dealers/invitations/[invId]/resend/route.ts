@@ -27,9 +27,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   if (inv.status === "ACCEPTED") return NextResponse.json({ error: "Already accepted" }, { status: 409 });
   if (inv.status === "CANCELLED") return NextResponse.json({ error: "Invitation was cancelled" }, { status: 409 });
 
-  // One token scheme for invitations, owned by the service: 7-day TTL, hashed at
-  // rest where the schema allows, and guarded on status so this cannot resurrect
-  // an invitation accepted or cancelled since the read above.
+  // One token scheme for invitations, owned by the service: 256-bit random,
+  // hashed at rest, 7-day TTL. Rotation invalidates the superseded link, and the
+  // status guard means this cannot resurrect an invitation that was accepted or
+  // cancelled between the read above and this write.
   const rotated = await refreshInvitationToken(invId);
   if (!rotated) {
     return NextResponse.json({ error: "Invitation is no longer resendable" }, { status: 409 });

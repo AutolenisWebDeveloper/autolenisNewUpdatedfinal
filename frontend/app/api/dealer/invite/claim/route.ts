@@ -102,11 +102,10 @@ export async function POST(request: NextRequest) {
         },
       });
       dealerId = dealer.id;
-      // Consumed through the service, inside THIS transaction, so two concurrent
-      // claims of the same link cannot both create a dealer — the loser's
-      // transaction aborts and its Supabase user is deleted below. The service
-      // owns the predicate because which columns exist depends on whether
-      // migration 20260828000000 has been applied.
+      // Consumed through the service, inside THIS transaction, so the guard the
+      // service enforces (PENDING + not yet consumed) actually applies here and
+      // two concurrent claims of the same link cannot both create a dealer. The
+      // loser's transaction aborts and its Supabase user is deleted below.
       const consumed = await consumeInvitationToken(invitation.id, dealer.id, new Date(), tx);
       if (!consumed) {
         throw new Error("INVITATION_ALREADY_CONSUMED");
