@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getRequestAffiliate, successResponse, errorResponse } from "@/lib/auth/affiliate-api";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { AFFILIATE_TAX_CLASSIFICATIONS } from "@/lib/constants";
 
 const ATTESTATION = "Under penalties of perjury, I certify that the taxpayer " +
   "identification number I have provided is correct and I am not subject to " +
@@ -9,7 +10,7 @@ const ATTESTATION = "Under penalties of perjury, I certify that the taxpayer " +
 
 const schema = z.object({
   legalName:         z.string().trim().min(1).max(200),
-  taxClassification: z.enum(["INDIVIDUAL", "LLC", "CORP", "PARTNERSHIP"]),
+  taxClassification: z.enum(AFFILIATE_TAX_CLASSIFICATIONS),
   tinType:           z.enum(["SSN", "EIN"]),
   taxId:             z.string().min(9).max(12).regex(/^[\d\-]+$/, "Tax ID must contain only digits and dashes"),
   certified:         z.literal(true, { errorMap: () => ({ message: "You must certify under penalty of perjury" }) }),

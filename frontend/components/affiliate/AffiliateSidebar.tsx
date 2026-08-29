@@ -12,14 +12,18 @@ import {
   FileCheck, Landmark, Share2, Menu, Trophy,
 } from "lucide-react";
 
-const NAV_ITEMS = [
+// Every destination is always reachable: affiliate accounts are auto-approved
+// and no onboarding gate exists, so nav carries no locked/gated state. Exported
+// so the access test can prove no destination is ever locked and no nav item
+// points at a missing page.
+export const NAV_ITEMS = [
   { label: "Dashboard",         href: "/affiliate/portal/dashboard",         icon: LayoutDashboard },
   { label: "My Referrals",      href: "/affiliate/portal/referrals",         icon: Users },
   { label: "Referral Hub",      href: "/affiliate/portal/referral-hub",      icon: Share2 },
   { label: "Earnings",          href: "/affiliate/portal/earnings",          icon: DollarSign },
   { label: "Finance Hub",       href: "/affiliate/portal/finance",           icon: Landmark },
   { label: "Documents",         href: "/affiliate/portal/documents",         icon: FileCheck },
-  { label: "Network Tree",      href: "/affiliate/portal/network",           icon: Network },
+  { label: "Referral Network",  href: "/affiliate/portal/network",           icon: Network },
   { label: "Leaderboard",       href: "/affiliate/portal/leaderboard",       icon: Trophy },
   { label: "Income Calculator", href: "/affiliate/portal/income-calculator", icon: Calculator },
   { label: "Notifications",     href: "/affiliate/portal/notifications",     icon: Bell },
@@ -43,9 +47,10 @@ function Inner({ pathname, onNavigate, unreadCount }: { pathname: string; onNavi
             <Link key={item.href} href={item.href} onClick={onNavigate}
               data-testid={`affiliate-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
               className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
-                active ? "bg-al-primary/10 text-al-primary font-semibold" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                active ? "bg-al-primary/10 text-al-primary font-semibold"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               }`}>
-              <item.icon size={15} className="shrink-0" />
+              <item.icon size={15} className="shrink-0" aria-hidden="true" />
               <span className="flex-1">{item.label}</span>
               {showBadge && (
                 <span

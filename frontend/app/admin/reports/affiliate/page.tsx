@@ -2,7 +2,7 @@
 
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
-import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_CENTS, MAX_COMMISSION_TOTAL } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Download, Share2 } from "lucide-react";
 
@@ -72,7 +72,7 @@ export default async function AdminAffiliateReportPage() {
 
       {/* Commission rate reminder */}
       <div className="bg-al-primary/5 border border-al-primary/20 rounded-xl p-4 mb-6 text-sm text-slate-600" data-testid="commission-rate-info">
-        <strong>Commission structure</strong> (sourced from lib/constants.ts): L1={Math.round(COMMISSION_RATES.LEVEL_1 * 100)}% · L2={Math.round(COMMISSION_RATES.LEVEL_2 * 100)}% · L3={Math.round(COMMISSION_RATES.LEVEL_3 * 100)}% of ${PREMIUM_FEE_CENTS / 100} fee. Max payout: 20% per deal across all levels.
+        <strong>Commission structure</strong> (sourced from lib/constants.ts): L1={Math.round(COMMISSION_RATES.LEVEL_1 * 100)}% · L2={Math.round(COMMISSION_RATES.LEVEL_2 * 100)}% · L3={Math.round(COMMISSION_RATES.LEVEL_3 * 100)}% of the ${PREMIUM_FEE_REMAINING_CENTS / 100} concierge-fee balance (the paid basis). Max payout: {Math.round(MAX_COMMISSION_TOTAL * 100)}% per deal across all levels.
       </div>
 
       {/* Affiliate table */}

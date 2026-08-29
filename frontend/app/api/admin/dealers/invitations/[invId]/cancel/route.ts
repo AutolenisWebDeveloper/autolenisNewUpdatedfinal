@@ -17,7 +17,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
   const { invId } = await params;
 
-  const inv = await prisma.dealerInvitation.findUnique({ where: { id: invId } });
+  const inv = await prisma.dealerInvitation.findUnique({
+    where: { id: invId },
+    select: { id: true, status: true },
+  });
   if (!inv) return NextResponse.json({ error: "Invitation not found" }, { status: 404 });
   if (inv.status === "ACCEPTED") return NextResponse.json({ error: "Cannot cancel accepted invitation" }, { status: 409 });
   if (inv.status === "CANCELLED") return NextResponse.json({ error: "Already cancelled" }, { status: 409 });

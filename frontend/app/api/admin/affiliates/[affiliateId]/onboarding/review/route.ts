@@ -47,17 +47,23 @@ export async function POST(request: NextRequest, { params }: Props) {
   const { decision, note, correctionItems } = result.data;
   const newStatus = DECISION_STATUS_MAP[decision];
 
-  const review = await prisma.affiliateOnboardingReview.upsert({
-    where:  { affiliateId },
-    create: {
-      affiliateId,
-      status:          newStatus as never,
-      decisionNote:    note,
-      correctionItems: correctionItems ?? [],
-      reviewedBy:      admin.email,
-      reviewedAt:      new Date(),
-    },
-    update: {
+  // O3 — preconditions: the affiliate must exist (a bad id previously threw
+  // an unhandled FK 500) and the onboarding must actually have been started —
+  // an admin cannot decide an application that was never made.
+  const affiliateExists = await prisma.affiliate.findUnique({
+    where: { id: affiliateId },
+    select: { id: true },
+  });
+  if (!affiliateExists) return adminError("NOT_FOUND", "Affiliate not found", 404);
+
+  const existingReview = await prisma.affiliateOnboardingReview.findUnique({ where: { affiliateId } });
+  if (!existingReview || existingReview.status === "NOT_STARTED") {
+    return adminError("NOT_SUBMITTED", "This affiliate has not started onboarding — there is nothing to review", 409);
+  }
+
+  const review = await prisma.affiliateOnboardingReview.update({
+    where: { affiliateId },
+    data: {
       status:          newStatus as never,
       decisionNote:    note,
       correctionItems: correctionItems ?? [],

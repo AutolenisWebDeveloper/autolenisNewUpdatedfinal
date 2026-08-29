@@ -5,6 +5,7 @@ import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { AffiliateStatus } from "@prisma/client";
 import { addSupportNote } from "@/lib/services/admin/admin-support.service";
+import { ledgerEarnedWhere } from "@/lib/services/affiliate/commission.service";
 import type { SupportNoteType } from "@prisma/client";
 import crypto from "crypto";
 
@@ -169,6 +170,27 @@ export async function getAdminAffiliateListData(
     if (Object.keys(createdAt).length > 0) where.createdAt = createdAt;
   }
 
+  // D10 — the earnings-tier filter derives from a commission aggregate, so it
+  // must resolve over the WHOLE filtered set BEFORE pagination. The old code
+  // filtered the current page after skip/take, breaking pages beyond 1 and
+  // reporting the filtered page size as the grand total.
+  if (earningsTier) {
+    const candidates = await prisma.affiliate.findMany({ where, select: { id: true } });
+    const candidateIds = candidates.map((c) => c.id);
+    const sums = candidateIds.length
+      ? await prisma.commission.groupBy({
+          by: ["affiliateId"],
+          where: { AND: [{ affiliateId: { in: candidateIds } }, ledgerEarnedWhere()] },
+          _sum: { amountCents: true },
+        })
+      : [];
+    const totalByAffiliate = new Map(sums.map((s) => [s.affiliateId, s._sum.amountCents ?? 0]));
+    const matchingIds = candidateIds.filter(
+      (id) => earningsTierOf(totalByAffiliate.get(id) ?? 0) === earningsTier,
+    );
+    where.id = { in: matchingIds };
+  }
+
   const [affiliates, rawTotal] = await Promise.all([
     prisma.affiliate.findMany({
       where,
@@ -225,7 +247,10 @@ export async function getAdminAffiliateListData(
     affiliateIds.length > 0
       ? prisma.commission.groupBy({
           by: ["affiliateId", "status"],
-          where: { affiliateId: { in: affiliateIds } },
+          // Shared ledger rule (M1): live rows + negative REVERSED clawback
+          // offsets; positive in-place-REVERSED and REJECTED rows never reach
+          // the earned totals. Same rule as getCommissionSummary/leaderboard.
+          where: { AND: [{ affiliateId: { in: affiliateIds } }, ledgerEarnedWhere()] },
           _sum: { amountCents: true },
         })
       : Promise.resolve([] as Array<{ affiliateId: string; status: string; _sum: { amountCents: number | null } }>),
@@ -250,22 +275,22 @@ export async function getAdminAffiliateListData(
     }
   }
 
-  // Earnings totals per affiliate.
-  //   totalEarned   = lifetime earned (PENDING + APPROVED + PAID; offsetting
-  //                   REVERSED rows carry negative amounts and net out)
+  // Earnings totals per affiliate. The groupBy above is already filtered by the
+  // shared ledger rule (ledgerEarnedWhere), so every returned group counts:
+  //   totalEarned   = lifetime earned (PENDING + APPROVED + PAID, net of the
+  //                   negative REVERSED clawback offsets the filter admits)
   //   pendingPayout = earned but not yet paid (PENDING + APPROVED)
   const totalEarnedMap = new Map<string, number>();
   const pendingPayoutMap = new Map<string, number>();
   for (const row of commissionSums) {
     const sum = row._sum.amountCents ?? 0;
-    if (row.status === "REJECTED") continue; // never earned
     totalEarnedMap.set(row.affiliateId, (totalEarnedMap.get(row.affiliateId) ?? 0) + sum);
     if (row.status === "PENDING" || row.status === "APPROVED") {
       pendingPayoutMap.set(row.affiliateId, (pendingPayoutMap.get(row.affiliateId) ?? 0) + sum);
     }
   }
 
-  let rows = affiliates.map((a) => {
+  const rows = affiliates.map((a) => {
     const flaggedAt = latestFlaggedMap.get(a.id);
     const resolvedAt = latestResolvedMap.get(a.id);
     const hasComplianceFlag =
@@ -293,15 +318,9 @@ export async function getAdminAffiliateListData(
     };
   });
 
-  // Earnings-tier filter is applied after enrichment (it derives from a
-  // commission aggregate, not a column). Total reflects the filtered set.
-  let total = rawTotal;
-  if (earningsTier) {
-    rows = rows.filter((r) => r.earningsTier === earningsTier);
-    total = rows.length;
-  }
-
-  return { affiliates: rows, total, page, perPage };
+  // D10 — the earnings-tier filter was resolved into `where.id` BEFORE
+  // pagination above, so rawTotal already reflects the filtered set.
+  return { affiliates: rows, total: rawTotal, page, perPage };
 }
 
 // ─── Affiliate Detail ─────────────────────────────────────────────────────────

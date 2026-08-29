@@ -20,10 +20,17 @@ function appUrl(): string {
 
 // Salted SHA-256 of the visitor IP — we never store raw IPs. The salt prefix
 // keeps hashes from being trivially reversible via a rainbow table of IPs.
+let warnedDefaultSalt = false;
 export function hashIp(ip: string | null | undefined): string | null {
   if (!ip) return null;
-  const salt = process.env.REFERRAL_IP_SALT ?? "autolenis-referral";
-  return crypto.createHash("sha256").update(`${salt}:${ip}`).digest("hex");
+  const salt = process.env.REFERRAL_IP_SALT;
+  if (!salt && !warnedDefaultSalt) {
+    warnedDefaultSalt = true;
+    // M13 — the hardcoded fallback salt is public (it's in the repo), so these
+    // hashes are rainbow-table-able. Keep working, but say so once per boot.
+    logger.warn("[referral] REFERRAL_IP_SALT is unset — IP hashes use the public default salt");
+  }
+  return crypto.createHash("sha256").update(`${salt ?? "autolenis-referral"}:${ip}`).digest("hex");
 }
 
 // Canonical shareable link for an affiliate's referral code. Lands on the buyer

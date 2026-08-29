@@ -1,4 +1,5 @@
 import { requirePermission } from "@/lib/auth/permissions";
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -11,6 +12,10 @@ const schema = z.object({ note: z.string().max(500).optional() });
 // so approving affiliate money needs this hard check — same gate the reverse/
 // and clawback/ siblings already enforce.
 const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "FINANCE_ADMIN"]);
+
+// Thrown inside the transaction when the compare-and-set matches 0 rows —
+// a concurrent transition already moved this commission.
+class TransitionConflictError extends Error {}
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { commissionId } = await params;
@@ -29,19 +34,34 @@ export async function POST(request: NextRequest, { params }: Props) {
   try { body = await request.json(); } catch { /* empty body ok */ }
   const parsed = schema.safeParse(body);
 
-  await prisma.commission.update({
-    where: { id: commissionId },
-    data: { status: "APPROVED" },
-  });
-
-  await prisma.adminAuditLog.create({
-    data: {
-      adminId: admin.adminId, adminEmail: admin.email,
-      action: "COMMISSION_APPROVED", entityType: "Commission", entityId: commissionId,
-      reason: parsed.success ? (parsed.data.note ?? null) : null,
-      metadata: { affiliateId: commission.affiliateId, amountCents: commission.amountCents },
-    },
-  }).catch(() => {});
+  // M5/D13 — the flip is a status-guarded compare-and-set (a concurrent
+  // transition wins cleanly with a 409, never a silent overwrite) and the
+  // audit row commits atomically with it: money never moves unlogged.
+  try {
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.commission.updateMany({
+        where: { id: commissionId, status: "PENDING" },
+        // D13 — stamp who approved and when on the row itself (the audit log
+        // is no longer the only record). Requires migration 001 before deploy.
+        data: { status: "APPROVED", approvedAt: new Date(), approvedBy: admin.email },
+      });
+      if (claimed.count !== 1) throw new TransitionConflictError();
+      await tx.adminAuditLog.create({
+        data: {
+          adminId: admin.adminId, adminEmail: admin.email,
+          action: "COMMISSION_APPROVED", entityType: "Commission", entityId: commissionId,
+          reason: parsed.success ? (parsed.data.note ?? null) : null,
+          metadata: { affiliateId: commission.affiliateId, amountCents: commission.amountCents },
+        },
+      });
+    });
+  } catch (err) {
+    if (err instanceof TransitionConflictError) {
+      return adminError("CONFLICT", "Commission is no longer PENDING — a concurrent transition won", 409);
+    }
+    logger.error("[commissions/approve] transition failed:", err);
+    return adminError("INTERNAL", "Approval failed — nothing was changed", 500);
+  }
 
   return adminSuccess({ commissionId, status: "APPROVED" });
 }

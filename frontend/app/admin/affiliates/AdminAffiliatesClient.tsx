@@ -540,12 +540,7 @@ export default function AdminAffiliatesClient({ initialAffiliates, initialTotal,
                     <div className="border-t border-slate-100 my-1" />
                     {(a.status === "PENDING" || a.status === "REJECTED" || a.status === "SUSPENDED") && (
                       <button onClick={() => openAction("approve", a.id, a.email)} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-green-700 hover:bg-green-50 transition-colors text-left">
-                        <CheckCircle2 size={13} /> Approve
-                      </button>
-                    )}
-                    {a.status === "PENDING" && (
-                      <button onClick={() => openAction("reject", a.id, a.email)} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors text-left">
-                        <XCircle size={13} /> Reject
+                        <CheckCircle2 size={13} /> Restore access
                       </button>
                     )}
                     {a.status === "ACTIVE" && (

@@ -10,12 +10,12 @@ import Panel from "@/components/ui/patterns/Panel";
 import EmptyState from "@/components/ui/patterns/EmptyState";
 import { FIGURE } from "@/components/ui/patterns/tokens";
 import {
-  DollarSign, Users, Clock, XCircle, AlertTriangle,
+  DollarSign, Users, Clock,
   TrendingUp, Calculator, Landmark, FileCheck, Share2, Inbox,
 } from "lucide-react";
 import Link from "next/link";
 import ReferralCodeCard from "@/components/affiliate/ReferralCodeCard";
-import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
@@ -56,10 +56,9 @@ export default async function AffiliateDashboardPage() {
     : rawPrefix;
   const firstName = profile?.firstName?.trim() || emailDerivedName;
 
-  const isActive = affiliate.status === "ACTIVE";
-  const isPending = affiliate.status === "PENDING";
-  const isRejected = affiliate.status === "REJECTED";
-  const isSuspended = affiliate.status === "SUSPENDED";
+  // Access is unconditional here: affiliate accounts are auto-approved, and
+  // REJECTED/SUSPENDED never reach this page (requireAffiliate redirects both
+  // to /affiliate/unsubscribed). There is no pending-approval state to render.
 
   const networkTotal = network.l1 + network.l2 + network.l3;
   const thisMonthCents = thisMonth._sum.amountCents ?? 0;
@@ -71,7 +70,7 @@ export default async function AffiliateDashboardPage() {
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   // Per-deal earnings from constants
-  const L1_PER_DEAL = PREMIUM_FEE_CENTS * COMMISSION_RATES.LEVEL_1;
+  const L1_PER_DEAL = PREMIUM_FEE_REMAINING_CENTS * COMMISSION_RATES.LEVEL_1;
 
   return (
     <PageContainer testId="affiliate-dashboard">
@@ -90,47 +89,8 @@ export default async function AffiliateDashboardPage() {
         subtitle="Your affiliate performance at a glance"
       />
 
-      {/* Status banners */}
-      {isPending && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 mb-6 flex items-start gap-4" data-testid="status-banner-pending">
-          <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-            <Clock size={17} className="text-amber-600" />
-          </div>
-          <div>
-            <p className="font-semibold text-amber-900 mb-0.5">Application under review</p>
-            <p className="text-sm text-amber-800">
-              Our team is reviewing your application (typically within 2 business days). Once approved, your referral code will unlock here.
-            </p>
-          </div>
-        </div>
-      )}
 
-      {isRejected && (
-        <div className="bg-red-50 border border-red-200 rounded-2xl p-5 mb-6 flex items-start gap-4" data-testid="status-banner-rejected">
-          <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
-            <XCircle size={17} className="text-red-600" />
-          </div>
-          <div>
-            <p className="font-semibold text-red-900 mb-0.5">Application not approved</p>
-            <p className="text-sm text-red-800">
-              Your application was not approved at this time.{" "}
-              <Link href="/for-buyers" className="underline font-semibold hover:text-red-950">Explore as a buyer →</Link>
-            </p>
-          </div>
-        </div>
-      )}
 
-      {isSuspended && (
-        <div className="bg-slate-100 border border-slate-300 rounded-2xl p-5 mb-6 flex items-start gap-4" data-testid="status-banner-suspended">
-          <div className="w-9 h-9 rounded-xl bg-slate-200 flex items-center justify-center shrink-0">
-            <AlertTriangle size={17} className="text-slate-600" />
-          </div>
-          <div>
-            <p className="font-semibold text-slate-900 mb-0.5">Account suspended</p>
-            <p className="text-sm text-slate-700">Your affiliate account is currently suspended. Please contact support for more information.</p>
-          </div>
-        </div>
-      )}
 
       {/* KPI cards — 4 horizontal */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6" data-testid="kpi-cards">
@@ -173,8 +133,7 @@ export default async function AffiliateDashboardPage() {
       </div>
 
       {/* Two-column body */}
-      {isActive && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
           {/* LEFT: Referral code + this month performance */}
           <div className="space-y-4">
             <ReferralCodeCard referralCode={affiliate.referralCode} referralLink={referralLink} />
@@ -238,7 +197,7 @@ export default async function AffiliateDashboardPage() {
                     <div className="flex items-center gap-2.5">
                       <Badge variant={c.status === "PAID" ? "green" : c.status === "APPROVED" ? "blue" : "secondary"} className="text-[10px]">{c.status}</Badge>
                       <span className="text-xs text-slate-500">Level {c.level}</span>
-                      <span className="text-xs text-slate-400 font-mono">{new Date(c.createdAt).toLocaleDateString()}</span>
+                      <span className="text-xs text-slate-500 font-mono">{new Date(c.createdAt).toLocaleDateString()}</span>
                     </div>
                     <span className={`text-sm ${FIGURE}`}>${(c.amountCents / 100).toFixed(2)}</span>
                   </div>
@@ -247,11 +206,9 @@ export default async function AffiliateDashboardPage() {
             )}
           </Panel>
         </div>
-      )}
 
       {/* Quick Actions row */}
-      {isActive && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="quick-actions">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" data-testid="quick-actions">
           {[
             { label: "Income Calculator", href: "/affiliate/portal/income-calculator", icon: Calculator },
             { label: "Finance Hub",        href: "/affiliate/portal/finance",           icon: Landmark },
@@ -264,14 +221,13 @@ export default async function AffiliateDashboardPage() {
               data-testid={`quick-action-${a.label.toLowerCase().replace(/\s+/g, "-")}`}
               className="flex flex-col items-center gap-2 bg-white border border-slate-200/80 rounded-2xl p-4 hover:border-al-primary/30 hover:shadow-sm transition-all text-center group"
             >
-              <div className="w-9 h-9 rounded-xl bg-al-primary-subtle flex items-center justify-center group-hover:bg-[#DBEAFE]/60 transition-colors">
+              <div className="w-9 h-9 rounded-xl bg-al-primary-subtle flex items-center justify-center group-hover:bg-blue-100/60 transition-colors">
                 <a.icon size={16} className="text-al-primary" />
               </div>
               <span className="text-xs font-semibold text-slate-700">{a.label}</span>
             </Link>
           ))}
-        </div>
-      )}
+      </div>
     </PageContainer>
   );
 }

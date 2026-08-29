@@ -34,7 +34,7 @@ export default function AffiliateError({
         resolves itself quickly — please try again.
       </p>
       {error.digest && (
-        <p className="text-xs text-slate-400 mb-6">Error reference: {error.digest}</p>
+        <p className="text-xs text-slate-500 mb-6">Error reference: {error.digest}</p>
       )}
       {!error.digest && <div className="mb-6" />}
       <Button data-testid="affiliate-error-retry-btn" onClick={reset} className="gap-2">

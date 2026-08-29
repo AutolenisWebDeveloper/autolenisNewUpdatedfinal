@@ -9,11 +9,24 @@
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { trackClick } from "@/lib/services/affiliate/referral.service";
+import { limitAuthAttempt, clientIpKey } from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   try {
+    // M13 — this endpoint is anonymous and writes a row per call; without a
+    // limit one source can inflate click stats and grow the table without
+    // bound. Generous ceiling (a human never hits it), keyed by IP; a limited
+    // request still answers 200/untracked so nothing surfaces on the page.
+    const limited = await limitAuthAttempt(`referral-track:${clientIpKey(request.headers)}`, {
+      tokens: 30,
+      window: "10 m",
+    });
+    if (!limited.ok) {
+      return NextResponse.json({ ok: false, tracked: false }, { status: 200 });
+    }
+
     const body = await request.json().catch(() => ({}));
     const referralCode =
       typeof body?.referralCode === "string" ? body.referralCode.trim() : "";

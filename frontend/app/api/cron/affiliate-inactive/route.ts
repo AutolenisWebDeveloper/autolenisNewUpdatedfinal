@@ -22,29 +22,43 @@ export async function GET(request: NextRequest) {
   const run = await withCronRun("affiliate-inactive", async () => {
   const cutoff = new Date(Date.now() - INACTIVITY_WINDOW_MS);
 
-  const affiliates = await prisma.affiliate.findMany({
-    where: { status: "ACTIVE" },
-    select: {
-      id: true,
-      lastInactiveNudgeAt: true,
-      user: { select: { email: true } },
-      profile: { select: { firstName: true } },
-    },
-    take: 500,
-  });
+  // D14 — the already-nudged watermark lives in SQL and the scan is a
+  // deterministic id-ordered cursor loop; the old `take: 500` with no orderBy
+  // served an arbitrary subset once the population passed 500.
+  const affiliates: Array<{
+    id: string;
+    user: { email: string } | null;
+    profile: { firstName: string | null } | null;
+  }> = [];
+  let cursorId: string | undefined;
+  const BATCH = 500;
+  for (;;) {
+    const batch = await prisma.affiliate.findMany({
+      where: {
+        status: "ACTIVE",
+        OR: [{ lastInactiveNudgeAt: null }, { lastInactiveNudgeAt: { lt: cutoff } }],
+      },
+      select: {
+        id: true,
+        user: { select: { email: true } },
+        profile: { select: { firstName: true } },
+      },
+      orderBy: { id: "asc" },
+      take: BATCH,
+      ...(cursorId ? { skip: 1, cursor: { id: cursorId } } : {}),
+    });
+    if (batch.length === 0) break;
+    affiliates.push(...batch);
+    cursorId = batch[batch.length - 1].id;
+    if (batch.length < BATCH) break;
+  }
 
   let dispatched = 0;
   let skippedActive = 0;
-  let skippedAlreadyNudged = 0;
+  const skippedAlreadyNudged = 0; // filtered in SQL now
   let skippedNoEmail = 0;
 
   for (const aff of affiliates) {
-    // Already nudged within the inactivity window — don't re-dispatch weekly.
-    if (aff.lastInactiveNudgeAt && aff.lastInactiveNudgeAt >= cutoff) {
-      skippedAlreadyNudged += 1;
-      continue;
-    }
-
     // Referral activity = a buyer they referred or a commission earned in the
     // window. Either signal means the affiliate is active; skip them.
     const [recentBuyer, recentCommission] = await Promise.all([

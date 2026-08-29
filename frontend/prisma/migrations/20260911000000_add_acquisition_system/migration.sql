@@ -13,28 +13,27 @@ ALTER TABLE "buyers"
   ADD COLUMN IF NOT EXISTS "opted_out_sms"    BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS "timezone"         TEXT;
 
-CREATE TABLE IF NOT EXISTS "conversations" (
-  "id"             TEXT NOT NULL,
-  "session_id"     TEXT NOT NULL,
-  "buyer_id"       TEXT,
-  "transcript"     JSONB NOT NULL DEFAULT '[]',
-  "completed"      BOOLEAN NOT NULL DEFAULT false,
-  "extracted_data" JSONB,
-  "created_at"     TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updated_at"     TIMESTAMP(3) NOT NULL,
-  CONSTRAINT "conversations_pkey" PRIMARY KEY ("id")
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS "conversations_session_id_key"
-  ON "conversations"("session_id");
+-- NAME CORRECTION (Batch 7): this block originally created its table under the
+-- bare name "conversations". The Conversation model maps to
+-- "acquisition_conversations" (schema.prisma @@map), which
+-- 20260423999999_baseline_manual_provisioned_tables already creates together
+-- with its session_id unique index — so the bare table was an orphan no model
+-- or code path ever touched on a chain-built database. Worse, it squatted on
+-- the name the CRM provisioning runbook (frontend/migrations/01) needs for the
+-- live admin-CRM inbox table, which made 14 of the 15 documented provisioning
+-- files fail on a fresh database. In production, where the CRM table existed
+-- first, the CREATE below silently no-opped — so this rewrite changes nothing
+-- there. What this block still owns is the buyer foreign key the model
+-- declares; it now targets the real table.
 
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'conversations_buyer_id_fkey'
-  ) THEN
-    ALTER TABLE "conversations"
-      ADD CONSTRAINT "conversations_buyer_id_fkey"
+  IF to_regclass(format('%I.%I', current_schema(), 'acquisition_conversations')) IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_constraint WHERE conname = 'acquisition_conversations_buyer_id_fkey'
+     ) THEN
+    ALTER TABLE "acquisition_conversations"
+      ADD CONSTRAINT "acquisition_conversations_buyer_id_fkey"
       FOREIGN KEY ("buyer_id") REFERENCES "buyers"("id")
       ON DELETE SET NULL ON UPDATE CASCADE;
   END IF;

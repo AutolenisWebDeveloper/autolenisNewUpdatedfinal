@@ -254,6 +254,46 @@ describe("admin UI role mirror — scope discipline", () => {
  * routes: this asserts internal consistency of the surfaces Batch 2 gated, and
  * does not silently claim console-wide coverage that does not exist.
  */
+describe("admin UI role mirror — user-facing copy matches what the server enforces", () => {
+  // Batch 5 found this in a browser: /admin/support told the reader "Only Super
+  // Admin and Support Admin can start or end sessions" while Batch 3 had already
+  // tightened both impersonation routes to SUPER_ADMIN. The code comment at the
+  // top of that file was updated; the visible paragraph was not. A SUPPORT_ADMIN
+  // read that they could do something the server answers with 403.
+  //
+  // Prose is not type-checked, so nothing caught it. This does: a page that
+  // NAMES roles for a mirrored capability must not name a role the mirror
+  // withholds.
+  const ROLE_WORDS: Record<string, string> = {
+    "Super Admin": "SUPER_ADMIN",
+    "Support Admin": "SUPPORT_ADMIN",
+    "Operations Admin": "OPERATIONS_ADMIN",
+    "Finance Admin": "FINANCE_ADMIN",
+    "Compliance Admin": "COMPLIANCE_ADMIN",
+  };
+
+  test("/admin/support names only roles that may actually impersonate", () => {
+    const src = readFileSync(join(process.cwd(), "app/admin/support/page.tsx"), "utf8");
+    const allowed = new Set(ADMIN_UI_CAPABILITIES["support.impersonate"].roles as readonly string[]);
+
+    // Only inspect the visible sentence about who may start/end a session.
+    const sentence = src.match(/Only [^<>{}]*?(?:start or end sessions)[^<>{}]*/);
+    assert.ok(sentence, "the /admin/support page no longer states who may start a session — re-point this guard");
+
+    const overclaimed = Object.entries(ROLE_WORDS)
+      .filter(([label, role]) => sentence![0].includes(label) && !allowed.has(role))
+      .map(([label, role]) => `${label} (${role})`);
+
+    assert.deepEqual(
+      overclaimed,
+      [],
+      "the page tells the reader a role can start an impersonation session that the " +
+        "server refuses with 403:\n  copy: " + sentence![0].trim() +
+        "\n  server admits: [" + [...allowed].join(", ") + "]",
+    );
+  });
+});
+
 describe("admin UI role mirror — opted-in components gate every hard-denying endpoint they call", () => {
   const ROOT = process.cwd();
 

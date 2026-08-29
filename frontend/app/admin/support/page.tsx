@@ -73,7 +73,7 @@ export default async function AdminSupportPage({
       </div>
       <p className="text-sm text-slate-500 mb-6">
         Audited support sessions — every session records who, why, and when in the audit log.
-        Only Super Admin and Support Admin can start or end sessions.
+        Only Super Admin can start or end sessions.
       </p>
 
       {/* User search */}

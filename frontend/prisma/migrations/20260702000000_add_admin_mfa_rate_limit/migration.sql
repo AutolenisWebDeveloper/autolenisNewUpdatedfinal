@@ -4,11 +4,11 @@
 
 DO $$ BEGIN
   IF to_regclass(format('%I.%I', current_schema(), 'admins')) IS NOT NULL THEN
-    ALTER TABLE "admins" ADD COLUMN "mfa_failed_attempts" INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE "admins" ADD COLUMN IF NOT EXISTS "mfa_failed_attempts" INTEGER NOT NULL DEFAULT 0;
   END IF;
 END $$;
 DO $$ BEGIN
   IF to_regclass(format('%I.%I', current_schema(), 'admins')) IS NOT NULL THEN
-    ALTER TABLE "admins" ADD COLUMN "mfa_locked_until" TIMESTAMP(3);
+    ALTER TABLE "admins" ADD COLUMN IF NOT EXISTS "mfa_locked_until" TIMESTAMP(3);
   END IF;
 END $$;

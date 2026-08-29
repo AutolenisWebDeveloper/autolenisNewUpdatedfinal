@@ -49,7 +49,11 @@ function getAdminLinkGenerator(): GenerateLinkAdmin {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-// Ensure Prisma user + buyer record exists for authenticated Supabase user
+// Ensure Prisma user + buyer record exists for authenticated Supabase user.
+// M6 — referralCode (from Supabase user_metadata) makes every provisioning
+// path record affiliate attribution: before, only the /auth/callback path
+// attributed, so a buyer provisioned by the sign-in or accept-terms safety
+// nets silently lost their referrer.
 async function ensurePrismaUser(
   supabaseUserId: string,
   email: string,
@@ -59,9 +63,16 @@ async function ensurePrismaUser(
   lastName?: string,
   termsAcceptedAt?: string | null,
   termsVersion?: string | null,
+  referralCode?: string | null,
 ) {
   const existing = await prisma.user.findUnique({ where: { supabaseId: supabaseUserId } });
-  if (existing) return existing;
+  if (existing) {
+    if (role === UserRole.BUYER && referralCode) {
+      // Idempotent (upsert + self-referral guard inside); never throws.
+      await recordAffiliateAttribution(existing.id, referralCode);
+    }
+    return existing;
+  }
 
   // ── Upgrade existing guest user in place ──────────────────────────────────
   // /api/public/request-vehicle may have pre-created a User with a
@@ -100,6 +111,10 @@ async function ensurePrismaUser(
           ...(termsVersion ? { termsVersion } : {}),
         },
       }).catch(err => logger.error("[ensurePrismaUser] guest buyer flip failed:", err));
+    }
+    // M6 — a guest-upgraded buyer keeps their referrer too.
+    if (role === UserRole.BUYER && referralCode) {
+      await recordAffiliateAttribution(upgraded.id, referralCode);
     }
     return upgraded;
   }
@@ -179,7 +194,8 @@ async function ensurePrismaUser(
       await prisma.affiliate.create({
         data: {
           userId: user.id,
-          status: AffiliateStatus.PENDING,
+          // Auto-approved: affiliate accounts never wait for admin approval.
+          status: AffiliateStatus.ACTIVE,
           referralCode: `AFF-${user.id.slice(0, 8).toUpperCase()}`,
           level: 1,
         },
@@ -187,6 +203,12 @@ async function ensurePrismaUser(
         logger.error("[ensurePrismaUser] affiliate create failed:", err)
       );
     }
+  }
+
+  // M6 — record attribution for a freshly-provisioned buyer, whatever path
+  // provisioned them. Idempotent and non-throwing.
+  if (role === UserRole.BUYER && referralCode) {
+    await recordAffiliateAttribution(user.id, referralCode);
   }
 
   return user;
@@ -219,12 +241,35 @@ async function recordAffiliateAttribution(userId: string, referralCode: string) 
       update: { referralCode },
     });
 
+    // M14 — mirror the attribution onto the Buyer row (set-if-null:
+    // first-touch wins). Buyer.affiliateId was never written by the referral
+    // chain, which left the inactive-affiliate cron's buyer-activity signal
+    // permanently dead and admin KPIs empty.
+    await prisma.buyer.updateMany({
+      where: { userId, affiliateId: null },
+      data: { affiliateId: affiliate.id },
+    });
+
     // Group 8 (8A) — close the click→conversion loop: mark the most recent
     // unconverted referral click for this code as converted. Non-blocking.
     const { attributeConversion } = await import(
       "@/lib/services/affiliate/referral.service"
     );
     await attributeConversion(referralCode, userId);
+
+    // M9 — award referral milestones at the referral event itself, not only
+    // when the referrer happens to open /buyer/referral. Idempotent (unique
+    // buyerId+milestone) and best-effort inside this try.
+    const referrerBuyer = await prisma.buyer.findUnique({
+      where: { userId: affiliate.userId },
+      select: { id: true },
+    });
+    if (referrerBuyer) {
+      const { evaluateBuyerReferralMilestones } = await import(
+        "@/lib/services/referral/referral-milestone.service"
+      );
+      await evaluateBuyerReferralMilestones(referrerBuyer.id);
+    }
   } catch (err) {
     logger.error("[recordAffiliateAttribution] failed to record attribution:", err);
     // Non-blocking — do not throw; buyer signup must not fail due to attribution error
@@ -241,7 +286,15 @@ export async function signUpAction(formData: FormData): Promise<AuthResult> {
   const lastName = (formData.get("lastName") as string)?.trim();
   const planInput = (formData.get("plan") as string)?.toUpperCase()?.trim();
   const plan: BuyerPlan = planInput === "PREMIUM" ? BuyerPlan.PREMIUM : BuyerPlan.STANDARD;
-  const referralCode = (formData.get("referralCode") as string)?.trim() || null;
+  // M6 — server-side cookie fallback: the client JS copies the affiliate_ref
+  // cookie into the form field, but with JS interference or a cleared field the
+  // attribution silently dropped. The cookie set by proxy.ts is authoritative
+  // when the form carries no code.
+  let referralCode = (formData.get("referralCode") as string)?.trim() || null;
+  if (!referralCode) {
+    const { cookies } = await import("next/headers");
+    referralCode = (await cookies()).get("affiliate_ref")?.value?.trim() || null;
+  }
   const agreeTerms = formData.get("agreeTerms") === "on" || formData.get("agreeTerms") === "true";
   const agreePrivacy = formData.get("agreePrivacy") === "on" || formData.get("agreePrivacy") === "true";
   const redirectParam = getSafeBuyerRedirect((formData.get("redirect") as string)?.trim() || null);
@@ -369,21 +422,22 @@ export async function signInAction(formData: FormData): Promise<AuthResult> {
 
   const role = user?.role ?? (data.user.user_metadata?.role as string | undefined) ?? "BUYER";
 
-  // Affiliate status gate — only ACTIVE affiliates may enter the portal.
-  // PENDING / REJECTED / SUSPENDED accounts are signed out and shown a
-  // status-specific message before any redirect happens.
+  // Affiliate status gate. R6/decision 1 — the activation model is
+  // auto-ACTIVE on email verification, and requireAffiliate() deliberately
+  // permits PENDING (safety-net-provisioned accounts): blocking PENDING here
+  // locked those accounts out entirely while the server gates would have let
+  // them in. Only REJECTED/SUSPENDED are refused; both are also enforced
+  // server-side on every page and API call.
   if (role === "AFFILIATE") {
     const affiliate = await prisma.affiliate.findFirst({
       where: { user: { supabaseId: data.user.id } },
       select: { status: true },
     });
-    if (!affiliate || affiliate.status !== "ACTIVE") {
+    if (!affiliate || affiliate.status === "REJECTED" || affiliate.status === "SUSPENDED") {
       // Tear down the just-issued Supabase session so the cookie cannot be
       // used to access the portal.
       await supabase.auth.signOut();
       switch (affiliate?.status) {
-        case "PENDING":
-          return { error: "Your application is under review. You'll receive an email once approved." };
         case "REJECTED":
           return { error: "Your application was not approved. Contact support for more information." };
         case "SUSPENDED":
@@ -399,8 +453,19 @@ export async function signInAction(formData: FormData): Promise<AuthResult> {
     redirect(getSafeDealerRedirect(rawRedirect) ?? "/dealer/dashboard");
   }
 
-  // Default: ensure buyer record exists then send to buyer dashboard
-  await ensurePrismaUser(data.user.id, email, UserRole.BUYER);
+  // Default: ensure buyer record exists then send to buyer dashboard.
+  // M6 — pass the signup referral code so safety-net provisioning attributes.
+  await ensurePrismaUser(
+    data.user.id,
+    email,
+    UserRole.BUYER,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    (data.user.user_metadata?.referralCode as string | undefined) ?? null,
+  );
   redirect(getSafeBuyerRedirect(rawRedirect) ?? "/buyer/dashboard");
 }
 
@@ -408,6 +473,17 @@ export async function signInAction(formData: FormData): Promise<AuthResult> {
 
 export async function signOutAction(): Promise<void> {
   const supabase = await createServerSupabaseClient();
+
+  // R13 — land each role on ITS sign-in page: affiliates were dumped on the
+  // buyer-branded /auth/signin. Read the role before tearing the session down.
+  let signInTarget = "/auth/signin";
+  try {
+    const { data } = await supabase.auth.getUser();
+    if ((data?.user?.user_metadata?.role as string | undefined) === "AFFILIATE") {
+      signInTarget = "/affiliate/signin";
+    }
+  } catch { /* default target */ }
+
   await supabase.auth.signOut();
 
   // Clear companion cookies set during session
@@ -416,7 +492,7 @@ export async function signOutAction(): Promise<void> {
   cookieStore.delete("al_remember");      // "Remember me" UX preference
   cookieStore.delete("affiliate_ref");    // Affiliate attribution cookie
 
-  redirect("/auth/signin");
+  redirect(signInTarget);
 }
 
 // ─── Forgot Password ──────────────────────────────────────────────────────
@@ -597,6 +673,8 @@ export async function acceptTermsAction(formData: FormData): Promise<void> {
         user.user_metadata?.lastName as string | undefined,
         now.toISOString(),
         termsVersion,
+        // M6 — safety-net provisioning must not lose the referrer.
+        (user.user_metadata?.referralCode as string | undefined) ?? null,
       );
     } catch (err) {
       logger.error("[acceptTermsAction] buyer provisioning failed:", err);

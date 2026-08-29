@@ -4,7 +4,7 @@
 // Commission walk depth: maximum 3 levels — no L4 or L5
 
 import { prisma } from "@/lib/prisma";
-import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import { emitDomainEvent } from "@/lib/events/emit";
 import { logger } from "@/lib/logger";
 import { computeCommissionCents } from "@/lib/services/affiliate/commission-math";
@@ -19,13 +19,15 @@ export async function walkCommissionTree(
   dealId: string,
   buyerAffiliateId: string | null | undefined,
   qualifyingEventId: string,
-  feeBasisCents: number = PREMIUM_FEE_CENTS,
+  feeBasisCents: number = PREMIUM_FEE_REMAINING_CENTS,
 ): Promise<void> {
   if (!buyerAffiliateId) return;
 
   // Defend against a missing/zero basis: fall back to the configured premium
   // fee so a metadata gap never silently zeroes out earned commissions.
-  const basisCents = feeBasisCents > 0 ? feeBasisCents : PREMIUM_FEE_CENTS;
+  // M4: the fallback is the CAPTURED amount ($400 after the $99 deposit
+  // credit), not the $499 sticker — the old fallback overpaid ~25%.
+  const basisCents = feeBasisCents > 0 ? feeBasisCents : PREMIUM_FEE_REMAINING_CENTS;
 
   const affiliate = await prisma.affiliate.findUnique({
     where: { id: buyerAffiliateId },
@@ -33,10 +35,16 @@ export async function walkCommissionTree(
   });
   if (!affiliate) return;
 
+  // M14 — a SUSPENDED/REJECTED affiliate does not accrue new money; its level
+  // is skipped while other levels of the tree still earn (PENDING stays
+  // quasi-active under the auto-ACTIVE activation model).
+  const canEarn = (a: { status?: string } | null | undefined) =>
+    !!a && a.status !== "SUSPENDED" && a.status !== "REJECTED";
+
   const levels = [
-    { affiliate, rate: COMMISSION_RATES.LEVEL_1, level: 1 },
-    affiliate.parent ? { affiliate: affiliate.parent, rate: COMMISSION_RATES.LEVEL_2, level: 2 } : null,
-    affiliate.parent?.parent ? { affiliate: affiliate.parent.parent, rate: COMMISSION_RATES.LEVEL_3, level: 3 } : null,
+    canEarn(affiliate) ? { affiliate, rate: COMMISSION_RATES.LEVEL_1, level: 1 } : null,
+    canEarn(affiliate.parent) ? { affiliate: affiliate.parent!, rate: COMMISSION_RATES.LEVEL_2, level: 2 } : null,
+    canEarn(affiliate.parent?.parent) ? { affiliate: affiliate.parent!.parent!, rate: COMMISSION_RATES.LEVEL_3, level: 3 } : null,
   ].filter(Boolean) as Array<{ affiliate: { id: string }; rate: number; level: number }>;
 
   // Commission is idempotent — check before creating
@@ -116,24 +124,86 @@ export async function processFeeCommission(params: {
 
   const referral = await prisma.affiliateReferral.findFirst({
     where: { referredUserId: buyer.userId },
-    select: { affiliateId: true },
+    // D6 — deterministic payee when one user somehow holds referral rows under
+    // two affiliates: first-touch wins (earliest signup), never planner order.
+    // The referred_user_id UNIQUE in migration 001 makes this structural; the
+    // orderBy is belt-and-braces until that migration is applied.
+    orderBy: { signedUpAt: "asc" },
+    select: { id: true, affiliateId: true, firstDealAt: true },
   });
   if (!referral) return; // buyer was not referred — nothing to pay
 
+  // D12 — replay guard for the conversion stamps below: if any commission for
+  // this qualifying event already exists, this event was already processed and
+  // a DLQ replay must not re-increment totalDeals. (Edge: a tree whose every
+  // level is SUSPENDED creates no commissions, so a replay after a stamp
+  // failure could re-increment — accepted; stats-only, no money impact.)
+  const alreadyProcessed = await prisma.commission.findFirst({
+    where: { qualifyingEventId: { startsWith: `${qualifyingEventId}-L` } },
+    select: { id: true },
+  });
+
   await walkCommissionTree(dealId, referral.affiliateId, qualifyingEventId, feeBasisCents);
+
+  if (!alreadyProcessed) {
+    // D12 — the conversion columns analytics read were never written anywhere:
+    // stamp first-deal-at once and count this deal.
+    await prisma.affiliateReferral
+      .update({
+        where: { id: referral.id },
+        data: {
+          ...(referral.firstDealAt ? {} : { firstDealAt: new Date() }),
+          totalDeals: { increment: 1 },
+        },
+      })
+      .catch((err) => logger.error("[commission] conversion stamp failed (stats only):", err));
+  }
+}
+
+// ─── The single ledger rule for "earned" money (M1 / decision 4) ─────────────
+// Two reversal mechanisms coexist and must net correctly everywhere:
+//   • in-place reverse flips a PENDING/APPROVED row to REVERSED, amount stays
+//     POSITIVE → it stops counting as earned;
+//   • clawback leaves the PAID original PAID and appends a NEGATIVE REVERSED
+//     offset row → the offset must count, netting the original out.
+// So: earned = PENDING + APPROVED + PAID rows, plus REVERSED rows whose amount
+// is negative. REJECTED never counts. Every affiliate/admin/leaderboard/digest
+// aggregation uses this rule — via ledgerEarnedWhere for queries or
+// countsTowardEarned for row filters — never an ad-hoc status filter.
+
+export const EARNED_STATUSES = ["PENDING", "APPROVED", "PAID"] as const;
+
+export function countsTowardEarned(c: { status: string; amountCents: number }): boolean {
+  if ((EARNED_STATUSES as readonly string[]).includes(c.status)) return true;
+  return c.status === "REVERSED" && c.amountCents < 0;
+}
+
+export function ledgerEarnedWhere(affiliateId?: string) {
+  return {
+    ...(affiliateId ? { affiliateId } : {}),
+    OR: [
+      { status: { in: [...EARNED_STATUSES] } },
+      { status: "REVERSED" as const, amountCents: { lt: 0 } },
+    ],
+  };
 }
 
 // Commission summary for an affiliate
 export async function getCommissionSummary(affiliateId: string) {
-  const [paid, approved, pendingReview] = await Promise.all([
+  const [paid, approved, pendingReview, clawbackOffsets] = await Promise.all([
     prisma.commission.aggregate({ where: { affiliateId, status: "PAID" }, _sum: { amountCents: true } }),
     prisma.commission.aggregate({ where: { affiliateId, status: "APPROVED" }, _sum: { amountCents: true } }),
     prisma.commission.aggregate({ where: { affiliateId, status: "PENDING" }, _sum: { amountCents: true } }),
+    prisma.commission.aggregate({
+      where: { affiliateId, status: "REVERSED", amountCents: { lt: 0 } },
+      _sum: { amountCents: true },
+    }),
   ]);
 
   const paidCents = paid._sum.amountCents ?? 0;
   const approvedCents = approved._sum.amountCents ?? 0;
   const pendingReviewCents = pendingReview._sum.amountCents ?? 0;
+  const clawbackOffsetCents = clawbackOffsets._sum.amountCents ?? 0; // ≤ 0
 
   return {
     paidCents,
@@ -143,11 +213,208 @@ export async function getCommissionSummary(affiliateId: string) {
     pendingCents: approvedCents + pendingReviewCents,
     // pendingReviewCents: commissions awaiting admin approval (not yet payable)
     pendingReviewCents,
-    // totalCents: lifetime earned excluding REVERSED (clawed-back) commissions,
-    // matching the per-level breakdown and the leaderboard ranking basis.
-    // Pending amounts are reported separately via pendingCents.
-    totalCents: paidCents + approvedCents + pendingReviewCents,
+    // totalCents: lifetime earned under the shared ledger rule above — live rows
+    // net of clawback offsets; in-place-reversed and REJECTED rows excluded.
+    totalCents: paidCents + approvedCents + pendingReviewCents + clawbackOffsetCents,
   };
+}
+
+// Per-level lifetime breakdown for the earnings page (M15) — a DB-side groupBy
+// over the WHOLE ledger under the shared earned rule, so the level bars always
+// sum to the same universe as the summary cards (the old version reduced the
+// latest 50 rows client-side and drifted once an affiliate passed 50).
+export async function getCommissionLevelBreakdown(
+  affiliateId: string,
+): Promise<Array<{ level: number; total: number; count: number }>> {
+  const groups = await prisma.commission.groupBy({
+    by: ["level"],
+    where: ledgerEarnedWhere(affiliateId),
+    _sum: { amountCents: true },
+    _count: { id: true },
+  });
+  const byLevel = new Map(groups.map((g) => [g.level, g]));
+  return [1, 2, 3].map((level) => {
+    const g = byLevel.get(level);
+    return { level, total: g?._sum.amountCents ?? 0, count: g?._count.id ?? 0 };
+  });
+}
+
+// ─── Refund/approval safety for fee-driven commissions (M2/M16) ──────────────
+
+// Fee-walk commissions are keyed `${paymentIntentId}-L${level}`.
+const FEE_EVENT_KEY = /^(pi_[A-Za-z0-9]+)-L[1-3]$/;
+
+// Called from the Stripe `charge.refunded` fee branch: flip this PI's
+// PENDING/APPROVED commissions to REVERSED via a status-guarded compare-and-set.
+// PAID commissions are NEVER auto-reversed — paying money back is a human
+// clawback decision — so their ids are returned for the caller to alert on.
+// NOTE (M16): the webhook has never recorded a production event, so in
+// production this is currently inert; approveMaturePendingCommissions below is
+// the effective guard until webhook delivery is fixed.
+export async function reverseCommissionsForPaymentIntent(
+  piId: string,
+): Promise<{ reversed: number; paidNeedingReview: string[] }> {
+  if (!piId) return { reversed: 0, paidNeedingReview: [] };
+  const keyPrefix = `${piId}-L`;
+
+  const reversed = await prisma.commission.updateMany({
+    where: { qualifyingEventId: { startsWith: keyPrefix }, status: { in: ["PENDING", "APPROVED"] } },
+    data: { status: "REVERSED", reversedAt: new Date() },
+  });
+
+  const paid = await prisma.commission.findMany({
+    where: { qualifyingEventId: { startsWith: keyPrefix }, status: "PAID" },
+    select: { id: true },
+  });
+
+  return { reversed: reversed.count, paidNeedingReview: paid.map((c) => c.id) };
+}
+
+export interface ApproveMatureResult {
+  candidates: number;
+  approved: number;
+  skippedPaymentState: number;
+  skippedDealState: number;
+  skippedUnverifiable: number;
+}
+
+// Hourly auto-approval (cron `affiliates`). A commission is approved only when
+// it is ≥7 days old AND the money it derives from is verifiably still good:
+//   • the fee PaymentIntent's charge is not refunded, partially refunded, or
+//     disputed — read from Stripe directly, per the deposit reconciler pattern,
+//     because webhook-delivered refund events have never been recorded in
+//     production (M16);
+//   • the linked deal is not CANCELLED/REFUNDED.
+// Unverifiable payment state (Stripe unreachable, no charge on the intent,
+// missing deal) fails CLOSED — the commission stays PENDING for a later run.
+export async function approveMaturePendingCommissions(now: Date = new Date()): Promise<ApproveMatureResult> {
+  const cutoff = new Date(now.getTime() - 7 * 24 * 3600000);
+  const result: ApproveMatureResult = {
+    candidates: 0,
+    approved: 0,
+    skippedPaymentState: 0,
+    skippedDealState: 0,
+    skippedUnverifiable: 0,
+  };
+
+  // P2-4 (review) — page through the FULL mature-PENDING set with an id
+  // cursor instead of a single head take(500): permanently-skipped rows
+  // (missing deal, unexpandable charge) otherwise accumulate at the head and
+  // starve everything behind them once they exceed the batch size. The PI
+  // verdict cache spans batches (one Stripe read per unique PI per run), and
+  // MAX_BATCHES bounds a pathological backlog; the hourly cron resumes where
+  // the cap left off because approved rows leave PENDING.
+  const MAX_BATCHES = 20; // 20 × 500 = 10k rows/run
+  // P2-4 — stop batching well short of the route's maxDuration (300s) so a
+  // partial run commits its approvals and reports cleanly instead of being
+  // killed mid-batch; the next hourly run picks up the rows still PENDING.
+  const deadline = Date.now() + 240_000;
+  const piVerdicts = new Map<string, boolean | null>();
+  let cursor: string | null = null;
+
+  for (let batch = 0; batch < MAX_BATCHES; batch++) {
+    if (Date.now() > deadline) break;
+    // P2-2 (second review) — keyset pagination (`id > cursor`), NOT Prisma
+    // cursor+skip: approveBatch flips rows out of the PENDING filter, and a
+    // cursor row that left the filtered set makes `skip: 1` drop the first
+    // surviving row after the boundary instead of the cursor row. `id` alone
+    // is a stable, unique order; the createdAt ordering was not load-bearing
+    // (maturity is the `cutoff` filter).
+    const candidates: Array<{ id: string; dealId: string; qualifyingEventId: string }> =
+      await prisma.commission.findMany({
+        where: {
+          status: "PENDING",
+          createdAt: { lte: cutoff },
+          ...(cursor ? { id: { gt: cursor } } : {}),
+        },
+        select: { id: true, dealId: true, qualifyingEventId: true },
+        orderBy: { id: "asc" },
+        take: 500,
+      });
+    if (candidates.length === 0) break;
+    cursor = candidates[candidates.length - 1].id;
+    result.candidates += candidates.length;
+    await approveBatch(candidates, { now, piVerdicts, result });
+    if (candidates.length < 500) break;
+  }
+  return result;
+}
+
+async function approveBatch(
+  candidates: Array<{ id: string; dealId: string; qualifyingEventId: string }>,
+  ctx: { now: Date; piVerdicts: Map<string, boolean | null>; result: ApproveMatureResult },
+): Promise<void> {
+  const { now, piVerdicts, result } = ctx;
+  const dealIds = [...new Set(candidates.map((c) => c.dealId))];
+  const deals = await prisma.deal.findMany({
+    where: { id: { in: dealIds } },
+    select: { id: true, status: true },
+  });
+  const dealStatusById = new Map(deals.map((d) => [d.id, d.status]));
+
+  // One Stripe read per unique PI per run (cache spans batches); levels of the
+  // same fee share the verdict.
+  // true = money pulled back (block), false = clean, null = unverifiable.
+  const { retrievePaymentIntent } = await import("@/lib/services/payment/stripe.service");
+  const piIds = [...new Set(
+    candidates
+      .map((c) => FEE_EVENT_KEY.exec(c.qualifyingEventId)?.[1])
+      .filter((v): v is string => Boolean(v)),
+  )].filter((id) => !piVerdicts.has(id));
+  for (const piId of piIds) {
+    try {
+      const intent = (await retrievePaymentIntent(piId, { expand: ["latest_charge"] })) as {
+        latest_charge?: { refunded?: boolean; amount_refunded?: number; disputed?: boolean } | string | null;
+      };
+      const charge = intent.latest_charge && typeof intent.latest_charge !== "string" ? intent.latest_charge : null;
+      if (!charge) {
+        piVerdicts.set(piId, null);
+        continue;
+      }
+      piVerdicts.set(
+        piId,
+        Boolean(charge.refunded) || (charge.amount_refunded ?? 0) > 0 || Boolean(charge.disputed),
+      );
+    } catch (err) {
+      logger.warn("[commission] payment-state check unavailable — leaving PENDING (fail closed):", { piId, err });
+      piVerdicts.set(piId, null);
+    }
+  }
+
+  const approveIds: string[] = [];
+  for (const c of candidates) {
+    const dealStatus = dealStatusById.get(c.dealId);
+    if (!dealStatus) {
+      result.skippedUnverifiable += 1;
+      continue;
+    }
+    if (dealStatus === "CANCELLED" || dealStatus === "REFUNDED") {
+      result.skippedDealState += 1;
+      continue;
+    }
+    const piId = FEE_EVENT_KEY.exec(c.qualifyingEventId)?.[1];
+    if (piId) {
+      const verdict = piVerdicts.get(piId);
+      if (verdict === null || verdict === undefined) {
+        result.skippedUnverifiable += 1;
+        continue;
+      }
+      if (verdict) {
+        result.skippedPaymentState += 1;
+        continue;
+      }
+    }
+    approveIds.push(c.id);
+  }
+
+  if (approveIds.length > 0) {
+    const updated = await prisma.commission.updateMany({
+      where: { id: { in: approveIds }, status: "PENDING" },
+      // D13 — stamp the actor on the row itself (migration 001).
+      data: { status: "APPROVED", approvedAt: now, approvedBy: "system:cron" },
+    });
+    result.approved += updated.count;
+  }
 }
 
 // Network tree size — max 3 levels. Three bounded queries total: the previous

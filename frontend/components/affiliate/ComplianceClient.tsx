@@ -105,7 +105,7 @@ export default function ComplianceClient({ initialAcknowledgedAt }: Props) {
             data-testid={`disclosure-${d.id}`}
             className={`border-2 rounded-xl p-5 transition-colors ${
               acknowledged.has(d.id)
-                ? "border-al-primary/30 bg-al-primary/3"
+                ? "border-al-primary/30 bg-al-primary-subtle"
                 : "border-slate-200 bg-white"
             }`}
           >
@@ -150,7 +150,7 @@ export default function ComplianceClient({ initialAcknowledgedAt }: Props) {
 
       {savedAt && (
         <p
-          className="text-xs text-slate-400 text-center mt-3"
+          className="text-xs text-slate-500 text-center mt-3"
           data-testid="compliance-saved-note"
         >
           Last acknowledged: {new Date(savedAt).toLocaleDateString()}

@@ -21,10 +21,22 @@ export async function GET(request: NextRequest) {
     data: { status: "EXPIRED" },
   });
 
+  // Columns are named explicitly so token material never enters a response that
+  // has no use for it.
   const invitations = await prisma.dealerInvitation.findMany({
     where: status ? { status: status as "PENDING" | "ACCEPTED" | "EXPIRED" | "CANCELLED" } : undefined,
     orderBy: { createdAt: "desc" },
     take: 100,
+    select: {
+      id: true,
+      dealershipName: true,
+      contactName: true,
+      email: true,
+      status: true,
+      expiresAt: true,
+      acceptedAt: true,
+      createdAt: true,
+    },
   });
 
   return NextResponse.json({

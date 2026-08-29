@@ -5,9 +5,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminFromRequest } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import { sendDealerInvitationEmail } from "@/lib/services/email/resend.service";
-import crypto from "crypto";
 import { z } from "zod";
-import { issueInvitationToken } from "@/lib/services/dealer-recruitment/invitation-token.service";
+import { createInvitation } from "@/lib/services/dealer-recruitment/invitation-token.service";
 
 const schema = z.object({
   dealershipName: z.string().min(1),
@@ -36,22 +35,27 @@ export async function POST(request: NextRequest) {
   }
 
   const { dealershipName, contactName, email, personalMessage } = parsed.data;
-  // Hashed at rest, 7-day TTL — same design as DealerAccountClaimToken. The raw
+  // 7-day TTL, hashed at rest. The service owns the token columns so the raw
   // token exists only in the emailed link below and is never persisted.
-  const { rawToken, tokenHash, expiresAt } = issueInvitationToken();
-
-  const invitation = await prisma.dealerInvitation.create({
-    data: {
+  let invitation: { id: string; rawToken: string; expiresAt: Date };
+  try {
+    invitation = await createInvitation({
       dealershipName,
       contactName,
-      email: email.toLowerCase(),
-      personalMessage: personalMessage ?? null,
-      tokenHash,
-      expiresAt,
+      email,
+      personalMessage,
       invitedBy: admin.adminId,
-      status: "PENDING",
-    },
-  });
+    });
+  } catch (err) {
+    // No invitation was persisted, so there is nothing to email and no success
+    // to report. Never return 201 for a write that did not happen.
+    logger.error("[dealer/invite] Failed to create invitation:", err);
+    return NextResponse.json(
+      { error: { code: "INVITATION_CREATE_FAILED", message: "Could not create the invitation" } },
+      { status: 500 },
+    );
+  }
+  const { rawToken, expiresAt } = invitation;
 
   await prisma.adminAuditLog.create({
     data: {

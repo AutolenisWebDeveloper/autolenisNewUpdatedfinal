@@ -47,7 +47,7 @@ export default async function AffiliateResourcesPage() {
 
       {/* Downloadable assets section */}
       <div className="mb-10" data-testid="downloadable-assets-section">
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">Downloadable Assets</p>
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Downloadable Assets</p>
 
         {DOWNLOADABLE_ASSETS.length > 0 ? (
           <div className="space-y-3 mb-4">
@@ -61,7 +61,7 @@ export default async function AffiliateResourcesPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-slate-800">{asset.label}</p>
-                    <p className="text-xs text-slate-400 truncate">{asset.description}</p>
+                    <p className="text-xs text-slate-500 truncate">{asset.description}</p>
                   </div>
                   <a
                     href={`/affiliate-assets/${asset.filename}`}
@@ -79,11 +79,11 @@ export default async function AffiliateResourcesPage() {
           <div className="bg-slate-50 border border-slate-200 border-dashed rounded-xl p-6 text-center" data-testid="assets-empty-state">
             <Download size={28} className="text-slate-300 mx-auto mb-3" />
             <p className="text-sm font-semibold text-slate-600 mb-1">Downloadable assets coming soon</p>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+            <p className="text-xs text-slate-500 max-w-sm mx-auto">
               Branded banners, social kits, and PDF one-pagers will appear here once they are
               published. In the meantime, use the copy-and-paste templates below to start sharing.
             </p>
-            <ul className="mt-4 space-y-1 text-left inline-block text-xs text-slate-400">
+            <ul className="mt-4 space-y-1 text-left inline-block text-xs text-slate-500">
               <li className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />Banners (728×90, 300×250, 160×600)</li>
               <li className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />Social Media Kit (ZIP)</li>
               <li className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0" />AutoLenis One-Pager (PDF)</li>

@@ -122,7 +122,7 @@ interface Props {
 type ModalType =
   | "approve" | "reject" | "suspend" | "reactivate"
   | "note" | "profile-edit" | "compliance-flag" | "compliance-resolve"
-  | "clawback" | "payout";
+  | "clawback" | "payout" | "settle-payout";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -267,8 +267,11 @@ function ConfirmModal({
 
 const PAYOUT_METHODS = ["ACH Transfer", "Zelle", "PayPal", "Check", "Venmo", "Other"] as const;
 
-function PayoutModal({ amountCents, onCancel, onConfirm }: {
+function PayoutModal({ amountCents, description, onCancel, onConfirm }: {
   amountCents: number;
+  /** Overrides the default single-commission sentence (used by the
+   *  settle-request flow, where the final amount is recomputed server-side). */
+  description?: React.ReactNode;
   onCancel: () => void;
   onConfirm: (paymentMethod: string, paymentReference: string, note: string) => Promise<void>;
 }) {
@@ -295,7 +298,9 @@ function PayoutModal({ amountCents, onCancel, onConfirm }: {
           <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 ml-2"><X size={18} /></button>
         </div>
         <p className="text-slate-600 text-sm mb-4">
-          Record payout of <strong>{fmtCents(amountCents)}</strong> for this approved commission. The affiliate is notified once recorded.
+          {description ?? (
+            <>Record payout of <strong>{fmtCents(amountCents)}</strong> for this approved commission. The affiliate is notified once recorded.</>
+          )}
         </p>
         {error && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 text-red-700 text-sm mb-3">{error}</div>}
         <form onSubmit={submit} className="space-y-3">
@@ -454,6 +459,8 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
   const [copiedCode, setCopiedCode] = useState(false);
   // Target commission for payout / clawback actions.
   const [commissionTarget, setCommissionTarget] = useState<{ id: string; amountCents: number } | null>(null);
+  // Decision 3 — a PENDING self-serve payout request the admin settles.
+  const [payoutTarget, setPayoutTarget] = useState<{ id: string; amountCents: number } | null>(null);
 
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
@@ -478,6 +485,25 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
     handleSuccess(successMsg);
   }
 
+  // Payout-request settlement — P1-3 (review): the server recomputes the
+  // settled amount from surviving claims (reversed-after-request commissions
+  // are excluded) and may cancel an all-reversed request. The person moving
+  // real money reads THIS toast, so it must carry the actual outcome, never
+  // the stale requested amount.
+  async function doSettlePayout(payoutId: string, requestedCents: number, body: Record<string, string>) {
+    const result = await api.post<{ amountCents: number; cancelled: boolean }>(
+      "/api/admin/affiliates/payouts/" + payoutId + "/mark-paid", body);
+    if (result.cancelled) {
+      handleSuccess("Payout request CANCELLED — every claimed commission was reversed. Nothing to pay.");
+    } else if (result.amountCents !== requestedCents) {
+      handleSuccess(
+        `Settled at ${fmtCents(result.amountCents)} — lower than the requested ${fmtCents(requestedCents)} because reversed commissions were excluded. Pay the settled amount.`,
+      );
+    } else {
+      handleSuccess("Payout request settled — affiliate notified");
+    }
+  }
+
   function copyReferralCode() {
     void navigator.clipboard.writeText(affiliate.referralCode).then(() => {
       setCopiedCode(true);
@@ -500,8 +526,13 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
     { id: "admin-actions", label: "⚙ Admin Actions" },
   ];
 
-  // Commission totals
-  const totalEarned = commissions.reduce((s, c) => s + c.amountCents, 0);
+  // Commission totals. "Earned" follows the shared ledger rule (M1, inlined —
+  // client components can't import the server-side commission service):
+  // PENDING+APPROVED+PAID rows plus negative REVERSED clawback offsets;
+  // positive in-place-REVERSED and REJECTED rows never count.
+  const totalEarned = commissions
+    .filter(c => ["PENDING", "APPROVED", "PAID"].includes(c.status) || (c.status === "REVERSED" && c.amountCents < 0))
+    .reduce((s, c) => s + c.amountCents, 0);
   const totalPending = commissions.filter(c => c.status === "PENDING").reduce((s, c) => s + c.amountCents, 0);
   const totalPaid = commissions.filter(c => c.status === "PAID").reduce((s, c) => s + c.amountCents, 0);
   const totalReversed = commissions.filter(c => c.status === "REVERSED").reduce((s, c) => s + c.amountCents, 0);
@@ -520,10 +551,10 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
       {/* Modals */}
       {modal === "approve" && (
         <ConfirmModal
-          title="Approve Affiliate" description={"Approve " + affiliate.email + " as an active affiliate?"}
-          submitLabel="Approve Affiliate" requireReason={false}
+          title="Restore Access" description={"Restore full affiliate access for " + affiliate.email + "? (Accounts are auto-approved at registration; this reverses a suspension or revocation.)"}
+          submitLabel="Restore Access" requireReason={false}
           onCancel={() => setModal(null)}
-          onConfirm={async (reason) => { await doAction("approve", { reason: reason || "Approved from admin command center" }, "Affiliate approved"); }}
+          onConfirm={async (reason) => { await doAction("approve", { reason: reason || "Access restored from admin command center" }, "Affiliate access restored"); }}
         />
       )}
       {modal === "reject" && (
@@ -587,6 +618,23 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
           onCancel={() => { setModal(null); setCommissionTarget(null); }}
           onConfirm={async (paymentMethod, paymentReference, note) => {
             await doCommissionAction(commissionTarget.id, "mark-paid", { paymentMethod, paymentReference, ...(note ? { note } : {}) }, "Payout recorded — affiliate notified");
+          }}
+        />
+      )}
+      {modal === "settle-payout" && payoutTarget && (
+        <PayoutModal
+          amountCents={payoutTarget.amountCents}
+          description={
+            <>
+              Settle this payout request (requested: <strong>{fmtCents(payoutTarget.amountCents)}</strong>).
+              The final amount is recomputed at settlement from the commissions still attached —
+              any reversed since the request are excluded, so it can be lower (or the request may
+              cancel entirely). <strong>Confirm the settled amount in the result before sending money.</strong>
+            </>
+          }
+          onCancel={() => { setModal(null); setPayoutTarget(null); }}
+          onConfirm={async (paymentMethod, paymentReference, note) => {
+            await doSettlePayout(payoutTarget.id, payoutTarget.amountCents, { paymentMethod, paymentReference, ...(note ? { note } : {}) });
           }}
         />
       )}
@@ -962,7 +1010,18 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
                     <span className="text-xs text-slate-500">{p.method ?? "—"}</span>
                     <span className="text-xs text-slate-500">{fmtDate(p.periodStart)} – {fmtDate(p.periodEnd)}</span>
                     <span className="text-xs text-slate-500">{fmtDate(p.requestedAt)}</span>
-                    <span className="text-xs text-slate-500">{fmtDate(p.processedAt)}</span>
+                    {p.status === "PENDING" ? (
+                      <button
+                        type="button"
+                        onClick={() => { setPayoutTarget({ id: p.id, amountCents: p.amountCents }); setModal("settle-payout"); }}
+                        className="justify-self-start text-xs font-semibold text-al-primary hover:underline"
+                        data-testid={"settle-payout-" + p.id}
+                      >
+                        Mark paid
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-500">{fmtDate(p.processedAt)}</span>
+                    )}
                   </div>
                 ))}
               </div>

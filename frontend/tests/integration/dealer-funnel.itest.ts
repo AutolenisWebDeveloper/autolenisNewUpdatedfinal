@@ -8,9 +8,10 @@ import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { PrismaClient } from "@prisma/client";
 import {
-  issueInvitationToken,
+  createInvitation,
   validateInvitationToken,
   consumeInvitationToken,
+  refreshInvitationToken,
   expireStaleInvitations,
 } from "@/lib/services/dealer-recruitment/invitation-token.service";
 import { hashToken } from "@/lib/services/dealer-recruitment/account-claim.service";
@@ -27,6 +28,22 @@ if (!/autolenis_e2e/.test(url)) {
 const prisma = new PrismaClient();
 let userId = "";
 let dealerId = "";
+/** DealerInvitation.dealerId is @unique, so every consumed invitation needs its own dealer. */
+const throwawayDealerIds: string[] = [];
+const throwawayUserIds: string[] = [];
+
+async function newDealer(): Promise<string> {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const user = await prisma.user.create({
+    data: { email: `throwaway-${suffix}@example.test`, role: "DEALER", supabaseId: `throwaway-${suffix}` },
+  });
+  const dealer = await prisma.dealer.create({
+    data: { userId: user.id, dealershipName: "Throwaway Motors", status: "PENDING" },
+  });
+  throwawayUserIds.push(user.id);
+  throwawayDealerIds.push(dealer.id);
+  return dealer.id;
+}
 
 before(async () => {
   const user = await prisma.user.create({
@@ -46,103 +63,111 @@ before(async () => {
 after(async () => {
   await prisma.inventoryItem.deleteMany({ where: { dealerId } });
   await prisma.dealerInvitation.deleteMany({ where: { email: { contains: "@example.test" } } });
-  await prisma.dealer.deleteMany({ where: { id: dealerId } });
-  await prisma.user.deleteMany({ where: { id: userId } });
+  await prisma.dealer.deleteMany({ where: { id: { in: [dealerId, ...throwawayDealerIds] } } });
+  await prisma.user.deleteMany({ where: { id: { in: [userId, ...throwawayUserIds] } } });
   await prisma.$disconnect();
 });
 
 // ── D3: invitation tokens ───────────────────────────────────────────────────
-test("D3: an invitation persists only the HASH, never the raw token", async () => {
-  const issued = issueInvitationToken();
-  const inv = await prisma.dealerInvitation.create({
-    data: {
-      dealershipName: "Hash Motors",
-      contactName: "Pat",
-      email: `hash-${Date.now()}@example.test`,
-      tokenHash: issued.tokenHash,
-      expiresAt: issued.expiresAt,
-      invitedBy: "admin-e2e",
-      status: "PENDING",
-    },
+//
+// Written against whichever physical schema the local database actually has, so
+// the same suite proves the invite path on the pre-migration shape production
+// runs today AND on the post-migration shape. Only the columns that exist are
+// ever read (an unqualified Prisma select would fail with P2022 on the former).
+
+/** Only the columns that exist in every schema generation. */
+const INV_SELECT = { id: true, status: true, expiresAt: true } as const;
+
+function seedEmail(tag: string): string {
+  return `${tag}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}@example.test`;
+}
+
+async function newInvitation(tag: string) {
+  return createInvitation({
+    dealershipName: `${tag} Motors`,
+    contactName: "Pat",
+    email: seedEmail(tag),
+    invitedBy: "admin-e2e",
   });
+}
+
+test("D3: an invitation persists only the HASH, never the raw token", async () => {
+  const inv = await newInvitation("hash");
   const row = await prisma.dealerInvitation.findUniqueOrThrow({ where: { id: inv.id } });
-  assert.equal(row.token, null, "raw token must never be persisted");
-  assert.equal(row.tokenHash, hashToken(issued.rawToken));
-  assert.notEqual(row.tokenHash, issued.rawToken);
+  assert.equal(row.tokenHash, hashToken(inv.rawToken), "the hash must be persisted");
+  assert.notEqual(row.tokenHash, inv.rawToken);
+  assert.equal(row.token, null, "the raw token must never be persisted");
 });
 
-test("D3: a valid raw token validates by hash", async () => {
-  const issued = issueInvitationToken();
-  await prisma.dealerInvitation.create({
-    data: {
-      dealershipName: "Valid Motors", contactName: "Sam",
-      email: `valid-${Date.now()}@example.test`,
-      tokenHash: issued.tokenHash, expiresAt: issued.expiresAt,
-      invitedBy: "admin-e2e", status: "PENDING",
-    },
-  });
-  const v = await validateInvitationToken(issued.rawToken);
+test("D3: a valid raw token validates", async () => {
+  const inv = await newInvitation("valid");
+  const v = await validateInvitationToken(inv.rawToken);
   assert.equal(v.ok, true);
 });
 
 test("D3: a consumed token cannot be reused, and only ONE concurrent claim wins", async () => {
-  const issued = issueInvitationToken();
-  const inv = await prisma.dealerInvitation.create({
-    data: {
-      dealershipName: "Once Motors", contactName: "Alex",
-      email: `once-${Date.now()}@example.test`,
-      tokenHash: issued.tokenHash, expiresAt: issued.expiresAt,
-      invitedBy: "admin-e2e", status: "PENDING",
-    },
-  });
+  const inv = await newInvitation("once");
+  const winner = await newDealer();
 
-  // Two concurrent consumes of the same invitation.
   const [a, b] = await Promise.all([
-    consumeInvitationToken(inv.id, dealerId),
-    consumeInvitationToken(inv.id, dealerId),
+    consumeInvitationToken(inv.id, winner),
+    consumeInvitationToken(inv.id, winner),
   ]);
   assert.equal([a, b].filter(Boolean).length, 1, "exactly one claim may win");
 
-  const row = await prisma.dealerInvitation.findUniqueOrThrow({ where: { id: inv.id } });
+  const row = await prisma.dealerInvitation.findUniqueOrThrow({
+    where: { id: inv.id }, select: INV_SELECT,
+  });
   assert.equal(row.status, "ACCEPTED");
-  assert.ok(row.consumedAt, "consumedAt must be stamped");
 
-  const v = await validateInvitationToken(issued.rawToken);
+  assert.ok(
+    (await prisma.dealerInvitation.findUniqueOrThrow({ where: { id: inv.id } })).consumedAt,
+    "consumedAt must be stamped",
+  );
+
+  const v = await validateInvitationToken(inv.rawToken);
   assert.equal(v.ok, false);
   assert.equal((v as { reason: string }).reason, "consumed");
 });
 
 test("D3: an expired token is rejected", async () => {
-  const issued = issueInvitationToken();
-  await prisma.dealerInvitation.create({
-    data: {
-      dealershipName: "Stale Motors", contactName: "Jo",
-      email: `stale-${Date.now()}@example.test`,
-      tokenHash: issued.tokenHash,
-      expiresAt: new Date(Date.now() - 1000),
-      invitedBy: "admin-e2e", status: "PENDING",
-    },
+  const inv = await newInvitation("stale");
+  await prisma.dealerInvitation.updateMany({
+    where: { id: inv.id }, data: { expiresAt: new Date(Date.now() - 1000) },
   });
-  const v = await validateInvitationToken(issued.rawToken);
+  const v = await validateInvitationToken(inv.rawToken);
   assert.equal(v.ok, false);
   assert.equal((v as { reason: string }).reason, "expired");
 });
 
 test("D3: the sweep expires PENDING rows past expiresAt — the lazy-expiry gap", async () => {
-  const issued = issueInvitationToken();
-  const inv = await prisma.dealerInvitation.create({
-    data: {
-      dealershipName: "Sweep Motors", contactName: "Kim",
-      email: `sweep-${Date.now()}@example.test`,
-      tokenHash: issued.tokenHash,
-      expiresAt: new Date(Date.now() - 60_000),
-      invitedBy: "admin-e2e", status: "PENDING",
-    },
+  const inv = await newInvitation("sweep");
+  await prisma.dealerInvitation.updateMany({
+    where: { id: inv.id }, data: { expiresAt: new Date(Date.now() - 60_000) },
   });
   const n = await expireStaleInvitations();
   assert.ok(n >= 1);
-  const row = await prisma.dealerInvitation.findUniqueOrThrow({ where: { id: inv.id } });
+  const row = await prisma.dealerInvitation.findUniqueOrThrow({
+    where: { id: inv.id }, select: INV_SELECT,
+  });
   assert.equal(row.status, "EXPIRED", "a PENDING row past expiry must not stay PENDING");
+});
+
+test("D3: a resend rotates the token — the previous link stops resolving", async () => {
+  const inv = await newInvitation("resend");
+  const rotated = await refreshInvitationToken(inv.id);
+  assert.ok(rotated, "a PENDING invitation is resendable");
+
+  const oldLink = await validateInvitationToken(inv.rawToken);
+  assert.equal(oldLink.ok, false, "the superseded link must not still work");
+  const newLink = await validateInvitationToken(rotated.rawToken);
+  assert.equal(newLink.ok, true);
+});
+
+test("D3: a resend cannot resurrect an ACCEPTED invitation", async () => {
+  const inv = await newInvitation("accepted");
+  assert.equal(await consumeInvitationToken(inv.id, await newDealer()), true);
+  assert.equal(await refreshInvitationToken(inv.id), null, "an accepted invitation is not resendable");
 });
 
 // ── D2: lifecycle ───────────────────────────────────────────────────────────

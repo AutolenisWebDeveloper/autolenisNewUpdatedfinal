@@ -1,6 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { prisma } from '@/lib/prisma';
+import { ledgerEarnedWhere } from '@/lib/services/affiliate/commission.service';
 import type { LifecycleStage } from '@/lib/types/crm';
 
 // ----------------------------------------------------------------------------
@@ -474,48 +475,49 @@ export class AnalyticsService {
   // AFFILIATES — referrals, conversion, total commission
   // ────────────────────────────────────────────────────────────────────────
   async getAffiliateMetrics(): Promise<AffiliateMetricsRow[]> {
-    const affiliates = await prisma.affiliate.findMany({
-      where: { status: { in: ['ACTIVE', 'PENDING'] } },
-      select: {
-        id: true,
-        referralCode: true,
-        status: true,
-        commissions: {
-          select: { amountCents: true, status: true },
-        },
-      },
-    });
+    // D11 — all aggregation happens in the database. The old version loaded
+    // every affiliate with their ENTIRE commission history plus the whole
+    // affiliate_referrals table into JS and reduced money client-side.
+    const [affiliates, commissionSums, referralsSent, referralsConverted] = await Promise.all([
+      prisma.affiliate.findMany({
+        where: { status: { in: ['ACTIVE', 'PENDING'] } },
+        select: { id: true, referralCode: true, status: true },
+      }),
+      prisma.commission.groupBy({
+        by: ['affiliateId', 'status'],
+        // Shared ledger rule (M1): live rows + negative REVERSED clawback
+        // offsets. PENDING groups are excluded below — not yet earned.
+        where: ledgerEarnedWhere(),
+        _sum: { amountCents: true },
+      }),
+      prisma.affiliateReferral.groupBy({ by: ['affiliateId'], _count: { _all: true } }),
+      prisma.affiliateReferral.groupBy({
+        by: ['affiliateId'],
+        where: { firstDealAt: { not: null } },
+        _count: { _all: true },
+      }),
+    ]);
 
-    // AffiliateReferral keeps the sent-vs-converted split.
-    const referrals = await prisma.affiliateReferral.findMany({
-      select: { affiliateId: true, firstDealAt: true },
-    });
-
-    const refsByAffiliate = new Map<string, { sent: number; converted: number }>();
-    for (const r of referrals) {
-      const c = refsByAffiliate.get(r.affiliateId) ?? { sent: 0, converted: 0 };
-      c.sent += 1;
-      if (r.firstDealAt) c.converted += 1;
-      refsByAffiliate.set(r.affiliateId, c);
+    const earnedByAffiliate = new Map<string, number>();
+    for (const g of commissionSums) {
+      if (g.status === 'PENDING') continue; // not yet earned
+      earnedByAffiliate.set(g.affiliateId, (earnedByAffiliate.get(g.affiliateId) ?? 0) + (g._sum.amountCents ?? 0));
     }
+    const sentByAffiliate = new Map(referralsSent.map((g) => [g.affiliateId, g._count._all]));
+    const convertedByAffiliate = new Map(referralsConverted.map((g) => [g.affiliateId, g._count._all]));
 
     return affiliates
       .map((a) => {
-        const r = refsByAffiliate.get(a.id) ?? { sent: 0, converted: 0 };
-        // Only count APPROVED + PAID commissions toward earnings — PENDING is
-        // not yet earned, REVERSED / REJECTED were clawed back.
-        const commissionCents = a.commissions
-          .filter((c) => c.status === 'APPROVED' || c.status === 'PAID')
-          .reduce((sum, c) => sum + c.amountCents, 0);
-
+        const sent = sentByAffiliate.get(a.id) ?? 0;
+        const converted = convertedByAffiliate.get(a.id) ?? 0;
         return {
           id: a.id,
           referral_code: a.referralCode,
           status: a.status,
-          referrals_sent: r.sent,
-          referrals_converted: r.converted,
-          conversion_rate: pct(r.converted, r.sent),
-          commission_cents: commissionCents,
+          referrals_sent: sent,
+          referrals_converted: converted,
+          conversion_rate: pct(converted, sent),
+          commission_cents: earnedByAffiliate.get(a.id) ?? 0,
         };
       })
       .sort((a, b) => b.commission_cents - a.commission_cents);
