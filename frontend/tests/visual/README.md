@@ -25,15 +25,16 @@ VISUAL_BASE_URL=https://<preview> pnpm test:visual
 Chromium is preinstalled in the CI/agent image; set `PW_CHROMIUM_PATH` if the
 default resolution fails. Do **not** run `playwright install`.
 
-## Two gates: pixels and copy
+## Three gates: pixels, copy, and metadata
 
-Each marketing page is asserted twice, because the two gates catch different
-things and neither covers the other.
+Each marketing page is asserted three times, because the gates catch different
+things and none covers the others.
 
 | Gate | Baseline | Catches | Blind to |
 | --- | --- | --- | --- |
 | `toHaveScreenshot` | `marketing-<page>-<project>.png` | layout movement, colour, spacing, token drift | an in-place copy edit small enough to fall under the tolerance |
-| `toMatchSnapshot` | `marketing-<page>-<project>.txt` | any change to visible copy, exactly | layout, colour, spacing |
+| `toMatchSnapshot` (text) | `marketing-<page>-<project>.txt` | any change to visible copy, exactly | layout, colour, spacing; everything a visitor never sees rendered |
+| `toMatchSnapshot` (metadata) | `marketing-<page>-meta-<project>.txt` | `<title>`, meta description, canonical, robots, OG/Twitter tags, image `alt`, `aria-label`s, JSON-LD — exactly | layout, colour, visible body copy |
 
 **Why the text gate exists.** The pixel gate runs at `maxDiffPixelRatio: 0.001`,
 a tolerance that exists to absorb anti-aliasing noise. That same tolerance also
@@ -51,17 +52,34 @@ Text is compared exactly and has no tolerance to hide behind. Changing copy is
 fine — it just has to be an intentional, reviewed baseline update, exactly like
 changing a pixel.
 
-**What the text gate does NOT cover.** It reads `document.body.innerText`, i.e.
-the copy a visitor actually sees. Image `alt` text, `aria-label`s, `<title>`,
-meta/OpenGraph tags and JSON-LD are outside it, and as of this writing nothing
-else freezes those for the marketing tier either (`test:seo` covers article
-bodies, CTAs and internal links, not page metadata). Treat that as a known gap,
-not as covered.
+**Why the metadata gate exists (added 2026-08-29).** A change to image `alt`
+text, an `aria-label`, `<title>`, the meta description, the canonical, an
+OG/Twitter tag or JSON-LD is a **0.000% pixel diff** and is invisible to
+`innerText` — strictly blinder than the `a3e4ec2` case that motivated the text
+gate. Those surfaces carry product claims to search engines and screen readers
+(FAQ answers ride in JSON-LD, business identity in LocalBusiness, page claims in
+descriptions), so they are frozen the same way. Proven end-to-end: with local
+baselines green, a one-word `alt` edit on `/for-buyers` passed the screenshot
+assertion AND the text assertion and was caught only by the metadata assertion,
+on exactly that page, both viewports, with the other eight snapshots green.
+
+Two normalisations, both deliberate: the app's own origin
+(`NEXT_PUBLIC_APP_URL`) is replaced with `{origin}` because it is deployment
+config, not copy — freezing it would break the baseline the moment CI supplies a
+real app URL, while the frozen PATH of every canonical/OG URL still catches a
+misdirected link; and OG/Twitter tags are attribute-sorted because Next.js emits
+them from an object, so their order is a framework internal.
+
+**What is STILL not frozen**, stated so it reads as a decision, not coverage:
+link `href`s (navigation targets), the `lang` attribute, `data-*` attributes,
+non-marketing public pages (city/state landing pages, `/pricing`, `/inventory`),
+and the auth-gated dashboard tier. `robots.txt` and sitemaps are `test:seo`'s
+jurisdiction.
 
 **The capture settles before it reads.** The cookie-consent banner mounts
 client-side *after* `networkidle`, a ~283-character swing that appears in some
-runs and not others. The helper polls `document.body.innerText` until two
-consecutive reads match, which makes the capture deterministic (verified: three
+runs and not others. Both text and metadata helpers poll their extraction until two
+consecutive reads match (the banner also carries `aria-label`s), which makes the capture deterministic (verified: three
 consecutive runs byte-identical on all five pages, both viewports).
 
 ## Only CI results are meaningful — never judge this suite locally
@@ -149,7 +167,7 @@ compare-only path and fails on the missing snapshots. Delete all of them, or
 regenerate locally with `pnpm test:visual:update` on the pinned image and commit
 the result.
 
-### Updating the COPY baseline only
+### Updating the COPY or METADATA baselines only
 
 `pnpm test:visual:update` rewrites **both** the `.txt` and the `.png` baselines.
 Off-runner, the regenerated PNGs are wrong (local fonts), so restore them and

@@ -1,0 +1,249 @@
+[title]
+AutoLenis — Where Dealers Compete for You | Car Buying Concierge | AutoLenis
+
+[meta:description]
+Verified dealers compete for your business in a private 48-hour auction. Compare every offer side by side. Choose the best deal. AutoLenis is the buyer-first car buying concierge platform.
+
+[canonical]
+{origin}
+
+[robots]
+index, follow
+
+[social]
+og:description = Verified dealers compete for your business. Compare every offer. Choose the best deal. Complete digital concierge.
+og:image = {origin}/og-image.jpg
+og:image:alt = AutoLenis — Where Dealers Compete for You | Car Buying Concierge
+og:image:height = 630
+og:image:width = 1200
+og:site_name = AutoLenis
+og:title = AutoLenis — Where Dealers Compete for You
+og:type = website
+og:url = {origin}
+twitter:card = summary_large_image
+twitter:description = Verified dealers compete for your business. Compare every offer. Choose the best deal. Complete digital concierge.
+twitter:image = {origin}/og-image.jpg
+twitter:site = @autolenis
+twitter:title = AutoLenis — Where Dealers Compete for You
+
+[img:alt]
+
+[aria-label]
+- a: AutoLenis home
+- button: Toggle navigation
+- button: Open chat
+- a: AutoLenis home
+- a: Facebook
+- a: Instagram
+- a: X
+- a: LinkedIn
+- section: Notifications alt+T
+- div: Cookie consent
+- button: Close banner
+
+[json-ld]
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": [
+        "Organization",
+        "LocalBusiness",
+        "FinancialService"
+      ],
+      "@id": "{origin}/#organization",
+      "name": "AutoLenis",
+      "url": "{origin}",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "{origin}/logo.png",
+        "width": 400,
+        "height": 120
+      },
+      "foundingDate": "2024",
+      "founder": {
+        "@id": "{origin}/#founder"
+      },
+      "makesOffer": [
+        {
+          "@id": "{origin}/#deposit-service"
+        },
+        {
+          "@id": "{origin}/#service-fee-offer"
+        }
+      ],
+      "hasOfferCatalog": {
+        "@type": "OfferCatalog",
+        "name": "AutoLenis Car Buying Concierge Services",
+        "itemListElement": [
+          {
+            "@id": "{origin}/#car-buying-service"
+          }
+        ]
+      },
+      "knowsAbout": [
+        "Car Buying Concierge",
+        "Automotive Buying Concierge",
+        "Vehicle Pre-Qualification",
+        "Dealer Auctions",
+        "Automotive Finance",
+        "Vehicle Trade-In"
+      ],
+      "sameAs": [
+        "https://www.facebook.com/autolenis",
+        "https://www.instagram.com/autolenis",
+        "https://twitter.com/autolenis",
+        "https://www.linkedin.com/company/autolenis"
+      ]
+    },
+    {
+      "@type": "Person",
+      "@id": "{origin}/#founder",
+      "name": "Markist Athelus",
+      "jobTitle": "Founder & CEO",
+      "worksFor": {
+        "@id": "{origin}/#organization"
+      },
+      "url": "{origin}/about",
+      "knowsAbout": [
+        "Fintech",
+        "Automotive Finance",
+        "Car Buying",
+        "Automotive Buying Concierge",
+        "Vehicle Marketplace Platforms"
+      ],
+      "sameAs": [
+        "{origin}/about"
+      ]
+    },
+    {
+      "@type": "Service",
+      "@id": "{origin}/#car-buying-service",
+      "name": "Car Buying Concierge Service",
+      "serviceType": "Automotive Buying Concierge",
+      "provider": {
+        "@id": "{origin}/#organization"
+      },
+      "areaServed": {
+        "@type": "Country",
+        "name": "United States"
+      },
+      "url": "{origin}/how-it-works",
+      "description": "AutoLenis connects pre-qualified buyers with verified dealers who compete in a private 48-hour auction. Buyers save an average of $2,300.",
+      "mainEntityOfPage": {
+        "@id": "{origin}/how-it-works#how-it-works"
+      }
+    },
+    {
+      "@type": "Offer",
+      "@id": "{origin}/#deposit-service",
+      "name": "Auction Access Deposit",
+      "price": "99.00",
+      "priceCurrency": "USD",
+      "description": "One-time $99 Auction Access Deposit that activates a private 48-hour dealer auction for the buyer. It is refundable on request if no competitive offer is received, and is credited toward the $499 AutoLenis concierge fee when the buyer proceeds (leaving $400 due).",
+      "offeredBy": {
+        "@id": "{origin}/#organization"
+      },
+      "priceValidUntil": "2027-12-31",
+      "availability": "https://schema.org/InStock"
+    },
+    {
+      "@type": "Offer",
+      "@id": "{origin}/#service-fee-offer",
+      "name": "AutoLenis Service Fee",
+      "price": "499.00",
+      "priceCurrency": "USD",
+      "description": "Full AutoLenis concierge fee covering dealer auction management, offer review, contract coordination, and purchase facilitation.",
+      "offeredBy": {
+        "@id": "{origin}/#organization"
+      },
+      "priceValidUntil": "2027-12-31",
+      "availability": "https://schema.org/InStock"
+    },
+    {
+      "@type": "WebSite",
+      "@id": "{origin}/#website",
+      "url": "{origin}",
+      "name": "AutoLenis",
+      "publisher": {
+        "@id": "{origin}/#organization"
+      },
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "{origin}/inventory?search={search_term_string}",
+        "query-input": "required name=search_term_string"
+      },
+      "inLanguage": "en-US"
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "{origin}/faq#faq-page",
+      "url": "{origin}/faq",
+      "name": "AutoLenis FAQ",
+      "isPartOf": {
+        "@id": "{origin}/#website"
+      },
+      "about": {
+        "@id": "{origin}/#car-buying-service"
+      },
+      "publisher": {
+        "@id": "{origin}/#organization"
+      }
+    },
+    {
+      "@type": "HowTo",
+      "@id": "{origin}/how-it-works#how-it-works",
+      "url": "{origin}/how-it-works",
+      "name": "How AutoLenis Works",
+      "isPartOf": {
+        "@id": "{origin}/#website"
+      },
+      "about": {
+        "@id": "{origin}/#car-buying-service"
+      },
+      "publisher": {
+        "@id": "{origin}/#organization"
+      }
+    }
+  ]
+}
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "AutoLenis",
+  "url": "{origin}",
+  "description": "AutoLenis is a car buying concierge platform where 8 local dealers compete in private 48-hour auctions for qualified buyers anywhere in the United States.",
+  "areaServed": "US",
+  "founder": {
+    "@type": "Person",
+    "name": "Markist"
+  },
+  "serviceType": "Car Buying Concierge"
+}
+{
+  "@context": "https://schema.org",
+  "@type": "LocalBusiness",
+  "name": "AutoLenis, Inc.",
+  "url": "{origin}",
+  "image": "{origin}/og-image.jpg",
+  "telephone": "+1-469-535-9785",
+  "address": {
+    "@type": "PostalAddress",
+    "streetAddress": "12800 Westridge Blvd Suite 114",
+    "addressLocality": "Frisco",
+    "addressRegion": "TX",
+    "postalCode": "75035",
+    "addressCountry": "US"
+  },
+  "geo": {
+    "@type": "GeoCoordinates",
+    "latitude": 33.1507,
+    "longitude": -96.8236
+  },
+  "areaServed": {
+    "@type": "State",
+    "name": "Texas"
+  },
+  "description": "Buyer-side car-buying concierge serving the Texas market — reverse auctions where dealers compete for your business.",
+  "priceRange": "$$"
+}
