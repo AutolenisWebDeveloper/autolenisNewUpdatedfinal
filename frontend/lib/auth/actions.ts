@@ -49,7 +49,11 @@ function getAdminLinkGenerator(): GenerateLinkAdmin {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-// Ensure Prisma user + buyer record exists for authenticated Supabase user
+// Ensure Prisma user + buyer record exists for authenticated Supabase user.
+// M6 — referralCode (from Supabase user_metadata) makes every provisioning
+// path record affiliate attribution: before, only the /auth/callback path
+// attributed, so a buyer provisioned by the sign-in or accept-terms safety
+// nets silently lost their referrer.
 async function ensurePrismaUser(
   supabaseUserId: string,
   email: string,
@@ -59,9 +63,16 @@ async function ensurePrismaUser(
   lastName?: string,
   termsAcceptedAt?: string | null,
   termsVersion?: string | null,
+  referralCode?: string | null,
 ) {
   const existing = await prisma.user.findUnique({ where: { supabaseId: supabaseUserId } });
-  if (existing) return existing;
+  if (existing) {
+    if (role === UserRole.BUYER && referralCode) {
+      // Idempotent (upsert + self-referral guard inside); never throws.
+      await recordAffiliateAttribution(existing.id, referralCode);
+    }
+    return existing;
+  }
 
   // ── Upgrade existing guest user in place ──────────────────────────────────
   // /api/public/request-vehicle may have pre-created a User with a
@@ -100,6 +111,10 @@ async function ensurePrismaUser(
           ...(termsVersion ? { termsVersion } : {}),
         },
       }).catch(err => logger.error("[ensurePrismaUser] guest buyer flip failed:", err));
+    }
+    // M6 — a guest-upgraded buyer keeps their referrer too.
+    if (role === UserRole.BUYER && referralCode) {
+      await recordAffiliateAttribution(upgraded.id, referralCode);
     }
     return upgraded;
   }
@@ -189,6 +204,12 @@ async function ensurePrismaUser(
     }
   }
 
+  // M6 — record attribution for a freshly-provisioned buyer, whatever path
+  // provisioned them. Idempotent and non-throwing.
+  if (role === UserRole.BUYER && referralCode) {
+    await recordAffiliateAttribution(user.id, referralCode);
+  }
+
   return user;
 }
 
@@ -217,6 +238,15 @@ async function recordAffiliateAttribution(userId: string, referralCode: string) 
         referralCode,
       },
       update: { referralCode },
+    });
+
+    // M14 — mirror the attribution onto the Buyer row (set-if-null:
+    // first-touch wins). Buyer.affiliateId was never written by the referral
+    // chain, which left the inactive-affiliate cron's buyer-activity signal
+    // permanently dead and admin KPIs empty.
+    await prisma.buyer.updateMany({
+      where: { userId, affiliateId: null },
+      data: { affiliateId: affiliate.id },
     });
 
     // Group 8 (8A) — close the click→conversion loop: mark the most recent
@@ -255,7 +285,15 @@ export async function signUpAction(formData: FormData): Promise<AuthResult> {
   const lastName = (formData.get("lastName") as string)?.trim();
   const planInput = (formData.get("plan") as string)?.toUpperCase()?.trim();
   const plan: BuyerPlan = planInput === "PREMIUM" ? BuyerPlan.PREMIUM : BuyerPlan.STANDARD;
-  const referralCode = (formData.get("referralCode") as string)?.trim() || null;
+  // M6 — server-side cookie fallback: the client JS copies the affiliate_ref
+  // cookie into the form field, but with JS interference or a cleared field the
+  // attribution silently dropped. The cookie set by proxy.ts is authoritative
+  // when the form carries no code.
+  let referralCode = (formData.get("referralCode") as string)?.trim() || null;
+  if (!referralCode) {
+    const { cookies } = await import("next/headers");
+    referralCode = (await cookies()).get("affiliate_ref")?.value?.trim() || null;
+  }
   const agreeTerms = formData.get("agreeTerms") === "on" || formData.get("agreeTerms") === "true";
   const agreePrivacy = formData.get("agreePrivacy") === "on" || formData.get("agreePrivacy") === "true";
   const redirectParam = getSafeBuyerRedirect((formData.get("redirect") as string)?.trim() || null);
@@ -413,8 +451,19 @@ export async function signInAction(formData: FormData): Promise<AuthResult> {
     redirect(getSafeDealerRedirect(rawRedirect) ?? "/dealer/dashboard");
   }
 
-  // Default: ensure buyer record exists then send to buyer dashboard
-  await ensurePrismaUser(data.user.id, email, UserRole.BUYER);
+  // Default: ensure buyer record exists then send to buyer dashboard.
+  // M6 — pass the signup referral code so safety-net provisioning attributes.
+  await ensurePrismaUser(
+    data.user.id,
+    email,
+    UserRole.BUYER,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    (data.user.user_metadata?.referralCode as string | undefined) ?? null,
+  );
   redirect(getSafeBuyerRedirect(rawRedirect) ?? "/buyer/dashboard");
 }
 
@@ -611,6 +660,8 @@ export async function acceptTermsAction(formData: FormData): Promise<void> {
         user.user_metadata?.lastName as string | undefined,
         now.toISOString(),
         termsVersion,
+        // M6 — safety-net provisioning must not lose the referrer.
+        (user.user_metadata?.referralCode as string | undefined) ?? null,
       );
     } catch (err) {
       logger.error("[acceptTermsAction] buyer provisioning failed:", err);

@@ -124,11 +124,40 @@ export async function processFeeCommission(params: {
 
   const referral = await prisma.affiliateReferral.findFirst({
     where: { referredUserId: buyer.userId },
-    select: { affiliateId: true },
+    // D6 — deterministic payee when one user somehow holds referral rows under
+    // two affiliates: first-touch wins (earliest signup), never planner order.
+    // The referred_user_id UNIQUE in migration 001 makes this structural; the
+    // orderBy is belt-and-braces until that migration is applied.
+    orderBy: { signedUpAt: "asc" },
+    select: { id: true, affiliateId: true, firstDealAt: true },
   });
   if (!referral) return; // buyer was not referred — nothing to pay
 
+  // D12 — replay guard for the conversion stamps below: if any commission for
+  // this qualifying event already exists, this event was already processed and
+  // a DLQ replay must not re-increment totalDeals. (Edge: a tree whose every
+  // level is SUSPENDED creates no commissions, so a replay after a stamp
+  // failure could re-increment — accepted; stats-only, no money impact.)
+  const alreadyProcessed = await prisma.commission.findFirst({
+    where: { qualifyingEventId: { startsWith: `${qualifyingEventId}-L` } },
+    select: { id: true },
+  });
+
   await walkCommissionTree(dealId, referral.affiliateId, qualifyingEventId, feeBasisCents);
+
+  if (!alreadyProcessed) {
+    // D12 — the conversion columns analytics read were never written anywhere:
+    // stamp first-deal-at once and count this deal.
+    await prisma.affiliateReferral
+      .update({
+        where: { id: referral.id },
+        data: {
+          ...(referral.firstDealAt ? {} : { firstDealAt: new Date() }),
+          totalDeals: { increment: 1 },
+        },
+      })
+      .catch((err) => logger.error("[commission] conversion stamp failed (stats only):", err));
+  }
 }
 
 // ─── The single ledger rule for "earned" money (M1 / decision 4) ─────────────

@@ -410,6 +410,8 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     response.cookies.set("affiliate_ref", refCode, {
       httpOnly: false, // readable by client JS for confirmation
       sameSite: "lax",
+      // M6 — attribution data never travels over plaintext in production.
+      secure: process.env.NODE_ENV === "production",
       maxAge: 60 * 60 * 24 * 30, // 30 days
       path: "/",
     });

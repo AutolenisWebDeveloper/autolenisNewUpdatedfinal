@@ -10,7 +10,6 @@
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { createClient } from "@supabase/supabase-js";
 import { successResponse, errorResponse } from "@/lib/auth/api";
 import { prisma } from "@/lib/prisma";
 import { UserRole, AffiliateStatus } from "@prisma/client";
@@ -55,13 +54,8 @@ async function uniqueReferralCode(): Promise<string> {
   throw new Error("Failed to generate unique referral code");
 }
 
-function adminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
-}
+// Service-role client comes from the shared adapter (lib/supabase-service) —
+// this route previously built its own duplicate client from the raw SDK.
 
 export async function POST(request: NextRequest) {
   let body: unknown;
@@ -92,17 +86,21 @@ export async function POST(request: NextRequest) {
 
   // 2. Resolve parent referral if provided
   let parentId: string | undefined;
+  let parentLevel = 0;
   if (referralCode) {
     const parent = await prisma.affiliate.findFirst({
       where: { referralCode: referralCode.toUpperCase(), status: AffiliateStatus.ACTIVE },
     });
-    if (parent) parentId = parent.id;
+    if (parent) {
+      parentId = parent.id;
+      parentLevel = parent.level;
+    }
   }
 
   // 3. Create Supabase user via admin API (bypasses rate limits)
   //    email_confirm: false → user must click link to verify
   //    bcrypt hashing handled by Supabase internally at cost factor 10+ (secure)
-  const admin = adminClient();
+  const admin = getServiceSupabase();
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email: normalizedEmail,
     password,
@@ -171,7 +169,9 @@ export async function POST(request: NextRequest) {
           userId: user.id,
           referralCode: referral,
           status: AffiliateStatus.ACTIVE, // auto-activate on email verification
-          level: parentId ? 2 : 1,
+          // R10/O7 — a recruit sits at the parent's depth + 1 (capped at 3;
+          // the commission walk pays at most 3 ancestor levels regardless).
+          level: parentId ? Math.min(parentLevel + 1, 3) : 1,
           parentId,
           promotionMethod,
           website: website || null,

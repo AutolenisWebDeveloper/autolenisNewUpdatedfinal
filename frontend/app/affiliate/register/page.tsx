@@ -81,9 +81,23 @@ export default function AffiliateRegisterPage() {
 
   const [form, setForm] = useState({
     firstName: "", lastName: "", email: "", password: "", confirmPassword: "",
-    website: "", promotionMethod: "", ftcDisclosure: false, termsAgreed: false,
+    website: "", promotionMethod: "", referralCode: "", ftcDisclosure: false, termsAgreed: false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // R10/O7 — pre-fill the recruiter's referral code from ?ref= or the
+  // proxy-set affiliate_ref cookie so the L2/L3 network can actually form.
+  // Visible + editable; the API validates it server-side.
+  useEffect(() => {
+    const fromQuery = new URLSearchParams(window.location.search).get("ref")?.trim();
+    const fromCookie = document.cookie
+      .split("; ")
+      .find((c) => c.startsWith("affiliate_ref="))
+      ?.split("=")[1]
+      ?.trim();
+    const code = fromQuery || fromCookie;
+    if (code) setForm((f) => (f.referralCode ? f : { ...f, referralCode: decodeURIComponent(code) }));
+  }, []);
 
   function validate() {
     const errs: Record<string, string> = {};
@@ -118,6 +132,7 @@ export default function AffiliateRegisterPage() {
           password: form.password,
           website: form.website.trim() || undefined,
           promotionMethod: form.promotionMethod,
+          referralCode: form.referralCode.trim() || undefined,
           ftcDisclosure: form.ftcDisclosure,
           termsAgreed: form.termsAgreed,
         }),
@@ -298,6 +313,15 @@ export default function AffiliateRegisterPage() {
                 {PROMOTION_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
               {errors.promotionMethod && <p className="text-[10px] text-red-500 mt-1">{errors.promotionMethod}</p>}
+            </div>
+            <div>
+              <label htmlFor="reg-referral-code" className="block text-xs font-bold text-[#4B5563] uppercase tracking-wider mb-2">
+                Referral code <span className="text-[#94A3B8] normal-case font-normal">(optional)</span>
+              </label>
+              <input id="reg-referral-code" type="text" data-testid="reg-referral-code-input"
+                className="w-full px-3.5 py-2.5 bg-[#F8F9FB] border border-[#E5E7EB] rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors"
+                placeholder="Recruited by another affiliate? Enter their code"
+                value={form.referralCode} onChange={(e) => setForm({ ...form, referralCode: e.target.value })} />
             </div>
             <div>
               <label className="flex items-start gap-3 cursor-pointer" data-testid="ftc-disclosure-label">
