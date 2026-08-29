@@ -155,13 +155,6 @@ const ADMIN_AUTH_ROUTES = [
 // routes are reachable without a session.
 const DEALER_AUTH_ROUTES = [...DEALER_PUBLIC_ROUTES];
 
-const PORTAL_PREFIXES = {
-  buyer: "/buyer",
-  dealer: "/dealer",
-  affiliate: "/affiliate/portal",
-  admin: "/admin",
-} as const;
-
 // Role to portal mapping
 const ROLE_PORTAL_MAP: Record<string, string> = {
   BUYER: "/buyer/dashboard",

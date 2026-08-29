@@ -1,17 +1,6 @@
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 
-export async function getOnboardingStatus(affiliateId: string) {
-  try {
-    const review = await prisma.affiliateOnboardingReview.findUnique({
-      where: { affiliateId },
-    });
-    return review?.status ?? "NOT_STARTED";
-  } catch {
-    return "NOT_STARTED"; // table not migrated yet
-  }
-}
-
 export async function ensureOnboardingRecord(affiliateId: string) {
   try {
     return await prisma.affiliateOnboardingReview.upsert({
