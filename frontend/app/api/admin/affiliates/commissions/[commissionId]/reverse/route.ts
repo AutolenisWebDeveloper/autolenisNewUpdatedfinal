@@ -8,6 +8,7 @@
 // FINANCE_ADMIN or SUPER_ADMIN only
 
 import { requirePermission } from "@/lib/auth/permissions";
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -79,6 +80,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     if (err instanceof TransitionConflictError) {
       return adminError("CONFLICT", "Commission is no longer reversible — a concurrent transition won", 409);
     }
+    logger.error("[commissions/reverse] transition failed:", err);
     return adminError("INTERNAL", "Reversal failed — nothing was changed", 500);
   }
 

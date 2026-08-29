@@ -10,6 +10,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { formatCentsAsUsd } from "@/lib/constants";
 import { z } from "zod";
 import {
   settleRequestedPayout,
@@ -57,31 +58,52 @@ export async function POST(request: NextRequest, { params }: Props) {
     throw err;
   }
 
+  // P1-1 — settlement recomputes from surviving claims: the audit, the
+  // notification, and the response all carry what ACTUALLY settled, and an
+  // all-reversed request is cancelled (REVERSED), not paid.
   await prisma.adminAuditLog.create({
     data: {
       adminId: admin.adminId, adminEmail: admin.email,
-      action: "PAYOUT_REQUEST_SETTLED", entityType: "AffiliatePayout", entityId: payoutId,
+      action: settlement.cancelled ? "PAYOUT_REQUEST_CANCELLED" : "PAYOUT_REQUEST_SETTLED",
+      entityType: "AffiliatePayout", entityId: payoutId,
       metadata: {
         affiliateId: settlement.affiliateId,
+        requestedAmountCents: payout.amountCents,
         amountCents: settlement.amountCents,
         commissionCount: settlement.commissionCount,
-        paymentMethod: parsed.data.paymentMethod,
-        paymentReference: parsed.data.paymentReference,
+        paymentMethod: settlement.cancelled ? null : parsed.data.paymentMethod,
+        paymentReference: settlement.cancelled ? null : parsed.data.paymentReference,
         note: parsed.data.note ?? null,
       },
     },
   }).catch((err) => logger.error("[payouts/mark-paid] audit log failed:", err));
 
   await prisma.notification.create({
-    data: {
-      affiliateId: settlement.affiliateId,
-      type: "PAYOUT_PAID",
-      channel: "IN_APP",
-      title: "Payout processed",
-      body: `Your payout of $${(settlement.amountCents / 100).toLocaleString()} has been paid via ${parsed.data.paymentMethod} (ref: ${parsed.data.paymentReference}).`,
-      actionUrl: "/affiliate/portal/finance",
-    },
+    data: settlement.cancelled
+      ? {
+          affiliateId: settlement.affiliateId,
+          // Closest existing NotificationType — adding a CANCELLED value would
+          // need another owner-gated enum migration.
+          type: "PAYOUT_FAILED",
+          channel: "IN_APP",
+          title: "Payout request cancelled",
+          body: "Every commission in your payout request was reversed (for example after a refunded deal), so the request was cancelled. Nothing was paid; you can request again once new commissions are approved.",
+          actionUrl: "/affiliate/portal/finance",
+        }
+      : {
+          affiliateId: settlement.affiliateId,
+          type: "PAYOUT_PAID",
+          channel: "IN_APP",
+          title: "Payout processed",
+          body: `Your payout of ${formatCentsAsUsd(settlement.amountCents)} has been paid via ${parsed.data.paymentMethod} (ref: ${parsed.data.paymentReference}).`,
+          actionUrl: "/affiliate/portal/finance",
+        },
   }).catch((err) => logger.error("[payouts/mark-paid] affiliate notification failed:", err));
 
-  return adminSuccess({ payoutId, status: "PAID", amountCents: settlement.amountCents });
+  return adminSuccess({
+    payoutId,
+    status: settlement.cancelled ? "REVERSED" : "PAID",
+    amountCents: settlement.amountCents,
+    cancelled: settlement.cancelled,
+  });
 }

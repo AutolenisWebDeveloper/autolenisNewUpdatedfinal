@@ -14,10 +14,10 @@ import {
 } from "lucide-react";
 import { AutoLenisLogo } from "@/components/shared/AutoLenisLogo";
 import { signInAction } from "@/lib/auth/actions";
-import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import type { AuthPageStats } from "@/lib/services/auth/stats.service";
 
-const L1_COMMISSION = `$${((PREMIUM_FEE_CENTS / 100) * COMMISSION_RATES.LEVEL_1).toFixed(0)}`;
+const L1_COMMISSION = `$${((PREMIUM_FEE_REMAINING_CENTS / 100) * COMMISSION_RATES.LEVEL_1).toFixed(0)}`;
 
 const AFFILIATE_BULLETS = [
   { icon: DollarSign, text: `Earn ${L1_COMMISSION} per closed deal — paid directly to you` },

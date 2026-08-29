@@ -10,12 +10,12 @@ import Panel from "@/components/ui/patterns/Panel";
 import EmptyState from "@/components/ui/patterns/EmptyState";
 import { FIGURE } from "@/components/ui/patterns/tokens";
 import {
-  DollarSign, Users, Clock, XCircle, AlertTriangle,
+  DollarSign, Users, Clock,
   TrendingUp, Calculator, Landmark, FileCheck, Share2, Inbox,
 } from "lucide-react";
 import Link from "next/link";
 import ReferralCodeCard from "@/components/affiliate/ReferralCodeCard";
-import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
@@ -57,9 +57,10 @@ export default async function AffiliateDashboardPage() {
   const firstName = profile?.firstName?.trim() || emailDerivedName;
 
   const isActive = affiliate.status === "ACTIVE";
+  // REJECTED/SUSPENDED never reach this page — requireAffiliate() already
+  // redirects both to /affiliate/unsubscribed (R8; P2-6 removed the dead
+  // banners that contradicted that).
   const isPending = affiliate.status === "PENDING";
-  const isRejected = affiliate.status === "REJECTED";
-  const isSuspended = affiliate.status === "SUSPENDED";
 
   const networkTotal = network.l1 + network.l2 + network.l3;
   const thisMonthCents = thisMonth._sum.amountCents ?? 0;
@@ -71,7 +72,7 @@ export default async function AffiliateDashboardPage() {
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   // Per-deal earnings from constants
-  const L1_PER_DEAL = PREMIUM_FEE_CENTS * COMMISSION_RATES.LEVEL_1;
+  const L1_PER_DEAL = PREMIUM_FEE_REMAINING_CENTS * COMMISSION_RATES.LEVEL_1;
 
   return (
     <PageContainer testId="affiliate-dashboard">
@@ -105,33 +106,7 @@ export default async function AffiliateDashboardPage() {
         </div>
       )}
 
-      {isRejected && (
-        <div className="bg-red-50 border border-red-200 rounded-2xl p-5 mb-6 flex items-start gap-4" data-testid="status-banner-rejected">
-          <div className="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
-            <XCircle size={17} className="text-red-600" />
-          </div>
-          <div>
-            <p className="font-semibold text-red-900 mb-0.5">Application not approved</p>
-            <p className="text-sm text-red-800">
-              Your application was not approved at this time. For the reason, or to appeal, contact{" "}
-              <a href="mailto:support@autolenis.com" className="underline font-semibold hover:text-red-950">support@autolenis.com</a>.{" "}
-              <Link href="/for-buyers" className="underline font-semibold hover:text-red-950">Explore as a buyer →</Link>
-            </p>
-          </div>
-        </div>
-      )}
 
-      {isSuspended && (
-        <div className="bg-slate-100 border border-slate-300 rounded-2xl p-5 mb-6 flex items-start gap-4" data-testid="status-banner-suspended">
-          <div className="w-9 h-9 rounded-xl bg-slate-200 flex items-center justify-center shrink-0">
-            <AlertTriangle size={17} className="text-slate-600" />
-          </div>
-          <div>
-            <p className="font-semibold text-slate-900 mb-0.5">Account suspended</p>
-            <p className="text-sm text-slate-700">Your affiliate account is currently suspended. Please contact support for more information.</p>
-          </div>
-        </div>
-      )}
 
       {/* KPI cards — 4 horizontal */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6" data-testid="kpi-cards">

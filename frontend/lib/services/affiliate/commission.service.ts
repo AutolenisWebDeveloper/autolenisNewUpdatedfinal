@@ -289,21 +289,48 @@ export interface ApproveMatureResult {
 // missing deal) fails CLOSED — the commission stays PENDING for a later run.
 export async function approveMaturePendingCommissions(now: Date = new Date()): Promise<ApproveMatureResult> {
   const cutoff = new Date(now.getTime() - 7 * 24 * 3600000);
-  const candidates = await prisma.commission.findMany({
-    where: { status: "PENDING", createdAt: { lte: cutoff } },
-    select: { id: true, dealId: true, qualifyingEventId: true },
-    orderBy: { createdAt: "asc" },
-    take: 500,
-  });
   const result: ApproveMatureResult = {
-    candidates: candidates.length,
+    candidates: 0,
     approved: 0,
     skippedPaymentState: 0,
     skippedDealState: 0,
     skippedUnverifiable: 0,
   };
-  if (candidates.length === 0) return result;
 
+  // P2-4 (review) — page through the FULL mature-PENDING set with an id
+  // cursor instead of a single head take(500): permanently-skipped rows
+  // (missing deal, unexpandable charge) otherwise accumulate at the head and
+  // starve everything behind them once they exceed the batch size. The PI
+  // verdict cache spans batches (one Stripe read per unique PI per run), and
+  // MAX_BATCHES bounds a pathological backlog; the hourly cron resumes where
+  // the cap left off because approved rows leave PENDING.
+  const MAX_BATCHES = 20; // 20 × 500 = 10k rows/run
+  const piVerdicts = new Map<string, boolean | null>();
+  let cursor: string | null = null;
+
+  for (let batch = 0; batch < MAX_BATCHES; batch++) {
+    const candidates: Array<{ id: string; dealId: string; qualifyingEventId: string }> =
+      await prisma.commission.findMany({
+        where: { status: "PENDING", createdAt: { lte: cutoff } },
+        select: { id: true, dealId: true, qualifyingEventId: true },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: 500,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      });
+    if (candidates.length === 0) break;
+    cursor = candidates[candidates.length - 1].id;
+    result.candidates += candidates.length;
+    await approveBatch(candidates, { now, piVerdicts, result });
+    if (candidates.length < 500) break;
+  }
+  return result;
+}
+
+async function approveBatch(
+  candidates: Array<{ id: string; dealId: string; qualifyingEventId: string }>,
+  ctx: { now: Date; piVerdicts: Map<string, boolean | null>; result: ApproveMatureResult },
+): Promise<void> {
+  const { now, piVerdicts, result } = ctx;
   const dealIds = [...new Set(candidates.map((c) => c.dealId))];
   const deals = await prisma.deal.findMany({
     where: { id: { in: dealIds } },
@@ -311,15 +338,15 @@ export async function approveMaturePendingCommissions(now: Date = new Date()): P
   });
   const dealStatusById = new Map(deals.map((d) => [d.id, d.status]));
 
-  // One Stripe read per unique PI; levels of the same fee share the verdict.
+  // One Stripe read per unique PI per run (cache spans batches); levels of the
+  // same fee share the verdict.
   // true = money pulled back (block), false = clean, null = unverifiable.
   const { retrievePaymentIntent } = await import("@/lib/services/payment/stripe.service");
-  const piVerdicts = new Map<string, boolean | null>();
   const piIds = [...new Set(
     candidates
       .map((c) => FEE_EVENT_KEY.exec(c.qualifyingEventId)?.[1])
       .filter((v): v is string => Boolean(v)),
-  )];
+  )].filter((id) => !piVerdicts.has(id));
   for (const piId of piIds) {
     try {
       const intent = (await retrievePaymentIntent(piId, { expand: ["latest_charge"] })) as {
@@ -372,9 +399,8 @@ export async function approveMaturePendingCommissions(now: Date = new Date()): P
       // D13 — stamp the actor on the row itself (migration 001).
       data: { status: "APPROVED", approvedAt: now, approvedBy: "system:cron" },
     });
-    result.approved = updated.count;
+    result.approved += updated.count;
   }
-  return result;
 }
 
 // Network tree size — max 3 levels. Three bounded queries total: the previous

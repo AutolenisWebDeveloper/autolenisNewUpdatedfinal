@@ -1,4 +1,4 @@
-import { requireAffiliate } from "@/lib/auth/affiliate-session";
+import { requireAffiliateWithOnboarding } from "@/lib/auth/affiliate-session";
 import { prisma } from "@/lib/prisma";
 import { countsTowardEarned } from "@/lib/services/affiliate/commission.service";
 import { Users } from "lucide-react";
@@ -8,7 +8,10 @@ import EmptyState from "@/components/ui/patterns/EmptyState";
 export const dynamic = "force-dynamic";
 
 export default async function AffiliateReferralsPage() {
-  const affiliate = await requireAffiliate();
+  // P1-2 — gate runs in the PAGE, not only the layout: App Router does not
+  // re-render the layout on soft navigation, so a sidebar click would bypass
+  // a layout-only gate.
+  const { affiliate } = await requireAffiliateWithOnboarding();
   const referrals = await prisma.affiliate.findMany({
     where: { parentId: affiliate.id },
     include: { user: { select: { email: true, createdAt: true } }, commissions: { select: { amountCents: true, status: true } } },

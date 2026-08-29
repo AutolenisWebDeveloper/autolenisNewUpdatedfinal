@@ -7,7 +7,7 @@
 import { useState } from "react";
 import { Copy, Check, Share2, Link2, Twitter, Linkedin, Mail, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { COMMISSION_RATES, PREMIUM_FEE_USD } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_USD } from "@/lib/constants";
 
 interface Props {
   referralCode: string;
@@ -188,7 +188,7 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
           </div>
           <p className="text-[10px] text-slate-500 mt-auto">
             {/* Derived from platform constants — never hardcode rates or the fee. */}
-            {Math.round(COMMISSION_RATES.LEVEL_1 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_2 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_3 * 100)}% of the {PREMIUM_FEE_USD} fee.
+            {Math.round(COMMISSION_RATES.LEVEL_1 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_2 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_3 * 100)}% of the {PREMIUM_FEE_REMAINING_USD} fee.
           </p>
         </div>
       </div>

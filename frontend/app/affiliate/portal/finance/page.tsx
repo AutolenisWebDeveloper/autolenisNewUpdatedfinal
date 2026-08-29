@@ -1,4 +1,4 @@
-import { requireAffiliate } from "@/lib/auth/affiliate-session";
+import { requireAffiliateWithOnboarding } from "@/lib/auth/affiliate-session";
 import { prisma } from "@/lib/prisma";
 import { getCommissionSummary } from "@/lib/services/affiliate/commission.service";
 import { getPayoutHistory } from "@/lib/services/affiliate/affiliate-payout.service";
@@ -34,7 +34,10 @@ function SectionError({ what }: { what: string }) {
 export const dynamic = "force-dynamic";
 
 export default async function AffiliateFinancePage() {
-  const affiliate = await requireAffiliate();
+  // P1-2 — gate runs in the PAGE, not only the layout: App Router does not
+  // re-render the layout on soft navigation, so a sidebar click would bypass
+  // a layout-only gate.
+  const { affiliate } = await requireAffiliateWithOnboarding();
 
   const [summaryR, payoutsR, payoutMethodR, taxProfileR, onboardingR, openRequestR] = await Promise.allSettled([
     getCommissionSummary(affiliate.id),
@@ -68,11 +71,13 @@ export default async function AffiliateFinancePage() {
 
   const hasBanking         = !!payoutMethod?.method;
   const onboardingApproved = onboarding?.status === "APPROVED";
+  const taxCertified       = !!taxProfile?.certified;
 
   // Prerequisites the payout service actually enforces, in user words.
   const missing: string[] = [];
   if (!onboardingApproved) missing.push("complete onboarding (and get approved)");
   if (!hasBanking) missing.push("add a payout method below");
+  if (!taxCertified) missing.push("certify your tax information (W-9) below");
 
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="affiliate-finance-page">

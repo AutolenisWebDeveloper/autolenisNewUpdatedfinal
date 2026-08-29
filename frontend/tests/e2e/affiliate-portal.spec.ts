@@ -125,7 +125,7 @@ test.describe("access control", () => {
     await expect(p).toHaveURL(/\/affiliate\/unsubscribed/);
     await expect(p.getByTestId("unsubscribed-title")).toBeVisible();
     // API enforcement, not just the page gate.
-    const res = await ctx.request.get("/api/affiliate/dashboard");
+    const res = await ctx.request.get("/api/affiliate/earnings");
     expect([401, 403]).toContain(res.status());
     await ctx.close();
   });
@@ -133,7 +133,7 @@ test.describe("access control", () => {
   test("a buyer-or-anonymous request is rejected by affiliate APIs", async ({ browser }) => {
     serverOnly();
     const ctx = await browser.newContext();
-    for (const api of ["/api/affiliate/dashboard", "/api/affiliate/payouts/request"]) {
+    for (const api of ["/api/affiliate/earnings", "/api/affiliate/payouts/request"]) {
       const res = api.includes("request") ? await ctx.request.post(api) : await ctx.request.get(api);
       expect([401, 403], `${api} returned ${res.status()}`).toContain(res.status());
     }
@@ -294,7 +294,7 @@ test.describe("payout request rail", () => {
     const res = await ctx.request.post("/api/affiliate/payouts/request");
     expect(res.status(), "request without onboarding must be refused").toBe(409);
     const body = await res.json();
-    expect(["ONBOARDING_REQUIRED", "NO_PAYOUT_METHOD", "NOTHING_TO_PAY", "BELOW_MINIMUM"]).toContain(body?.error?.code);
+    expect(["ONBOARDING_REQUIRED", "NO_PAYOUT_METHOD", "TAX_REQUIRED", "NOTHING_TO_PAY", "BELOW_MINIMUM"]).toContain(body?.error?.code);
     await ctx.close();
   });
 

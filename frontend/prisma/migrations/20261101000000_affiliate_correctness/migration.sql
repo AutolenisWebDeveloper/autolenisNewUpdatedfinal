@@ -151,3 +151,13 @@ END $$;
 -- The camelCase column is written by nothing and read by nothing.
 ALTER TABLE "affiliates" DROP COLUMN IF EXISTS "lastInactiveNudgeAt";
 -- VERIFY: SELECT column_name FROM information_schema.columns WHERE table_name='affiliates' AND column_name='lastInactiveNudgeAt'; -- expect 0 rows
+
+-- ── P2-2 (review): one open payout request per affiliate, DB-enforced ────────
+-- requestPayout checks "no open PENDING request" read-then-act; under READ
+-- COMMITTED two concurrent requests can both pass the check. The commission
+-- CAS still prevents double-claiming, but the one-open-request invariant the
+-- UI and admin rail assume needs a partial unique index to hold under
+-- concurrency. (Prisma cannot express partial indexes; raw SQL by design.)
+CREATE UNIQUE INDEX IF NOT EXISTS "affiliate_payouts_one_pending_per_affiliate"
+  ON "affiliate_payouts"("affiliate_id") WHERE "status" = 'PENDING';
+-- VERIFY: SELECT indexname FROM pg_indexes WHERE tablename='affiliate_payouts' AND indexname='affiliate_payouts_one_pending_per_affiliate'; -- expect 1 row

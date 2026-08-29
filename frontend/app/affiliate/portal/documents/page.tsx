@@ -1,5 +1,5 @@
 import { logger } from "@/lib/logger";
-import { requireAffiliate } from "@/lib/auth/affiliate-session";
+import { requireAffiliateWithOnboarding } from "@/lib/auth/affiliate-session";
 import { prisma } from "@/lib/prisma";
 import { FileCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +21,10 @@ function statusVariant(status: string): "green" | "destructive" | "amber" | "sec
 export const dynamic = "force-dynamic";
 
 export default async function AffiliateDocumentsPage() {
-  const affiliate = await requireAffiliate();
+  // P1-2 — gate runs in the PAGE, not only the layout: App Router does not
+  // re-render the layout on soft navigation, so a sidebar click would bypass
+  // a layout-only gate.
+  const { affiliate } = await requireAffiliateWithOnboarding();
 
   // M-18: distinguish "no documents" from "the read failed". A DB error must
   // render as an error state with the checklist disabled — never as an empty

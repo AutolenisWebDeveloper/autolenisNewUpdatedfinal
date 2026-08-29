@@ -115,6 +115,7 @@ export class PayoutRequestError extends Error {
     public readonly code:
       | "ONBOARDING_REQUIRED"
       | "NO_PAYOUT_METHOD"
+      | "TAX_REQUIRED"
       | "REQUEST_PENDING"
       | "NOTHING_TO_PAY"
       | "BELOW_MINIMUM",
@@ -148,6 +149,18 @@ export async function requestPayout(affiliateId: string): Promise<RequestPayoutR
     const method = await tx.affiliatePayoutMethod.findUnique({ where: { affiliateId } });
     if (!method?.method) {
       throw new PayoutRequestError("NO_PAYOUT_METHOD", "Add a payout method in the Finance Hub first.");
+    }
+    // P2-5 — recorded payouts over $600/yr without a certified W-9 are a 1099
+    // compliance gap; the pre-rebuild rail required certification too.
+    const tax = await tx.affiliateTaxProfile.findUnique({
+      where: { affiliateId },
+      select: { certified: true },
+    });
+    if (!tax?.certified) {
+      throw new PayoutRequestError(
+        "TAX_REQUIRED",
+        "Complete and certify your tax information (W-9) in the Finance Hub before requesting a payout.",
+      );
     }
 
     // One open request at a time — a second request cannot race the first.
@@ -214,14 +227,30 @@ export async function requestPayout(affiliateId: string): Promise<RequestPayoutR
 export interface SettleRequestedPayoutResult {
   payoutId: string;
   affiliateId: string;
+  /** What actually settled — recomputed from surviving claims, never the stale request amount. */
   amountCents: number;
   commissionCount: number;
   settledAt: Date;
+  /** True when every claimed commission had been reversed: the payout was
+   *  cancelled (REVERSED), no money instruction exists, and the affiliate can
+   *  request again. */
+  cancelled: boolean;
 }
 
-// Admin settlement of a requested payout: PENDING→PAID CAS on the payout, then
-// APPROVED→PAID on its attached commissions (count-verified), then the settled
-// invariant asserted per row — any mismatch rolls the whole settlement back.
+// Admin settlement of a requested payout.
+//
+// P1-1 (review) — commissions can be REVERSED *after* being claimed by a
+// pending request (fee refund → in-place reversal; admin reverse). Settling at
+// the amount frozen at request time would over-instruct payment, and an
+// all-reversed payout would be forever unsettleable while blocking the
+// affiliate's next request. So settlement recomputes from the SURVIVING
+// attached APPROVED rows inside the transaction:
+//   • some survive → payout PENDING→PAID CAS with amountCents re-stamped to
+//     the surviving sum; those rows APPROVED→PAID (count-verified); invariant
+//     asserted per row;
+//   • none survive → payout PENDING→REVERSED CAS (cancelled — terminal, so
+//     the one-open-request rule frees up), reversed rows stay attached for the
+//     audit trail, `cancelled: true` returned.
 export async function settleRequestedPayout(input: {
   payoutId: string;
   paymentMethod: string;
@@ -236,18 +265,45 @@ export async function settleRequestedPayout(input: {
       throw new CommissionNotClaimableError(`payout ${payoutId} is not awaiting settlement`);
     }
 
+    const attached = await tx.commission.findMany({
+      where: { payoutId, status: "APPROVED" },
+      select: { id: true, amountCents: true },
+    });
+
+    if (attached.length === 0) {
+      // Every claim was reversed since the request — cancel, never pay.
+      const cancelled = await tx.affiliatePayout.updateMany({
+        where: { id: payoutId, status: "PENDING" },
+        data: { status: "REVERSED", processedAt: settledAt },
+      });
+      if (cancelled.count !== 1) {
+        throw new CommissionNotClaimableError(`payout ${payoutId} was settled concurrently`);
+      }
+      return {
+        payoutId,
+        affiliateId: payout.affiliateId,
+        amountCents: 0,
+        commissionCount: 0,
+        settledAt,
+        cancelled: true,
+      };
+    }
+
+    const survivingCents = attached.reduce((s, c) => s + c.amountCents, 0);
     const flipped = await tx.affiliatePayout.updateMany({
       where: { id: payoutId, status: "PENDING" },
-      data: { status: "PAID", method: paymentMethod, reference: paymentReference, processedAt: settledAt },
+      data: {
+        status: "PAID",
+        amountCents: survivingCents,
+        method: paymentMethod,
+        reference: paymentReference,
+        processedAt: settledAt,
+      },
     });
     if (flipped.count !== 1) {
       throw new CommissionNotClaimableError(`payout ${payoutId} was settled concurrently`);
     }
 
-    const attached = await tx.commission.findMany({
-      where: { payoutId, status: "APPROVED" },
-      select: { id: true },
-    });
     const paid = await tx.commission.updateMany({
       where: { payoutId, status: "APPROVED" },
       data: { status: "PAID", paidAt: settledAt },
@@ -272,9 +328,10 @@ export async function settleRequestedPayout(input: {
     return {
       payoutId,
       affiliateId: payout.affiliateId,
-      amountCents: payout.amountCents,
+      amountCents: survivingCents,
       commissionCount: attached.length,
       settledAt,
+      cancelled: false,
     };
   });
 }

@@ -37,6 +37,7 @@ type Payout = { id: string; affiliateId: string; status: string; amountCents: nu
 interface Ctrl {
   onboardingStatus: string | null;
   payoutMethod: { method: string } | null;
+  taxCertified: boolean;
   commissions: Commission[];
   payouts: Payout[];
   // simulate a concurrent claim: N commissions get claimed elsewhere between
@@ -53,6 +54,9 @@ function makeTx() {
     },
     affiliatePayoutMethod: {
       findUnique: async () => ctrl.payoutMethod,
+    },
+    affiliateTaxProfile: {
+      findUnique: async () => (ctrl.taxCertified ? { certified: true } : null),
     },
     affiliatePayout: {
       findFirst: async ({ where }: { where: { status?: string } }) =>
@@ -127,6 +131,7 @@ beforeEach(() => {
   ctrl = {
     onboardingStatus: "APPROVED",
     payoutMethod: { method: "ACH" },
+    taxCertified: true,
     commissions: [
       { id: "c1", affiliateId: "aff_1", status: "APPROVED", amountCents: 2000, payoutId: null, paidAt: null, createdAt: OLD },
       { id: "c2", affiliateId: "aff_1", status: "APPROVED", amountCents: 1500, payoutId: null, paidAt: null, createdAt: OLD },
@@ -209,6 +214,56 @@ test("settleRequestedPayout: payout PENDING→PAID and its commissions APPROVED�
     assert.ok(c.paidAt);
     assert.equal(c.payoutId, payoutId);
   }
+});
+
+// P2-5 (review) — a payout must not be requestable without a certified W-9:
+// recorded payouts over $600/yr without tax certification are a 1099 gap, and
+// the pre-rebuild rail required it.
+test("no certified tax profile → TAX_REQUIRED, nothing written", async () => {
+  const { requestPayout, PayoutRequestError } = await svc();
+  ctrl.taxCertified = false;
+  await assert.rejects(requestPayout("aff_1"), (e: unknown) => (e as InstanceType<typeof PayoutRequestError>).code === "TAX_REQUIRED");
+  assert.equal(ctrl.payouts.length, 0);
+});
+
+// P1-1 (review) — a commission reversed AFTER being claimed by a pending
+// request must not be paid out: settlement recomputes from the surviving
+// attached APPROVED rows and re-stamps the payout amount, so the audit log,
+// notification, and payment instruction all say the true settled amount.
+test("settle after a partial reversal pays the recomputed surviving amount, not the stale request amount", async () => {
+  const { requestPayout, settleRequestedPayout } = await svc();
+  const { payoutId } = await requestPayout("aff_1"); // claims c1 (2000) + c2 (1500)
+  // The fee behind c2 is refunded → in-place reversal while claimed.
+  const c2 = ctrl.commissions.find((c) => c.id === "c2")!;
+  c2.status = "REVERSED";
+  const result = await settleRequestedPayout({ payoutId, paymentMethod: "ACH Transfer", paymentReference: "REF-9" });
+  assert.equal(result.amountCents, 2000, "settled amount is the surviving sum, not the stale 3500");
+  assert.equal(result.commissionCount, 1);
+  assert.equal(result.cancelled, false);
+  const payout = ctrl.payouts.find((p) => p.id === payoutId)!;
+  assert.equal(payout.status, "PAID");
+  assert.equal(payout.amountCents, 2000, "payout row re-stamped to what actually settled");
+  assert.equal(ctrl.commissions.find((c) => c.id === "c1")!.status, "PAID");
+  assert.equal(c2.status, "REVERSED", "reversed row must never be flipped to PAID");
+  assert.equal(c2.paidAt, null);
+});
+
+// P1-1 (review) — every claimed commission reversed: the payout must become a
+// settleable-as-cancelled terminal state (REVERSED), not a forever-PENDING
+// block on the affiliate's next request.
+test("settle after ALL claims reversed cancels the payout and unblocks the next request", async () => {
+  const { requestPayout, settleRequestedPayout } = await svc();
+  const { payoutId } = await requestPayout("aff_1");
+  for (const id of ["c1", "c2"]) ctrl.commissions.find((c) => c.id === id)!.status = "REVERSED";
+  const result = await settleRequestedPayout({ payoutId, paymentMethod: "ACH Transfer", paymentReference: "REF-0" });
+  assert.equal(result.cancelled, true);
+  assert.equal(result.amountCents, 0);
+  assert.equal(result.commissionCount, 0);
+  assert.equal(ctrl.payouts.find((p) => p.id === payoutId)!.status, "REVERSED");
+  // The affiliate can request again once new commissions approve.
+  ctrl.commissions.push({ id: "c9", affiliateId: "aff_1", status: "APPROVED", amountCents: 9000, payoutId: null, paidAt: null, createdAt: OLD });
+  const second = await requestPayout("aff_1");
+  assert.equal(second.amountCents, 9000);
 });
 
 test("settleRequestedPayout: a non-PENDING payout is rejected (double-settle safe)", async () => {

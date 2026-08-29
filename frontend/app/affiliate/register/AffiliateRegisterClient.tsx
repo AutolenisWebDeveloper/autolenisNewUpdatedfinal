@@ -3,12 +3,12 @@
 import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { DollarSign, TrendingUp, Users, Mail } from "lucide-react";
-import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_CENTS, MAX_COMMISSION_TOTAL } from "@/lib/constants";
 import { AutoLenisLogo } from "@/components/shared/AutoLenisLogo";
 
-const L1 = ((PREMIUM_FEE_CENTS / 100) * COMMISSION_RATES.LEVEL_1).toFixed(2);
-const L2 = ((PREMIUM_FEE_CENTS / 100) * COMMISSION_RATES.LEVEL_2).toFixed(2);
-const L3 = ((PREMIUM_FEE_CENTS / 100) * COMMISSION_RATES.LEVEL_3).toFixed(2);
+const L1 = ((PREMIUM_FEE_REMAINING_CENTS / 100) * COMMISSION_RATES.LEVEL_1).toFixed(2);
+const L2 = ((PREMIUM_FEE_REMAINING_CENTS / 100) * COMMISSION_RATES.LEVEL_2).toFixed(2);
+const L3 = ((PREMIUM_FEE_REMAINING_CENTS / 100) * COMMISSION_RATES.LEVEL_3).toFixed(2);
 
 const PROMOTION_METHODS = [
   "Personal Blog / Website",
@@ -132,7 +132,10 @@ export default function AffiliateRegisterClient() {
         error?: { code?: string; message?: string };
       };
 
-      if (res.status === 409 || data.error?.code === "EMAIL_EXISTS") {
+      // Only EMAIL_EXISTS means "sign in instead" — EMAIL_ORPHANED (O8) also
+      // arrives as a 409 but sign-in would dead-end (no app account exists);
+      // its server message routes the user to support and must render as-is.
+      if (data.error?.code === "EMAIL_EXISTS") {
         setEmailExists(true);
         return;
       }
@@ -221,7 +224,7 @@ export default function AffiliateRegisterClient() {
 
         <div className="relative">
           <p className="text-[10px] text-white/55 leading-relaxed">
-            Commission rates based on $499 Premium concierge fee. Subject to Affiliate Terms. Max 20% total per deal.
+            Commission rates based on the $400 concierge-fee balance (the $499 Premium fee less the $99 deposit credit) — the basis commissions are actually paid on. Subject to Affiliate Terms. Max {Math.round(MAX_COMMISSION_TOTAL * 100)}% total per deal.
           </p>
         </div>
       </div>

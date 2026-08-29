@@ -10,6 +10,7 @@ import { logger } from "@/lib/logger";
 const ERROR_STATUS: Record<PayoutRequestError["code"], number> = {
   ONBOARDING_REQUIRED: 409,
   NO_PAYOUT_METHOD: 409,
+  TAX_REQUIRED: 409,
   REQUEST_PENDING: 409,
   NOTHING_TO_PAY: 409,
   BELOW_MINIMUM: 409,

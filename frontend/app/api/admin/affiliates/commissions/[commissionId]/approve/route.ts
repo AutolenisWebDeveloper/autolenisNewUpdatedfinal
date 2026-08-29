@@ -1,4 +1,5 @@
 import { requirePermission } from "@/lib/auth/permissions";
+import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { adminError, adminSuccess } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
@@ -58,6 +59,7 @@ export async function POST(request: NextRequest, { params }: Props) {
     if (err instanceof TransitionConflictError) {
       return adminError("CONFLICT", "Commission is no longer PENDING — a concurrent transition won", 409);
     }
+    logger.error("[commissions/approve] transition failed:", err);
     return adminError("INTERNAL", "Approval failed — nothing was changed", 500);
   }
 

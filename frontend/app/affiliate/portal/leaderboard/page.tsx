@@ -1,7 +1,7 @@
 // app/affiliate/portal/leaderboard/page.tsx
 // Elite Affiliate Leaderboard — shows top earners, current rank, and motivational tier context
 
-import { requireAffiliate } from "@/lib/auth/affiliate-session";
+import { requireAffiliateWithOnboarding } from "@/lib/auth/affiliate-session";
 import { getLeaderboard } from "@/lib/services/affiliate/affiliate-leaderboard.service";
 import { getCommissionSummary } from "@/lib/services/affiliate/commission.service";
 import { Trophy, Medal, Star, TrendingUp, Crown } from "lucide-react";
@@ -25,7 +25,10 @@ function rankBg(rank: number, isCurrentUser: boolean) {
 }
 
 export default async function AffiliateLeaderboardPage() {
-  const affiliate = await requireAffiliate();
+  // P1-2 — gate runs in the PAGE, not only the layout: App Router does not
+  // re-render the layout on soft navigation, so a sidebar click would bypass
+  // a layout-only gate.
+  const { affiliate } = await requireAffiliateWithOnboarding();
   const [board, summary] = await Promise.all([
     getLeaderboard(affiliate.id, 10),
     getCommissionSummary(affiliate.id),

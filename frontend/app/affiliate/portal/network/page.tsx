@@ -1,9 +1,9 @@
 // Feature 8 — Affiliate Income Planner + Referral Network Tree (L1/L2/L3 visual)
 // Commission rates sourced from COMMISSION_RATES in lib/constants.ts — never hardcoded
 
-import { requireAffiliate } from "@/lib/auth/affiliate-session";
+import { requireAffiliateWithOnboarding } from "@/lib/auth/affiliate-session";
 import { getNetworkSize } from "@/lib/services/affiliate/commission.service";
-import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { GitBranch, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,10 @@ import EmptyState from "@/components/ui/patterns/EmptyState";
 export const dynamic = "force-dynamic";
 
 export default async function AffiliateNetworkPage() {
-  const affiliate = await requireAffiliate();
+  // P1-2 — gate runs in the PAGE, not only the layout: App Router does not
+  // re-render the layout on soft navigation, so a sidebar click would bypass
+  // a layout-only gate.
+  const { affiliate } = await requireAffiliateWithOnboarding();
   const network = await getNetworkSize(affiliate.id);
 
   // Build L1 tree data
@@ -29,9 +32,9 @@ export default async function AffiliateNetworkPage() {
   });
 
   // Earnings per level — from COMMISSION_RATES (lib/constants.ts) only
-  const L1_PER_DEAL = Math.round(PREMIUM_FEE_CENTS * COMMISSION_RATES.LEVEL_1);
-  const L2_PER_DEAL = Math.round(PREMIUM_FEE_CENTS * COMMISSION_RATES.LEVEL_2);
-  const L3_PER_DEAL = Math.round(PREMIUM_FEE_CENTS * COMMISSION_RATES.LEVEL_3);
+  const L1_PER_DEAL = Math.round(PREMIUM_FEE_REMAINING_CENTS * COMMISSION_RATES.LEVEL_1);
+  const L2_PER_DEAL = Math.round(PREMIUM_FEE_REMAINING_CENTS * COMMISSION_RATES.LEVEL_2);
+  const L3_PER_DEAL = Math.round(PREMIUM_FEE_REMAINING_CENTS * COMMISSION_RATES.LEVEL_3);
 
   function maskEmail(email: string): string {
     const [user, domain] = email.split("@");

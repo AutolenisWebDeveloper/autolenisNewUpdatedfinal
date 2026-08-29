@@ -181,3 +181,26 @@ test("sidebar nav gating mirrors the server exempt set exactly", async () => {
     );
   }
 });
+
+// P1-2 (review) — the layout is NOT re-rendered on App Router soft
+// navigation, so a layout-only gate is bypassed by any sidebar click. Every
+// gated page must therefore call requireAffiliateWithOnboarding itself. This
+// reads the page sources so a future page that reverts to requireAffiliate()
+// fails here instead of silently reopening the bypass.
+test("every gated page calls requireAffiliateWithOnboarding in its own module (soft-nav enforcement)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { ONBOARDING_EXEMPT_PATHS } = await gate();
+  const { NAV_ITEMS } = await import("@/components/affiliate/AffiliateSidebar");
+  const root = join(process.cwd(), "app");
+  for (const item of NAV_ITEMS) {
+    const exempt = ONBOARDING_EXEMPT_PATHS.some((p) => item.href.startsWith(p));
+    if (exempt) continue;
+    const pagePath = join(root, ...item.href.split("/").filter(Boolean), "page.tsx");
+    const src = readFileSync(pagePath, "utf8");
+    assert.ok(
+      src.includes("requireAffiliateWithOnboarding"),
+      `${item.href}/page.tsx must call requireAffiliateWithOnboarding — the layout gate alone is bypassed by soft navigation`,
+    );
+  }
+});

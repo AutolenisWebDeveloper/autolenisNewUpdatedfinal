@@ -65,14 +65,21 @@ const prismaMock = {
       }
       return { count: hit };
     },
-    findMany: async ({ where }: { where: Record<string, unknown> }) => {
+    findMany: async ({ where, take, cursor, skip }: { where: Record<string, unknown>; take?: number; cursor?: { id: string }; skip?: number }) => {
       const prefix = (where.qualifyingEventId as { startsWith?: string } | undefined)?.startsWith;
       const createdLte = (where.createdAt as { lte?: Date } | undefined)?.lte;
-      return ctrl.commissions.filter((c) => {
+      let rows = ctrl.commissions.filter((c) => {
         if (prefix && !c.qualifyingEventId.startsWith(prefix)) return false;
         if (createdLte && !(c.createdAt <= createdLte)) return false;
         return matchesStatus(c, where);
       });
+      // P2-4 — the pagination the starvation fix depends on: id-cursor + take.
+      if (cursor) {
+        const at = rows.findIndex((c) => c.id === cursor.id);
+        rows = at >= 0 ? rows.slice(at + (skip ?? 0)) : rows;
+      }
+      if (take !== undefined) rows = rows.slice(0, take);
+      return rows;
     },
   },
   deal: {
@@ -208,4 +215,30 @@ test("cron approve: one Stripe read per unique PI (levels share the check)", asy
   const result = await approveMaturePendingCommissions(NOW);
   assert.equal(result.approved, 3);
   assert.deepEqual(ctrl.retrieveCalls, ["pi_X"]);
+});
+
+// P2-4 (review) — a head-of-queue backlog of permanently-skipped rows
+// (missing deal) must not starve approvable rows behind it: the cron pages
+// past the first take(500) with an id cursor.
+test("cron approve: 500+ unverifiable head rows do not starve an approvable row behind them", async () => {
+  const { approveMaturePendingCommissions } = await svc();
+  ctrl.deals = [{ id: "d1", status: "SIGNED" }];
+  ctrl.commissions = Array.from({ length: 501 }, (_, i) => ({
+    id: `dead${String(i).padStart(4, "0")}`,
+    status: "PENDING",
+    dealId: "d_missing", // no deal row → skippedUnverifiable, forever
+    qualifyingEventId: `pi_dead${i}-L1`,
+    createdAt: OLD,
+  }));
+  ctrl.commissions.push({
+    id: "zz-approvable",
+    status: "PENDING",
+    dealId: "d1",
+    qualifyingEventId: "pi_ok-L1",
+    createdAt: OLD,
+  });
+  const result = await approveMaturePendingCommissions(NOW);
+  assert.equal(result.approved, 1, "the row behind the dead backlog must be reached and approved");
+  assert.equal(result.skippedUnverifiable, 501);
+  assert.equal(ctrl.commissions.find((c) => c.id === "zz-approvable")!.status, "APPROVED");
 });

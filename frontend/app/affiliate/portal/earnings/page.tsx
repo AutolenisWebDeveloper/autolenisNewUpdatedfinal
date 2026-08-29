@@ -1,4 +1,4 @@
-import { requireAffiliate } from "@/lib/auth/affiliate-session";
+import { requireAffiliateWithOnboarding } from "@/lib/auth/affiliate-session";
 import { prisma } from "@/lib/prisma";
 import { getCommissionSummary, getCommissionLevelBreakdown } from "@/lib/services/affiliate/commission.service";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +9,10 @@ import { COMMISSION_RATES } from "@/lib/constants";
 export const dynamic = "force-dynamic";
 
 export default async function AffiliateEarningsPage() {
-  const affiliate = await requireAffiliate();
+  // P1-2 — gate runs in the PAGE, not only the layout: App Router does not
+  // re-render the layout on soft navigation, so a sidebar click would bypass
+  // a layout-only gate.
+  const { affiliate } = await requireAffiliateWithOnboarding();
   // M15 — the level bars aggregate the WHOLE ledger in the DB (same universe
   // as the summary cards); the row list below stays the latest 50.
   const [summary, byLevel, commissions] = await Promise.all([
