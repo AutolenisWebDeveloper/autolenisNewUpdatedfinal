@@ -87,7 +87,8 @@ export default function AffiliateTaxInfoForm({
         >
           <option value="INDIVIDUAL">Individual / Sole Proprietor</option>
           <option value="LLC">LLC</option>
-          <option value="CORP">Corporation</option>
+          <option value="CORP">C Corporation</option>
+          <option value="S_CORP">S Corporation</option>
           <option value="PARTNERSHIP">Partnership</option>
         </select>
       </div>

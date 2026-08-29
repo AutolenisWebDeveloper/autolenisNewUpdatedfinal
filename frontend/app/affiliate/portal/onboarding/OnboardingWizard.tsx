@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  CheckCircle2, ChevronRight, ChevronLeft, Upload, AlertCircle,
+  CheckCircle2, ChevronRight, ChevronLeft, Upload, AlertCircle, Clock,
   User, Building2, FileText, CreditCard, FolderOpen, ClipboardList,
 } from "lucide-react";
 import { api, apiErrorMessage } from "@/lib/api/client";
@@ -144,10 +144,14 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
   const [paypalEmail, setPaypalEmail]   = useState(profile.paymentProfile?.paypalEmail ?? "");
   const [zellePhone, setZellePhone]     = useState(profile.paymentProfile?.zellePhone ?? "");
 
-  // Step 6 state
+  // Step 6 state. O15 — the step is satisfied only by a GOVERNMENT_ID upload
+  // (matching the server-side submit gate), not by any document.
   const [uploadFile, setUploadFile]   = useState<File | null>(null);
   const [docType, setDocType]         = useState("GOVERNMENT_ID");
   const [uploadSuccess, setUploadSuccess] = useState(profile.documents.length > 0);
+  const [governmentIdUploaded, setGovernmentIdUploaded] = useState(
+    profile.documents.some(d => d.type === "GOVERNMENT_ID"),
+  );
 
   const goTo = (n: number) => {
     setError(null);
@@ -205,16 +209,29 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
     } catch (err) { setError(apiErrorMessage(err, "Save failed")); return false; }
   }
 
+  // U6 — the raw fetch here used to reject unhandled on a network failure or
+  // non-JSON response: loading reset (try/finally in handleNext) but no error
+  // was ever shown. Every failure path now lands in setError.
   async function uploadDocument() {
     if (!uploadFile) { setError("Please select a file to upload."); return false; }
-    const fd = new FormData();
-    fd.append("file", uploadFile);
-    fd.append("type", docType);
-    const res = await fetch("/api/affiliate/onboarding/documents/upload", { method: "POST", body: fd });
-    if (!res.ok) { const d = await res.json(); setError(d.error?.message ?? "Upload failed"); return false; }
-    setUploadSuccess(true);
-    setUploadFile(null);
-    return true;
+    try {
+      const fd = new FormData();
+      fd.append("file", uploadFile);
+      fd.append("type", docType);
+      const res = await fetch("/api/affiliate/onboarding/documents/upload", { method: "POST", body: fd });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        setError(d?.error?.message ?? `Upload failed (${res.status}). Please try again.`);
+        return false;
+      }
+      if (docType === "GOVERNMENT_ID") setGovernmentIdUploaded(true);
+      setUploadSuccess(true);
+      setUploadFile(null);
+      return true;
+    } catch {
+      setError("Upload failed — check your connection and try again.");
+      return false;
+    }
   }
 
   async function handleNext() {
@@ -226,7 +243,22 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
       if (step === 4 && !(await saveStep4())) return;
       if (step === 5 && !(await saveStep5())) return;
       if (step === 6) {
-        if (!uploadSuccess && !(await uploadDocument())) return;
+        // O15 — the server's submit gate requires a GOVERNMENT_ID document
+        // specifically; letting any doc type satisfy this step produced a
+        // confusing "Missing: Government ID document" failure at the end.
+        if (!governmentIdUploaded) {
+          if (uploadFile && docType !== "GOVERNMENT_ID") {
+            // Upload their selected supporting doc, but the step isn't done.
+            if (!(await uploadDocument())) return;
+            setError("Supporting document uploaded — a Government ID is still required to continue.");
+            return;
+          }
+          if (docType !== "GOVERNMENT_ID") {
+            setError("A Government ID document is required to continue. Select \"Government ID\" and upload it.");
+            return;
+          }
+          if (!(await uploadDocument())) return;
+        }
       }
       if (step < TOTAL) goTo(step + 1);
     } finally {
@@ -247,16 +279,52 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
     }
   }
 
+  // O5/U7 — the post-submit card must tell the truth per status: SUBMITTED/
+  // UNDER_REVIEW is "awaiting review", only APPROVED is "complete", and
+  // REJECTED gets an explanation instead of a blank wizard.
   if (submitted) {
+    const approved = onboarding.status === "APPROVED";
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="bg-white border border-slate-200 rounded-2xl p-10 max-w-md w-full text-center shadow-sm">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <CheckCircle2 size={32} className="text-green-600" />
+        <div className="bg-white border border-slate-200 rounded-2xl p-10 max-w-md w-full text-center shadow-sm" data-testid={approved ? "onboarding-approved" : "onboarding-under-review"}>
+          <div className={`w-16 h-16 ${approved ? "bg-green-100" : "bg-blue-100"} rounded-full flex items-center justify-center mx-auto mb-4`}>
+            {approved
+              ? <CheckCircle2 size={32} className="text-green-600" />
+              : <Clock size={32} className="text-blue-600" />}
           </div>
-          <h1 className="text-xl font-bold text-slate-900 mb-2">Onboarding Complete!</h1>
+          <h1 className="text-xl font-bold text-slate-900 mb-2">
+            {approved ? "Onboarding Complete!" : "Submitted — under review"}
+          </h1>
           <p className="text-sm text-slate-600 mb-6">
-            Your affiliate account is active. Head to your dashboard to grab your referral link and start earning.
+            {approved
+              ? "Your onboarding is approved. Head to your dashboard to grab your referral link and start earning."
+              : "Our team is reviewing your information. You'll get a notification (and an email) once it's processed — usually within 2 business days. Your referral link works in the meantime."}
+          </p>
+          <button
+            onClick={() => router.push("/affiliate/portal/dashboard")}
+            className="w-full bg-al-primary text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-al-primary/90 transition-colors"
+          >
+            Go to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (onboarding.status === "REJECTED") {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="bg-white border border-red-200 rounded-2xl p-10 max-w-md w-full text-center shadow-sm" data-testid="onboarding-rejected">
+          <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle size={32} className="text-red-500" />
+          </div>
+          <h1 className="text-xl font-bold text-slate-900 mb-2">Onboarding not approved</h1>
+          {onboarding.decisionNote && (
+            <p className="text-sm text-red-900 bg-red-50 border border-red-100 rounded-lg p-3 mb-4 text-left">{onboarding.decisionNote}</p>
+          )}
+          <p className="text-sm text-slate-600 mb-6">
+            If you believe this was a mistake or want to appeal, contact{" "}
+            <a href="mailto:support@autolenis.com" className="text-al-primary font-semibold hover:underline">support@autolenis.com</a>.
           </p>
           <button
             onClick={() => router.push("/affiliate/portal/dashboard")}
@@ -277,6 +345,31 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
           <h1 className="text-2xl font-bold text-slate-900">Affiliate Onboarding</h1>
           <p className="text-sm text-slate-500 mt-1">Complete all steps to activate your account for payouts.</p>
         </div>
+
+        {/* O4 — corrections requested: the admin's decision note and item list
+            were collected but never shown; without them the affiliate saw a
+            blank wizard with no idea what to fix. */}
+        {onboarding.status === "NEEDS_CORRECTION" && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6" role="alert" data-testid="corrections-banner">
+            <div className="flex items-center gap-2 mb-1">
+              <AlertCircle size={16} className="text-amber-600 shrink-0" aria-hidden="true" />
+              <p className="text-sm font-semibold text-amber-900">Corrections requested</p>
+            </div>
+            {onboarding.decisionNote && (
+              <p className="text-sm text-amber-900 mb-2">{onboarding.decisionNote}</p>
+            )}
+            {onboarding.correctionItems.length > 0 && (
+              <ul className="list-disc pl-5 text-sm text-amber-900 space-y-0.5">
+                {onboarding.correctionItems.map((item, i) => (
+                  <li key={i}>{item}</li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs text-amber-800 mt-2">
+              Update the steps below, then resubmit from the Review step.
+            </p>
+          </div>
+        )}
 
         {/* Progress bar */}
         <div className="flex items-center gap-1 mb-8 overflow-x-auto pb-2">
@@ -441,12 +534,13 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   <Label required>Tax Classification</Label>
                   <Select value={taxClass} onChange={e => setTaxClass(e.target.value)}>
                     <option value="">Select classification…</option>
-                    <option value="individual">Individual / Sole Proprietor</option>
-                    <option value="llc_single">Single-member LLC</option>
-                    <option value="llc_multi">Multi-member LLC</option>
-                    <option value="corporation">C Corporation</option>
-                    <option value="s_corp">S Corporation</option>
-                    <option value="partnership">Partnership</option>
+                    {/* O12 — canonical AFFILIATE_TAX_CLASSIFICATIONS values, matching
+                        the finance route: one vocabulary in the tax column. */}
+                    <option value="INDIVIDUAL">Individual / Sole Proprietor</option>
+                    <option value="LLC">LLC</option>
+                    <option value="CORP">C Corporation</option>
+                    <option value="S_CORP">S Corporation</option>
+                    <option value="PARTNERSHIP">Partnership</option>
                   </Select>
                 </div>
                 <div>

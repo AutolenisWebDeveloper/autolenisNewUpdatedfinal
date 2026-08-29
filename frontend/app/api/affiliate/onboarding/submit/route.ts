@@ -5,6 +5,7 @@ import {
   getOnboardingProfile,
   computeOnboardingCompletion,
   saveOnboardingStep,
+  OnboardingLockedError,
 } from "@/lib/services/affiliate/onboarding.service";
 import { syncGhlTag } from "@/lib/services/ghl/tag-sync";
 
@@ -25,7 +26,16 @@ export async function POST(request: NextRequest) {
     return errorResponse("INCOMPLETE", `Missing: ${missing.join(", ")}`, 400);
   }
 
-  await saveOnboardingStep(affiliate.id, 7, "SUBMITTED");
+  // O3 — SUBMITTED is reachable only from IN_PROGRESS/NEEDS_CORRECTION; a
+  // re-POST on an already-decided review can no longer erase the decision.
+  try {
+    await saveOnboardingStep(affiliate.id, 7, "SUBMITTED");
+  } catch (err) {
+    if (err instanceof OnboardingLockedError) {
+      return errorResponse("ONBOARDING_LOCKED", `Your onboarding is already ${err.status.toLowerCase().replace("_", " ")}.`, 409);
+    }
+    throw err;
+  }
 
   await prisma.notification.create({
     data: {

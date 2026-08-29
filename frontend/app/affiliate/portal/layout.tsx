@@ -5,18 +5,23 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { robots: { index: false, follow: false } };
 import AffiliateSidebar from "@/components/affiliate/AffiliateSidebar";
 import ChatWidget from "@/components/public/ChatWidget";
-import { requireAffiliate } from "@/lib/auth/affiliate-session";
+import { requireAffiliateWithOnboarding } from "@/lib/auth/affiliate-session";
 
 // All affiliate portal pages canonical under /affiliate/portal/*
 export default async function AffiliatePortalLayout({ children }: { children: React.ReactNode }) {
-  // R8 — requireAffiliate() already redirects SUSPENDED and REJECTED
+  // R3/decision 2 — the onboarding gate lives here: a NOT_STARTED affiliate
+  // is redirected from gated pages to the wizard (exempt: onboarding,
+  // profile, settings, compliance, dashboard, notifications, resources).
+  // R8 — requireAffiliate() inside already redirects SUSPENDED/REJECTED
   // affiliates to /affiliate/unsubscribed; the old REJECTED-may-view-dashboard
   // branch here was unreachable dead code encoding a contradictory product.
-  await requireAffiliate();
+  // Pages keep their own requireAffiliate() for data — that call is the
+  // server-side authority; this gate adds the onboarding dimension.
+  const { onboardingStatus } = await requireAffiliateWithOnboarding();
 
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-[#F8F9FA]" data-testid="affiliate-portal">
-      <AffiliateSidebar />
+      <AffiliateSidebar onboardingRequired={onboardingStatus === "NOT_STARTED"} />
       <main className="flex-1 overflow-y-auto pt-14 lg:pt-0">{children}</main>
       <ChatWidget
         chatEndpoint="/api/affiliate/ai/chat"

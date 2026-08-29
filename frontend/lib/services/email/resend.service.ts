@@ -4,6 +4,7 @@
 // FROM_NAME and RESEND_API_KEY from env
 
 import { logger } from "@/lib/logger";
+import { escapeHtml } from "@/lib/utils/escape-html";
 import { Resend } from "resend";
 import { prisma } from "@/lib/prisma";
 import { enqueueTransactionalEmail } from "./transactional-dispatch";
@@ -869,7 +870,7 @@ export async function sendRefundConfirmationEmail(params: {
         <div style="padding:32px;color:#1f2937;line-height:1.7;font-size:14px">
           <p>Hi ${firstName},</p>
           <p>We've processed a refund of <strong>${amount}</strong> back to your original payment method.</p>
-          ${reason ? `<p style="background:#F8F9FB;border-left:3px solid #0B5FD1;padding:12px 16px;margin:16px 0;color:#4B5563"><strong>Reason:</strong> ${reason}</p>` : ""}
+          ${reason ? `<p style="background:#F8F9FB;border-left:3px solid #0B5FD1;padding:12px 16px;margin:16px 0;color:#4B5563"><strong>Reason:</strong> ${escapeHtml(reason)}</p>` : ""}
           <p>Most banks post refunds within 5–10 business days.</p>
           <a href="${dashboardUrl}" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px">Back to dashboard →</a>
           <p style="margin-top:32px;color:#94A3B8;font-size:12px">Reference: ${refundId}</p>
@@ -1074,7 +1075,7 @@ export async function sendAffiliateRejectionEmail(to: string, firstName: string,
         <div style="padding:32px;color:#4B5563;line-height:1.7">
           <p>Hi ${firstName},</p>
           <p>Thank you for your interest in the AutoLenis affiliate program. After reviewing your application, we're unable to approve it at this time.</p>
-          ${reason ? `<p style="background:#F8F9FB;border-left:3px solid #0B5FD1;padding:12px 16px;margin:16px 0;font-size:13px"><strong style="color:#111827">Note from our team:</strong> ${reason}</p>` : ""}
+          ${reason ? `<p style="background:#F8F9FB;border-left:3px solid #0B5FD1;padding:12px 16px;margin:16px 0;font-size:13px"><strong style="color:#111827">Note from our team:</strong> ${escapeHtml(reason)}</p>` : ""}
           <p>We review applications on an ongoing basis and typically look for affiliates with:</p>
           <ul style="padding-left:20px;font-size:14px">
             <li>An established platform (blog, social, newsletter, podcast, or community)</li>
@@ -1106,7 +1107,7 @@ export async function sendAffiliateSuspendedEmail(to: string, firstName: string,
         <div style="padding:32px;color:#4B5563;line-height:1.7">
           <p>Hi ${firstName},</p>
           <p>Your AutoLenis affiliate account has been suspended. While suspended, your referral links remain active for attribution but you will not accrue new commissions and payouts are paused.</p>
-          <p style="background:#F8F9FB;border-left:3px solid #DC2626;padding:12px 16px;margin:16px 0;font-size:13px"><strong style="color:#111827">Reason:</strong> ${reason}</p>
+          <p style="background:#F8F9FB;border-left:3px solid #DC2626;padding:12px 16px;margin:16px 0;font-size:13px"><strong style="color:#111827">Reason:</strong> ${escapeHtml(reason)}</p>
           <p>If you believe this is a mistake or would like to discuss reinstatement, please contact our team.</p>
           <a href="mailto:support@autolenis.com" style="display:inline-block;background:#0B5FD1;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;margin-top:8px">Contact Support</a>
           <p style="margin-top:32px;color:#94A3B8;font-size:12px">— The AutoLenis Team</p>
@@ -1365,7 +1366,7 @@ export async function sendDealerRejectionEmail(
         <div style="padding:32px">
           <p style="color:#1a1a2e;font-size:15px">Hi ${contactName},</p>
           <p style="color:#4B5563;font-size:14px;line-height:1.7">Thank you for your interest in the AutoLenis Dealer Network. After careful review, we are unable to approve your application at this time.</p>
-          ${reason ? `<p style="color:#4B5563;font-size:14px;line-height:1.7"><strong>Reason:</strong> ${reason}</p>` : ""}
+          ${reason ? `<p style="color:#4B5563;font-size:14px;line-height:1.7"><strong>Reason:</strong> ${escapeHtml(reason)}</p>` : ""}
           <p style="color:#4B5563;font-size:14px;line-height:1.7">If you believe this was a mistake, please contact us at support@autolenis.com.</p>
         </div>
       </div>

@@ -134,9 +134,13 @@ export async function POST(request: NextRequest) {
     const msg = createErr?.message ?? "";
     logger.error("[affiliate/register] Supabase admin createUser failed", { code: createErr?.code, msg });
     if (/already|registered|exists|duplicate/i.test(msg)) {
+      // O8 — we only reach Supabase after confirming no Prisma user holds this
+      // email, so a Supabase duplicate here means an ORPHANED auth user (a
+      // prior registration crashed between createUser and the DB transaction).
+      // "Sign in instead" would dead-end them — sign-in has no account row.
       return errorResponse(
-        "EMAIL_EXISTS",
-        "An account with this email already exists. Sign in instead.",
+        "EMAIL_ORPHANED",
+        "This email is attached to an incomplete registration. Contact support@autolenis.com and we'll reset it for you.",
         409,
       );
     }
@@ -178,40 +182,54 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 5. Create Prisma User + Affiliate in a transaction
-  let referral: string;
+  // 5. Create Prisma User + Affiliate in a transaction.
+  // O9 — the referral-code uniqueness check is check-then-insert; the @unique
+  // constraint makes a collision safe but it used to abort the whole signup
+  // with a 500. On a referral-code P2002 we regenerate and retry once instead.
+  let referral = "";
   let unsubscribeToken: string;
   let affiliateId = "";
   try {
-    referral = await uniqueReferralCode();
     unsubscribeToken = crypto.randomBytes(24).toString("hex");
 
-    await prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          supabaseId: supabaseUserId,
-          email: normalizedEmail,
-          role: UserRole.AFFILIATE,
-        },
-      });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      referral = await uniqueReferralCode();
+      try {
+        await prisma.$transaction(async (tx) => {
+          const user = await tx.user.create({
+            data: {
+              supabaseId: supabaseUserId,
+              email: normalizedEmail,
+              role: UserRole.AFFILIATE,
+            },
+          });
 
-      const affiliate = await tx.affiliate.create({
-        data: {
-          userId: user.id,
-          referralCode: referral,
-          status: AffiliateStatus.ACTIVE, // auto-activate on email verification
-          // R10/O7 — a recruit sits at the parent's depth + 1 (capped at 3;
-          // the commission walk pays at most 3 ancestor levels regardless).
-          level: parentId ? Math.min(parentLevel + 1, 3) : 1,
-          parentId,
-          promotionMethod,
-          website: website || null,
-          ftcAcknowledgedAt: new Date(),
-          unsubscribeToken,
-        },
-      });
-      affiliateId = affiliate.id;
-    });
+          const affiliate = await tx.affiliate.create({
+            data: {
+              userId: user.id,
+              referralCode: referral,
+              status: AffiliateStatus.ACTIVE, // auto-activate on email verification
+              // R10/O7 — a recruit sits at the parent's depth + 1 (capped at 3;
+              // the commission walk pays at most 3 ancestor levels regardless).
+              level: parentId ? Math.min(parentLevel + 1, 3) : 1,
+              parentId,
+              promotionMethod,
+              website: website || null,
+              ftcAcknowledgedAt: new Date(),
+              unsubscribeToken,
+            },
+          });
+          affiliateId = affiliate.id;
+        });
+        break;
+      } catch (err) {
+        const isReferralCollision =
+          (err as { code?: string })?.code === "P2002" &&
+          JSON.stringify((err as { meta?: unknown })?.meta ?? "").includes("referral");
+        if (isReferralCollision && attempt === 0) continue;
+        throw err;
+      }
+    }
   } catch (err) {
     // Roll back the Supabase user we created
     try {

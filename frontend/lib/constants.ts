@@ -198,5 +198,10 @@ export const CRON_AUTH_PREFIX = "Bearer ";
 // ─── Affiliate Document Upload ───────────────────────────────────────────────
 export const AFFILIATE_DOCUMENT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
+// O12 — the ONE tax-classification vocabulary for AffiliateTaxProfile: the
+// finance route and the onboarding wizard previously wrote two different
+// casings/granularities into the same column.
+export const AFFILIATE_TAX_CLASSIFICATIONS = ["INDIVIDUAL", "LLC", "CORP", "S_CORP", "PARTNERSHIP"] as const;
+
 // ─── Affiliate Compliance ─────────────────────────────────────────────────────
 export const AFFILIATE_DISCLOSURE_VERSION = "1.0";

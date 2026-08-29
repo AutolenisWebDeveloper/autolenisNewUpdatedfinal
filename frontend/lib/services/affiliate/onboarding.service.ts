@@ -24,20 +24,62 @@ export async function ensureOnboardingRecord(affiliateId: string) {
   }
 }
 
-export async function saveOnboardingStep(
+// O3 — thrown when a step/submit write hits a review the affiliate may not
+// modify (SUBMITTED/UNDER_REVIEW awaiting the admin, or a terminal decision).
+// Routes map it to 409 so an affiliate can never erase an admin decision.
+export class OnboardingLockedError extends Error {
+  constructor(public readonly status: string) {
+    super(`Onboarding is ${status} and cannot be modified`);
+    this.name = "OnboardingLockedError";
+  }
+}
+
+// States the affiliate may write in. NEEDS_CORRECTION is writable but sticky:
+// edits keep the status (and the admin's correctionItems context) until the
+// affiliate explicitly resubmits.
+const STEP_WRITABLE = new Set(["NOT_STARTED", "IN_PROGRESS", "NEEDS_CORRECTION"]);
+
+type OnboardingDb = Pick<typeof prisma, "affiliateOnboardingReview">;
+
+async function saveOnboardingStepWith(
+  db: OnboardingDb,
   affiliateId: string,
   step: number,
-  status: "IN_PROGRESS" | "SUBMITTED" = "IN_PROGRESS"
+  status: "IN_PROGRESS" | "SUBMITTED",
 ) {
-  return prisma.affiliateOnboardingReview.upsert({
+  const current = await db.affiliateOnboardingReview.findUnique({ where: { affiliateId } });
+  const currentStatus = current?.status ?? "NOT_STARTED";
+  if (!STEP_WRITABLE.has(currentStatus)) throw new OnboardingLockedError(currentStatus);
+
+  const nextStatus =
+    status === "SUBMITTED"
+      ? "SUBMITTED"
+      : currentStatus === "NEEDS_CORRECTION"
+        ? "NEEDS_CORRECTION"
+        : "IN_PROGRESS";
+
+  return db.affiliateOnboardingReview.upsert({
     where:  { affiliateId },
-    create: { affiliateId, status, currentStep: step },
+    create: { affiliateId, status: nextStatus, currentStep: step },
     update: {
       currentStep: step,
-      status,
+      status: nextStatus,
       ...(status === "SUBMITTED" ? { submittedAt: new Date() } : {}),
     },
   });
+}
+
+// Guarded, transactional step/submit write. Pass `db` to compose with an
+// enclosing transaction (the step routes wrap their data write + this call in
+// one $transaction); without it, the guard+write runs in its own transaction.
+export async function saveOnboardingStep(
+  affiliateId: string,
+  step: number,
+  status: "IN_PROGRESS" | "SUBMITTED" = "IN_PROGRESS",
+  db?: OnboardingDb,
+) {
+  if (db) return saveOnboardingStepWith(db, affiliateId, step, status);
+  return prisma.$transaction((tx) => saveOnboardingStepWith(tx, affiliateId, step, status));
 }
 
 export async function getOnboardingProfile(affiliateId: string) {
