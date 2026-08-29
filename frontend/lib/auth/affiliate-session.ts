@@ -1,7 +1,6 @@
 import { createServerSupabaseClient } from "@/lib/supabase";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 
 export async function getAuthenticatedAffiliate() {
   const supabase = await createServerSupabaseClient();
@@ -26,12 +25,14 @@ export async function requireAffiliate() {
   // All authenticated affiliate routes are canonical under /affiliate/portal/*
   if (!affiliate) redirect("/auth/signin");
 
-  // Block suspended affiliates — full portal access is revoked until support resolves the issue.
+  // REVOCATION, not approval: suspension is the abuse kill switch applied to
+  // an already-active account. No affiliate ever waits for approval to get in.
   if (affiliate.status === "SUSPENDED") {
     redirect("/affiliate/unsubscribed?reason=suspended");
   }
 
-  // Block rejected affiliates — application was denied; portal access must not be granted.
+  // REVOCATION, not approval: REJECTED is an admin-initiated shutdown of an
+  // existing account (there is no application review to fail).
   if (affiliate.status === "REJECTED") {
     redirect("/affiliate/unsubscribed?reason=rejected");
   }
@@ -39,43 +40,25 @@ export async function requireAffiliate() {
   return affiliate;
 }
 
-// R3/decision 2 — the reconciled exempt set: the pre-existing four plus
-// dashboard (home + onboarding CTA), notifications (admin decisions arrive
-// there), and resources. Everything else in the portal requires the wizard to
-// have been started. Exported so the gate test can prove every filesystem
-// route is either exempt or gated, with no unreachable page and no loop.
-export const ONBOARDING_EXEMPT_PATHS = [
-  "/affiliate/portal/onboarding",
-  "/affiliate/portal/profile",
-  "/affiliate/portal/settings",
-  "/affiliate/portal/compliance",
-  "/affiliate/portal/dashboard",
-  "/affiliate/portal/notifications",
-  "/affiliate/portal/resources",
-];
-
-// The portal layout calls this for every portal page. Read-only: a missing
-// review row means NOT_STARTED (the wizard page provisions the record on
-// first visit); a degraded read (e.g. unmigrated environment) also resolves
-// to NOT_STARTED, which lands on the wizard's own error state — never a loop.
+// APPROVAL GATE REMOVED (owner decision, 2026-08-29).
+//
+// Affiliate accounts are auto-approved at registration: no admin approval, no
+// pending-approval state, and no onboarding gate stands between an affiliate
+// and any portal surface. This helper is retained only so pages can render a
+// NON-BLOCKING onboarding nudge (the wizard still collects tax + banking data,
+// which the payout rail needs) — it never redirects.
+//
+// What is still enforced, and is NOT an approval gate: SUSPENDED and REJECTED
+// (see requireAffiliate above) are revocations — the abuse kill switch applied
+// after the fact, not a precondition for access.
 export async function requireAffiliateWithOnboarding() {
   const affiliate = await requireAffiliate();
 
+  // Read-only and failure-tolerant: a missing review row or a degraded read
+  // both resolve to NOT_STARTED, which blocks nothing.
   const review = await prisma.affiliateOnboardingReview
     .findUnique({ where: { affiliateId: affiliate.id }, select: { status: true } })
     .catch(() => null);
-  const onboardingStatus = review?.status ?? "NOT_STARTED";
 
-  const headersList = await headers();
-  const pathname    = headersList.get("x-pathname") ?? "";
-
-  if (
-    onboardingStatus === "NOT_STARTED" &&
-    pathname.startsWith("/affiliate/portal/") &&
-    !ONBOARDING_EXEMPT_PATHS.some(p => pathname.startsWith(p))
-  ) {
-    redirect("/affiliate/portal/onboarding?step=1");
-  }
-
-  return { affiliate, onboardingStatus };
+  return { affiliate, onboardingStatus: review?.status ?? "NOT_STARTED" };
 }

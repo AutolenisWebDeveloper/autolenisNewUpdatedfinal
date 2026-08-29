@@ -8,7 +8,6 @@ import { logger } from "@/lib/logger";
 // the service; typed errors map to specific, actionable client messages.
 // Settlement stays admin-gated and recorded-only (no real money movement).
 const ERROR_STATUS: Record<PayoutRequestError["code"], number> = {
-  ONBOARDING_REQUIRED: 409,
   NO_PAYOUT_METHOD: 409,
   TAX_REQUIRED: 409,
   REQUEST_PENDING: 409,

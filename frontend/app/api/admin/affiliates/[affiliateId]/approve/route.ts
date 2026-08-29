@@ -1,5 +1,7 @@
 // POST /api/admin/affiliates/[affiliateId]/approve
-// Transitions PENDING/SUSPENDED/REJECTED → ACTIVE
+// RESTORE rail — affiliate accounts are AUTO-APPROVED at registration, so this
+// never gates a new signup. It reverses an admin revocation (SUSPENDED /
+// REJECTED) or normalises a legacy PENDING row: → ACTIVE.
 // Regenerates referral code if missing. Sends activation email with referral code.
 // Requires admin auth, Zod validation, writes audit log via service.
 

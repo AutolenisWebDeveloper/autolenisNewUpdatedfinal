@@ -17,11 +17,13 @@ export default async function AffiliatePortalLayout({ children }: { children: Re
   // branch here was unreachable dead code encoding a contradictory product.
   // Pages keep their own requireAffiliate() for data — that call is the
   // server-side authority; this gate adds the onboarding dimension.
-  const { onboardingStatus } = await requireAffiliateWithOnboarding();
+  // Access is open: this only resolves the session (and redirects the
+  // suspended/rejected kill-switch cases). No approval or onboarding gate.
+  await requireAffiliateWithOnboarding();
 
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-al-bg" data-testid="affiliate-portal">
-      <AffiliateSidebar onboardingRequired={onboardingStatus === "NOT_STARTED"} />
+      <AffiliateSidebar />
       <main className="flex-1 overflow-y-auto pt-14 lg:pt-0">{children}</main>
       <ChatWidget
         chatEndpoint="/api/affiliate/ai/chat"

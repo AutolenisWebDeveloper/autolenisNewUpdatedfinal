@@ -9,33 +9,31 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   LayoutDashboard, Users, DollarSign, Network,
   Calculator, Bell, ShieldCheck, FileText, User, Settings, LogOut,
-  FileCheck, Landmark, Share2, Menu, Trophy, Lock,
+  FileCheck, Landmark, Share2, Menu, Trophy,
 } from "lucide-react";
 
-// `gated: true` marks destinations the server-side onboarding gate
-// (requireAffiliateWithOnboarding) redirects to the wizard while onboarding
-// is NOT_STARTED — the sidebar mirrors that gate with a lock affordance so
-// nav truthfully reflects what a click will do. UX only; the layout enforces.
-// Exported so the onboarding-gate test can prove nav gating and the server
-// gate's exempt set never drift apart.
+// Every destination is always reachable: affiliate accounts are auto-approved
+// and no onboarding gate exists, so nav carries no locked/gated state. Exported
+// so the access test can prove no destination is ever locked and no nav item
+// points at a missing page.
 export const NAV_ITEMS = [
-  { label: "Dashboard",         href: "/affiliate/portal/dashboard",         icon: LayoutDashboard, gated: false },
-  { label: "My Referrals",      href: "/affiliate/portal/referrals",         icon: Users,           gated: true },
-  { label: "Referral Hub",      href: "/affiliate/portal/referral-hub",      icon: Share2,          gated: true },
-  { label: "Earnings",          href: "/affiliate/portal/earnings",          icon: DollarSign,      gated: true },
-  { label: "Finance Hub",       href: "/affiliate/portal/finance",           icon: Landmark,        gated: true },
-  { label: "Documents",         href: "/affiliate/portal/documents",         icon: FileCheck,       gated: true },
-  { label: "Referral Network",  href: "/affiliate/portal/network",           icon: Network,         gated: true },
-  { label: "Leaderboard",       href: "/affiliate/portal/leaderboard",       icon: Trophy,          gated: true },
-  { label: "Income Calculator", href: "/affiliate/portal/income-calculator", icon: Calculator,      gated: true },
-  { label: "Notifications",     href: "/affiliate/portal/notifications",     icon: Bell,            gated: false },
-  { label: "Compliance",        href: "/affiliate/portal/compliance",        icon: ShieldCheck,     gated: false },
-  { label: "Resources",         href: "/affiliate/portal/resources",         icon: FileText,        gated: false },
-  { label: "Profile",           href: "/affiliate/portal/profile",           icon: User,            gated: false },
-  { label: "Settings",          href: "/affiliate/portal/settings",          icon: Settings,        gated: false },
+  { label: "Dashboard",         href: "/affiliate/portal/dashboard",         icon: LayoutDashboard },
+  { label: "My Referrals",      href: "/affiliate/portal/referrals",         icon: Users },
+  { label: "Referral Hub",      href: "/affiliate/portal/referral-hub",      icon: Share2 },
+  { label: "Earnings",          href: "/affiliate/portal/earnings",          icon: DollarSign },
+  { label: "Finance Hub",       href: "/affiliate/portal/finance",           icon: Landmark },
+  { label: "Documents",         href: "/affiliate/portal/documents",         icon: FileCheck },
+  { label: "Referral Network",  href: "/affiliate/portal/network",           icon: Network },
+  { label: "Leaderboard",       href: "/affiliate/portal/leaderboard",       icon: Trophy },
+  { label: "Income Calculator", href: "/affiliate/portal/income-calculator", icon: Calculator },
+  { label: "Notifications",     href: "/affiliate/portal/notifications",     icon: Bell },
+  { label: "Compliance",        href: "/affiliate/portal/compliance",        icon: ShieldCheck },
+  { label: "Resources",         href: "/affiliate/portal/resources",         icon: FileText },
+  { label: "Profile",           href: "/affiliate/portal/profile",           icon: User },
+  { label: "Settings",          href: "/affiliate/portal/settings",          icon: Settings },
 ];
 
-function Inner({ pathname, onNavigate, unreadCount, onboardingRequired }: { pathname: string; onNavigate?: () => void; unreadCount: number; onboardingRequired: boolean }) {
+function Inner({ pathname, onNavigate, unreadCount }: { pathname: string; onNavigate?: () => void; unreadCount: number }) {
   return (
     <>
       <div className="px-5 py-4 border-b border-slate-100">
@@ -45,20 +43,15 @@ function Inner({ pathname, onNavigate, unreadCount, onboardingRequired }: { path
         {NAV_ITEMS.map(item => {
           const active = pathname === item.href || pathname.startsWith(item.href + "/");
           const showBadge = item.href === "/affiliate/portal/notifications" && unreadCount > 0;
-          const locked = onboardingRequired && item.gated;
           return (
             <Link key={item.href} href={item.href} onClick={onNavigate}
               data-testid={`affiliate-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
-              title={locked ? "Complete onboarding to unlock" : undefined}
-              aria-label={locked ? `${item.label} — locked until onboarding is complete` : undefined}
               className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
                 active ? "bg-al-primary/10 text-al-primary font-semibold"
-                : locked ? "text-slate-400 hover:bg-slate-50 hover:text-slate-500"
                 : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
               }`}>
               <item.icon size={15} className="shrink-0" aria-hidden="true" />
               <span className="flex-1">{item.label}</span>
-              {locked && <Lock size={12} className="shrink-0" aria-hidden="true" data-testid={`affiliate-nav-lock-${item.label.toLowerCase().replace(/\s+/g, "-")}`} />}
               {showBadge && (
                 <span
                   data-testid="affiliate-sidebar-notification-badge"
@@ -83,7 +76,7 @@ function Inner({ pathname, onNavigate, unreadCount, onboardingRequired }: { path
   );
 }
 
-export default function AffiliateSidebar({ onboardingRequired = false }: { onboardingRequired?: boolean }) {
+export default function AffiliateSidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -103,7 +96,7 @@ export default function AffiliateSidebar({ onboardingRequired = false }: { onboa
   return (
     <>
       <aside className="hidden lg:flex w-60 shrink-0 bg-white border-r border-slate-200 flex-col h-screen sticky top-0" data-testid="affiliate-sidebar">
-        <Inner pathname={pathname} unreadCount={unreadCount} onboardingRequired={onboardingRequired} />
+        <Inner pathname={pathname} unreadCount={unreadCount} />
       </aside>
       <div className="lg:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between bg-white border-b border-slate-200 px-4 h-14" data-testid="affiliate-mobile-topbar">
         <AutoLenisLogo size="sm" variant="dark" href="/affiliate/portal/dashboard" testId="affiliate-mobile-logo" />
@@ -128,7 +121,7 @@ export default function AffiliateSidebar({ onboardingRequired = false }: { onboa
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent variant="sheet" side="left" className="flex flex-col p-0" data-testid="affiliate-mobile-drawer">
           <DialogTitle className="sr-only">Affiliate navigation</DialogTitle>
-          <Inner pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} onboardingRequired={onboardingRequired} />
+          <Inner pathname={pathname} onNavigate={() => setOpen(false)} unreadCount={unreadCount} />
         </DialogContent>
       </Dialog>
     </>

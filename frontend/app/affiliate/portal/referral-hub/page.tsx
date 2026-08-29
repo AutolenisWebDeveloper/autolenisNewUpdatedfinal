@@ -31,7 +31,6 @@ export default async function ReferralHubPage() {
     <ReferralHubClient
       referralCode={affiliate.referralCode}
       referralLink={referralLink}
-      affiliateStatus={affiliate.status}
       qrDataUrl={qrDataUrl}
       l1PerDealCents={l1PerDealCents}
       l2PerDealCents={l2PerDealCents}

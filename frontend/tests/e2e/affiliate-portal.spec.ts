@@ -12,12 +12,12 @@ import { PrismaClient } from "@prisma/client";
 // spec SKIPS with an explicit reason — it never passes vacuously (same
 // convention as buyer-remediation.spec.ts / dealer-funnel.spec.ts).
 //
-//   E2E_AFFILIATE_STORAGE_STATE            signed-in ACTIVE affiliate whose
-//                                          onboarding review is APPROVED
+//   E2E_AFFILIATE_STORAGE_STATE            signed-in ACTIVE affiliate with a
+//                                          payout method + certified W-9
 //   E2E_AFFILIATE_ID                       that affiliate's Affiliate.id, for
 //                                          the database-ledger assertions
 //   E2E_AFFILIATE_NEW_STORAGE_STATE        signed-in ACTIVE affiliate with NO
-//                                          onboarding review row (NOT_STARTED)
+//                                          onboarding record at all
 //   E2E_AFFILIATE_SUSPENDED_STORAGE_STATE  signed-in SUSPENDED affiliate
 //   DATABASE_URL                           must target autolenis_e2e for any
 //                                          spec that reads or asserts DB state
@@ -70,17 +70,6 @@ const PORTAL_ROUTES = [
   "/affiliate/portal/resources",
   "/affiliate/portal/profile",
   "/affiliate/portal/settings",
-];
-
-/** The server gate's exempt set (ONBOARDING_EXEMPT_PATHS + the wizard). */
-const EXEMPT_ROUTES = [
-  "/affiliate/portal/onboarding",
-  "/affiliate/portal/profile",
-  "/affiliate/portal/settings",
-  "/affiliate/portal/compliance",
-  "/affiliate/portal/dashboard",
-  "/affiliate/portal/notifications",
-  "/affiliate/portal/resources",
 ];
 
 async function withState(page: Page, state: string): Promise<{ ctx: BrowserContext; p: Page }> {
@@ -142,46 +131,40 @@ test.describe("access control", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Onboarding gate — NOT_STARTED is confined to exempt pages + the wizard, and
-// the exempt pages themselves must actually render (no dead ends).
+// Open access — the approval/onboarding gate is REMOVED. An affiliate with no
+// onboarding record must reach every portal surface, and nav must lock nothing.
 // ─────────────────────────────────────────────────────────────────────────────
-test.describe("onboarding gate", () => {
-  test("a NOT_STARTED affiliate is routed to the wizard from gated pages", async ({ page }) => {
+test.describe("open access (no approval gate)", () => {
+  test("an affiliate with NO onboarding record reaches every gated-by-default page", async ({ page }) => {
     test.skip(!NEW_STATE, "E2E_AFFILIATE_NEW_STORAGE_STATE not set — needs an affiliate with no onboarding review row");
     const { ctx, p } = await withState(page, NEW_STATE!);
-    for (const path of ["/affiliate/portal/earnings", "/affiliate/portal/finance", "/affiliate/portal/network"]) {
-      await gotoOk(p, path);
-      await expect(p, `${path} must gate to the onboarding wizard`).toHaveURL(/\/affiliate\/portal\/onboarding/);
-    }
-    await ctx.close();
-  });
-
-  test("exempt pages stay reachable while onboarding is NOT_STARTED", async ({ page }) => {
-    test.skip(!NEW_STATE, "E2E_AFFILIATE_NEW_STORAGE_STATE not set — needs an affiliate with no onboarding review row");
-    const { ctx, p } = await withState(page, NEW_STATE!);
-    for (const path of EXEMPT_ROUTES) {
+    for (const path of ["/affiliate/portal/earnings", "/affiliate/portal/finance", "/affiliate/portal/network", "/affiliate/portal/referral-hub", "/affiliate/portal/documents"]) {
       const res = await gotoOk(p, path);
       expect(res?.status(), `${path} status`).toBeLessThan(500);
-      const landed = new URL(p.url()).pathname;
-      // Exempt pages render in place; only the wizard route itself may show the wizard.
-      if (path !== "/affiliate/portal/onboarding") {
-        expect(landed, `${path} bounced to ${landed} despite being exempt`).toBe(path);
-      }
+      expect(
+        new URL(p.url()).pathname,
+        `${path} must NOT redirect to the onboarding wizard — access is open`,
+      ).toBe(path);
     }
-    // The compliance page in particular (the gate reconciliation defect).
-    await gotoOk(p, "/affiliate/portal/compliance");
-    await expect(p.getByTestId("affiliate-compliance-page").or(p.locator("main, body"))).toBeVisible();
     await ctx.close();
   });
 
-  test("gated nav items carry the lock affordance for a NOT_STARTED affiliate", async ({ page }) => {
+  test("every portal route renders for an affiliate with no onboarding record", async ({ page }) => {
+    test.skip(!NEW_STATE, "E2E_AFFILIATE_NEW_STORAGE_STATE not set — needs an affiliate with no onboarding review row");
+    const { ctx, p } = await withState(page, NEW_STATE!);
+    for (const path of PORTAL_ROUTES) {
+      const res = await gotoOk(p, path);
+      expect(res?.status(), `${path} status`).toBeLessThan(500);
+      expect(new URL(p.url()).pathname, `${path} redirected away`).toBe(path);
+    }
+    await ctx.close();
+  });
+
+  test("nav renders no locked destinations", async ({ page }) => {
     test.skip(!NEW_STATE, "E2E_AFFILIATE_NEW_STORAGE_STATE not set — needs an affiliate with no onboarding review row");
     const { ctx, p } = await withState(page, NEW_STATE!);
     await gotoOk(p, "/affiliate/portal/dashboard");
-    await expect(p.getByTestId("affiliate-nav-lock-earnings")).toBeVisible();
-    await expect(p.getByTestId("affiliate-nav-lock-finance-hub")).toBeVisible();
-    // Ungated destinations show no lock.
-    await expect(p.getByTestId("affiliate-nav-lock-settings")).toHaveCount(0);
+    expect(await p.locator('[data-testid^="affiliate-nav-lock-"]').count(), "no nav item may be locked").toBe(0);
     await ctx.close();
   });
 });
@@ -290,11 +273,11 @@ test.describe("payout request rail", () => {
   test("an affiliate below prerequisites gets a disabled control, not a dead click", async ({ page }) => {
     test.skip(!NEW_STATE, "E2E_AFFILIATE_NEW_STORAGE_STATE not set — needs a not-yet-onboarded affiliate");
     const { ctx } = await withState(page, NEW_STATE!);
-    // Finance is gated for NOT_STARTED — the API must still refuse directly.
+    // No approval gate: the only refusals left are missing self-service data.
     const res = await ctx.request.post("/api/affiliate/payouts/request");
     expect(res.status(), "request without onboarding must be refused").toBe(409);
     const body = await res.json();
-    expect(["ONBOARDING_REQUIRED", "NO_PAYOUT_METHOD", "TAX_REQUIRED", "NOTHING_TO_PAY", "BELOW_MINIMUM"]).toContain(body?.error?.code);
+    expect(["NO_PAYOUT_METHOD", "TAX_REQUIRED", "NOTHING_TO_PAY", "BELOW_MINIMUM"]).toContain(body?.error?.code);
     await ctx.close();
   });
 

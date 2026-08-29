@@ -174,10 +174,22 @@ test("no payout method → NO_PAYOUT_METHOD", async () => {
   await assert.rejects(requestPayout("aff_1"), (e: unknown) => (e as InstanceType<typeof PayoutRequestError>).code === "NO_PAYOUT_METHOD");
 });
 
-test("onboarding not APPROVED → ONBOARDING_REQUIRED", async () => {
-  const { requestPayout, PayoutRequestError } = await svc();
-  ctrl.onboardingStatus = "SUBMITTED";
-  await assert.rejects(requestPayout("aff_1"), (e: unknown) => (e as InstanceType<typeof PayoutRequestError>).code === "ONBOARDING_REQUIRED");
+// APPROVAL GATE REMOVED (owner decision): an affiliate never needs an admin's
+// blessing to be paid. The remaining prerequisites are self-service data the
+// payment itself requires — somewhere to send money (payout method) and a
+// certified W-9 (1099 compliance) — never a human approval step.
+test("no admin approval needed: a payout succeeds with onboarding NOT_STARTED / no review row", async () => {
+  const { requestPayout } = await svc();
+  for (const status of [null, "NOT_STARTED", "IN_PROGRESS", "SUBMITTED", "NEEDS_CORRECTION"]) {
+    ctrl.onboardingStatus = status;
+    ctrl.payouts = [];
+    ctrl.commissions = [
+      { id: "c1", affiliateId: "aff_1", status: "APPROVED", amountCents: 2000, payoutId: null, paidAt: null, createdAt: OLD },
+      { id: "c2", affiliateId: "aff_1", status: "APPROVED", amountCents: 1500, payoutId: null, paidAt: null, createdAt: OLD },
+    ];
+    const result = await requestPayout("aff_1");
+    assert.equal(result.amountCents, 3500, `onboarding=${status} must not block a payout request`);
+  }
 });
 
 test("nothing claimable → NOTHING_TO_PAY", async () => {

@@ -34,12 +34,9 @@ function SectionError({ what }: { what: string }) {
 export const dynamic = "force-dynamic";
 
 export default async function AffiliateFinancePage() {
-  // P1-2 — gate runs in the PAGE, not only the layout: App Router does not
-  // re-render the layout on soft navigation, so a sidebar click would bypass
-  // a layout-only gate.
   const { affiliate } = await requireAffiliateWithOnboarding();
 
-  const [summaryR, payoutsR, payoutMethodR, taxProfileR, onboardingR, openRequestR] = await Promise.allSettled([
+  const [summaryR, payoutsR, payoutMethodR, taxProfileR, openRequestR] = await Promise.allSettled([
     getCommissionSummary(affiliate.id),
     getPayoutHistory(affiliate.id, { take: 50 }),
     prisma.affiliatePayoutMethod.findUnique({
@@ -52,10 +49,6 @@ export default async function AffiliateFinancePage() {
         taxClassification: true, certified: true, certifiedAt: true,
       },
     }),
-    prisma.affiliateOnboardingReview.findUnique({
-      where: { affiliateId: affiliate.id },
-      select: { status: true },
-    }),
     prisma.affiliatePayout.findFirst({
       where: { affiliateId: affiliate.id, status: "PENDING" },
       select: { amountCents: true, requestedAt: true },
@@ -66,16 +59,15 @@ export default async function AffiliateFinancePage() {
   const payouts      = payoutsR.status === "fulfilled" ? payoutsR.value : null;
   const payoutMethod = payoutMethodR.status === "fulfilled" ? payoutMethodR.value : null;
   const taxProfile   = taxProfileR.status === "fulfilled" ? taxProfileR.value : null;
-  const onboarding   = onboardingR.status === "fulfilled" ? onboardingR.value : null;
   const openRequest  = openRequestR.status === "fulfilled" ? openRequestR.value : null;
 
-  const hasBanking         = !!payoutMethod?.method;
-  const onboardingApproved = onboarding?.status === "APPROVED";
-  const taxCertified       = !!taxProfile?.certified;
+  const hasBanking   = !!payoutMethod?.method;
+  const taxCertified = !!taxProfile?.certified;
 
-  // Prerequisites the payout service actually enforces, in user words.
+  // Prerequisites the payout service actually enforces, in user words. There is
+  // no approval step — only the data a payment needs (where to send it, and a
+  // certified W-9 for 1099 reporting). Both are self-service on this page.
   const missing: string[] = [];
-  if (!onboardingApproved) missing.push("complete onboarding (and get approved)");
   if (!hasBanking) missing.push("add a payout method below");
   if (!taxCertified) missing.push("certify your tax information (W-9) below");
 

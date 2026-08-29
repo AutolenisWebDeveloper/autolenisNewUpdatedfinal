@@ -113,7 +113,6 @@ export async function settleApprovedCommission(input: {
 export class PayoutRequestError extends Error {
   constructor(
     public readonly code:
-      | "ONBOARDING_REQUIRED"
       | "NO_PAYOUT_METHOD"
       | "TAX_REQUIRED"
       | "REQUEST_PENDING"
@@ -134,24 +133,16 @@ export interface RequestPayoutResult {
 
 export async function requestPayout(affiliateId: string): Promise<RequestPayoutResult> {
   return prisma.$transaction(async (tx) => {
-    // Eligibility: onboarding APPROVED (the review rail's one hard gate) and
-    // a payout method on file — money must have somewhere real to go.
-    const review = await tx.affiliateOnboardingReview.findUnique({
-      where: { affiliateId },
-      select: { status: true },
-    });
-    if (review?.status !== "APPROVED") {
-      throw new PayoutRequestError(
-        "ONBOARDING_REQUIRED",
-        "Complete onboarding (and get approved) before requesting a payout.",
-      );
-    }
+    // APPROVAL GATE REMOVED (owner decision): a payout never waits on an admin
+    // approving onboarding. The only remaining prerequisites are the data the
+    // payment itself cannot proceed without — both self-service:
+    //   • a payout method (somewhere to send the money);
+    //   • a certified W-9 (1099 reporting; recorded payouts over $600/yr
+    //     without one are a compliance gap).
     const method = await tx.affiliatePayoutMethod.findUnique({ where: { affiliateId } });
     if (!method?.method) {
       throw new PayoutRequestError("NO_PAYOUT_METHOD", "Add a payout method in the Finance Hub first.");
     }
-    // P2-5 — recorded payouts over $600/yr without a certified W-9 are a 1099
-    // compliance gap; the pre-rebuild rail required certification too.
     const tax = await tx.affiliateTaxProfile.findUnique({
       where: { affiliateId },
       select: { certified: true },
