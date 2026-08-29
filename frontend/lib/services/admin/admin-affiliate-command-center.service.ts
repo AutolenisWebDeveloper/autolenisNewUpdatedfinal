@@ -5,6 +5,7 @@ import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { AffiliateStatus } from "@prisma/client";
 import { addSupportNote } from "@/lib/services/admin/admin-support.service";
+import { ledgerEarnedWhere } from "@/lib/services/affiliate/commission.service";
 import type { SupportNoteType } from "@prisma/client";
 import crypto from "crypto";
 
@@ -225,7 +226,10 @@ export async function getAdminAffiliateListData(
     affiliateIds.length > 0
       ? prisma.commission.groupBy({
           by: ["affiliateId", "status"],
-          where: { affiliateId: { in: affiliateIds } },
+          // Shared ledger rule (M1): live rows + negative REVERSED clawback
+          // offsets; positive in-place-REVERSED and REJECTED rows never reach
+          // the earned totals. Same rule as getCommissionSummary/leaderboard.
+          where: { AND: [{ affiliateId: { in: affiliateIds } }, ledgerEarnedWhere()] },
           _sum: { amountCents: true },
         })
       : Promise.resolve([] as Array<{ affiliateId: string; status: string; _sum: { amountCents: number | null } }>),
@@ -250,15 +254,15 @@ export async function getAdminAffiliateListData(
     }
   }
 
-  // Earnings totals per affiliate.
-  //   totalEarned   = lifetime earned (PENDING + APPROVED + PAID; offsetting
-  //                   REVERSED rows carry negative amounts and net out)
+  // Earnings totals per affiliate. The groupBy above is already filtered by the
+  // shared ledger rule (ledgerEarnedWhere), so every returned group counts:
+  //   totalEarned   = lifetime earned (PENDING + APPROVED + PAID, net of the
+  //                   negative REVERSED clawback offsets the filter admits)
   //   pendingPayout = earned but not yet paid (PENDING + APPROVED)
   const totalEarnedMap = new Map<string, number>();
   const pendingPayoutMap = new Map<string, number>();
   for (const row of commissionSums) {
     const sum = row._sum.amountCents ?? 0;
-    if (row.status === "REJECTED") continue; // never earned
     totalEarnedMap.set(row.affiliateId, (totalEarnedMap.get(row.affiliateId) ?? 0) + sum);
     if (row.status === "PENDING" || row.status === "APPROVED") {
       pendingPayoutMap.set(row.affiliateId, (pendingPayoutMap.get(row.affiliateId) ?? 0) + sum);

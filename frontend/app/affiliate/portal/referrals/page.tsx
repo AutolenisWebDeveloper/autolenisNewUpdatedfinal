@@ -1,5 +1,6 @@
 import { requireAffiliate } from "@/lib/auth/affiliate-session";
 import { prisma } from "@/lib/prisma";
+import { countsTowardEarned } from "@/lib/services/affiliate/commission.service";
 import { Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -33,7 +34,7 @@ export default async function AffiliateReferralsPage() {
       ) : (
         <div className="space-y-2">
           {referrals.map((r, i) => {
-            const totalEarned = r.commissions.filter(c => c.status !== "REVERSED").reduce((s, c) => s + c.amountCents, 0);
+            const totalEarned = r.commissions.filter(countsTowardEarned).reduce((s, c) => s + c.amountCents, 0);
             return (
               <div key={r.id} data-testid={`referral-row-${i}`}
                 className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4">

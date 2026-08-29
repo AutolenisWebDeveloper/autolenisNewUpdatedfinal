@@ -17,6 +17,7 @@
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { countsTowardEarned } from "@/lib/services/affiliate/commission.service";
 import { sendAffiliateWeeklyDigest } from "@/lib/services/email/resend.service";
 import crypto from "crypto";
 import { AffiliateStatus } from "@prisma/client";
@@ -101,10 +102,10 @@ export async function sendWeeklyDigestForAffiliate(affiliateId: string, now: Dat
     where: { affiliateId },
     select: { amountCents: true, status: true },
   });
-  // Lifetime earned excludes REVERSED (clawed-back) commissions, matching
-  // getCommissionSummary and the portal's per-level breakdown.
+  // Lifetime earned under the shared ledger rule (M1): live rows plus negative
+  // REVERSED clawback offsets, matching getCommissionSummary.totalCents.
   const totalCentsLifetime = allCommissions
-    .filter((c) => c.status !== "REVERSED")
+    .filter(countsTowardEarned)
     .reduce((s, c) => s + c.amountCents, 0);
   const pendingCentsLifetime = allCommissions.filter((c) => c.status === "PENDING" || c.status === "APPROVED").reduce((s, c) => s + c.amountCents, 0);
 

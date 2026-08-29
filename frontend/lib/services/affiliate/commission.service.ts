@@ -123,17 +123,50 @@ export async function processFeeCommission(params: {
   await walkCommissionTree(dealId, referral.affiliateId, qualifyingEventId, feeBasisCents);
 }
 
+// ─── The single ledger rule for "earned" money (M1 / decision 4) ─────────────
+// Two reversal mechanisms coexist and must net correctly everywhere:
+//   • in-place reverse flips a PENDING/APPROVED row to REVERSED, amount stays
+//     POSITIVE → it stops counting as earned;
+//   • clawback leaves the PAID original PAID and appends a NEGATIVE REVERSED
+//     offset row → the offset must count, netting the original out.
+// So: earned = PENDING + APPROVED + PAID rows, plus REVERSED rows whose amount
+// is negative. REJECTED never counts. Every affiliate/admin/leaderboard/digest
+// aggregation uses this rule — via ledgerEarnedWhere for queries or
+// countsTowardEarned for row filters — never an ad-hoc status filter.
+
+export const EARNED_STATUSES = ["PENDING", "APPROVED", "PAID"] as const;
+
+export function countsTowardEarned(c: { status: string; amountCents: number }): boolean {
+  if ((EARNED_STATUSES as readonly string[]).includes(c.status)) return true;
+  return c.status === "REVERSED" && c.amountCents < 0;
+}
+
+export function ledgerEarnedWhere(affiliateId?: string) {
+  return {
+    ...(affiliateId ? { affiliateId } : {}),
+    OR: [
+      { status: { in: [...EARNED_STATUSES] } },
+      { status: "REVERSED" as const, amountCents: { lt: 0 } },
+    ],
+  };
+}
+
 // Commission summary for an affiliate
 export async function getCommissionSummary(affiliateId: string) {
-  const [paid, approved, pendingReview] = await Promise.all([
+  const [paid, approved, pendingReview, clawbackOffsets] = await Promise.all([
     prisma.commission.aggregate({ where: { affiliateId, status: "PAID" }, _sum: { amountCents: true } }),
     prisma.commission.aggregate({ where: { affiliateId, status: "APPROVED" }, _sum: { amountCents: true } }),
     prisma.commission.aggregate({ where: { affiliateId, status: "PENDING" }, _sum: { amountCents: true } }),
+    prisma.commission.aggregate({
+      where: { affiliateId, status: "REVERSED", amountCents: { lt: 0 } },
+      _sum: { amountCents: true },
+    }),
   ]);
 
   const paidCents = paid._sum.amountCents ?? 0;
   const approvedCents = approved._sum.amountCents ?? 0;
   const pendingReviewCents = pendingReview._sum.amountCents ?? 0;
+  const clawbackOffsetCents = clawbackOffsets._sum.amountCents ?? 0; // ≤ 0
 
   return {
     paidCents,
@@ -143,10 +176,9 @@ export async function getCommissionSummary(affiliateId: string) {
     pendingCents: approvedCents + pendingReviewCents,
     // pendingReviewCents: commissions awaiting admin approval (not yet payable)
     pendingReviewCents,
-    // totalCents: lifetime earned excluding REVERSED (clawed-back) commissions,
-    // matching the per-level breakdown and the leaderboard ranking basis.
-    // Pending amounts are reported separately via pendingCents.
-    totalCents: paidCents + approvedCents + pendingReviewCents,
+    // totalCents: lifetime earned under the shared ledger rule above — live rows
+    // net of clawback offsets; in-place-reversed and REJECTED rows excluded.
+    totalCents: paidCents + approvedCents + pendingReviewCents + clawbackOffsetCents,
   };
 }
 
