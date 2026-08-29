@@ -19,8 +19,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
   const { invId } = await params;
 
-  // Columns are named explicitly: an unqualified select would ask for token_hash
-  // / consumed_at, which do not exist until migration 20260828000000 is applied.
   const inv = await prisma.dealerInvitation.findUnique({
     where: { id: invId },
     select: { id: true, email: true, contactName: true, dealershipName: true, status: true },

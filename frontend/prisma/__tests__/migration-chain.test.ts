@@ -253,3 +253,50 @@ describe("migration chain — same-timestamp migrations are order-independent", 
     );
   });
 });
+
+describe("migration chain — tables that survive the chain belong to the schema", () => {
+  // DEFECT (Batch 7): 20260911000000_add_acquisition_system created its table
+  // under the bare name "conversations" while the Conversation model maps to
+  // "acquisition_conversations" — which 20260423999999 had already created. No
+  // model, and no code path, ever touched the bare table on a chain-built
+  // database. It was pure squatting, and the name it squatted on is the one
+  // the CRM provisioning runbook (frontend/migrations/01_phase1_foundation.sql)
+  // needs for the LIVE admin-CRM inbox table: its CREATE TABLE IF NOT EXISTS
+  // silently skipped, the transaction rolled back, and 14 of the 15 documented
+  // provisioning files failed on a fresh database.
+  //
+  // The guard: compute the NET set of tables the chain leaves behind (created
+  // and not later dropped) and require every one to be an @@map'd table in
+  // schema.prisma. Transient tables (created then dropped inside the chain,
+  // e.g. refinance_partners in the 20260424030000 rebuild) are fine; a SURVIVOR
+  // no model owns is a name collision waiting for whoever needs that name next.
+  test("every table the chain leaves behind is @@map'd in schema.prisma", () => {
+    const schemaNames = new Set(schemaTables().keys());
+    const surviving = new Set<string>();
+
+    for (const d of migrationDirs()) {
+      // Strip SQL comments FIRST. The first version of this guard did not, and
+      // passed when it should have failed: 20261017000000's header comment
+      // mentions `DROP TABLE "conversations"` in prose, and that prose deleted
+      // the orphan from the surviving set. A parser that reads comments as
+      // statements is Observation-6 all over again — prove the guard against
+      // the defect before trusting it.
+      const sql = sqlOf(d).replace(/--.*$/gm, "");
+      const create = /CREATE TABLE (?:IF NOT EXISTS )?"?([a-zA-Z_]+)"?/g;
+      const drop = /DROP TABLE (?:IF EXISTS )?"?([a-zA-Z_]+)"?/g;
+      let m: RegExpExecArray | null;
+      while ((m = create.exec(sql)) !== null) surviving.add(m[1]);
+      while ((m = drop.exec(sql)) !== null) surviving.delete(m[1]);
+    }
+
+    const orphans = [...surviving].filter((t) => !schemaNames.has(t)).sort();
+    assert.deepEqual(
+      orphans,
+      [],
+      "these tables are created by the migration chain but no schema.prisma model " +
+        "@@maps to them — nothing in the app can reach them, and they squat on names " +
+        "other systems may need:\n  " +
+        orphans.join("\n  "),
+    );
+  });
+});

@@ -14,7 +14,6 @@ import {
   refreshInvitationToken,
   expireStaleInvitations,
 } from "@/lib/services/dealer-recruitment/invitation-token.service";
-import { getInvitationSchemaCapabilities } from "@/lib/services/dealer-recruitment/invitation-schema-compat";
 import { hashToken } from "@/lib/services/dealer-recruitment/account-claim.service";
 import { dealerScope } from "@/lib/auth/dealer-scope";
 import { parseCsvPriceToCents } from "@/lib/utils/csv-price";
@@ -92,31 +91,12 @@ async function newInvitation(tag: string) {
   });
 }
 
-test("D3: the token is stored in a column the database actually has, and the raw token is persisted only when it must be", async () => {
-  const caps = await getInvitationSchemaCapabilities();
+test("D3: an invitation persists only the HASH, never the raw token", async () => {
   const inv = await newInvitation("hash");
-
-  // Read the token columns through raw SQL so this works on both schemas.
-  const [row] = await prisma.$queryRawUnsafe<Array<Record<string, string | null>>>(
-    `SELECT ${caps.hasToken ? '"token"' : "NULL AS token"},
-            ${caps.hasTokenHash ? '"token_hash"' : "NULL AS token_hash"}
-       FROM dealer_invitations WHERE id = $1`,
-    inv.id,
-  );
-
-  if (caps.hasTokenHash) {
-    assert.equal(row.token_hash, hashToken(inv.rawToken), "the hash must be persisted");
-    assert.notEqual(row.token_hash, inv.rawToken);
-    if (!caps.tokenRequired) {
-      assert.equal(row.token, null, "raw token must not be persisted once the hash column exists");
-    }
-  } else {
-    // Legacy: there is nowhere to put a hash. Storing the RAW token is what the
-    // migration's backfill expects — digest(token) is the hash a post-migration
-    // lookup computes — so this row stays redeemable after the migration.
-    assert.equal(row.token, inv.rawToken);
-    assert.equal(hashToken(row.token as string), hashToken(inv.rawToken));
-  }
+  const row = await prisma.dealerInvitation.findUniqueOrThrow({ where: { id: inv.id } });
+  assert.equal(row.tokenHash, hashToken(inv.rawToken), "the hash must be persisted");
+  assert.notEqual(row.tokenHash, inv.rawToken);
+  assert.equal(row.token, null, "the raw token must never be persisted");
 });
 
 test("D3: a valid raw token validates", async () => {
@@ -140,13 +120,10 @@ test("D3: a consumed token cannot be reused, and only ONE concurrent claim wins"
   });
   assert.equal(row.status, "ACCEPTED");
 
-  const caps = await getInvitationSchemaCapabilities();
-  if (caps.hasConsumedAt) {
-    const [c] = await prisma.$queryRawUnsafe<Array<{ consumed_at: Date | null }>>(
-      `SELECT "consumed_at" FROM dealer_invitations WHERE id = $1`, inv.id,
-    );
-    assert.ok(c.consumed_at, "consumedAt must be stamped where the column exists");
-  }
+  assert.ok(
+    (await prisma.dealerInvitation.findUniqueOrThrow({ where: { id: inv.id } })).consumedAt,
+    "consumedAt must be stamped",
+  );
 
   const v = await validateInvitationToken(inv.rawToken);
   assert.equal(v.ok, false);
