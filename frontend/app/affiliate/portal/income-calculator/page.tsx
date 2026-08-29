@@ -17,6 +17,19 @@ const L2_RATE = COMMISSION_RATES.LEVEL_2;
 const L3_RATE = COMMISSION_RATES.LEVEL_3;
 const FEE = PREMIUM_FEE_CENTS / 100; // $499
 
+// Canvas 2D can't read CSS custom properties, so the shareable-card colors
+// are the design-token hex values duplicated here by necessity. Keep in sync
+// with app/globals.css @theme (--color-al-primary, --color-brand-*) and the
+// AutoLenisLogo stripe palette.
+const CANVAS_COLORS = {
+  cardBg: "#0b5fd1",       // --color-al-primary
+  white: "#ffffff",
+  stripeGreen: "#50D14E",  // logo stripe green
+  stripeCyan: "#53C8E7",   // logo stripe cyan
+  stripeBlue: "#2667BF",   // logo stripe blue
+  accentViolet: "#a78bfa", // L3 accent (violet-400)
+} as const;
+
 // Generate styled PNG using Canvas API — no external dependencies
 // Card: AutoLenis branding, projection numbers, sub-affiliate enrollment CTA
 function downloadProjectionPng(
@@ -31,8 +44,8 @@ function downloadProjectionPng(
 
   // ── Background ──────────────────────────────────────────────────────────────
   const grad = ctx.createLinearGradient(0, 0, W, H);
-  grad.addColorStop(0, "#0B5FD1");
-  grad.addColorStop(1, "#0B5FD1");
+  grad.addColorStop(0, CANVAS_COLORS.cardBg);
+  grad.addColorStop(1, CANVAS_COLORS.cardBg);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
@@ -51,12 +64,12 @@ function downloadProjectionPng(
     ctx.fill();
     ctx.restore();
   };
-  drawBar(36, "#50D14E");
-  drawBar(52, "#53C8E7");
-  drawBar(68, "#2667BF");
+  drawBar(36, CANVAS_COLORS.stripeGreen);
+  drawBar(52, CANVAS_COLORS.stripeCyan);
+  drawBar(68, CANVAS_COLORS.stripeBlue);
 
   // ── Brand name ───────────────────────────────────────────────────────────────
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = CANVAS_COLORS.white;
   ctx.font = "bold 22px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
   ctx.fillText("AutoLenis", 88, 58);
 
@@ -66,7 +79,7 @@ function downloadProjectionPng(
   ctx.fillText("AFFILIATE MONTHLY PROJECTION", 40, 100);
 
   // ── Total earning ────────────────────────────────────────────────────────────
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = CANVAS_COLORS.white;
   ctx.font = "bold 60px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
   ctx.fillText(`$${projection.total.toFixed(2)}`, 40, 175);
 
@@ -81,16 +94,16 @@ function downloadProjectionPng(
 
   // ── Level breakdown ──────────────────────────────────────────────────────────
   const levels = [
-    { label: `L1 (${Math.round(L1_RATE * 100)}%)`, value: projection.l1, color: "#50D14E" },
-    { label: `L2 (${Math.round(L2_RATE * 100)}%)`, value: projection.l2, color: "#53C8E7" },
-    { label: `L3 (${Math.round(L3_RATE * 100)}%)`, value: projection.l3, color: "#a78bfa" },
+    { label: `L1 (${Math.round(L1_RATE * 100)}%)`, value: projection.l1, color: CANVAS_COLORS.stripeGreen },
+    { label: `L2 (${Math.round(L2_RATE * 100)}%)`, value: projection.l2, color: CANVAS_COLORS.stripeCyan },
+    { label: `L3 (${Math.round(L3_RATE * 100)}%)`, value: projection.l3, color: CANVAS_COLORS.accentViolet },
   ];
   levels.forEach((lvl, i) => {
     const x = 40 + i * 200;
     ctx.fillStyle = lvl.color;
     ctx.font = `bold 14px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
     ctx.fillText(lvl.label, x, 255);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = CANVAS_COLORS.white;
     ctx.font = `bold 24px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
     ctx.fillText(`$${lvl.value.toFixed(2)}`, x, 285);
   });
@@ -99,7 +112,7 @@ function downloadProjectionPng(
   ctx.fillStyle = "rgba(255,255,255,0.6)";
   ctx.font = "13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
   ctx.fillText("Join the AutoLenis affiliate program →", 40, 340);
-  ctx.fillStyle = "#50D14E";
+  ctx.fillStyle = CANVAS_COLORS.stripeGreen;
   ctx.font = "bold 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
   ctx.fillText(enrollUrl, 40, 360);
 
@@ -163,7 +176,7 @@ Join the AutoLenis affiliate program: ${enrollUrl}`;
     <div className="p-6 md:p-8 max-w-2xl" data-testid="income-calculator-page">
       <div className="flex items-center gap-3 mb-6">
         <DollarSign size={22} className="text-al-primary" />
-        <h1 className="text-xl font-bold text-slate-900">Income Planner</h1>
+        <h1 className="text-xl font-bold text-slate-900">Income Calculator</h1>
       </div>
       <p className="text-sm text-slate-500 mb-8">
         Estimate your monthly earnings. Commission rates are set by AutoLenis and sourced from platform constants.
@@ -176,25 +189,25 @@ Join the AutoLenis affiliate program: ${enrollUrl}`;
             <Label htmlFor="calc-l1">L1 referrals per month</Label>
             <Input id="calc-l1" type="number" min="0" data-testid="calc-l1-input" className="mt-1.5"
               value={l1} onChange={e => setL1(e.target.value)} />
-            <p className="text-xs text-slate-400 mt-0.5">{Math.round(L1_RATE * 100)}% per deal = ${(FEE * L1_RATE).toFixed(2)}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{Math.round(L1_RATE * 100)}% per deal = ${(FEE * L1_RATE).toFixed(2)}</p>
           </div>
           <div>
             <Label htmlFor="calc-l2">L2 referrals per month</Label>
             <Input id="calc-l2" type="number" min="0" data-testid="calc-l2-input" className="mt-1.5"
               value={l2} onChange={e => setL2(e.target.value)} />
-            <p className="text-xs text-slate-400 mt-0.5">{Math.round(L2_RATE * 100)}% per deal = ${(FEE * L2_RATE).toFixed(2)}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{Math.round(L2_RATE * 100)}% per deal = ${(FEE * L2_RATE).toFixed(2)}</p>
           </div>
           <div>
             <Label htmlFor="calc-l3">L3 referrals per month</Label>
             <Input id="calc-l3" type="number" min="0" data-testid="calc-l3-input" className="mt-1.5"
               value={l3} onChange={e => setL3(e.target.value)} />
-            <p className="text-xs text-slate-400 mt-0.5">{Math.round(L3_RATE * 100)}% per deal = ${(FEE * L3_RATE).toFixed(2)}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{Math.round(L3_RATE * 100)}% per deal = ${(FEE * L3_RATE).toFixed(2)}</p>
           </div>
           <div>
             <Label htmlFor="calc-rate">Deal conversion rate (%)</Label>
             <Input id="calc-rate" type="number" min="0" max="100" data-testid="calc-rate-input" className="mt-1.5"
               value={rate} onChange={e => setRate(e.target.value)} />
-            <p className="text-xs text-slate-400 mt-0.5">% of referrals who complete a deal</p>
+            <p className="text-xs text-slate-500 mt-0.5">% of referrals who complete a deal</p>
           </div>
         </div>
       </div>
@@ -238,7 +251,7 @@ Join the AutoLenis affiliate program: ${enrollUrl}`;
             <span className="text-2xl font-bold">${projection.total.toFixed(2)}</span>
           </div>
         </div>
-        <p className="text-xs text-white/40">
+        <p className="text-xs text-white/70">
           Rates: L1={Math.round(L1_RATE * 100)}%, L2={Math.round(L2_RATE * 100)}%, L3={Math.round(L3_RATE * 100)}% of the ${FEE} fee. Not a guarantee.
         </p>
       </div>
@@ -262,11 +275,11 @@ Join the AutoLenis affiliate program: ${enrollUrl}`;
         </Button>
       </div>
 
-      <p className="text-xs text-slate-400 text-center mt-3">
+      <p className="text-xs text-slate-500 text-center mt-3">
         PNG card includes AutoLenis branding, your projection numbers, and a sub-affiliate enrollment link.
       </p>
 
-      <p className="text-xs text-slate-400 text-center mt-2">
+      <p className="text-xs text-slate-500 text-center mt-2">
         Rates sourced from <strong>lib/constants.ts</strong> and applied consistently across all outputs.
       </p>
     </div>

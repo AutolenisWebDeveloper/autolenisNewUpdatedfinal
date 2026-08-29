@@ -72,7 +72,7 @@ export default function AffiliateDocumentUpload() {
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5">
-      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-4">Upload Document</p>
+      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">Upload Document</p>
 
       <div className="space-y-4">
         <div>
@@ -100,7 +100,7 @@ export default function AffiliateDocumentUpload() {
             className="block w-full text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-al-primary/10 file:text-al-primary hover:file:bg-al-primary/20"
           />
           {file && (
-            <p className="text-xs text-slate-400 mt-1">{file.name} · {(file.size / 1024).toFixed(0)} KB</p>
+            <p className="text-xs text-slate-500 mt-1">{file.name} · {(file.size / 1024).toFixed(0)} KB</p>
           )}
         </div>
 

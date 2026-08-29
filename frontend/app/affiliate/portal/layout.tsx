@@ -20,7 +20,7 @@ export default async function AffiliatePortalLayout({ children }: { children: Re
   const { onboardingStatus } = await requireAffiliateWithOnboarding();
 
   return (
-    <div className="flex flex-col lg:flex-row h-screen bg-[#F8F9FA]" data-testid="affiliate-portal">
+    <div className="flex flex-col lg:flex-row h-screen bg-al-bg" data-testid="affiliate-portal">
       <AffiliateSidebar onboardingRequired={onboardingStatus === "NOT_STARTED"} />
       <main className="flex-1 overflow-y-auto pt-14 lg:pt-0">{children}</main>
       <ChatWidget

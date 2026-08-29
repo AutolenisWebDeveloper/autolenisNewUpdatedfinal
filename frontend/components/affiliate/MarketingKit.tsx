@@ -145,7 +145,7 @@ export default function MarketingKit({ referralCode, referralLink }: Props) {
         const items = templates.filter((t) => t.category === cat);
         return (
           <div key={cat}>
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
               {cat}
             </p>
             <div className="space-y-3">
@@ -173,15 +173,15 @@ export default function MarketingKit({ referralCode, referralLink }: Props) {
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-slate-800">{t.title}</p>
-                          <p className="text-xs text-slate-400">{t.desc}</p>
+                          <p className="text-xs text-slate-500">{t.desc}</p>
                         </div>
                       </button>
                       <div className="flex items-center gap-2 shrink-0 ml-3">
                         <CopyButton text={t.content} testId={`copy-btn-${t.id}`} />
                         {isOpen ? (
-                          <ChevronUp size={16} className="text-slate-400" />
+                          <ChevronUp size={16} className="text-slate-400" aria-hidden="true" />
                         ) : (
-                          <ChevronDown size={16} className="text-slate-400" />
+                          <ChevronDown size={16} className="text-slate-400" aria-hidden="true" />
                         )}
                       </div>
                     </div>
@@ -202,7 +202,7 @@ export default function MarketingKit({ referralCode, referralLink }: Props) {
         );
       })}
 
-      <p className="text-xs text-slate-400 text-center mt-4">
+      <p className="text-xs text-slate-500 text-center mt-4">
         All templates include FTC-required affiliate disclosure language. Customize before sending.
       </p>
     </div>

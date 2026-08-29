@@ -25,7 +25,7 @@ export const NAV_ITEMS = [
   { label: "Earnings",          href: "/affiliate/portal/earnings",          icon: DollarSign,      gated: true },
   { label: "Finance Hub",       href: "/affiliate/portal/finance",           icon: Landmark,        gated: true },
   { label: "Documents",         href: "/affiliate/portal/documents",         icon: FileCheck,       gated: true },
-  { label: "Network Tree",      href: "/affiliate/portal/network",           icon: Network,         gated: true },
+  { label: "Referral Network",  href: "/affiliate/portal/network",           icon: Network,         gated: true },
   { label: "Leaderboard",       href: "/affiliate/portal/leaderboard",       icon: Trophy,          gated: true },
   { label: "Income Calculator", href: "/affiliate/portal/income-calculator", icon: Calculator,      gated: true },
   { label: "Notifications",     href: "/affiliate/portal/notifications",     icon: Bell,            gated: false },

@@ -76,7 +76,7 @@ export default async function AffiliateProfilePage() {
               <Badge variant={statusVariant(affiliate.status)} className="text-xs">{affiliate.status}</Badge>
             </div>
             {memberSince && (
-              <p className="text-xs text-slate-400 mt-1">Member since {memberSince}</p>
+              <p className="text-xs text-slate-500 mt-1">Member since {memberSince}</p>
             )}
           </div>
         </div>
@@ -85,7 +85,7 @@ export default async function AffiliateProfilePage() {
       {/* Payout Readiness */}
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-4">
         <div className="flex items-center justify-between mb-4">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Payout Readiness</p>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Payout Readiness</p>
           <span className="text-xs font-semibold text-al-primary">{completion.completedCount} / {completion.totalCount}</span>
         </div>
         <div className="space-y-2">
@@ -115,7 +115,7 @@ export default async function AffiliateProfilePage() {
 
       {/* Account details */}
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-4">
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-4">Account Details</p>
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">Account Details</p>
         <dl className="space-y-3">
           <div className="flex items-center justify-between">
             <dt className="text-sm text-slate-500">Email</dt>
@@ -171,7 +171,7 @@ export default async function AffiliateProfilePage() {
 
       {/* Compliance */}
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-4">
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-4">Compliance</p>
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">Compliance</p>
         <dl className="space-y-3">
           <div className="flex items-center justify-between">
             <dt className="text-sm text-slate-500">FTC Disclosure</dt>
@@ -203,7 +203,7 @@ export default async function AffiliateProfilePage() {
 
       {/* Finance Hub link */}
       <div className="bg-white border border-slate-200 rounded-xl p-6">
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Finance</p>
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Finance</p>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Wallet size={16} className="text-al-primary" />

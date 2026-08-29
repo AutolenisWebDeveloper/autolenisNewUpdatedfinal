@@ -72,7 +72,7 @@ export default async function AffiliateDocumentsPage() {
 
       {/* Required documents status */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 mb-6">
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-4">Required Documents</p>
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">Required Documents</p>
         <div className="space-y-3">
           {REQUIRED_DOCS.map(req => {
             const doc = docsByType.get(req.type);
@@ -80,7 +80,7 @@ export default async function AffiliateDocumentsPage() {
               <div key={req.type} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
                 <div>
                   <p className="text-sm font-medium text-slate-800">{req.label}</p>
-                  <p className="text-xs text-slate-400">{req.description}</p>
+                  <p className="text-xs text-slate-500">{req.description}</p>
                 </div>
                 {doc ? (
                   <Badge variant={statusVariant(doc.status)}>{doc.status}</Badge>
@@ -99,7 +99,7 @@ export default async function AffiliateDocumentsPage() {
       {/* Document list */}
       {documents.length > 0 ? (
         <div className="bg-white border border-slate-200 rounded-xl p-5 mt-6">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-4">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">
             Uploaded Documents ({documents.length})
           </p>
           <div className="space-y-3">
@@ -107,7 +107,7 @@ export default async function AffiliateDocumentsPage() {
               <div key={doc.id} className="flex items-center justify-between border border-slate-100 rounded-lg px-4 py-3">
                 <div>
                   <p className="text-sm font-medium text-slate-800">{doc.fileName}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <p className="text-xs text-slate-500 mt-0.5">
                     {doc.type} · {(doc.fileSizeBytes / 1024).toFixed(0)} KB · {new Date(doc.uploadedAt).toLocaleDateString()}
                   </p>
                 </div>
@@ -122,7 +122,7 @@ export default async function AffiliateDocumentsPage() {
       ) : (
         <div className="mt-6 bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center">
           <FileCheck size={28} className="text-slate-300 mx-auto mb-2" />
-          <p className="text-sm text-slate-400">No documents uploaded yet</p>
+          <p className="text-sm text-slate-500">No documents uploaded yet</p>
         </div>
       )}
     </div>

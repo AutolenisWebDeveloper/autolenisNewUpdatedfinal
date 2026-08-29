@@ -113,7 +113,8 @@ export default async function AffiliateDashboardPage() {
           <div>
             <p className="font-semibold text-red-900 mb-0.5">Application not approved</p>
             <p className="text-sm text-red-800">
-              Your application was not approved at this time.{" "}
+              Your application was not approved at this time. For the reason, or to appeal, contact{" "}
+              <a href="mailto:support@autolenis.com" className="underline font-semibold hover:text-red-950">support@autolenis.com</a>.{" "}
               <Link href="/for-buyers" className="underline font-semibold hover:text-red-950">Explore as a buyer →</Link>
             </p>
           </div>
@@ -238,7 +239,7 @@ export default async function AffiliateDashboardPage() {
                     <div className="flex items-center gap-2.5">
                       <Badge variant={c.status === "PAID" ? "green" : c.status === "APPROVED" ? "blue" : "secondary"} className="text-[10px]">{c.status}</Badge>
                       <span className="text-xs text-slate-500">Level {c.level}</span>
-                      <span className="text-xs text-slate-400 font-mono">{new Date(c.createdAt).toLocaleDateString()}</span>
+                      <span className="text-xs text-slate-500 font-mono">{new Date(c.createdAt).toLocaleDateString()}</span>
                     </div>
                     <span className={`text-sm ${FIGURE}`}>${(c.amountCents / 100).toFixed(2)}</span>
                   </div>
@@ -264,7 +265,7 @@ export default async function AffiliateDashboardPage() {
               data-testid={`quick-action-${a.label.toLowerCase().replace(/\s+/g, "-")}`}
               className="flex flex-col items-center gap-2 bg-white border border-slate-200/80 rounded-2xl p-4 hover:border-al-primary/30 hover:shadow-sm transition-all text-center group"
             >
-              <div className="w-9 h-9 rounded-xl bg-al-primary-subtle flex items-center justify-center group-hover:bg-[#DBEAFE]/60 transition-colors">
+              <div className="w-9 h-9 rounded-xl bg-al-primary-subtle flex items-center justify-center group-hover:bg-blue-100/60 transition-colors">
                 <a.icon size={16} className="text-al-primary" />
               </div>
               <span className="text-xs font-semibold text-slate-700">{a.label}</span>

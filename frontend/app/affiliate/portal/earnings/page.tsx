@@ -2,7 +2,8 @@ import { requireAffiliate } from "@/lib/auth/affiliate-session";
 import { prisma } from "@/lib/prisma";
 import { getCommissionSummary, getCommissionLevelBreakdown } from "@/lib/services/affiliate/commission.service";
 import { Badge } from "@/components/ui/badge";
-import { DollarSign, TrendingUp } from "lucide-react";
+import EmptyState from "@/components/ui/patterns/EmptyState";
+import { DollarSign, TrendingUp, Inbox } from "lucide-react";
 import { COMMISSION_RATES } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,7 @@ export default async function AffiliateEarningsPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         {[
           { label: "Total Earned", value: `$${(summary.totalCents / 100).toLocaleString()}`, color: "text-slate-900" },
           { label: "Paid Out",     value: `$${(summary.paidCents / 100).toLocaleString()}`,   color: "text-green-600" },
@@ -47,7 +48,7 @@ export default async function AffiliateEarningsPage() {
           </div>
         ))}
       </div>
-      <p className="text-xs text-slate-400 -mt-6 mb-8" data-testid="earnings-basis-note">
+      <p className="text-xs text-slate-500 -mt-6 mb-8" data-testid="earnings-basis-note">
         Totals reflect settled commissions; reversed commissions are excluded.
       </p>
 
@@ -63,7 +64,7 @@ export default async function AffiliateEarningsPage() {
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-500">L{b.level}</span>
-                  <span className="text-xs text-slate-400">{Math.round(rates[i] * 100)}% · {b.count} commission{b.count !== 1 ? "s" : ""}</span>
+                  <span className="text-xs text-slate-500">{Math.round(rates[i] * 100)}% · {b.count} commission{b.count !== 1 ? "s" : ""}</span>
                 </div>
                 <span className="text-sm font-bold text-slate-900">${(b.total / 100).toLocaleString()}</span>
               </div>
@@ -81,9 +82,14 @@ export default async function AffiliateEarningsPage() {
 
       {/* Commission log */}
       {commissions.length === 0 ? (
-        <div className="text-center py-16 text-slate-400" data-testid="no-commissions">
-          <p>No commissions yet. Start referring buyers to earn.</p>
-        </div>
+        <EmptyState
+          testId="no-commissions"
+          icon={Inbox}
+          title="No commissions yet"
+          body="Share your referral link — commissions land here as your referrals complete deals."
+          action={{ label: "Open referral hub", href: "/affiliate/portal/referral-hub", testId: "empty-earnings-cta" }}
+          className="py-16 bg-white border border-slate-200 rounded-xl"
+        />
       ) : (
         <div className="space-y-2">
           {commissions.map(c => (
@@ -94,9 +100,9 @@ export default async function AffiliateEarningsPage() {
                   <Badge variant={c.status === "PAID" ? "green" : c.status === "REVERSED" ? "destructive" : "secondary"} className="text-xs">
                     {c.status}
                   </Badge>
-                  <span className="text-xs text-slate-400">Level {c.level} · {Math.round(c.rate * 100)}%</span>
+                  <span className="text-xs text-slate-500">Level {c.level} · {Math.round(c.rate * 100)}%</span>
                 </div>
-                <p className="text-xs text-slate-400">{c.createdAt.toLocaleDateString()}</p>
+                <p className="text-xs text-slate-500">{c.createdAt.toLocaleDateString()}</p>
               </div>
               <p className={`font-bold text-sm ${c.status === "REVERSED" ? "text-red-500 line-through" : "text-slate-900"}`}>
                 ${(c.amountCents / 100).toLocaleString()}

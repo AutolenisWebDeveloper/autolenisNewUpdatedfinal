@@ -140,8 +140,9 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
             </code>
             <button type="button" onClick={handleCopyLink}
               data-testid="hub-copy-link-btn"
+              aria-label={copiedLink ? "Referral link copied" : "Copy referral link"}
               className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors border border-white/15">
-              {copiedLink ? <Check size={15} className="text-[#50D14E]" /> : <Copy size={15} />}
+              {copiedLink ? <Check size={15} className="text-[#50D14E]" aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
             </button>
           </div>
           <div className="flex items-center gap-3 mt-4">
@@ -170,7 +171,7 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
 
         {/* Stats / earning preview */}
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex flex-col gap-3" data-testid="earning-preview">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">What you earn</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">What you earn</p>
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-slate-600">L1 direct referral</span>
@@ -185,7 +186,7 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
               <span className="font-semibold text-green-600">${(l3PerDealCents / 100).toFixed(2)} / deal</span>
             </div>
           </div>
-          <p className="text-[10px] text-slate-400 mt-auto">
+          <p className="text-[10px] text-slate-500 mt-auto">
             {/* Derived from platform constants — never hardcode rates or the fee. */}
             {Math.round(COMMISSION_RATES.LEVEL_1 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_2 * 100)}% / {Math.round(COMMISSION_RATES.LEVEL_3 * 100)}% of the {PREMIUM_FEE_USD} fee.
           </p>
@@ -225,7 +226,7 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
             </div>
           ))}
         </div>
-        <p className="text-xs text-slate-400 text-center mt-4">
+        <p className="text-xs text-slate-500 text-center mt-4">
           All templates include FTC-required affiliate disclosure. Customize before sending.
         </p>
       </div>

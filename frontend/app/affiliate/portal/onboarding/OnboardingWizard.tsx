@@ -76,9 +76,9 @@ const STEPS = [
 
 const TOTAL = STEPS.length;
 
-function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+function Label({ children, required, htmlFor }: { children: React.ReactNode; required?: boolean; htmlFor?: string }) {
   return (
-    <label className="block text-sm font-medium text-slate-700 mb-1">
+    <label htmlFor={htmlFor} className="block text-sm font-medium text-slate-700 mb-1">
       {children}{required && <span className="text-red-500 ml-0.5">*</span>}
     </label>
   );
@@ -433,7 +433,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500">
                 Your information is encrypted and securely stored. We only retain the last 4 digits of sensitive numbers.
               </p>
             </div>
@@ -446,40 +446,40 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               <p className="text-sm text-slate-500 mb-6">Legal name and mailing address for tax documents.</p>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label required>First Name</Label>
-                  <Input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="John" />
+                  <Label required htmlFor="ob-first-name">First Name</Label>
+                  <Input id="ob-first-name" value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="John" />
                 </div>
                 <div>
-                  <Label required>Last Name</Label>
-                  <Input value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Smith" />
+                  <Label required htmlFor="ob-last-name">Last Name</Label>
+                  <Input id="ob-last-name" value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Smith" />
                 </div>
                 <div>
-                  <Label required>Phone</Label>
-                  <Input value={phone} onChange={e => setPhone(e.target.value)} type="tel" placeholder="(555) 000-0000" />
+                  <Label required htmlFor="ob-phone">Phone</Label>
+                  <Input id="ob-phone" value={phone} onChange={e => setPhone(e.target.value)} type="tel" placeholder="(555) 000-0000" />
                 </div>
                 <div>
-                  <Label>Date of Birth</Label>
-                  <Input value={dateOfBirth} onChange={e => setDateOfBirth(e.target.value)} type="date" />
+                  <Label htmlFor="ob-date-of-birth">Date of Birth</Label>
+                  <Input id="ob-date-of-birth" value={dateOfBirth} onChange={e => setDateOfBirth(e.target.value)} type="date" />
                 </div>
                 <div className="col-span-2">
-                  <Label required>Address Line 1</Label>
-                  <Input value={address1} onChange={e => setAddress1(e.target.value)} placeholder="123 Main St" />
+                  <Label required htmlFor="ob-address-line-1">Address Line 1</Label>
+                  <Input id="ob-address-line-1" value={address1} onChange={e => setAddress1(e.target.value)} placeholder="123 Main St" />
                 </div>
                 <div className="col-span-2">
-                  <Label>Address Line 2</Label>
-                  <Input value={address2} onChange={e => setAddress2(e.target.value)} placeholder="Apt 4B (optional)" />
+                  <Label htmlFor="ob-address-line-2">Address Line 2</Label>
+                  <Input id="ob-address-line-2" value={address2} onChange={e => setAddress2(e.target.value)} placeholder="Apt 4B (optional)" />
                 </div>
                 <div>
-                  <Label required>City</Label>
-                  <Input value={city} onChange={e => setCity(e.target.value)} placeholder="Austin" />
+                  <Label required htmlFor="ob-city">City</Label>
+                  <Input id="ob-city" value={city} onChange={e => setCity(e.target.value)} placeholder="Austin" />
                 </div>
                 <div>
-                  <Label required>State</Label>
-                  <Input value={state} onChange={e => setState(e.target.value)} placeholder="TX" maxLength={2} />
+                  <Label required htmlFor="ob-state">State</Label>
+                  <Input id="ob-state" value={state} onChange={e => setState(e.target.value)} placeholder="TX" maxLength={2} />
                 </div>
                 <div>
-                  <Label required>ZIP Code</Label>
-                  <Input value={zip} onChange={e => setZip(e.target.value)} placeholder="78701" maxLength={10} />
+                  <Label required htmlFor="ob-zip-code">ZIP Code</Label>
+                  <Input id="ob-zip-code" value={zip} onChange={e => setZip(e.target.value)} placeholder="78701" maxLength={10} />
                 </div>
               </div>
             </div>
@@ -492,8 +492,8 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               <p className="text-sm text-slate-500 mb-6">How you operate as an affiliate (individual or business entity).</p>
               <div className="space-y-4">
                 <div>
-                  <Label required>Entity Type</Label>
-                  <Select value={entityType} onChange={e => setEntityType(e.target.value)}>
+                  <Label required htmlFor="ob-entity-type">Entity Type</Label>
+                  <Select id="ob-entity-type" value={entityType} onChange={e => setEntityType(e.target.value)}>
                     <option value="">Select entity type…</option>
                     <option value="INDIVIDUAL">Individual / Sole Proprietor</option>
                     <option value="LLC">LLC</option>
@@ -503,21 +503,21 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   </Select>
                 </div>
                 <div>
-                  <Label>Business Name</Label>
-                  <Input value={businessName} onChange={e => setBusinessName(e.target.value)} placeholder="Acme Autos LLC (if applicable)" />
+                  <Label htmlFor="ob-business-name">Business Name</Label>
+                  <Input id="ob-business-name" value={businessName} onChange={e => setBusinessName(e.target.value)} placeholder="Acme Autos LLC (if applicable)" />
                 </div>
                 <div>
-                  <Label>DBA Name</Label>
-                  <Input value={dbaName} onChange={e => setDbaName(e.target.value)} placeholder="Doing business as… (optional)" />
+                  <Label htmlFor="ob-dba-name">DBA Name</Label>
+                  <Input id="ob-dba-name" value={dbaName} onChange={e => setDbaName(e.target.value)} placeholder="Doing business as… (optional)" />
                 </div>
                 <div>
-                  <Label>Business Address</Label>
-                  <Input value={businessAddress} onChange={e => setBusinessAddress(e.target.value)} placeholder="Same as personal or different" />
+                  <Label htmlFor="ob-business-address">Business Address</Label>
+                  <Input id="ob-business-address" value={businessAddress} onChange={e => setBusinessAddress(e.target.value)} placeholder="Same as personal or different" />
                 </div>
                 {entityType !== "INDIVIDUAL" && (
                   <div>
-                    <Label>EIN (last 4 digits only)</Label>
-                    <Input value={einLast4} onChange={e => setEinLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="1234" maxLength={4} className="max-w-[120px]" />
+                    <Label htmlFor="ob-ein-last-4-digits-only">EIN (last 4 digits only)</Label>
+                    <Input id="ob-ein-last-4-digits-only" value={einLast4} onChange={e => setEinLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="1234" maxLength={4} className="max-w-[120px]" />
                   </div>
                 )}
               </div>
@@ -531,8 +531,8 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               <p className="text-sm text-slate-500 mb-6">Required by the IRS for payments over $600/year. We only store the last 4 digits of your TIN.</p>
               <div className="space-y-4">
                 <div>
-                  <Label required>Tax Classification</Label>
-                  <Select value={taxClass} onChange={e => setTaxClass(e.target.value)}>
+                  <Label required htmlFor="ob-tax-classification">Tax Classification</Label>
+                  <Select id="ob-tax-classification" value={taxClass} onChange={e => setTaxClass(e.target.value)}>
                     <option value="">Select classification…</option>
                     {/* O12 — canonical AFFILIATE_TAX_CLASSIFICATIONS values, matching
                         the finance route: one vocabulary in the tax column. */}
@@ -544,29 +544,29 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   </Select>
                 </div>
                 <div>
-                  <Label required>TIN Type</Label>
-                  <Select value={tinType} onChange={e => setTinType(e.target.value)}>
+                  <Label required htmlFor="ob-tin-type">TIN Type</Label>
+                  <Select id="ob-tin-type" value={tinType} onChange={e => setTinType(e.target.value)}>
                     <option value="">Select type…</option>
                     <option value="SSN">SSN (Social Security Number)</option>
                     <option value="EIN">EIN (Employer ID Number)</option>
                   </Select>
                 </div>
                 <div>
-                  <Label required>Last 4 digits of TIN</Label>
-                  <Input value={tinLast4} onChange={e => setTinLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="e.g. 5678" maxLength={4} className="max-w-[120px]" />
-                  <p className="text-xs text-slate-400 mt-1">We never store your full TIN — only the last 4 digits.</p>
+                  <Label required htmlFor="ob-last-4-digits-of-tin">Last 4 digits of TIN</Label>
+                  <Input id="ob-last-4-digits-of-tin" value={tinLast4} onChange={e => setTinLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="e.g. 5678" maxLength={4} className="max-w-[120px]" />
+                  <p className="text-xs text-slate-500 mt-1">We never store your full TIN — only the last 4 digits.</p>
                 </div>
                 <div>
-                  <Label required>Legal Name (as on tax return)</Label>
-                  <Input value={legalName} onChange={e => setLegalName(e.target.value)} placeholder="Full legal name" />
+                  <Label required htmlFor="ob-legal-name-as-on-tax-return">Legal Name (as on tax return)</Label>
+                  <Input id="ob-legal-name-as-on-tax-return" value={legalName} onChange={e => setLegalName(e.target.value)} placeholder="Full legal name" />
                 </div>
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
                   <p className="font-semibold mb-1">IRS Certification</p>
                   <p>Under penalties of perjury, I certify that: (1) The number shown is my correct taxpayer identification number; (2) I am not subject to backup withholding; (3) I am a U.S. citizen or other U.S. person; (4) The FATCA code (if any) is correct.</p>
                 </div>
                 <div>
-                  <Label required>Electronic Signature (type your full name)</Label>
-                  <Input value={signature} onChange={e => setSignature(e.target.value)} placeholder="Your full legal name" />
+                  <Label required htmlFor="ob-electronic-signature-type-your-full-name">Electronic Signature (type your full name)</Label>
+                  <Input id="ob-electronic-signature-type-your-full-name" value={signature} onChange={e => setSignature(e.target.value)} placeholder="Your full legal name" />
                 </div>
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input type="checkbox" checked={certified} onChange={e => setCertified(e.target.checked)} className="mt-0.5 w-4 h-4 accent-al-primary" />
@@ -583,8 +583,8 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               <p className="text-sm text-slate-500 mb-6">How you&apos;d like to receive commission payments. Only the last 4 digits of account numbers are stored.</p>
               <div className="space-y-4">
                 <div>
-                  <Label required>Payout Method</Label>
-                  <Select value={payoutMethod} onChange={e => setPayoutMethod(e.target.value)}>
+                  <Label required htmlFor="ob-payout-method">Payout Method</Label>
+                  <Select id="ob-payout-method" value={payoutMethod} onChange={e => setPayoutMethod(e.target.value)}>
                     <option value="">Select method…</option>
                     <option value="ACH">ACH / Direct Deposit</option>
                     <option value="CHECK">Paper Check</option>
@@ -595,22 +595,22 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                 {(payoutMethod === "ACH" || payoutMethod === "CHECK") && (
                   <>
                     <div>
-                      <Label required>Account Holder Name</Label>
-                      <Input value={holderName} onChange={e => setHolderName(e.target.value)} placeholder="Full name on account" />
+                      <Label required htmlFor="ob-account-holder-name">Account Holder Name</Label>
+                      <Input id="ob-account-holder-name" value={holderName} onChange={e => setHolderName(e.target.value)} placeholder="Full name on account" />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <Label required>Routing (last 4)</Label>
-                        <Input value={routingLast4} onChange={e => setRoutingLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="1234" maxLength={4} />
+                        <Label required htmlFor="ob-routing-last-4">Routing (last 4)</Label>
+                        <Input id="ob-routing-last-4" value={routingLast4} onChange={e => setRoutingLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="1234" maxLength={4} />
                       </div>
                       <div>
-                        <Label required>Account (last 4)</Label>
-                        <Input value={accountLast4} onChange={e => setAccountLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="5678" maxLength={4} />
+                        <Label required htmlFor="ob-account-last-4">Account (last 4)</Label>
+                        <Input id="ob-account-last-4" value={accountLast4} onChange={e => setAccountLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="5678" maxLength={4} />
                       </div>
                     </div>
                     <div>
-                      <Label required>Account Type</Label>
-                      <Select value={accountType} onChange={e => setAccountType(e.target.value)}>
+                      <Label required htmlFor="ob-account-type">Account Type</Label>
+                      <Select id="ob-account-type" value={accountType} onChange={e => setAccountType(e.target.value)}>
                         <option value="">Select…</option>
                         <option value="CHECKING">Checking</option>
                         <option value="SAVINGS">Savings</option>
@@ -620,14 +620,14 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                 )}
                 {payoutMethod === "PAYPAL" && (
                   <div>
-                    <Label required>PayPal Email</Label>
-                    <Input value={paypalEmail} onChange={e => setPaypalEmail(e.target.value)} type="email" placeholder="you@paypal.com" />
+                    <Label required htmlFor="ob-paypal-email">PayPal Email</Label>
+                    <Input id="ob-paypal-email" value={paypalEmail} onChange={e => setPaypalEmail(e.target.value)} type="email" placeholder="you@paypal.com" />
                   </div>
                 )}
                 {payoutMethod === "ZELLE" && (
                   <div>
-                    <Label required>Zelle Phone Number</Label>
-                    <Input value={zellePhone} onChange={e => setZellePhone(e.target.value)} type="tel" placeholder="(555) 000-0000" />
+                    <Label required htmlFor="ob-zelle-phone-number">Zelle Phone Number</Label>
+                    <Input id="ob-zelle-phone-number" value={zellePhone} onChange={e => setZellePhone(e.target.value)} type="tel" placeholder="(555) 000-0000" />
                   </div>
                 )}
               </div>
@@ -650,8 +650,8 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
               ) : (
                 <div className="space-y-4">
                   <div>
-                    <Label required>Document Type</Label>
-                    <Select value={docType} onChange={e => setDocType(e.target.value)}>
+                    <Label required htmlFor="ob-document-type">Document Type</Label>
+                    <Select id="ob-document-type" value={docType} onChange={e => setDocType(e.target.value)}>
                       <option value="GOVERNMENT_ID">Government-Issued ID</option>
                       <option value="W9">W-9 Form</option>
                       <option value="VOIDED_CHECK">Voided Check</option>
@@ -664,7 +664,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                     <label className="block border-2 border-dashed border-slate-300 rounded-lg p-6 text-center cursor-pointer hover:border-al-primary/50 transition-colors">
                       <Upload size={24} className="mx-auto mb-2 text-slate-400" />
                       <p className="text-sm font-medium text-slate-700">{uploadFile ? uploadFile.name : "Click to select file"}</p>
-                      <p className="text-xs text-slate-400 mt-1">PDF, JPG, PNG, WEBP — max 10 MB</p>
+                      <p className="text-xs text-slate-500 mt-1">PDF, JPG, PNG, WEBP — max 10 MB</p>
                       <input
                         type="file"
                         className="sr-only"
@@ -743,7 +743,7 @@ export default function OnboardingWizard({ affiliateId: _affiliateId, email, ini
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-slate-400 mt-4">
+              <p className="text-xs text-slate-500 mt-4">
                 By submitting, you confirm that all information provided is accurate and complete.
               </p>
             </div>
