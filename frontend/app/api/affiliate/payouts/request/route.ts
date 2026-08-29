@@ -39,6 +39,13 @@ export async function POST(request: NextRequest) {
       // A concurrent request claimed the same commissions; nothing was written.
       return errorResponse("CONFLICT", "Your balance changed while requesting — please try again.", 409);
     }
+    // P2-1 (review) — the DB-enforced one-PENDING-payout-per-affiliate partial
+    // unique index (migration 001) rejects the loser of a concurrent
+    // double-request with P2002. That is the same condition as REQUEST_PENDING,
+    // not a server error.
+    if ((err as { code?: string })?.code === "P2002") {
+      return errorResponse("REQUEST_PENDING", "You already have a payout request awaiting settlement.", 409);
+    }
     logger.error("[affiliate/payouts/request] failed:", err);
     return errorResponse("INTERNAL", "Payout request failed — nothing was created. Please try again.", 500);
   }

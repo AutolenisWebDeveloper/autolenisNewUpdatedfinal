@@ -8,12 +8,15 @@ import { escapeHtml } from "@/lib/utils/escape-html";
 import { Resend } from "resend";
 import { prisma } from "@/lib/prisma";
 import { enqueueTransactionalEmail } from "./transactional-dispatch";
-import { PREMIUM_FEE_CENTS, PREMIUM_FEE_USD, COMMISSION_RATES, formatCentsAsUsd } from "@/lib/constants";
+import { PREMIUM_FEE_CENTS, PREMIUM_FEE_USD, PREMIUM_FEE_REMAINING_CENTS, PREMIUM_FEE_REMAINING_USD, COMMISSION_RATES, formatCentsAsUsd } from "@/lib/constants";
 
 // L1 affiliate commission on the Premium concierge fee.
 // Derived from constants so a fee or rate change is reflected automatically.
+// P1-2 (review) — advertised figures compute from the $400 captured basis
+// commissions are actually paid on (PREMIUM_FEE_REMAINING_CENTS), never the
+// $499 sticker; the ledger pays on amount_received (commission.service.ts).
 const L1_PREMIUM_FEE_COMMISSION_USD = formatCentsAsUsd(
-  Math.round(PREMIUM_FEE_CENTS * COMMISSION_RATES.LEVEL_1),
+  Math.round(PREMIUM_FEE_REMAINING_CENTS * COMMISSION_RATES.LEVEL_1),
 );
 const L1_PCT_LABEL = `${Math.round(COMMISSION_RATES.LEVEL_1 * 100)}%`;
 const L2_PCT_LABEL = `${Math.round(COMMISSION_RATES.LEVEL_2 * 100)}%`;
@@ -1012,7 +1015,7 @@ export async function sendAffiliateVerificationEmail(to: string, firstName: stri
             <br/>
             <span style="color:#4B5563;font-size:13px">Once you verify your email, you&rsquo;ll have immediate access to your affiliate dashboard and referral link.</span>
           </p>
-          <p style="color:#4B5563;font-size:13px">Commission rates on the ${PREMIUM_FEE_USD} Premium concierge fee: L1 ${L1_PCT_LABEL} &middot; L2 ${L2_PCT_LABEL} &middot; L3 ${L3_PCT_LABEL}.</p>
+          <p style="color:#4B5563;font-size:13px">Commission rates on the ${PREMIUM_FEE_REMAINING_USD} concierge-fee balance (the ${PREMIUM_FEE_USD} Premium fee less the deposit credit): L1 ${L1_PCT_LABEL} &middot; L2 ${L2_PCT_LABEL} &middot; L3 ${L3_PCT_LABEL}.</p>
           <p style="margin-top:24px;color:#94A3B8;font-size:12px">If you didn&rsquo;t apply for an AutoLenis affiliate account, you can safely ignore this email.</p>
         </div>
       </div>
@@ -1048,7 +1051,7 @@ export async function sendAffiliateActivationEmail(to: string, firstName: string
             <p style="margin:0 0 8px;color:#111827;font-size:13px;font-weight:600">How it works</p>
             <ul style="margin:0;padding-left:20px;color:#4B5563;font-size:13px;line-height:1.7">
               <li>Share your link or code with anyone shopping for a car.</li>
-              <li>When they complete a deal, you earn <strong>${L1_PCT_LABEL} of the ${PREMIUM_FEE_USD} concierge fee (${L1_PREMIUM_FEE_COMMISSION_USD})</strong>.</li>
+              <li>When they complete a deal, you earn <strong>${L1_PCT_LABEL} of the ${PREMIUM_FEE_REMAINING_USD} concierge-fee balance (${L1_PREMIUM_FEE_COMMISSION_USD})</strong>.</li>
               <li>Their referrals earn you L2 (${L2_PCT_LABEL}) and L3 (${L3_PCT_LABEL}) commissions — up to 3 levels deep.</li>
               <li>Payouts process automatically every two weeks.</li>
             </ul>

@@ -267,8 +267,11 @@ function ConfirmModal({
 
 const PAYOUT_METHODS = ["ACH Transfer", "Zelle", "PayPal", "Check", "Venmo", "Other"] as const;
 
-function PayoutModal({ amountCents, onCancel, onConfirm }: {
+function PayoutModal({ amountCents, description, onCancel, onConfirm }: {
   amountCents: number;
+  /** Overrides the default single-commission sentence (used by the
+   *  settle-request flow, where the final amount is recomputed server-side). */
+  description?: React.ReactNode;
   onCancel: () => void;
   onConfirm: (paymentMethod: string, paymentReference: string, note: string) => Promise<void>;
 }) {
@@ -295,7 +298,9 @@ function PayoutModal({ amountCents, onCancel, onConfirm }: {
           <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 ml-2"><X size={18} /></button>
         </div>
         <p className="text-slate-600 text-sm mb-4">
-          Record payout of <strong>{fmtCents(amountCents)}</strong> for this approved commission. The affiliate is notified once recorded.
+          {description ?? (
+            <>Record payout of <strong>{fmtCents(amountCents)}</strong> for this approved commission. The affiliate is notified once recorded.</>
+          )}
         </p>
         {error && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 text-red-700 text-sm mb-3">{error}</div>}
         <form onSubmit={submit} className="space-y-3">
@@ -480,10 +485,23 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
     handleSuccess(successMsg);
   }
 
-  // Payout-request endpoints live under /api/admin/affiliates/payouts/{id}/...
-  async function doPayoutAction(payoutId: string, action: string, body: Record<string, string>, successMsg: string) {
-    await api.post<unknown>("/api/admin/affiliates/payouts/" + payoutId + "/" + action, body);
-    handleSuccess(successMsg);
+  // Payout-request settlement — P1-3 (review): the server recomputes the
+  // settled amount from surviving claims (reversed-after-request commissions
+  // are excluded) and may cancel an all-reversed request. The person moving
+  // real money reads THIS toast, so it must carry the actual outcome, never
+  // the stale requested amount.
+  async function doSettlePayout(payoutId: string, requestedCents: number, body: Record<string, string>) {
+    const result = await api.post<{ amountCents: number; cancelled: boolean }>(
+      "/api/admin/affiliates/payouts/" + payoutId + "/mark-paid", body);
+    if (result.cancelled) {
+      handleSuccess("Payout request CANCELLED — every claimed commission was reversed. Nothing to pay.");
+    } else if (result.amountCents !== requestedCents) {
+      handleSuccess(
+        `Settled at ${fmtCents(result.amountCents)} — lower than the requested ${fmtCents(requestedCents)} because reversed commissions were excluded. Pay the settled amount.`,
+      );
+    } else {
+      handleSuccess("Payout request settled — affiliate notified");
+    }
   }
 
   function copyReferralCode() {
@@ -606,9 +624,17 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
       {modal === "settle-payout" && payoutTarget && (
         <PayoutModal
           amountCents={payoutTarget.amountCents}
+          description={
+            <>
+              Settle this payout request (requested: <strong>{fmtCents(payoutTarget.amountCents)}</strong>).
+              The final amount is recomputed at settlement from the commissions still attached —
+              any reversed since the request are excluded, so it can be lower (or the request may
+              cancel entirely). <strong>Confirm the settled amount in the result before sending money.</strong>
+            </>
+          }
           onCancel={() => { setModal(null); setPayoutTarget(null); }}
           onConfirm={async (paymentMethod, paymentReference, note) => {
-            await doPayoutAction(payoutTarget.id, "mark-paid", { paymentMethod, paymentReference, ...(note ? { note } : {}) }, "Payout request settled — affiliate notified");
+            await doSettlePayout(payoutTarget.id, payoutTarget.amountCents, { paymentMethod, paymentReference, ...(note ? { note } : {}) });
           }}
         />
       )}

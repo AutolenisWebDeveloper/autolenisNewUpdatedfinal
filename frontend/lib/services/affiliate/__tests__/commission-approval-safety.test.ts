@@ -65,18 +65,21 @@ const prismaMock = {
       }
       return { count: hit };
     },
-    findMany: async ({ where, take, cursor, skip }: { where: Record<string, unknown>; take?: number; cursor?: { id: string }; skip?: number }) => {
+    findMany: async ({ where, take, orderBy }: { where: Record<string, unknown>; take?: number; orderBy?: unknown }) => {
       const prefix = (where.qualifyingEventId as { startsWith?: string } | undefined)?.startsWith;
       const createdLte = (where.createdAt as { lte?: Date } | undefined)?.lte;
+      const idGt = (where.id as { gt?: string } | undefined)?.gt;
       let rows = ctrl.commissions.filter((c) => {
         if (prefix && !c.qualifyingEventId.startsWith(prefix)) return false;
         if (createdLte && !(c.createdAt <= createdLte)) return false;
+        // P2-4/P2-2 — keyset pagination the starvation fix depends on: the
+        // filter applies REGARDLESS of the row's current status, exactly like
+        // a real `id > cursor` predicate (no cursor-row-left-the-set hazard).
+        if (idGt !== undefined && !(c.id > idGt)) return false;
         return matchesStatus(c, where);
       });
-      // P2-4 — the pagination the starvation fix depends on: id-cursor + take.
-      if (cursor) {
-        const at = rows.findIndex((c) => c.id === cursor.id);
-        rows = at >= 0 ? rows.slice(at + (skip ?? 0)) : rows;
+      if (orderBy && !Array.isArray(orderBy) && (orderBy as { id?: string }).id === "asc") {
+        rows = [...rows].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       }
       if (take !== undefined) rows = rows.slice(0, take);
       return rows;
@@ -241,4 +244,23 @@ test("cron approve: 500+ unverifiable head rows do not starve an approvable row 
   assert.equal(result.approved, 1, "the row behind the dead backlog must be reached and approved");
   assert.equal(result.skippedUnverifiable, 501);
   assert.equal(ctrl.commissions.find((c) => c.id === "zz-approvable")!.status, "APPROVED");
+});
+
+// P2-2 (second review) — batch-boundary hazard: when the last row of a batch
+// is APPROVED by that batch (leaving the PENDING filter), the first row of
+// the next batch must not be silently skipped. Keyset `id > cursor` makes the
+// boundary independent of the boundary row's new status.
+test("cron approve: a row right after an approved batch boundary is not skipped", async () => {
+  const { approveMaturePendingCommissions } = await svc();
+  ctrl.deals = [{ id: "d1", status: "SIGNED" }];
+  ctrl.commissions = Array.from({ length: 501 }, (_, i) => ({
+    id: `ok${String(i).padStart(4, "0")}`,
+    status: "PENDING",
+    dealId: "d1",
+    qualifyingEventId: `pi_ok${i}-L1`,
+    createdAt: OLD,
+  }));
+  const result = await approveMaturePendingCommissions(NOW);
+  assert.equal(result.approved, 501, "all 501 must approve — the boundary row's status change must not skip its successor");
+  assert.equal(ctrl.commissions.filter((c) => c.status === "APPROVED").length, 501);
 });

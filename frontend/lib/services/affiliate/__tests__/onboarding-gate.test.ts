@@ -97,11 +97,20 @@ test("every filesystem portal route is exempt or gated; every exemption names a 
   for (const exempt of ONBOARDING_EXEMPT_PATHS) {
     assert.ok(routes.includes(exempt), `exempt path ${exempt} has no page.tsx`);
   }
-  // Everything else is, by construction, gated — enumerate for the record and
-  // assert each classifies exactly one way.
+  // P2-3 (second review) — everything non-exempt must enforce the gate in its
+  // OWN page module (soft navigation does not re-render the layout). Driven
+  // by the FILESYSTEM, not the sidebar, so a gated page that never made it
+  // into the nav cannot silently escape. A page whose entire body is a
+  // redirect to a gated page inherits that page's gate and is allowed.
   for (const route of routes) {
     const isExempt = ONBOARDING_EXEMPT_PATHS.some((p) => route.startsWith(p));
-    assert.equal(typeof isExempt, "boolean");
+    if (isExempt) continue;
+    const src = fs.readFileSync(path.join(PORTAL_DIR, route.split("/").pop()!, "page.tsx"), "utf8");
+    const isRedirectOnly = /redirect\("\/affiliate\/portal\//.test(src) && !src.includes("prisma");
+    assert.ok(
+      src.includes("requireAffiliateWithOnboarding") || isRedirectOnly,
+      `${route}/page.tsx must call requireAffiliateWithOnboarding (or be a pure redirect to a gated page) — the layout gate alone is bypassed by soft navigation`,
+    );
   }
 });
 
@@ -187,20 +196,10 @@ test("sidebar nav gating mirrors the server exempt set exactly", async () => {
 // gated page must therefore call requireAffiliateWithOnboarding itself. This
 // reads the page sources so a future page that reverts to requireAffiliate()
 // fails here instead of silently reopening the bypass.
-test("every gated page calls requireAffiliateWithOnboarding in its own module (soft-nav enforcement)", async () => {
-  const { readFileSync } = await import("node:fs");
-  const { join } = await import("node:path");
-  const { ONBOARDING_EXEMPT_PATHS } = await gate();
+test("every sidebar destination is a filesystem portal route (the filesystem scan covers all of nav)", async () => {
   const { NAV_ITEMS } = await import("@/components/affiliate/AffiliateSidebar");
-  const root = join(process.cwd(), "app");
+  const routes = filesystemPortalRoutes();
   for (const item of NAV_ITEMS) {
-    const exempt = ONBOARDING_EXEMPT_PATHS.some((p) => item.href.startsWith(p));
-    if (exempt) continue;
-    const pagePath = join(root, ...item.href.split("/").filter(Boolean), "page.tsx");
-    const src = readFileSync(pagePath, "utf8");
-    assert.ok(
-      src.includes("requireAffiliateWithOnboarding"),
-      `${item.href}/page.tsx must call requireAffiliateWithOnboarding — the layout gate alone is bypassed by soft navigation`,
-    );
+    assert.ok(routes.includes(item.href), `nav item ${item.href} has no page.tsx — dead link`);
   }
 });

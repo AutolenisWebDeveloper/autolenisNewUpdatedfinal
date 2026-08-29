@@ -152,6 +152,21 @@ END $$;
 ALTER TABLE "affiliates" DROP COLUMN IF EXISTS "lastInactiveNudgeAt";
 -- VERIFY: SELECT column_name FROM information_schema.columns WHERE table_name='affiliates' AND column_name='lastInactiveNudgeAt'; -- expect 0 rows
 
+-- ── P1-1 (second review): close legacy orphaned PENDING payouts FIRST ────────
+-- The disabled legacy self-serve rail created AffiliatePayout(PENDING) rows
+-- that nothing could ever advance and that claim no commissions. Left in
+-- place they (a) can hold two PENDING rows for one affiliate, which would
+-- fail the unique index build below, and (b) would permanently block that
+-- affiliate's requestPayout with REQUEST_PENDING. A legacy orphan is exactly
+-- "PENDING with zero attached commissions" — the rebuilt rail always attaches
+-- claims in the same transaction, so this cannot touch a real request.
+UPDATE "affiliate_payouts" p
+   SET "status" = 'FAILED',
+       "failure_reason" = 'orphaned by disabled legacy self-serve rail (closed by migration 20261101000000)'
+ WHERE p."status" = 'PENDING'
+   AND NOT EXISTS (SELECT 1 FROM "commissions" c WHERE c."payout_id" = p."id");
+-- VERIFY: SELECT count(*) FROM affiliate_payouts p WHERE p.status='PENDING' AND NOT EXISTS (SELECT 1 FROM commissions c WHERE c.payout_id = p.id); -- expect 0
+
 -- ── P2-2 (review): one open payout request per affiliate, DB-enforced ────────
 -- requestPayout checks "no open PENDING request" read-then-act; under READ
 -- COMMITTED two concurrent requests can both pass the check. The commission

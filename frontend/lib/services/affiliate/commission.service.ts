@@ -305,17 +305,31 @@ export async function approveMaturePendingCommissions(now: Date = new Date()): P
   // MAX_BATCHES bounds a pathological backlog; the hourly cron resumes where
   // the cap left off because approved rows leave PENDING.
   const MAX_BATCHES = 20; // 20 × 500 = 10k rows/run
+  // P2-4 — stop batching well short of the route's maxDuration (300s) so a
+  // partial run commits its approvals and reports cleanly instead of being
+  // killed mid-batch; the next hourly run picks up the rows still PENDING.
+  const deadline = Date.now() + 240_000;
   const piVerdicts = new Map<string, boolean | null>();
   let cursor: string | null = null;
 
   for (let batch = 0; batch < MAX_BATCHES; batch++) {
+    if (Date.now() > deadline) break;
+    // P2-2 (second review) — keyset pagination (`id > cursor`), NOT Prisma
+    // cursor+skip: approveBatch flips rows out of the PENDING filter, and a
+    // cursor row that left the filtered set makes `skip: 1` drop the first
+    // surviving row after the boundary instead of the cursor row. `id` alone
+    // is a stable, unique order; the createdAt ordering was not load-bearing
+    // (maturity is the `cutoff` filter).
     const candidates: Array<{ id: string; dealId: string; qualifyingEventId: string }> =
       await prisma.commission.findMany({
-        where: { status: "PENDING", createdAt: { lte: cutoff } },
+        where: {
+          status: "PENDING",
+          createdAt: { lte: cutoff },
+          ...(cursor ? { id: { gt: cursor } } : {}),
+        },
         select: { id: true, dealId: true, qualifyingEventId: true },
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        orderBy: { id: "asc" },
         take: 500,
-        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       });
     if (candidates.length === 0) break;
     cursor = candidates[candidates.length - 1].id;
