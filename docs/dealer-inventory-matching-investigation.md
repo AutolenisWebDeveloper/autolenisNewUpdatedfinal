@@ -28,9 +28,13 @@ This investigation ran in two passes:
 
 Consequently **the tracer findings were NOT adversarially verified by the workflow.** Before
 writing this report I personally re-verified every load-bearing tracer claim (the ones that change
-the verdict or carry P0/P1 severity). Those are marked **[verified here]**. Tracer findings I did
-*not* re-verify are quarantined in §11 and are explicitly **NOT VERIFIED** — do not action them
-without checking first. Two tracer claims were **overstated and are corrected** in §11.
+the verdict or carry P0/P1 severity). Those are marked **[verified here]**.
+
+**§11 has since been replaced.** The workflow's verification stage later completed — with
+`verify:dual-stack` and `verify:stuck-state` still unverified and the `critic` pass dead — and §11
+now carries a first-hand re-check of all 78 broken/security/not-wired entries against current
+`main`, with per-segment discard rates and a `VERIFIED_WORKING` audit. It supersedes the earlier
+quarantine; read it in place of the "do not action" list that used to sit there.
 
 ---
 
@@ -897,42 +901,482 @@ re-check for offers created after `postCloseProcessedAt`.
 
 ---
 
-## 11. Not verified — do not action without checking
+## 11. Re-check against current `main` (supersedes the previous §11)
 
-The workflow's adversarial-verification stage did not run (§0). These tracer claims are recorded
-because they are plausible and worth checking, but I did **not** confirm them:
+The previous §11 quarantined tracer claims that the workflow's adversarial-verification stage never
+reached. That stage has since completed — badly: of 231 agents, 30 died on a session limit, and the
+casualties were not random. **`verify:dual-stack` lost all 20 of its agents and `verify:stuck-state`
+9 of 10, so those two segments carry no adversarial verification at all, and the `critic` pass over
+the whole run also failed.** The trace also ran against `b059a4b`; `main` has since moved 49 commits
+to `9c09aee9`.
 
-- `custom.adapter.ts` never instantiated; `ADAPTERS = [new MarketCheckAdapter()]` — plausible but
-  the exact line was not read by me.
-- Column-mapping page maps six hardcoded fake column names (`DETECTED_COLUMNS`) instead of the
-  dealer's real CSV headers.
-- The dealer document download link points at a bare private-bucket path, so no uploaded document
-  can be retrieved.
-- `POST /api/admin/deals` binds a Deal to an offer without verifying the offer's auction belongs
-  to the buyer, and is non-transactional.
-- The legacy `Notification`-based "Vehicle Request:" stack runs in parallel to `VehicleRequest`,
-  and admin *Send to Dealers* writes status back to the legacy row rather than the canonical one.
-- `VehicleRequestOffer` is unreachable because its due-diligence gate requires checkpoints nothing
-  creates.
-- `resolveDepositFulfillmentTrack` classifies NULL-PaymentIntent deposits as `standard`.
-- 1,291 duplicate `SYSTEM_ALERT` rows from the DEFERRED sync path.
-- Quick-offer double-counts fees, so any offer with a fee fails the OTD assertion. (Moot while
-  finding 9 stands, but relevant once it is fixed.)
-- Naive CSV parsing splits on every comma, shifting columns for quoted fields.
+This section replaces that quarantine with a first-hand re-check of all 78 **VERIFIED_BROKEN /
+SECURITY_RISK / NOT_WIRED** entries against current `main`, plus a 10-entry audit of the
+**VERIFIED_WORKING** column. Nothing below rests on a tracer's word: every code claim was re-read at
+a `file:line` on `9c09aee9`, every state claim re-queried against `aieybibvewmvrubcpthm`, and every
+negative claim ("no consumer exists") re-established by exhaustive symbol search. Findings already
+dispositioned elsewhere — the dealer-funnel defects D1–D12, the invitation-token work, and the
+applied `20260828000000` migration — are excluded.
 
-**Two tracer claims I checked and am correcting:**
+### 11.1 Discard rate — the expected staleness did not materialise
 
-1. The public dealer-offer endpoint was reported as **"unauthenticated"** and P0. It is
-   **token-authenticated** (`route.ts:110-124` returns 404 without a valid token). The real,
-   verified defects are the missing rate limiter, the missing `invite.status` replay check, and
-   the 100 MB upload ceiling — recorded as **P2 finding 19**, not P0.
-2. `auction-close` reporting `closed: 0 / processed: 0` was read by one tracer as a live failure.
-   It is correct behaviour for the current data (no ACTIVE auction past `endsAt`; all CLOSED
-   auctions already post-processed).
+The inv-entry sample suggested the report would be largely stale: five of five headline findings
+there were already fixed. Extended to all 78 entries, **that ratio does not hold.**
 
-Also genuinely unverifiable in this session: **cross-dealer isolation has never been exercised in
-production** — there is only one dealer with any activity, so the isolation conclusions in §8 rest
-on code reading alone, not on observed behaviour.
+| Segment | Entries | Discarded (fixed) | Survive |
+| --- | ---: | ---: | ---: |
+| inv-entry | 10 | **3** | 7 |
+| inv-integrity | 12 | 0 | 12 |
+| inv-provenance | 4 | 0 | 4 |
+| matching | 5 | 0 | 5 |
+| deposit-gate | 9 | 0 | 9 |
+| offer-submit | 5 | 0 | 5 |
+| isolation | 6 | **1** | 5 |
+| auction-view-to-deal | 6 | 0 | 6 |
+| stuck-state | 15 | 0 | 15 |
+| dual-stack | 6 | 0 | 6 |
+| **Total** | **78** | **4 (5%)** | **74** |
+
+**Discarded, with the fix that closed each:**
+
+1. *Manual add always 422* — the page now posts `NEW`/`USED`/`CPO` matching the route enum
+   (`app/dealer/inventory/add/page.tsx:10-13`).
+2. *Edit page fetches `/undefined`; PATCH silently strips fields* — `params: Promise<{id}>`, and the
+   schema is widened and `.strict()` (`app/api/dealer/inventory/[id]/route.ts:15-30`).
+3. *Mapping cookie never reaches the bulk route* — `path: "/"`
+   (`app/api/dealer/inventory/column-mapping/route.ts`). **The workflow is still dead**, now for
+   finding **E1** below rather than the cookie path.
+4. *SSRF via `extractContractText`* — now routed through the host-allowlisted
+   `fetchAllowedContract` (`lib/services/contract-shield/extract-text.ts:11,24`).
+
+The staleness is concentrated entirely where PR #348 worked — the dealer entry funnel. Outside it,
+**74 of 74 entries survive contact with current `main`.** The CSV price 100× corruption is also
+fixed, but it was a `PARTIAL`, outside this re-check's 78.
+
+### 11.2 The VERIFIED_WORKING column is *not* as stale — 10/10 hold
+
+Sampled from `dual-stack` and `stuck-state` first, as instructed. **Those two segments contain only
+three `VERIFIED_WORKING` entries between them**, so all three were taken and seven more drawn at
+random from the rest.
+
+| Entry | Claim | Re-check on `9c09aee9` |
+| --- | --- | --- |
+| stuck-state:5 | offer write is one Serializable txn | **holds** — `offer.service.ts`, 2 × `isolationLevel: "Serializable"` |
+| stuck-state:13 | duplicate-offer guard inside that txn | **holds** — guard + 400 mapping both present |
+| dual-stack:1 | `VehicleRequest` is canonical intake | **holds** — 2 × `vehicleRequest.create` in `unified-buyer-intake.service.ts` |
+| isolation:22 | scorecard scoped by `dealerId` | **holds** — 8 `dealerId` scopes |
+| isolation:23 | thread membership enforced | **holds** — `messageThreadParticipant.findFirst` |
+| isolation:27 | ownership before storage write | **holds** — 2 × `assertDealerOwnsDeal` |
+| isolation:32 | pickup QR ownership check | **holds** |
+| isolation:34 | profile schema cannot escalate | **holds** — `.strict()`, no `status`/`tier`/`userId` |
+| auction-view-to-deal:9 | zero-offer close path | **holds** |
+| offer-submit:10 | provenance of existing rows | **holds** — `offers` still 0 |
+
+**So the working column can be trusted roughly as far as the broken column can.** The report's
+weakness is not indiscriminate rot; it is (a) the two segments that were never adversarially
+verified, and (b) the funnel-shaped hole where fixes landed. Treat `dual-stack` and `stuck-state`
+conclusions as single-sourced — the re-check below is now their only second opinion.
+
+### 11.3 Surviving findings
+
+Cross-references mark entries the trace reported twice under different segments; each is stated once.
+
+#### inv-entry — 7 survive of 10
+
+**E1 · Column mapping is keyed to six invented column names** — P1
+*Location* `app/dealer/inventory/column-mapping/page.tsx:8` · *Root cause* `DETECTED_COLUMNS =
+["VehicleID","yr","Mk","Mdl","Miles","ListPrice"]` is a literal; the page receives no CSV and posts
+only `{ mapping }` (`:46`), so the saved mapping is keyed on names that will not appear in a real
+file, and `bulk/route.ts` keys strictly on them. *Impact* the non-standard-header import path is
+still 100% dead — the cookie fix (discard 3) removed the transport failure and exposed this one.
+*Fix* pass the uploaded file's real header row into the mapping page and map against it.
+
+**E2 · Column-mapping route's `rows` mode has no caller** — P3
+*Location* `app/api/dealer/inventory/column-mapping/route.ts` (accepts optional `rows`, would
+`createMany`) · *Root cause* the only client posts `{ mapping }` alone. *Impact* dead ingestion
+branch that reads as a working second import path. *Fix* delete it or wire it.
+
+**E3 · DMS/feed ingestion does not exist under any name** — P2 *(absorbs inv-entry:9,
+inv-provenance:6, inv-integrity:18)*
+*Location* `app/dealer/inventory/feed-setup/page.tsx` (zero `fetch`/`useState`/`action`);
+`app/api/dealer/onboarding/route.ts:150` is the **only** `dealerFeedConfig` writer repo-wide;
+`lib/services/inventory/orchestrator.ts:26` `const ADAPTERS = [new MarketCheckAdapter()]`;
+`CustomAdapter` is defined at `adapters/custom.adapter.ts:22` and **never constructed**. *Root cause*
+the config surface, the storage table and the adapter all exist; nothing joins them. *Impact*
+`dealer_feed_configs` = 0 rows; a dealer cannot connect a feed. *Fix* either instantiate
+`CustomAdapter` per config row in the orchestrator, or remove the surfaces.
+
+**E4 · Import history renders a hardcoded empty state** — P3
+*Location* `app/dealer/inventory/import-history/page.tsx` — no `prisma`, no `fetch`. *Root cause* the
+dealer bulk path cannot create an `InventoryUploadBatch` anyway (see T3). *Impact* a dealer who
+imports successfully still sees "no imports". *Fix* write dealer batch rows (T3), then query them.
+
+**E5 · `DELETE /api/dealer/inventory/[id]` is a cross-tenant existence oracle** — **P2, security**
+*Location* `app/api/dealer/inventory/[id]/route.ts:74-77` and `:88-92` · *Root cause* the
+reservation pre-check `auctionVehicle.findFirst({ where: { inventoryItemId: id, auction: { status:
+"ACTIVE" } } })` is **not** dealer-scoped, and the subsequent `updateMany` result count is never
+inspected. *Impact* any authenticated dealer gets 409 vs 200 for an arbitrary inventory id,
+disclosing existence and auction-reservation state of another dealer's stock. The write itself stays
+correctly scoped — no cross-tenant mutation. *Fix* scope the pre-check by `dealerId`, and return 404
+when `updateMany` reports `count === 0`.
+
+**E6 · Inventory analytics returns literals** — P3
+*Location* `app/api/dealer/inventory/[id]/analytics/route.ts:14` — `{ views: 0, shortlistAdds: 0,
+auctionRate: 0, qualityScore: null }`. *Impact* no caller anyway; the detail page renders em-dashes.
+*Fix* wire to the quality service (I11) or remove.
+
+#### inv-integrity + inv-provenance — 16 survive of 16
+
+**I1 · MarketCheck ingestion has never once succeeded** — P1
+*Location* `lib/services/inventory/adapters/marketcheck.adapter.ts:81-88`. *Root cause* HTTP 429 maps
+to `outcome: "DEFERRED"`, which resolves normally. *Impact* `inventory_sync_runs` = **136 rows, 136
+DEFERRED**, zero of any other status (was 108 at trace time — 28 further failures since); latest run
+`2026-08-29 00:03:04`; `max(last_seen_at)` across all inventory is `2026-08-18 19:01:34`. *Fix* obtain
+working MarketCheck credentials/quota; until then the pipeline has no supply.
+
+**I2 · No retry, backoff or circuit-breaking on rate-limit** — P1
+*Location* same file, `:81-119`; the only in-run control is `AbortSignal.timeout(20000)`. *Root
+cause* one attempt per run, no `Retry-After` handling, no backoff state. *Impact* every scheduled run
+burns quota and returns nothing. *Fix* honour `Retry-After`, add exponential backoff and a breaker
+that stops calling after N consecutive 429s.
+
+**I3 · A 100%-failed sync is logged `COMPLETED`** — P1
+*Location* `lib/services/monitoring/cron-monitor.service.ts:28-41`. *Root cause* `withCronRun` marks
+`COMPLETED` whenever `work()` resolves, and a DEFERRED sync resolves. *Impact* both inventory crons
+report healthy while achieving nothing; liveness classification only knows OVERDUE/NEVER_RUN. *Fix*
+let the handler return a failure outcome that `withCronRun` maps to `FAILED`, and alert on repeated
+non-success.
+
+**I4 · Executable supply is zero, so matching cannot start** — P1 *(≡ inv-provenance:2)*
+*Location* `lib/services/inventory/inventory-eligibility.ts:40`. *Root cause* the predicate requires
+`dealerId` **or** `sourceAdapter` **or** `addedByAdminId` to be non-null. *Impact* re-queried today:
+206 inventory rows, **206 with `dealer_id` NULL and 206 with `source_adapter` NULL** → executable
+supply **0**. Every downstream match short-circuits to `NO_ELIGIBLE_SUPPLY`. *Fix* backfill
+provenance on the 206 legacy rows, or admit they are not executable supply and source real stock.
+
+**I5 · Provenance stamping has never executed** — P2 *(≡ inv-provenance:1)*
+*Location* `orchestrator.ts:211`, `:226`, `:245`. *Root cause* the stamping code post-dates every row
+in the table, and no run since has written a row. *Impact* the direct cause of I4. *Fix* as I4.
+
+**I6 · The no-VIN create path swallows every error and over-counts** — P2
+*Location* `orchestrator.ts:252` `.catch(() => {}); // Ignore duplicates`, with `upserted++` at `:254`
+firing unconditionally. *Root cause* there is no unique key on the composite, so nothing is deduped,
+and genuine DB failures are indistinguishable from duplicates. *Impact* `vehiclesUpserted` on
+`InventorySyncRun` over-reports. No production instance (206/206 rows have a VIN). *Fix* catch only
+`P2002`, and increment on confirmed writes.
+
+**I7 · Feed upsert silently demotes and orphans dealer-owned rows** — P2
+*Location* `orchestrator.ts:219-228`. *Root cause* the update block overwrites `priceCents`,
+`mileage`, `lane`, `sourceAdapter` unconditionally with no recency or quality comparison, and
+`dealerId` is absent from it. `assignLane` can only return LANE_2/LANE_3. *Impact* an external feed
+hit on a dealer-owned VIN demotes LANE_1 → LANE_3 (making it stale-sweep eligible) while leaving
+`dealerId` dangling. Unrealised only because no feed run has ever succeeded. *Fix* never downgrade a
+LANE_1 row from an external source; compare recency before overwriting price/mileage.
+
+**I8 · Dealer CSV paths validate VIN length only** — **P2, security**
+*Location* `app/api/dealer/inventory/bulk/route.ts:24,83` and
+`app/api/dealer/inventory/column-mapping/route.ts:67`. *Root cause* both check `length 11–17` with no
+charset check, no `normalizeVin`/`isValidVin`, and no uppercasing — while the single-item path
+(`inventory/route.ts`) applies all three. The DB unique index is on raw text. *Impact* case-variant
+and junk VINs bypass global uniqueness; both files were edited by #348 and the gap survived. *Fix*
+route all three paths through `normalizeVin` + `isValidVin`.
+
+**I9 · Geographic search filters on columns nothing writes** — P2
+*Location* `app/api/public/inventory/route.ts:79-80`, `app/(public)/inventory/page.tsx:120`. *Root
+cause* exhaustive search confirms **no `inventoryItem` create/update/upsert anywhere sets
+`latitude`**; `geocode-backfill` is scoped to Dealer + DealerProspect only. *Impact* 1 of 206 rows has
+a latitude, so any ZIP+radius search returns almost nothing. *Fix* extend the backfill to inventory,
+or drop the geo filter until it is populated.
+
+**I10 · Public browse has no freshness gate** — P2
+*Location* `app/api/public/inventory/route.ts:35` filters on `isActive` alone and does not use
+`executableSupplyWhere`. *Impact* all **95** active rows are older than 48h — every one. *Fix* apply
+the freshness cutoff, or surface the age.
+
+**I11 · Per-item quality scoring has no caller** — P3
+*Location* `lib/services/inventory/inventory-quality.service.ts:4` — `computeQualityScore` has
+exactly one repo-wide hit, its own definition. `inventory_quality_scores` = 0 rows. *Fix* call it on
+ingest or delete it.
+
+#### matching — 5 survive of 5
+
+**M1 · Inventory does not influence dealer selection at all** — P1
+*Location* `lib/services/auction/dealer-invitation.service.ts:213-216` selects only
+`{ id, zip, latitude, longitude }`. *Root cause* exhaustive grep across
+`dealer-invitation.service.ts`, `coverage.service.ts`, `auction-capacity.service.ts` and
+`dealer-auction-eligibility.service.ts` returns **no inventory reference of any kind**. *Impact*
+dealers are invited on geography and scorecard alone; whether a dealer has the car is not an input.
+*Fix* treat matched inventory as a ranking input, once I4 gives it something to read.
+
+**M2 · Request→inventory matching produces nothing** — P1
+*Location* `lib/services/inventory/request-inventory-match.service.ts`, cron
+`inventory-match-refresh`. *Impact* 17 non-terminal requests, last run `2026-08-28 18:30`,
+`vehicle_request_match_results` = **0 rows**. Consequence of I4, not an independent defect. *Fix* I4.
+
+**M3 · Match output has a writer and no reader** — P2 *(≡ dual-stack:9)*
+*Location* writer `request-inventory-match.service.ts:157` (+ deleters at `:164`, `:166`). *Root
+cause* exhaustive search returns only the model definition, the writer, comments and tests — and the
+model has no Prisma relation field, so no `include` can reach it either. *Impact* the matching
+pipeline computes and persists a result set nothing consumes. *Fix* consume it in dealer selection
+(M1) or delete the table.
+
+**M4 · Buyer-facing matcher is never called** — P3 *(≡ dual-stack:10)*
+*Location* `lib/services/inventory/inventory-match.service.ts:23` `findMatchedVehicles` — callers are
+its own test file only. The buyer surface uses `app/api/buyer/search/route.ts` instead.
+`vehicle_match_scores` = 0 rows. *Fix* wire or delete.
+
+**M5 · `geocode-backfill` is never scheduled** — P2
+*Location* handler at `app/api/cron/geocode-backfill/route.ts`; `grep -c geocode-backfill
+frontend/vercel.json` → **0**. *Impact* `cron_job_logs` has **0** rows for it; both production dealers
+have a ZIP and **no coordinates**, which is the upstream cause of A2. *Fix* register it in
+`vercel.json`.
+
+#### deposit-gate — 9 survive of 9
+
+**G1 · The launch route fabricates the deposit it is gated on** — **P1, security**
+*Location* `app/api/admin/buyers/[buyerId]/launch-auction/route.ts:136-141` · *Root cause* when no
+PAID deposit exists the route **creates one** (`status: "PAID"`, no PaymentIntent) and proceeds to
+create, launch and invite. *Impact* the $99 gate is satisfiable by the same call it gates. *Fix*
+require a Stripe-confirmed deposit; never mint one on the launch path.
+
+**G2 · No deposit check on activation** — P2
+*Location* `lib/services/auction/auction.service.ts` — `launchAuction` is a bare `auction.update` to
+ACTIVE. *Fix* re-assert the deposit at activation.
+
+**G3 · No deposit check on either invite path** — P2
+*Location* `dealer-invitation.service.ts` and `outside-invite.service.ts` — the word `deposit` does
+not appear in either file. *Fix* assert fulfilment unlock before minting invitations.
+
+**G4 · The concierge stack cannot express a deposit gate** — **P1, security**
+*Location* `app/api/admin/vehicle-requests/[id]/send-to-dealers/route.ts` — no deposit logic; the
+`vehicle_offers` table has no `buyer_id` column, only free-text `buyer_email`. *Impact* the parallel
+stack — which holds all 6 production offers and both dealer submissions — has **no linkage to a
+Deposit at all**. *Fix* add the buyer FK, then gate.
+
+**G5 · A production invite went out before the buyer's deposit was real** — P1
+*Location* invite `7ad05398`, vehicle_offer `43bb1ad2`. *Impact* documented instance of G4. *Fix* G4.
+
+**G6 · Admin-minted deposits auto-convert to live auctions** — **P1, security**
+*Location* `lib/services/payment/fulfillment-gate.ts:84` — `if (!pi || pi.startsWith(...)) return
+"standard"`. *Root cause* a PAID deposit with a NULL PaymentIntent is classified `standard`, so the
+reconciler's `track !== "standard"` fail-closed check passes. *Impact* any admin-minted deposit left
+without an auction is auto-converted into a launched, dealer-invited auction. *Fix* classify NULL-PI
+deposits `unknown` and fail closed.
+
+**G7 · Three routes mint PAID deposits under OPS roles** — **P1, security**
+*Location* `launch-auction/route.ts:64`, `journey/complete/route.ts:144`,
+`journey/complete-all/route.ts:103` all gate on `["SUPER_ADMIN","OPERATIONS_ADMIN"]`, while the
+dedicated `deposit/override/route.ts` requires `["SUPER_ADMIN","FINANCE_ADMIN"]` plus
+`finance.deposit.override`. *Impact* the money control is enforced on one route and bypassable on
+three that produce identical state. *Fix* put all four behind `finance.deposit.override`.
+
+**G8 · Cost-bearing enrichment runs before any deposit** — P2
+*Location* `lib/services/acquisition/intake-pipeline.service.ts:496` calls
+`enrichProspectEmailsForOpportunity` unconditionally at intake; no `isFulfillmentUnlocked` appears in
+the file — despite `fulfillment-gate.ts:8-11` naming exactly this as the invariant. *Impact* paid
+Apollo/LLM spend on unpaid intake. *Fix* gate on `isFulfillmentUnlocked`.
+
+#### offer-submit — 5 survive of 5
+
+**F1 · The only offer-submission UI crashes on render** — P1
+*Location* `app/dealer/quick-offer/[auctionId]/page.tsx:176` reads `auctionCtx._count.offers`, but
+`app/api/dealer/auctions/[auctionId]/route.ts:113` destructures `_count` **out** and `:117` returns
+`offerCount`. *Impact* `undefined.offers` — the single dealer-facing submit surface throws. Consistent
+with `offers` = **0** in production. *Fix* read `offerCount`.
+
+**F2 · Offer revision has no client** — P3
+*Location* `app/api/dealer/offers/[offerId]/revise/route.ts` is complete; grep for `/revise` across
+`app`, `components`, `lib` finds only unrelated comments. *Fix* wire or remove.
+
+**F3 · Public concierge submission has no rate limit** — **P2, security**
+*Location* `app/api/public/dealer-offer/[token]/route.ts` — no `limitGeneral`, no `clientIpKey`,
+while the sibling `outside-dealer-offer/[token]/route.ts:37` limits to 20/hour. It is
+token-authenticated (correcting the earlier P0 reading), and the residual defects are the missing
+limiter, the missing `invite.status` replay check, and the 100 MB upload ceiling. *Fix* add the
+limiter and the replay check.
+
+**F4 · Exact buyer budget is rendered to dealers** — **P2, security** *(≡ isolation:18)*
+*Location* `app/dealer/opportunities/page.tsx:50,83` selects `maxBudgetCents` and renders
+`Budget: up to $…`, contradicting `lib/utils/buyer-budget.ts`, whose contract is 5k-bucket
+anonymisation and which the auction surfaces honour. *Fix* route this page through the same
+anonymiser.
+
+**F5 · A dealer cannot see their own concierge submission** — P2
+*Location* `app/api/dealer/offers/route.ts:30-34` filters `dealerOfferSubmission` by `dealerId`.
+*Impact* 1 of 2 production submissions has `dealer_id` NULL despite a `contact_email` that resolves
+to a real dealer; the email-linkage code post-dates the row and no backfill ran. *Fix* backfill
+`dealer_id` by contact email, and fall back to email match on read.
+
+#### isolation — 5 survive of 6
+
+**H1 · Loss-insights page leaks a small-sample median** — **P2, security** *(≡ auction-view-to-deal:5)*
+*Location* `app/dealer/auctions/[auctionId]/insights/page.tsx:53-56` guards only on `length > 0`,
+while the sibling API applies `MIN_MEDIAN_SAMPLE = 4`
+(`app/api/dealer/auctions/[auctionId]/insights/route.ts:39`). *Impact* with n=1 the rendered
+"% above the segment median" is the competitor's exact price. *Fix* apply the same minimum.
+
+**H2 · Uploaded dealer documents cannot be retrieved** — P2
+*Location* `app/api/dealer/documents/upload/route.ts` persists a bare private-bucket path by design;
+`app/api/dealer/documents/` contains **only** `upload`, and no signed-URL read route exists for
+dealer documents (the `createSignedUrl` helpers all serve agreements/e-sign/contracts). *Impact*
+every dealer document upload is write-only. *Fix* add an authorised signed-URL read route.
+
+**H3 · Contract upload never registers a `ContractVersion`** — P2
+*Location* `components/dealer/ContractUploadButton.tsx:32` POSTs to `…/contracts/upload-file` and
+stops; nothing calls `…/contracts/upload`. *Impact* the file lands in storage, no `ContractVersion`
+row is created and no Contract Shield scan is ever triggered. *Fix* chain the register call after the
+file upload.
+
+**H4 · RLS is enabled but not forced** — **P2, security**
+*Location* production `pg_class`: **243** public tables with `relrowsecurity`, **1** with
+`relforcerowsecurity`. *Root cause* the application connects with a role that bypasses non-forced
+RLS. *Impact* RLS is not a second line of defence behind the application's `dealerId` scoping — it is
+inert for the app's own connection. *Fix* `FORCE ROW LEVEL SECURITY` on the tenant tables, and prove
+it with a negative test.
+
+#### auction-view-to-deal — 6 survive of 6
+
+**A1 · A buyer with no ZIP silently gets zero invitations** — P1
+*Location* `dealer-invitation.service.ts:184-210` — `if (!buyerCoords) { … return 0 }`, fail-closed.
+*Impact* 6 of 15 production buyers have a NULL zip; auction `dc009660` minted an auction vehicle and
+**0 invitations**. Compounded by M5, which would have supplied the dealer coordinates. *Fix* require
+ZIP at intake, and alert when invitation count is 0 rather than returning silently.
+
+**A2 · The concierge stack can never produce a Deal** — P1
+*Location* `deals` has exactly one offer linkage pair (`offer_id`, `vehicle_request_offer_id`) and
+**no** `vehicle_offer_id` / `dealer_offer_submission_id` column. *Impact* all 6 production offers live
+in the stack that has no path to a Deal; `deals` = 0. The only bridge is the concierge-conversion
+service. *Fix* run every concierge offer through that conversion, or add the linkage.
+
+**A3 · Admin Deal creation is unjoined and non-transactional** — **P2, security**
+*Location* `app/api/admin/deals/route.ts:34-49` — offer, existing-deal and buyer are looked up
+independently, then `deal.create` and `offer.update` run as separate statements. *Impact* nothing
+verifies the offer's auction belongs to the buyer; a crash between the two writes leaves a Deal whose
+Offer is not ACCEPTED. *Fix* join buyer↔auction↔offer in one query and wrap both writes in a
+transaction.
+
+**A4 · Auction-load accounting drifts negative** — P2
+*Location* `dealer-invitation.service.ts` `releaseAuctionLoad` — `decrement: 1` per invitation, with
+no floor and no idempotency, called from `processAuctionClose`. *Impact* production: *Athelus Motors
+LLC* has `current_auction_load` = **-4**, and that value feeds invitation scoring. *Fix* clamp at
+zero and make the release idempotent per (auction, dealer).
+
+**A5 · The due-diligence gate is vacuous** — P1 *(≡ dual-stack:3)*
+*Location* `lib/services/vehicle-request/vehicle-request-offer.service.ts:10-11` — `incomplete =
+req.checkpoints.filter(c => !c.completed)` passes unconditionally when there are no checkpoints.
+*Impact* `vehicle_request_due_diligence_checkpoints` = **0 rows**, so the gate has never blocked
+anything; meanwhile the admin UI requires `checkpoints.length > 0`, so the surface is unreachable
+while the service is unguarded. *Fix* require a non-empty, complete checkpoint set in the service.
+
+#### stuck-state — 15 survive of 15 *(no adversarial verification; this re-check is the only second opinion)*
+
+**T1 · An interrupted sync leaves no record at all** — P2
+*Location* `orchestrator.ts:181-256` upserts in a sequential loop with no transaction and no progress
+row; the `InventorySyncRun` is created only afterwards at `:282`. Exhaustive search: `SyncRunStatus`
+declares `RUNNING` but **nothing ever writes it**, and `inventorySyncRun` has exactly one writer.
+*Impact* a platform kill mid-loop leaves partially written inventory and zero accounting — and no
+reaper is even possible, because there is no row to reap. *Fix* create the run row `RUNNING` before
+the loop and resolve it after.
+
+**T2 · Admin bulk-upload batches are always `COMPLETED`** — P2
+*Location* `app/api/admin/inventory/bulk-upload/route.ts:126-137` — up to 500 un-transacted
+per-row creates, then a batch row with the literal `status: "COMPLETED"`. *Impact* an interrupted
+upload leaves rows and no batch record; a finished one always claims success. *Fix* write the batch
+first as `RUNNING` and resolve it with real counts.
+
+**T3 · The dealer CSV path writes no batch record** — P3
+*Location* `app/api/dealer/inventory/bulk/route.ts` never references `inventoryUploadBatch` (0 hits);
+`InventoryUploadBatch` requires non-null `adminId`/`adminEmail`, so it structurally cannot. *Impact*
+cause of E4. *Fix* make the admin columns nullable, or add a dealer-scoped batch model.
+
+**T4 · The concierge submission performs five unguarded sequential writes** — P1
+*Location* `app/api/public/dealer-offer/[token]/route.ts` — submission create, documents update,
+dealerId update, and two further writes, with no transaction and several `.catch(...)` swallows.
+*Impact* this is the stack holding every production offer; a failure between writes leaves a
+submission with no documents or no dealer link — exactly the shape of F5's NULL `dealer_id`. *Fix*
+wrap in one transaction; upload to storage first, then write once.
+
+**T5 · Auction close races offer submission** — P2
+*Location* `closeExpiredAuctions` is a bare `auction.updateMany` at READ COMMITTED, while submission
+validates the deadline inside a Serializable transaction. *Impact* the two are not mutually isolated;
+an offer can commit against an auction the closer has just closed. *Fix* re-assert
+`status = ACTIVE` in the submission transaction's own update predicate.
+
+**T6 · Outside-dealer token path decides on a pre-transaction snapshot** — P2
+*Location* `app/api/public/outside-dealer-offer/[token]/route.ts:57-66` evaluates `inviteRejection`
+over a snapshot read before the write. *Fix* re-read and re-check inside the transaction.
+
+**T7 · Revision validates the auction outside its transaction** — P2
+*Location* `lib/services/offer/offer.service.ts:259-263` checks auction status/deadline outside; the
+transaction at `:283-311` re-checks only the offer. *Fix* move the auction check inside.
+
+**T8 · `AuctionInvitation` has no terminal state** — P2
+*Location* the model carries `sentAt`/`viewedAt`/`respondedAt` and **no status field**; no
+`InvitationStatus` enum exists. *Impact* an invitation to a closed auction is indistinguishable from
+a live one; nothing can express expired/declined. *Fix* add a status with a close-time transition.
+
+**T9 · `VehicleOffer` never terminates** — P2
+*Location* `app/api/cron/vehicle-offer-expire/route.ts` expires only the child invites and never
+touches the parent. *Impact* parent rows sit in a non-terminal state indefinitely. *Fix* expire the
+parent when all children are terminal.
+
+**T10 · Duplicate concierge submissions are unconstrained** — P2
+*Location* the only replay guard is `inviteId String? @unique`; a submission made with the generic
+`vehicle_offers.token` has `invite_id` NULL, and Postgres permits unlimited NULLs in a unique index.
+*Impact* re-POSTing creates unlimited duplicates. *Fix* add a unique constraint on
+(vehicleOfferId, contactEmail) or require a per-dealer invite token.
+
+**T11 · The dead-letter queue covers only Stripe** — P2
+*Location* `moveJobToDeadLetter` (`lib/jobs/idempotency.ts:124`) has exactly one production caller,
+`app/api/webhooks/stripe/route.ts:569`. *Impact* no inventory, offer, auction or cron failure is ever
+captured for replay. *Fix* route the orchestrator and offer/auction services through it.
+
+**T12 · No reaper for a killed cron run** — P3
+*Location* `cron-monitor.service.ts:7` writes `RUNNING` before the work and only resolves on return
+or throw; no reaper exists among the `cronJobLog` writers. *Impact* **currently unrealised** — 0 rows
+have been stuck in `RUNNING` beyond 2h across 63,058 logs. Code-proven gap, no observed instance.
+*Fix* sweep `RUNNING` rows older than the max expected duration to `FAILED`.
+
+**T13 · Concierge send-to-buyer advances state last** — P2
+*Location* `app/api/admin/vehicle-offers/[id]/send-to-buyer/route.ts` — the review rows are created
+transactionally, then four awaited notification/email calls run **before** the state advance, which is
+the final write. *Impact* a failure in any notification leaves the buyer emailed and the offer not
+advanced. *Fix* advance state inside the transaction; send notifications after.
+
+**T14 · Unbounded `SYSTEM_ALERT` growth** — P2
+*Location* `orchestrator.ts:323-331` creates a `Notification` on every run with `healthScore < 70`,
+with no dedup key, no throttle and no open/closed state. *Impact* production holds **1,319**
+"Inventory Health Alert" rows (1,683 `SYSTEM_ALERT` total), **28 in the last 24 hours** — the alert
+channel is unusable. *Fix* dedup on an open-incident key.
+
+#### dual-stack — 6 survive of 6 *(no adversarial verification; as above)*
+
+**U1 · `VehicleRequestOffer` is unreachable** — P1 — see **A5**.
+
+**U2 · The buyer cannot accept a concierge offer** — P1
+*Location* `app/api/public/buyer-offer-review/[reviewToken]/` contains only `question/route.ts`;
+`BuyerOfferReviewItem` has exactly one writer (the admin send-to-buyer route) and no accept/decline
+route exists. *Impact* 3 review items exist in production with no path to acceptance — the concierge
+funnel terminates at the buyer. *Fix* add the accept route, transactionally creating the Deal.
+
+**U3 · Concierge submissions are fetched but never rendered** — P3
+*Location* `app/api/dealer/offers/route.ts` returns `conciergeSubmissions`; the only client reference
+is a **POST** from the quick-offer page. *Impact* no dealer surface consumes the GET. *Fix* render it,
+after F5 fixes the linkage.
+
+**U4 · Match results have no reader** — see **M3**. **U5 · Buyer matcher unwired** — see **M4**.
+
+**U6 · A buyer vehicle-request creates no auction and no offer** — P1
+*Location* `app/api/public/request-vehicle/route.ts` → `unified-buyer-intake.service.ts` writes
+`vehicle_requests` + `buyer_opportunities` and explicitly does not trigger orchestration. *Impact*
+17 non-terminal requests, 7 auctions, 6 invitations, **0 offers, 0 deals**. *Fix* this is the
+end-to-end consequence of I4 + M1 + A1 + F1; it does not close independently.
+
+### 11.4 What remains genuinely unverifiable
+
+**Cross-dealer isolation has still never been exercised in production** — one dealer has any
+activity, so §8's isolation conclusions rest on code reading, as before. The `critic` pass over the
+whole workflow never ran, so no adversarial reading of *this* re-check exists either.
 
 ---
 
