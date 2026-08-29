@@ -1,3 +1,14 @@
+-- ############################################################################
+-- ⛔ MOOT as of 2026-08-29 — admin_impersonations has 0 ROWS in production.
+--
+-- Verified by read-only inspection: the table exists and is empty, so there are
+-- no stranded ACTIVE sessions to close and nothing for the UPDATE below to do.
+-- The runbook this belongs to also has an INVALID premise and is disabled —
+-- see scripts/production-runbook/RUNBOOK.md.
+--
+-- The SELECT remains safe to run at any time.
+-- ############################################################################
+
 -- STEP 5 (OPTIONAL, owner decision) — stale ACTIVE impersonation sessions.
 --
 -- Batch 3 (PR #346) tightened impersonation to SUPER_ADMIN. Any session a

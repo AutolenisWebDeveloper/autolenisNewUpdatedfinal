@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
+# ############################################################################
+# ⚠️  ASSERTIONS ENCODE A DISPROVEN PREMISE (2026-08-29) — read-only, safe to
+#     run, but its expectations are stale. Interpret failures accordingly.
+# ############################################################################
+# This asserts the END STATE the (now-disabled) runbook was meant to produce:
+# all 98 migrations recorded, etc. Against real production it will report FAIL
+# on the migration-count check — production has 67 recorded, which is its
+# ACTUAL state, not a defect this script should be used to "fix".
+#
+# It must NOT be used as a signal to run the write steps. Those are disabled;
+# see scripts/production-runbook/RUNBOOK.md.
+#
+# Checks that remain meaningful against production today:
+#   - file 05 / file 08 seed presence (both verified PRESENT)
+#   - amips_intelligence_snapshots RLS (verified ENABLED)
+#   - no misnamed conversations orphan (verified: CRM shape, correct)
+# ############################################################################
 # STEP 4 — READ-ONLY verification that steps 1-3 landed as intended.
 # Exits non-zero if any expectation fails.
 #
