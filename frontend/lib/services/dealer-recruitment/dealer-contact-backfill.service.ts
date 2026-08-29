@@ -61,7 +61,7 @@ export const MAX_CANDIDATE_SCAN = 5000;
 // Prospect statuses excluded from Phase 0 resolution: DEAD (do-not-contact) and
 // ONBOARDED (already became a registered Dealer — the rooftop comes from the dealer
 // side). Mirrors the live coverage query's exclusion so the two agree.
-const PROSPECT_RESOLVE_EXCLUDE = ["DEAD", "ONBOARDED"] as const;
+export const PROSPECT_RESOLVE_EXCLUDE = ["DEAD", "ONBOARDED"] as const;
 
 export interface BackfillParams {
   limit?: number;

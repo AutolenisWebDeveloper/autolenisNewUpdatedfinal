@@ -188,10 +188,19 @@ describe("admin IA — page inventory", () => {
     assert.deepEqual(deleted, [], `pages deleted since the baseline:\n${deleted.join("\n")}`);
   });
 
-  test("pages added by Batch 2 are deliberate, not accidental", () => {
+  test("pages added since the baseline are deliberate, not accidental", () => {
+    // This guard exists so a new admin page cannot appear unnoticed: every
+    // addition must be named here on purpose. Sorted, because ROUTES is.
+    //   /admin                            — Batch 2 root redirect.
+    //   /admin/dealer-outreach/coverage   — dealer contact-coverage census
+    //     (HUB under /admin/dealer-outreach; read-only ops readout).
     const baseline = new Set(BASELINE_ADMIN_ROUTES);
     const added = ROUTES.filter((r) => !baseline.has(r));
-    assert.deepEqual(added, ["/admin"], "Batch 2 adds only the /admin root redirect");
+    assert.deepEqual(
+      added,
+      ["/admin", "/admin/dealer-outreach/coverage"],
+      "an unlisted admin page appeared — add it here deliberately, with its IA placement",
+    );
   });
 
   test("every page is accounted for in the IA — none orphaned", () => {

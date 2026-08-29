@@ -222,6 +222,7 @@ export const HUB_PARENTS: Readonly<Record<string, string>> = {
   // Pipeline — buyers. Owner ruling 7: Journey demoted, route preserved.
   "/admin/journey": "/admin/buyers",
   // Dealers
+  "/admin/dealer-outreach/coverage": "/admin/dealer-outreach",
   "/admin/dealers/applications": "/admin/dealers",
   "/admin/dealers/invite": "/admin/dealers",
   "/admin/inventory/dealer-discovery": "/admin/inventory",
