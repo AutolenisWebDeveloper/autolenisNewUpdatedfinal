@@ -94,9 +94,11 @@ mock.module("@/lib/services/contact.service", {
   namedExports: { ContactService: { upsertFromAffiliate: async () => {} } },
 });
 mock.module("@/lib/events/emit", { namedExports: { emitDomainEvent: async () => {} } });
+let rateLimited = false;
 mock.module("@/lib/security/rate-limit", {
   namedExports: {
-    limitAuthAttempt: async () => ({ ok: true }),
+    limitAuthAttempt: async () =>
+      rateLimited ? { ok: false, status: 429, message: "Too many attempts." } : { ok: true },
     clientIpKey: () => "1.2.3.4",
   },
 });
@@ -120,6 +122,15 @@ const BASE_BODY = {
 
 beforeEach(() => {
   ctrl = { parent: null, usersByEmail: {}, createdAffiliates: [], supabaseCreateFails: false };
+  rateLimited = false;
+});
+
+test("R4: rate-limited request → 429, nothing created", async () => {
+  const { POST } = await import("@/app/api/affiliate/register/route");
+  rateLimited = true;
+  const res = await POST(req(BASE_BODY));
+  assert.equal(res.status, 429);
+  assert.equal(ctrl.createdAffiliates.length, 0);
 });
 
 test("no referral code → level 1, no parent", async () => {

@@ -11,6 +11,7 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { successResponse, errorResponse } from "@/lib/auth/api";
+import { limitAuthAttempt, clientIpKey } from "@/lib/security/rate-limit";
 import { prisma } from "@/lib/prisma";
 import { UserRole, AffiliateStatus } from "@prisma/client";
 import { sendAffiliateVerificationEmail } from "@/lib/services/email/resend.service";
@@ -73,6 +74,21 @@ export async function POST(request: NextRequest) {
 
   const { firstName, lastName, email, password, website, promotionMethod, referralCode } = parsed.data;
   const normalizedEmail = email.toLowerCase().trim();
+
+  // R4 — this is an unauthenticated route that mints service-role Supabase
+  // users and sends email; without a throttle, sybil registration and email
+  // flooding are free. Keyed by BOTH source IP and target email, same tiers
+  // as the buyer auth actions. (The duplicate-email 409 below intentionally
+  // matches the buyer signup convention of naming an existing account on the
+  // REGISTRATION form; the throttle is what blunts enumeration at scale.)
+  const ipKey = clientIpKey(request.headers);
+  const [ipLimit, emailLimit] = await Promise.all([
+    limitAuthAttempt(`affiliate-register:ip:${ipKey}`),
+    limitAuthAttempt(`affiliate-register:email:${normalizedEmail}`, { tokens: 5, window: "10 m" }),
+  ]);
+  if (!ipLimit.ok || !emailLimit.ok) {
+    return errorResponse("RATE_LIMITED", "Too many attempts. Please wait a few minutes and try again.", 429);
+  }
 
   // 1. Duplicate email check (platform-wide)
   const existingUser = await prisma.user.findFirst({ where: { email: normalizedEmail } });
@@ -145,6 +161,21 @@ export async function POST(request: NextRequest) {
     }
   } catch (err) {
     logger.error("[affiliate/register] generateLink failed", err);
+  }
+
+  // O2 — without a link there is NO way to verify: Supabase sends no email of
+  // its own (email_confirm:false is the point of the admin API), and the old
+  // fallback email told the user to find one that doesn't exist. Fail loudly
+  // and roll the Supabase user back so the email stays reusable.
+  if (!verificationLink) {
+    try {
+      await admin.auth.admin.deleteUser(supabaseUserId);
+    } catch { /* best-effort cleanup */ }
+    return errorResponse(
+      "VERIFICATION_UNAVAILABLE",
+      "We couldn't issue your verification email right now. Nothing was created — please try again in a few minutes.",
+      503,
+    );
   }
 
   // 5. Create Prisma User + Affiliate in a transaction

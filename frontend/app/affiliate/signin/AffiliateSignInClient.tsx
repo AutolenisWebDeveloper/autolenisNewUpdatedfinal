@@ -36,18 +36,44 @@ export default function AffiliateSignInClient({ stats }: Props) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [verifyRequired, setVerifyRequired] = useState(false);
+  const [resendState, setResendState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+
+  // O2 — resend the affiliate verification email through the shared route.
+  async function handleResendVerification() {
+    setResendState("sending");
+    try {
+      const res = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      setResendState(res.ok ? "sent" : "failed");
+    } catch {
+      setResendState("failed");
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setVerifyRequired(false);
+    setResendState("idle");
     try {
       const formData = new FormData();
       formData.set("email", email);
       formData.set("password", password);
       const result = await signInAction(formData);
       if (result?.error) {
-        setError(result.error);
+        // O2 — verify_required is a machine token, previously rendered
+        // verbatim; map it to human copy with a resend action.
+        if (result.error === "verify_required") {
+          setVerifyRequired(true);
+          setError("Please verify your email before signing in. Check your inbox for the verification link.");
+        } else {
+          setError(result.error);
+        }
         return;
       }
       // signInAction redirects on success; if we reach here, force redirect
@@ -118,11 +144,31 @@ export default function AffiliateSignInClient({ stats }: Props) {
           {/* Error */}
           {error && (
             <div
-              className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-5"
+              className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-5"
               data-testid="affiliate-signin-error"
             >
-              <AlertCircle size={15} className="text-red-500 shrink-0" />
-              <p className="text-sm text-red-700">{error}</p>
+              <div className="flex items-center gap-2">
+                <AlertCircle size={15} className="text-red-500 shrink-0" />
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+              {verifyRequired && (
+                <div className="mt-2 pl-6 text-sm" data-testid="resend-verification">
+                  {resendState === "sent" ? (
+                    <p className="text-green-700">Verification email sent — check your inbox.</p>
+                  ) : resendState === "failed" ? (
+                    <p className="text-red-700">Couldn&apos;t resend right now. Try again in a minute.</p>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleResendVerification}
+                      disabled={resendState === "sending"}
+                      className="text-al-primary font-semibold hover:underline disabled:opacity-60"
+                    >
+                      {resendState === "sending" ? "Sending…" : "Resend verification email"}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

@@ -421,21 +421,22 @@ export async function signInAction(formData: FormData): Promise<AuthResult> {
 
   const role = user?.role ?? (data.user.user_metadata?.role as string | undefined) ?? "BUYER";
 
-  // Affiliate status gate — only ACTIVE affiliates may enter the portal.
-  // PENDING / REJECTED / SUSPENDED accounts are signed out and shown a
-  // status-specific message before any redirect happens.
+  // Affiliate status gate. R6/decision 1 — the activation model is
+  // auto-ACTIVE on email verification, and requireAffiliate() deliberately
+  // permits PENDING (safety-net-provisioned accounts): blocking PENDING here
+  // locked those accounts out entirely while the server gates would have let
+  // them in. Only REJECTED/SUSPENDED are refused; both are also enforced
+  // server-side on every page and API call.
   if (role === "AFFILIATE") {
     const affiliate = await prisma.affiliate.findFirst({
       where: { user: { supabaseId: data.user.id } },
       select: { status: true },
     });
-    if (!affiliate || affiliate.status !== "ACTIVE") {
+    if (!affiliate || affiliate.status === "REJECTED" || affiliate.status === "SUSPENDED") {
       // Tear down the just-issued Supabase session so the cookie cannot be
       // used to access the portal.
       await supabase.auth.signOut();
       switch (affiliate?.status) {
-        case "PENDING":
-          return { error: "Your application is under review. You'll receive an email once approved." };
         case "REJECTED":
           return { error: "Your application was not approved. Contact support for more information." };
         case "SUSPENDED":
@@ -471,6 +472,17 @@ export async function signInAction(formData: FormData): Promise<AuthResult> {
 
 export async function signOutAction(): Promise<void> {
   const supabase = await createServerSupabaseClient();
+
+  // R13 — land each role on ITS sign-in page: affiliates were dumped on the
+  // buyer-branded /auth/signin. Read the role before tearing the session down.
+  let signInTarget = "/auth/signin";
+  try {
+    const { data } = await supabase.auth.getUser();
+    if ((data?.user?.user_metadata?.role as string | undefined) === "AFFILIATE") {
+      signInTarget = "/affiliate/signin";
+    }
+  } catch { /* default target */ }
+
   await supabase.auth.signOut();
 
   // Clear companion cookies set during session
@@ -479,7 +491,7 @@ export async function signOutAction(): Promise<void> {
   cookieStore.delete("al_remember");      // "Remember me" UX preference
   cookieStore.delete("affiliate_ref");    // Affiliate attribution cookie
 
-  redirect("/auth/signin");
+  redirect(signInTarget);
 }
 
 // ─── Forgot Password ──────────────────────────────────────────────────────

@@ -104,7 +104,13 @@ export default function AffiliateRegisterPage() {
     if (!form.firstName.trim()) errs.firstName = "Required";
     if (!form.lastName.trim()) errs.lastName = "Required";
     if (!form.email.includes("@")) errs.email = "Valid email required";
-    if (form.password.length < 8) errs.password = "Minimum 8 characters";
+    // R11 — mirror the server zod rules exactly (12+ chars, upper/lower/digit)
+    // so nobody passes client validation only to bounce off the API.
+    if (form.password.length < 12) {
+      errs.password = "Password must be at least 12 characters.";
+    } else if (!/^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)/.test(form.password)) {
+      errs.password = "Must include an uppercase letter, a lowercase letter, and a number.";
+    }
     if (form.password !== form.confirmPassword) errs.confirmPassword = "Passwords do not match";
     if (!form.promotionMethod) errs.promotionMethod = "Please select a method";
     if (!form.ftcDisclosure) errs.ftcDisclosure = "FTC disclosure acknowledgment required";
@@ -171,7 +177,7 @@ export default function AffiliateRegisterPage() {
           <h2 className="text-2xl font-semibold text-[#111827] mb-3 tracking-tight">Check your email</h2>
           <p className="text-[#4B5563] text-sm leading-relaxed mb-2">We sent a verification link to</p>
           <p className="text-[#111827] font-semibold text-sm mb-5" data-testid="affiliate-submitted-email">{submittedEmail}</p>
-          <p className="text-[#4B5563] text-sm leading-relaxed">Click the link to verify your account. Once our team reviews your application (typically within 2 business days) we'll activate your referral code and email you a link to your affiliate dashboard.</p>
+          <p className="text-[#4B5563] text-sm leading-relaxed">Click the link to verify your email — that activates your account and referral code immediately. You can then sign in to your affiliate dashboard and start sharing your link right away.</p>
           <Link href="/affiliate/signin" className="mt-8 inline-block text-sm text-al-primary hover:text-al-primary-hover transition-colors font-semibold" data-testid="success-signin-link">← Back to sign in</Link>
         </div>
       </div>
@@ -259,7 +265,7 @@ export default function AffiliateRegisterPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} data-testid="affiliate-register-form" className="space-y-4">
+          <form onSubmit={handleSubmit} noValidate data-testid="affiliate-register-form" className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-[#4B5563] uppercase tracking-wider mb-2">First name</label>
@@ -287,7 +293,7 @@ export default function AffiliateRegisterPage() {
               <label className="block text-xs font-bold text-[#4B5563] uppercase tracking-wider mb-2">Password</label>
               <input type="password" data-testid="reg-password-input" required autoComplete="new-password"
                 className={`w-full px-3.5 py-2.5 bg-[#F8F9FB] border rounded-md text-[#111827] text-sm placeholder-[#94A3B8] focus:outline-none focus:border-al-primary/50 focus:ring-2 focus:ring-al-primary/10 transition-colors ${errors.password ? "border-red-400" : "border-[#E5E7EB]"}`}
-                placeholder="Min. 8 characters" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+                placeholder="Min. 12 characters, mixed case + number" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
               <PasswordStrength password={form.password} />
               {errors.password && <p className="text-[10px] text-red-500 mt-1">{errors.password}</p>}
             </div>

@@ -6,25 +6,13 @@ export const metadata: Metadata = { robots: { index: false, follow: false } };
 import AffiliateSidebar from "@/components/affiliate/AffiliateSidebar";
 import ChatWidget from "@/components/public/ChatWidget";
 import { requireAffiliate } from "@/lib/auth/affiliate-session";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-
-const DASHBOARD_PATH = "/affiliate/portal/dashboard";
 
 // All affiliate portal pages canonical under /affiliate/portal/*
 export default async function AffiliatePortalLayout({ children }: { children: React.ReactNode }) {
-  const affiliate = await requireAffiliate();
-  // Note: SUSPENDED affiliates are already redirected by requireAffiliate() above.
-
-  // REJECTED affiliates may only view the dashboard (which shows the status banner).
-  // Any other portal page redirects them to the dashboard.
-  if (affiliate.status === "REJECTED") {
-    const hdrs = await headers();
-    const pathname = hdrs.get("x-pathname") ?? "";
-    if (pathname !== DASHBOARD_PATH) {
-      redirect(DASHBOARD_PATH);
-    }
-  }
+  // R8 — requireAffiliate() already redirects SUSPENDED and REJECTED
+  // affiliates to /affiliate/unsubscribed; the old REJECTED-may-view-dashboard
+  // branch here was unreachable dead code encoding a contradictory product.
+  await requireAffiliate();
 
   return (
     <div className="flex flex-col lg:flex-row h-screen bg-[#F8F9FA]" data-testid="affiliate-portal">

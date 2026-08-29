@@ -300,9 +300,12 @@ function validateCsrfToken(request: NextRequest): boolean {
   }
 
   // Skip CSRF for role-specific API routes — protected by Supabase session auth
-  // in each route handler via getRequestBuyer / getRequestDealer / getRequestAffiliate.
-  // The Supabase session cookie is HttpOnly and SameSite=Lax, which already mitigates
-  // cross-site request forgery for these authenticated routes.
+  // in each route handler via getRequestBuyer / getRequestDealer /
+  // getRequestAffiliate. R9 (comment accuracy, not a behavior change): the
+  // @supabase/ssr session cookie is SameSite=Lax but NOT HttpOnly — Lax is
+  // what actually mitigates classic cross-site POST CSRF here. Note that
+  // /api/affiliate/register performs no session auth at all (public by
+  // design); it defends itself with IP+email rate limiting in the handler.
   if (
     pathname.startsWith("/api/buyer/") ||
     pathname.startsWith("/api/dealer/") ||
@@ -638,7 +641,13 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
   }
 
   // 10. Affiliate portal canonical enforcement
-  // All /affiliate/* authenticated routes redirect to /affiliate/portal/*
+  // All /affiliate/* authenticated routes redirect to /affiliate/portal/*.
+  // R1 — bare /affiliate/portal (no trailing segment) has no page.tsx and the
+  // generic rewrite produced /affiliate/portal/portal (a 404); it is reachable
+  // via the post-sign-in redirect, so send it to the dashboard explicitly.
+  if (pathname === "/affiliate/portal" || pathname === "/affiliate/portal/") {
+    return NextResponse.redirect(new URL("/affiliate/portal/dashboard", request.url));
+  }
   if (
     pathname.startsWith("/affiliate/") &&
     !pathname.startsWith("/affiliate/portal/") &&
