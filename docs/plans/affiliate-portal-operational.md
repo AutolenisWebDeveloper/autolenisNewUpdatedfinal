@@ -71,6 +71,32 @@ affiliate table anywhere in `app/`, `lib/`, `components/`. All affiliate data ac
 Prisma/service-role. Therefore RLS migration 002 is **hardening** (chain-provisioned envs, future
 anon usage), not a live production risk — stated per the owner's requirement.
 
+**Production-verification corrections (2026-08-29, all queried live against
+aieybibvewmvrubcpthm — supersede any conflicting claim above or below):**
+
+1. **affiliate_documents IS drifted in production** (see corrected D2 row):
+   upload is broken live; the table holds 0 rows. The migration chain is NOT
+   authoritative for this database.
+2. **RLS is ALREADY ENABLED on all 16 affiliate tables in production**
+   (pg_class.relrowsecurity), with 0 policies on 13 of them (deny-all for
+   anon/authenticated; service_role bypasses), redundant service-role-bypass
+   policies on affiliates + affiliate_documents, an authenticated-SELECT-all
+   policy on referral_milestone_configs, and a mismatched-predicate owner
+   policy on affiliate_payout_methods (affiliate_id = auth.uid() — two
+   unrelated id spaces; matches 0 rows). Migration 002 is therefore a no-op
+   on production (it creates no policies and cannot open access) and was
+   rewritten as a diff against live state; its value is chain-provisioned
+   environments only. The §6 "out-of-band RLS state" item is now VERIFIED.
+3. **Live enums are missing schema values** (pg_enum): CommissionStatus lacks
+   REJECTED (the admin reject rail fails live); NotificationType lacks every
+   PAYOUT_* value (payout notifications fail live). Migration 001 adds them
+   (plus the net-new PAYOUT_CANCELLED).
+4. Re-verified live and still correct: no index on commissions(affiliate_id),
+   affiliate_payouts has only its PK, no affiliates(parent_id) or
+   buyers(affiliate_id) index, commissions.payout_id FK is ON DELETE SET
+   NULL, qualifying_event_id UNIQUE, the lastInactiveNudgeAt duplicate
+   column, 0 duplicate referred_user_id groups, 0 orphaned PENDING payouts.
+
 Physical-schema facts (information_schema, not `_prisma_migrations`): all 16 tables exist;
 `affiliates` carries a **duplicate column pair** `lastInactiveNudgeAt` *and* `last_inactive_nudge_at`
 (schema.prisma maps only the snake_case one — the camelCase column is orphaned); `commissions.rate`
@@ -159,7 +185,7 @@ file:line unless marked ASSUMPTION.
 | ID | Sev | Finding | Evidence |
 |---|---|---|---|
 | D1 | P1 | `commissions`: no index on `affiliate_id`/`status` — every summary/dashboard/cron/leaderboard read is a full scan (physically confirmed live) | `schema.prisma:875`; pg_indexes |
-| D2 | P1 | Migration-built `affiliate_documents` **cannot accept the app's inserts**: baseline migration adds `document_type text NOT NULL` (not in Prisma), nullable `type`/`file_name` (Prisma required), `bigint` vs `Int` → NOT NULL violation on every upload in a chain-provisioned DB (production manually aligned: ASSUMPTION) | `20260423999999_baseline…/migration.sql:70-88` |
+| D2 | P1 | Migration-built `affiliate_documents` **cannot accept the app's inserts**: baseline migration adds `document_type text NOT NULL` (not in Prisma), nullable `type`/`file_name` (Prisma required), `bigint` vs `Int` → NOT NULL violation on every upload. **CORRECTED 2026-08-29: live production VERIFIED DRIFTED** (information_schema.columns against aieybibvewmvrubcpthm — document_type NOT NULL no default, type/file_name nullable, file_size_bytes bigint nullable, stray nullable file_size int; table holds 0 rows). Upload is broken in production; the earlier 'manually aligned' assumption came from reading the baseline SQL, not a live query | `20260423999999_baseline…/migration.sql:70-88` |
 | D3 | P1 | **Zero RLS** statements for all 16 affiliate tables in the migration chain (other tables got the 20260918 treatment); moot on production *if* out-of-band enable happened; any chain-provisioned env exposes PII/financial tables via anon PostgREST | migration grep |
 | D6 | P2 | `AffiliateReferral` unique is per `(affiliateId, referredUserId)` pair — one user can hold rows under two affiliates; `processFeeCommission` resolves with `findFirst` **no orderBy** → nondeterministic payee | `schema.prisma:3041`; `commission.service.ts:117-121` |
 | D7 | P2 | `Buyer.affiliateId`: no index, no FK; inactive-cron does per-affiliate `findFirst` in a ≤500 loop → up to 500 sequential scans | `cron/affiliate-inactive/route.ts:56-60` |

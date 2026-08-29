@@ -5,9 +5,21 @@
 --
 -- Contents (every section idempotent; every statement followed by a
 -- commented verification query):
---   D2  — affiliate_documents drift fix (chain-provisioned DBs only: the
---         baseline created a shape the app's inserts violate; live production
---         verified NOT drifted, so there this section no-ops)
+--   ENUM — reconcile live enum types with schema.prisma (VERIFIED against
+--         production 2026-08-29 via pg_enum: CommissionStatus lacks REJECTED;
+--         NotificationType lacks PAYOUT_REQUESTED/PAYOUT_PAID/PAYOUT_FAILED;
+--         PAYOUT_CANCELLED is net-new for cancelled settlements)
+--   D2  — affiliate_documents drift fix. LIVE PRODUCTION IS DRIFTED —
+--         VERIFIED 2026-08-29 against aieybibvewmvrubcpthm via
+--         information_schema.columns: document_type text NOT NULL (no
+--         default, not in schema.prisma), type nullable, file_name nullable,
+--         file_size_bytes bigint nullable, plus a stray nullable integer
+--         file_size column. Every Prisma insert omits document_type and
+--         fails its NOT NULL — AFFILIATE DOCUMENT UPLOAD IS BROKEN IN
+--         PRODUCTION until this migration is applied (the table holds 0
+--         rows). An earlier revision of this header claimed production was
+--         verified not drifted; that claim was wrong — it was based on
+--         reading the baseline migration SQL, not on a live query.
 --   D1  — commissions (affiliate_id, status) + (status, created_at) indexes
 --   D7  — buyers (affiliate_id) index
 --   D8  — affiliates (parent_id) index
@@ -17,11 +29,43 @@
 --   D20 — commissions.payout_id FK SET NULL -> RESTRICT
 --   M-x — drop the orphaned camelCase "lastInactiveNudgeAt" duplicate column
 
+-- ── ENUM: reconcile live enum types with schema.prisma ───────────────────────
+-- The migration chain is NOT authoritative for the live database. VERIFIED
+-- against production 2026-08-29 (SELECT t.typname, e.enumlabel FROM pg_type t
+-- JOIN pg_enum e ON e.enumtypid=t.oid WHERE t.typname IN
+-- ('CommissionStatus','NotificationType') ORDER BY e.enumsortorder):
+--   • live "CommissionStatus" = {PENDING,APPROVED,PAID,REVERSED} — NO
+--     REJECTED, though schema.prisma declares it and the admin reject route
+--     writes it: the reject rail fails on live production until this runs.
+--   • live "NotificationType" ends at OFFER_DECLINED — NO PAYOUT_REQUESTED /
+--     PAYOUT_PAID / PAYOUT_FAILED (schema.prisma declares all three): the
+--     settle rail's notifications fail on live production until this runs.
+--   • PAYOUT_CANCELLED is net-new (owner item 3): the cancelled-settlement
+--     notification gets its own truthful type instead of PAYOUT_FAILED.
+-- ADD VALUE IF NOT EXISTS no-ops on chain-provisioned databases, where the
+-- chain already created the first four; nothing later in this migration uses
+-- the new labels, so the in-transaction ADD VALUE restriction does not bite.
+ALTER TYPE "CommissionStatus" ADD VALUE IF NOT EXISTS 'REJECTED';
+ALTER TYPE "NotificationType" ADD VALUE IF NOT EXISTS 'PAYOUT_REQUESTED';
+ALTER TYPE "NotificationType" ADD VALUE IF NOT EXISTS 'PAYOUT_PAID';
+ALTER TYPE "NotificationType" ADD VALUE IF NOT EXISTS 'PAYOUT_FAILED';
+ALTER TYPE "NotificationType" ADD VALUE IF NOT EXISTS 'PAYOUT_CANCELLED';
+-- VERIFY:
+--   SELECT e.enumlabel FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid
+--   WHERE t.typname='CommissionStatus';  -- expect REJECTED present (5 labels)
+--   SELECT e.enumlabel FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid
+--   WHERE t.typname='NotificationType' AND e.enumlabel LIKE 'PAYOUT%'; -- expect 4 rows
+
 -- ── D2: affiliate_documents drift fix ────────────────────────────────────────
--- The 20260423999999 baseline created "document_type" NOT NULL (no default,
--- not in schema.prisma), nullable "type"/"file_name" (Prisma: required), and
--- "file_size_bytes" bigint (Prisma Int -> integer). On such a database every
--- app upload fails with a NOT NULL violation.
+-- LIVE PRODUCTION HAS THIS SHAPE (VERIFIED 2026-08-29, information_schema.
+-- columns): "document_type" text NOT NULL (no default, not in schema.prisma),
+-- nullable "type"/"file_name" (Prisma: required), "file_size_bytes" bigint
+-- nullable (Prisma: Int required), plus a stray nullable integer "file_size"
+-- column schema.prisma does not declare. Every Prisma insert omits
+-- document_type and fails its NOT NULL — affiliate document upload is BROKEN
+-- IN PRODUCTION until this section runs. The table holds 0 rows (VERIFIED:
+-- SELECT count(*) FROM affiliate_documents), so every backfill below no-ops
+-- live; the guards keep the section correct for any environment.
 DO $$
 BEGIN
   IF EXISTS (
@@ -31,6 +75,18 @@ BEGIN
     -- Preserve any data the drifted column held before dropping it.
     UPDATE "affiliate_documents" SET "type" = "document_type" WHERE "type" IS NULL;
     ALTER TABLE "affiliate_documents" DROP COLUMN "document_type";
+  END IF;
+
+  -- Stray "file_size" integer column (live production carries it alongside
+  -- file_size_bytes; schema.prisma declares neither reads nor writes it).
+  -- Preserve any value into the canonical column, then drop.
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'affiliate_documents' AND column_name = 'file_size'
+  ) THEN
+    UPDATE "affiliate_documents" SET "file_size_bytes" = COALESCE("file_size_bytes", "file_size"::bigint)
+     WHERE "file_size" IS NOT NULL;
+    ALTER TABLE "affiliate_documents" DROP COLUMN "file_size";
   END IF;
 
   IF EXISTS (
@@ -82,8 +138,9 @@ END $$;
 -- VERIFY:
 --   SELECT column_name, is_nullable, data_type FROM information_schema.columns
 --   WHERE table_name = 'affiliate_documents'
---     AND column_name IN ('type','file_name','file_size_bytes','document_type');
---   -- expect: no document_type row; type/file_name/file_size_bytes NOT NULL; integer.
+--     AND column_name IN ('type','file_name','file_size_bytes','document_type','file_size');
+--   -- expect: no document_type row, no file_size row;
+--   --         type/file_name/file_size_bytes NOT NULL; file_size_bytes integer.
 
 -- ── D1: commissions read-path indexes ────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "commissions_affiliate_id_status_idx" ON "commissions"("affiliate_id", "status");
@@ -100,7 +157,9 @@ CREATE INDEX IF NOT EXISTS "affiliates_parent_id_idx" ON "affiliates"("parent_id
 -- VERIFY: SELECT indexname FROM pg_indexes WHERE tablename='affiliates' AND indexname='affiliates_parent_id_idx';
 
 -- ── D6: one referrer per referred user (first-touch wins) ────────────────────
--- Safe: affiliate_referrals held 0 rows at audit (2026-08-29). If a future
+-- Safe: 0 duplicate referred_user_id groups on live production (RE-VERIFIED
+-- 2026-08-29: SELECT referred_user_id FROM affiliate_referrals GROUP BY
+-- referred_user_id HAVING count(*)>1 returns 0 rows). If a future
 -- application window created conflicting rows, the guarded block reports
 -- instead of failing the whole migration.
 DO $$

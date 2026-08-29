@@ -82,9 +82,10 @@ export async function POST(request: NextRequest, { params }: Props) {
     data: settlement.cancelled
       ? {
           affiliateId: settlement.affiliateId,
-          // Closest existing NotificationType — adding a CANCELLED value would
-          // need another owner-gated enum migration.
-          type: "PAYOUT_FAILED",
+          // PAYOUT_CANCELLED is added by owner-gated migration 001 (which
+          // must be applied before this code deploys — it also adds the
+          // other PAYOUT_* values the live enum is missing).
+          type: "PAYOUT_CANCELLED",
           channel: "IN_APP",
           title: "Payout request cancelled",
           body: "Every commission in your payout request was reversed (for example after a refunded deal), so the request was cancelled. Nothing was paid; you can request again once new commissions are approved.",

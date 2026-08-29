@@ -1604,6 +1604,7 @@ enum NotificationType {
   PAYOUT_REQUESTED
   PAYOUT_PAID
   PAYOUT_FAILED
+  PAYOUT_CANCELLED
 }
 
 enum RiskTier {
