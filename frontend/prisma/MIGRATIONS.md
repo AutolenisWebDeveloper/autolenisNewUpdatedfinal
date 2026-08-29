@@ -48,8 +48,15 @@ workflow_versions, workflows
 ```
 
 Their DDL + seed data live in `frontend/migrations/*.sql` (numbered, run in
-order) and `prisma/migrations/manual_supabase_sql/*.sql`. These files are
+order) and `prisma/manual_supabase_sql/*.sql`. These files are
 idempotent (`IF NOT EXISTS`, `ON CONFLICT`).
+
+> **This directory moved on 2026-08-29** from `prisma/migrations/manual_supabase_sql/`
+> to `prisma/manual_supabase_sql/`. Prisma treats every subdirectory of
+> `prisma/migrations/` as a migration, so a directory there with no `migration.sql`
+> made `prisma migrate deploy` abort with **P3015 on every environment** before
+> applying anything. Out-of-band SQL must live beside the migrations directory,
+> never inside it. `prisma/__tests__/migration-chain.test.ts` now enforces this.
 
 ## Provisioning a FRESH environment
 
@@ -60,7 +67,7 @@ pnpm prisma migrate deploy          # 1. all Prisma-managed tables (203 models)
 psql "$DATABASE_URL" -f migrations/01_phase1_foundation.sql
 # … through …
 psql "$DATABASE_URL" -f migrations/15_welcome_templates.sql
-# 3. any remaining one-off SQL in prisma/migrations/manual_supabase_sql/ as needed
+# 3. any remaining one-off SQL in prisma/manual_supabase_sql/ as needed
 pnpm prisma generate
 pnpm prisma db seed
 ```

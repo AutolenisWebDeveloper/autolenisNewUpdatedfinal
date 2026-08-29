@@ -34,7 +34,7 @@ evidence (merged, present, consumed) is confirmed.
 | Capability | Where it already lives |
 | --- | --- |
 | Internal lifecycle scheduler (the 12 workloads) | `lib/services/crm/lifecycle-touch-drain.service.ts` — `enqueueLifecycleTouch` + `drainDueLifecycleTouches`, 16-sequence registry, message bodies ported **verbatim** from the QStash routes |
-| Backing table | `lifecycle_touch_schedule` (raw Supabase SQL, `prisma/migrations/manual_supabase_sql/lifecycle_touch_schedule.sql`) — `UNIQUE(base_key, sequence)` |
+| Backing table | `lifecycle_touch_schedule` (raw Supabase SQL, `prisma/manual_supabase_sql/lifecycle_touch_schedule.sql`) — `UNIQUE(base_key, sequence)` |
 | Drain cron | `app/api/cron/lifecycle-touch-drain` (`vercel.json` `*/15 * * * *`) — live but dormant (NO_DUE/NO_TABLE) |
 | Communications delivery | `lib/qstash/notify.ts` `notifyContact` (TCPA/consent/suppression/STOP gated) + `comms_outbox` drain |
 | Idempotency | `UNIQUE(base_key, sequence)` (per touch) + `lib/jobs/idempotency.ts` (`acquireIdempotencyGuard`, `claimJob`, `moveJobToDeadLetter`) |
@@ -182,7 +182,7 @@ Every lifecycle touch re-reads authoritative state at drain time and cancels
 
 **None required for merge/deploy.** The `lifecycle_touch_schedule` table already
 exists as owner-gated raw Supabase SQL
-(`prisma/migrations/manual_supabase_sql/lifecycle_touch_schedule.sql`). Applying
+(`prisma/manual_supabase_sql/lifecycle_touch_schedule.sql`). Applying
 that SQL to production remains an **owner-gated** step that must precede enabling
 any internal producer flag (§12). The 6 `FeatureFlag` rows are created on demand by
 the admin toggle (absent row = OFF), so no data migration is needed.

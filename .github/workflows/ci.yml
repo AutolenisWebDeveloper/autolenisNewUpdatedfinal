@@ -83,6 +83,95 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET || 'ci-placeholder-jwt-secret-32-characters' }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || 'placeholder' }}
 
+  # The migration chain had never been executed against an empty database: CI had
+  # no database job, so every migration was only ever validated against whatever
+  # state the live Supabase instance happened to be in when it was written.
+  # `prisma migrate deploy` failed at migration 22 of 94 on a fresh provision, so
+  # a new environment, a preview branch, and a restore-from-zero were impossible,
+  # and the chain had drifted from schema.prisma unnoticed.
+  #
+  # This job is the gate that makes that class of defect impossible to land:
+  # a real postgres, an empty database, the whole chain, then a drift check.
+  migrations:
+    name: Migration chain (empty DB -> schema)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    services:
+      postgres:
+        # Pinned rather than :16 so the gate cannot change underneath a PR.
+        image: postgres:16.4
+        env:
+          POSTGRES_USER: autolenis_ci
+          POSTGRES_DB: autolenis_ci
+          # No password, by design. This container is created for one job, listens
+          # only on the runner's localhost, holds nothing but a throwaway schema,
+          # and is destroyed with the runner. Setting a password would mean writing
+          # a credential-shaped literal into a tracked file — which secret scanning
+          # correctly flags, and which would have to be triaged as a non-incident
+          # on every future PR. Removing the credential is better than teaching
+          # people to wave the scanner through.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U autolenis_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://autolenis_ci@localhost:5432/autolenis_ci
+      DIRECT_URL: postgresql://autolenis_ci@localhost:5432/autolenis_ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a15d269cd4658e1107c09f1fabf4cbd7bd1f308a # v4.4.0
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Assert the starting state rather than trusting it. If the service image
+      # ever ships with tables, every result below would be meaningless.
+      - name: Assert the database is empty
+        run: |
+          COUNT=$(psql "$DATABASE_URL" -tAc \
+            "select count(*) from information_schema.tables where table_schema='public'")
+          echo "public tables before migrating: $COUNT"
+          test "$COUNT" -eq 0
+
+      # The headline gate. Before this job existed, this command failed at
+      # migration 22 of 94 and nothing noticed.
+      - name: Apply the full migration chain to an empty database
+        run: pnpm exec prisma migrate deploy
+
+      # Applying twice must be a no-op. This catches a migration that succeeds
+      # once but is not idempotent — the defect class behind the duplicate-
+      # timestamp collision in 20260702000000.
+      - name: Re-apply (must be a no-op)
+        run: pnpm exec prisma migrate deploy
+
+      - name: Generate Prisma client
+        run: pnpm exec prisma generate
+
+      # Functional drift is gated at hard zero; structural drift is ratcheted.
+      # See scripts/check-migration-drift.ts for why the two differ.
+      - name: Drift — chain-built database vs schema.prisma
+        run: pnpm db:check-drift
+
   dependency-audit:
     name: Dependency audit
     runs-on: ubuntu-latest
