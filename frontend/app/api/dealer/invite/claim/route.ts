@@ -11,7 +11,6 @@ import { ContactService } from "@/lib/services/contact.service";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import { z } from "zod";
 import { validateInvitationToken, consumeInvitationToken } from "@/lib/services/dealer-recruitment/invitation-token.service";
-import { getInvitationSchemaCapabilities } from "@/lib/services/dealer-recruitment/invitation-schema-compat";
 
 const schema = z.object({
   token: z.string().min(1),
@@ -70,12 +69,6 @@ export async function POST(request: NextRequest) {
   if (existing) {
     return NextResponse.json({ error: "An account with this email already exists. Please sign in." }, { status: 409 });
   }
-
-  // Resolve the physical-schema capabilities BEFORE opening the transaction
-  // below, so the (cached) probe never needs a second pooled connection while a
-  // transaction is holding one. validateInvitationToken has already warmed it;
-  // this makes the ordering a stated requirement rather than an accident.
-  await getInvitationSchemaCapabilities();
 
   const supabase = adminSupabase();
   const { data: created, error: authErr } = await supabase.auth.admin.createUser({

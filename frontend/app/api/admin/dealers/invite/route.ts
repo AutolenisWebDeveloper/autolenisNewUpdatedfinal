@@ -35,9 +35,8 @@ export async function POST(request: NextRequest) {
   }
 
   const { dealershipName, contactName, email, personalMessage } = parsed.data;
-  // 7-day TTL, hashed at rest wherever the database can hold a hash. The service
-  // owns the token columns so this route never has to know which physical schema
-  // it is running against — see invitation-schema-compat.ts.
+  // 7-day TTL, hashed at rest. The service owns the token columns so the raw
+  // token exists only in the emailed link below and is never persisted.
   let invitation: { id: string; rawToken: string; expiresAt: Date };
   try {
     invitation = await createInvitation({

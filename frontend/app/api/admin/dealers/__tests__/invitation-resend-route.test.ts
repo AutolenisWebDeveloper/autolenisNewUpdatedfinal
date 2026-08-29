@@ -4,7 +4,7 @@
 // ---------------------
 // The invitation token scheme is covered at the service level
 // (lib/services/dealer-recruitment/__tests__/invitation-token.test.ts) and the
-// capability probe has its own suite. Nothing covered the ROUTE: there are no
+// write guards by __tests__/invitation-guards.test.ts. Nothing covered the ROUTE: there are no
 // tests anywhere under app/api/admin/dealers. So the parts that only exist in
 // the handler were unpinned — the admin authorization check, the status
 // pre-checks, the 409 when the guarded rotation loses a race, the shape of the
@@ -16,7 +16,8 @@
 // scalar — including columns a not-yet-applied migration has not created — and
 // fails with 42703/P2022. That is what killed the invite path (fixed by #352)
 // and, on the e-sign side, what the executed-artifact gate exists to prevent.
-// The read in this route must stay projected.
+// The read in this route must stay projected — the migration that made those
+// columns real removes the crash, not the habit.
 //
 // Run with:
 //   npx tsx --test --experimental-test-module-mocks \
@@ -92,18 +93,6 @@ async function load() {
   return (await import("@/app/api/admin/dealers/invitations/[invId]/resend/route")).POST;
 }
 
-/**
- * Pin the physical-schema capabilities so the real rotation logic runs without a
- * database. MODERN is production today (migration 20260828000000 is applied);
- * LEGACY is the shape the shim still has to serve.
- */
-async function setCaps(kind: "modern" | "legacy") {
-  const mod = await import("@/lib/services/dealer-recruitment/invitation-schema-compat");
-  mod.__setInvitationSchemaCapabilities(
-    kind === "modern" ? mod.MODERN_CAPABILITIES : mod.LEGACY_CAPABILITIES,
-  );
-}
-
 function req() {
   return new NextRequest(
     `https://autolenis.com/api/admin/dealers/invitations/${INV_ID}/resend`,
@@ -119,7 +108,7 @@ function rawTokenFromUrl(url: string): string {
 
 const sha256 = (v: string) => crypto.createHash("sha256").update(v).digest("hex");
 
-beforeEach(async () => {
+beforeEach(() => {
   ctrl = {
     admin: { adminId: "admin_1", email: "admin@autolenis.com" },
     invitation: {
@@ -137,7 +126,6 @@ beforeEach(async () => {
     audits: [],
   };
   process.env.NEXT_PUBLIC_APP_URL = "https://autolenis.com";
-  await setCaps("modern");
 });
 
 // ---------------------------------------------------------------------------
@@ -151,10 +139,11 @@ test("the invitation is read with an explicit select, never an unprojected findU
   const args = ctrl.findUniqueArgs[0];
   assert.ok(args, "the route must read the invitation before rotating it");
   const select = args.select as Record<string, unknown> | undefined;
-  assert.ok(select, "an unprojected read asks for every model scalar and 42703s on a schema that lacks one");
-  // Only columns that exist in BOTH physical schemas may be named here.
+  assert.ok(select, "an unprojected read asks for every model scalar — the defect class this suite exists to pin");
+  // token_hash and consumed_at exist now, but the route has no use for token
+  // material; naming columns explicitly is what keeps it out of the handler.
   for (const gated of ["tokenHash", "consumedAt"]) {
-    assert.ok(!(gated in select), `${gated} must not be selected — it does not exist pre-migration`);
+    assert.ok(!(gated in select), `${gated} must not be selected — the route has no use for token material`);
   }
 });
 
@@ -177,7 +166,7 @@ test("the link carries the RAW token and the stored hash is the hash OF THAT LIN
   assert.equal(ctrl.emails[0].claimUrl, body.inviteUrl, "the emailed link and the API response must agree");
 });
 
-test("on the modern schema the superseded plaintext is nulled, so the old link dies", async () => {
+test("the superseded plaintext is nulled, so the old link dies", async () => {
   ctrl.invitation = { ...(ctrl.invitation as object), token: OLD_PLAINTEXT } as Record<string, unknown>;
   const POST = await load();
   await POST(req(), ctx);
@@ -187,17 +176,6 @@ test("on the modern schema the superseded plaintext is nulled, so the old link d
     null,
     "a resend that leaves the previous token resolvable has revoked nothing",
   );
-});
-
-test("on the legacy schema the link still resolves — plaintext is written because there is nowhere else to put it", async () => {
-  await setCaps("legacy");
-  const POST = await load();
-  const res = await POST(req(), ctx);
-  const { inviteUrl } = (await res.json()) as { inviteUrl: string };
-
-  const data = ctrl.updates[0].data;
-  assert.equal(data.token, rawTokenFromUrl(inviteUrl), "the legacy lookup is by plaintext; a mismatch is a dead link");
-  assert.equal(data.tokenHash, undefined, "writing token_hash on a schema without the column is a 42703");
 });
 
 test("the TTL is 7 days — the old 72h window expired 6 of 11 real invitations unopened", async () => {
