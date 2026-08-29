@@ -1,3 +1,59 @@
+> [!CAUTION]
+> # ⛔ DO NOT RUN — PREMISE INVALID as of 2026-08-29
+>
+> **This runbook's central premise was disproven by a read-only inspection of the
+> live database. Do not execute any write step (01, 02, 03, 05) until it is
+> corrected.** Step 00 (inspection) remains safe and is how the findings below
+> were obtained.
+>
+> **The premise was wrong.** This runbook assumes production is *unbaselined* —
+> no `_prisma_migrations` table, `prisma migrate deploy` refusing pre-flight with
+> `P3005`. Production in fact **has** `_prisma_migrations` with **67 migrations
+> recorded, 67 finished, 0 rolled back**, most recent applied
+> **2026-08-29 22:01**. `migrate deploy` does **not** refuse with `P3005`. The
+> production analogue the steps were rehearsed against did not represent
+> production, so the rehearsal validated the wrong thing.
+>
+> ### Step 1 would destroy an owner-gated compliance boundary
+>
+> Step 1 baselines every migration `< 20261017000000` as applied. That range
+> includes **`20261014000000_esign_envelope_history`** and
+> **`20261015000000_esign_consent_and_executed_artifact`**, which are
+> **verified NOT recorded in production, and their objects verified absent**:
+> the `e_sign_envelope_history` table does not exist, and
+> `e_sign_envelopes.executed_document_key` does not exist.
+>
+> They are **deliberately unapplied pending attorney/compliance review** — see
+> `lib/services/esign/esign-schema-gate.ts`, which states ESIGN/UETA legal
+> sufficiency is NOT VERIFIED and the consent policy is blocked. Recording them
+> as applied would erase that boundary, silently assert a compliance-blocked
+> migration had shipped, and strand the runtime gate that currently keeps
+> `esign-artifact-reconcile` green.
+>
+> ### Steps 3 and 5 are unnecessary, not merely risky
+>
+> - **Step 3 (template seeds) — not needed.** All nine seeds already exist in
+>   production (`abandonment_touch_1..3`, `exit_intent_recovery`,
+>   `welcome_d0/d1/d3/d5/d7`); 52 templates total. The premise that files 05/08
+>   never applied there is false.
+> - **Step 5 (stale impersonations) — moot.** `admin_impersonations` has
+>   **0 rows**. There is nothing to close.
+>
+> ### The rehearsal environment did not match production
+>
+> The analogue ran **PostgreSQL 16.4**; production runs **17.6**.
+>
+> ### What a corrected runbook must do
+>
+> Baseline only the migrations genuinely applied (verify per-migration rather
+> than by timestamp cutoff), explicitly **exclude** `20261014` and `20261015`
+> and assert they stay excluded, drop step 3, drop step 5, and decide
+> separately whether `ai_action_intents` (table absent, migration
+> `20261016000000` unrecorded, no compatibility gate) should be applied or
+> gated the way e-sign is.
+
+---
+
 # Production runbook — adopt the migration chain, backfill the missing seeds
 
 **Status: PREPARED AND DRY-RUN VERIFIED — not executed against production.**

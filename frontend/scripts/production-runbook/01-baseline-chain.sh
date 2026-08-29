@@ -1,4 +1,63 @@
 #!/usr/bin/env bash
+# ############################################################################
+# ⛔ DO NOT RUN — PREMISE INVALID as of 2026-08-29
+# ############################################################################
+#
+# A read-only inspection of the live database disproved this script's premise.
+# It is disabled below and will refuse to execute until the runbook is corrected.
+# See scripts/production-runbook/RUNBOOK.md for the full findings.
+#
+#   * PREMISE INVALID. This script assumes production is UNBASELINED — no
+#     _prisma_migrations table, `migrate deploy` refusing with P3005. Production
+#     in fact HAS _prisma_migrations with 67 migrations recorded (67 finished,
+#     0 rolled back), most recent applied 2026-08-29 22:01. `migrate deploy`
+#     does NOT refuse with P3005. The analogue this was rehearsed against did
+#     not represent production, so the rehearsal validated the wrong thing.
+#
+#   * STEP 1 WOULD ERASE AN OWNER-GATED COMPLIANCE BOUNDARY. The cutoff below
+#     (< 20261017000000) sweeps in 20261014000000_esign_envelope_history and
+#     20261015000000_esign_consent_and_executed_artifact. Both are verified NOT
+#     recorded in production AND their objects verified ABSENT: the
+#     e_sign_envelope_history table does not exist, and
+#     e_sign_envelopes.executed_document_key does not exist. They are
+#     DELIBERATELY unapplied pending attorney/compliance review — see
+#     lib/services/esign/esign-schema-gate.ts (ESIGN/UETA legal sufficiency NOT
+#     VERIFIED; consent policy blocked). Marking them applied would assert a
+#     compliance-blocked migration had shipped and strand the runtime gate that
+#     currently keeps esign-artifact-reconcile green.
+#
+#   * STEP 3 (template seeds) IS UNNECESSARY — all nine seeds exist in
+#     production (52 templates total).
+#
+#   * STEP 5 (impersonations) IS MOOT — admin_impersonations has 0 rows.
+#
+#   * ENVIRONMENT MISMATCH — the analogue was PostgreSQL 16.4; production is 17.6.
+#
+#   * DO NOT RUN ANY WRITE STEP until the runbook is corrected: baseline only
+#     migrations genuinely applied (verify per-migration, not by timestamp
+#     cutoff), explicitly exclude 20261014/20261015 and assert they stay
+#     excluded, drop steps 3 and 5, and decide separately whether
+#     ai_action_intents is applied or gated the way e-sign is.
+#
+# ############################################################################
+
+# Hard stop. Removing this block is not enough to make the script correct —
+# fix the runbook first. Set AUTOLENIS_RUNBOOK_OVERRIDE=i-have-corrected-this
+# only after the premise above has actually been addressed.
+if [[ "${AUTOLENIS_RUNBOOK_OVERRIDE:-}" != "i-have-corrected-this" ]]; then
+  cat >&2 <<'STOP'
+REFUSING TO RUN: 01-baseline-chain.sh is disabled.
+
+Its premise (production is unbaselined) was disproven on 2026-08-29: production
+already has _prisma_migrations with 67 migrations recorded. Running this would
+falsely record the owner-gated e-sign migrations 20261014 and 20261015 as
+applied, erasing a compliance boundary that is pending attorney review.
+
+Read scripts/production-runbook/RUNBOOK.md before doing anything else.
+STOP
+  exit 2
+fi
+
 # STEP 1 — record the pre-executable migration history as already applied.
 #
 # WHY: production was built with `prisma db push` + manual SQL; it has no

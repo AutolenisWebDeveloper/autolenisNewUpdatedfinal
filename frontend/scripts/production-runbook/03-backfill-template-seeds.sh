@@ -1,4 +1,28 @@
 #!/usr/bin/env bash
+# ############################################################################
+# ⛔ DO NOT RUN — part of a runbook whose premise is INVALID (2026-08-29)
+# ############################################################################
+# See scripts/production-runbook/RUNBOOK.md for the full findings.
+#
+# This step is UNNECESSARY. Verified on 2026-08-29: all nine seeds already
+# exist in production (abandonment_touch_1..3, exit_intent_recovery,
+# welcome_d0/d1/d3/d5/d7; 52 templates total). The premise that files 05/08 never
+# applied to production is false. Running it is idempotent and would very likely
+# be a no-op, but the runbook it belongs to is disabled — correct the runbook
+# first.
+# ############################################################################
+
+if [[ "${AUTOLENIS_RUNBOOK_OVERRIDE:-}" != "i-have-corrected-this" ]]; then
+  cat >&2 <<'STOP'
+REFUSING TO RUN: 03-backfill-template-seeds.sh is disabled.
+
+The production runbook's premise was disproven on 2026-08-29 — production is
+already baselined (67 migrations recorded). Read
+scripts/production-runbook/RUNBOOK.md before doing anything else.
+STOP
+  exit 2
+fi
+
 # STEP 3 — backfill the email-template seeds production never received.
 #
 # WHY: migrations/05 (four lp_* LP-recovery templates) carried an ON CONFLICT
