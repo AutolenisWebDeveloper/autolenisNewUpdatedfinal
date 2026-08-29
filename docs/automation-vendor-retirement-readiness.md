@@ -87,7 +87,7 @@ by editing `review-request`'s dispatch lines while it itself stays QStash-trigge
 
 **`refinance-outreach` — internal parity BUILT (DORMANT) this run (reference
 implementation):**
-- `prisma/migrations/manual_supabase_sql/refinance_outreach_schedule.sql`
+- `prisma/manual_supabase_sql/refinance_outreach_schedule.sql`
   (additive, OWNER-GATED): durable single-touch queue table with
   `UNIQUE(dedup_key)` (enqueue-once per buyer) + a partial due index.
 - `lib/services/refinance/refinance-outreach-drain.service.ts`:
@@ -122,7 +122,7 @@ implementation):**
 
 **`referral-nudge` + `affiliate-inactive` + `affiliate-reengagement-2` — internal
 parity BUILT (DORMANT) this run (consolidated):**
-- `prisma/migrations/manual_supabase_sql/outreach_touch_schedule.sql` (additive,
+- `prisma/manual_supabase_sql/outreach_touch_schedule.sql` (additive,
   OWNER-GATED): ONE sequence-discriminated table (the same multi-sequence shape as
   `lead_nurture_schedule`, NOT a generalized queue — a fixed 3-value CHECK) with
   `UNIQUE(base_key, sequence)` (enqueue-once per touch, closing the QStash
