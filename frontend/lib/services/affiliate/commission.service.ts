@@ -4,7 +4,7 @@
 // Commission walk depth: maximum 3 levels — no L4 or L5
 
 import { prisma } from "@/lib/prisma";
-import { COMMISSION_RATES, PREMIUM_FEE_CENTS } from "@/lib/constants";
+import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_CENTS } from "@/lib/constants";
 import { emitDomainEvent } from "@/lib/events/emit";
 import { logger } from "@/lib/logger";
 import { computeCommissionCents } from "@/lib/services/affiliate/commission-math";
@@ -19,13 +19,15 @@ export async function walkCommissionTree(
   dealId: string,
   buyerAffiliateId: string | null | undefined,
   qualifyingEventId: string,
-  feeBasisCents: number = PREMIUM_FEE_CENTS,
+  feeBasisCents: number = PREMIUM_FEE_REMAINING_CENTS,
 ): Promise<void> {
   if (!buyerAffiliateId) return;
 
   // Defend against a missing/zero basis: fall back to the configured premium
   // fee so a metadata gap never silently zeroes out earned commissions.
-  const basisCents = feeBasisCents > 0 ? feeBasisCents : PREMIUM_FEE_CENTS;
+  // M4: the fallback is the CAPTURED amount ($400 after the $99 deposit
+  // credit), not the $499 sticker — the old fallback overpaid ~25%.
+  const basisCents = feeBasisCents > 0 ? feeBasisCents : PREMIUM_FEE_REMAINING_CENTS;
 
   const affiliate = await prisma.affiliate.findUnique({
     where: { id: buyerAffiliateId },

@@ -549,15 +549,21 @@ export async function POST(request: NextRequest) {
           // queue keyed on the fee PaymentIntent; the DLQ drainer replays
           // processFeeCommission (idempotent) until it succeeds or is surfaced for
           // review — closing the one path where a paid-fee commission could vanish.
-          if (metaDealId && metaBuyerId) {
+          // M3 — the walk runs for BOTH resolution paths: metadata ids
+          // (primary) or the deal matched via stripeFeePIId (legacy buyer
+          // self-service). Before, the legacy path recorded the fee and
+          // advanced the deal but silently skipped commissions.
+          const commissionDealId = metaDealId ?? feeDeal?.id;
+          const commissionBuyerId = metaBuyerId ?? feeDeal?.buyerId;
+          if (commissionDealId && commissionBuyerId) {
             // F-004 — base commissions on the actual fee paid (this PI), not a
             // hardcoded constant. amount_received is the captured amount in cents;
             // fall back to amount if unset.
             const feeBasisCents = pi.amount_received || pi.amount || 0;
             try {
               await processFeeCommission({
-                dealId: metaDealId,
-                buyerId: metaBuyerId,
+                dealId: commissionDealId,
+                buyerId: commissionBuyerId,
                 qualifyingEventId: pi.id,
                 feeBasisCents,
               });
@@ -568,9 +574,9 @@ export async function POST(request: NextRequest) {
                 const { getServiceSupabase } = await import("@/lib/supabase-service");
                 await moveJobToDeadLetter(
                   getServiceSupabase(),
-                  `commission:${metaDealId}:${pi.id}`,
+                  `commission:${commissionDealId}:${pi.id}`,
                   "autolenis/affiliate.commission_walk",
-                  { dealId: metaDealId, buyerId: metaBuyerId, qualifyingEventId: pi.id, feeBasisCents },
+                  { dealId: commissionDealId, buyerId: commissionBuyerId, qualifyingEventId: pi.id, feeBasisCents },
                   commissionErr instanceof Error ? commissionErr.message : String(commissionErr),
                 );
               } catch (dlqErr) {
