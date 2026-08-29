@@ -2,6 +2,7 @@
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { isCommissionSettled } from "@/lib/services/affiliate/payout-invariants";
+import { AFFILIATE_PAYOUT_MINIMUM_CENTS, formatCentsAsUsd } from "@/lib/constants";
 
 // F-002/F-003 — a commission that could not be claimed for settlement: it was
 // missing, already settled, or lost the compare-and-set race to a concurrent
@@ -100,28 +101,182 @@ export async function settleApprovedCommission(input: {
   });
 }
 
-// F-002/F-003 — the self-serve batch payout rail is DISABLED.
+// ─── Self-serve payout request rail (decision 3 — rebuilt, not re-enabled) ───
 //
-// It previously created an AffiliatePayout(PENDING) that nothing could ever
-// advance to PAID (no settle route exists; processPayouts is a stub) AND
-// prematurely stamped Commission.paidAt while leaving status APPROVED —
-// corrupting balances and orphaning payouts forever. Until a real processor
-// (Stripe Connect / ACH — F-049) is integrated, settlement happens ONLY through
-// the admin per-commission mark-paid rail, which records a real
-// AffiliatePayout(PAID) and links it via Commission.payoutId in one transaction.
-export class PayoutsUnavailableError extends Error {
-  constructor() {
-    super(
-      "Self-serve payouts are not yet available. Approved commissions are settled by AutoLenis and paid out directly.",
-    );
-    this.name = "PayoutsUnavailableError";
+// The old rail was disabled because it created orphaned PENDING payouts and
+// stamped Commission.paidAt at request time. The rebuild follows the proven
+// settlement pattern: one transaction, compare-and-set claims, and commissions
+// stay APPROVED until an admin settles the request. Settlement remains
+// recorded-only — no real money movement until a processor is integrated
+// (Stripe Connect / ACH — F-049, unchanged TODO).
+
+export class PayoutRequestError extends Error {
+  constructor(
+    public readonly code:
+      | "ONBOARDING_REQUIRED"
+      | "NO_PAYOUT_METHOD"
+      | "REQUEST_PENDING"
+      | "NOTHING_TO_PAY"
+      | "BELOW_MINIMUM",
+    message: string,
+  ) {
+    super(message);
+    this.name = "PayoutRequestError";
   }
 }
 
-// Disabled: never creates an orphaned payout or mutates commission state. Any
-// caller gets a clear, typed error so the route can surface a clean message.
-export async function requestPayout(_affiliateId: string): Promise<never> {
-  throw new PayoutsUnavailableError();
+export interface RequestPayoutResult {
+  payoutId: string;
+  amountCents: number;
+  commissionCount: number;
+}
+
+export async function requestPayout(affiliateId: string): Promise<RequestPayoutResult> {
+  return prisma.$transaction(async (tx) => {
+    // Eligibility: onboarding APPROVED (the review rail's one hard gate) and
+    // a payout method on file — money must have somewhere real to go.
+    const review = await tx.affiliateOnboardingReview.findUnique({
+      where: { affiliateId },
+      select: { status: true },
+    });
+    if (review?.status !== "APPROVED") {
+      throw new PayoutRequestError(
+        "ONBOARDING_REQUIRED",
+        "Complete onboarding (and get approved) before requesting a payout.",
+      );
+    }
+    const method = await tx.affiliatePayoutMethod.findUnique({ where: { affiliateId } });
+    if (!method?.method) {
+      throw new PayoutRequestError("NO_PAYOUT_METHOD", "Add a payout method in the Finance Hub first.");
+    }
+
+    // One open request at a time — a second request cannot race the first.
+    const open = await tx.affiliatePayout.findFirst({
+      where: { affiliateId, status: "PENDING" },
+      select: { id: true },
+    });
+    if (open) {
+      throw new PayoutRequestError(
+        "REQUEST_PENDING",
+        "You already have a payout request awaiting settlement.",
+      );
+    }
+
+    const claimable = await tx.commission.findMany({
+      where: { affiliateId, status: "APPROVED", payoutId: null },
+      select: { id: true, amountCents: true, createdAt: true },
+    });
+    if (claimable.length === 0) {
+      throw new PayoutRequestError("NOTHING_TO_PAY", "No approved commissions are ready for payout yet.");
+    }
+    const amountCents = claimable.reduce((s, c) => s + c.amountCents, 0);
+    if (amountCents < AFFILIATE_PAYOUT_MINIMUM_CENTS) {
+      throw new PayoutRequestError(
+        "BELOW_MINIMUM",
+        `Payouts start at ${formatCentsAsUsd(AFFILIATE_PAYOUT_MINIMUM_CENTS)} — keep earning and request once your approved balance reaches it.`,
+      );
+    }
+
+    const requestedAt = new Date();
+    const periodStart = claimable.reduce(
+      (min, c) => (c.createdAt < min ? c.createdAt : min),
+      claimable[0].createdAt,
+    );
+    const payout = await tx.affiliatePayout.create({
+      data: {
+        affiliateId,
+        amountCents,
+        status: "PENDING",
+        method: method.method,
+        periodStart,
+        periodEnd: requestedAt,
+      },
+    });
+
+    // Compare-and-set claim: only rows that are STILL approved and unclaimed
+    // attach. A concurrent claimant makes the count mismatch and the whole
+    // request (payout row included) rolls back — the same commission can
+    // never belong to two payouts.
+    const claimed = await tx.commission.updateMany({
+      where: { id: { in: claimable.map((c) => c.id) }, status: "APPROVED", payoutId: null },
+      data: { payoutId: payout.id },
+    });
+    if (claimed.count !== claimable.length) {
+      throw new CommissionNotClaimableError(
+        `payout request for ${affiliateId}: claimed ${claimed.count}/${claimable.length}`,
+      );
+    }
+
+    return { payoutId: payout.id, amountCents, commissionCount: claimable.length };
+  });
+}
+
+export interface SettleRequestedPayoutResult {
+  payoutId: string;
+  affiliateId: string;
+  amountCents: number;
+  commissionCount: number;
+  settledAt: Date;
+}
+
+// Admin settlement of a requested payout: PENDING→PAID CAS on the payout, then
+// APPROVED→PAID on its attached commissions (count-verified), then the settled
+// invariant asserted per row — any mismatch rolls the whole settlement back.
+export async function settleRequestedPayout(input: {
+  payoutId: string;
+  paymentMethod: string;
+  paymentReference: string;
+}): Promise<SettleRequestedPayoutResult> {
+  const { payoutId, paymentMethod, paymentReference } = input;
+  const settledAt = new Date();
+
+  return prisma.$transaction(async (tx) => {
+    const payout = await tx.affiliatePayout.findUnique({ where: { id: payoutId } });
+    if (!payout || payout.status !== "PENDING") {
+      throw new CommissionNotClaimableError(`payout ${payoutId} is not awaiting settlement`);
+    }
+
+    const flipped = await tx.affiliatePayout.updateMany({
+      where: { id: payoutId, status: "PENDING" },
+      data: { status: "PAID", method: paymentMethod, reference: paymentReference, processedAt: settledAt },
+    });
+    if (flipped.count !== 1) {
+      throw new CommissionNotClaimableError(`payout ${payoutId} was settled concurrently`);
+    }
+
+    const attached = await tx.commission.findMany({
+      where: { payoutId, status: "APPROVED" },
+      select: { id: true },
+    });
+    const paid = await tx.commission.updateMany({
+      where: { payoutId, status: "APPROVED" },
+      data: { status: "PAID", paidAt: settledAt },
+    });
+    if (paid.count !== attached.length || paid.count === 0) {
+      throw new CommissionNotClaimableError(
+        `payout ${payoutId}: settled ${paid.count}/${attached.length} attached commissions`,
+      );
+    }
+
+    // M11 — assert the settled invariant against each written row.
+    for (const { id } of attached) {
+      const settled = await tx.commission.findUnique({
+        where: { id },
+        select: { status: true, paidAt: true, payoutId: true },
+      });
+      if (!settled || !isCommissionSettled(settled)) {
+        throw new Error(`Settlement invariant violated for commission ${id} — rolling back`);
+      }
+    }
+
+    return {
+      payoutId,
+      affiliateId: payout.affiliateId,
+      amountCents: payout.amountCents,
+      commissionCount: attached.length,
+      settledAt,
+    };
+  });
 }
 
 // D15 — bounded: the admin settlement rail creates one payout per settled

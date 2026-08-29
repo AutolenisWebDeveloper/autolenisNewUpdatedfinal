@@ -122,7 +122,7 @@ interface Props {
 type ModalType =
   | "approve" | "reject" | "suspend" | "reactivate"
   | "note" | "profile-edit" | "compliance-flag" | "compliance-resolve"
-  | "clawback" | "payout";
+  | "clawback" | "payout" | "settle-payout";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -454,6 +454,8 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
   const [copiedCode, setCopiedCode] = useState(false);
   // Target commission for payout / clawback actions.
   const [commissionTarget, setCommissionTarget] = useState<{ id: string; amountCents: number } | null>(null);
+  // Decision 3 — a PENDING self-serve payout request the admin settles.
+  const [payoutTarget, setPayoutTarget] = useState<{ id: string; amountCents: number } | null>(null);
 
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
@@ -475,6 +477,12 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
   // Commission endpoints live under /api/admin/affiliates/commissions/{id}/...
   async function doCommissionAction(commissionId: string, action: string, body: Record<string, string>, successMsg: string) {
     await api.post<unknown>("/api/admin/affiliates/commissions/" + commissionId + "/" + action, body);
+    handleSuccess(successMsg);
+  }
+
+  // Payout-request endpoints live under /api/admin/affiliates/payouts/{id}/...
+  async function doPayoutAction(payoutId: string, action: string, body: Record<string, string>, successMsg: string) {
+    await api.post<unknown>("/api/admin/affiliates/payouts/" + payoutId + "/" + action, body);
     handleSuccess(successMsg);
   }
 
@@ -592,6 +600,15 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
           onCancel={() => { setModal(null); setCommissionTarget(null); }}
           onConfirm={async (paymentMethod, paymentReference, note) => {
             await doCommissionAction(commissionTarget.id, "mark-paid", { paymentMethod, paymentReference, ...(note ? { note } : {}) }, "Payout recorded — affiliate notified");
+          }}
+        />
+      )}
+      {modal === "settle-payout" && payoutTarget && (
+        <PayoutModal
+          amountCents={payoutTarget.amountCents}
+          onCancel={() => { setModal(null); setPayoutTarget(null); }}
+          onConfirm={async (paymentMethod, paymentReference, note) => {
+            await doPayoutAction(payoutTarget.id, "mark-paid", { paymentMethod, paymentReference, ...(note ? { note } : {}) }, "Payout request settled — affiliate notified");
           }}
         />
       )}
@@ -967,7 +984,18 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
                     <span className="text-xs text-slate-500">{p.method ?? "—"}</span>
                     <span className="text-xs text-slate-500">{fmtDate(p.periodStart)} – {fmtDate(p.periodEnd)}</span>
                     <span className="text-xs text-slate-500">{fmtDate(p.requestedAt)}</span>
-                    <span className="text-xs text-slate-500">{fmtDate(p.processedAt)}</span>
+                    {p.status === "PENDING" ? (
+                      <button
+                        type="button"
+                        onClick={() => { setPayoutTarget({ id: p.id, amountCents: p.amountCents }); setModal("settle-payout"); }}
+                        className="justify-self-start text-xs font-semibold text-al-primary hover:underline"
+                        data-testid={"settle-payout-" + p.id}
+                      >
+                        Mark paid
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-500">{fmtDate(p.processedAt)}</span>
+                    )}
                   </div>
                 ))}
               </div>

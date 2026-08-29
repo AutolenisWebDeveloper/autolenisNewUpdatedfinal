@@ -251,7 +251,7 @@ export const ACTION_INTENT_CATALOG: Record<string, IntentDefinition> = Object.fr
       type: "affiliate.request_payout",
       title: "Request an affiliate payout",
       description:
-        "Request a payout of settled commissions. Money movement. The canonical payout service is currently gated OFF at the platform (PayoutsUnavailableError), so this intent is UNAVAILABLE: the AI may recognise the request but it can never execute, and must escalate to a human.",
+        "Request a payout of settled commissions. Money movement. The self-serve rail is live for the AFFILIATE THEMSELVES in the Finance Hub, but this intent stays UNAVAILABLE for the AI: money movement is never AI-initiated — the AI may recognise the request and must direct the affiliate to the Finance Hub's Request Payout button (or escalate to a human).",
       actorType: "AFFILIATE",
       permittedRoles: AFFILIATE_ROLES,
       parameters: z
@@ -263,7 +263,7 @@ export const ACTION_INTENT_CATALOG: Record<string, IntentDefinition> = Object.fr
       requiresHumanApproval: true,
       approverPermission: "finance.commissions.settle",
       availability: "UNAVAILABLE",
-      canonicalService: "lib/services/affiliate/affiliate-payout.service.ts#requestPayout (gated off)",
+      canonicalService: "lib/services/affiliate/affiliate-payout.service.ts#requestPayout (human-only; never AI-invoked)",
       idempotency: "delegated",
     }),
 

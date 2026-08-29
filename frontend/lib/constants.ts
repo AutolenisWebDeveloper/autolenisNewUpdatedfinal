@@ -203,5 +203,9 @@ export const AFFILIATE_DOCUMENT_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 // casings/granularities into the same column.
 export const AFFILIATE_TAX_CLASSIFICATIONS = ["INDIVIDUAL", "LLC", "CORP", "S_CORP", "PARTNERSHIP"] as const;
 
+// Decision 3 — self-serve payout request threshold (config constant, never a
+// literal). Requests below this total are rejected with BELOW_MINIMUM.
+export const AFFILIATE_PAYOUT_MINIMUM_CENTS = 2500; // $25
+
 // ─── Affiliate Compliance ─────────────────────────────────────────────────────
 export const AFFILIATE_DISCLOSURE_VERSION = "1.0";
