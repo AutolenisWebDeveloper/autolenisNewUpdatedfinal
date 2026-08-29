@@ -500,8 +500,13 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
     { id: "admin-actions", label: "⚙ Admin Actions" },
   ];
 
-  // Commission totals
-  const totalEarned = commissions.reduce((s, c) => s + c.amountCents, 0);
+  // Commission totals. "Earned" follows the shared ledger rule (M1, inlined —
+  // client components can't import the server-side commission service):
+  // PENDING+APPROVED+PAID rows plus negative REVERSED clawback offsets;
+  // positive in-place-REVERSED and REJECTED rows never count.
+  const totalEarned = commissions
+    .filter(c => ["PENDING", "APPROVED", "PAID"].includes(c.status) || (c.status === "REVERSED" && c.amountCents < 0))
+    .reduce((s, c) => s + c.amountCents, 0);
   const totalPending = commissions.filter(c => c.status === "PENDING").reduce((s, c) => s + c.amountCents, 0);
   const totalPaid = commissions.filter(c => c.status === "PAID").reduce((s, c) => s + c.amountCents, 0);
   const totalReversed = commissions.filter(c => c.status === "REVERSED").reduce((s, c) => s + c.amountCents, 0);
