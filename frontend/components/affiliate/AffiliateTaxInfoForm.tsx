@@ -87,7 +87,8 @@ export default function AffiliateTaxInfoForm({
         >
           <option value="INDIVIDUAL">Individual / Sole Proprietor</option>
           <option value="LLC">LLC</option>
-          <option value="CORP">Corporation</option>
+          <option value="CORP">C Corporation</option>
+          <option value="S_CORP">S Corporation</option>
           <option value="PARTNERSHIP">Partnership</option>
         </select>
       </div>
@@ -120,9 +121,9 @@ export default function AffiliateTaxInfoForm({
           maxLength={12}
         />
         {initialTinLast4 && !taxId && (
-          <p className="text-xs text-slate-400 mt-0.5">Saved: ****{initialTinLast4}</p>
+          <p className="text-xs text-slate-500 mt-0.5">Saved: ****{initialTinLast4}</p>
         )}
-        <p className="text-xs text-slate-400 mt-1">Only the last 4 digits are stored. Your full ID is never retained.</p>
+        <p className="text-xs text-slate-500 mt-1">Only the last 4 digits are stored. Your full ID is never retained.</p>
       </div>
 
       <label className="flex items-start gap-2 mt-4 cursor-pointer">

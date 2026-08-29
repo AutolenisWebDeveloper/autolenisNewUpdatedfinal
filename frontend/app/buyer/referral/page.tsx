@@ -10,41 +10,30 @@ import { Badge } from "@/components/ui/badge";
 import { Share2, Users, DollarSign } from "lucide-react";
 import ReferralLinkCopy from "@/components/buyer/ReferralLinkCopy";
 import { evaluateBuyerReferralMilestones } from "@/lib/services/referral/referral-milestone.service";
+import { getBuyerReferralStats } from "@/lib/services/buyer/referral.service";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReferralPage() {
   const buyer = await requireBuyer();
-  const affiliate = await prisma.affiliate.findFirst({ where: { userId: buyer.userId } });
 
-  // Referral count + approved-commission sum both depend on the affiliate, so
-  // they run together as one concurrent wave.
-  const [referralCount, earnedResult] = affiliate
-    ? await Promise.all([
-        // Count buyers referred via this affiliate's referral code
-        prisma.affiliateReferral.count({ where: { affiliateId: affiliate.id } }),
-        // Sum approved commissions for this affiliate
-        prisma.commission.aggregate({
-          where: { affiliateId: affiliate.id, status: "APPROVED" },
-          _sum: { amountCents: true },
-        }),
-      ])
-    : [0, null];
+  // M8 — one definition per fact: referral count, earned total (shared ledger
+  // rule), and the referral link all come from the same service the buyer
+  // referral API uses, so the page and the API can never disagree.
+  const stats = await getBuyerReferralStats(buyer.id);
 
   // Award any newly-crossed configured milestones before rendering. Idempotent
   // (unique per buyer+milestone) and best-effort — never blocks the page.
-  if (affiliate) await evaluateBuyerReferralMilestones(buyer.id);
+  if (stats) await evaluateBuyerReferralMilestones(buyer.id);
 
   const milestones = await prisma.referralMilestone.findMany({
     where: { buyerId: buyer.id },
     orderBy: { createdAt: "asc" },
   });
 
-  const totalEarnedCents = earnedResult?._sum?.amountCents ?? 0;
-
-  const referralLink = affiliate
-    ? `${(process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim()}/auth/signup?ref=${affiliate.referralCode}`
-    : null;
+  const referralCount = stats?.referralCount ?? 0;
+  const totalEarnedCents = stats?.totalEarnedCents ?? 0;
+  const referralLink = stats?.referralLink ?? null;
 
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="referral-page">

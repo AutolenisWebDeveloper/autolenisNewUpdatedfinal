@@ -38,6 +38,14 @@ mock.module("@/lib/services/monitoring/health.service", {
   namedExports: { checkSLAs: async () => ({ breached: 0, warnings: 0 }) },
 });
 
+// affiliates delegates to approveMaturePendingCommissions (M2 — payment-state
+// gated approval); stub it for the same reason. The real service transitively
+// imports lib/events/emit (`server-only`), which cannot load under the test
+// runner — its behaviour is covered by commission-approval-safety.test.ts.
+mock.module("@/lib/services/affiliate/commission.service", {
+  namedExports: { approveMaturePendingCommissions: async () => ({ approved: 2, held: 0, checked: 2 }) },
+});
+
 function cronReq(path: string) {
   return new NextRequest(`http://localhost${path}`, { headers: { authorization: "Bearer test-secret" } });
 }

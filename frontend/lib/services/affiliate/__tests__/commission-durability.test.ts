@@ -29,16 +29,30 @@ let ctrl: PrismaCtrl;
 
 const prismaMock = {
   buyer: { findUnique: async () => ctrl.buyer },
-  affiliateReferral: { findFirst: async () => ctrl.referral },
+  affiliateReferral: {
+    findFirst: async () => ctrl.referral,
+    // D12 conversion stamps (firstDealAt/totalDeals) — stats only, not under
+    // test here; accept and discard.
+    update: async ({ data }: { data: Record<string, unknown> }) => data,
+  },
   affiliate: {
     // Serves both walkCommissionTree lookups: the tree walk (parent chain) and
     // the earner lookup (user/profile for the CRM emit). A flat leaf affiliate
     // with no parents satisfies both shapes.
-    findUnique: async () => ({ id: "aff_1", parent: null, user: { email: "aff@example.com" }, profile: { firstName: "A", lastName: "B" } }),
+    findUnique: async () => ({ id: "aff_1", status: "ACTIVE", parent: null, user: { email: "aff@example.com" }, profile: { firstName: "A", lastName: "B" } }),
   },
   commission: {
     findUnique: async ({ where }: { where: { qualifyingEventId: string } }) =>
       ctrl.existingCommissionKeys.has(where.qualifyingEventId) ? { id: "c_exist" } : null,
+    // D12 replay guard: any key with the event prefix marks the event processed.
+    findFirst: async ({ where }: { where: { qualifyingEventId?: { startsWith?: string } } }) => {
+      const prefix = where.qualifyingEventId?.startsWith;
+      if (!prefix) return null;
+      for (const key of ctrl.existingCommissionKeys) {
+        if (key.startsWith(prefix)) return { id: "c_exist" };
+      }
+      return null;
+    },
     create: async ({ data }: { data: Record<string, unknown> }) => { ctrl.created.push(data); return data; },
   },
 };

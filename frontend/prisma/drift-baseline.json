@@ -1,6 +1,6 @@
 {
-  "structuralStatements": 352,
+  "structuralStatements": 345,
   "note": "Statements `prisma migrate diff` proposes to turn a chain-built database into schema.prisma, EXCLUDING functional gaps (which are gated at hard zero by scripts/check-migration-drift.ts). These are index renames and reshapes, foreign-key re-creation, column type normalisation, and one table the chain creates that the schema no longer declares. Closing them needs DROP statements aimed at a production database whose real state is not inspectable from CI, so they are pinned rather than fixed. This number may only go down; the checker fails if it grows AND if it shrinks without this file being updated.",
-  "measuredOn": "postgresql 16.13 locally; CI (postgres 16.4) confirmed the previous value 355 exactly on PR #358's first run",
+  "measuredOn": "CI (postgres 16.4) reported 345 on PR #362 after the production-state reconciliation (dropping the stray affiliate_documents.file_size column closed one more structural statement; 346 was CI's number one commit earlier)",
   "ifCiDisagrees": "CI is authoritative. The count compares catalog objects (tables, columns, indexes, foreign keys, enums), which do not vary by postgres patch version, so the two should agree \u2014 but this baseline was measured locally and the first CI run is what confirms it. If CI reports a different number, set structuralStatements to CI's number rather than arguing with it."
 }

@@ -10,8 +10,8 @@
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { createClient } from "@supabase/supabase-js";
 import { successResponse, errorResponse } from "@/lib/auth/api";
+import { limitAuthAttempt, clientIpKey } from "@/lib/security/rate-limit";
 import { prisma } from "@/lib/prisma";
 import { UserRole, AffiliateStatus } from "@prisma/client";
 import { sendAffiliateVerificationEmail } from "@/lib/services/email/resend.service";
@@ -55,13 +55,8 @@ async function uniqueReferralCode(): Promise<string> {
   throw new Error("Failed to generate unique referral code");
 }
 
-function adminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
-}
+// Service-role client comes from the shared adapter (lib/supabase-service) —
+// this route previously built its own duplicate client from the raw SDK.
 
 export async function POST(request: NextRequest) {
   let body: unknown;
@@ -80,6 +75,21 @@ export async function POST(request: NextRequest) {
   const { firstName, lastName, email, password, website, promotionMethod, referralCode } = parsed.data;
   const normalizedEmail = email.toLowerCase().trim();
 
+  // R4 — this is an unauthenticated route that mints service-role Supabase
+  // users and sends email; without a throttle, sybil registration and email
+  // flooding are free. Keyed by BOTH source IP and target email, same tiers
+  // as the buyer auth actions. (The duplicate-email 409 below intentionally
+  // matches the buyer signup convention of naming an existing account on the
+  // REGISTRATION form; the throttle is what blunts enumeration at scale.)
+  const ipKey = clientIpKey(request.headers);
+  const [ipLimit, emailLimit] = await Promise.all([
+    limitAuthAttempt(`affiliate-register:ip:${ipKey}`),
+    limitAuthAttempt(`affiliate-register:email:${normalizedEmail}`, { tokens: 5, window: "10 m" }),
+  ]);
+  if (!ipLimit.ok || !emailLimit.ok) {
+    return errorResponse("RATE_LIMITED", "Too many attempts. Please wait a few minutes and try again.", 429);
+  }
+
   // 1. Duplicate email check (platform-wide)
   const existingUser = await prisma.user.findFirst({ where: { email: normalizedEmail } });
   if (existingUser) {
@@ -92,17 +102,21 @@ export async function POST(request: NextRequest) {
 
   // 2. Resolve parent referral if provided
   let parentId: string | undefined;
+  let parentLevel = 0;
   if (referralCode) {
     const parent = await prisma.affiliate.findFirst({
       where: { referralCode: referralCode.toUpperCase(), status: AffiliateStatus.ACTIVE },
     });
-    if (parent) parentId = parent.id;
+    if (parent) {
+      parentId = parent.id;
+      parentLevel = parent.level;
+    }
   }
 
   // 3. Create Supabase user via admin API (bypasses rate limits)
   //    email_confirm: false → user must click link to verify
   //    bcrypt hashing handled by Supabase internally at cost factor 10+ (secure)
-  const admin = adminClient();
+  const admin = getServiceSupabase();
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email: normalizedEmail,
     password,
@@ -120,9 +134,13 @@ export async function POST(request: NextRequest) {
     const msg = createErr?.message ?? "";
     logger.error("[affiliate/register] Supabase admin createUser failed", { code: createErr?.code, msg });
     if (/already|registered|exists|duplicate/i.test(msg)) {
+      // O8 — we only reach Supabase after confirming no Prisma user holds this
+      // email, so a Supabase duplicate here means an ORPHANED auth user (a
+      // prior registration crashed between createUser and the DB transaction).
+      // "Sign in instead" would dead-end them — sign-in has no account row.
       return errorResponse(
-        "EMAIL_EXISTS",
-        "An account with this email already exists. Sign in instead.",
+        "EMAIL_ORPHANED",
+        "This email is attached to an incomplete registration. Contact support@autolenis.com and we'll reset it for you.",
         409,
       );
     }
@@ -149,38 +167,69 @@ export async function POST(request: NextRequest) {
     logger.error("[affiliate/register] generateLink failed", err);
   }
 
-  // 5. Create Prisma User + Affiliate in a transaction
-  let referral: string;
+  // O2 — without a link there is NO way to verify: Supabase sends no email of
+  // its own (email_confirm:false is the point of the admin API), and the old
+  // fallback email told the user to find one that doesn't exist. Fail loudly
+  // and roll the Supabase user back so the email stays reusable.
+  if (!verificationLink) {
+    try {
+      await admin.auth.admin.deleteUser(supabaseUserId);
+    } catch { /* best-effort cleanup */ }
+    return errorResponse(
+      "VERIFICATION_UNAVAILABLE",
+      "We couldn't issue your verification email right now. Nothing was created — please try again in a few minutes.",
+      503,
+    );
+  }
+
+  // 5. Create Prisma User + Affiliate in a transaction.
+  // O9 — the referral-code uniqueness check is check-then-insert; the @unique
+  // constraint makes a collision safe but it used to abort the whole signup
+  // with a 500. On a referral-code P2002 we regenerate and retry once instead.
+  let referral = "";
   let unsubscribeToken: string;
   let affiliateId = "";
   try {
-    referral = await uniqueReferralCode();
     unsubscribeToken = crypto.randomBytes(24).toString("hex");
 
-    await prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          supabaseId: supabaseUserId,
-          email: normalizedEmail,
-          role: UserRole.AFFILIATE,
-        },
-      });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      referral = await uniqueReferralCode();
+      try {
+        await prisma.$transaction(async (tx) => {
+          const user = await tx.user.create({
+            data: {
+              supabaseId: supabaseUserId,
+              email: normalizedEmail,
+              role: UserRole.AFFILIATE,
+            },
+          });
 
-      const affiliate = await tx.affiliate.create({
-        data: {
-          userId: user.id,
-          referralCode: referral,
-          status: AffiliateStatus.ACTIVE, // auto-activate on email verification
-          level: parentId ? 2 : 1,
-          parentId,
-          promotionMethod,
-          website: website || null,
-          ftcAcknowledgedAt: new Date(),
-          unsubscribeToken,
-        },
-      });
-      affiliateId = affiliate.id;
-    });
+          const affiliate = await tx.affiliate.create({
+            data: {
+              userId: user.id,
+              referralCode: referral,
+              status: AffiliateStatus.ACTIVE, // auto-activate on email verification
+              // R10/O7 — a recruit sits at the parent's depth + 1 (capped at 3;
+              // the commission walk pays at most 3 ancestor levels regardless).
+              level: parentId ? Math.min(parentLevel + 1, 3) : 1,
+              parentId,
+              promotionMethod,
+              website: website || null,
+              ftcAcknowledgedAt: new Date(),
+              unsubscribeToken,
+            },
+          });
+          affiliateId = affiliate.id;
+        });
+        break;
+      } catch (err) {
+        const isReferralCollision =
+          (err as { code?: string })?.code === "P2002" &&
+          JSON.stringify((err as { meta?: unknown })?.meta ?? "").includes("referral");
+        if (isReferralCollision && attempt === 0) continue;
+        throw err;
+      }
+    }
   } catch (err) {
     // Roll back the Supabase user we created
     try {

@@ -5,7 +5,7 @@
 import { logger } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceSupabaseClient } from "@/lib/supabase";
-import { sendWelcomeEmail } from "@/lib/services/email/resend.service";
+import { sendWelcomeEmail, sendAffiliateVerificationEmail } from "@/lib/services/email/resend.service";
 import { prisma } from "@/lib/prisma";
 import { getAppUrl } from "@/lib/auth/urls";
 
@@ -22,6 +22,71 @@ interface GenerateLinkAdmin {
   }): Promise<GenerateLinkResult>;
 }
 
+// O2 — the affiliate variant: same rate-limit + enumeration-safety contract,
+// affiliate-branded email, callback tagged with role=AFFILIATE (matching the
+// register route) so verification lands on the affiliate sign-in.
+async function resendForAffiliate(normalizedEmail: string) {
+  const affiliate = await prisma.affiliate
+    .findFirst({
+      where: { user: { email: normalizedEmail } },
+      select: { id: true, referralCode: true, profile: { select: { firstName: true } } },
+    })
+    .catch(() => null);
+  const entityId = affiliate?.id ?? normalizedEmail;
+
+  const recentResend = await prisma.adminAuditLog
+    .findFirst({
+      where: {
+        action: "VERIFICATION_RESENT",
+        entityType: "AFFILIATE",
+        entityId,
+        createdAt: { gte: new Date(Date.now() - 60_000) },
+      },
+    })
+    .catch(() => null);
+  if (recentResend) {
+    return NextResponse.json(
+      { error: "Please wait a moment before requesting another verification email." },
+      { status: 429 },
+    );
+  }
+
+  try {
+    const admin = createServiceSupabaseClient().auth.admin as unknown as GenerateLinkAdmin;
+    const { data: linkData } = await admin.generateLink({
+      type: "signup",
+      email: normalizedEmail,
+      options: { redirectTo: `${getAppUrl()}/auth/callback?role=AFFILIATE` },
+    });
+    const verificationUrl = linkData?.properties?.action_link;
+    if (verificationUrl && affiliate) {
+      const firstName = affiliate.profile?.firstName ?? normalizedEmail.split("@")[0];
+      await sendAffiliateVerificationEmail(normalizedEmail, firstName, affiliate.referralCode, verificationUrl);
+      await prisma.adminAuditLog
+        .create({
+          data: {
+            action: "VERIFICATION_RESENT",
+            entityType: "AFFILIATE",
+            entityId,
+            adminId: "system",
+            adminEmail: "system@autolenis.com",
+            metadata: { email: normalizedEmail },
+          },
+        })
+        .catch(() => {});
+    } else {
+      // No link means Supabase can't mint one (already verified, or admin API
+      // failure) — never send a dead-end email pointing nowhere.
+      logger.error("[resend-verification] affiliate link unavailable", { email: normalizedEmail });
+    }
+  } catch (e) {
+    logger.error("[resend-verification] affiliate resend failed:", e);
+    // Enumeration-safe: fall through to success either way.
+  }
+
+  return NextResponse.json({ success: true });
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json() as { email?: string };
   const { email } = body;
@@ -31,6 +96,16 @@ export async function POST(request: NextRequest) {
   }
 
   const normalizedEmail = email.toLowerCase().trim();
+
+  // O2 — affiliates need a reachable resend path too: their sign-in blocks
+  // unverified emails, but this route was buyer-branded end to end. Branch on
+  // the account's role; one route, no parallel system.
+  const account = await prisma.user
+    .findFirst({ where: { email: normalizedEmail }, select: { role: true } })
+    .catch(() => null);
+  if (account?.role === "AFFILIATE") {
+    return resendForAffiliate(normalizedEmail);
+  }
 
   // Look up buyer for rate limiting and email personalization
   const buyer = await prisma.buyer.findFirst({

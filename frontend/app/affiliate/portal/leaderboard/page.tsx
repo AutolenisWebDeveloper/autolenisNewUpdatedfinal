@@ -1,7 +1,7 @@
 // app/affiliate/portal/leaderboard/page.tsx
 // Elite Affiliate Leaderboard — shows top earners, current rank, and motivational tier context
 
-import { requireAffiliate } from "@/lib/auth/affiliate-session";
+import { requireAffiliateWithOnboarding } from "@/lib/auth/affiliate-session";
 import { getLeaderboard } from "@/lib/services/affiliate/affiliate-leaderboard.service";
 import { getCommissionSummary } from "@/lib/services/affiliate/commission.service";
 import { Trophy, Medal, Star, TrendingUp, Crown } from "lucide-react";
@@ -25,7 +25,10 @@ function rankBg(rank: number, isCurrentUser: boolean) {
 }
 
 export default async function AffiliateLeaderboardPage() {
-  const affiliate = await requireAffiliate();
+  // P1-2 — gate runs in the PAGE, not only the layout: App Router does not
+  // re-render the layout on soft navigation, so a sidebar click would bypass
+  // a layout-only gate.
+  const { affiliate } = await requireAffiliateWithOnboarding();
   const [board, summary] = await Promise.all([
     getLeaderboard(affiliate.id, 10),
     getCommissionSummary(affiliate.id),
@@ -85,12 +88,12 @@ export default async function AffiliateLeaderboardPage() {
 
       {/* Top 10 list */}
       <div data-testid="leaderboard-list">
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
           Top Earners
         </p>
         {board.top.length === 0 ? (
           <div
-            className="text-center py-12 bg-white border border-slate-200 rounded-xl text-slate-400"
+            className="text-center py-12 bg-white border border-slate-200 rounded-xl text-slate-500"
             data-testid="leaderboard-empty"
           >
             <TrendingUp size={28} className="mx-auto mb-2 text-slate-300" />
@@ -121,7 +124,7 @@ export default async function AffiliateLeaderboardPage() {
                       </Badge>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <p className="text-xs text-slate-500 mt-0.5">
                     {entry.networkCount} direct referral{entry.networkCount !== 1 ? "s" : ""}
                   </p>
                 </div>
@@ -143,7 +146,7 @@ export default async function AffiliateLeaderboardPage() {
         <div className="mt-4 space-y-1" data-testid="your-rank-below-top">
           <div className="flex items-center gap-2 px-4 py-2">
             <div className="flex-1 h-px bg-slate-200" />
-            <p className="text-xs text-slate-400 shrink-0">your position</p>
+            <p className="text-xs text-slate-500 shrink-0">your position</p>
             <div className="flex-1 h-px bg-slate-200" />
           </div>
           <div
@@ -162,7 +165,7 @@ export default async function AffiliateLeaderboardPage() {
                   You
                 </Badge>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-500 mt-0.5">
                 {currentRank.networkCount} direct referral{currentRank.networkCount !== 1 ? "s" : ""}
               </p>
             </div>
@@ -175,8 +178,8 @@ export default async function AffiliateLeaderboardPage() {
         </div>
       )}
 
-      <p className="text-xs text-slate-300 text-center mt-8">
-        Rankings update in real time. Identities are masked. Earn more to climb.
+      <p className="text-xs text-slate-500 text-center mt-8">
+        Rankings refresh regularly. Identities are masked. Earn more to climb.
       </p>
     </div>
   );

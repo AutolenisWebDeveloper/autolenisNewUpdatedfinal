@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getRequestAffiliate, successResponse, errorResponse } from "@/lib/auth/affiliate-api";
 import { prisma } from "@/lib/prisma";
-import { saveOnboardingStep } from "@/lib/services/affiliate/onboarding.service";
+import { saveOnboardingStep, OnboardingLockedError } from "@/lib/services/affiliate/onboarding.service";
 import { z } from "zod";
 
 const schema = z.object({
@@ -37,12 +37,22 @@ export async function POST(request: NextRequest) {
 
   const { step, einLast4, ...rest } = result.data;
 
-  await prisma.affiliateProfile.upsert({
-    where:  { affiliateId: affiliate.id },
-    create: { affiliateId: affiliate.id, ...rest, ...(einLast4 !== undefined ? { einLast4 } : {}) },
-    update: { ...rest, ...(einLast4 !== undefined ? { einLast4 } : {}) },
-  });
-
-  await saveOnboardingStep(affiliate.id, step);
+  // O3 — the data write and the guarded status write commit atomically; a
+  // locked review (submitted/decided) rejects the whole request with 409.
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.affiliateProfile.upsert({
+        where:  { affiliateId: affiliate.id },
+        create: { affiliateId: affiliate.id, ...rest, ...(einLast4 !== undefined ? { einLast4 } : {}) },
+        update: { ...rest, ...(einLast4 !== undefined ? { einLast4 } : {}) },
+      });
+      await saveOnboardingStep(affiliate.id, step, "IN_PROGRESS", tx);
+    });
+  } catch (err) {
+    if (err instanceof OnboardingLockedError) {
+      return errorResponse("ONBOARDING_LOCKED", `Your onboarding is ${err.status.toLowerCase().replace("_", " ")} and can no longer be edited.`, 409);
+    }
+    throw err;
+  }
   return successResponse({ step });
 }

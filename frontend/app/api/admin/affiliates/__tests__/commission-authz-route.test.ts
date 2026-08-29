@@ -33,24 +33,36 @@ let commissionStatus = "PENDING";
 let commissionUpdateCalls = 0;
 let settleCalls = 0;
 
+const prismaClientMock = {
+  commission: {
+    findUnique: async () => ({
+      id: "com_1",
+      status: commissionStatus,
+      affiliateId: "aff_1",
+      dealId: "deal_1",
+      amountCents: 25_000,
+    }),
+    update: async () => {
+      commissionUpdateCalls += 1;
+      return { id: "com_1", status: commissionStatus };
+    },
+    // The routes now flip status via a compare-and-set updateMany inside a
+    // $transaction (M5); for this authz contract it counts as "the mutation
+    // was reached" exactly like update did.
+    updateMany: async () => {
+      commissionUpdateCalls += 1;
+      return { count: 1 };
+    },
+  },
+  adminAuditLog: { create: async () => ({ id: "log_1" }) },
+  notification: { create: async () => ({ id: "notif_1" }) },
+};
+
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
-      commission: {
-        findUnique: async () => ({
-          id: "com_1",
-          status: commissionStatus,
-          affiliateId: "aff_1",
-          dealId: "deal_1",
-          amountCents: 25_000,
-        }),
-        update: async () => {
-          commissionUpdateCalls += 1;
-          return { id: "com_1", status: commissionStatus };
-        },
-      },
-      adminAuditLog: { create: async () => ({ id: "log_1" }) },
-      notification: { create: async () => ({ id: "notif_1" }) },
+      ...prismaClientMock,
+      $transaction: async (cb: (tx: typeof prismaClientMock) => Promise<unknown>) => cb(prismaClientMock),
     },
   },
 });
