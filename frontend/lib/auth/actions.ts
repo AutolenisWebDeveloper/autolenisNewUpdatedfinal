@@ -225,6 +225,20 @@ async function recordAffiliateAttribution(userId: string, referralCode: string) 
       "@/lib/services/affiliate/referral.service"
     );
     await attributeConversion(referralCode, userId);
+
+    // M9 — award referral milestones at the referral event itself, not only
+    // when the referrer happens to open /buyer/referral. Idempotent (unique
+    // buyerId+milestone) and best-effort inside this try.
+    const referrerBuyer = await prisma.buyer.findUnique({
+      where: { userId: affiliate.userId },
+      select: { id: true },
+    });
+    if (referrerBuyer) {
+      const { evaluateBuyerReferralMilestones } = await import(
+        "@/lib/services/referral/referral-milestone.service"
+      );
+      await evaluateBuyerReferralMilestones(referrerBuyer.id);
+    }
   } catch (err) {
     logger.error("[recordAffiliateAttribution] failed to record attribution:", err);
     // Non-blocking — do not throw; buyer signup must not fail due to attribution error

@@ -35,10 +35,16 @@ export async function walkCommissionTree(
   });
   if (!affiliate) return;
 
+  // M14 — a SUSPENDED/REJECTED affiliate does not accrue new money; its level
+  // is skipped while other levels of the tree still earn (PENDING stays
+  // quasi-active under the auto-ACTIVE activation model).
+  const canEarn = (a: { status?: string } | null | undefined) =>
+    !!a && a.status !== "SUSPENDED" && a.status !== "REJECTED";
+
   const levels = [
-    { affiliate, rate: COMMISSION_RATES.LEVEL_1, level: 1 },
-    affiliate.parent ? { affiliate: affiliate.parent, rate: COMMISSION_RATES.LEVEL_2, level: 2 } : null,
-    affiliate.parent?.parent ? { affiliate: affiliate.parent.parent, rate: COMMISSION_RATES.LEVEL_3, level: 3 } : null,
+    canEarn(affiliate) ? { affiliate, rate: COMMISSION_RATES.LEVEL_1, level: 1 } : null,
+    canEarn(affiliate.parent) ? { affiliate: affiliate.parent!, rate: COMMISSION_RATES.LEVEL_2, level: 2 } : null,
+    canEarn(affiliate.parent?.parent) ? { affiliate: affiliate.parent!.parent!, rate: COMMISSION_RATES.LEVEL_3, level: 3 } : null,
   ].filter(Boolean) as Array<{ affiliate: { id: string }; rate: number; level: number }>;
 
   // Commission is idempotent — check before creating
@@ -182,6 +188,26 @@ export async function getCommissionSummary(affiliateId: string) {
     // net of clawback offsets; in-place-reversed and REJECTED rows excluded.
     totalCents: paidCents + approvedCents + pendingReviewCents + clawbackOffsetCents,
   };
+}
+
+// Per-level lifetime breakdown for the earnings page (M15) — a DB-side groupBy
+// over the WHOLE ledger under the shared earned rule, so the level bars always
+// sum to the same universe as the summary cards (the old version reduced the
+// latest 50 rows client-side and drifted once an affiliate passed 50).
+export async function getCommissionLevelBreakdown(
+  affiliateId: string,
+): Promise<Array<{ level: number; total: number; count: number }>> {
+  const groups = await prisma.commission.groupBy({
+    by: ["level"],
+    where: ledgerEarnedWhere(affiliateId),
+    _sum: { amountCents: true },
+    _count: { id: true },
+  });
+  const byLevel = new Map(groups.map((g) => [g.level, g]));
+  return [1, 2, 3].map((level) => {
+    const g = byLevel.get(level);
+    return { level, total: g?._sum.amountCents ?? 0, count: g?._count.id ?? 0 };
+  });
 }
 
 // ─── Refund/approval safety for fee-driven commissions (M2/M16) ──────────────

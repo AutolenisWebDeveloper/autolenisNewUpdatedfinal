@@ -27,9 +27,14 @@ mock.module("server-only", { namedExports: {} });
 mock.module("@/lib/logger", { namedExports: { logger: { error: () => {}, warn: () => {}, info: () => {} } } });
 
 interface Ctrl {
-  commission: { id: string; status: string; affiliateId: string; amountCents: number; createdAt: Date } | null;
+  commission:
+    | { id: string; status: string; affiliateId: string; amountCents: number; createdAt: Date; paidAt?: Date | null; payoutId?: string | null }
+    | null;
   // number of rows the compare-and-set updateMany reports as claimed
   claimCount: number;
+  // T1.10: simulate a corrupted claim — the CAS "succeeds" but the persisted
+  // row does not satisfy the settled invariant (e.g. payoutId never linked)
+  corruptClaim: boolean;
   payoutsCreated: Array<Record<string, unknown>>;
   updateManyCalls: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>;
 }
@@ -41,6 +46,16 @@ const tx = {
     findUnique: async () => ctrl.commission,
     updateMany: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
       ctrl.updateManyCalls.push({ where, data });
+      // Reflect the write so a post-claim read-back sees the persisted state,
+      // exactly as Postgres would inside the same transaction.
+      if (ctrl.claimCount === 1 && ctrl.commission) {
+        ctrl.commission = {
+          ...ctrl.commission,
+          status: data.status as string,
+          paidAt: (data.paidAt as Date) ?? ctrl.commission.paidAt ?? null,
+          payoutId: ctrl.corruptClaim ? null : ((data.payoutId as string) ?? null),
+        };
+      }
       return { count: ctrl.claimCount };
     },
   },
@@ -66,6 +81,7 @@ beforeEach(() => {
   ctrl = {
     commission: { id: "c_1", status: "APPROVED", affiliateId: "aff_1", amountCents: 4990, createdAt: new Date("2026-01-01") },
     claimCount: 1,
+    corruptClaim: false,
     payoutsCreated: [],
     updateManyCalls: [],
   };
@@ -115,6 +131,14 @@ test("non-APPROVED commission is rejected before any payout is created", async (
 
   assert.equal(ctrl.payoutsCreated.length, 0, "no money-out record for a non-APPROVED commission");
   assert.equal(ctrl.updateManyCalls.length, 0);
+});
+
+test("M11: post-claim settled-invariant assertion — a corrupted claim rolls the settlement back", async () => {
+  // The CAS "succeeds" but the persisted row violates isCommissionSettled
+  // (payoutId never linked — the exact corruption shape the invariant exists
+  // to reject). The settlement must throw so the transaction rolls back.
+  ctrl.corruptClaim = true;
+  await assert.rejects(settle());
 });
 
 test("missing commission is rejected before any payout is created", async () => {

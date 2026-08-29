@@ -112,6 +112,25 @@ test("M8: referralCount counts AffiliateReferral rows, not sub-affiliate childre
   assert.equal(stats!.referralCount, 3);
 });
 
+test("M14: a SUSPENDED level skips its own commission; other levels still earn", async () => {
+  const { walkCommissionTree } = await import("@/lib/services/affiliate/commission.service");
+  ctrl.affiliate = {
+    id: "aff_l1",
+    status: "SUSPENDED", // the referring affiliate is suspended
+    parent: { id: "aff_l2", status: "ACTIVE", parent: { id: "aff_l3", status: "REJECTED" } },
+  };
+  await walkCommissionTree("deal_1", "aff_l1", "pi_m14", 40000);
+  const earners = ctrl.created.map((c) => c.affiliateId);
+  assert.deepEqual(earners, ["aff_l2"], "only the ACTIVE L2 parent earns; SUSPENDED L1 and REJECTED L3 are skipped");
+});
+
+test("M14: PENDING affiliates still earn (activation model keeps PENDING quasi-active)", async () => {
+  const { walkCommissionTree } = await import("@/lib/services/affiliate/commission.service");
+  ctrl.affiliate = { id: "aff_p", status: "PENDING", parent: null };
+  await walkCommissionTree("deal_1", "aff_p", "pi_m14b", 40000);
+  assert.equal(ctrl.created.length, 1);
+});
+
 test("M8: earned total follows the shared ledger rule (REJECTED excluded, clawback offsets net)", async () => {
   const { getBuyerReferralStats } = await import("@/lib/services/buyer/referral.service");
   ctrl.commissions = [

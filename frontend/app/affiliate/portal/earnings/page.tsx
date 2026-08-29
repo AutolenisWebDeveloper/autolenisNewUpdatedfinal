@@ -1,6 +1,6 @@
 import { requireAffiliate } from "@/lib/auth/affiliate-session";
 import { prisma } from "@/lib/prisma";
-import { getCommissionSummary } from "@/lib/services/affiliate/commission.service";
+import { getCommissionSummary, getCommissionLevelBreakdown } from "@/lib/services/affiliate/commission.service";
 import { Badge } from "@/components/ui/badge";
 import { DollarSign, TrendingUp } from "lucide-react";
 import { COMMISSION_RATES } from "@/lib/constants";
@@ -9,21 +9,17 @@ export const dynamic = "force-dynamic";
 
 export default async function AffiliateEarningsPage() {
   const affiliate = await requireAffiliate();
-  const [summary, commissions] = await Promise.all([
+  // M15 — the level bars aggregate the WHOLE ledger in the DB (same universe
+  // as the summary cards); the row list below stays the latest 50.
+  const [summary, byLevel, commissions] = await Promise.all([
     getCommissionSummary(affiliate.id),
+    getCommissionLevelBreakdown(affiliate.id),
     prisma.commission.findMany({
       where: { affiliateId: affiliate.id },
       orderBy: { createdAt: "desc" },
       take: 50,
     }),
   ]);
-
-  // Per-level breakdown
-  const byLevel = [1, 2, 3].map((lvl) => {
-    const levelComms = commissions.filter((c) => c.level === lvl && c.status !== "REVERSED");
-    const total = levelComms.reduce((s, c) => s + c.amountCents, 0);
-    return { level: lvl, total, count: levelComms.length };
-  });
 
   const maxLevelTotal = Math.max(...byLevel.map((b) => b.total), 1);
 

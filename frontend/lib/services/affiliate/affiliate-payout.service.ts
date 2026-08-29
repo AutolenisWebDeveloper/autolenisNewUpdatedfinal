@@ -1,6 +1,7 @@
 // lib/services/affiliate/affiliate-payout.service.ts
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { isCommissionSettled } from "@/lib/services/affiliate/payout-invariants";
 
 // F-002/F-003 — a commission that could not be claimed for settlement: it was
 // missing, already settled, or lost the compare-and-set race to a concurrent
@@ -73,6 +74,20 @@ export async function settleApprovedCommission(input: {
       // Another settlement won the race between our read and our claim. Throwing
       // rolls back the payout we just created — no orphaned money-out record.
       throw new CommissionNotClaimableError(commissionId);
+    }
+
+    // M11 — assert the settled invariant against the row we just wrote, inside
+    // the transaction: status PAID + paidAt + payoutId must all agree, or the
+    // whole settlement rolls back. This turns payout-invariants from test-only
+    // documentation into an enforced write-path guard.
+    const settled = await tx.commission.findUnique({
+      where: { id: commissionId },
+      select: { status: true, paidAt: true, payoutId: true },
+    });
+    if (!settled || !isCommissionSettled(settled)) {
+      throw new Error(
+        `Settlement invariant violated for commission ${commissionId} — rolling back (status=${settled?.status}, paidAt=${String(settled?.paidAt)}, payoutId=${String(settled?.payoutId)})`,
+      );
     }
 
     return {
