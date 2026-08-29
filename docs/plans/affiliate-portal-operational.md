@@ -55,6 +55,22 @@ referral → commission → payout is unexercised live code. Nothing downstream 
 can be proven by production data; it is proven only by tests written in this plan. Stated per the
 brief: the flow has never executed — we do not assume it works.
 
+**Webhook-ledger evidence (added at plan revision, VERIFIED live):** `payment_provider_events`
+has **0 rows** while `deposits` holds 7 PAID (+1 PENDING). The Stripe webhook handler has never
+recorded an event in production; deposits reach PAID via the reconciler cron
+(`deposit-activation-reconcile` → `deposit-settlement.service.ts:206-209`, which polls Stripe
+PaymentIntents directly). Consequence: **commission accrual — created only in the webhook fee
+branch (`stripe/route.ts:552-563`) — is currently unreachable in production**, as is any
+`charge.refunded` handling. This is finding M16. Everything implemented in the webhook path is
+therefore labeled **UNVERIFIED (production reachability)** in the PR, never FIXED-and-proven-live.
+
+**Anon-key exposure check (added at plan revision, VERIFIED by grep):** the only browser Supabase
+client on the affiliate surface is the register page's auth-session check
+(`app/affiliate/register/page.tsx:8,70`); there are **zero** PostgREST `.from()` reads on any
+affiliate table anywhere in `app/`, `lib/`, `components/`. All affiliate data access is
+Prisma/service-role. Therefore RLS migration 002 is **hardening** (chain-provisioned envs, future
+anon usage), not a live production risk — stated per the owner's requirement.
+
 Physical-schema facts (information_schema, not `_prisma_migrations`): all 16 tables exist;
 `affiliates` carries a **duplicate column pair** `lastInactiveNudgeAt` *and* `last_inactive_nudge_at`
 (schema.prisma maps only the snake_case one — the camelCase column is orphaned); `commissions.rate`
@@ -100,6 +116,7 @@ file:line unless marked ASSUMPTION.
 | M13 | P3 | Click tracking unauthenticated + unlimited (no rate limit); conversion marks the affiliate's most recent unconverted click **by anyone**; `hashIp` falls back to a hardcoded salt | `public/referral/track/route.ts`; `referral.service.ts:25,107-117` |
 | M14 | P3 | Commissions accrue to non-ACTIVE affiliates; `Buyer.affiliateId` never written by the referral chain → inactive-cron's buyer signal dead | `commission.service.ts:30-40`; `cron/affiliate-inactive/route.ts:50-54` |
 | M15 | P3 | Earnings level bars computed from `take: 50` rows next to full-table summary cards — disagree past 50 commissions **[dup: D18]** | `earnings/page.tsx:14-26` |
+| M16 | P1 | Commission accrual depends exclusively on the Stripe webhook fee branch, and the webhook ledger has never recorded a production event (0 `payment_provider_events` rows vs 7 PAID deposits, which reach PAID via the reconciler) → accrual and refund handling are unreachable live | §1 webhook-ledger evidence; `stripe/route.ts:552-563`; `deposit-settlement.service.ts:206-209` |
 
 ### Routing & auth (R)
 
@@ -191,54 +208,105 @@ H-6 banking unification + its test.
 
 ---
 
-## 4. Decisions taken by this plan (flag at plan review if you disagree)
+## 4. Decisions (owner-approved 2026-08-29, with amendments applied)
 
-1. **Activation model — keep auto-ACTIVE on email verification** (current server reality). Fix the
-   register success copy, allow `PENDING` at sign-in with an "under review" banner path removed
-   (PENDING only arises from the safety net; map it to the same portal experience as ACTIVE since
-   `requireAffiliate` already permits it). Rejected: introducing human review pre-activation —
-   contradicts the deployed model and adds an admin bottleneck the owner didn't ask for.
-2. **Onboarding gate — wire `requireAffiliateWithOnboarding` into the portal layout** (its exempt
-   list already covers onboarding/profile/settings/compliance; extend with dashboard + resources +
-   notifications so a `NOT_STARTED` affiliate can see their home, get guidance, and read
-   notices — the dashboard already renders an onboarding CTA). Earnings/finance/referral-hub/
-   network/leaderboard/documents/income-calculator require the wizard. Payout eligibility
-   additionally requires onboarding **APPROVED** + verified payout method. Rejected: deleting the
-   gate — the brief requires an onboarding gate E2E and an operational approval flow.
-3. **Payout request rail — rebuild, not re-enable.** `requestPayout` becomes: one `$transaction`
-   that CAS-claims the affiliate's APPROVED commissions (`updateMany where status:"APPROVED",
-   payoutId:null` → attach to a new `AffiliatePayout` in `REQUESTED` status), min threshold 2500¢,
-   requires onboarding APPROVED + payout method. Admin settles via the existing mark-paid CAS
-   (extended to settle a requested payout: REQUESTED→PAID flips its commissions APPROVED→PAID).
-   Real money movement stays out (recorded-only settlement, existing TODO stands). No new enum
-   value: the request state reuses the existing, currently-unreachable `PayoutStatus.PENDING`
-   (M12), so no schema change is needed for the rail.
-4. **Clawback semantics — one shared aggregation.** New `commissionLedgerTotals()` in
-   `commission.service.ts`: `earned = SUM(amountCents) WHERE status IN (PENDING, APPROVED, PAID)
-   + SUM(amountCents) WHERE status = REVERSED AND amountCents < 0`. In-place-reversed positive
-   rows stay excluded; clawback offsets net out. All five consumers (summary, leaderboard SQL,
-   digest, referrals page, admin) switch to the same rule. Rejected: converting in-place reverse
-   to offsets (rewrites admin history semantics).
-5. **Refunds → commissions:** in the `charge.refunded` fee branch, PENDING/APPROVED commissions
-   whose `qualifyingEventId` starts with the refunded PI id are flipped to REVERSED (CAS);
-   PAID ones trigger an ops alert (existing notification path) for manual clawback — never a
-   silent auto-clawback of paid money. Cron auto-approval additionally requires the linked deal
-   to not be CANCELLED/REFUNDED.
-6. **Schema migrations are written but NOT applied** (owner-gated): indexes (D1, D7, D8, D9, D15),
-   `affiliate_documents` drift reconciliation (D2), RLS enable deny-all for 16 tables (D3),
-   `affiliate_referrals.referred_user_id` UNIQUE (D6 — safe: table has 0 rows), drop orphaned
-   `affiliates."lastInactiveNudgeAt"` duplicate column, `payout_id` FK SET NULL→RESTRICT (D20).
-   Code-side belt-and-braces (deterministic `orderBy`) ships regardless.
-7. **Deferred entirely** (real, out of scope — see §7): Stripe Connect payouts; AffiliateTier
-   implementation or table drop; milestone ledger; leaderboard masking redesign; visual-suite
-   authenticated tier; O8 orphan reconciliation job (add detection message only); O16 role
-   uniformity; R14 401→403.
+1. **Activation model — keep auto-ACTIVE on email verification** (owner-accepted). Fix the
+   register success copy; sign-in permits PENDING. The real sybil control sits at the payout
+   boundary, so **register rate limiting is in scope** (Phase 3), not deferred.
+   **What the admin review surface means under auto-ACTIVE:** account-level approve/reject
+   (`Affiliate.status`) is **not decorative** — it is the kill switch: reject/suspend revokes
+   portal + API access (`requireAffiliate`/`getRequestAffiliate` enforce it server-side) at any
+   time after auto-activation; "approve" on an already-ACTIVE affiliate is a no-op rail kept for
+   safety-net-provisioned PENDING accounts. `AffiliateOnboardingReview` is a **second, distinct
+   gate**: after this plan it gates exactly two things — the gated portal surfaces (decision 2)
+   and payout eligibility (decision 3). It never grants or revokes login. The PR restates this
+   so neither rail is mistaken for the other.
+2. **Onboarding gate — wire `requireAffiliateWithOnboarding` into the portal layout.**
+   **Live population check (owner-required, VERIFIED 2026-08-29):** 2 affiliates, both ACTIVE —
+   one with onboarding `IN_PROGRESS`, one with **no review row at all**. The gate as written
+   blocks only `NOT_STARTED`; a missing review row must resolve to the same treatment as
+   `NOT_STARTED` (it is created on first wizard visit), so the no-row affiliate WILL be
+   redirected from gated pages to the wizard once the gate ships — that is the intended launch
+   behavior, affects exactly 1 existing account, and walls them out of nothing exempt. Neither
+   existing affiliate loses dashboard/notifications/profile/settings/compliance access.
+   **Exempt-set reconciliation (owner-required):** final set = the existing list in
+   `affiliate-session.ts:53-58` (`onboarding`, `profile`, `settings`, `compliance`) **∪**
+   {`dashboard`, `notifications`, `resources`}. Gated: earnings, finance, payouts(redirect),
+   referrals, referral-hub, network, leaderboard, documents, income-calculator. A unit test
+   proves: every portal route is either exempt or gated (no unreachable page), the gate's
+   redirect target is exempt (no loop), and specifically a `NOT_STARTED` affiliate reaches
+   `/affiliate/portal/compliance`. Payout eligibility additionally requires onboarding
+   **APPROVED** + payout method.
+3. **Payout request rail — rebuild, not re-enable — moved to Phase 6** (owner reorder: it is the
+   only net-new capability, has zero live data, and is downstream of a funnel that cannot yet
+   produce a commission). `requestPayout`: one `$transaction` that CAS-claims the affiliate's
+   APPROVED commissions (`updateMany where status:"APPROVED", payoutId:null` → attach to a new
+   `AffiliatePayout` in the currently-unreachable `PayoutStatus.PENDING` state — no new enum
+   value, no schema change). Minimum threshold is a config constant
+   (`AFFILIATE_PAYOUT_MINIMUM_CENTS = 2500` in `lib/constants.ts`), never a literal. Requires
+   onboarding APPROVED + payout method. Admin settles via the existing mark-paid CAS pattern.
+   Real money movement stays out (recorded-only settlement, existing TODO stands).
+4. **Clawback semantics — one shared aggregation** (owner-approved as written). New
+   `commissionLedgerTotals()` in `commission.service.ts`: `earned = SUM(amountCents) WHERE
+   status IN (PENDING, APPROVED, PAID) + SUM(amountCents) WHERE status = REVERSED AND
+   amountCents < 0`. In-place-reversed positive rows stay excluded; clawback offsets net out.
+   All five consumers (summary, leaderboard SQL, digest, referrals page, admin) switch to it.
+5. **Refunds → commissions** (owner-approved with reachability amendment). `charge.refunded` fee
+   branch flips PENDING/APPROVED commissions matching the PI prefix to REVERSED (CAS); PAID →
+   ops alert, never silent auto-clawback. **Reachability: the webhook path has never recorded a
+   production event (M16), so this handler is inert in production until webhook delivery is
+   fixed (owner/infra action — Stripe dashboard endpoint config, unverifiable from the repo).
+   The PR labels it UNVERIFIED (production reachability), not FIXED.** The auto-approve cron
+   stops approving on age alone: before approving, it reads the underlying payment state — the
+   local refund records for the fee PI (`refund.service` writes) AND the linked deal's status —
+   and skips any commission whose payment is refunded/disputed or whose deal is
+   CANCELLED/REFUNDED. Because webhook-driven refund events may never arrive (M16), the cron's
+   payment-state read is the effective production guard.
+6. **Migration SQL split in two owner-gated files** (owner amendment), both under
+   `frontend/prisma/migrations/` as chain migrations AND mirrored as standalone annotated files
+   in `docs/plans/sql/` for manual owner application:
+   - **001_affiliate_correctness.sql** — `affiliate_documents` drift fix, `commissions`
+     indexes + `approved_at/approved_by/reversed_at`, `buyers(affiliate_id)`,
+     `affiliates(parent_id)`, `affiliate_referrals(referred_user_id)` index + UNIQUE,
+     `affiliate_payouts(affiliate_id)`, orphaned `affiliates."lastInactiveNudgeAt"` drop,
+     `payout_id` FK → RESTRICT. **Every statement is followed by a verification query.**
+   - **002_affiliate_rls.sql** — RLS enable deny-all on the 16 affiliate tables, separately
+     applyable, each with a verification query.
+   **Production-impact statement (owner-required):** until 001 applies, **BROKEN IN PRODUCTION:**
+   document upload only if the production table carries the drifted baseline shape — live
+   `information_schema` shows production does NOT have the drifted `document_type` column, so on
+   production 001's drift section is a no-op guard and the breakage is confined to
+   chain-provisioned environments; the index/uniqueness/stamp sections are performance +
+   integrity hardening on production. 002 is **hardening only**: no affiliate path uses the anon
+   key (verified, §1) — it protects chain-provisioned environments and any future anon usage.
+7. **Deferred entirely** (§7): Stripe Connect payouts; AffiliateTier implementation or drop;
+   milestone ledger; leaderboard masking redesign; visual-suite authenticated tier; O8 orphan
+   reconciliation job (detection message only); O16 role uniformity; R14 401→403; U14
+   client→RSC restructures; remember-me; visitor-scoped click conversion; broader FK program
+   (D16 beyond what 001 carries).
+
+## 4b. Up-front triage — FIX vs DEFER for every finding (owner criteria)
+
+FIX only if: **money path** · **blocking a flow** · **security boundary** · **user-visible dead
+end** · **one-line change**. Everything else defers with a reason. The UI phase is bounded to
+four-state completeness, 375px/1280px responsiveness, and a11y — reusing the existing design
+system; it is not a redesign.
+
+| Disposition | Findings | Criterion |
+|---|---|---|
+| **FIX** | M1–M8, M10, M11, M15, M16(code side) | money path |
+| **FIX (partial)** | M9 (evaluation trigger + pay CAS; ledger deferred), M12 (remove the false "next payout" display; tier schema deferred), M13 (rate limit + salt warning; visitor-scoping deferred), M14 (skip SUSPENDED/REJECTED in the walk + write `Buyer.affiliateId`; broader policy deferred) | money path / security |
+| **FIX** | R1, R7, R12 (dead ends) · R3 (blocking gate) · R4 (security) · R5 (blocking — mid-session 401s) · R6, R10 (blocking flows) · R2, R8, R9, R11 (one-liners) · R13 (sign-out target + signin bounce only) | as noted |
+| **FIX** | O2 (blocking) · O3 (security boundary) · O4, O5, O15 (dead ends / user-visible) · O9, O14 (one-liners) · O11, O12 (validation consistency on a security-adjacent path) · O17 (dead code removal) · O8 (detection message only) | as noted |
+| **FIX** | D1, D6, D9 (money path) · D2 (blocking flow in chain envs) · D3 (security hardening, 002) · D7, D8, D15, D20 (001 migration lines) · D10, D11, D12, D13 (money correctness) · D14 (blocking at scale) · D17 (dead code) | as noted |
+| **FIX** | U1–U3, U6 (error states) · U4, U5, U8, U9 (a11y) · U10 (375px) · U11 (token reuse — bounded swap, no redesign) · U12 (delete) · U13 (small) · U16 (dead-end empty states) · U15/U17 (only the one-line items: nav labels, `aria-hidden`, dead classes, "real time" copy) | bounded UI phase |
+| **DEFER** | R14 (matches buyer convention) · O16 (cross-portal convention) · D16 broader FKs (needs an orphan policy) · D21 (no money impact) · D22 (by-design ambiguity, owner call) · U14 (restructure, not states/responsive/a11y) · M9-ledger, M12-tier, M13-visitor-scoping, M14-policy (above) · everything in §7 | outside criteria |
 
 ## 5. Execution phases and tasks
 
-Order is dependency-driven: money correctness first (it defines the semantics the UI must
-display), then attribution, then the payout rail, then gates/routing, onboarding, data layer,
-UI, dead code, E2E. **Every task:** (1) re-read the cited files and confirm the finding still
+Order (owner-set): **money correctness → attribution → routing/auth → onboarding → data layer →
+payout rail → UI → dead code → E2E → gates/review/PR.** Everything blocking a first commission
+lands before the rail, which is the only net-new capability. **Every task:** (1) re-read the cited files and confirm the finding still
 holds; (2) failing test first (`tsx --test` conventions of the sibling tests in
 `lib/services/affiliate/__tests__/`); (3) minimal fix; (4) suite green; (5) commit with a
 conventional message naming the finding ID. Commits are per-task.
@@ -256,12 +324,16 @@ conventional message naming the finding ID. Commits are per-task.
   excludes the third. Then implement in `commission.service.ts`; switch `getCommissionSummary`,
   leaderboard SQL `FILTER`, `digest.service.ts:104-108`, `referrals/page.tsx:36`, and the admin
   netting to it. Regression: existing `commission-basis`/`commission-durability` stay green.
-- [ ] **T1.2 (M2)** Refund wiring + cron gating. Tests: reversal on `charge.refunded` for
+- [ ] **T1.2 (M2/M16)** Refund wiring + cron gating. Tests: reversal on `charge.refunded` for
   PENDING/APPROVED via CAS `updateMany({ where: { qualifyingEventId: { startsWith: pi.id },
-  status: { in: ["PENDING","APPROVED"] } } })`; PAID → ops notification, untouched; cron
-  approves only commissions whose `dealId` resolves to a deal not in CANCELLED/REFUNDED.
-  Files: `app/api/webhooks/stripe/route.ts` (fee-refund branch), `app/api/cron/affiliates/route.ts`,
-  logic in `commission.service.ts` (`reverseCommissionsForPaymentIntent`).
+  status: { in: ["PENDING","APPROVED"] } } })`; PAID → ops notification, untouched. The cron
+  reads **underlying payment state, not age alone**: skip any commission whose fee PI has a
+  local refund/dispute record or whose linked deal is CANCELLED/REFUNDED (test both skip
+  reasons + the approve case). Reachability: the webhook handler is inert in production (M16,
+  §1) — PR labels it UNVERIFIED (production reachability); the cron's payment-state read is
+  documented as the effective production guard. Files: `app/api/webhooks/stripe/route.ts`
+  (fee-refund branch), `app/api/cron/affiliates/route.ts`, logic in `commission.service.ts`
+  (`reverseCommissionsForPaymentIntent`).
 - [ ] **T1.3 (M3)** Legacy fee path: derive `buyerId` from `feeDeal.buyerId` when metadata absent;
   always attempt the walk; DLQ on failure (existing `autolenis/affiliate.commission_walk` topic).
   Test: webhook fixture without metadata still creates commissions.
@@ -291,6 +363,9 @@ conventional message naming the finding ID. Commits are per-task.
 - [ ] **T1.12 (M13, partial)** Rate-limit `/api/public/referral/track` with the existing limiter
   used by auth actions; keep salt fallback but log a warning when `REFERRAL_IP_SALT` unset.
   Visitor-scoped conversion linking deferred (stats-only impact).
+- [ ] **T1.13 (M14, partial)** `walkCommissionTree` skips SUSPENDED/REJECTED affiliates at every
+  level (their level's commission is not created; other levels unaffected). Test: suspended L1
+  parent earns nothing, L2 grandparent still earns. (`Buyer.affiliateId` write lands in T2.4.)
 
 ### Phase 2 — Attribution integrity
 
@@ -307,110 +382,138 @@ conventional message naming the finding ID. Commits are per-task.
 - [ ] **T2.5 (R10/O7)** Register page reads `?ref` + `affiliate_ref` cookie into a visible,
   editable "Referral code (optional)" field and POSTs it; API sets `level: parent.level + 1`
   (cap at 3). Failing test on the route level math first.
+- [ ] **T2.6 (owner-required) Full-chain attribution test.** One test,
+  `__tests__/attribution-chain.test.ts`, that walks the COMPLETE chain in a single execution:
+  simulated `?ref=` visit (proxy cookie semantics) → `affiliate_ref` value → buyer signup path
+  (`signUpAction` server-side fallback from T2.2) → `recordAffiliateAttribution` →
+  `AffiliateReferral` row asserted → fee-payment conversion (`processFeeCommission` with the
+  referral in place) → `Commission` rows asserted at every level with correct basis and payee.
+  This test must FAIL before T2.1–T2.5 land (proving the chain is dead and where — write it
+  first, record which link breaks it) and pass after. Five isolated unit tests do not satisfy
+  this task: the deliverable is one execution crossing every link, because 5 clicks → 0
+  referrals in production is consistent with more than one break; this proves every break found
+  is closed.
 
-### Phase 3 — Payout request rail (per decision 3)
+### Phase 3 — Routing & auth
 
-- [ ] **T3.1** `requestPayout` in `affiliate-payout.service.ts`: single `$transaction` — eligibility
-  (onboarding APPROVED via `AffiliateOnboardingReview`, payout method exists, sum(APPROVED,
-  payoutId:null) ≥ 2500¢) → create `AffiliatePayout` status `PENDING` → CAS-attach commissions
-  (`updateMany where affiliateId, status:"APPROVED", payoutId:null → { payoutId }`; count must
-  equal the pre-read set or rollback). Commissions stay APPROVED until settlement. Tests:
-  happy path; below-threshold rejection; no-method rejection; onboarding-not-approved rejection;
-  **two concurrent requests cannot claim the same commission** (CAS count mismatch → rollback).
-- [ ] **T3.2** `/api/affiliate/payouts/request` replaces the 503 stub: zod body (optional note),
-  auth via `getRequestAffiliate`, service call, typed errors (`BELOW_MINIMUM`,
-  `NO_PAYOUT_METHOD`, `ONBOARDING_REQUIRED`, `NOTHING_TO_PAY`).
-- [ ] **T3.3** Admin settlement of a requested payout: extend mark-paid to accept an
-  `AffiliatePayout` in PENDING → one transaction flips payout PENDING→PAID (CAS) + its attached
-  commissions APPROVED→PAID (CAS, count-verified) + audit row. Reuses `settleApprovedCommission`
-  internals; invariant assertion from T1.10 applies.
-- [ ] **T3.4** Finance Hub UI: replace "Payouts opening soon" with available-balance card +
-  Request button gated on eligibility, using kit `ConfirmDialog` with the amount and
-  "requests are reviewed and paid manually; this cannot be combined with a second request until
-  settled" consequence copy; pending-request state; typed error surfacing. Delete
-  `PayoutRequestButton.tsx` (U12) — superseded.
-
-### Phase 4 — Routing & auth
-
-- [ ] **T4.1 (R1)** `proxy.ts` step 10: exact `/affiliate/portal` (and trailing-slash) →
+- [ ] **T3.1 (R1)** `proxy.ts` step 10: exact `/affiliate/portal` (and trailing-slash) →
   redirect `/affiliate/portal/dashboard`. E2E asserts 200 chain later.
-- [ ] **T4.2 (R4)** `limitAuthAttempt`-style IP+email throttle on register (reuse the existing
-  limiter from `actions.ts:341-348`); correct the proxy CSRF comment (R9) — no behavior change
-  to CSRF policy itself; neutralize enumeration by returning the same success envelope for
-  existing emails (send "you already have an account" email instead — matches buyer forgot-password
-  convention if present; if not, keep 409 but rate-limited, and say so in the PR).
-- [ ] **T4.3 (R5)** Port the buyer `setAll` cookie-forwarding into `affiliate-api.ts` verbatim
+- [ ] **T3.2 (R4, owner-required in scope)** `limitAuthAttempt`-style IP+email throttle on
+  register (reuse the existing limiter from `actions.ts:341-348`); correct the proxy CSRF
+  comment (R9) — no behavior change to CSRF policy itself; neutralize enumeration by returning
+  the same success envelope for existing emails (send "you already have an account" email
+  instead — matches buyer forgot-password convention if present; if not, keep 409 but
+  rate-limited, and say so in the PR).
+- [ ] **T3.3 (R5)** Port the buyer `setAll` cookie-forwarding into `affiliate-api.ts` verbatim
   (attributed comment). Test mirrors the buyer helper's test if one exists; else unit-test the
   handler wiring.
-- [ ] **T4.4 (R6/O10)** Align activation model (decision 1): fix register success copy; sign-in
+- [ ] **T3.4 (R6/O10)** Align activation model (decision 1): fix register success copy; sign-in
   permits PENDING (drops the "under review" hard block; keeps SUSPENDED/REJECTED handling);
   safety-net provisioning unchanged.
-- [ ] **T4.5 (R7/O1 + R8)** `unsubscribed/page.tsx`: proper `reason === "rejected"` card (what
+- [ ] **T3.5 (R7/O1 + R8)** `unsubscribed/page.tsx`: proper `reason === "rejected"` card (what
   happened, the emailed reason exists, support contact, no dashboard link); delete the dead
   layout REJECTED branch (`portal/layout.tsx:19-27`).
-- [ ] **T4.6 (O2)** Verification recovery: map `verify_required` to human copy + a resend action
+- [ ] **T3.6 (O2)** Verification recovery: map `verify_required` to human copy + a resend action
   on the affiliate sign-in client; extend the existing resend-verification route to accept
   affiliates (branch on role, affiliate email template) — no second route. Register fails loudly
   (VERIFICATION_UNAVAILABLE) when `generateLink` fails instead of sending a dead-end email.
-- [ ] **T4.7 (R12/O13)** Onboarding degraded state renders an error panel instead of
+- [ ] **T3.7 (R12/O13)** Onboarding degraded state renders an error panel instead of
   self-redirect; `affiliate-session.ts:46-49` same fix when the gate goes live.
-- [ ] **T4.8 (R13)** Sign-out: role-aware redirect (affiliates → `/affiliate/signin`);
+- [ ] **T3.8 (R13)** Sign-out: role-aware redirect (affiliates → `/affiliate/signin`);
   authenticated visitors to `/affiliate/signin` bounce to the dashboard (server-side, mirroring
   step-9's AUTH_ROUTES pattern or an in-page server check). Remember-me deferred.
-- [ ] **T4.9 (R11/U13)** Register client validation = server zod rules (12 chars + classes);
+- [ ] **T3.9 (R11/U13)** Register client validation = server zod rules (12 chars + classes);
   `noValidate` on the form so the styled error path owns validation.
 
-### Phase 5 — Onboarding integrity
+### Phase 4 — Onboarding integrity
 
-- [ ] **T5.1 (O3)** Transition guards in `saveOnboardingStep` + `submit`: step writes rejected
+- [ ] **T4.1 (O3)** Transition guards in `saveOnboardingStep` + `submit`: step writes rejected
   (409) when status ∈ {SUBMITTED, APPROVED, REJECTED} unless NEEDS_CORRECTION; submit only from
   IN_PROGRESS/NEEDS_CORRECTION; all data+status writes in one `$transaction`; admin review 404s
   a nonexistent affiliate and requires an existing review row (no approve-from-nothing). Failing
   tests per illegal transition.
-- [ ] **T5.2 (O4/O5/U7)** Wizard status rendering: NEEDS_CORRECTION banner listing
+- [ ] **T4.2 (O4/O5/U7)** Wizard status rendering: NEEDS_CORRECTION banner listing
   `correctionItems` + `decisionNote`; SUBMITTED/UNDER_REVIEW → "submitted, under review" card;
   APPROVED → the existing success card; REJECTED → explanation card. Props already typed.
-- [ ] **T5.3 (R3, decision 2)** Wire `requireAffiliateWithOnboarding` into `portal/layout.tsx`
-  with the extended exempt list (dashboard, resources, notifications + existing four); pages
-  drop their duplicate `requireAffiliate` **only** where the layout guarantees it (keep the
-  call in pages that render user data — cheap after M7's include removal — decide per page and
-  document); nav gating in `AffiliateSidebar` mirrors the gate (locked items with lock icon +
-  tooltip, matching the buyer sidebar's existing gating pattern if present).
-- [ ] **T5.4 (O15/U6)** Step 6 gates on a GOVERNMENT_ID upload specifically; upload path wrapped
+- [ ] **T4.3 (R3, decision 2 with owner amendments)** Wire `requireAffiliateWithOnboarding` into
+  `portal/layout.tsx` with the **reconciled** exempt set (existing four: onboarding, profile,
+  settings, compliance ∪ dashboard, notifications, resources); a missing review row is treated
+  exactly as NOT_STARTED. Required tests (owner-mandated): every portal route is either exempt
+  or gated (enumerated against the filesystem routes — no unreachable page); the gate's redirect
+  target is in the exempt set (no loop); a NOT_STARTED affiliate **reaches
+  `/affiliate/portal/compliance`**; a NOT_STARTED affiliate hitting a gated page lands on the
+  wizard. Pages drop their duplicate `requireAffiliate` only where the layout guarantees it;
+  nav gating in `AffiliateSidebar` mirrors the gate (locked items with lock icon + tooltip,
+  matching the buyer sidebar's gating pattern if present). Live-population impact (§4 decision
+  2): exactly 1 existing affiliate (no review row) becomes wizard-gated on gated pages — stated
+  in the PR.
+- [ ] **T4.4 (O15/U6)** Step 6 gates on a GOVERNMENT_ID upload specifically; upload path wrapped
   in try/catch with `apiErrorMessage` surfacing.
-- [ ] **T5.5 (O11/O12)** One upload service consumed by both routes (union of type allowlists,
+- [ ] **T4.5 (O11/O12)** One upload service consumed by both routes (union of type allowlists,
   identical MIME rules); one tax-classification vocabulary (finance enum wins; wizard maps its
   labels onto it; migration-free — column is text).
-- [ ] **T5.6 (O9/O14/O8)** P2002 retry on referral-code create; escape admin reason/note in email
+- [ ] **T4.6 (O9/O14/O8)** P2002 retry on referral-code create; escape admin reason/note in email
   HTML (`escapeHtml` helper already in repo — grep, reuse); register EMAIL_EXISTS branch
   distinguishes the Supabase-orphan case (Supabase user exists, no Prisma user) and returns a
   distinct message telling the user to contact support (reconciliation job deferred).
 
-### Phase 6 — Data layer
+### Phase 5 — Data layer
 
-- [ ] **T6.1 (D1/D7/D8/D9/D15/D6/D20/D2 + dup column + audit stamps)** One migration:
-  `frontend/prisma/migrations/<ts>_affiliate_surface_reconciliation/migration.sql` —
-  `CREATE INDEX` on `commissions(affiliate_id, status)`, `commissions(status, created_at)`,
-  `buyers(affiliate_id)`, `affiliates(parent_id)`, `affiliate_referrals(referred_user_id)` +
-  UNIQUE, `affiliate_payouts(affiliate_id)`; `affiliate_documents` drift fix (drop
-  `document_type`, align nullability + `bigint`→`integer`, rename indexes to Prisma names);
-  drop `affiliates."lastInactiveNudgeAt"`; `commissions` `approved_at`/`approved_by`/`reversed_at`;
-  `payout_id` FK → RESTRICT. Idempotent (`IF NOT EXISTS` / guarded DO blocks) per repo migration
-  conventions. schema.prisma updated to match. **NOT applied to production — owner-gated,
-  called out in the PR.** `npm run test:migrations` (chain-from-zero) must pass.
-- [ ] **T6.2 (D3)** Separate migration enabling RLS deny-all on all 16 affiliate tables,
-  following `20260918000000_enable_rls_manual_tables` exactly. Owner-gated likewise.
-- [ ] **T6.3 (M7/D4)** Drop the `commissions` include + slim `user` select in
+- [ ] **T5.1 (001_affiliate_correctness — D1/D2/D6/D7/D8/D9/D15/D20 + dup column + audit
+  stamps)** Chain migration `frontend/prisma/migrations/<ts>_affiliate_correctness/migration.sql`
+  + annotated mirror `docs/plans/sql/001_affiliate_correctness.sql` for manual owner
+  application. Contents: `affiliate_documents` drift fix (guarded: drop `document_type`, align
+  nullability, `bigint`→`integer`, rename indexes to Prisma names); `CREATE INDEX` on
+  `commissions(affiliate_id, status)`, `commissions(status, created_at)`, `buyers(affiliate_id)`,
+  `affiliates(parent_id)`, `affiliate_referrals(referred_user_id)` + UNIQUE (live table has 0
+  rows — safe), `affiliate_payouts(affiliate_id)`; drop orphaned
+  `affiliates."lastInactiveNudgeAt"`; `commissions` `approved_at`/`approved_by`/`reversed_at`;
+  `payout_id` FK → RESTRICT. Idempotent (`IF NOT EXISTS` / guarded DO blocks). **Every
+  statement is followed by a commented verification query** (owner-required). schema.prisma
+  updated to match. **NOT applied to production — owner-gated.** Production-impact statement
+  per §4 decision 6 goes in the PR verbatim. `npm run test:migrations` (chain-from-zero) must
+  pass.
+- [ ] **T5.2 (002_affiliate_rls — D3)** Separate chain migration + annotated mirror
+  `docs/plans/sql/002_affiliate_rls.sql`, separately applyable: RLS enable deny-all on the 16
+  affiliate tables, following `20260918000000_enable_rls_manual_tables` exactly, each statement
+  with a verification query. Hardening-only on production (anon-key check, §1) — stated in the
+  PR. Owner-gated likewise.
+- [ ] **T5.3 (M7/D4)** Drop the `commissions` include + slim `user` select in
   `getAuthenticatedAffiliate`; keep `children: { take: 1 }` only if a consumer needs it (grep;
   none found → drop). Typecheck catches any hidden consumer.
-- [ ] **T6.4 (D10)** Admin `earningsTier` filter moves before pagination (tier derived from the
+- [ ] **T5.4 (D10)** Admin `earningsTier` filter moves before pagination (tier derived from the
   commission `groupBy` already computed); `total` reflects the filtered set. Test with 2 pages.
-- [ ] **T6.5 (D11)** `getAffiliateMetrics` → `commission.groupBy` + `affiliateReferral.groupBy`;
+- [ ] **T5.5 (D11)** `getAffiliateMetrics` → `commission.groupBy` + `affiliateReferral.groupBy`;
   no row loading. Numbers pinned by test.
-- [ ] **T6.6 (D14)** Digest + inactive crons: eligibility in SQL (`lastDigestSentAt < weekStart
+- [ ] **T5.6 (D14)** Digest + inactive crons: eligibility in SQL (`lastDigestSentAt < weekStart
   OR NULL`, etc.), `orderBy: { id: "asc" }`, cursor loop. Test the watermark filter.
-- [ ] **T6.7 (D15)** `getPayoutHistory` paginated (`take: 50` default + cursor param); API +
+- [ ] **T5.7 (D15)** `getPayoutHistory` paginated (`take: 50` default + cursor param); API +
   finance page consume it.
+
+### Phase 6 — Payout request rail (per decision 3; owner-moved after the funnel fixes)
+
+- [ ] **T6.1** `AFFILIATE_PAYOUT_MINIMUM_CENTS = 2500` added to `lib/constants.ts` (config
+  constant, never a literal — owner-required). `requestPayout` in
+  `affiliate-payout.service.ts`: single `$transaction` — eligibility (onboarding APPROVED via
+  `AffiliateOnboardingReview`, payout method exists, sum(APPROVED, payoutId:null) ≥
+  `AFFILIATE_PAYOUT_MINIMUM_CENTS`) → create `AffiliatePayout` status `PENDING` → CAS-attach
+  commissions (`updateMany where affiliateId, status:"APPROVED", payoutId:null → { payoutId }`;
+  count must equal the pre-read set or rollback). Commissions stay APPROVED until settlement.
+  Tests: happy path; below-threshold rejection; no-method rejection; onboarding-not-approved
+  rejection; **two concurrent requests cannot claim the same commission** (CAS count mismatch →
+  rollback).
+- [ ] **T6.2** `/api/affiliate/payouts/request` replaces the 503 stub: zod body (optional note),
+  auth via `getRequestAffiliate`, service call, typed errors (`BELOW_MINIMUM`,
+  `NO_PAYOUT_METHOD`, `ONBOARDING_REQUIRED`, `NOTHING_TO_PAY`).
+- [ ] **T6.3** Admin settlement of a requested payout: extend mark-paid to accept an
+  `AffiliatePayout` in PENDING → one transaction flips payout PENDING→PAID (CAS) + its attached
+  commissions APPROVED→PAID (CAS, count-verified) + audit row. Reuses `settleApprovedCommission`
+  internals; invariant assertion from T1.10 applies.
+- [ ] **T6.4** Finance Hub UI: replace "Payouts opening soon" with available-balance card +
+  Request button gated on eligibility, using kit `ConfirmDialog` with the amount and
+  "requests are reviewed and paid manually; this cannot be combined with a second request until
+  settled" consequence copy; pending-request state; typed error surfacing. Delete
+  `PayoutRequestButton.tsx` (U12) — superseded.
 
 ### Phase 7 — UI (design-system conformance; Impeccable audit after)
 
@@ -443,20 +546,20 @@ conventional message naming the finding ID. Commits are per-task.
 
 - [ ] **T8.1 (R2/O17/D17)** Delete: `PORTAL_PREFIXES`, `registerAffiliate`/`activateAffiliate`/
   `getAffiliateWithStats`, `getOnboardingStatus` (superseded by the wired gate's read),
-  `getNetworkTree`, `PayoutRequestButton` (done in T3.4). Keep `payout-invariants.ts` (now
+  `getNetworkTree`, `PayoutRequestButton` (done in T6.4). Keep `payout-invariants.ts` (now
   called, T1.10). `AffiliateTier`/`TierHistory`/`PayoutSchedule` schema stays (deferred
   decision, §7) but the Finance "next payout" display driven by the never-written schedule is
-  removed (honesty) in T3.4.
+  removed (honesty) in T6.4.
 
 ### Phase 9 — Playwright E2E + wrap-up tests
 
 - [ ] **T9.1** `frontend/tests/e2e/affiliate-portal.spec.ts` on `playwright.e2e.config.ts`,
   desktop + mobile projects, DATABASE_URL `autolenis_e2e` guard + skip-with-reason exactly per
   `dealer-funnel.spec.ts`. Coverage (brief's list): unauthenticated `/affiliate/portal/dashboard`
-  → signin redirect; bare `/affiliate/portal` → dashboard (T4.1); onboarding gate redirect for
+  → signin redirect; bare `/affiliate/portal` → dashboard (T3.1); onboarding gate redirect for
   NOT_STARTED on a gated page + exempt pages reachable; dashboard renders with seeded data;
   earnings totals equal a direct Prisma ledger aggregation (DB-state assertion); payout request
-  happy path (seeded APPROVED commissions → REQUESTED payout row + commissions claimed) and
+  happy path (seeded APPROVED commissions → PENDING payout row + commissions claimed) and
   rejection path (below threshold → typed error surfaced); referral-link copy (clipboard grant);
   document upload (fixture PDF → row + listed); notifications read + mark-all-read; suspended
   affiliate → `/affiliate/unsubscribed` and API 401; every sidebar destination responds 200.
