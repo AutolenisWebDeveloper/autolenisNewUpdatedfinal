@@ -21,6 +21,10 @@ const schema = z.object({
 
 const ALLOWED_ROLES = new Set(["SUPER_ADMIN", "FINANCE_ADMIN"]);
 
+// Thrown inside the transaction when the compare-and-set matches 0 rows —
+// a concurrent transition already moved this commission.
+class TransitionConflictError extends Error {}
+
 export async function POST(request: NextRequest, { params }: Props) {
   const { commissionId } = await params;
   const admin = await requirePermission(request, "finance.commissions.reverse");
@@ -32,6 +36,9 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   if (commission.status === "REVERSED") return adminError("ALREADY_REVERSED", "Commission is already reversed", 400);
   if (commission.status === "PAID") return adminError("ALREADY_PAID", "Cannot reverse a paid commission", 400);
+  // M5 — REJECTED is terminal: it never counted as earned, so "reversing" it
+  // would fabricate a transition that has no meaning in the ledger.
+  if (commission.status === "REJECTED") return adminError("ALREADY_REJECTED", "Cannot reverse a rejected commission", 400);
 
   let body: unknown;
   try { body = await request.json(); } catch { return adminError("VALIDATION_ERROR", "Invalid JSON", 400); }
@@ -40,29 +47,39 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const { reason } = parsed.data;
   const oldStatus = commission.status;
-
-  const updated = await prisma.commission.update({
-    where: { id: commissionId },
-    data: { status: "REVERSED" },
-    select: { id: true, status: true, affiliateId: true },
-  });
-
   const ipAddress = request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip") ?? undefined;
 
-  await prisma.adminAuditLog.create({
-    data: {
-      adminId: admin.adminId,
-      adminEmail: admin.email,
-      action: "COMMISSION_REVERSED",
-      entityType: "Commission",
-      entityId: commissionId,
-      reason,
-      previousState: { status: oldStatus },
-      newState: { status: "REVERSED" },
-      ipAddress: ipAddress ?? null,
-      metadata: { affiliateId: commission.affiliateId, dealId: commission.dealId, amountCents: commission.amountCents },
-    },
-  });
+  // M5/D13 — the flip is a compare-and-set scoped to the reversible states,
+  // and the audit row commits atomically with it: a concurrent transition
+  // 409s cleanly, and a reversal can never commit unlogged.
+  try {
+    await prisma.$transaction(async (tx) => {
+      const claimed = await tx.commission.updateMany({
+        where: { id: commissionId, status: { in: ["PENDING", "APPROVED"] } },
+        data: { status: "REVERSED" },
+      });
+      if (claimed.count !== 1) throw new TransitionConflictError();
+      await tx.adminAuditLog.create({
+        data: {
+          adminId: admin.adminId,
+          adminEmail: admin.email,
+          action: "COMMISSION_REVERSED",
+          entityType: "Commission",
+          entityId: commissionId,
+          reason,
+          previousState: { status: oldStatus },
+          newState: { status: "REVERSED" },
+          ipAddress: ipAddress ?? null,
+          metadata: { affiliateId: commission.affiliateId, dealId: commission.dealId, amountCents: commission.amountCents },
+        },
+      });
+    });
+  } catch (err) {
+    if (err instanceof TransitionConflictError) {
+      return adminError("CONFLICT", "Commission is no longer reversible — a concurrent transition won", 409);
+    }
+    return adminError("INTERNAL", "Reversal failed — nothing was changed", 500);
+  }
 
-  return adminSuccess({ commission: { id: updated.id, status: updated.status } });
+  return adminSuccess({ commission: { id: commissionId, status: "REVERSED" } });
 }
