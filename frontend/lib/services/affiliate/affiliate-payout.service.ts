@@ -124,8 +124,20 @@ export async function requestPayout(_affiliateId: string): Promise<never> {
   throw new PayoutsUnavailableError();
 }
 
-export async function getPayoutHistory(affiliateId: string) {
-  return prisma.affiliatePayout.findMany({ where: { affiliateId }, orderBy: { requestedAt: "desc" } });
+// D15 — bounded: the admin settlement rail creates one payout per settled
+// commission, so this table scales with commissions; an unbounded read grew
+// without limit. Callers page with `cursor` (a payout id) when needed.
+export async function getPayoutHistory(
+  affiliateId: string,
+  opts: { take?: number; cursor?: string } = {},
+) {
+  const take = Math.min(Math.max(opts.take ?? 50, 1), 200);
+  return prisma.affiliatePayout.findMany({
+    where: { affiliateId },
+    orderBy: [{ requestedAt: "desc" }, { id: "desc" }],
+    take,
+    ...(opts.cursor ? { skip: 1, cursor: { id: opts.cursor } } : {}),
+  });
 }
 
 export async function processPayouts(): Promise<number> {

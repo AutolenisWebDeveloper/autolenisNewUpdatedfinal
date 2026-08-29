@@ -56,7 +56,8 @@ export async function POST(request: NextRequest, { params }: Props) {
     await prisma.$transaction(async (tx) => {
       const claimed = await tx.commission.updateMany({
         where: { id: commissionId, status: { in: ["PENDING", "APPROVED"] } },
-        data: { status: "REVERSED" },
+        // D13 — stamp the reversal on the row itself (migration 001).
+        data: { status: "REVERSED", reversedAt: new Date() },
       });
       if (claimed.count !== 1) throw new TransitionConflictError();
       await tx.adminAuditLog.create({

@@ -8,12 +8,15 @@ export async function getAuthenticatedAffiliate() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
+  // M7/D4 — this runs for the layout AND every portal page render. The old
+  // include loaded the full User row, the affiliate's ENTIRE approved
+  // commission history (unbounded, used by no caller — pages aggregate via
+  // getCommissionSummary), and a children sample. Callers read only
+  // user.email; everything else was dead per-request weight.
   return prisma.affiliate.findFirst({
     where: { user: { supabaseId: user.id } },
     include: {
-      user: true,
-      commissions: { where: { status: "APPROVED" }, select: { amountCents: true, level: true } },
-      children: { take: 1 },
+      user: { select: { id: true, email: true, role: true } },
     },
   });
 }

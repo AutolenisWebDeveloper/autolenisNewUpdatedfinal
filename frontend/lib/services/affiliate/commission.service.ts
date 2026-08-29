@@ -259,7 +259,7 @@ export async function reverseCommissionsForPaymentIntent(
 
   const reversed = await prisma.commission.updateMany({
     where: { qualifyingEventId: { startsWith: keyPrefix }, status: { in: ["PENDING", "APPROVED"] } },
-    data: { status: "REVERSED" },
+    data: { status: "REVERSED", reversedAt: new Date() },
   });
 
   const paid = await prisma.commission.findMany({
@@ -369,7 +369,8 @@ export async function approveMaturePendingCommissions(now: Date = new Date()): P
   if (approveIds.length > 0) {
     const updated = await prisma.commission.updateMany({
       where: { id: { in: approveIds }, status: "PENDING" },
-      data: { status: "APPROVED" },
+      // D13 — stamp the actor on the row itself (migration 001).
+      data: { status: "APPROVED", approvedAt: now, approvedBy: "system:cron" },
     });
     result.approved = updated.count;
   }

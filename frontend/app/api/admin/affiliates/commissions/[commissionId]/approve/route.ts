@@ -40,7 +40,9 @@ export async function POST(request: NextRequest, { params }: Props) {
     await prisma.$transaction(async (tx) => {
       const claimed = await tx.commission.updateMany({
         where: { id: commissionId, status: "PENDING" },
-        data: { status: "APPROVED" },
+        // D13 — stamp who approved and when on the row itself (the audit log
+        // is no longer the only record). Requires migration 001 before deploy.
+        data: { status: "APPROVED", approvedAt: new Date(), approvedBy: admin.email },
       });
       if (claimed.count !== 1) throw new TransitionConflictError();
       await tx.adminAuditLog.create({

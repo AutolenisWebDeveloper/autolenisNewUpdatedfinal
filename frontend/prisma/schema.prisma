@@ -88,6 +88,9 @@ model Buyer {
   conversations         Conversation[]
   buyerOpportunities    BuyerOpportunity[]
 
+  // D7 — the inactive-affiliate cron and admin KPIs filter buyers by
+  // affiliate_id; previously an unindexed scan per affiliate in a loop.
+  @@index([affiliateId])
   @@map("buyers")
 }
 
@@ -258,6 +261,8 @@ model Affiliate {
   onboardingReview    AffiliateOnboardingReview?
   clicks              AffiliateClick[]
 
+  // D8 — network/digest/leaderboard/referrals all filter on parentId.
+  @@index([parentId])
   @@map("affiliates")
 }
 
@@ -862,17 +867,29 @@ model Commission {
   status            CommissionStatus @default(PENDING)
   qualifyingEventId String           @unique @map("qualifying_event_id")
   paidAt            DateTime?        @map("paid_at")
+  // D13 — transition stamps: the audit log is no longer the ONLY record of
+  // who approved/reversed money. Nullable for pre-existing rows. Requires
+  // owner-gated migration 001_affiliate_correctness before deploy.
+  approvedAt        DateTime?        @map("approved_at")
+  approvedBy        String?          @map("approved_by")
+  reversedAt        DateTime?        @map("reversed_at")
   // F-002/F-003 — link to the settlement that actually paid this commission.
   // Set ONLY when an admin records a real payout via the mark-paid rail; the
-  // status flips to PAID in the same transaction. The previously orphaned
-  // self-serve requestPayout rail is disabled.
+  // status flips to PAID in the same transaction. The self-serve request rail
+  // (payout PENDING) attaches commissions here too, before settlement.
+  // D20 — Restrict: deleting a payout would fabricate the exact corruption
+  // isCommissionSettled rejects (PAID + paidAt + no payout link).
   payoutId          String?          @map("payout_id")
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
   affiliate         Affiliate        @relation(fields: [affiliateId], references: [id])
-  payout            AffiliatePayout? @relation(fields: [payoutId], references: [id])
+  payout            AffiliatePayout? @relation(fields: [payoutId], references: [id], onDelete: Restrict)
 
   @@index([payoutId])
+  // D1 — every affiliate-facing read filters (affiliateId, status); the cron
+  // sweeps (status, createdAt). Both were full-table scans.
+  @@index([affiliateId, status])
+  @@index([status, createdAt])
   @@map("commissions")
 }
 
@@ -2413,6 +2430,9 @@ model AffiliatePayout {
   // F-002/F-003 — the commissions settled by this payout.
   commissions   Commission[]
 
+  // D15 — payout history reads filter on affiliateId; the table scales with
+  // commissions (one payout per settled commission on the admin rail).
+  @@index([affiliateId])
   @@map("affiliate_payouts")
 }
 
@@ -3039,6 +3059,9 @@ model AffiliateReferral {
   totalDeals     Int       @default(0) @map("total_deals")
 
   @@unique([affiliateId, referredUserId])
+  // D6 — one referrer per referred user (first-touch wins): the payee lookup
+  // must never depend on planner order. Safe to add: 0 live rows at audit.
+  @@unique([referredUserId])
   @@map("affiliate_referrals")
 }
 
