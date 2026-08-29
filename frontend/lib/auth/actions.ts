@@ -194,7 +194,8 @@ async function ensurePrismaUser(
       await prisma.affiliate.create({
         data: {
           userId: user.id,
-          status: AffiliateStatus.PENDING,
+          // Auto-approved: affiliate accounts never wait for admin approval.
+          status: AffiliateStatus.ACTIVE,
           referralCode: `AFF-${user.id.slice(0, 8).toUpperCase()}`,
           level: 1,
         },

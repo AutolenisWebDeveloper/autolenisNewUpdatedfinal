@@ -551,10 +551,10 @@ export default function AdminAffiliateCommandCenter({ data, availability, initia
       {/* Modals */}
       {modal === "approve" && (
         <ConfirmModal
-          title="Approve Affiliate" description={"Approve " + affiliate.email + " as an active affiliate?"}
-          submitLabel="Approve Affiliate" requireReason={false}
+          title="Restore Access" description={"Restore full affiliate access for " + affiliate.email + "? (Accounts are auto-approved at registration; this reverses a suspension or revocation.)"}
+          submitLabel="Restore Access" requireReason={false}
           onCancel={() => setModal(null)}
-          onConfirm={async (reason) => { await doAction("approve", { reason: reason || "Approved from admin command center" }, "Affiliate approved"); }}
+          onConfirm={async (reason) => { await doAction("approve", { reason: reason || "Access restored from admin command center" }, "Affiliate access restored"); }}
         />
       )}
       {modal === "reject" && (

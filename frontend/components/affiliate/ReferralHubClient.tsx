@@ -12,7 +12,6 @@ import { COMMISSION_RATES, PREMIUM_FEE_REMAINING_USD } from "@/lib/constants";
 interface Props {
   referralCode: string;
   referralLink: string;
-  affiliateStatus: string;
   qrDataUrl: string;
   l1PerDealCents: number;
   l2PerDealCents: number;
@@ -78,7 +77,7 @@ function CopyButton({ text, label, testId }: { text: string; label: string; test
 }
 
 
-export default function ReferralHubClient({ referralCode, referralLink, affiliateStatus, qrDataUrl, l1PerDealCents, l2PerDealCents, l3PerDealCents }: Props) {
+export default function ReferralHubClient({ referralCode, referralLink, qrDataUrl, l1PerDealCents, l2PerDealCents, l3PerDealCents }: Props) {
   const [copiedLink, setCopiedLink] = useState(false);
   const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
   const templates = buildSocialTemplates(referralCode, referralLink);
@@ -105,7 +104,6 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
     }
   }
 
-  const isActive = affiliateStatus === "ACTIVE";
 
   return (
     <div className="p-6 md:p-8 max-w-2xl" data-testid="referral-hub-page">
@@ -117,11 +115,6 @@ export default function ReferralHubClient({ referralCode, referralLink, affiliat
         Share your referral link and earn commissions on completed deals.
       </p>
 
-      {!isActive && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 mb-6 text-sm text-amber-800" data-testid="inactive-affiliate-notice">
-          Your affiliate account is currently <strong>{affiliateStatus.toLowerCase()}</strong>. Referral commissions are only earned while your account is Active.
-        </div>
-      )}
 
       {/* Referral code + link card */}
       <div className="bg-gradient-to-br from-al-primary to-al-primary-hover rounded-xl p-6 text-white mb-6 relative overflow-hidden"
