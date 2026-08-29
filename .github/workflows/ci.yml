@@ -172,6 +172,29 @@ jobs:
       - name: Drift — chain-built database vs schema.prisma
         run: pnpm db:check-drift
 
+      # The documented fresh-provision runbook (prisma/MIGRATIONS.md) is the
+      # Prisma chain PLUS the 15 numbered CRM/workflow files. Before Batch 7,
+      # 14 of the 15 failed on a fresh database — a misnamed acquisition table
+      # squatted on the "conversations" name the CRM inbox needs, and two seed
+      # files carried an ON CONFLICT arbiter that can never match their own
+      # partial unique index. This step runs AFTER the drift check on purpose:
+      # the drift contract is chain-vs-schema, and these tables are
+      # deliberately not Prisma-managed.
+      - name: CRM provisioning runbook (the 15 numbered files)
+        run: |
+          for f in migrations/*.sql; do
+            echo "== $f"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
+      # And a second pass: every file claims idempotency (IF NOT EXISTS /
+      # ON CONFLICT DO NOTHING), so re-running the runbook must succeed too.
+      - name: CRM provisioning runbook (re-run must be a no-op)
+        run: |
+          for f in migrations/*.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+
   dependency-audit:
     name: Dependency audit
     runs-on: ubuntu-latest
