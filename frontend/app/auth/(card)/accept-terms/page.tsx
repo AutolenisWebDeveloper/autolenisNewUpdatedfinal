@@ -2,9 +2,8 @@
 // Buyers cannot bypass this page by navigating directly
 // proxy.ts checks termsAcceptedAt and redirects to this page when null
 
-import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { acceptTermsAction } from "@/lib/auth/actions";
+import AcceptTermsForm from "./AcceptTermsForm";
 
 interface Props {
   searchParams: Promise<{ redirect?: string; error?: string }>;
@@ -51,15 +50,9 @@ export default async function AcceptTermsPage({ searchParams }: Props) {
       </div>
 
       <div className="flex flex-col gap-3">
-        <form action={acceptTermsAction}>
-          {/* Pass original destination so buyer returns there after accepting */}
-          {redirect && (
-            <input type="hidden" name="redirect" value={redirect} />
-          )}
-          <Button type="submit" className="w-full" size="lg" data-testid="accept-terms-btn">
-            I Accept — Continue
-          </Button>
-        </form>
+        {/* The submit path is a Client Component so the acceptance round-trip
+            has a visible pending state and cannot be double-submitted. */}
+        <AcceptTermsForm redirectTo={redirect} />
         <div className="text-center">
           <Link href="/legal/terms" target="_blank" className="text-xs text-[#94A3B8] hover:text-[#0B5FD1] hover:underline transition-colors" data-testid="view-full-terms-link">
             Read full Terms of Service →

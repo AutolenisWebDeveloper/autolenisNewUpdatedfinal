@@ -65,8 +65,37 @@ async function ensurePrismaUser(
   termsVersion?: string | null,
   referralCode?: string | null,
 ) {
-  const existing = await prisma.user.findUnique({ where: { supabaseId: supabaseUserId } });
+  const existing = await prisma.user.findUnique({
+    where:   { supabaseId: supabaseUserId },
+    include: { buyer: { select: { id: true } } },
+  });
   if (existing) {
+    // A User row with NO Buyer row is the exact half-provisioned state that both
+    // self-heal call sites call this function to repair: acceptTermsAction (when
+    // its buyer.updateMany matches zero rows) and requireBuyer. Returning
+    // `existing` untouched made that heal a NO-OP for the one case it exists to
+    // fix — the caller retried its Buyer write, still matched zero rows, and
+    // the account was stranded: accepting the terms could never take effect and
+    // the buyer could never leave /auth/accept-terms.
+    //
+    // upsert (Buyer.userId is @unique) so two concurrent heals cannot collide on
+    // the unique constraint, and `update: {}` guarantees an existing Buyer is
+    // never overwritten — healing must never clobber real buyer data.
+    if (role === UserRole.BUYER && !existing.buyer) {
+      await prisma.buyer.upsert({
+        where:  { userId: existing.id },
+        create: {
+          userId:             existing.id,
+          firstName:          firstName ?? email.split("@")[0],
+          lastName:           lastName ?? "",
+          onboardingComplete: false,
+          plan,
+          termsAcceptedAt:    termsAcceptedAt ? new Date(termsAcceptedAt) : null,
+          termsVersion:       termsVersion ?? null,
+        },
+        update: {},
+      });
+    }
     if (role === UserRole.BUYER && referralCode) {
       // Idempotent (upsert + self-referral guard inside); never throws.
       await recordAffiliateAttribution(existing.id, referralCode);
