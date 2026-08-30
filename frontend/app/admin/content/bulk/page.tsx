@@ -9,6 +9,7 @@
 // it in HUB_PARENTS, it is a bookmarkable entry point to the highest-frequency
 // job, and every control it offered still lives on the component it now renders.
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { ArrowLeft, ClipboardCheck } from "lucide-react";
 
@@ -42,12 +43,18 @@ export default async function ReviewQueuePage() {
         time, or select a batch.
       </p>
 
-      <ContentWorktable
-        clusters={[...CLUSTER_OPTIONS]}
-        metros={[...METRO_OPTIONS]}
-        scopeFilters={{ status: "REVIEW_NEEDED" }}
-        showTriage={false}
-      />
+      {/* The worktable reads useSearchParams, so it is wrapped here exactly as
+          it is on /admin/content. force-dynamic makes this route render on
+          demand today, but the boundary should not depend on that staying
+          true — without it, losing force-dynamic would fail the build. */}
+      <Suspense fallback={<div className="h-96 animate-pulse rounded-al-lg bg-slate-100" aria-hidden />}>
+        <ContentWorktable
+          clusters={[...CLUSTER_OPTIONS]}
+          metros={[...METRO_OPTIONS]}
+          scopeFilters={{ status: "REVIEW_NEEDED" }}
+          showTriage={false}
+        />
+      </Suspense>
     </div>
   );
 }
