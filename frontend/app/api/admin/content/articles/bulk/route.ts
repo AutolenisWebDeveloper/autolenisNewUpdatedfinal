@@ -31,6 +31,10 @@ const bulkSchema = z
   .object({
     action: z.enum(["publish", "reject", "draft"]),
     ids: z.array(z.string()).optional(),
+    // Exclusions apply to the filter path only. "Select all matching, except
+    // these" is a real operator intent: without it, un-ticking one row in
+    // all-matching mode had to collapse the whole selection.
+    excludeIds: z.array(z.string()).optional(),
     filter: z
       .object({
         status: z.string().optional(),
@@ -38,6 +42,8 @@ const bulkSchema = z
         metro: z.string().optional(),
         quality_score_min: z.number().optional(),
         quality_score_max: z.number().optional(),
+        scheduled: z.string().optional(),
+        failed: z.string().optional(),
       })
       .optional(),
   })
@@ -58,6 +64,20 @@ function whereFromFilter(filter: NonNullable<z.infer<typeof bulkSchema>["filter"
     if (filter.quality_score_max !== undefined) range.lte = filter.quality_score_max;
     where.qualityScore = range;
   }
+  // These two lenses must mirror buildArticleWhere in the list route exactly.
+  // They are what the operator was looking at when they chose the action; if
+  // they are dropped here the action hits a wider set than the list showed.
+  if (filter.scheduled === "1") {
+    where.scheduledAt = { not: null };
+    // AND-composed so an explicit status filter is preserved, not overwritten.
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      { status: { in: ["DRAFT", "REVIEW_NEEDED"] } },
+    ];
+  }
+  if (filter.failed === "1") {
+    where.publishFailureReason = { not: null };
+  }
   return where;
 }
 
@@ -71,11 +91,20 @@ export async function POST(request: NextRequest) {
     return adminError("VALIDATION_ERROR", parsed.error.message, 400);
   }
 
-  const { action, ids, filter } = parsed.data;
+  const { action, ids, excludeIds, filter } = parsed.data;
   const status = ACTION_TO_STATUS[action];
 
-  const baseWhere: Prisma.ContentArticleWhereInput =
-    ids && ids.length > 0 ? { id: { in: ids } } : whereFromFilter(filter!);
+  let baseWhere: Prisma.ContentArticleWhereInput;
+  if (ids && ids.length > 0) {
+    // An explicit id list is already the exact target; exclusions are a
+    // filter-path concept and are ignored here rather than silently subtracted.
+    baseWhere = { id: { in: ids } };
+  } else {
+    baseWhere = whereFromFilter(filter!);
+    if (excludeIds && excludeIds.length > 0) {
+      baseWhere = { AND: [baseWhere, { id: { notIn: excludeIds } }] };
+    }
+  }
 
   let updated = 0;
 
@@ -120,6 +149,8 @@ export async function POST(request: NextRequest) {
       mode: ids && ids.length > 0 ? "ids" : "filter",
       ids: ids ?? undefined,
       filter: filter ?? undefined,
+      excludedCount: excludeIds?.length ?? undefined,
+      excludeIds: excludeIds?.length ? excludeIds : undefined,
     },
   });
 

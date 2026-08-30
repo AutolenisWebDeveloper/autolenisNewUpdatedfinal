@@ -327,6 +327,9 @@ export interface ContentArticleDetail {
   body: string;
   faqJson: string | null;
   metaDescription: string;
+  /** Why the last publish attempt was refused by the publish guards. */
+  publishFailureReason: string | null;
+  scheduledAt: Date | null;
 }
 
 export async function getContentArticleById(
@@ -360,6 +363,8 @@ export async function getContentArticleById(
       body: true,
       faqJson: true,
       metaDescription: true,
+      publishFailureReason: true,
+      scheduledAt: true,
     },
   });
 }

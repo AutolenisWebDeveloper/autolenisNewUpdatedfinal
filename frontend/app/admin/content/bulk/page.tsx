@@ -1,24 +1,53 @@
-// Bulk Article Management — server shell.
+// Review queue — /admin/content/bulk.
 //
-// Ops tool for selecting, filtering, previewing, and bulk publishing/archiving
-// generated ContentArticle rows without opening each one. Complements the
-// read-first Content Engine dashboard (/admin/content) with a dense, action-
-// oriented worktable. Auth is enforced here (and by the admin layout); the
-// filter option sources are passed to the client so the dropdowns are populated
-// even before any article exists.
+// This route used to host a second, divergent copy of the article table: its
+// own filters, its own page size, its own search semantics and its own word for
+// ARCHIVED. It now renders the SAME worktable component as /admin/content,
+// pinned to the review queue, so the two surfaces cannot drift again.
+//
+// The route is deliberately preserved rather than folded away: Batch 2 registers
+// it in HUB_PARENTS, it is a bookmarkable entry point to the highest-frequency
+// job, and every control it offered still lives on the component it now renders.
+
+import Link from "next/link";
+import { ArrowLeft, ClipboardCheck } from "lucide-react";
 
 import { requireAdmin } from "@/lib/auth/admin-session";
 import {
   CLUSTER_OPTIONS,
   METRO_OPTIONS,
 } from "@/lib/services/admin/admin-content.service";
-import ArticleManagerClient from "./ArticleManagerClient";
+import ContentWorktable from "@/components/admin/content/ContentWorktable";
 
 export const dynamic = "force-dynamic";
 
-export default async function BulkArticleManagerPage() {
+export default async function ReviewQueuePage() {
   await requireAdmin();
+
   return (
-    <ArticleManagerClient clusters={[...CLUSTER_OPTIONS]} metros={[...METRO_OPTIONS]} />
+    <div className="p-6 md:p-8" data-testid="bulk-article-page">
+      <Link
+        href="/admin/content"
+        className="mb-4 inline-flex items-center gap-1.5 rounded text-sm text-al-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus"
+      >
+        <ArrowLeft size={14} aria-hidden /> Content Engine
+      </Link>
+
+      <div className="mb-1 flex items-center gap-3">
+        <ClipboardCheck size={22} className="text-al-primary" aria-hidden />
+        <h1 className="text-xl font-bold text-slate-900">Review queue</h1>
+      </div>
+      <p className="mb-6 text-sm text-slate-500">
+        Every article waiting for a review decision. Preview, publish or archive them one at a
+        time, or select a batch.
+      </p>
+
+      <ContentWorktable
+        clusters={[...CLUSTER_OPTIONS]}
+        metros={[...METRO_OPTIONS]}
+        scopeFilters={{ status: "REVIEW_NEEDED" }}
+        showTriage={false}
+      />
+    </div>
   );
 }

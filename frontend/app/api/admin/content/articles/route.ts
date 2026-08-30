@@ -71,7 +71,34 @@ export function buildArticleWhere(params: URLSearchParams): Prisma.ContentArticl
 
   const search = params.get("search");
   if (search?.trim()) {
-    where.title = { contains: search.trim(), mode: "insensitive" };
+    // Widened from title-only to match the dashboard list, which has always
+    // searched slug/keyword/city too. A narrower search here meant the same
+    // query returned different rows depending on which surface ran it.
+    const q = search.trim();
+    where.OR = [
+      { title: { contains: q, mode: "insensitive" } },
+      { slug: { contains: q, mode: "insensitive" } },
+      { targetKeyword: { contains: q, mode: "insensitive" } },
+      { city: { contains: q, mode: "insensitive" } },
+    ];
+  }
+
+  // Lenses over columns that are not part of the editorial status enum.
+  // "scheduled" = a publish is pending for a not-yet-public article; the
+  // content-publisher cron additionally requires approvedAt before it fires.
+  if (params.get("scheduled") === "1") {
+    where.scheduledAt = { not: null };
+    // Composed via AND, never assigned to where.status: an explicit ?status=
+    // must still apply. Assigning here would DROP that constraint and widen the
+    // result set — and the same filter object drives bulk actions.
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      { status: { in: ["DRAFT", "REVIEW_NEEDED"] } },
+    ];
+  }
+  // "failed" = the last publish attempt was refused by the publish guards.
+  if (params.get("failed") === "1") {
+    where.publishFailureReason = { not: null };
   }
 
   return where;
@@ -88,7 +115,7 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(params.get("limit")) || DEFAULT_LIMIT));
   const wantsBreakdown = params.get("breakdown") === "1";
 
-  const [items, total, statusCounts] = await Promise.all([
+  const [items, total, statusCounts, scheduledCount, failedCount] = await Promise.all([
     prisma.contentArticle.findMany({
       where,
       orderBy: buildOrderBy(params.get("sort")),
@@ -112,11 +139,24 @@ export async function GET(request: NextRequest) {
       },
     }),
     prisma.contentArticle.count({ where }),
-    // Global status totals for the stat strip — intentionally unfiltered.
+    // Global status totals for the triage strip — intentionally unfiltered, so
+    // the chips always show the whole pipeline rather than the current view.
     prisma.contentArticle.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.contentArticle.count({
+      where: { scheduledAt: { not: null }, status: { in: ["DRAFT", "REVIEW_NEEDED"] } },
+    }),
+    prisma.contentArticle.count({ where: { publishFailureReason: { not: null } } }),
   ]);
 
-  const stats = { total: 0, published: 0, review_needed: 0, draft: 0, retired: 0 };
+  const stats = {
+    total: 0,
+    published: 0,
+    review_needed: 0,
+    draft: 0,
+    retired: 0,
+    scheduled: scheduledCount,
+    failed: failedCount,
+  };
   for (const row of statusCounts) {
     const count = row._count._all;
     stats.total += count;
