@@ -85,6 +85,7 @@ const DASHBOARD: Capability[] = [
   { what: "Breakdown by cluster", was: "content-cluster-table" },
   { what: "Breakdown by metro", was: "content-metro-table" },
   { what: "The article list", was: "content-article-list" },
+  { what: "Each row's link to its article", was: "content-row-" },
   { what: "Empty state when filters match nothing", was: "content-list-empty" },
   { what: "Pagination", was: "content-pagination" },
   { what: "Clear all filters", was: "content-filter-clear" },
@@ -108,6 +109,13 @@ const WORKTABLE: Capability[] = [
   { what: "Jump to the review queue", was: "banner-review-first" },
   { what: "Status counters that filter the list", was: "stat-strip" },
   { what: "The article worktable", was: "article-table" },
+  { what: "Each article row", was: "article-row-" },
+  { what: "Each row's checkbox", was: "row-check-" },
+  { what: "Each row's quality flags", was: "row-flags-" },
+  { what: "Preview a row", was: "row-preview-" },
+  { what: "Publish a row", was: "row-publish-" },
+  { what: "Archive a row", was: "row-retire-" },
+  { what: "Each status counter", was: "stat-card-" },
   { what: "Select every row on the page", was: "select-page" },
   { what: "Select every row matching the filters", was: "select-all-matching" },
   { what: "Clear the selection", was: "clear-selection" },
@@ -195,6 +203,8 @@ const DETAIL: Capability[] = [
   { what: "The article review page", was: "admin-content-detail-page" },
   { what: "Status controls", was: "content-detail-actions" },
   { what: "Status action buttons", was: "article-status-actions" },
+  { what: "Each status transition button", was: "article-action-" },
+  { what: "Status change error", was: "article-action-error" },
   { what: "Article body preview", was: "content-detail-body" },
   { what: "FAQ block", was: "content-detail-faqs" },
   { what: "Quality score", was: "content-detail-quality" },
@@ -213,6 +223,7 @@ const ATTRIBUTION: Capability[] = [
   { what: "By state", was: "attribution-by-state" },
   { what: "By city", was: "attribution-by-city" },
   { what: "Top articles", was: "attribution-top-articles" },
+  { what: "Attribution KPI cards", was: "kpi-" },
 ];
 
 const ALL: Array<[string, Capability[]]> = [
@@ -339,5 +350,82 @@ describe("one vocabulary for one database state", () => {
         `${rel} restates the status labels — import statusMeta from lib/content/cluster-meta`,
       );
     }
+  });
+});
+
+// ── Completeness ────────────────────────────────────────────────────────────
+//
+// Everything above is a hand-written allow-list, and an allow-list reports on
+// what it enumerates while staying silent on what it omits. That is not
+// theoretical: the first draft of this file passed 90/90 while the review
+// banner and both of its actions had in fact been dropped, because the fixture
+// had never named them. A green run meant "nothing on the list was lost", and
+// was read as "nothing was lost".
+//
+// So the baseline is derived from the artifact rather than from memory. The
+// list below is every data-testid present in the Content workspace at the base
+// commit 73223c3, extracted mechanically:
+//
+//   git show 73223c3:<each content source> \
+//     | grep -oE 'data-testid=\{?`?"?[a-z0-9-]+' | sed -E 's/.*"?//' | sort -u
+//
+// A baseline id the fixture does not mention fails the suite. To retire one,
+// name it in WAIVED with a reason — a deliberate, reviewable act.
+const BASELINE_TESTIDS = [
+  "admin-content-attribution-link", "admin-content-bulk-link", "admin-content-detail-page",
+  "admin-content-page", "article-action-", "article-action-error", "article-row-",
+  "article-status-actions", "article-table", "attribution-export-csv", "attribution-trend",
+  "banner-publish-all", "banner-review-first", "bulk-article-page", "bulk-publish",
+  "bulk-retire", "clear-selection", "confirm-backdrop", "confirm-breakdown", "confirm-cancel",
+  "confirm-modal", "confirm-run", "content-article-list", "content-attribution-page",
+  "content-coverage", "content-detail-actions", "content-detail-body", "content-detail-faqs",
+  "content-detail-flags", "content-detail-meta", "content-detail-quality", "content-detail-seo",
+  "content-filter-clear", "content-filter-cluster", "content-filter-metro",
+  "content-filter-status", "content-filters", "content-kpis", "content-list-empty",
+  "content-pagination", "content-row-", "content-search", "drawer-backdrop", "drawer-body",
+  "drawer-close", "drawer-close-x", "drawer-error", "drawer-faqs", "drawer-flags",
+  "drawer-publish", "drawer-retire", "drawer-retry", "kpi-", "page-next", "page-prev",
+  "pagination", "preview-drawer", "review-banner", "row-check-", "row-flags-", "row-preview-",
+  "row-publish-", "row-retire-", "search-input", "select-all-matching", "select-page",
+  "selected-count", "stat-card-", "stat-strip", "table-empty", "table-loading", "toast",
+  "toolbar",
+] as const;
+
+/** Baseline ids deliberately not treated as capabilities, each with a reason. */
+const WAIVED: Record<string, string> = {
+  // Artifacts of `data-testid={testId}` prop plumbing, not ids in their own
+  // right; the controls they render are named individually above.
+  test: "attribute-name artifact of the extraction, not a rendered id",
+  testid: "attribute-name artifact of the extraction, not a rendered id",
+};
+
+describe("the preservation fixture is complete, not merely self-consistent", () => {
+  const named = new Set(ALL.flatMap(([, caps]) => caps.map((c) => c.was)));
+
+  test("every control present at baseline 73223c3 is accounted for", () => {
+    const unaccounted = BASELINE_TESTIDS.filter((id) => !named.has(id) && !(id in WAIVED));
+    assert.deepEqual(
+      unaccounted,
+      [],
+      `these controls existed at baseline and this fixture never mentions them, so the ` +
+        `suite would pass while they were quietly dropped:\n  ${unaccounted.join("\n  ")}`,
+    );
+  });
+
+  test("the fixture does not claim controls the baseline never had", () => {
+    // Guards the other direction: a fixture padded with ids that never existed
+    // inflates the count without proving anything. Ids introduced BY this batch
+    // belong in the "newly reachable" block, not in the preservation list.
+    const INTRODUCED_BY_THIS_BATCH = new Set([
+      "content-cluster-table", "content-metro-table", "filter-status", "filter-cluster",
+      "filter-metro", "filter-quality", "filter-sort", "attribution-by-cluster",
+      "attribution-by-metro", "attribution-by-state", "attribution-by-city",
+      "attribution-top-articles",
+    ]);
+    const baseline = new Set<string>(BASELINE_TESTIDS);
+    const invented = [...named].filter(
+      (id) => !baseline.has(id) && !INTRODUCED_BY_THIS_BATCH.has(id),
+    );
+    assert.deepEqual(invented, [], `fixture names ids absent from the baseline: ${invented}`);
   });
 });

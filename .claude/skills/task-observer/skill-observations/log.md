@@ -325,3 +325,18 @@ never executes. Import-time coupling is coupling.
 **Suggested improvement:** When the same rule fires on 3+ components in one file, report it once as a repetition finding — "this device appears in N components; each should encode something different, or the device should collapse to one" — rather than N independent findings.
 
 **Principle:** A visual device repeated across components that mean different things is not N small problems; it is one design problem about vocabulary. Review tooling that counts instances hides the pattern that makes them worth fixing.
+
+### Observation 20: A capability-preservation fixture is only as good as its enumeration
+
+**Status:** OPEN
+**Date:** 2026-08-30
+**Session context:** Implementing the approved /admin/content redesign. Wrote an executable capability-preservation test listing every pre-existing control by data-testid, ran it green at 90/90, and only found during the independent second review that a banner and its two actions had been dropped — the fixture had never named them, so it passed while the regression was live.
+**Skill:** autolenis-code-verification
+**Type:** open-source
+**Phase/Area:** STEP 6 — independent second review
+
+**Issue:** An allow-list style regression fixture reports on what it enumerates and is silent on what it omits. A green run therefore reads as "nothing was lost" when it only means "nothing on the list was lost". The failure is invisible precisely because the test is passing, and the confidence it produces suppresses the manual check that would have caught it.
+
+**Suggested improvement:** When a preservation fixture is built by hand, derive the baseline mechanically rather than from memory — enumerate the identifiers present at the base commit (e.g. extract them from `git show BASE:file`) and diff that set against the fixture, failing on any baseline identifier the fixture does not mention. The fixture then cannot be quietly incomplete.
+
+**Principle:** A hand-written allow-list cannot prove completeness, only conformance to itself. Any test asserting that nothing was lost must derive its baseline from the artifact being preserved, not from the author's recollection of it.
