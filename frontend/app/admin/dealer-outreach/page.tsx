@@ -5,7 +5,7 @@
 import { requireAdmin } from "@/lib/auth/admin-session";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import { Phone } from "lucide-react";
+import { BarChart3, Phone } from "lucide-react";
 import { DealerProspectStatus, type Prisma } from "@prisma/client";
 import BackfillButton from "./BackfillButton";
 import BackfillEmailsButton from "./BackfillEmailsButton";
@@ -176,6 +176,13 @@ export default async function DealerOutreachPage({
             </h1>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <Link
+              href="/admin/dealer-outreach/coverage"
+              className="inline-flex items-center gap-2 rounded-md border border-al-primary px-4 py-2 text-sm font-medium text-al-primary hover:bg-blue-50"
+            >
+              <BarChart3 size={16} aria-hidden="true" />
+              Contact Coverage
+            </Link>
             <RunFollowupsButton />
             <BackfillEmailsButton missingCount={missingEmailCount} />
             <BackfillButton missingCount={missingScriptCount} />
