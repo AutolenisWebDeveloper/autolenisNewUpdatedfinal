@@ -223,7 +223,16 @@ function getOAuthUrl(): string | null {
 // request without it cannot be routed and is rejected by MicroBilt.
 //
 // All four values are account-specific and issued by MicroBilt. There is no safe
-// default for any of them, so each is required rather than defaulted.
+// default for any of them, so none is ever defaulted or invented.
+//
+// Each field is resolved INDEPENDENTLY and sent when it is set. The gate used to
+// require all four together, which meant a deployment configured with only
+// MICROBILT_PRODUCT_ID sent NO identity at all — MicroBilt was never told which
+// product was being requested, and every prequal came back as an unexplained
+// MANUAL_REVIEW. A field that is unset is OMITTED from MsgRqHdr; it is never
+// blanked, because an empty string looks configured while still being
+// unroutable. When nothing at all is configured the adapter still refuses to
+// spend an inquiry (IDENTITY_NOT_CONFIGURED) — see callIPredict.
 //
 // MemberPwd is a CREDENTIAL: read only inside this adapter, never logged, and
 // never surfaced by getMicroBiltConfigStatus().
@@ -234,41 +243,55 @@ const IDENTITY_ENV = {
   ProductID: "MICROBILT_PRODUCT_ID",
 } as const;
 
-interface MicroBiltIdentity {
+/**
+ * The MsgRqHdr identity fragment actually configured for this deployment.
+ *
+ * Partial by design: MicroBilt has issued some AutoLenis accounts only a
+ * ProductID. Every key present here was read from env and is non-blank; a key
+ * that is absent was not configured and must not appear in the request.
+ */
+type MicroBiltIdentity = Partial<{
   MemberId:  string;
   MemberPwd: string;
   UserName:  string;
   ProductID: string;
-}
+}>;
 
 /**
- * Resolve the four MsgRqHdr identity fields from env.
+ * Resolve whichever of the four MsgRqHdr identity fields are configured.
  *
  * A value that is absent OR only whitespace counts as MISSING: a blank identity
  * field is worse than an absent one, because it looks configured while still
- * being unroutable — the same class of bug as sending an empty header.
+ * being unroutable — the same class of bug as sending an empty header. Missing
+ * fields are simply left out of the returned object, so they cannot reach the
+ * wire as `""`, `null`, or a guessed value.
  *
- * Returns the env var NAMES that are missing (never their values) so callers can
- * tell ops exactly what to set without leaking a credential into a log line.
+ * Keys are inserted in the spec's field order (MemberId, MemberPwd, UserName,
+ * ProductID), so MsgRqHdr keeps its documented shape for whatever subset is set.
+ *
+ * `missing` carries the env var NAMES that are unset (never their values) so
+ * callers can tell ops exactly what to set without leaking a credential into a
+ * log line. It is reported even when the call proceeds — a partial identity is
+ * still a deployment ops needs to finish.
  */
-function resolveIdentity(): { identity: MicroBiltIdentity | null; missing: string[] } {
+function resolveIdentity(): { identity: MicroBiltIdentity; missing: string[] } {
   const read = (envName: string): string | null => process.env[envName]?.trim() || null;
 
-  const MemberId  = read(IDENTITY_ENV.MemberId);
-  const MemberPwd = read(IDENTITY_ENV.MemberPwd);
-  const UserName  = read(IDENTITY_ENV.UserName);
-  const ProductID = read(IDENTITY_ENV.ProductID);
-
+  const identity: MicroBiltIdentity = {};
   const missing: string[] = [];
-  if (!MemberId)  missing.push(IDENTITY_ENV.MemberId);
-  if (!MemberPwd) missing.push(IDENTITY_ENV.MemberPwd);
-  if (!UserName)  missing.push(IDENTITY_ENV.UserName);
-  if (!ProductID) missing.push(IDENTITY_ENV.ProductID);
 
-  if (MemberId && MemberPwd && UserName && ProductID) {
-    return { identity: { MemberId, MemberPwd, UserName, ProductID }, missing };
-  }
-  return { identity: null, missing };
+  const take = (field: keyof MicroBiltIdentity, envName: string): void => {
+    const value = read(envName);
+    if (value) identity[field] = value;
+    else missing.push(envName);
+  };
+
+  take("MemberId",  IDENTITY_ENV.MemberId);
+  take("MemberPwd", IDENTITY_ENV.MemberPwd);
+  take("UserName",  IDENTITY_ENV.UserName);
+  take("ProductID", IDENTITY_ENV.ProductID);
+
+  return { identity, missing };
 }
 
 /**
@@ -671,11 +694,13 @@ interface CallIPredictArgs {
  * Build the MicroBilt iPredict request payload. Employment fields are NEVER
  * included. Names + address fields are uppercased per MicroBilt's ingest spec.
  *
- * The MsgRqHdr identity fields are REQUIRED and resolved by resolveIdentity()
- * before this is called — the spec's security scheme is `oauth: []` only, so the
- * Bearer token identifies the caller but selects neither the member account nor
- * the product. callIPredict fails closed (IDENTITY_NOT_CONFIGURED) rather than
- * spending an inquiry on a request MicroBilt cannot route.
+ * The MsgRqHdr identity fields are resolved by resolveIdentity() before this is
+ * called — the spec's security scheme is `oauth: []` only, so the Bearer token
+ * identifies the caller but selects neither the member account nor the product.
+ * Whichever fields are configured are spread in at the head of MsgRqHdr in spec
+ * order; the rest are omitted entirely rather than sent blank. callIPredict
+ * fails closed (IDENTITY_NOT_CONFIGURED) when NONE is configured, rather than
+ * spending an inquiry on a request MicroBilt cannot route at all.
  *
  * STILL DEFERRED, awaiting a confirmed request example from MicroBilt support:
  * the MBCLVRq envelope, ContactInfo object-vs-array, and whether the X-CAID /
@@ -689,13 +714,13 @@ function buildPayload(
 ) {
   return {
     MsgRqHdr: {
-      // Identity + product routing (spec field order). Without these MicroBilt
-      // cannot resolve the member account or select IPredict Advantage, and
-      // rejects the request regardless of a valid Bearer token.
-      MemberId:    identity.MemberId,
-      MemberPwd:   identity.MemberPwd,
-      UserName:    identity.UserName,
-      ProductID:   identity.ProductID,
+      // Identity + product routing (spec field order, preserved by
+      // resolveIdentity's insertion order). Without these MicroBilt cannot
+      // resolve the member account or select the product, and rejects the
+      // request regardless of a valid Bearer token. Only CONFIGURED fields are
+      // spread in: an unset field is absent from the request rather than blank,
+      // so MicroBilt sees exactly what this deployment actually has.
+      ...identity,
       RequestType: "N",
       ReasonCode:  "3",
       RefNum:      randomUUID(),
@@ -790,18 +815,33 @@ export async function callIPredict(args: CallIPredictArgs): Promise<IPredicResul
   }
 
   // ── MsgRqHdr identity guard (fail closed BEFORE spending an inquiry) ───────
-  // A GetReport call missing MemberId / MemberPwd / UserName / ProductID cannot
-  // be routed to the member account or the product, so MicroBilt rejects it —
+  // A GetReport call carrying NO identity at all cannot be routed to a member
+  // account or a product under any circumstance, so MicroBilt rejects it —
   // which historically surfaced only as an opaque HTTP_<status>. Stop here
   // instead and name exactly which env vars ops must set. Only the variable
   // NAMES are logged; the values (one of which is a credential) never are.
-  if (!identity) {
+  //
+  // A PARTIAL identity is NOT stopped. Requiring all four was the defect: a
+  // deployment holding only MICROBILT_PRODUCT_ID sent no routing whatsoever and
+  // every prequal returned an unexplained MANUAL_REVIEW. Sending what we
+  // actually have lets MicroBilt answer, or reject with a reason we can read.
+  if (Object.keys(identity).length === 0) {
     logger.error(
-      "[microbilt] CRITICAL: MsgRqHdr identity/routing is incomplete — missing " +
+      "[microbilt] CRITICAL: MsgRqHdr identity/routing is entirely unconfigured — missing " +
         missingIdentity.join(", ") +
         ". Routing to MANUAL_REVIEW without calling GetReport.",
     );
     return errorResult("IDENTITY_NOT_CONFIGURED");
+  }
+  if (missingIdentity.length > 0) {
+    // Proceed, but keep the deployment gap visible: an incomplete identity is a
+    // likely cause of a downstream rejection, and ops needs the var names to
+    // close it. Names only — MemberPwd's value never reaches a log line.
+    logger.warn(
+      "[microbilt] MsgRqHdr identity/routing is PARTIAL — unset: " +
+        missingIdentity.join(", ") +
+        ". Sending only the configured fields; MicroBilt may still reject the request.",
+    );
   }
 
   // ── STEP 1: Compute income gate (PASS 1 — UNKNOWN tier, 10.5% APR) ─────────

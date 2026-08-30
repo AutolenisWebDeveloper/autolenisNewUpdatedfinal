@@ -259,22 +259,96 @@ test("the full request we put on the wire matches the expected contract exactly"
   );
 });
 
-test("a missing identity var fails closed BEFORE the call, never spending an inquiry", async () => {
-  // Per-field coverage (each var individually required, whitespace treated as
-  // unset, and the ops log naming the missing vars) lives in
-  // microbilt-parse.test.ts. What this file adds is the interaction with the
-  // URL guards above: identity is checked AFTER them, so a deployment with
-  // several faults reports the most specific cause first.
-  delete process.env.MICROBILT_PRODUCT_ID;
+// P0 regression — the all-or-nothing identity gate.
+//
+// MICROBILT_PRODUCT_ID=MBCLR was set in production while MemberId / MemberPwd /
+// UserName were not (MicroBilt has never issued those account credentials, and
+// guessing them risks a different rejection). resolveIdentity() required ALL
+// FOUR before returning an identity at all, so callIPredict took the fail-closed
+// branch and every prequal came back MANUAL_REVIEW / tier=null /
+// credit_score=null / max_otd_amount_cents=0 — without MicroBilt ever being
+// told which product was being requested.
+//
+// Each field is now resolved and sent INDEPENDENTLY. Unset fields are omitted
+// from MsgRqHdr entirely: never invented, never blanked (a blank is worse than
+// absent — it looks configured while still being unroutable).
+
+test("a ProductID-only identity still reaches MicroBilt, carrying ProductID in MsgRqHdr", async () => {
+  for (const k of IDENTITY_ENV) delete process.env[k];
+  process.env.MICROBILT_PRODUCT_ID = "MBCLR";
+
+  const res = await call();
+
+  assert.equal(
+    reportCallCount,
+    1,
+    "ProductID alone must reach GetReport — dropping it is what produced the blind MANUAL_REVIEW",
+  );
+  const hdr = (JSON.parse(lastReportBody!) as { MsgRqHdr: Record<string, unknown> }).MsgRqHdr;
+  assert.equal(hdr.ProductID, "MBCLR", "the configured product must reach MsgRqHdr");
+  for (const absent of ["MemberId", "MemberPwd", "UserName"]) {
+    assert.ok(
+      !(absent in hdr),
+      `${absent} is unset and must be OMITTED from MsgRqHdr — not invented, not blank`,
+    );
+  }
+  assert.notEqual(res.reason, "IDENTITY_NOT_CONFIGURED");
+});
+
+test("each identity field is sent independently when it is the only one configured", async () => {
+  const cases = [
+    { env: "MICROBILT_MEMBER_ID", field: "MemberId" },
+    { env: "MICROBILT_MEMBER_PASSWORD", field: "MemberPwd" },
+    { env: "MICROBILT_USERNAME", field: "UserName" },
+    { env: "MICROBILT_PRODUCT_ID", field: "ProductID" },
+  ] as const;
+  const allFields = cases.map((c) => c.field);
+
+  for (const { env, field } of cases) {
+    for (const k of IDENTITY_ENV) delete process.env[k];
+    process.env[env] = "solo-value";
+    reportCallCount = 0;
+    lastReportBody = null;
+
+    await call();
+
+    assert.equal(reportCallCount, 1, `${env} alone must still reach GetReport`);
+    const hdr = (JSON.parse(lastReportBody!) as { MsgRqHdr: Record<string, unknown> }).MsgRqHdr;
+    assert.equal(hdr[field], "solo-value", `${field} must be present when ${env} is set`);
+    for (const other of allFields.filter((f) => f !== field)) {
+      assert.ok(!(other in hdr), `${other} must be omitted when its env var is unset`);
+    }
+  }
+});
+
+test("a fully-unset identity still fails closed — the block is omitted by never sending at all", async () => {
+  // The strongest form of "omit the block": with no identity configured at all
+  // MicroBilt cannot route the request under any circumstance, so the adapter
+  // still refuses BEFORE spending a real inquiry. Relaxing the gate to per-field
+  // inclusion must not relax this: nothing is invented, nothing is blanked, and
+  // no fabricated score / tier / OTD amount is ever produced.
+  for (const k of IDENTITY_ENV) delete process.env[k];
   const res = await call();
   assert.equal(res.reason, "IDENTITY_NOT_CONFIGURED");
   assertFailClosed(res);
   assert.equal(reportCallCount, 0, "must not spend a real inquiry on an unroutable request");
 });
 
+test("a whitespace-only identity value is treated as unset, not sent as blank", async () => {
+  for (const k of IDENTITY_ENV) delete process.env[k];
+  process.env.MICROBILT_PRODUCT_ID = "MBCLR";
+  process.env.MICROBILT_MEMBER_ID = "   ";
+
+  await call();
+
+  const hdr = (JSON.parse(lastReportBody!) as { MsgRqHdr: Record<string, unknown> }).MsgRqHdr;
+  assert.equal(hdr.ProductID, "MBCLR");
+  assert.ok(!("MemberId" in hdr), "a blank env value must be OMITTED, never sent as an empty string");
+});
+
 test("a URL fault is reported ahead of a missing identity (most specific cause wins)", async () => {
   process.env.MICROBILT_BASE_URL = "https://api.microbilt.example/iPredict";
-  delete process.env.MICROBILT_MEMBER_ID;
+  for (const k of IDENTITY_ENV) delete process.env[k];
   const res = await call();
   assert.equal(
     res.reason,

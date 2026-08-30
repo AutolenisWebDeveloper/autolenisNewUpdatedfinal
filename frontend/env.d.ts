@@ -51,8 +51,11 @@ declare namespace NodeJS {
     // scheme is `oauth: []` only, so the Bearer token identifies the CALLER but
     // selects neither the member account nor the product — these body fields do.
     // All four are account-specific values issued by MicroBilt. Typed optional
-    // because sandbox mode never reads them, but in production the adapter fails
-    // closed to MANUAL_REVIEW (IDENTITY_NOT_CONFIGURED) if any is missing.
+    // because sandbox mode never reads them, and because MicroBilt issues some
+    // accounts only a ProductID. Each is resolved and sent INDEPENDENTLY: an
+    // unset one is omitted from MsgRqHdr, never guessed and never blanked. Only
+    // when NONE is configured does the adapter fail closed to MANUAL_REVIEW
+    // (IDENTITY_NOT_CONFIGURED); a partial identity proceeds and is logged.
     MICROBILT_MEMBER_ID?: string;       // MsgRqHdr.MemberId
     MICROBILT_MEMBER_PASSWORD?: string; // MsgRqHdr.MemberPwd — CREDENTIAL, never logged
     MICROBILT_USERNAME?: string;        // MsgRqHdr.UserName

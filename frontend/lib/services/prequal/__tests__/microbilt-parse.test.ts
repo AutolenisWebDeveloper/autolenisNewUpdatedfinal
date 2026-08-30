@@ -22,9 +22,10 @@ process.env.MICROBILT_BASE_URL = "https://api.microbilt.example/iPredict/GetRepo
 process.env.MICROBILT_OAUTH_BASE_URL = "https://api.microbilt.example/OAuth/Token";
 process.env.MICROBILT_CLIENT_ID = "test-client-id";
 process.env.MICROBILT_CLIENT_SECRET = "test-client-secret";
-// MsgRqHdr identity/routing fields (iPredict_6.yaml). All four are required in
-// production; the adapter fails closed to MANUAL_REVIEW without them rather
-// than spending a real inquiry on a request MicroBilt cannot route.
+// MsgRqHdr identity/routing fields (iPredict_6.yaml). Each is resolved and sent
+// INDEPENDENTLY; an unset one is omitted from the request rather than blanked.
+// Only when NONE is configured does the adapter fail closed to MANUAL_REVIEW,
+// rather than spending a real inquiry on a request MicroBilt cannot route.
 process.env.MICROBILT_MEMBER_ID = "test-member-id";
 process.env.MICROBILT_MEMBER_PASSWORD = "test-member-pwd";
 process.env.MICROBILT_USERNAME = "test-user-name";
@@ -285,15 +286,82 @@ test("MsgRqHdr carries MemberId / MemberPwd / UserName / ProductID from env", as
   assert.ok((hdr.RefNum as string).length > 0, "RefNum must be non-empty");
 });
 
-test("a missing identity field fails closed: IDENTITY_NOT_CONFIGURED, GetReport never called", async () => {
+// P0 regression: the identity gate was all-or-nothing. Production had only
+// MICROBILT_PRODUCT_ID set (MicroBilt has never issued the other three), so the
+// whole MsgRqHdr identity block was dropped and every prequal returned an
+// unexplained MANUAL_REVIEW. Each field is now independent.
+
+const ALL_IDENTITY_ENV = [
+  "MICROBILT_MEMBER_ID",
+  "MICROBILT_MEMBER_PASSWORD",
+  "MICROBILT_USERNAME",
+  "MICROBILT_PRODUCT_ID",
+] as const;
+
+test("a partially-configured identity no longer fails closed — the set fields are sent", async () => {
   const saved = process.env.MICROBILT_PRODUCT_ID;
   delete process.env.MICROBILT_PRODUCT_ID;
+  const callsBefore = getReportCallCount;
+  try {
+    const res = await callWith(successBody({ ofac: { ofacresult: "N" }, idv: { OFACAlert: "N" } }));
+    assert.notEqual(
+      res.reason,
+      "IDENTITY_NOT_CONFIGURED",
+      "one unset field must no longer suppress the whole identity block",
+    );
+    assert.equal(
+      getReportCallCount,
+      callsBefore + 1,
+      "the request must reach GetReport carrying whatever identity IS configured",
+    );
+    const hdr = (sentReportPayload as { MsgRqHdr?: Record<string, unknown> }).MsgRqHdr!;
+    assert.equal(hdr.MemberId, "test-member-id");
+    assert.equal(hdr.MemberPwd, "test-member-pwd");
+    assert.equal(hdr.UserName, "test-user-name");
+    assert.ok(!("ProductID" in hdr), "the unset field is OMITTED, never blank or invented");
+  } finally {
+    restoreEnv("MICROBILT_PRODUCT_ID", saved);
+  }
+});
+
+test("removing any one identity field never suppresses the other three", async () => {
+  const FIELD_OF: Record<(typeof ALL_IDENTITY_ENV)[number], string> = {
+    MICROBILT_MEMBER_ID: "MemberId",
+    MICROBILT_MEMBER_PASSWORD: "MemberPwd",
+    MICROBILT_USERNAME: "UserName",
+    MICROBILT_PRODUCT_ID: "ProductID",
+  };
+  for (const v of ALL_IDENTITY_ENV) {
+    const saved = process.env[v];
+    delete process.env[v];
+    try {
+      const res = await callWith(successBody({ ofac: { ofacresult: "N" }, idv: { OFACAlert: "N" } }));
+      assert.notEqual(res.reason, "IDENTITY_NOT_CONFIGURED", `${v} must not gate the others`);
+      const hdr = (sentReportPayload as { MsgRqHdr?: Record<string, unknown> }).MsgRqHdr!;
+      assert.ok(!(FIELD_OF[v] in hdr), `${FIELD_OF[v]} must be omitted when ${v} is unset`);
+      for (const other of ALL_IDENTITY_ENV.filter((o) => o !== v)) {
+        assert.ok(FIELD_OF[other] in hdr, `${FIELD_OF[other]} must still be sent`);
+      }
+    } finally {
+      restoreEnv(v, saved);
+    }
+  }
+});
+
+test("an entirely unconfigured identity still fails closed, GetReport never called", async () => {
+  // The safety control the per-field relaxation must NOT weaken: with nothing
+  // configured MicroBilt cannot route the request under any circumstance, so no
+  // paid inquiry is spent and nothing is fabricated.
+  const saved = ALL_IDENTITY_ENV.map((v) => [v, process.env[v]] as const);
+  for (const v of ALL_IDENTITY_ENV) delete process.env[v];
   const callsBefore = getReportCallCount;
   try {
     const res = await callWith(successBody({ ofac: { ofacresult: "N" }, idv: { OFACAlert: "N" } }));
     assert.equal(res.decision, "MANUAL_REVIEW");
     assert.equal(res.reason, "IDENTITY_NOT_CONFIGURED");
     assert.equal(res.mocked, false);
+    assert.equal(res.tier, null, "no tier is fabricated");
+    assert.equal(res.maxOtdAmountCents, 0, "no budget is fabricated");
     assert.equal(
       getReportCallCount,
       callsBefore,
@@ -302,35 +370,22 @@ test("a missing identity field fails closed: IDENTITY_NOT_CONFIGURED, GetReport 
     // OFAC was never screened — the tri-state contract requires indeterminate.
     assert.equal(res.ofacFlagged, null);
   } finally {
-    restoreEnv("MICROBILT_PRODUCT_ID", saved);
+    for (const [v, value] of saved) restoreEnv(v, value);
   }
 });
 
-test("every identity field is individually required", async () => {
-  const vars = [
-    "MICROBILT_MEMBER_ID",
-    "MICROBILT_MEMBER_PASSWORD",
-    "MICROBILT_USERNAME",
-    "MICROBILT_PRODUCT_ID",
-  ] as const;
-  for (const v of vars) {
-    const saved = process.env[v];
-    delete process.env[v];
-    try {
-      const res = await callWith(successBody({ ofac: { ofacresult: "N" }, idv: { OFACAlert: "N" } }));
-      assert.equal(res.reason, "IDENTITY_NOT_CONFIGURED", `${v} must be required`);
-    } finally {
-      restoreEnv(v, saved);
-    }
-  }
-});
-
-test("an identity field of only whitespace is treated as unset (not sent as blank)", async () => {
+test("an identity field of only whitespace is omitted, not sent as blank", async () => {
   const saved = process.env.MICROBILT_MEMBER_ID;
   process.env.MICROBILT_MEMBER_ID = "   ";
   try {
     const res = await callWith(successBody({ ofac: { ofacresult: "N" }, idv: { OFACAlert: "N" } }));
-    assert.equal(res.reason, "IDENTITY_NOT_CONFIGURED");
+    assert.notEqual(res.reason, "IDENTITY_NOT_CONFIGURED");
+    const hdr = (sentReportPayload as { MsgRqHdr?: Record<string, unknown> }).MsgRqHdr!;
+    assert.ok(
+      !("MemberId" in hdr),
+      "a blank env value must be OMITTED — an empty string looks configured while being unroutable",
+    );
+    assert.equal(hdr.ProductID, "test-product-id", "the configured fields are unaffected");
   } finally {
     restoreEnv("MICROBILT_MEMBER_ID", saved);
   }
