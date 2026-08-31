@@ -1,11 +1,12 @@
 // Filter state for the Content worktable — pure, so the list query, the bulk
 // payload and the URL all derive from one place instead of drifting apart.
 //
-// `search` is deliberately absent from toBulkFilter(): the bulk endpoint's
-// filter schema has no free-text predicate, so sending one would be dropped
-// server-side and the action would hit a WIDER set than the operator was
-// looking at. The worktable therefore disables "select all matching" while a
-// search is active and falls back to explicit ids.
+// Every predicate here reaches BOTH the list query and the bulk mutation. That
+// includes `search`: the bulk endpoint accepts it and resolves it through the
+// same lib/content/article-filter builder the list uses, so "select all
+// matching" during a search targets exactly the rows on screen. An earlier
+// revision withheld select-all while searching to avoid drift — that capped a
+// real capability to work around a gap that was fixable, and it is fixed.
 
 export interface ContentFilterState {
   status: string;
@@ -109,21 +110,13 @@ export function toBulkFilter(f: ContentFilterState): Record<string, string | num
   if (f.metro) obj.metro = f.metro;
   if (f.scheduled) obj.scheduled = f.scheduled;
   if (f.failed) obj.failed = f.failed;
+  if (f.search.trim()) obj.search = f.search.trim();
 
   const { min, max } = qualityRange(f.quality);
   if (min !== undefined) obj.quality_score_min = min;
   if (max !== undefined) obj.quality_score_max = max;
 
   return obj;
-}
-
-/**
- * True when the whole visible result set can be expressed as a server-side
- * filter. A free-text search cannot, so select-all-matching is withheld and the
- * operator selects explicit rows instead.
- */
-export function isBulkFilterable(f: ContentFilterState): boolean {
-  return !f.search;
 }
 
 /** Filters as URL search params, for a shareable, Back-button-safe address. */

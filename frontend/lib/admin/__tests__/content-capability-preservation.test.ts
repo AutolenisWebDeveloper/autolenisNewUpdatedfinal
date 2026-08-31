@@ -280,6 +280,9 @@ describe("newly reachable — capability that existed only on the server", () =>
     ["Open the full review from the preview", "drawer-open-detail"],
     ["See why a publish was blocked", "content-detail-publish-failure"],
     ["See a pending scheduled publish", "content-detail-scheduled"],
+    ["Return to the Content Engine from attribution", "attribution-parent-link"],
+    ["Know the export contains buyer email before downloading", "attribution-export-pii-notice"],
+    ["Read the 30-day trend as a table, not only as bars", "attribution-trend-table"],
   ];
 
   for (const [what, testid] of NEW) {

@@ -12,8 +12,11 @@ import {
   adminError,
 } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import type { ArticleStatus, Prisma } from "@prisma/client";
-import { ARTICLE_STATUSES } from "@/lib/content/cluster-meta";
+import type { Prisma } from "@prisma/client";
+import {
+  buildContentArticleWhere,
+  filterFromSearchParams,
+} from "@/lib/content/article-filter";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -44,64 +47,11 @@ function buildOrderBy(sort: string | null): Prisma.ContentArticleOrderByWithRela
   }
 }
 
-// Translates the dashboard query params into a Prisma WHERE clause. Shared shape
-// with the bulk endpoint so "select all matching" stays consistent.
+// The WHERE clause comes from lib/content/article-filter, which the bulk
+// mutation endpoint also uses. Two builders agreed only by convention, and the
+// convention had already slipped; one builder cannot disagree with itself.
 export function buildArticleWhere(params: URLSearchParams): Prisma.ContentArticleWhereInput {
-  const where: Prisma.ContentArticleWhereInput = {};
-
-  const status = params.get("status");
-  if (status && (ARTICLE_STATUSES as readonly string[]).includes(status)) {
-    where.status = status as ArticleStatus;
-  }
-
-  const cluster = params.get("cluster");
-  if (cluster) where.cluster = cluster;
-
-  const metro = params.get("metro");
-  if (metro) where.metro = metro;
-
-  const min = params.get("quality_score_min");
-  const max = params.get("quality_score_max");
-  if (min !== null || max !== null) {
-    const range: Prisma.IntNullableFilter = {};
-    if (min !== null && min !== "") range.gte = Number(min);
-    if (max !== null && max !== "") range.lte = Number(max);
-    if (Object.keys(range).length > 0) where.qualityScore = range;
-  }
-
-  const search = params.get("search");
-  if (search?.trim()) {
-    // Widened from title-only to match the dashboard list, which has always
-    // searched slug/keyword/city too. A narrower search here meant the same
-    // query returned different rows depending on which surface ran it.
-    const q = search.trim();
-    where.OR = [
-      { title: { contains: q, mode: "insensitive" } },
-      { slug: { contains: q, mode: "insensitive" } },
-      { targetKeyword: { contains: q, mode: "insensitive" } },
-      { city: { contains: q, mode: "insensitive" } },
-    ];
-  }
-
-  // Lenses over columns that are not part of the editorial status enum.
-  // "scheduled" = a publish is pending for a not-yet-public article; the
-  // content-publisher cron additionally requires approvedAt before it fires.
-  if (params.get("scheduled") === "1") {
-    where.scheduledAt = { not: null };
-    // Composed via AND, never assigned to where.status: an explicit ?status=
-    // must still apply. Assigning here would DROP that constraint and widen the
-    // result set — and the same filter object drives bulk actions.
-    where.AND = [
-      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-      { status: { in: ["DRAFT", "REVIEW_NEEDED"] } },
-    ];
-  }
-  // "failed" = the last publish attempt was refused by the publish guards.
-  if (params.get("failed") === "1") {
-    where.publishFailureReason = { not: null };
-  }
-
-  return where;
+  return buildContentArticleWhere(filterFromSearchParams(params));
 }
 
 export async function GET(request: NextRequest) {

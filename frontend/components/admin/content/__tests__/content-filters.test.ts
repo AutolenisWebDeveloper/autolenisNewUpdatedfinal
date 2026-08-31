@@ -24,7 +24,6 @@ import {
   type ContentFilterState,
   filterSignature,
   fromSearchParams,
-  isBulkFilterable,
   qualityRange,
   toBulkFilter,
   toQueryParams,
@@ -70,29 +69,26 @@ describe("filterSignature — does the current total still describe the current 
 });
 
 describe("toBulkFilter — the visible list and the bulk target must agree", () => {
-  test("every narrowing field either reaches the bulk payload or disqualifies select-all", () => {
-    // The invariant that actually matters. A field that narrows the visible
-    // list has exactly two honest fates: the server can express it as a bulk
-    // predicate, or it cannot — in which case select-all-matching must be
-    // withheld so the operator selects explicit ids instead. What must never
-    // happen is the third case: the field narrows the list, is dropped from the
-    // payload, and the bulk action quietly hits a wider set.
+  test("every narrowing field reaches the bulk payload", () => {
+    // The invariant, now that search is a real server-side predicate: a field
+    // that narrows the visible list must narrow the mutation too. Nothing may
+    // narrow the list and then be silently dropped from the action.
     for (const [field, value] of NARROWING_FIELDS) {
       const filters = { ...EMPTY_FILTERS, [field]: value };
-      const reachesServer = Object.keys(toBulkFilter(filters)).length > 0;
-      const withheld = !isBulkFilterable(filters);
       assert.ok(
-        reachesServer || withheld,
-        `${String(field)} narrows the list, is absent from the bulk payload, and still ` +
-          `permits "select all matching" — the action would hit more rows than were shown`,
+        Object.keys(toBulkFilter(filters)).length > 0,
+        `${String(field)} narrows the list but vanishes from the bulk payload — ` +
+          `the action would hit more rows than were shown`,
       );
     }
   });
 
-  test("a free-text search withholds select-all-matching rather than being dropped", () => {
-    assert.equal(isBulkFilterable({ ...EMPTY_FILTERS, search: "camry" }), false);
-    assert.equal(isBulkFilterable(EMPTY_FILTERS), true);
-    assert.equal(isBulkFilterable({ ...EMPTY_FILTERS, status: "DRAFT" }), true);
+  test("search is sent as a bulk predicate, trimmed", () => {
+    assert.deepEqual(toBulkFilter({ ...EMPTY_FILTERS, search: "  camry " }), { search: "camry" });
+  });
+
+  test("a whitespace-only search adds no predicate", () => {
+    assert.deepEqual(toBulkFilter({ ...EMPTY_FILTERS, search: "   " }), {});
   });
 
   test("quality bands map to the numeric range the server understands", () => {
@@ -119,13 +115,6 @@ describe("toBulkFilter — the visible list and the bulk target must agree", () 
     assert.ok(!("sort" in bulk));
   });
 
-  test("search is not sent as a bulk filter", () => {
-    // The bulk endpoint's filter schema has no free-text predicate. Sending one
-    // would be silently dropped server-side and widen the target set, so the
-    // worktable must fall back to explicit ids when a search is active.
-    const bulk = toBulkFilter({ ...EMPTY_FILTERS, search: "camry" });
-    assert.ok(!("search" in bulk), "search must not masquerade as a server-side bulk predicate");
-  });
 });
 
 describe("query params — what the list endpoint receives", () => {

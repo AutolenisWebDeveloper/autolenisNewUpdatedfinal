@@ -92,6 +92,25 @@ function leaves(where: unknown, acc: Record<string, unknown>[] = []): Record<str
   return acc;
 }
 
+/**
+ * The OR array, wherever it sits. `publish` wraps baseWhere in an AND (the
+ * publishedAt split), so the search clause is nested for that action and
+ * top-level for the others — the test should not care which.
+ */
+function findOr(where: unknown): Record<string, { contains: string; mode: string }>[] | undefined {
+  if (!where || typeof where !== "object") return undefined;
+  const w = where as Record<string, unknown>;
+  if (Array.isArray(w.OR)) return w.OR as Record<string, { contains: string; mode: string }>[];
+  for (const value of Object.values(w)) {
+    const arr = Array.isArray(value) ? value : [value];
+    for (const child of arr) {
+      const hit = findOr(child);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
 function findLeaf(where: unknown, key: string): unknown {
   const hit = leaves(where).find((l) => key in l);
   return hit ? (hit as Record<string, unknown>)[key] : undefined;
@@ -169,6 +188,34 @@ describe("lens parity — the bulk target must match the list the operator saw",
       statusLeaves.some((l) => l.status === "DRAFT"),
       "the explicit DRAFT constraint must survive the scheduled lens",
     );
+  });
+
+  test("free-text search reaches the where clause as an OR over four columns", async () => {
+    // Without this, "select all matching" during a search rewrote every row the
+    // OTHER filters matched, ignoring the text the operator was looking at.
+    const POST = await loadPOST();
+    await POST(req({ action: "publish", filter: { search: "camry", status: "REVIEW_NEEDED" } }));
+
+    const where = updateManyCalls[0].where;
+    const or = findOr(where);
+    assert.ok(or, "search must produce an OR clause on the mutation");
+    assert.deepEqual(
+      or.map((c) => Object.keys(c)[0]).sort(),
+      ["city", "slug", "targetKeyword", "title"],
+      "the mutation must search the same columns the list does",
+    );
+    for (const clause of or) {
+      const predicate = Object.values(clause)[0];
+      assert.equal(predicate.contains, "camry");
+      assert.equal(predicate.mode, "insensitive");
+    }
+    assert.equal(findLeaf(where, "status"), "REVIEW_NEEDED", "other filters still apply");
+  });
+
+  test("a whitespace-only search adds no predicate to the mutation", async () => {
+    const POST = await loadPOST();
+    await POST(req({ action: "publish", filter: { search: "   ", status: "DRAFT" } }));
+    assert.equal(findOr(updateManyCalls[0].where), undefined);
   });
 
   test("quality bands reach the where clause", async () => {

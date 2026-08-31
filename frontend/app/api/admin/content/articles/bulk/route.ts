@@ -19,7 +19,10 @@ import {
 } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
 import type { ArticleStatus, Prisma } from "@prisma/client";
-import { ARTICLE_STATUSES } from "@/lib/content/cluster-meta";
+import {
+  buildContentArticleWhere,
+  filterFromBulkPayload,
+} from "@/lib/content/article-filter";
 
 const ACTION_TO_STATUS: Record<"publish" | "reject" | "draft", ArticleStatus> = {
   publish: "PUBLISHED",
@@ -44,6 +47,11 @@ const bulkSchema = z
         quality_score_max: z.number().optional(),
         scheduled: z.string().optional(),
         failed: z.string().optional(),
+        // Free text over title/slug/keyword/city — the same predicate the list
+        // endpoint applies. Without it, "select all matching" during a search
+        // resolved to every row the OTHER filters matched, ignoring the text
+        // the operator had typed and was looking at.
+        search: z.string().optional(),
       })
       .optional(),
   })
@@ -51,34 +59,12 @@ const bulkSchema = z
     message: "Provide either a non-empty ids array or a filter",
   });
 
-function whereFromFilter(filter: NonNullable<z.infer<typeof bulkSchema>["filter"]>): Prisma.ContentArticleWhereInput {
-  const where: Prisma.ContentArticleWhereInput = {};
-  if (filter.status && (ARTICLE_STATUSES as readonly string[]).includes(filter.status)) {
-    where.status = filter.status as ArticleStatus;
-  }
-  if (filter.cluster) where.cluster = filter.cluster;
-  if (filter.metro) where.metro = filter.metro;
-  if (filter.quality_score_min !== undefined || filter.quality_score_max !== undefined) {
-    const range: Prisma.IntNullableFilter = {};
-    if (filter.quality_score_min !== undefined) range.gte = filter.quality_score_min;
-    if (filter.quality_score_max !== undefined) range.lte = filter.quality_score_max;
-    where.qualityScore = range;
-  }
-  // These two lenses must mirror buildArticleWhere in the list route exactly.
-  // They are what the operator was looking at when they chose the action; if
-  // they are dropped here the action hits a wider set than the list showed.
-  if (filter.scheduled === "1") {
-    where.scheduledAt = { not: null };
-    // AND-composed so an explicit status filter is preserved, not overwritten.
-    where.AND = [
-      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-      { status: { in: ["DRAFT", "REVIEW_NEEDED"] } },
-    ];
-  }
-  if (filter.failed === "1") {
-    where.publishFailureReason = { not: null };
-  }
-  return where;
+// Shared with the list endpoint (lib/content/article-filter) so the rows an
+// operator saw are exactly the rows this mutation touches.
+function whereFromFilter(
+  filter: NonNullable<z.infer<typeof bulkSchema>["filter"]>,
+): Prisma.ContentArticleWhereInput {
+  return buildContentArticleWhere(filterFromBulkPayload(filter));
 }
 
 export async function POST(request: NextRequest) {

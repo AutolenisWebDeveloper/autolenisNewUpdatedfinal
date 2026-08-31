@@ -16,9 +16,9 @@
 //    count comes from a fetch keyed on filterSignature(); until that fetch
 //    matches the active filter the action button stays busy, so an irreversible
 //    dialog can never quote a number belonging to a filter already left.
-//  • Select-all-matching is withheld while a free-text search is active,
-//    because the bulk endpoint has no free-text predicate and would otherwise
-//    act on a wider set than the list showed.
+//  • The list query and the bulk mutation resolve their WHERE clause through
+//    ONE builder (lib/content/article-filter), free-text search included, so
+//    "select all matching" always targets exactly the rows on screen.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -53,7 +53,6 @@ import {
   type ContentFilterState,
   filterSignature,
   fromSearchParams,
-  isBulkFilterable,
   toBulkFilter,
   toQueryParams,
   toSearchParams,
@@ -309,7 +308,6 @@ export default function ContentWorktable({
   const pageIds = useMemo(() => articles.map((a) => a.id), [articles]);
   const count = selectedCount(selection, total);
   const anySelected = hasSelection(selection, total);
-  const canSelectAll = isBulkFilterable(filters);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const changeRowStatus = useCallback(
@@ -566,20 +564,14 @@ export default function ContentWorktable({
           <span className="text-sm font-semibold text-slate-700" data-testid="selected-count">
             {fmt(count)} selected
           </span>
-          {canSelectAll ? (
-            <button
-              type="button"
-              onClick={() => setSelection(selectAllMatching(selection))}
-              data-testid="select-all-matching"
-              className="rounded text-xs font-semibold text-al-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus"
-            >
-              Select all matching ({fmt(total)})
-            </button>
-          ) : (
-            <span className="text-xs text-slate-400">
-              Clear the search to select all matching
-            </span>
-          )}
+          <button
+            type="button"
+            onClick={() => setSelection(selectAllMatching(selection))}
+            data-testid="select-all-matching"
+            className="rounded text-xs font-semibold text-al-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-al-focus"
+          >
+            Select all matching ({fmt(total)})
+          </button>
           {anySelected && (
             <button
               type="button"
