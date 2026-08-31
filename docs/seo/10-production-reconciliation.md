@@ -661,8 +661,9 @@ weekly, and a weekly countdown to a single-day cliff could report "7 days left" 
 until after the cliff had passed. **No cron was added** — that would be a schedule change, out of
 scope.
 
-**Not built, by instruction: the refresh cron itself.** That remains an owner decision. The signal
-tells you when it is needed; it does not decide for you.
+**Not built, by instruction: the refresh cron itself.** That remained an owner decision. The signal
+tells you when it is needed; it does not decide for you. **The owner has since decided — see
+"The refresh cron" below, which closes this.**
 
 ### Cadence-aware failing-cron detection
 
@@ -890,3 +891,82 @@ population identifiable without guesswork.
 **Recommended follow-up (not in this remediation):** the lifecycle manager should write an audit
 record per transition. Its absence is why V-1's responsible *run* is unidentifiable, and it will
 recur on the next incident.
+
+## The refresh cron — closing the one-way door
+
+Built on owner instruction, after the staleness runway made the cliff visible. `amips-refresh`,
+daily at 03:00 UTC.
+
+### What was actually broken
+
+Two failures compounding, and the second is the one that made the first permanent:
+
+1. **`REFRESH_REQUIRED` was a one-way door.** `lifecycle-manager.ts:284` demotes a page when its
+   data ages out. Nothing anywhere promoted one back — a repository-wide search for the status
+   returns the demotion, the servability set, the sitemap filter and the repair planner, and no
+   transition home.
+2. **The data never got newer on its own.** `syncMarketIntelligence()` and
+   `computeMarketScoreBatch()` — the two pipelines that write the timestamps every page is judged
+   against — were reachable **only** from `/api/admin/amips/sync-market-intelligence` and
+   `/api/admin/amips/compute-market-scores`. No cron ran either. Unless an admin clicked, the
+   source data aged indefinitely. That is the mechanism behind the 66–85-day-old market/dealer/
+   vehicle data the owner reported: pages went stale because nothing refreshed the sources, were
+   demoted, and had no path back.
+
+### The design decision that shaped everything: refresh is regeneration
+
+A page's body embeds real numbers — Quality Gate 1 requires at least three, and the assembler
+feeds them in as `dataTokens`. So moving `marketDataAsOf` forward on a page whose body still
+narrates last quarter's figures would publish a freshness claim the page cannot support. The
+cheap fix (bump the dates, flip to ACTIVE) is the dishonest one.
+
+**So this cron never writes an as-of date.** It re-opens the page's own `ContentQueue` row and
+lets `generateAmipsPage` do the work: because `slug = slugify(keywordTarget)` and the completed
+queue row is linked by `contentPageId`, the generator upserts *the same slug* and rewrites body,
+as-of dates and `lifecycleStatus` together, through the quality gate, in one statement. A wiring
+test asserts the service performs **no** `amips_pages` write at all.
+
+### Eligibility is judged on the sources, not the page
+
+The subtle bug this avoids, caught while reasoning about the data flow rather than from a failing
+test: `hasStaleData()` reads the *page's own* as-of columns, and those do not change until the
+page is regenerated. An implementation that consulted them would find every page still stale
+immediately after a successful source refresh — the cron would run nightly, report work, and
+requeue nothing, forever. Eligibility therefore reads the **projected** dates: the timestamps on
+the source rows a regeneration is about to consume. Two tests pin this in both directions.
+
+### What it refuses to do, and why
+
+| Skip reason | Why re-opening would be wrong |
+| --- | --- |
+| `still_stale` | The source row for that metro/vehicle did not get newer. Regenerating would fail Gate 5 and land the page in `UNDER_REVIEW` — strictly worse than the `REFRESH_REQUIRED` it sits in. A persistent count here points at a source the refresh does not cover. |
+| `no_impressions` | The page was demoted for earning no traffic, not for staleness. `lifecycleStatus` records the destination, not the cause, so the rule is re-derived through the **same exported predicate** the demotion uses (`hasNoImpressions`, extracted for this). Fresh data does not make an unread page worth regenerating; the next lifecycle run would demote it again. |
+| `no_queue_item` | No queue row links to the page, so its `keywordTarget` — the only input that reproduces its slug — is unrecoverable. Regenerating from a guessed keyword would mint a **second** page at a different slug instead of refreshing this one. Reported, never guessed at. |
+| `duplicate_entity` | Found in second review. The entity guard (FIX 1) fails any generation where a sibling covers the same (make, model, metro) — and production carries **31 such clusters**. Re-opening those nightly would fail the same guard every time, and because the requeue clears `failureReason`, it would erase the guard's own verdict and loop forever. The service now reads that verdict via an exported marker and leaves those rows untouched. Clusters are `lifecycle-repair.ts`'s problem, not refresh's. |
+| `over_budget` | `amips-generate` takes 17 items per run, three runs a day. Re-opening the whole backlog would monopolise every slot for days and starve new coverage, so a run claims at most 17 and the backlog drains over successive days, highest queue priority first. A skip costs no budget. |
+
+### Ordering is load-bearing
+
+Sources refresh **before** candidates are read, and the two pipelines run **sequentially** —
+`computeMarketScoreBatch` reads the rows `syncMarketIntelligence` writes, so running them
+concurrently would score half the metros against the previous snapshot. A source failure aborts
+the requeue entirely and returns rather than throwing: throwing would record the run FAILED, and
+`failCronRun` **replaces** `result` with `{ build }`, discarding the diagnosis. The run stays
+COMPLETED with `sourceRefreshError` in its result JSONB.
+
+| Change | File |
+| --- | --- |
+| `planPageRefresh()`, `planRefreshBatch()`, `REFRESH_REQUEUE_BUDGET` (pure) | `lib/amips/refresh.ts` |
+| `runAmipsRefresh()` — source refresh, projection, requeue | `lib/amips/refresh.service.ts` |
+| `hasNoImpressions()` extracted and exported; demotion rewired through it; `loadTraffic` exported | `lib/amips/lifecycle-manager.ts` |
+| `DUPLICATE_ENTITY_FAILURE_PREFIX` exported so the guard's verdict is read, not re-derived | `lib/amips/amips-generator.ts` |
+| Cron route (03:00 UTC) and admin backfill | `app/api/cron/amips-refresh/`, `app/api/admin/amips/refresh/` |
+| Schedule + monitoring registry (pinned to each other by `cron-schedule.test.ts`) | `vercel.json`, `cron-schedule.ts` |
+
+**No migration.** `lastRefreshedAt`, `marketScoreJson` and `ContentQueue.contentPageId` already
+existed; the frozen migrations are untouched.
+
+**One test assertion was changed, deliberately.** `dead-cron-cadence.test.ts` pinned the fleet
+split at exactly 34/33 — the sizes when that fix landed — so adding any cron failed a test about
+threshold *behaviour*. The counts are now a floor plus a partition check; the two property
+assertions (every slow cron alerts on one failure, every fast cron still needs two) are unchanged.
