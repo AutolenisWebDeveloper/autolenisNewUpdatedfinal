@@ -22,6 +22,10 @@ import {
   deniedReason,
   type AdminUiCapability,
 } from "../admin-ui-roles";
+import {
+  CONTENT_CAPABILITY_ROLES,
+  type ContentCapability,
+} from "../content-permissions";
 
 const ALL_ROLES = [
   "SUPER_ADMIN",
@@ -59,6 +63,20 @@ function enforcedRolesIn(source: string): Set<string> {
   for (const m of source.matchAll(/admin\.role\s*!==\s*"([A-Z_]+)"/g)) roles.add(m[1]);
   // `admin.role !== AdminRole.SUPER_ADMIN`
   for (const m of source.matchAll(/admin\.role\s*!==\s*AdminRole\.([A-Z_]+)/g)) roles.add(m[1]);
+
+  // `requireContentCapability(request, "content.x")` — a thin wrapper that
+  // forwards CONTENT_CAPABILITY_ROLES["content.x"] straight to getAdminWithRole,
+  // so it denies exactly like the explicit forms above. The role names are not
+  // literal in the route file, so they are resolved through the same map the
+  // SERVER uses — never through a list restated here, which would let the
+  // mirror agree with itself instead of with the route.
+  for (const m of source.matchAll(
+    /requireContentCapability\(\s*request\s*,\s*"([a-z_.]+)"\s*\)/g,
+  )) {
+    const mapped = CONTENT_CAPABILITY_ROLES[m[1] as ContentCapability];
+    assert.ok(mapped, `route names an unknown content capability: ${m[1]}`);
+    for (const r of mapped) roles.add(r);
+  }
 
   return roles;
 }

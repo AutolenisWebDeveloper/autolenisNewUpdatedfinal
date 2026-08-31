@@ -12,8 +12,11 @@ import {
   adminError,
 } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
-import type { ArticleStatus, Prisma } from "@prisma/client";
-import { ARTICLE_STATUSES } from "@/lib/content/cluster-meta";
+import type { Prisma } from "@prisma/client";
+import {
+  buildContentArticleWhere,
+  filterFromSearchParams,
+} from "@/lib/content/article-filter";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -44,37 +47,11 @@ function buildOrderBy(sort: string | null): Prisma.ContentArticleOrderByWithRela
   }
 }
 
-// Translates the dashboard query params into a Prisma WHERE clause. Shared shape
-// with the bulk endpoint so "select all matching" stays consistent.
+// The WHERE clause comes from lib/content/article-filter, which the bulk
+// mutation endpoint also uses. Two builders agreed only by convention, and the
+// convention had already slipped; one builder cannot disagree with itself.
 export function buildArticleWhere(params: URLSearchParams): Prisma.ContentArticleWhereInput {
-  const where: Prisma.ContentArticleWhereInput = {};
-
-  const status = params.get("status");
-  if (status && (ARTICLE_STATUSES as readonly string[]).includes(status)) {
-    where.status = status as ArticleStatus;
-  }
-
-  const cluster = params.get("cluster");
-  if (cluster) where.cluster = cluster;
-
-  const metro = params.get("metro");
-  if (metro) where.metro = metro;
-
-  const min = params.get("quality_score_min");
-  const max = params.get("quality_score_max");
-  if (min !== null || max !== null) {
-    const range: Prisma.IntNullableFilter = {};
-    if (min !== null && min !== "") range.gte = Number(min);
-    if (max !== null && max !== "") range.lte = Number(max);
-    if (Object.keys(range).length > 0) where.qualityScore = range;
-  }
-
-  const search = params.get("search");
-  if (search?.trim()) {
-    where.title = { contains: search.trim(), mode: "insensitive" };
-  }
-
-  return where;
+  return buildContentArticleWhere(filterFromSearchParams(params));
 }
 
 export async function GET(request: NextRequest) {
@@ -88,7 +65,7 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(MAX_LIMIT, Math.max(1, Number(params.get("limit")) || DEFAULT_LIMIT));
   const wantsBreakdown = params.get("breakdown") === "1";
 
-  const [items, total, statusCounts] = await Promise.all([
+  const [items, total, statusCounts, scheduledCount, failedCount] = await Promise.all([
     prisma.contentArticle.findMany({
       where,
       orderBy: buildOrderBy(params.get("sort")),
@@ -112,11 +89,24 @@ export async function GET(request: NextRequest) {
       },
     }),
     prisma.contentArticle.count({ where }),
-    // Global status totals for the stat strip — intentionally unfiltered.
+    // Global status totals for the triage strip — intentionally unfiltered, so
+    // the chips always show the whole pipeline rather than the current view.
     prisma.contentArticle.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.contentArticle.count({
+      where: { scheduledAt: { not: null }, status: { in: ["DRAFT", "REVIEW_NEEDED"] } },
+    }),
+    prisma.contentArticle.count({ where: { publishFailureReason: { not: null } } }),
   ]);
 
-  const stats = { total: 0, published: 0, review_needed: 0, draft: 0, retired: 0 };
+  const stats = {
+    total: 0,
+    published: 0,
+    review_needed: 0,
+    draft: 0,
+    retired: 0,
+    scheduled: scheduledCount,
+    failed: failedCount,
+  };
   for (const row of statusCounts) {
     const count = row._count._all;
     stats.total += count;

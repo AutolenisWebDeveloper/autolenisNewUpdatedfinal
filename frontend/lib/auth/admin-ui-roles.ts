@@ -17,6 +17,9 @@
 //   1. requirePermissionActorStrict(...) — hard-denies regardless of the flag.
 //   2. an explicit role check in the route — getAdminWithRole(request, [...]),
 //      an ALLOWED_ROLES set, or an inline admin.role comparison.
+//   3. requireContentCapability(request, "content.x") — a thin wrapper that
+//      forwards CONTENT_CAPABILITY_ROLES["content.x"] to getAdminWithRole, so
+//      it denies exactly like form 2 with the roles held one indirection away.
 // Only those are mirrored. Gating the UI on the full PERMISSION_ROLES map would
 // hide controls the server currently permits, which would be a capability
 // regression dressed up as a security improvement.
@@ -38,6 +41,16 @@ const MONEY: readonly AdminRoleName[] = ["SUPER_ADMIN", "FINANCE_ADMIN"];
 const OPS: readonly AdminRoleName[] = ["SUPER_ADMIN", "OPERATIONS_ADMIN"];
 /** Super-admin only. */
 const SUPER: readonly AdminRoleName[] = ["SUPER_ADMIN"];
+/** Content editors — mirrors CONTENT_CAPABILITY_ROLES' EDITORS grouping. */
+const EDITORS: readonly AdminRoleName[] = ["SUPER_ADMIN", "OPERATIONS_ADMIN"];
+/** Every operational role — mirrors content-permissions' ALL_OPERATIONAL. */
+const ALL_OPERATIONAL_ROLES: readonly AdminRoleName[] = [
+  "SUPER_ADMIN",
+  "OPERATIONS_ADMIN",
+  "COMPLIANCE_ADMIN",
+  "FINANCE_ADMIN",
+  "SUPPORT_ADMIN",
+];
 
 /**
  * UI capability → the roles the SERVER actually admits, plus the route files
@@ -123,6 +136,36 @@ export const ADMIN_UI_CAPABILITIES = {
       "app/api/admin/support/impersonate/route.ts",
       "app/api/admin/support/impersonation/[id]/end/route.ts",
     ],
+  },
+  /**
+   * Enqueue a content generation / regeneration batch.
+   *
+   * The route enforces this through requireContentCapability("content.generate"),
+   * which resolves to CONTENT_CAPABILITY_ROLES.EDITORS. Mirrored so the Generate
+   * control on the Content Engine is disabled-with-a-reason for the three roles
+   * the server refuses, instead of 403-ing after the click.
+   */
+  "content.generate": {
+    roles: EDITORS,
+    sourceRoutes: ["app/api/admin/content/articles/generate/route.ts"],
+  },
+  /** Retry / cancel / pause / resume a generation job. */
+  "content.manage_jobs": {
+    roles: EDITORS,
+    sourceRoutes: ["app/api/admin/content/jobs/[id]/route.ts"],
+  },
+  /**
+   * Read the generation job list.
+   *
+   * Every operational role is admitted, so this gates nothing today — it is
+   * mirrored because the route DOES perform a hard role check, and the
+   * scope-discipline test requires each hard-denying endpoint a gated component
+   * calls to be represented. Recording it as open is the honest entry; omitting
+   * it would leave a real check undocumented.
+   */
+  "content.view": {
+    roles: ALL_OPERATIONAL_ROLES,
+    sourceRoutes: ["app/api/admin/content/jobs/route.ts"],
   },
 } as const satisfies Record<
   string,

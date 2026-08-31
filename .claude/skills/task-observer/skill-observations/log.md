@@ -278,3 +278,65 @@ for the route path across test files as part of the change.
 
 **Principle:** A route test depends on everything the route imports, including code the test
 never executes. Import-time coupling is coupling.
+
+## 2026-08-30
+
+### Observation 17: Admin UI audits should grep for API capabilities with no UI consumer
+
+**Status:** OPEN
+**Date:** 2026-08-30
+**Session context:** Auditing /admin/content before a UX/workflow redesign; discovered an entire Phase-3 content workflow API layer (validate/approve/schedule/publish_now/unpublish/rollback, generation jobs with pause/resume/cancel/retry, a content capability model) with zero UI consumers.
+**Skill:** autolenis-system-architecture
+**Type:** open-source
+**Phase/Area:** Reuse-before-create protocol / capability-index
+
+**Issue:** The reuse-before-create protocol tells you to search for an existing service before building a new one, but it does not tell you to search the reverse direction — for existing API routes and services that no UI reaches. A redesign brief that says "preserve every capability" is silently scoped to what the UI already shows, so orphaned server capability stays invisible and gets rebuilt later as a "new" feature.
+
+**Suggested improvement:** Add an "orphan sweep" step to the reuse-before-create protocol: for the domain under change, list every route handler and exported service function, then grep the UI tree for a consumer of each. Report the ones with no consumer as orphaned capability rather than assuming the UI is the complete inventory.
+
+**Principle:** An inventory taken from the user interface is not an inventory of the system. Capability audits must enumerate from the server surface inward, because unreached capability is invisible from the surface that fails to reach it.
+
+### Observation 18: Two write paths to the same state with different invariants is a design defect worth naming explicitly
+
+**Status:** OPEN
+**Date:** 2026-08-30
+**Session context:** Same /admin/content audit. Publishing an article is reachable by two paths with different semantics: a plain status flip (updateContentArticleStatus) that bypasses approval/validation guardrails, and publishNow() which enforces them.
+**Skill:** autolenis-code-verification
+**Type:** open-source
+**Phase/Area:** STEP 2 — first code review checklist
+
+**Issue:** The review checklist lists "duplicated functionality" and "invalid assumptions" but does not name the specific and more dangerous pattern: two code paths that write the same field, where one enforces an invariant and the other does not. This reads as acceptable duplication rather than as a guardrail bypass.
+
+**Suggested improvement:** Add an explicit review prompt to STEP 2: "For every state field this change touches, enumerate all write paths. If one path enforces a guard the others do not, that is a bypass — report it even if the change did not introduce it."
+
+**Principle:** Duplication of a write path is not a style problem; it is an invariant problem. The weakest path defines the actual guarantee, so guardrails must be reviewed at the field level, not the function level.
+
+### Observation 19: Reaching for the same visual device in three components is the signal, not each instance
+
+**Status:** OPEN
+**Date:** 2026-08-30
+**Session context:** Building an owner-facing audit document; the Impeccable hook flagged a thick left accent border on three separate card components (banner, finding card, callout).
+**Skill:** impeccable
+**Type:** open-source
+**Phase/Area:** side-tab rule / design self-review
+
+**Issue:** The rule fires per instance, so it reads as three independent nits. The actual defect was singular and structural: one device was reused for three different jobs, and in one of them it duplicated information a chip already carried. Fixing instance-by-instance would have produced three subtler stripes rather than three distinct devices.
+
+**Suggested improvement:** When the same rule fires on 3+ components in one file, report it once as a repetition finding — "this device appears in N components; each should encode something different, or the device should collapse to one" — rather than N independent findings.
+
+**Principle:** A visual device repeated across components that mean different things is not N small problems; it is one design problem about vocabulary. Review tooling that counts instances hides the pattern that makes them worth fixing.
+
+### Observation 20: A capability-preservation fixture is only as good as its enumeration
+
+**Status:** OPEN
+**Date:** 2026-08-30
+**Session context:** Implementing the approved /admin/content redesign. Wrote an executable capability-preservation test listing every pre-existing control by data-testid, ran it green at 90/90, and only found during the independent second review that a banner and its two actions had been dropped — the fixture had never named them, so it passed while the regression was live.
+**Skill:** autolenis-code-verification
+**Type:** open-source
+**Phase/Area:** STEP 6 — independent second review
+
+**Issue:** An allow-list style regression fixture reports on what it enumerates and is silent on what it omits. A green run therefore reads as "nothing was lost" when it only means "nothing on the list was lost". The failure is invisible precisely because the test is passing, and the confidence it produces suppresses the manual check that would have caught it.
+
+**Suggested improvement:** When a preservation fixture is built by hand, derive the baseline mechanically rather than from memory — enumerate the identifiers present at the base commit (e.g. extract them from `git show BASE:file`) and diff that set against the fixture, failing on any baseline identifier the fixture does not mention. The fixture then cannot be quietly incomplete.
+
+**Principle:** A hand-written allow-list cannot prove completeness, only conformance to itself. Any test asserting that nothing was lost must derive its baseline from the artifact being preserved, not from the author's recollection of it.
