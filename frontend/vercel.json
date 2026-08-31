@@ -233,6 +233,10 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/cron/content-generation-seed",
+      "schedule": "0 8 * * *"
+    },
+    {
       "path": "/api/cron/workflow-resume-drain",
       "schedule": "* * * * *"
     },
