@@ -195,6 +195,120 @@ jobs:
             psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$f"
           done
 
+  # Playwright had no CI job at all: three E2E specs existed and none of them had
+  # ever run on a pull request. This job runs the outreach suite against a real
+  # browser, a real Next server and a real migrated database, and asserts
+  # DATABASE STATE rather than visible text.
+  #
+  # SCOPE, AND WHY IT IS NARROW. tests/e2e also holds dealer-funnel,
+  # affiliate-portal and buyer-remediation. Those drive flows that call
+  # supabase.auth.admin.createUser(), which has no local stub, so running them
+  # here would red the build for missing infrastructure rather than for a defect.
+  # Widening this job means standing up Supabase auth first — a deliberate piece
+  # of work, not a glob change. Naming the file is the honest boundary.
+  e2e:
+    name: E2E (dealer outreach)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    services:
+      postgres:
+        image: postgres:16.4
+        env:
+          POSTGRES_USER: autolenis_ci
+          # The database name is load-bearing, not cosmetic: every spec and the
+          # storage-state script refuse to run unless DATABASE_URL contains
+          # "autolenis_e2e". That guard is what makes it impossible for this job
+          # to be pointed at a real database by an edit to one env line.
+          POSTGRES_DB: autolenis_e2e
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U autolenis_ci -d autolenis_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://autolenis_ci@localhost:5432/autolenis_e2e
+      DIRECT_URL: postgresql://autolenis_ci@localhost:5432/autolenis_e2e
+      JWT_SECRET: ci-placeholder-jwt-secret-32-characters
+      NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder
+      SUPABASE_SERVICE_ROLE_KEY: placeholder
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      E2E_BASE_URL: http://localhost:3000
+      E2E_STORAGE_STATE: /tmp/autolenis-e2e-admin.json
+      # No TWILIO_*, no RESEND_API_KEY, no APOLLO_API_KEY, and the send flag left
+      # unset. Even if a gate were bypassed there is no credential to send with.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@a15d269cd4658e1107c09f1fabf4cbd7bd1f308a # v4.4.0
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply the migration chain
+        run: pnpm exec prisma migrate deploy
+
+      - name: Generate Prisma client
+        run: pnpm exec prisma generate
+
+      - name: Build
+        run: pnpm build
+
+      - name: Install the Playwright browser
+        # Only chromium, and only here. The agent image ships one preinstalled;
+        # a GitHub runner does not.
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Same readiness probe visual.yml uses. There is no /api/health route in
+      # this app, so the check is a 200 on / — polled, not slept on.
+      - name: Start the app
+        run: |
+          pnpm start &
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/ || true)
+            if [ "$code" = "200" ]; then echo "app up after ${i}s"; exit 0; fi
+            sleep 1
+          done
+          echo "app did not become ready on :3000"; exit 1
+
+      # Admin auth is a self-contained JWT cookie (lib/auth/admin-session.ts:
+      # "NEVER touches Supabase auth"), so an authenticated session can be minted
+      # from JWT_SECRET without an auth provider. The script refuses to run
+      # unless DATABASE_URL targets autolenis_e2e.
+      - name: Mint an admin session
+        run: pnpm exec tsx scripts/e2e-admin-storage-state.ts
+
+      - name: E2E — dealer outreach
+        run: pnpm exec playwright test --config playwright.e2e.config.ts tests/e2e/dealer-outreach.spec.ts
+
+      - name: Upload the trace on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-outreach-report
+          path: |
+            frontend/playwright-report/**
+            frontend/test-results/**
+          if-no-files-found: ignore
+
   dependency-audit:
     name: Dependency audit
     runs-on: ubuntu-latest
