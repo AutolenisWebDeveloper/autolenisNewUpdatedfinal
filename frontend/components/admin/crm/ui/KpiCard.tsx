@@ -31,7 +31,19 @@ const DELTA_TONE = {
   flat: 'text-[var(--crm-text-tertiary)]',
 } as const;
 
-/** Flat metric tile — label, value, optional delta + sublabel. No shadow. */
+/**
+ * Flat metric tile — label, value, optional delta + sublabel. No shadow.
+ *
+ * INTERACTIVE ONLY WHEN ASKED. `onClick` and `href` had been declared in the
+ * props for as long as this component existed and were never destructured or
+ * rendered, so a tile passed one was silently inert — it could advertise "Tap to
+ * review" and do nothing, for mouse and keyboard alike, with no type error to
+ * say so. An E2E run looking for the button found a div.
+ *
+ * With a handler or an href it renders a real <button> or <a>: keyboard
+ * reachable, with the kit's focus ring. Without one it renders exactly the div
+ * it always did, so every existing tile is untouched.
+ */
 export function KpiCard({
   label,
   value,
@@ -40,18 +52,23 @@ export function KpiCard({
   icon: Icon,
   trust = false,
   loading = false,
+  onClick,
+  href,
   className,
   'data-testid': testId,
 }: KpiCardProps) {
   const accent = trust ? 'var(--crm-trust)' : 'var(--crm-primary)';
-  return (
-    <div
-      className={cn(
-        'rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] p-4',
-        className,
-      )}
-      data-testid={testId}
-    >
+  const interactive = !!onClick || !!href;
+
+  const shell = cn(
+    'rounded-[var(--crm-radius-md)] border border-[var(--crm-border)] crm-hairline bg-[var(--crm-bg-primary)] p-4',
+    interactive &&
+      'w-full text-left transition-colors hover:bg-[var(--crm-bg-secondary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--crm-ring)] cursor-pointer',
+    className,
+  );
+
+  const body = (
+    <>
       <div className="flex items-center justify-between">
         <span className="text-[12px] text-[var(--crm-text-tertiary)]">{label}</span>
         {Icon && <Icon className="h-4 w-4" style={{ color: accent }} strokeWidth={1.75} />}
@@ -73,6 +90,26 @@ export function KpiCard({
         )}
         {sublabel && <span className="text-[12px] text-[var(--crm-text-tertiary)]">{sublabel}</span>}
       </div>
+    </>
+  );
+
+  if (href) {
+    return (
+      <a href={href} className={shell} data-testid={testId}>
+        {body}
+      </a>
+    );
+  }
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={shell} data-testid={testId}>
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div className={shell} data-testid={testId}>
+      {body}
     </div>
   );
 }

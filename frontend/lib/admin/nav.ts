@@ -89,6 +89,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     items: [
       { label: "Dealers", href: "/admin/dealers", icon: "Building2" },
       { label: "Dealer Recruitment", href: "/admin/dealer-outreach", icon: "Phone" },
+      { label: "Outreach Queue", href: "/admin/dealer-outreach/queue", icon: "ListChecks" },
       { label: "Dealer Health", href: "/admin/dealers/health", icon: "TrendingUp" },
     ],
   },

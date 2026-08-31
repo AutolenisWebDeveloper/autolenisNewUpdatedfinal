@@ -28,6 +28,22 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   size?: Size;
 }
 
+/**
+ * The button's visual recipe, exported so a LINK that should look like a button
+ * consumes the same one. A `tel:` action must be an anchor — right-click, long
+ * press and open-in-app all depend on it — and re-typing these classes at the
+ * call site is how the kit's tone scale quietly forks.
+ */
+export function buttonClasses(opts?: { variant?: Variant; size?: Size; className?: string }): string {
+  return cn(
+    'inline-flex items-center justify-center rounded-[var(--crm-radius-sm)] font-medium transition-colors outline-none',
+    'focus-visible:ring-2 focus-visible:ring-[var(--crm-ring)] disabled:opacity-50 disabled:pointer-events-none',
+    VARIANT[opts?.variant ?? 'secondary'],
+    SIZE[opts?.size ?? 'md'],
+    opts?.className,
+  );
+}
+
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = 'secondary', size = 'md', className, type = 'button', ...rest },
   ref,
@@ -36,13 +52,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
     <button
       ref={ref}
       type={type}
-      className={cn(
-        'inline-flex items-center justify-center rounded-[var(--crm-radius-sm)] font-medium transition-colors outline-none',
-        'focus-visible:ring-2 focus-visible:ring-[var(--crm-ring)] disabled:opacity-50 disabled:pointer-events-none',
-        VARIANT[variant],
-        SIZE[size],
-        className,
-      )}
+      className={buttonClasses({ variant, size, className })}
       {...rest}
     />
   );
