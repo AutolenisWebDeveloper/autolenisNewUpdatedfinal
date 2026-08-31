@@ -279,8 +279,48 @@ async function claimPrequalPull(
   return "claimed";
 }
 
+/**
+ * Persist the validated city/state/zip from a prequal submission onto the buyer.
+ *
+ * Prequal is the only step in the buyer journey that collects a validated
+ * location (the route enforces a 2-letter state and a 5-digit ZIP). It used to
+ * forward these to MicroBilt and discard them, leaving `buyers.city/state/zip`
+ * NULL — and `dealer-invitation.service` fails closed on an unplaceable buyer,
+ * so those buyers' auctions produced zero invitations.
+ *
+ * NEVER-OVERWRITE is structural, not a read-then-write: each field is its own
+ * conditional `updateMany` guarded on `<field>: null`. A buyer who already has
+ * the value simply does not match, so a concurrent admin edit can never be
+ * clobbered and there is no read to race against. Each field is guarded
+ * independently, so a buyer holding a ZIP but no city/state still gets both.
+ *
+ * `address` is deliberately NOT persisted here: the invitation matcher never
+ * reads it, so writing it would widen the stored PII for no functional gain.
+ */
+async function backfillBuyerLocation(buyerId: string, input: PrequalSubmission): Promise<void> {
+  const city = input.city?.trim() ?? "";
+  const state = input.state?.trim().toUpperCase() ?? "";
+  const zip = input.zip?.trim() ?? "";
+
+  await Promise.all([
+    city ? prisma.buyer.updateMany({ where: { id: buyerId, city: null }, data: { city } }) : null,
+    state ? prisma.buyer.updateMany({ where: { id: buyerId, state: null }, data: { state } }) : null,
+    zip ? prisma.buyer.updateMany({ where: { id: buyerId, zip: null }, data: { zip } }) : null,
+  ]);
+}
+
 export async function initiatePrsequal(buyer: BuyerForPrequal, input: PrequalSubmission) {
   if (!input.fcraConsent) throw new Error("FCRA consent required");
+
+  // Location backfill runs BEFORE the valid-prequal early return and before the
+  // pull, so it lands on every submission carrying a validated address —
+  // including a re-submission by an already-approved buyer, which is the path
+  // that heals an existing NULL row. A soft credit pull costs money and touches
+  // the consumer: a failed location write must never fail it, so this degrades
+  // to a logged error.
+  await backfillBuyerLocation(buyer.id, input).catch((err) =>
+    logger.error(`[prequal] buyer location backfill failed for ${buyer.id}:`, err),
+  );
 
   // Reuse only a still-valid APPROVED prequal — never re-pull MicroBilt for an
   // active approval. A DECLINED / PENDING / MANUAL_REVIEW / OFAC record (even

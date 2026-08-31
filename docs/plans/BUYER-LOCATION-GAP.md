@@ -201,8 +201,10 @@ signal is the `logger.warn` above and the `'invite'`/`'close'` ladder in
 `GOOGLE_GEOCODING_API_KEY` is read at `geocoding.service.ts:101,124` but is
 **declared nowhere** — not in `env.d.ts`, not in `.env.example`. When it is
 absent, `geocodeZip` returns `null` for any ZIP outside the static table
-(`:153`), and that table holds **123 ZIPs**; `CITY_COORDS` holds **127
-city,state pairs**. **Whether the key is set in production is `NOT VERIFIED`.**
+(`:153`), and that table holds **173 ZIPs**; `CITY_COORDS` holds **127
+city,state pairs**. (An earlier revision of this document said 123 ZIPs — that
+count was taken with a truncated range read. The verified figure is 173,
+enumerated by `scripts/check-buyer-location-backfill.ts --coverage`.) **Whether the key is set in production is `NOT VERIFIED`.**
 This directly bounds the backfill: a correct ZIP outside those 123 still yields
 `buyerCoords = null` and still invites zero.
 
@@ -415,9 +417,10 @@ Two gaps to close first, or the backfill will silently produce unusable data:
   `state` in the service before backfilling.** This is a fifth small fix and it is
   a prerequisite, not optional.
 - `lookupCity` keys on `"city,state"` lowercased (`zip-coords.ts:295`) against
-  **127 pairs**; `lookupZip` covers **123 ZIPs**. **Verify each backfilled value
-  resolves** — via `geocodeZip`/`lookupCity` in a dry run — before declaring a row
-  fixed. A correct-but-uncovered ZIP still invites zero.
+  **127 pairs**; `lookupZip` covers **173 ZIPs**. **Verify each backfilled value
+  resolves** before declaring a row fixed — a correct-but-uncovered ZIP still
+  invites zero. `scripts/check-buyer-location-backfill.ts` now does this check;
+  see `docs/plans/BUYER-LOCATION-BACKFILL.md`.
 
 ### Sequence
 
