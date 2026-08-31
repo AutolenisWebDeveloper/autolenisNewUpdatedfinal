@@ -187,6 +187,18 @@ export async function advanceDealStatus(
   if (newStatus === DealStatus.COMPLETED) {
     await emitDealCompletionEvent(dealId);
   }
+
+  // Insurance gate, re-checked ON ARRIVAL. upload-proof has no deal-status check, so
+  // a buyer can submit proof before the deal ever reaches INSURANCE_PENDING — at
+  // which point the gate driver no-ops. Without this the deal then parks at
+  // INSURANCE_PENDING with proof already on file: exactly the stall the driver
+  // exists to prevent. Checked here rather than at each caller because the drivers
+  // of this edge (service-fee, the Stripe webhook, admin repair) are easy to add to
+  // and easy to forget. Bounded: the follow-on advance targets CONTRACT_PENDING, so
+  // it cannot re-enter this branch.
+  if (newStatus === DealStatus.INSURANCE_PENDING) {
+    await advanceOnInsuranceSatisfied(dealId, { actorId: opts.actorId, actorRole: opts.actorRole });
+  }
   return true;
 }
 

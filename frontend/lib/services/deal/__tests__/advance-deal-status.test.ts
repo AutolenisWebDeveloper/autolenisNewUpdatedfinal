@@ -228,6 +228,32 @@ test("NEVER rewinds: losing the race to a deal that moved on to CONTRACT_REVIEW 
   );
 });
 
+test("ARRIVING at INSURANCE_PENDING with proof already on file releases the gate immediately", async () => {
+  // upload-proof has no deal-status check, so a buyer can submit proof at any
+  // stage. If they do it BEFORE the deal reaches INSURANCE_PENDING, the driver
+  // no-ops at upload time — and without a re-check on arrival the deal strands at
+  // INSURANCE_PENDING with satisfied proof, which is the exact bug the driver exists
+  // to prevent.
+  ctrl.deal.status = "FEE_PAID";
+  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "INSURANCE_PENDING", { actorRole: "SYSTEM" });
+  assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "the gate must release on arrival, not only on upload");
+  assert.deepEqual(
+    ctrl.historyCreates.map((h) => h.toStatus),
+    ["INSURANCE_PENDING", "CONTRACT_PENDING"],
+    "both hops recorded",
+  );
+});
+
+test("arriving at INSURANCE_PENDING WITHOUT proof still parks the deal there", async () => {
+  ctrl.deal.status = "FEE_PAID";
+  ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "INSURANCE_PENDING", { actorRole: "SYSTEM" });
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "no proof, no release — the gate still holds");
+});
+
 test("expectedFrom guards advanceDealStatus against advancing from any other state", async () => {
   ctrl.deal.status = "CONTRACT_REVIEW";
   const { advanceDealStatus } = await load();
