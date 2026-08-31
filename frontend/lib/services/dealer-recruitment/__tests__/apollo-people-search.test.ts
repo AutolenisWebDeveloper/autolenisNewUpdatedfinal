@@ -12,14 +12,39 @@
 // path that could spend would make the credit cap unenforceable at its source.
 
 import test, { beforeEach } from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 
 import {
   runPeopleSearch,
   MAX_SEARCH_PAGES,
+  type PeopleSearchCandidate,
   type PeopleSearchDeps,
 } from "../apollo-people-search.service";
-import { DEALER_PERSON_TITLES, DEALER_SIC_CODES, type ApolloSearchPerson } from "../apollo.service";
+import {
+  DEALER_PERSON_TITLES,
+  DEALER_SIC_CODES,
+  type ApolloSearchClient,
+  type ApolloSearchPerson,
+} from "../apollo.service";
+
+
+/**
+ * A source file with comments removed.
+ *
+ * A "this module must not reference X" assertion has to read executable code
+ * only. Matching raw text also matches the comment that EXPLAINS why X is
+ * excluded, which fails a correct file and pressures the author to delete the
+ * explanation rather than keep the guarantee.
+ */
+function executableSource(relPath: string): string {
+  return readFileSync(join(process.cwd(), relPath), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((line) => line.split("//")[0])
+    .join("\n");
+}
 
 function person(id: string, over: Partial<ApolloSearchPerson> = {}): ApolloSearchPerson {
   return {
@@ -44,9 +69,8 @@ function person(id: string, over: Partial<ApolloSearchPerson> = {}): ApolloSearc
 
 interface Harness {
   deps: Partial<PeopleSearchDeps>;
-  persisted: () => Record<string, unknown>[];
+  persisted: () => PeopleSearchCandidate[];
   searchCalls: () => { page: number; perPage: number }[];
-  creditDraws: () => number;
 }
 
 function harness(opts: {
@@ -57,32 +81,24 @@ function harness(opts: {
 }): Harness {
   const pages = opts.pages ?? { 1: [person("a")] };
   const totalPages = opts.totalPages ?? 1;
-  const persisted: Record<string, unknown>[] = [];
+  const persisted: PeopleSearchCandidate[] = [];
   const searchCalls: { page: number; perPage: number }[] = [];
-  let creditDraws = 0;
 
   return {
     persisted: () => persisted,
     searchCalls: () => searchCalls,
-    creditDraws: () => creditDraws,
     deps: {
       enabled: () => opts.enabled ?? true,
       now: new Date("2026-08-31T00:00:00Z"),
       client: {
-        async peopleSearchByCriteria({ page, perPage }) {
+        async peopleSearchByCriteria({ page, perPage }: { page: number; perPage: number }) {
           searchCalls.push({ page, perPage });
           if (opts.throwOnPage === page) throw new Error("apollo 500");
           return { people: pages[page] ?? [], totalPages, totalEntries: totalPages * 100 };
         },
-      },
-      persistCandidate: async (c) => {
-        persisted.push(c as unknown as Record<string, unknown>);
-      },
-      // Present ONLY so a test can prove it is never called. The real service
-      // has no credit dependency at all.
-      drawCredits: async () => {
-        creditDraws += 1;
-        return { drawn: true };
+      } as ApolloSearchClient,
+      persistCandidate: async (c: PeopleSearchCandidate) => {
+        persisted.push(c);
       },
     },
   };
@@ -95,10 +111,37 @@ beforeEach(() => {
   h = harness({});
 });
 
-test("search never draws a credit — discovery is free by construction", async () => {
-  h = harness({ pages: { 1: [person("a"), person("b")] } });
-  await runPeopleSearch(BASE, h.deps);
-  assert.equal(h.creditDraws(), 0, "People Search must never spend; only reveal costs");
+test("search cannot draw a credit — the module has no path to the ledger", () => {
+  // Asserted structurally rather than with a spy, because a spy can only prove
+  // "did not spend on this input". The service takes no credit dependency and
+  // imports nothing that can spend, so it cannot spend on ANY input. An attempt
+  // to inject one does not type-check.
+  const src = executableSource("lib/services/dealer-recruitment/apollo-people-search.service.ts");
+  for (const forbidden of [
+    "apollo-credit-ledger",
+    "drawCredits",
+    "remainingCredits",
+    "peopleMatch",
+    "apolloResolveAndReveal",
+  ]) {
+    assert.ok(
+      !src.includes(forbidden),
+      `discovery must stay free: apollo-people-search.service.ts references ${forbidden}`,
+    );
+  }
+});
+
+test("the search seam exposes no billable capability", () => {
+  // ApolloSearchClient is deliberately separate from ApolloClient. A caller
+  // holding a search client cannot reach peopleMatch, the one call that bills.
+  const src = readFileSync(
+    join(process.cwd(), "lib/services/dealer-recruitment/apollo.service.ts"),
+    "utf8",
+  );
+  const iface = src.match(/export interface ApolloSearchClient \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(iface, "ApolloSearchClient must exist as its own interface");
+  assert.ok(!iface.includes("peopleMatch"), "the search seam must not expose the paid reveal");
+  assert.ok(iface.includes("peopleSearchByCriteria"));
 });
 
 test("paginates to totalPages and persists every result", async () => {
