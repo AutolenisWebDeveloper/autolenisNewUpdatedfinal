@@ -11,6 +11,7 @@
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { GROQ_SUMMARY } from "@/lib/ai/acquisition";
+import { complete } from "@/lib/ai/provider";
 import { LinkedInProvider } from "@/lib/social/providers/linkedin.provider";
 import { sendMarketIndexPublishedEmail } from "@/lib/services/email/resend.service";
 
@@ -25,38 +26,20 @@ export interface MarketIndexReport {
 
 // ─── Groq helper (mirrors groq-script.engine REST pattern) ───────────────────
 async function callGroq(systemPrompt: string, userPrompt: string): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey || apiKey.startsWith("gsk_placeholder")) {
-    throw new Error("GROQ_API_KEY is not configured");
-  }
-
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: GROQ_SUMMARY, // llama-3.3-70b-versatile
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      max_tokens: 3000,
-      temperature: 0.6,
-      top_p: 1.0,
-    }),
+  // Transport only — model, prompts, token cap, temperature and top_p unchanged.
+  const result = await complete({
+    purpose: "social.market_index",
+    model: GROQ_SUMMARY, // llama-3.3-70b-versatile
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    maxTokens: 3000,
+    temperature: 0.6,
+    topP: 1.0,
   });
-
-  logger.info("[market-index] groq response status:", res.status);
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`);
-  }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  return data.choices?.[0]?.message?.content ?? "";
+  logger.info("[market-index] groq answered with model:", result.model);
+  return result.content;
 }
 
 function stripFences(raw: string): string {

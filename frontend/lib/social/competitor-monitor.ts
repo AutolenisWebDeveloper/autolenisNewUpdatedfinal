@@ -8,6 +8,7 @@
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { complete } from "@/lib/ai/provider";
 
 export interface CompetitorInsight {
   competitor: string;
@@ -49,17 +50,12 @@ export async function scanCompetitorContent(): Promise<CompetitorInsight[]> {
   }
 
   try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${groqKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [
-          {
-            role: "user",
+    const result = await complete({
+      purpose: "social.competitor_monitor",
+      model: GROQ_MODEL,
+      messages: [
+        {
+          role: "user",
             content: `You are an automotive content strategist.
 Identify 5 content opportunities for AutoLenis based on what
 CarEdge, CarGurus, Edmunds, and Carvana typically post on
@@ -75,26 +71,15 @@ Return ONLY valid JSON array, no other text:
   "opportunity": "how AutoLenis does this better (1 sentence)",
   "suggestedHook": "specific hook AutoLenis could use (under 15 words)"
 }]`,
-          },
-        ],
-        max_tokens: 600,
-      }),
+        },
+      ],
+      maxTokens: 600,
     });
 
-    // Surface upstream failures (auth/quota/5xx) instead of silently parsing an
-    // error body as "[]" and reporting a successful empty scan.
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      logger.error(
-        `[competitor-monitor] Groq request failed: ${res.status} ${body.slice(0, 300)}`,
-      );
-      return [];
-    }
-
-    const data = (await res.json().catch(() => ({}))) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const raw = data?.choices?.[0]?.message?.content ?? "[]";
+    // Upstream failures (auth/quota/5xx) still surface rather than being
+    // silently parsed as "[]" and reported as a successful empty scan — the
+    // provider adapter throws a ProviderHttpError, which the catch below logs.
+    const raw = result.content || "[]";
     const cleaned = raw.replace(/```json|```/g, "").trim();
     let insights: Omit<CompetitorInsight, "weekOf">[];
     try {

@@ -25,7 +25,7 @@ import type { EngineDeps } from "./engine";
 import { defaultPolicyDeps } from "./policy";
 import { COMMANDS } from "./commands";
 import { auditLogRecorder } from "./store";
-import { envActivationResolver, isActionIntentSurfaceEnabled } from "./activation";
+import { featureFlagActivationResolver, isActionIntentSurfaceEnabled } from "./activation";
 
 /**
  * Raised when the durable ActionIntent store is asked to touch ai_action_intents
@@ -256,7 +256,16 @@ export function createDurableEngineDeps(overrides: Partial<EngineDeps> = {}): En
   return {
     store: overrides.store ?? new PrismaActionIntentStore(prismaDelegate()),
     audit: overrides.audit ?? auditLogRecorder,
-    activation: overrides.activation ?? envActivationResolver(),
+    // PRODUCTION ACTIVATION resolves through the FeatureFlag substrate, so an
+    // owner can enable — or KILL — one capability at a time without a redeploy.
+    //
+    // It must be the same authority everywhere the durable engine is used.
+    // Proposal ran through the flag while approval revalidated through the env
+    // resolver, which meant flipping a capability off at runtime did not stop an
+    // intent that had already been proposed from executing once approved.
+    // `featureFlagActivationResolver` fails closed exactly as the env resolver
+    // does: an absent flag row is `false`, and the master flag must also be on.
+    activation: overrides.activation ?? featureFlagActivationResolver(),
     policyDeps: overrides.policyDeps ?? defaultPolicyDeps(),
     commands: overrides.commands ?? COMMANDS,
     genId: overrides.genId ?? durableId,

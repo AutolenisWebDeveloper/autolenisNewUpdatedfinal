@@ -52,6 +52,42 @@ export function isAdminRole(role: AuthenticatedRole): boolean {
 //                 actions. ALWAYS requires server-authoritative human approval.
 export type Consequence = "READ" | "LOW" | "CONSEQUENTIAL";
 
+// ─── Presentational risk vocabulary (ADDITIVE — never load-bearing) ──────────
+// Seven classes for the proposal card's badge, the sentence shown to a human,
+// and the audit event. They ride ALONGSIDE `Consequence` and are deliberately
+// NOT part of any authorization decision: `authorize.ts` switches on
+// `Consequence`, and approval is driven by `requiresHumanApproval`
+// (`engine.ts`), not by a label. A security-relevant enum with seven arms is
+// seven chances to miss a case — so this one is never security-relevant.
+//
+//   READ_ONLY            — returns authoritative state; no write.
+//   NAVIGATION           — moves the user to a page; no state change at all.
+//   ANALYSIS             — text or judgement from context; persists nothing.
+//   LOW_RISK_MUTATION    — bounded, reversible write, fully policy-guarded.
+//   CONSEQUENTIAL        — business state, compliance record, or commitment.
+//   IRREVERSIBLE         — money movement or a commitment with no in-product undo.
+//   EXTERNAL_SIDE_EFFECT — reaches outside AutoLenis (SMS, email, live transfer).
+export type RiskClass =
+  | "READ_ONLY"
+  | "NAVIGATION"
+  | "ANALYSIS"
+  | "LOW_RISK_MUTATION"
+  | "CONSEQUENTIAL"
+  | "IRREVERSIBLE"
+  | "EXTERNAL_SIDE_EFFECT";
+
+/** The default `riskClass` implied by a `Consequence`, when none is declared. */
+export function defaultRiskClass(consequence: Consequence): RiskClass {
+  switch (consequence) {
+    case "READ":
+      return "READ_ONLY";
+    case "LOW":
+      return "LOW_RISK_MUTATION";
+    case "CONSEQUENTIAL":
+      return "CONSEQUENTIAL";
+  }
+}
+
 // ─── Availability of the underlying capability ───────────────────────────────
 // AVAILABLE            — the canonical dependency exists and is safely callable.
 // UNAVAILABLE          — the required dependency is absent or intentionally
@@ -230,6 +266,13 @@ export interface IntentDefinition {
   /** Zod schema for the parameters. Malformed input → deterministic reject. */
   parameters: ZodTypeAny;
   consequence: Consequence;
+  /**
+   * Optional presentational risk class (§6.1). Defaults from `consequence` via
+   * `defaultRiskClass`. Declared only where the seven-class vocabulary is more
+   * specific than the three-value one — e.g. money movement is IRREVERSIBLE
+   * while a deal-status advance is merely CONSEQUENTIAL. Never authorization.
+   */
+  riskClass?: RiskClass;
   requiresHumanApproval: boolean;
   /**
    * The existing RBAC permission a human approver MUST hold to approve this

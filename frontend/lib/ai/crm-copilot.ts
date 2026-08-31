@@ -12,6 +12,7 @@
 
 import { z } from 'zod';
 import { GROQ_SUMMARY } from '@/lib/ai/acquisition';
+import { complete } from '@/lib/ai/provider';
 
 // The Groq model the copilot speaks to. Exported so the route can audit it
 // without re-importing the acquisition lineup.
@@ -265,38 +266,23 @@ interface GroqJsonOptions {
 // Direct REST call to Groq's OpenAI-compatible endpoint with JSON Object Mode,
 // mirroring the project's existing Groq REST pattern (lib/social/groq-script).
 async function callGroqJson(opts: GroqJsonOptions): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey || apiKey.startsWith('gsk_placeholder')) {
-    throw new Error('GROQ_API_KEY is not configured');
-  }
-
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: COPILOT_MODEL,
-      messages: [
-        { role: 'system', content: opts.systemPrompt },
-        { role: 'user', content: opts.userPrompt },
-      ],
-      max_tokens: opts.maxTokens ?? 1800,
-      temperature: opts.temperature ?? 0.5,
-      top_p: 1.0,
-      response_format: { type: 'json_object' },
-    }),
+  // Transport only: model, prompts, token cap, temperature, top_p and JSON
+  // Object Mode are unchanged. Routing through the provider chokepoint is what
+  // finally brings the CRM Copilot under the AI kill switch (Phase 1 §A.9 found
+  // it had none).
+  const result = await complete({
+    purpose: 'crm.copilot.generate',
+    model: COPILOT_MODEL,
+    messages: [
+      { role: 'system', content: opts.systemPrompt },
+      { role: 'user', content: opts.userPrompt },
+    ],
+    maxTokens: opts.maxTokens ?? 1800,
+    temperature: opts.temperature ?? 0.5,
+    topP: 1.0,
+    responseFormatJson: true,
   });
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`);
-  }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  return data.choices?.[0]?.message?.content ?? '';
+  return result.content;
 }
 
 // JSON Object Mode usually returns clean JSON, but strip code fences / stray

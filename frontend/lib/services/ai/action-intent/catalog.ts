@@ -11,7 +11,8 @@
 // `commands.ts`. Descriptions and guidance are never the enforcement boundary.
 
 import { z } from "zod";
-import type { ActorType, IntentDefinition } from "./types";
+import { defaultRiskClass } from "./types";
+import type { ActorType, IntentDefinition, RiskClass } from "./types";
 
 const BUYER_ROLES = ["BUYER"] as const;
 const DEALER_ROLES = ["DEALER"] as const;
@@ -80,6 +81,7 @@ export const ACTION_INTENT_CATALOG: Record<string, IntentDefinition> = Object.fr
     }),
     def({
       type: "buyer.select_offer",
+      riskClass: "IRREVERSIBLE",
       title: "Select a winning dealer offer",
       description:
         "Commit the buyer's selection of a specific dealer offer, which creates a Deal and moves money forward. Highly consequential and irreversible — requires the buyer's explicit server-authoritative confirmation.",
@@ -214,6 +216,7 @@ export const ACTION_INTENT_CATALOG: Record<string, IntentDefinition> = Object.fr
     }),
     def({
       type: "admin.trigger_deposit_refund",
+      riskClass: "IRREVERSIBLE",
       title: "Refund a $99 deposit",
       description:
         "Refund a buyer's $99 auction-access deposit through the canonical refund service. Money movement — requires human approval by a finance admin.",
@@ -249,6 +252,7 @@ export const ACTION_INTENT_CATALOG: Record<string, IntentDefinition> = Object.fr
     }),
     def({
       type: "affiliate.request_payout",
+      riskClass: "IRREVERSIBLE",
       title: "Request an affiliate payout",
       description:
         "Request a payout of settled commissions. Money movement. The self-serve rail is live for the AFFILIATE THEMSELVES in the Finance Hub, but this intent stays UNAVAILABLE for the AI: money movement is never AI-initiated — the AI may recognise the request and must direct the affiliate to the Finance Hub's Request Payout button (or escalate to a human).",
@@ -304,6 +308,14 @@ export function listIntentsForActor(actorType: ActorType): IntentDefinition[] {
   return Object.values(ACTION_INTENT_CATALOG).filter(
     (d) => d.actorType === actorType || (actorType !== "SYSTEM" && d.type === "system.escalate_to_human"),
   );
+}
+
+/**
+ * The presentational risk class for an intent: its declared `riskClass`, or the
+ * one its `consequence` implies. Presentation and audit only — never a gate.
+ */
+export function riskClassFor(definition: IntentDefinition): RiskClass {
+  return definition.riskClass ?? defaultRiskClass(definition.consequence);
 }
 
 export function allIntentTypes(): string[] {

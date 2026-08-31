@@ -1,48 +1,74 @@
-// POST /api/admin/ai/chat — Admin concierge (Zura)
-// Groq ONLY | Kill switch | Admin auth required (MFA verified)
+// POST /api/admin/ai/chat — Zura, admin surface.
+//
+// Two things this route does that no other chat route does, both preserved:
+//   • it passes the ADMIN IDENTITY AND ROLE into the turn, which the previous
+//     `adminConciergeChat(message, history)` signature could not express — so
+//     per-role scoping was not even representable (Phase 1 §D.4);
+//   • it keeps its existing `ADMIN_AI_CHAT` write to `admin_audit_logs`,
+//     unchanged. The unified AI trail in `audit_logs` is written by the shared
+//     service IN ADDITION. That double-write is deliberate: routing admin AI
+//     events only to the admin trail would leave the AI trail with a hole
+//     exactly where the highest-privilege actor is.
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
-import { adminConciergeChat } from "@/lib/services/ai/admin-concierge.agent";
-import type { ChatMessage } from "@/lib/ai/groq-client";
-import { isAiEnabled } from "@/lib/ai/kill-switch";
+import { clientIpKey } from "@/lib/security/rate-limit";
+import { runZuraTurn } from "@/lib/services/ai/zura-chat.service";
+import type { AuthenticatedRole } from "@/lib/services/ai/action-intent";
+
+const SURFACE = "admin" as const;
 
 export async function POST(request: NextRequest) {
-  if (!isAiEnabled()) {
-    return adminError("AI_DISABLED", "AI services are currently unavailable", 503);
-  }
-
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
 
-  const body = await request.json() as {
-    message: string;
-    history?: Array<{ role: "user" | "assistant"; content: string }>;
-  };
-
-  if (!body.message?.trim()) {
-    return adminError("VALIDATION_ERROR", "message is required", 400);
-  }
-
+  let body: { message?: unknown; history?: unknown; pageLabel?: unknown; chatSessionId?: unknown };
   try {
-    const result = await adminConciergeChat(
-      body.message,
-      (body.history ?? []) as ChatMessage[]
-    );
-    await createAuditLog(admin, request, {
-      action: "ADMIN_AI_CHAT",
-      entityType: "AdminConcierge",
-      entityId: admin.adminId,
-      metadata: { model: result.model, message_length: body.message.length, history_length: body.history?.length ?? 0 },
-    });
-    return adminSuccess({ content: result.content, model: result.model });
-  } catch (err) {
-    const msg = String(err);
-    if (msg.includes("AI_KILL_SWITCH") || msg.includes("kill-switch")) {
-      return adminError("AI_DISABLED", "AI services are currently unavailable", 503);
-    }
-    if (msg.includes("GROQ_API_KEY") || msg.includes("not configured")) {
-      return adminError("AI_NOT_CONFIGURED", "AI service not configured", 503);
-    }
-    return adminError("AI_ERROR", "AI service error — please try again", 500);
+    body = (await request.json()) as typeof body;
+  } catch {
+    return adminError("VALIDATION_ERROR", "Invalid JSON body", 400);
   }
+
+  const message = typeof body.message === "string" ? body.message : "";
+
+  const result = await runZuraTurn({
+    surface: SURFACE,
+    actor: {
+      actorType: "ADMIN",
+      actorId: admin.adminId,
+      // `AdminRole` and `AuthenticatedRole` share the five admin members, which
+      // is why §5.5 needed no new vocabulary.
+      authenticatedRole: admin.role as AuthenticatedRole,
+      actorEmail: admin.email,
+    },
+    message,
+    history: body.history,
+    location: { pageLabel: typeof body.pageLabel === "string" ? body.pageLabel : undefined },
+    chatSessionId: typeof body.chatSessionId === "string" ? body.chatSessionId : undefined,
+    clientIp: clientIpKey(request.headers),
+  });
+
+  if (!result.ok) {
+    const status =
+      result.status ??
+      (result.code === "VALIDATION_ERROR" ? 400 : result.code === "AI_ERROR" ? 500 : 503);
+    return adminError(result.code, result.message, status);
+  }
+
+  await createAuditLog(admin, request, {
+    action: "ADMIN_AI_CHAT",
+    entityType: "AdminConcierge",
+    entityId: admin.adminId,
+    metadata: {
+      model: result.model,
+      message_length: message.length,
+      history_length: Array.isArray(body.history) ? body.history.length : 0,
+    },
+  });
+
+  return adminSuccess({
+    content: result.content,
+    model: result.model,
+    chatSessionId: result.chatSessionId,
+    ...(result.proposal ? { proposal: result.proposal } : {}),
+  });
 }

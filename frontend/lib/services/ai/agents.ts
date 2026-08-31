@@ -2,8 +2,8 @@
 // Groq API ONLY — openai/gpt-oss-120b primary, openai/gpt-oss-20b fallback
 // Kill switch checked before every agent call
 
-import { groqChat, groqChatStream, type ChatMessage } from "@/lib/ai/groq-client";
-import { buildSystemPromptFromContext, buildBuyerContext, buildDealerContext, buildAdminContext, type PlatformContext } from "@/lib/ai/context-builder";
+import { groqChat, type ChatMessage } from "@/lib/ai/groq-client";
+import { buildSystemPromptFromContext, buildBuyerContext, buildDealerContext, buildAdminContext } from "@/lib/ai/context-builder";
 import { PREMIUM_FEE_USD } from "@/lib/constants";
 
 // ─── Agent 1: Buyer General Concierge ─────────────────────────────────────────
@@ -81,25 +81,30 @@ Format as 3-5 prioritized bullet points with recommended actions.`;
   return result.content;
 }
 
-// ─── Agent selector (routes to appropriate agent) ────────────────────────────
-export type AgentType = "general" | "prequal" | "search" | "auction" | "deal" | "dealer" | "admin";
-
-export async function routeToAgent(
-  agentType: AgentType,
-  entityId: string,
-  message: string,
-  history: ChatMessage[] = [],
-  extra?: { adminRole?: string }
-): Promise<{ content: string; model: string; agentType: AgentType }> {
-  let result;
-  switch (agentType) {
-    case "prequal":  result = await prequalAdvisorAgent(entityId, message, history); break;
-    case "search":   result = await searchAdvisorAgent(entityId, message, history); break;
-    case "auction":  result = await auctionAdvisorAgent(entityId, message, history); break;
-    case "deal":     result = await dealAdvisorAgent(entityId, message, history); break;
-    case "dealer":   result = await dealerAdvisorAgent(entityId, message, history); break;
-    case "general":
-    default:         result = await buyerConciergeAgent(entityId, message, history); break;
-  }
-  return { ...result, agentType };
-}
+// ─── The agent selector is RETIRED ───────────────────────────────────────────
+//
+// `routeToAgent` and its `AgentType` union are gone (Phase 2 §1.3a / §8.5 #3).
+// This was not dead weight — it was a live authorization defect:
+//
+//   • `AgentType` included `"admin"`, but the switch had NO `admin` case and NO
+//     `affiliate` case, so `routeToAgent("admin", adminId, …)` fell through
+//     `default` into `buyerConciergeAgent(adminId, …)` — an admin id used as a
+//     buyer id. `buildBuyerContext` returns `{ role: "BUYER" }` for a missing
+//     buyer rather than throwing, so the failure was SILENT.
+//   • It dispatched on a CLIENT-SUPPLIED string, and the selector was already on
+//     the wire as `ChatWidget`'s `agentType` prop. Wiring the two together would
+//     have shipped that defect.
+//   • It had no affiliate path at all, so it could never have served five
+//     surfaces.
+//
+// What replaced it: `lib/services/ai/zura-chat.service.ts`'s `SURFACES` — a
+// TABLE keyed on a surface the SERVER derives from the route, not a dispatcher
+// that decides. Nothing a client sends can select which brain answers.
+//
+// The seven personas' guardrail TEXT is fully preserved and is now actually in
+// force: see `lib/services/ai/zura-personas.ts`, whose constants are asserted
+// verbatim against the prompts in this file by
+// `lib/services/ai/__tests__/zura-guardrail-adoption.test.ts`.
+//
+// The agent functions above are retained (the brief permits no agent deletions
+// beyond the retirements listed) and are unchanged byte-for-byte.

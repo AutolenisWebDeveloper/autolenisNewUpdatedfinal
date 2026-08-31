@@ -8,6 +8,7 @@
 
 import { logger } from "@/lib/logger";
 import { GROQ_SUMMARY } from "@/lib/ai/acquisition";
+import { complete } from "@/lib/ai/provider";
 import type { ContentFranchise, TopicSignal } from "@prisma/client";
 import { getFunnelDestination, type PlatformConfig } from "@/lib/social/config";
 import type { TrendingData } from "./trending-intelligence.engine";
@@ -58,46 +59,25 @@ async function callGroq(options: {
   temperature?: number;
   maxTokens?: number;
 }): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey || apiKey.startsWith("gsk_placeholder")) {
-    throw new Error("GROQ_API_KEY is not configured");
-  }
-
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: GROQ_SUMMARY, // llama-3.3-70b-versatile
-      messages: [
-        { role: "system", content: options.systemPrompt },
-        { role: "user", content: options.userPrompt },
-      ],
-      max_tokens: options.maxTokens ?? 1400,
-      temperature: options.temperature ?? 0.7,
-      top_p: 1.0,
-    }),
+  // Transport only — model, prompts, token cap, temperature and top_p unchanged.
+  //
+  // The retry layer below decides on the HTTP status code itself rather than
+  // substring-matching the (attacker/model-influenced) response body, which
+  // would otherwise retry a 400/500 whose body merely contains "429". That
+  // property is preserved: `ProviderHttpError` carries `.status` as a typed
+  // field, which is exactly what the hand-rolled error here used to attach.
+  const result = await complete({
+    purpose: "social.script_generation",
+    model: GROQ_SUMMARY, // llama-3.3-70b-versatile
+    messages: [
+      { role: "system", content: options.systemPrompt },
+      { role: "user", content: options.userPrompt },
+    ],
+    maxTokens: options.maxTokens ?? 1400,
+    temperature: options.temperature ?? 0.7,
+    topP: 1.0,
   });
-
-  logger.info("[groq-script] response status:", res.status);
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    // Attach the HTTP status so the retry layer can decide on the status code
-    // itself rather than substring-matching the (attacker/model-influenced)
-    // response body, which would otherwise retry a 400/500 whose body merely
-    // contains "429".
-    const error = new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`) as Error & {
-      status?: number;
-    };
-    error.status = res.status;
-    throw error;
-  }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const rawText = data.choices?.[0]?.message?.content ?? "";
+  const rawText = result.content;
   logger.info("[groq-script] raw response:", rawText?.slice(0, 200));
   return rawText;
 }
