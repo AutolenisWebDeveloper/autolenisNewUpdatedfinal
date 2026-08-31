@@ -50,63 +50,129 @@ every row, not ZIP alone.** ZIP alone is a coin flip against a 173-entry table.
 
 ---
 
-## 2. The 10 rows — what I can and cannot pre-check
+## 2. The 10 rows — verified production values
 
-**I do not have the 10 buyers' candidate values, and I will not invent them.**
-This session has no production database access; the supplied facts give the
-*shape* of the backlog (3 rows with a ZIP but no city/state, 7 with nothing) but
-not the values. Ten fabricated ZIPs would look exactly like a completed
-pre-check and would be worthless — worse, they would be actioned.
+Values below were supplied and verified by the requester from production and are
+**not re-derived here**. Source: `buyer_opportunities.zip`, joined to buyers via
+`vehicle_requests.buyer_opportunity_id`. That source is **corroborated** — where
+a buyer also carries its own ZIP, the two agree, 3 of 3.
 
-So the pre-check is delivered as a **mechanism plus a filled decision matrix**,
-and the value column is the one thing a reviewer supplies:
+### Recoverable — 4 rows
 
-| Class | Count | What is present | What the backfill must add | Pre-check verdict, decided in advance |
-| --- | --- | --- | --- | --- |
-| **A** | **3** | `zip` only | `city` + `state` | `PLACES_BY_ZIP` **if** the ZIP is one of the 173; otherwise `WILL_NOT_PLACE` **unless** city+state are also filled and hit `CITY_COORDS`. **Fill city+state on all 3 regardless** — it costs nothing and removes the dependency on the ZIP table. |
-| **B** | **7** | nothing | `zip` + `city` + `state` | `NO_VALUE_SUPPLIED` until a source is found. Each needs a source from §3 before it can be checked at all. |
+| Buyer | Sourced ZIP | City (implied) | Checker verdict |
+| --- | --- | --- | --- |
+| `6cc7bfa6` | **75035** | Frisco, TX | `PLACES_BY_ZIP` |
+| `ff9c4525` | **75035** | Frisco, TX | `PLACES_BY_ZIP` |
+| `b6fdc690` | **75035** | Frisco, TX | `PLACES_BY_ZIP` |
+| `7e60731b` | **75034** | Frisco, TX | `PLACES_BY_ZIP` |
 
-Run the check the moment values exist:
+### Not recoverable — 6 rows
+
+The other six buyers have **no location anywhere in the database**. They require
+customer contact, not a script. `decideBackfill` returns `NO_SOURCE` for them and
+the tool writes nothing — inventing a location for a buyer is exactly the failure
+this plan exists to avoid.
+
+### The checker run that changed the plan
+
+Running the checker against those ZIPs **before** any code change:
+
+```
+BUYER     ZIP    VERDICT          NOTE
+6cc7bfa6  75035  WILL_NOT_PLACE   ZIP absent from static table and no city/state fallback
+ff9c4525  75035  WILL_NOT_PLACE   …
+b6fdc690  75035  WILL_NOT_PLACE   …
+7e60731b  75034  WILL_NOT_PLACE   …
+
+0/4 would place.
+```
+
+**0 of 4.** Both 75034 and 75035 are Frisco, TX, and neither was in the 173-entry
+`ZIP_COORDS`; `frisco,tx` was likewise absent from `CITY_COORDS`, which carried
+only seven Texas cities (`austin, dallas, el paso, fort worth, houston, plano,
+san antonio`). The nearest covered ZIP was `75024` — Plano, a different city.
+
+**Writing those ZIPs would have resolved to `null` and changed nothing.** The
+rows would have read as backfilled and the auctions would have gone on inviting
+zero dealers — the precise failure mode this plan was written to prevent, caught
+by the gate rather than in production.
+
+### The unblock
+
+`lib/utils/zip-coords.ts` now carries `75034`, `75035`, and `frisco,tx`. The
+same run afterwards:
+
+```
+6cc7bfa6  75035  PLACES_BY_ZIP  static ZIP table hit
+ff9c4525  75035  PLACES_BY_ZIP  static ZIP table hit
+b6fdc690  75035  PLACES_BY_ZIP  static ZIP table hit
+7e60731b  75034  PLACES_BY_ZIP  static ZIP table hit
+
+4/4 would place.
+```
+
+**Coordinate provenance, stated plainly.** Both ZIPs carry the Frisco city
+centroid (33.1507, -96.8236) rather than per-ZIP centroids. This table feeds a
+50–150 mile radius filter, the two ZIPs are roughly five miles apart, and a
+documented city-level approximation is preferable to a per-ZIP figure that
+cannot be sourced. `lib/utils/__tests__/zip-coords-backfill-coverage.test.ts`
+pins a bounding box and the north-of-Dallas/north-of-Plano ordering, so a
+transposed sign or a coordinate pasted from the wrong row fails loudly.
+
+**Hand-curating this table does not scale.** Setting `GOOGLE_GEOCODING_API_KEY`
+makes `geocodeZip` fall through to Google for any ZIP and removes the need for
+these additions entirely. That remains the durable fix and is still
+**NOT VERIFIED** as set in production.
+
+## 2a. Programmatic sourcing — no admin hand-entry
+
+`frontend/scripts/backfill-buyer-location.ts`, over
+`frontend/lib/services/buyer/location-backfill.ts`.
+
+**Dry run by default. It writes nothing without `--apply`.**
 
 ```bash
 cd frontend
-npx tsx scripts/check-buyer-location-backfill.ts candidates.json
+npx tsx scripts/backfill-buyer-location.ts                        # report only
+npx tsx scripts/backfill-buyer-location.ts --apply --admin-email you@autolenis.com
 ```
 
-`candidates.json`:
+It queries buyers missing any part of their location, collects every
+`buyer_opportunities.zip` reachable through their vehicle requests, and returns
+one of four decisions per row:
 
-```json
-[
-  { "buyerId": "6cc7bfa6", "zip": "…", "city": "…", "state": "…", "source": "stripe_billing" }
-]
-```
+| Decision | Meaning |
+| --- | --- |
+| `FILL` | one corroborated ZIP, buyer has none — writable |
+| `ALREADY_SET` | buyer already carries a ZIP (any source agrees) — nothing to do |
+| `NO_SOURCE` | no opportunity ZIP anywhere — customer contact, the 6 rows above |
+| `CONFLICT` | sources disagree with each other or with the buyer — **never auto-resolved** |
 
-The checker prints a verdict per row — `PLACES_BY_ZIP`, `PLACES_BY_CITY`,
-`WILL_NOT_PLACE`, `NO_VALUE_SUPPLIED` — and **exits non-zero if any row would
-not place**, so it can gate the backfill rather than merely inform it. It reads
-no database and mutates nothing.
+Three properties matter more than the convenience:
 
-Worked output on illustrative inputs (not production data):
+1. **Corroboration is enforced, not assumed.** If an opportunity ZIP ever
+   contradicts the buyer's own ZIP, or two opportunities contradict each other,
+   the row stops as `CONFLICT`. The "3 of 3 agree" premise is checked per row
+   rather than trusted globally.
+2. **It gates on resolvability.** Every `FILL` is run through `lookupZip` — the
+   same lookup the matcher uses — and `--apply` refuses outright while any
+   sourced ZIP does not resolve. A backfill that cannot place the buyer is not
+   allowed to run.
+3. **Every write is audited to a named human.** Writes go through
+   `updateBuyerProfileByAdmin`, the same path the admin UI uses, so each row
+   lands with an `AdminAuditLog` entry; `--apply` requires `--admin-email` so
+   the entry names a real accountable admin rather than a faceless script.
 
-```
-BUYER                        ZIP      CITY          ST  VERDICT             NOTE
-ILLUSTRATIVE-covered-zip     78701    —             —   PLACES_BY_ZIP       static ZIP table hit
-ILLUSTRATIVE-uncovered-zip   78745    —             —   WILL_NOT_PLACE      ZIP absent from static table and no city/state fallback
-ILLUSTRATIVE-zip+city        78745    Austin        TX  PLACES_BY_CITY      ZIP not in static table — placed via city/state fallback
-ILLUSTRATIVE-city-only       —        Dallas        TX  PLACES_BY_CITY      static city table hit
-ILLUSTRATIVE-city-uncovered  —        Nowhereville  ZZ  WILL_NOT_PLACE      "nowhereville,zz" absent from CITY_COORDS
-ILLUSTRATIVE-city-no-state   —        Austin        —   WILL_NOT_PLACE      city without state never resolves
-ILLUSTRATIVE-nothing         —        —             —   NO_VALUE_SUPPLIED   no candidate value — needs a source
-
-3/7 would place.
-```
-
----
+It sources **ZIP only**, because `buyer_opportunities` has no city or state
+column. Claiming to fill those would be fabricating.
 
 ## 3. Sources, best first
 
 `PreQualification` is **not** a source — it has no location columns; that is the
 root cause (`BUYER-LOCATION-GAP.md` §1).
+
+For the 4 recoverable rows the source is settled (§2). This ranking governs the
+**6 rows with nothing in the database**, and any future row.
 
 | Rank | Source | Fields | Confidence | Applies to |
 | --- | --- | --- | --- | --- |
@@ -146,29 +212,40 @@ on `"city,state"` lowercased, so `"austin,texas"` misses; `lookupZip` slices to 
 chars, so `"787"` misses. **The row would look backfilled and still invite
 zero.**
 
-Tighten the admin schema to match the prequal route and uppercase `state` in the
-service **before** backfilling. This is a fifth small fix, deliberately **not
-implemented in this change** — it was not in the approved scope of fixes 1–4.
-Flagging it for the same review.
+**IMPLEMENTED in this PR.** The route schema now enforces a 2-letter state and a
+5-digit (or ZIP+4) ZIP, and `updateBuyerProfileByAdmin` uppercases `state`.
+
+One thing the fix had to get right, found in review rather than in production:
+the admin edit form seeds itself from `buyer.city ?? ""` and submits **every**
+field on each save (`AdminBuyerCommandCenter.tsx:249-251,261`). For a buyer whose
+location is NULL that payload carries `city`/`state`/`zip` as empty strings, so a
+regex that rejected `""` would have returned 400 on every save for exactly the
+ten buyers this work exists to repair — including any attempt to fix them by
+hand. The schema therefore accepts `""` as "not provided / clear", and the
+service converts a blank to NULL rather than persisting an empty string, matching
+`app/api/buyer/profile/route.ts`. Both behaviours are pinned by tests.
 
 ---
 
 ## 5. Sequence
 
 1. **Done** — fixes 1–4 shipped, so the backlog stops growing.
-2. **Decide the fifth fix** (§4 prerequisite). Backfilling before it lands risks
-   writing values that do not resolve.
-3. **Confirm `GOOGLE_GEOCODING_API_KEY`.** If set, ZIP coverage is effectively
-   unlimited and §1's caution relaxes. If unset, city+state become mandatory on
-   every row. This single answer changes the shape of the whole backfill.
-4. **Assemble `candidates.json`** from §3, read-only.
-5. **Run the checker.** Iterate until it exits 0. **Review the table before any
-   write.**
+2. **Done** — the fifth fix (§4) is implemented and tested.
+3. **Done** — the four recoverable ZIPs resolve (§2), and the sourcing tool
+   exists (§2a).
+4. **Confirm `GOOGLE_GEOCODING_API_KEY`.** Still unverified. If set, the static
+   table stops mattering and no future ZIP needs hand-curating. If unset, every
+   new market needs a `zip-coords.ts` entry — a treadmill worth ending.
+5. **Run the dry run** and review its table:
+   `npx tsx scripts/backfill-buyer-location.ts`. Expect 4 `FILL`, 6 `NO_SOURCE`.
+   Any `CONFLICT` means the corroboration premise broke for that row — stop and
+   look, do not override.
 6. **Prioritise `6cc7bfa6`.** It is the only affected buyer with a PAID deposit
    and an auction. See §6 — its window has already closed, which changes the
    action from "restore" to "re-open".
-7. **Backfill through the admin UI**, one row at a time, `reason` citing this
-   plan.
+7. **Apply**: `--apply --admin-email <you>`. Each row writes an `AdminAuditLog`
+   entry naming you. The admin UI remains available for the 6 rows that need a
+   value gathered by hand.
 8. **Verify.** After each row, the next invitation attempt either places or
    writes a fresh `AUCTION_ZERO_INVITATIONS` row with cause
    `NO_DEALER_IN_RANGE` (Fix 2) — which is now visible on the admin auction
@@ -225,7 +302,10 @@ needs dealers** — do not treat it as a failed backfill.
 | A real ZIP (`78745`) can be absent from the static table | `CODE-VERIFIED` — checker output |
 | Admin update path lacks state/ZIP validation and does not uppercase state | `CODE-VERIFIED` — service `:723-727`, schema `:26-30` |
 | A CLOSED auction is terminal to the activation ladder | `CODE-VERIFIED` — `deposit-activation-policy.ts:32-43` |
-| The 10 buyers' candidate location values | **NOT AVAILABLE** — no DB access. Not fabricated; §2 supplies the mechanism instead |
+| The 10 buyers' candidate location values | **SUPPLIED AND VERIFIED BY THE REQUESTER** — 4 recoverable, 6 with no source anywhere (§2). Not re-derived in this session |
+| 75034 / 75035 resolve in the static table | `CODE-VERIFIED` — 0/4 before the additions, 4/4 after; checker output in §2 |
+| Frisco coordinates are correct | `CODE-VERIFIED` to city-level precision, bounded by tests. The per-ZIP centroids are a documented approximation, not a sourced figure |
+| Admin route rejects bad state/ZIP and accepts the real form payload | `CODE-VERIFIED` — 13 tests |
 | `GOOGLE_GEOCODING_API_KEY` set in production | **NOT VERIFIED** — undeclared in `env.d.ts` and `.env.example` |
 | `noDealerCloseGraceMinutes` production value | **NOT VERIFIED** — injected, not literal |
 

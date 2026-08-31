@@ -45,6 +45,15 @@ export const ZIP_COORDS: Record<string, LatLng> = {
   "33301": { lat: 26.1224, lng: -80.1373 }, // Fort Lauderdale
   // Texas
   "75024": { lat: 33.0795, lng: -96.8088 }, // Plano
+  // Frisco — added for the buyer-location backfill
+  // (docs/plans/BUYER-LOCATION-BACKFILL.md). Both ZIPs carry the Frisco
+  // city centroid rather than a per-ZIP centroid: this table feeds a
+  // 50-150 mile radius filter, the two ZIPs are ~5mi apart, and a
+  // documented city-level approximation is preferable to a per-ZIP figure
+  // that cannot be sourced. Set GOOGLE_GEOCODING_API_KEY to stop curating
+  // this table by hand.
+  "75034": { lat: 33.1507, lng: -96.8236 }, // Frisco
+  "75035": { lat: 33.1507, lng: -96.8236 }, // Frisco
   "75201": { lat: 32.7831, lng: -96.8067 }, "75204": { lat: 32.8025, lng: -96.7856 },
   "75080": { lat: 32.9756, lng: -96.7325 }, // Richardson
   "76102": { lat: 32.7531, lng: -97.3284 }, // Fort Worth
@@ -167,6 +176,7 @@ export const CITY_COORDS: Record<string, LatLng> = {
   "fort worth,tx": { lat: 32.7555, lng: -97.3308 },
   "el paso,tx": { lat: 31.7619, lng: -106.4850 },
   "plano,tx": { lat: 33.0198, lng: -96.6989 },
+  "frisco,tx": { lat: 33.1507, lng: -96.8236 },
   "miami,fl": { lat: 25.7617, lng: -80.1918 },
   "orlando,fl": { lat: 28.5383, lng: -81.3792 },
   "tampa,fl": { lat: 27.9506, lng: -82.4572 },
