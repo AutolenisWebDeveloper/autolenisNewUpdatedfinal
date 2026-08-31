@@ -69,6 +69,31 @@ const ZERO_TRAFFIC_DAYS = 365;
 const LOW_CONVERSION_THRESHOLD = 0.001; // 0.1%
 
 /**
+ * Should this page be demoted for having earned no search impressions?
+ *
+ * Extracted and exported because the refresh cron must re-derive it. A page can
+ * reach REFRESH_REQUIRED for either of two unrelated reasons — stale data or no
+ * impressions — and `lifecycleStatus` records only the destination, not the
+ * cause. Refreshing market data fixes the first and does nothing for the second,
+ * so the refresh path has to ask the same question this one does. Two copies of
+ * the rule would drift, and a drifted copy here means regenerating pages nobody
+ * reads (burning LLM budget on articles the next lifecycle run re-demotes).
+ *
+ * `pubAge === null` (never published) is NOT no-impressions: an unpublished page
+ * has not had the chance to earn any.
+ *
+ * Pure and synchronous so the decision can be tested without a database.
+ */
+export function hasNoImpressions(input: {
+  pubAgeDays: number | null;
+  impressions180: number;
+}): boolean {
+  const { pubAgeDays, impressions180 } = input;
+  if (pubAgeDays === null) return false;
+  return pubAgeDays >= NO_IMPRESSIONS_DAYS && impressions180 === 0;
+}
+
+/**
  * Should this page be demoted for sustained low conversion?
  *
  * `leadsTrackingActive` is the guard that separates "measured zero" from "never
@@ -136,7 +161,7 @@ interface TrafficWindow {
 
 // Aggregate search_intelligence into per-slug traffic windows. Returns lookups
 // for the 180/365-day windows plus a 90-day conversion estimate.
-async function loadTraffic(now: number): Promise<{
+export async function loadTraffic(now: number): Promise<{
   imp180: Map<string, number>;
   traffic365: Map<string, TrafficWindow>;
 }> {
@@ -273,10 +298,10 @@ export async function runLifecycleReview(): Promise<LifecycleResult> {
     if (p.lifecycleStatus === "ACTIVE") {
       // 1) Refresh — data integrity takes priority over review.
       const stale = hasStaleData(p, now);
-      const noImpressions =
-        pubAge !== null &&
-        pubAge >= NO_IMPRESSIONS_DAYS &&
-        (imp180.get(p.slug) ?? 0) === 0;
+      const noImpressions = hasNoImpressions({
+        pubAgeDays: pubAge,
+        impressions180: imp180.get(p.slug) ?? 0,
+      });
 
       if (stale || noImpressions) {
         await prisma.amipsPage.update({

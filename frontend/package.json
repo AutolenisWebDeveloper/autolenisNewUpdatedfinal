@@ -36,7 +36,7 @@
     "test:seo": "tsx --test lib/seo/__tests__/*.test.ts",
     "test:crm": "tsx --tsconfig lib/crm/__tests__/tsconfig.test.json --test lib/crm/__tests__/*.test.ts",
     "test:dealer": "tsx --test lib/services/dealer/__tests__/*.test.ts",
-    "test:amips": "tsx --test lib/amips/__tests__/*.test.ts lib/amips/intelligence/__tests__/*.test.ts",
+    "test:amips": "tsx --test --experimental-test-module-mocks lib/amips/__tests__/*.test.ts lib/amips/intelligence/__tests__/*.test.ts",
     "test:admin-deals": "tsx --test --experimental-test-module-mocks app/api/admin/deals/__tests__/*.test.ts",
     "test:admin-dealers": "tsx --test --experimental-test-module-mocks app/api/admin/dealers/__tests__/*.test.ts app/api/admin/dealer-outreach/__tests__/*.test.ts",
     "test:affiliate-routes": "tsx --test --experimental-test-module-mocks app/api/affiliate/__tests__/*.test.ts",

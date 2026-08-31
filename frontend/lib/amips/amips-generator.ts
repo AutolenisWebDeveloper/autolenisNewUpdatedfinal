@@ -111,6 +111,14 @@ function parseArticle(raw: string): GeneratedAmipsArticle {
   };
 }
 
+/**
+ * Prefix of the failureReason the entity guard writes. Exported so the refresh
+ * cron can recognise the guard's own verdict instead of re-deriving the rule:
+ * a page sitting in a duplicate cluster must not be re-opened every night to
+ * fail the same check again.
+ */
+export const DUPLICATE_ENTITY_FAILURE_PREFIX = "Duplicate entity:";
+
 /** A page already covering the same (make, model, metro) under a different slug. */
 export interface EntityConflict {
   slug: string;
@@ -200,7 +208,7 @@ export async function generateAmipsPage(
       data: {
         status: "failed",
         attempts: { increment: 1 },
-        failureReason: `Duplicate entity: ${conflict.slug} already covers ${data.vehicle.make} ${data.vehicle.model} in ${data.market?.metro}`,
+        failureReason: `${DUPLICATE_ENTITY_FAILURE_PREFIX} ${conflict.slug} already covers ${data.vehicle.make} ${data.vehicle.model} in ${data.market?.metro}`,
       },
     });
     logger.info(

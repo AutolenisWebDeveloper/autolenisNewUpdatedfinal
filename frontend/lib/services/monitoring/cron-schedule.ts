@@ -98,6 +98,7 @@ export const CRON_STALENESS: Record<string, CronStalenessEntry> = {
   "lead-magnet-sequence": { intervalMinutes: DAY },
   "social-lead-nurture": { intervalMinutes: DAY },
   "amips-snapshot": { intervalMinutes: DAY },
+  "amips-refresh": { intervalMinutes: DAY }, // 03:00 — refresh sources, re-open rescued pages
   "social-signal-scan": { intervalMinutes: DAY },
   "social-generate": { intervalMinutes: DAY },
   "social-analytics-sync": { intervalMinutes: DAY },

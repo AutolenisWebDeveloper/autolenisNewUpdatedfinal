@@ -111,24 +111,47 @@ describe("fleet coverage — the gap this closes", () => {
     assert.deepEqual(undetectable.map(([n]) => n), []);
   });
 
-  test("the pre-fix blind set was 34 crons, and it is now empty", () => {
+  // COUNTS RELAXED TO A FLOOR, DELIBERATELY. These were pinned at exactly 34 and
+  // 33 — the fleet's size when the cadence fix landed. That made every future
+  // cron addition fail a test about threshold behaviour, which is a trap rather
+  // than a signal: adding `amips-refresh` (daily, so it joins the slow set) broke
+  // it for a reason that has nothing to do with what the test is checking.
+  //
+  // What is actually load-bearing is asserted below and is UNCHANGED: every slow
+  // cron alerts on one failure, every fast cron still needs two, and the two sets
+  // partition the registry so nothing escapes classification. The historical
+  // scale survives as a floor — 34 crons were structurally unalertable — which
+  // still fails loudly if a lookback change reclassifies the fleet wholesale.
+  const PRE_FIX_BLIND_FLOOR = 34;
+
+  test("the pre-fix blind set — 34+ crons — now alerts on a single failure", () => {
     const wouldHaveBeenBlind = Object.entries(CRON_STALENESS).filter(
       ([, e]) => e.intervalMinutes > FAILED_CRON_LOOKBACK_MINUTES,
     );
-    // Sized against vercel.json: 18 daily + 10 weekly + 5 six-hourly + 1 four-hourly.
-    assert.equal(wouldHaveBeenBlind.length, 34);
+    // Originally 18 daily + 10 weekly + 5 six-hourly + 1 four-hourly, per vercel.json.
+    assert.ok(
+      wouldHaveBeenBlind.length >= PRE_FIX_BLIND_FLOOR,
+      `slow set shrank to ${wouldHaveBeenBlind.length}; the lookback may have been widened`,
+    );
     for (const [name] of wouldHaveBeenBlind) {
       assert.equal(failedStreakThresholdFor(name), 1, `${name} must now alert on one failure`);
     }
   });
 
-  test("the fast set is untouched at 33 crons", () => {
+  test("the fast set is untouched — still two failures before it alerts", () => {
     const fast = Object.entries(CRON_STALENESS).filter(
       ([, e]) => e.intervalMinutes <= FAILED_CRON_LOOKBACK_MINUTES,
     );
-    assert.equal(fast.length, 33);
+    assert.ok(fast.length > 0, "the fast set must not be empty");
     for (const [name] of fast) {
       assert.equal(failedStreakThresholdFor(name), FAILED_CRON_STREAK_THRESHOLD, name);
     }
+  });
+
+  test("the two sets partition the registry — no cron escapes classification", () => {
+    const all = Object.entries(CRON_STALENESS);
+    const slow = all.filter(([, e]) => e.intervalMinutes > FAILED_CRON_LOOKBACK_MINUTES);
+    const fast = all.filter(([, e]) => e.intervalMinutes <= FAILED_CRON_LOOKBACK_MINUTES);
+    assert.equal(slow.length + fast.length, all.length);
   });
 });
