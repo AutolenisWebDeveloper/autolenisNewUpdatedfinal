@@ -14,14 +14,19 @@ signature, **397** with `email IS NULL`.
 > that the pattern began ~36h ago and that the cleanup should expect ~72 rows. Both are corrected
 > below. The pattern has been running since the scanner became reachable on **2026-08-23**.
 > `d54131c` was committed **20:06:41 UTC**, so the first possible hourly run is **21:00 on
-> 2026-08-23**; to the 2026-08-31 measurement that is **194 runs**, a ceiling of **388** rows at
-> 2/run, against **366** observed — 94% of ceiling, i.e. ~11 runs that failed or found nothing.
+> 2026-08-23**; to the 2026-08-31 measurement that is **195 runs** (inclusive of both ends), a ceiling of
+> **390** rows at 2/run, against **366** observed — 94% of ceiling, i.e. ~11 runs that failed or found nothing.
 > (Do not compute this as "48/day × 8 days = 384": the window does not start at midnight.)
 >
-> Read the residual arithmetic too: 397 − 366 = **31 email-less rows that are NOT fabricated**
-> (legitimately SMS-originated — `01_phase1_foundation.sql` says so in situ: *"Nullable email is
-> intentional: SMS-originated contacts may not have one"*), and 415 − 397 = **18 rows carrying a
-> real email**. Neither group may be touched by the cleanup.
+> Read the residual arithmetic too: 397 − 366 = **31 email-less rows that are NOT fabricated**,
+> and 415 − 397 = **18 rows carrying a real email**. The 18 are out of scope entirely — **nothing
+> in this cleanup may touch them.**
+>
+> The 31 are mostly legitimate SMS-originated contacts (`01_phase1_foundation.sql` says so in
+> situ: *"Nullable email is intentional: SMS-originated contacts may not have one"*) — but **the
+> seed rows are inside this group**, since they are email-less by construction. Step 1 must not
+> match any of the 31; Step 3 deliberately merges two of them. Those are the only rows in the
+> group the cleanup may alter, and only by the merge, never the Step 2 delete.
 
 ## The writer
 
@@ -73,17 +78,23 @@ Email uniqueness is enforced by the database; **phone uniqueness is not**. Once 
 shared a phone, `.maybeSingle()` returned an error for that phone on *every* subsequent call,
 so defect 1 fired deterministically — once per scan, forever.
 
-**This is why every fabricated row has `email IS NULL`.** The insert is attempted for whatever
-contact the scanner is processing; the unique partial index rejects any duplicate carrying a
-real email (that path throws, is caught by `emitDomainEvent`, and is logged as
-"contact resolve failed" — no row). Only the email-less ones survive to disk. The observed
-"0 distinct emails across all 72" is the index doing its job on the rows it *could* police.
+**This is why every fabricated row has `email IS NULL` — and the reason is ordering, not
+rejection.** `upsertContact` tries the email lookup *first*, and that lookup runs against a
+column the database keeps unique, so it can never raise the multi-row error. A contact that has
+an email therefore always resolves, takes the UPDATE branch, and **never reaches the phone lookup
+or the insert at all**. Only an email-less contact falls through to the phone lookup, where the
+ambiguity lives.
+
+> An earlier draft explained this as the unique index *rejecting* duplicate inserts that carried
+> an email. That is wrong: the index is a backstop that never fires in this flow, because the
+> insert is never attempted for those rows. The observed "0 distinct emails" is a consequence of
+> **which rows can reach the failing lookup**, not of anything the database refused.
 
 A second, independent path into defect 1: `normalizePhone` returns `''` — not `null` — for a
 number it cannot render in E.164. `''` is falsy, so the phone lookup was **skipped entirely**
 and the row was written with `phone: ''`, an identity that matches nothing and therefore mints
-a fresh duplicate on every later call. Both variants produce rows with an identical phone
-value; see the confirmation query below for which one is live.
+a fresh duplicate on every later call. **This variant is NOT what happened here** — Step 0 settled
+that by production query — but the same fix closes it.
 
 ### 3. The scanner's idempotency guard lands on the wrong row
 
@@ -133,8 +144,9 @@ contact the scanner selects but `upsertContact` cannot resolve.
 
 **The corrupted window is ~8 days, not ~1.5.** `d54131c` landed at **2026-08-23 20:06:41 UTC**, so
 the first hourly run it could have driven is **21:00 that day**. From there to the 2026-08-31
-measurement is **194 hourly runs** — a ceiling of **388** rows at 2 per run — against **366**
-observed. That is 94% of ceiling, leaving ~11 runs that failed, found nothing, or were skipped.
+measurement is **195 hourly runs** inclusive of both ends — a ceiling of **390** rows at 2 per run — against
+**366** observed. That is 94% of ceiling, leaving ~12 runs that failed, found nothing, or were
+skipped.
 The observed count sits *below* the ceiling, as it must.
 
 An earlier draft put the onset at 36–40 hours ago by mistaking a 36-hour sample for the whole
@@ -364,7 +376,7 @@ tripwire at any point in the future:
 | --- | --- | --- |
 | `email_null − matched` | **≈ 31** | Falling toward 0 ⇒ the query is **over-matching**, eating the legitimate SMS-originated contacts. **STOP.** |
 | `total_live − email_null` | **≈ 18** | The rows carrying a real email. Should not move at all. |
-| `matched` | **≥ 366** | Nothing in the system deletes contact rows, so the fabricated population is monotonically non-decreasing from the 2026-08-31 measurement. **Below 366 means under-matching — STOP**, do not "clean up what you can". |
+| `matched` | **≥ 366**, normally | The scanner only ever *adds*, so the count should not fall. But `ContactService.softDeleteContact` exists and is reachable from `DELETE /api/admin/crm/contacts/[id]`, so an admin tidying rows by hand **can** legitimately lower it. Below 366 ⇒ **investigate before proceeding**: check for admin soft-deletes in that window (`deleted_at IS NOT NULL` on rows matching the signature). Unexplained ⇒ STOP, do not "clean up what you can". |
 | `matched` growth | ≈ **+2/hour** from 366 until `c1cac50` is deployed, then flat | Materially faster ⇒ a second affected number or a second writer. Slower ⇒ the scan is erroring; check the logs. |
 
 There is deliberately **no upper bound in absolute rows**: at 2/hour the count is a function of how
@@ -372,10 +384,20 @@ long the fix takes to deploy, and any fixed ceiling would expire silently. If yo
 figure, compute it at query time as `366 + 2 × (hours since 2026-08-31 23:00 UTC, capped at the
 deploy of c1cac50)`.
 
-**Shape checks, independent of any count:** every matched row's `created_at` sits within a few
-seconds of the top of an hour, and every matched row carries `phone = '+19547562609'`. A matched
-row with a different phone means a second number is affected and the blast radius is wider than
-this document assumes — **STOP and re-derive**.
+**Shape checks, independent of any count:** every matched row's `created_at` should sit within a
+few seconds of the top of an hour, and every matched row should carry `phone = '+19547562609'`.
+
+Note the provenance: that phone was confirmed on the **72 sampled rows**, not on all 366. Treat a
+matched row bearing a *different* phone as **new information rather than proof of an error** — it
+would mean a second number is affected, the population is larger than this document models, and
+the Step 3 seed analysis has to be repeated per phone. Stop and re-derive; do not simply widen the
+delete to cover it. Run this before Step 2 to find out:
+
+```sql
+SELECT phone, count(*) FROM ( /* the Step 1 SELECT */ ) m
+JOIN contacts c USING (id) GROUP BY phone ORDER BY 2 DESC;
+-- expect exactly one row: '+19547562609'
+```
 
 **Hard stop — any one of these means do not delete:** a matched row with a non-NULL `email`; a
 matched row with a `contact_identities` link; a matched row with a timeline event outside
@@ -413,10 +435,14 @@ they are picked up by a second pass, which is correct and safe. Once `c1cac50` i
 rows are produced at all, so a single pass suffices.
 
 Soft delete is sufficient and is the safer default: every application read path and both dedup
-lookups filter `deleted_at IS NULL`, and the unique email index is likewise partial on it. So
-soft-deleting the duplicates **also resolves the phone ambiguity** that triggers the bug, and it
-is reversible. A hard `DELETE` also works — `contact_identities` and `contact_timeline_events`
-are `ON DELETE CASCADE` — but discards the evidence and is not reversible.
+lookups filter `deleted_at IS NULL`, and the unique email index is likewise partial on it, so a
+soft-deleted row is invisible to the dedup lookup exactly as a hard-deleted one would be — and it
+is reversible. A hard `DELETE` also works — the CASCADE children would go with it — but discards
+the evidence and cannot be undone.
+
+> **Step 2 does NOT on its own resolve the phone ambiguity.** The seed rows are not in the Step 1
+> set and survive this delete, so `.maybeSingle()` keeps erroring and the affected person stays
+> unresolvable. Only Step 3 closes that. Do not stop here.
 
 ### Step 3 — REQUIRED. Reduce the phone to exactly one live row (expect to find 2+).
 
@@ -595,8 +621,12 @@ No schema change. No production mutation by this document or the change that acc
 scheduled and, with the fix deployed, fails loudly instead of fabricating. Disabling it needs
 owner approval and, given the fix, should not be necessary.
 
-The production figures in this document (the `+19547562609` value, 415/366/397, the index
-definitions, the 3 `buyers` rows) were supplied from queries run by the owner against production.
-No session authoring this document has had database access; nothing here was measured by the
-author, and every count in the stop-condition must be re-measured at cleanup time rather than
-trusted from this page.
+Every production figure in this document was supplied by the owner from queries run against
+production — the `+19547562609` value, 415/366/397, the index definitions, the 3 `buyers` rows,
+**the 2 rows/hour rate, and the `:00:04–:00:05` creation timestamps**. The rate and timestamps
+came from a 36-hour sample, and the phone from a 72-row sample; neither has been confirmed across
+the full 366.
+
+No session authoring this document has had database access. **Nothing here was measured by the
+author** — the code, DDL and git history are first-hand; every number is second-hand. Re-measure
+every count in the stop-condition at cleanup time rather than trusting this page.
