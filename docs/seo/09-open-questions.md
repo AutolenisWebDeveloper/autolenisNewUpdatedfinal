@@ -42,15 +42,24 @@ Consolidated from all documents. **Run V-4 first** — it sizes ongoing producti
 
 ## Part B — Owner decisions
 
-### D-1 · Emergency response to the auto-de-indexing defect — **decide first**
-`01`/C-7 and `04`/T-1 establish that `/api/cron/amips-lifecycle` (`0 4 * * 2`) flags every
-`/intelligence/*` page ≥90 days old with ≥1 click as `UNDER_REVIEW`, which 404s it and removes it
-from every sitemap. Weekly, ongoing.
+### D-1 · Emergency response to AMIPS de-indexing — **decide first** (REVISED 2026-08-31)
+**Superseded in its reasoning by `10-production-reconciliation.md`; the decision still stands,
+for different reasons.**
 
-**Decision:** pause the `amips-lifecycle` cron now, or accept continued weekly loss until the fix
-ships? A pause is a `vercel.json` change; recovery of already-flagged pages is a data fix
-(restoring `lifecycleStatus` to `ACTIVE` for pages flagged solely on the false low-conversion
-signal — V-4 sizes it). **This audit made no change.**
+The original framing — that the leads-ratio branch was de-indexing pages weekly — was **wrong**.
+Owner-verified state (`clicks = 0` corpus-wide) proves that branch has never fired (`10`, V-3).
+
+What is actually true, and worse: **609 of 794 pages (76.7%) return HTTP 404 and are in no
+sitemap today**, via the staleness branches (`10`, V-2) — Tier C/D/E pages expire 30 days after
+generation with no refresh path, and Tier F is stale from birth. A third branch
+(`noImpressions`, 180 days) **arms 2026-12-05** reading an empty `search_intelligence`, which
+would flag every remaining `ACTIVE` page at once.
+
+**Decision:** pause the `amips-lifecycle` cron now, or accept the scheduled 2026-12-05 event and
+continued Tier C/D/E expiry? A pause is a one-line `vercel.json` removal, fully reversible,
+changes no data and un-404s nothing. Recovery of the 239 already-demoted `PUBLISHED` pages is a
+separate data fix that **must follow the code correction**, or the next Tuesday run re-demotes
+them. **This audit made no change.** Full plan in `10` → Remediation.
 
 ### D-2 · `seo_page_configs` — repair or retire?
 The table has no reachable writer (`01`/C-1). Two coherent options:
@@ -168,6 +177,14 @@ Recorded so a reviewer can trust the rest.
 | "`SavingsCallout` may make quantified savings claims contradicting the AMIPS stripper" — initially deferred to the owner | **Verified in-session, and it passes.** The figure block is deliberately withheld pending substantiation and a disclaimer is rendered | Read the component instead of deferring a check code could answer (`05`) |
 | "Content publish/unpublish actions lack a role check" | **A-1 is correctly enforced** — it calls `hasContentCapability` at line 64, which the initial grep pattern missed. The real defects are A-2 and A-3 | Read the full handler (`07`) |
 
-**Method note.** Two of these five would have become false findings had the grep result been
-reported without opening the file. Every classification in this audit was made by reading the
-cited lines.
+| **"The leads-ratio branch is actively de-indexing performing pages weekly"** (`01` C-7, `04` T-1, `08` 0.1) | **WRONG — corrected 2026-08-31.** Owner-verified state has `clicks = 0` for all 794 pages, so `conversion` is `null` and the branch has **never fired**. It is latent, closed by the click gate rather than the age gate | Reconciled the code against owner-verified production state (`10`, V-3). The mechanism was correct; the **tense** was wrong |
+| "The 31 UNDER_REVIEW + PUBLISHED pages were demoted by the leads ratio" (implied by `01` C-7) | **WRONG.** They came from the `duplicate` branch at `lifecycle-manager.ts:206`. Proven by elimination: the generator writes `lifecycleStatus` and `qualityGateStatus` atomically from one `gate.status`, so it cannot emit that pair; only `lifecycle-manager.ts:206` writes `UNDER_REVIEW` without touching `qualityGateStatus`; and `clicks = 0` excludes `lowConversion` | Exhaustive writer enumeration (`10`, V-1) |
+| The audit did not identify the **actual** active de-indexing paths | **Two new HIGH findings** (`10`, V-2): Tier C/D/E pages expire 30 days after generation with no refresh path; **Tier F is stale from birth** because `isTierCPlus` includes `"F"` while `assembler.ts:236-251` never sets F's as-of dates — while quality Gate 5 passes Tier F using a `{C,D,E}` set. A tier-set contradiction across three files | Traced every branch that can produce a non-`ACTIVE` status (`10`, V-2) |
+| The audit understated the scale of present damage | **609 of 794 pages (76.7%) are non-servable now** — larger than the original finding claimed, and already realised rather than prospective | `10`, V-2 |
+
+**Method note.** Two of the first five would have become false findings had the grep result been
+reported without opening the file. The sixth through ninth are of a different kind: the code
+analysis was correct but **unreconciled against production state**, which made a dormant defect
+look active and hid three larger ones. Code-only analysis can establish a mechanism; only state
+establishes whether it has fired. Every classification here was made by reading the cited lines,
+and every claim about production comes from owner-verified state, not inference.

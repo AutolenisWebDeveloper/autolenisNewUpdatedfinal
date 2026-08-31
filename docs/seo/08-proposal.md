@@ -27,18 +27,28 @@ from ACTIVE — which is why Branch B here is a short spec, not a project.
 
 ---
 
-## Part 0 — Three defects to fix before any new capability
+## Part 0 — Five defects to fix before any new capability
 
-Ordered strictly by business damage. Two are actively destroying organic assets right now.
+Ordered strictly by business damage. 0.1 is destroying organic assets right now; 0.1b and 0.1c
+are scheduled to.
 
 | # | Defect | Effect | Fix |
 | --- | --- | --- | --- |
-| **0.1** | `AmipsPage.leadsGenerated` never written; `lifecycle-manager.ts:196-201` divides it by clicks | **Every `/intelligence/*` page ≥90 days old that earns a click is 404'd and dropped from all sitemaps.** Better pages die first | Treat unwritten as *unknown*, not *zero*; gate `lowConversion` on the metric being populated. Consider pausing `amips-lifecycle` until then |
+| **0.1** | Lifecycle staleness branches: Tier C/D/E expire 30d after generation with no refresh path; Tier F stale from birth (`isTierCPlus` includes `"F"`, assembler never sets F's as-of dates) | **609 of 794 pages (76.7%) return HTTP 404 and are in no sitemap — today** | See `10`, C-3/C-4. Decouple `REFRESH_REQUIRED` from non-servable |
+| **0.1b** | `noImpressions` (180d) and `RETIRED` (365d) read an **empty** `search_intelligence` | Arms **2026-12-05**: flags every remaining `ACTIVE` page at once | See `10`, C-2. Treat absent data as unknown, never zero |
+| **0.1c** | `AmipsPage.leadsGenerated` never written; `lifecycle-manager.ts:196-201` divides it by clicks | **Latent** — `clicks = 0` corpus-wide closes it. Arms when the GSC sync starts writing | See `10`, C-1. Gate on the metric being populated |
 | **0.2** | `content-validation.service.ts:245` `required:false` + corpus scoped to `cluster + city` | Near-duplicate buying-guide articles publish unchecked across cities | Make `duplicate` REQUIRED; widen the corpus across cities within a cluster |
 | **0.3** | `quality-gate.ts:37,39` module-level `/g` regexes used with `.test()` | Roughly every second AMIPS page containing "guaranteed" passes the compliance gate | Drop the `/g` flag |
 
-**Nothing in this proposal should be built before 0.1.** Adding pages to a system that
-de-indexes its winners compounds the loss.
+**Nothing in this proposal should be built before 0.1/0.1b/0.1c.** Adding pages to a system in
+which 76.7% of the existing corpus already 404s compounds the loss.
+
+> **Revised 2026-08-31 against owner-verified production state — see
+> `10-production-reconciliation.md`.** The original 0.1 described the leads-ratio branch as
+> actively de-indexing pages. It is **latent**; the active damage comes from the staleness
+> branches, now 0.1. Ordering is unchanged in spirit — lifecycle correctness still precedes every
+> other item — but the specific fixes differ. **Note the perverse coupling: repairing the GSC
+> sync (Phase 1/2 below) arms 0.1c.** Ship 0.1c before, or with, any sync repair.
 
 ---
 
@@ -368,7 +378,7 @@ writer and #5 must be preserved as a distinct surface instead.
 
 | Phase | Work | Rationale |
 | --- | --- | --- |
-| **0** | Defects 0.1, 0.2, 0.3 | Stop active damage. 0.1 first — the system is de-indexing its best pages weekly |
+| **0** | Defects 0.1, 0.1b, 0.1c, 0.2, 0.3 | Stop active damage. 0.1 first — 76.7% of the corpus 404s today. **0.1c must ship before or with Phase 1/2, which would otherwise arm it** |
 | **0b** | AUTHZ-1, AUTHZ-2 (`07`) | Two one-line changes using primitives that already exist |
 | **1** | Remove the `/intelligence/` filter (`pipeline.ts:172`) | Immediately extends real GSC coverage from 1 family to all — **no schema change** |
 | **2** | `search_query_performance` + paginated `["page","query"]` pull + failure handling (1.7) | The data foundation. DDL to owner for approval first |

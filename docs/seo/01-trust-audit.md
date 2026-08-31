@@ -14,7 +14,7 @@ targeted call-graph tracing of every read and every write. Paths are relative to
 
 | Result | Count |
 | --- | --- |
-| CRITICAL findings (STATIC/BROKEN value shown to an operator as a real measurement) | **7** |
+| CRITICAL findings (STATIC/BROKEN value shown to an operator as a real measurement) | **7** (C-7 downgraded to HIGH/dormant on 2026-08-31 — see `10`) |
 | Fabricated data (MOCK / SYNTHETIC / randomized) found anywhere in the SEO surface | **0** |
 | `/admin/seo` routes | 5 |
 | `/admin/seo` API routes | 2 |
@@ -163,10 +163,25 @@ not supported by the data; the metric is simply never recorded.
 
 ---
 
-### C-7 · The zero-leads defect actively de-indexes AutoLenis's best-performing pages
-**Severity: CRITICAL — highest business impact in this audit · Classification: BROKEN**
+### C-7 · The zero-leads defect arms a de-indexing loop (LATENT — corrected)
+**Severity: HIGH · Classification: BROKEN (dormant)**
 
-This is C-6 turned into a live production feedback loop.
+> **CORRECTED 2026-08-31 against owner-verified production state — see
+> `10-production-reconciliation.md`, V-3.** This finding originally claimed the loop was
+> *actively* de-indexing pages weekly. **That was wrong.** Production has `clicks = 0` for all
+> 794 `amips_pages`, so `conversion` evaluates to `null` and the branch has **never fired and
+> cannot fire today** — it is closed by the click gate, not the age gate. The mechanism below is
+> real and the code is unchanged; only the tense was wrong.
+>
+> Two consequences the original framing missed, both in `10`:
+> - **The 31 demoted pages were not caused by this branch.** They came from the `duplicate`
+>   branch at `lifecycle-manager.ts:206` (V-1).
+> - **The real, present-tense damage is larger:** 609 of 794 pages (76.7%) are non-servable now,
+>   via the staleness branches (V-2), not this one.
+>
+> This branch arms itself when the GSC sync starts returning rows — see V-3 for the dates.
+
+This is C-6 turned into a de-indexing feedback loop that is currently dormant.
 
 `lib/amips/lifecycle-manager.ts:196-201`:
 ```ts
@@ -203,13 +218,14 @@ The lifecycle review runs weekly — `vercel.json` cron `/api/cron/amips-lifecyc
 | `sitemap-amips-{a..d}.xml` | `lib/amips/sitemap.ts:51` `lifecycleStatus: "ACTIVE"` | **dropped** |
 | `sitemap-intelligence.xml` | `app/sitemap-intelligence.xml/route.ts:33` | **dropped** |
 
-**Net effect: the better an AMIPS page performs in organic search, the sooner it is 404'd and
-removed from every sitemap. Pages that attract no traffic at all survive indefinitely.** This
-inverts the intended lifecycle policy and destroys accumulated ranking equity, link equity and
-crawl history for exactly the pages worth keeping.
+**Net effect once armed: the better an AMIPS page performs in organic search, the sooner it is
+404'd and removed from every sitemap. Pages that attract no traffic at all survive
+indefinitely.** This inverts the intended lifecycle policy.
 
-This is a code-provable defect requiring no live data to confirm. It is the single
-highest-priority remediation in this audit.
+**Current status: dormant.** With `clicks = 0` corpus-wide the branch cannot fire. It becomes
+reachable only when *both* gates open — age ≥90d (earliest cohort 2026-09-06) **and**
+`clicks > 0`, which requires the GSC sync to start writing. Repairing the sync without repairing
+this branch would activate it. See `10-production-reconciliation.md`, V-3.
 
 ---
 

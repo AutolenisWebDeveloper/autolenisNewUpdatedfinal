@@ -1,0 +1,485 @@
+# 10 — Production Reconciliation (V-1 … V-5)
+
+Reconciles the code against owner-verified production state. **No production was queried; no
+source, cron, data, sitemap, or indexing change was made.** Paths relative to `frontend/`.
+
+Production state below is **owner-VERIFIED** and treated as given, not re-derived.
+
+| Fact | Value |
+| --- | --- |
+| `amips_pages` total | 794 |
+| `leads_generated` | **0 for all 794**, never nonzero |
+| `clicks`, `impressions` | **0 for all 794** |
+| `published_at` range | 2026-06-08 … 2026-06-28 — **zero rows exceed 90 days** as of 2026-08-31 |
+| UNDER_REVIEW + REVIEW_NEEDED | 370 |
+| REFRESH_REQUIRED + PUBLISHED | 208 |
+| ACTIVE + PUBLISHED | 185 |
+| **UNDER_REVIEW + PUBLISHED** | **31** |
+| `amips-lifecycle` | 1 logged run, 2026-08-25, `{retired:0, flaggedForReview:0, flaggedForRefresh:0}` |
+| `amips-search-sync` | 2 logged runs, 2026-08-24 / 2026-08-31, both `{synced:0, reprioritized:{mode:"launch",reprioritized:0}}` |
+| `cron_job_logs` history | begins 2026-08-20 |
+
+---
+
+## Headline
+
+**The audit's core mechanism was right; its tense was wrong.** The leads-ratio branch is real and
+confirmed, but it is **currently unreachable** — `clicks = 0` closes it, independent of age. It
+did **not** demote the 31.
+
+What did the damage is a **different, unlogged branch of the same function**, and the damage is
+larger than the audit reported: **609 of 794 pages (76.7%) are non-servable right now** — every
+non-`ACTIVE` page returns HTTP 404 and is absent from every sitemap. Only **185 (23.3%)** are
+live. Corrections are applied to `01`, `04`, `08` and recorded in `09` Part D.
+
+---
+
+# V-1 (PRIMARY) — Explaining the 31
+
+## Every writer of `amipsPage.lifecycleStatus` — exhaustive
+
+Repo-wide search over `.ts/.tsx/.sql/.prisma/.js` excluding `node_modules`/`.next`, for
+`lifecycleStatus:` assignments and `lifecycle_status`, plus separate sweeps for `$executeRaw` /
+`$queryRaw` touching amips (**none**) and for `amipsPage` in `scripts/` and `prisma/`
+(**none** — all six `scripts/amips-*.ts` return `0` matches for `amipsPage`).
+
+| # | Site | Writes | Also writes `qualityGateStatus`? | Trigger |
+| --- | --- | --- | --- | --- |
+| W-1 | `lib/amips/amips-generator.ts:220` (upsert **create**) | `published ? "ACTIVE" : "UNDER_REVIEW"` | **Yes — line 221, same statement** | `amips-generate` cron / queue drain |
+| W-2 | `lib/amips/amips-generator.ts:243` (upsert **update**) | `published ? "ACTIVE" : "UNDER_REVIEW"` | **Yes — line 244, same statement** | regeneration of an existing slug |
+| W-3 | `lib/amips/lifecycle-manager.ts:188` | `"REFRESH_REQUIRED"` | **No — `lifecycleStatus` only** | `stale \|\| noImpressions` |
+| W-4 | `lib/amips/lifecycle-manager.ts:206` | `"UNDER_REVIEW"` | **No — `lifecycleStatus` only** | `duplicate \|\| lowConversion` |
+| W-5 | `lib/amips/lifecycle-manager.ts:227` | `"RETIRED"` | **No — `lifecycleStatus` only** | UNDER_REVIEW + 365d + zero traffic |
+
+**Not writers** (checked and excluded): `lib/services/content/content-publishing.service.ts:87`
+(writes `contentArticle`, not `amipsPage`); `lib/services/ai/action-intent/store.ts:155`
+(different model); all `migrations/**` and `prisma/**` occurrences (DDL, defaults and indexes
+only — `DEFAULT 'ACTIVE'`); `executive-intelligence.ts` (reads only). **There is no admin route,
+backfill script, seed, or manual SQL path that writes it.**
+
+## The deduction
+
+`amips-generator.ts` writes `lifecycleStatus` **and** `qualityGateStatus` in the **same object
+literal**, both derived from one `gate.status` (line 198: `const published = gate.status ===
+"PUBLISHED"`). `FAILED` returns early at lines 181-193 and never persists a page. So the
+generator can emit exactly two pairs:
+
+| `gate.status` | `lifecycleStatus` | `qualityGateStatus` |
+| --- | --- | --- |
+| `PUBLISHED` | `ACTIVE` | `PUBLISHED` |
+| `REVIEW_NEEDED` | `UNDER_REVIEW` | `REVIEW_NEEDED` |
+
+> **`(UNDER_REVIEW, PUBLISHED)` is unreachable from the generator — on both the create and the
+> update path.** It can only arise if something later changed `lifecycleStatus` while leaving
+> `qualityGateStatus` untouched. W-3, W-4 and W-5 are the only writes that do that, and **W-4 is
+> the only one that writes `UNDER_REVIEW`.**
+
+**∴ The 31 were written by `lib/amips/lifecycle-manager.ts:206`, from a prior `(ACTIVE,
+PUBLISHED)` state.**
+
+W-4 fires on `if (duplicate || lowConversion)` (line 204). Production has `clicks = 0` for all
+794, so line 196 `const conversion = p.clicks > 0 ? p.leadsGenerated / p.clicks : null` yields
+`null`, and line 200 `conversion !== null` is **false** ⇒ `lowConversion = false`.
+
+**∴ `duplicate = true`. The 31 are duplicate-cluster demotions.**
+
+## The duplicate branch — preconditions and fit
+
+`lifecycle-manager.ts:146-168`:
+
+| Precondition | Line | Fit with the 31 |
+| --- | --- | --- |
+| `p.lifecycleStatus === "ACTIVE"` at scan time | 151 | ✓ they were `ACTIVE + PUBLISHED` |
+| `make`, `model` **and** `metro` all non-null | 152 | ✓ implies tier ∈ {C,D,E} — `metro` is set only on the metro-tier return (`assembler.ts:21,255,326`) |
+| cluster key `make\|model\|metro` lowercased, ≥2 members | 153-160 | ✓ |
+| sort `impressions` DESC, then `publishedAt` ASC; all but `sorted[0]` flagged | 161-167 | ✓ **with `impressions = 0` for every page the primary sort key is inert, so canonical selection collapses to earliest `publishedAt`** |
+| no age, click, impression or lead precondition | — | ✓ fires immediately on any run |
+
+The publish dates fit precisely: the 31 carry `published_at` 2026-06-25/26 and
+`last_refreshed_at` 2026-06-26 — i.e. a cluster of pages generated together, of which the
+earliest-published member in each `make|model|metro` group survived as `ACTIVE` and the rest were
+demoted.
+
+## Why the one logged run flagged zero — consistent, not contradictory
+
+The 2026-08-25 run reported `flaggedForReview: 0`. That is **expected**, not evidence against
+the above: by then the 31 were already `UNDER_REVIEW`, so line 151
+(`if (p.lifecycleStatus !== "ACTIVE") continue`) excludes them from cluster building, and the
+`ACTIVE` branch at line 177 never evaluates them. `flaggedForRefresh: 0` is likewise consistent —
+the 208 were already `REFRESH_REQUIRED`, and the surviving 185 are non-metro tiers whose only
+applicable check is vehicle ≤180d (≈78 days old at that date). **The whole logged run is
+consistent with the reconstruction.**
+
+## Can the responsible run be dated from code?
+
+**No — and the reason is itself a finding.** `cron_job_logs` history begins 2026-08-20; the
+demotion happened before that. **`runLifecycleReview` writes no audit record** — no `AuditLog`,
+no workflow event, no per-page transition history. `amipsPage` has no `lifecycleChangedAt` or
+prior-status column (`prisma/schema.prisma:4757-4790`). A page's demotion is therefore
+unattributable after the fact.
+
+Code does bound the window. The 31 must be tier C/D/E (they have a `metro`), and for those tiers
+`hasStaleData` (lines 62-67) checks `marketDataAsOf` against a **30-day** ceiling. Staleness is
+evaluated **first** and `continue`s (lines 183-192), so a run reaching the duplicate branch must
+have occurred while their market data was still within 30 days.
+
+> **Responsible run: an `amips-lifecycle` execution between ~2026-06-26 and ~2026-07-26.** The
+> cron is `0 4 * * 2` (Tuesdays), giving candidate dates **2026-06-30, 07-07, 07-14, 07-21**.
+
+**Exact evidence that would settle it** (owner-side, none require production writes):
+1. Vercel function logs for `/api/cron/amips-lifecycle` in 2026-06-26 … 2026-07-26 — the handler
+   logs `[amips-p3-lifecycle] done — refresh N, review M, retired K` (line 215).
+2. Any `cron_job_logs` retained before 2026-08-20 (backup/export), same window.
+3. Supabase point-in-time recovery or WAL/audit retention on `amips_pages`, if enabled.
+
+**Verdict — V-1: the responsible code path is determined; the responsible run is not.** The path
+is `lib/amips/lifecycle-manager.ts:206` via the `duplicate` branch. `lowConversion` is excluded
+by `clicks = 0`, and the generator is excluded by the atomic
+`lifecycleStatus`/`qualityGateStatus` write.
+
+---
+
+# V-2 — Sibling de-indexing paths
+
+## The serving and sitemap gates
+
+| Surface | Gate | File:line |
+| --- | --- | --- |
+| `/intelligence/[slug]` | `where: { slug, lifecycleStatus: "ACTIVE" }` → `notFound()` | `app/(public)/intelligence/[slug]/page.tsx:38, 91` |
+| `sitemap-amips-{a..d}.xml` | `contentTier: tier, lifecycleStatus: "ACTIVE"` | `lib/amips/sitemap.ts:51` |
+| `sitemap-intelligence.xml` | `lifecycleStatus: "ACTIVE"` | `app/sitemap-intelligence.xml/route.ts:33` |
+
+**`lifecycleStatus === "ACTIVE"` is the sole serving gate.** `dataTokenCount` and
+`qualityGateStatus` are **write-only** — a repo-wide search shows their only occurrences are the
+four generator writes (`amips-generator.ts:218,221,241,244`). **There is no token-count
+threshold and no quality-gate re-evaluation at serve time.** So *any* non-`ACTIVE` status ⇒ 404 +
+delisted, with no gradation.
+
+**Present-tense impact (VERIFIED state):** 370 + 208 + 31 = **609 of 794 pages (76.7%) return
+HTTP 404 and appear in no sitemap.** 185 are servable.
+
+## Every condition producing a non-ACTIVE status
+
+| # | Branch | Line | Field read | Populated in production? | Status |
+| --- | --- | --- | --- | --- | --- |
+| S-1 | `stale` — vehicle > 180d (all tiers) | 60 | `vehicleDataAsOf` | **Yes** — set on all three assembler returns (250, 263, 335) | dormant (≈84d max) |
+| S-2 | `stale` — Tier C+ `dealerDataAsOf` null **or** > 90d | 64 | `dealerDataAsOf` | C/D/E: yes (`assembler.ts:336`). **Tier F: always NULL** | **ACTIVE — see V2-B** |
+| S-3 | `stale` — Tier C+ `marketDataAsOf` null **or** > 30d | 66 | `marketDataAsOf` | C/D/E: yes (`:337`). **Tier F: always NULL** | **ACTIVE — see V2-A** |
+| S-4 | `noImpressions` — age ≥180d **and** `imp180 === 0` | 181-183 | `imp180` ← `searchIntelligence` | **Table is empty (V-4)** → always 0 | **latent, arms 2026-12-05** |
+| S-5 | `duplicate` — cluster peer | 197 | `make/model/metro`, `impressions` | Yes / impressions always 0 | **ACTIVE — produced the 31** |
+| S-6 | `lowConversion` — age ≥90d **and** ratio < 0.001 | 198-201 | `clicks`, `leadsGenerated` | **Both always 0** | **unreachable — V-3** |
+| S-7 | `RETIRED` — UNDER_REVIEW, age ≥365d, zero traffic | 216-229 | `traffic365`, `p.impressions`, `p.clicks` | **All always 0** | **latent, arms 2027-06-08** |
+
+### V2-A · Tier C/D/E pages have a 30-day servable lifespan by construction — HIGH
+`MARKET_MAX_AGE_DAYS = 30` (`lifecycle-manager.ts:32`) is checked against `marketDataAsOf`, which
+is written **only** by the generator (`amips-generator.ts:229, 252` from `assembler.ts:337`).
+**Nothing refreshes it.** There is no market-data refresh path that updates an existing page's
+`marketDataAsOf` without a full regeneration. Therefore every Tier C/D/E page becomes `stale` on
+the first lifecycle run ≥30 days after generation and transitions to `REFRESH_REQUIRED` → 404.
+
+This is the most probable explanation for the **208**: pages published 2026-06-08…28 cross the
+30-day mark 2026-07-08…28, and the Tuesday cron would have caught them in late July. No age or
+traffic precondition is involved.
+
+### V2-B · Tier F is permanently stale from birth — HIGH
+A tier-set asymmetry across three files:
+
+| Set | Members | File:line |
+| --- | --- | --- |
+| assembler `METRO_TIERS` | C, D, E | `lib/amips/assembler.ts:21` |
+| quality-gate `METRO_TIERS` | C, D, E | `lib/amips/quality-gate.ts:18` |
+| lifecycle `isTierCPlus` | C, D, E, **F** | `lib/amips/lifecycle-manager.ts:43-45` |
+
+The **Tier F return** (`assembler.ts:236-251`) sets `market: { metro, state, dealerCount }` and
+`vehicleDataAsOf` — but **omits `dealerDataAsOf` and `marketDataAsOf` entirely** (contrast the
+metro-tier return at `:335-337`, which sets all three). The generator then persists
+`dealerDataAsOf: data.dealerDataAsOf ?? null` and `marketDataAsOf: data.marketDataAsOf ?? null`
+(`:228-229, :251-252`) ⇒ **both NULL for every Tier F page**.
+
+`hasStaleData` includes F via `isTierCPlus`, and line 64 is `if (dAge === null || dAge > 90)
+return true`. **`ageDays(null)` returns `null` (line 39) ⇒ stale is `true` on the first
+lifecycle run, immediately after publication, permanently.** Regeneration reproduces the same
+nulls, so a Tier F page can never return to `ACTIVE`.
+
+Compounding it: quality **Gate 5** passes Tier F because it uses the `{C,D,E}` set
+(`quality-gate.ts:18,80,131`) and only checks vehicle freshness. **The gate certifies the page as
+fresh; the lifecycle manager treats it as permanently stale.** A direct contradiction between two
+tier sets that must agree.
+
+### V2-C · Three branches key on structurally-always-zero fields — HIGH
+S-4, S-6 and S-7 read `imp180`, `traffic365`, `p.clicks`, `p.impressions` and `leadsGenerated`.
+`imp180`/`traffic365` come from `searchIntelligence` (`loadTraffic`, lines 79-114), which is
+empty (V-4); `p.clicks`/`p.impressions` are written only by
+`search-intelligence.pipeline.ts:230-233`, which has synced nothing; `leadsGenerated` has no
+writer at all. **Every one of these branches therefore reads "zero traffic" for every page,
+regardless of true traffic**, and each treats zero as *evidence of failure* rather than *absence
+of measurement*.
+
+The consequence is a scheduled mass event, not a gradual one:
+
+| Date | Trigger | Effect |
+| --- | --- | --- |
+| **2026-09-06** | earliest cohort reaches 90d | S-6 age gate opens — **still blocked by `clicks = 0`** |
+| **2026-12-05** | earliest cohort reaches 180d | **S-4 opens: every remaining `ACTIVE` page with `imp180 === 0` → `REFRESH_REQUIRED` → 404.** Because the table is empty, that is *all* of them |
+| **2027-06-08** | earliest cohort reaches 365d | S-7 opens: `UNDER_REVIEW` pages retire en masse on the same always-zero reading |
+
+> **Answering V-2's stated goal directly: fixing only the leads ratio (S-6) would close the one
+> branch that is not currently firing and leave S-2, S-3, S-4, S-5 and S-7 open.** S-6 is the
+> *least* active of the six. Any remediation must treat "no measurement" as distinct from
+> "measured zero" across all of them.
+
+---
+
+# V-3 — The leads-ratio branch
+
+## Full trace
+
+**Schema:** `AmipsPage.leadsGenerated Int @default(0)` (`prisma/schema.prisma:4784`).
+
+**Writers — none.** All five `amipsPage` write sites enumerated in V-1; none sets
+`leadsGenerated`. The only `leadsGenerated:` assignments in the repo
+(`search-intelligence.pipeline.ts:212,223`) write **`searchIntelligence.leadsGenerated`**, and
+the value written is `page.leadsGenerated` (line 198) — i.e. it copies the always-zero field into
+a second table.
+
+**Readers:** `lifecycle-manager.ts:196`; `executive-intelligence.ts:375,380,385,389-390,544,555`;
+`content-queue.seed.ts:428`; `search-intelligence.pipeline.ts:198`.
+
+## The exact lifecycle sequence
+
+| Step | Detail | Line |
+| --- | --- | --- |
+| 1. Load | `where: { lifecycleStatus: { in: ["ACTIVE","UNDER_REVIEW"] } }`, selects `clicks`, `leadsGenerated`, `publishedAt` | 124-142 |
+| 2. Traffic | `loadTraffic()` aggregates `searchIntelligence` into `imp180` / `traffic365` | 145, 79-114 |
+| 3. Branch | `if (p.lifecycleStatus === "ACTIVE")` | 177 |
+| 4. **Staleness first** | `if (stale \|\| noImpressions) { … continue; }` — **preempts the ratio branch entirely** | 179-192 |
+| 5. Ratio | `const conversion = p.clicks > 0 ? p.leadsGenerated / p.clicks : null` | 196 |
+| 6. Threshold | `pubAge >= 90 && conversion !== null && conversion < 0.001` | 198-201 |
+| 7. Transition | `data: { lifecycleStatus: "UNDER_REVIEW" }` | 204-207 |
+| 8. HTTP | `where {slug, lifecycleStatus:"ACTIVE"}` → `notFound()` = **404** | route `:38, :91` |
+| 9. Sitemaps | excluded from tier and intelligence sitemaps | `sitemap.ts:51`; `sitemap-intelligence.xml/route.ts:33` |
+| 10. Schedule | `vercel.json` `0 4 * * 2` → `/api/cron/amips-lifecycle` → `authorizeCronRequest` → `withCronRun("amips-lifecycle", runLifecycleReview)` | `route.ts:20` |
+
+## Verdict — **CONFIRMED UNREACHABLE**
+
+With `clicks = 0` across all 794 rows, line 196 evaluates the false arm and yields `null`; line
+200 requires `conversion !== null`; therefore `lowConversion` is `false` for every page.
+
+**The branch is closed by the click gate, not the age gate.** It would remain unreachable even if
+every page were past 90 days. Two independent conditions must both open:
+
+| Gate | Opens | Currently |
+| --- | --- | --- |
+| Age ≥ 90d | **2026-09-06** (earliest cohort, 2026-06-08 + 90d); full corpus by **2026-09-26** | 6 days away |
+| `clicks > 0` | only when `search-intelligence.pipeline.ts:230-233` writes a nonzero click count | closed — `synced: 0` |
+
+> **The defect arms itself the moment the GSC sync starts returning rows.** Repairing V-4 without
+> first repairing V-3 would activate S-6 on a corpus that is by then all past 90 days — turning a
+> dormant defect into an active one on the first successful sync after 2026-09-26.
+
+**Correction to the prior audit.** `01`/C-7 and `04`/T-1 stated this branch was *currently*
+de-indexing pages weekly. **That was wrong.** The mechanism is real and the code is unchanged,
+but the branch has never fired and cannot fire in the present state. Corrections applied; see
+`09` Part D.
+
+---
+
+# V-4 — Why `synced: 0`
+
+## What the logged output already proves
+
+The cron returns `{success:false, error:"No GSC_SITE_URL / NEXT_PUBLIC_APP_URL configured"}`
+**outside** `withCronRun` (`route.ts:31-36`) — that path writes **no** `cron_job_logs` row. The
+owner's logs show two rows whose payload is `{"synced":0,…,"reprioritized":{…}}`, which is the
+shape returned from **inside** `withCronRun` at `route.ts:46-50`.
+
+> **∴ `GSC_SITE_URL` or `NEXT_PUBLIC_APP_URL` is set, and execution reached
+> `syncSearchIntelligence` and then `reprioritizeContentQueue`.** The missing-site-URL
+> explanation is ruled out.
+
+`reprioritized.mode === "launch"` means `hasMaturedSearchIntelligence()` returned `false`
+(`content-queue.seed.ts:399-403`), i.e. `searchIntelligence` is **empty or its earliest row is
+<60 days old** (`:376-386`). Combined with two consecutive `synced: 0` runs, the table is empty.
+
+## The six paths that all yield `synced: 0`
+
+| # | Path | Line | Log emitted |
+| --- | --- | --- | --- |
+| P-1 | `GOOGLE_SEARCH_CONSOLE_KEY` unset | 49-51 | `warn` "…not set; skipping sync" |
+| P-2 | key malformed / missing fields | 55-58, 60-63 | `warn` |
+| P-3 | token exchange non-OK or throw | 90-93, 96-99 | `warn` with status |
+| P-4 | Search Analytics query non-OK (403/401/429) | 158-161 | `warn` with status |
+| P-5 | query fetch throws / times out | 164-167 | `warn` |
+| P-6 | rows returned but **no `/intelligence/*` matches** | 178-181 | `info` "no /intelligence/* rows returned" |
+| P-7 | matches found but no `amipsPage` row | 192 | **silent `continue`** |
+
+**All seven produce an identical cron payload.** Code alone cannot distinguish them — this is the
+silent-degradation defect recorded at `02`/§1.7.
+
+## Row-matching audit (the hypothesis-(a) check)
+
+| Risk | Code | Verdict |
+| --- | --- | --- |
+| Protocol / host mismatch | filter is `url.includes("/intelligence/")` (`:172`), a substring test — protocol, host and port are irrelevant | **not a defect** |
+| Trailing slash | `slugFromUrl` splits on `[?#/]` (`:112`) — `…/intelligence/foo/` → `"foo"` | **handled** |
+| Query string / fragment | same split handles `?` and `#` | **handled** |
+| Percent-encoding | `decodeURIComponent` (`:113`) | **handled** |
+| Slug case | slugs are lowercased at generation (`amips-generator.ts:34-38`) and the route is `/intelligence/[slug]`, so crawled URLs are lowercase | **not a defect** |
+| Tier case | `contentTier` is `select`ed and copied (`:185,206,217`), never used as a join key | **irrelevant to the join** |
+| Join | `where: { slug: { in: candidates.map(c => c.slug) } }` (`:183-184`), exact match | **sound** |
+
+> **No trailing-slash, protocol, host, or tier-case defect exists. The matching logic is correct.**
+
+## Which explanation the code supports
+
+**Explanation (b) — GSC genuinely returns no rows for these URLs** — is strongly supported, on
+evidence that is itself code-plus-verified-state and does not require production access:
+
+1. **609 of 794 pages (76.7%) currently return HTTP 404** (V-2). Google cannot report impressions
+   for pages that 404, and would drop previously-indexed ones.
+2. **The 185 servable pages are orphaned** — no public inbound link anywhere in
+   `app/(public)/**` or `components/**` (`04`/T-7), and the only `/intelligence` link in the repo
+   is an admin button pointing at a non-existent index route.
+3. `impressions = 0` **and** `clicks = 0` for all 794 — consistent with never having been indexed
+   rather than with a write-path defect, which would more likely produce partial or stale data.
+4. `mode: "launch"` independently confirms `searchIntelligence` is empty.
+
+**But (a) cannot be excluded from code**, because P-1/P-2 (credential absent or malformed) are
+observationally identical to (b) in the cron payload. **This is the honest limit of code-only
+analysis.**
+
+## Owner-side evidence that would settle it
+
+| # | Check | Distinguishes |
+| --- | --- | --- |
+| V4-a | GSC → Performance → filter *Page contains* `/intelligence/`, last 3 months | Zero rows ⇒ **(b)** confirmed. Non-zero ⇒ **(a)** |
+| V4-b | Vercel logs for `/api/cron/amips-search-sync` on 2026-08-24 and 2026-08-31; look for `[amips-p3-search]` warn lines | Identifies P-1…P-5 by message; **absence of any warn line plus the `info` "no /intelligence/* rows returned" ⇒ P-6 ⇒ (b)** |
+| V4-c | Confirm `GOOGLE_SEARCH_CONSOLE_KEY` present in Vercel production | Rules out P-1 directly |
+| V4-d | GSC → Pages → inspect any `/intelligence/<slug>` URL | Shows crawl/index status and whether Google sees 404s |
+
+**V4-b is decisive and cheapest** — the log line alone separates every path.
+
+---
+
+# V-5 — Confirming three audit claims
+
+### 1. GSC limited to `/intelligence/*` by the filter at `pipeline.ts:172` — **VERIFIED**
+`const INTELLIGENCE_PATH = "/intelligence/"` (`:30`); filter
+`if (!url || !url.includes(INTELLIGENCE_PATH)) return [];` (`:172`) inside the `rows.flatMap`
+(`:170-176`).
+**Complete call path:** `vercel.json` cron `0 5 * * 1` → `app/api/cron/amips-search-sync/route.ts:21`
+`GET` → `:22` `authorizeCronRequest` → `:38` `withCronRun("amips-search-sync", …)` → `:39`
+`syncSearchIntelligence(siteUrl, weekOf)` → `pipeline.ts:141-157` query (no `dimensionFilterGroups`
+— **the API returns all pages; the discard is client-side**) → `:170-176` filter.
+
+### 2. Page-level dimensions only; query-level analysis impossible — **VERIFIED**
+Request body: `dimensions: ["page"]` (`:152`) — the sole `dimensions` occurrence in the file.
+`GscRow` (`:37-43`) types only `keys/clicks/impressions/ctr/position`.
+`SearchIntelligence` (`prisma/schema.prisma:4673-4695`) has `url` and **no `query` or `keyword`
+column**; the unique key is `@@unique([url, weekOf])` (`:4689`), which makes one row per page per
+week and **cannot represent per-query rows without a schema change**.
+Striking distance, low-CTR-vs-expected, decline-by-query and cannibalization all require per-query
+grain. **Impossible against current data — confirmed.**
+
+### 3. GA4 events emitted, no loader or configuration path — **VERIFIED**
+**Emitters (3):** `lib/analytics/events.ts:20`, `lib/analytics/funnel-events.ts:58`,
+`components/tools/DealerFeeCalculator.tsx:47` (`w.gtag?.(...)`, declared `:44`).
+**Case-sensitive searches across `app/`, `components/`, `lib/`, `public/`, `package.json`,
+`next.config.mjs`, `env.d.ts`:**
+
+| Searched | Result |
+| --- | --- |
+| `gtag/js`, `googletagmanager`, `@next/third-parties`, `GoogleAnalytics` | **NONE** |
+| `'G-XXXXXXXX'` measurement-id literal | **NONE** |
+| `NEXT_PUBLIC_GA`, `GA_MEASUREMENT`, `GA_TRACKING`, `ANALYTICS_ID` | **NONE** |
+| `next/script` importers | **exactly 2**: `components/seo/Clarity.tsx:3`, `components/analytics/TikTokPixel.tsx:3` |
+
+`window.gtag` is therefore permanently `undefined`; every call optional-chains to a no-op. **No
+env var could enable it — there is no loader to configure.** Confirmed: a code gap, not a
+configuration gap.
+
+---
+
+# Remediation plan (smallest viable)
+
+**Not implemented — for owner approval.**
+
+## Should `amips-lifecycle` be paused?
+
+**Yes — but not for the reason the original audit gave.** The leads-ratio branch is dormant
+(V-3). The warranted reasons are:
+
+| Reason | Urgency |
+| --- | --- |
+| **S-4 arms 2026-12-05** and reads an empty table — on that Tuesday every remaining `ACTIVE` page is flagged `REFRESH_REQUIRED` → 404 | highest — a scheduled mass 404 event |
+| **S-2/S-3 (V2-A, V2-B)** continue firing: Tier C/D/E expire 30 days after generation with no refresh path; Tier F is stale from birth | active now |
+| **S-5** continues demoting duplicates using an inert `impressions` sort key | active now |
+| **S-6 arms** once V-4 is fixed and the corpus is past 90 days | conditional |
+
+Pausing is a one-line `vercel.json` removal, fully reversible, and stops all four. **It changes
+no data and un-404s nothing** — recovery is separate. Given only 185 pages remain `ACTIVE` and
+every one is on a countdown driven by fields that cannot be populated, pausing until the
+correction ships is the low-risk choice.
+
+## Minimal code correction — four changes, one principle
+
+**Principle: distinguish *"not measured"* from *"measured zero."*** Every defect above is one
+error expressed five ways.
+
+| # | Change | File | Closes |
+| --- | --- | --- | --- |
+| C-1 | Gate `lowConversion` on the conversion metric being *populated*, not merely non-null — require evidence that leads are being recorded before treating a ratio as meaningful | `lifecycle-manager.ts:196-201` | S-6 |
+| C-2 | Gate `noImpressions` and the `RETIRED` traffic test on `searchIntelligence` having data for the window at all; absent data ⇒ skip, never "zero" | `lifecycle-manager.ts:181-183, 216-229`, `loadTraffic:79-114` | S-4, S-7 |
+| C-3 | Align the tier sets: either drop `"F"` from `isTierCPlus` **or** populate `dealerDataAsOf`/`marketDataAsOf` on the Tier F return. The three sets must agree | `lifecycle-manager.ts:43-45` **or** `assembler.ts:236-251` | S-2, V2-B |
+| C-4 | Give `marketDataAsOf` a refresh path, or make the 30-day ceiling a *refresh signal* that does not un-serve the page (`REFRESH_REQUIRED` should not imply 404) | `lifecycle-manager.ts:32,188` + serving gate | S-3, V2-A |
+
+**C-4 is the highest-leverage structural change:** `REFRESH_REQUIRED` means *"this page's data is
+aging"* — it should not remove the page from the internet. Separating "needs refresh" from "not
+servable" would have prevented the 208 outright. Consider serving `REFRESH_REQUIRED` pages
+normally while surfacing them in the admin queue.
+
+## Evaluating the 31 for restoration
+
+They are duplicate demotions where **canonical selection was effectively arbitrary** — with
+`impressions = 0` the primary sort key was inert and selection fell through to earliest
+`publishedAt` (`lifecycle-manager.ts:161-167`). There is no traffic evidence to justify which
+member of each cluster deserves to be canonical.
+
+**Recommended, in order:**
+1. **Do not bulk-restore.** Group the 31 by `make|model|metro` and inspect each cluster.
+2. **Restore where no live duplicate exists** — if every other member of a cluster is now
+   non-`ACTIVE`, the demotion serves no purpose and the page can return to `ACTIVE`.
+3. **Where a live `ACTIVE` peer exists**, leave the demotion and revisit once real GSC data can
+   inform canonical choice — or resolve properly with a canonical tag rather than a 404.
+4. **Note the same question applies to the 208**, which are a larger population and were removed
+   by a mechanism (V2-A) that will simply re-fire unless C-4 ships first. **Restoring them before
+   C-4 would be undone at the next Tuesday run.**
+
+## Required tests
+| Test | Asserts |
+| --- | --- |
+| `hasStaleData` with Tier F + null `dealerDataAsOf`/`marketDataAsOf` | does **not** return `true` after C-3 |
+| `runLifecycleReview` with empty `searchIntelligence` | flags **nothing** via S-4/S-7 (currently would flag everything past 180d) |
+| `runLifecycleReview` with `clicks=0, leadsGenerated=0`, age > 90d | does **not** flag `UNDER_REVIEW` — the V-3 regression test |
+| Duplicate clustering with all-zero `impressions` | canonical selection is deterministic and documented |
+| Assembler Tier F return | includes both as-of dates (if C-3 is solved at the assembler) |
+| Tier-set parity | `assembler.METRO_TIERS`, `quality-gate.METRO_TIERS`, `lifecycle.isTierCPlus` agree — a guard test so they cannot drift again |
+
+## Production data repair
+**Required, but only after the code correction ships.** Repairing first guarantees re-demotion at
+the next Tuesday run. Sequence: pause cron → ship C-1…C-4 → verify against a snapshot → repair
+`lifecycle_status` for pages demoted solely by a defective branch → resume cron.
+`quality_gate_status` is untouched by all three lifecycle writers, so **`quality_gate_status =
+'PUBLISHED'` is a reliable marker of a page the generator certified**, which makes the repair
+population identifiable without guesswork.
+
+## Rollback
+| Action | Rollback |
+| --- | --- |
+| Pause cron | re-add the `vercel.json` entry |
+| C-1…C-4 | ordinary revert; transitions are pure status writes, no deletes (`lifecycle-manager.ts:117-118`) |
+| Data repair | **capture `(id, lifecycle_status)` for every touched row before writing** — there is no history table and the lifecycle manager writes no audit record, so this snapshot is the only rollback path |
+
+**Recommended follow-up (not in this remediation):** the lifecycle manager should write an audit
+record per transition. Its absence is why V-1's responsible *run* is unidentifiable, and it will
+recur on the next incident.

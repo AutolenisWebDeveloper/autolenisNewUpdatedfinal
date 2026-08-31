@@ -10,9 +10,20 @@ end and is **not estimated**.
 
 ## Findings
 
-### T-1 · Performing AMIPS pages are automatically 404'd — CRITICAL
-Full analysis in `01-trust-audit.md`, C-7. Restated here because it is a technical-SEO defect,
-not only a trust defect.
+### T-1 · Performing AMIPS pages would be automatically 404'd — HIGH (LATENT — corrected)
+
+> **CORRECTED 2026-08-31 — see `10-production-reconciliation.md`, V-3.** Originally rated
+> CRITICAL and described as currently de-indexing pages. **Production has `clicks = 0` for all
+> 794 pages, so this branch has never fired.** It is latent, not active. The mechanism stands.
+>
+> **The active de-indexing paths are different and worse** — `10`, V-2: 609 of 794 pages (76.7%)
+> return HTTP 404 today via the staleness branches, including two new HIGH findings (Tier C/D/E
+> pages expire 30 days after generation with no refresh path; Tier F is stale from birth because
+> `isTierCPlus` includes `"F"` while the assembler never populates F's as-of dates). A third
+> branch (`noImpressions`, 180d) arms **2026-12-05** and reads an empty table, which would flag
+> every remaining `ACTIVE` page at once.
+
+Full analysis in `01-trust-audit.md`, C-7 and `10-production-reconciliation.md`, V-2/V-3.
 
 - **Evidence:** `lib/amips/lifecycle-manager.ts:196-201` divides a never-written
   `leadsGenerated` (always `0`) by `clicks`; `0 < LOW_CONVERSION_THRESHOLD` (0.001, line 36) is
@@ -20,11 +31,13 @@ not only a trust defect.
   `lifecycleStatus:"UNDER_REVIEW"` (line 204). That status yields HTTP 404
   (`app/(public)/intelligence/[slug]/page.tsx:38,91`) and removal from both AMIPS sitemaps
   (`lib/amips/sitemap.ts:51`; `app/sitemap-intelligence.xml/route.ts:33`).
-- **Effect:** any `/intelligence/*` page ≥90 days old, with non-stale data, **that recorded at
-  least one click in the most recently synced GSC week**, is de-indexed. (`amipsPage.clicks`
-  holds the latest synced week's total, not a cumulative count —
-  `search-intelligence.pipeline.ts:230-233`.) Pages with zero clicks that week are untouched.
-  Ranking equity, link equity and crawl history are destroyed for the best pages first.
+- **Effect once armed:** any `/intelligence/*` page ≥90 days old, with non-stale data, **that
+  recorded at least one click in the most recently synced GSC week**, is de-indexed.
+  (`amipsPage.clicks` holds the latest synced week's total, not a cumulative count —
+  `search-intelligence.pipeline.ts:230-233`.) Pages with zero clicks that week are untouched, so
+  ranking equity would be destroyed for the best pages first.
+- **Current status: dormant.** `clicks = 0` corpus-wide closes it. Both gates must open — age
+  (2026-09-06 earliest) **and** `clicks > 0`, which requires the GSC sync to start writing.
 - **Remediation:** treat an unwritten conversion metric as *unknown*, not *zero* — gate
   `lowConversion` on `leadsGenerated` actually being populated (e.g. require
   `p.leadsGenerated > 0 || <attribution known>` before the comparison), and separately close the
