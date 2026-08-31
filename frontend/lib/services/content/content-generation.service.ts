@@ -244,11 +244,9 @@ export const CONTENT_SEED_RETRY_QUOTA_FRACTION = 0.2;
  * `enqueuedRetry` in the cron-monitor run record is how a growing failure
  * backlog shows up.
  *
- * Fairness within the retry pool is deliberately NOT solved here: retries are
- * taken in keyword order, so with more failures than the quota the same slugs are
- * retried each run. That is bounded waste (<=20% of the cap), not starvation —
- * ordering the pool by least-recently-attempted would need per-slug attempt
- * timestamps and is a separate change.
+ * The retry pool is ordered least-recently-attempted first (per-slug max item
+ * `updatedAt`), so the quota rotates through it instead of burning on the same
+ * few slugs every run, and no previously-attempted slug is skipped forever.
  *
  * Concurrency: two overlapping seed runs could both read "not in flight" and
  * enqueue the same slugs, costing a duplicate generation each. The window is the
@@ -296,21 +294,30 @@ export async function seedScheduledGeneration(
   // Rules 3 + 4 in ONE probe: every job item for a candidate slug, whatever its
   // status. An in-flight-only filter would hide exactly the settled rows (FAILED,
   // CANCELED) the never-attempted/previously-attempted partition depends on.
-  // content_generation_job_items has no index on target_slug, so this is a scan —
-  // fine for a once-a-day run against a table of this size; if it ever grows an
-  // order of magnitude, an index on target_slug is the fix (needs a migration).
+  // content_generation_job_items has no index on target_slug, so this is a scan.
+  // Deliberately left that way: the table grows ~25 rows/day, so a once-a-day scan
+  // stays trivial and an index does not justify a migration.
+  //
+  // `updatedAt` comes back too — it is what orders the retry pool (below). Newest
+  // first, so the row kept per (slug, status) by `distinct` is that pair's most
+  // recent one and the per-slug max is the true last-attempt time.
   const items = await prisma.contentGenerationJobItem.findMany({
     where: { targetSlug: { in: candidateSlugs } },
-    select: { targetSlug: true, status: true },
+    select: { targetSlug: true, status: true, updatedAt: true },
+    orderBy: { updatedAt: "desc" },
     distinct: ["targetSlug", "status"],
   });
   const inFlightSet: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
   const queued = new Set<string>();
   const attempted = new Set<string>();
+  const lastAttemptAt = new Map<string, number>();
   for (const item of items) {
     if (!item.targetSlug) continue;
     attempted.add(item.targetSlug);
     if (inFlightSet.has(item.status)) queued.add(item.targetSlug);
+    const at = item.updatedAt.getTime();
+    const seen = lastAttemptAt.get(item.targetSlug);
+    if (seen === undefined || at > seen) lastAttemptAt.set(item.targetSlug, at);
   }
 
   let skippedExisting = 0;
@@ -329,6 +336,17 @@ export async function seedScheduledGeneration(
     }
     (attempted.has(slug) ? previouslyAttempted : neverAttempted).push(slug);
   }
+
+  // Rotate the retry pool: least-recently-attempted first. Without this the pool is
+  // walked in keyword order, so the same `retryQuota` slugs are retried every run —
+  // ~5 Groq calls a day forever for zero output — while a transient failure deeper
+  // in the list is never retried at all, turning a recoverable failure permanent.
+  // Ordering by last attempt means a slug that just failed goes to the BACK, so
+  // every previously-attempted slug comes up in turn. Sort is stable, so slugs
+  // sharing a timestamp keep keyword order.
+  previouslyAttempted.sort(
+    (a, b) => (lastAttemptAt.get(a) ?? 0) - (lastAttemptAt.get(b) ?? 0),
+  );
 
   // Never-attempted slugs get the batch minus the retry quota, so forward
   // progress is guaranteed however long the failure backlog grows. Each pool then

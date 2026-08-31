@@ -29,12 +29,23 @@ let articleRows: Array<{ slug: string }> = [];
 // appends to it exactly like the nested write does, so a second seed run in the
 // same test observes the first run's QUEUED items — the real "no drain in
 // between" scenario.
-let itemRows: Array<{ targetSlug: string | null; status: string; payloadJson: string }> = [];
+let itemRows: Array<{
+  targetSlug: string | null;
+  status: string;
+  payloadJson: string;
+  updatedAt: Date;
+}> = [];
+
+// Fixed clock so "least recently attempted" is deterministic in tests.
+const T0 = new Date("2026-01-01T00:00:00Z").getTime();
+const at = (minutes: number) => new Date(T0 + minutes * 60_000);
+let clock = 10_000; // minutes; advanced when a run writes new items
 
 const calls = {
   jobCreate: [] as Array<Record<string, unknown>>,
   articleWhere: [] as Array<Record<string, unknown>>,
   itemWhere: [] as Array<Record<string, unknown>>,
+  itemOrderBy: [] as Array<unknown>,
   events: [] as Array<{ eventType: string; actor: string }>,
 };
 
@@ -65,12 +76,23 @@ mock.module("@/lib/prisma", {
         },
       },
       contentGenerationJobItem: {
-        findMany: async ({ where }: { where: { targetSlug?: { in?: string[] } } }) => {
+        findMany: async ({
+          where,
+          orderBy,
+        }: {
+          where: { targetSlug?: { in?: string[] } };
+          orderBy?: { updatedAt?: "asc" | "desc" };
+        }) => {
           calls.itemWhere.push(where);
+          calls.itemOrderBy.push(orderBy);
           const wanted = new Set(where.targetSlug?.in ?? []);
-          return itemRows
+          const rows = itemRows
             .filter((i) => i.targetSlug !== null && wanted.has(i.targetSlug))
-            .map((i) => ({ targetSlug: i.targetSlug, status: i.status }));
+            .map((i) => ({ targetSlug: i.targetSlug, status: i.status, updatedAt: i.updatedAt }));
+          if (orderBy?.updatedAt === "desc") {
+            rows.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+          }
+          return rows;
         },
       },
       contentGenerationJob: {
@@ -78,11 +100,13 @@ mock.module("@/lib/prisma", {
           calls.jobCreate.push(data);
           const created = (data.items as { create: Array<Record<string, unknown>> }).create;
           // Mirror the nested write: the new items ARE in-flight from now on.
+          clock += 1440; // a day between runs
           for (const item of created) {
             itemRows.push({
               targetSlug: item.targetSlug as string,
               status: item.status as string,
               payloadJson: item.payloadJson as string,
+              updatedAt: at(clock),
             });
           }
           return { id: `job-${calls.jobCreate.length}`, items: created };
@@ -109,6 +133,8 @@ beforeEach(() => {
   calls.jobCreate = [];
   calls.articleWhere = [];
   calls.itemWhere = [];
+  calls.itemOrderBy = [];
+  clock = 10_000;
   calls.events = [];
 });
 
@@ -163,9 +189,9 @@ test("skips slugs that already have a ContentArticle row", async () => {
 
 test("skips slugs with an in-flight job item (QUEUED / PROCESSING / PAUSED)", async () => {
   itemRows = [
-    { targetSlug: "kw-1", status: "QUEUED", payloadJson: "{}" },
-    { targetSlug: "kw-2", status: "PROCESSING", payloadJson: "{}" },
-    { targetSlug: "kw-3", status: "PAUSED", payloadJson: "{}" },
+    { targetSlug: "kw-1", status: "QUEUED", payloadJson: "{}", updatedAt: at(0) },
+    { targetSlug: "kw-2", status: "PROCESSING", payloadJson: "{}", updatedAt: at(0) },
+    { targetSlug: "kw-3", status: "PAUSED", payloadJson: "{}", updatedAt: at(0) },
   ];
   const { seedScheduledGeneration } = await load();
   const result = await seedScheduledGeneration(25);
@@ -197,9 +223,9 @@ test("a settled item (SUCCEEDED / FAILED / CANCELED) does NOT block a slug", asy
   // actually stops it; FAILED/CANCELED slugs are genuinely un-generated and are
   // meant to be re-attempted on a later run.
   itemRows = [
-    { targetSlug: "kw-1", status: "SUCCEEDED", payloadJson: "{}" },
-    { targetSlug: "kw-2", status: "FAILED", payloadJson: "{}" },
-    { targetSlug: "kw-3", status: "CANCELED", payloadJson: "{}" },
+    { targetSlug: "kw-1", status: "SUCCEEDED", payloadJson: "{}", updatedAt: at(0) },
+    { targetSlug: "kw-2", status: "FAILED", payloadJson: "{}", updatedAt: at(0) },
+    { targetSlug: "kw-3", status: "CANCELED", payloadJson: "{}", updatedAt: at(0) },
   ];
   const { seedScheduledGeneration } = await load();
   const result = await seedScheduledGeneration(25);
@@ -210,8 +236,8 @@ test("a settled item (SUCCEEDED / FAILED / CANCELED) does NOT block a slug", asy
 test("existing-article and in-flight skips are counted without double-counting", async () => {
   articleRows = [{ slug: "kw-1" }];
   itemRows = [
-    { targetSlug: "kw-1", status: "QUEUED", payloadJson: "{}" }, // both rules match
-    { targetSlug: "kw-2", status: "QUEUED", payloadJson: "{}" },
+    { targetSlug: "kw-1", status: "QUEUED", payloadJson: "{}", updatedAt: at(0) }, // both rules match
+    { targetSlug: "kw-2", status: "QUEUED", payloadJson: "{}", updatedAt: at(0) },
   ];
   const { seedScheduledGeneration } = await load();
   const result = await seedScheduledGeneration(25);
@@ -306,7 +332,7 @@ test("re-running with no drain in between enqueues nothing the second time", asy
 
 test("returns the full diagnosable shape for the cron-monitor run record", async () => {
   articleRows = [{ slug: "kw-1" }];
-  itemRows = [{ targetSlug: "kw-2", status: "QUEUED", payloadJson: "{}" }];
+  itemRows = [{ targetSlug: "kw-2", status: "QUEUED", payloadJson: "{}", updatedAt: at(0) }];
   const { seedScheduledGeneration } = await load();
   const result = await seedScheduledGeneration(25);
   assert.deepEqual(result, {
@@ -356,6 +382,7 @@ test("REGRESSION: 25 FAILED head slugs + 100 new, cap 25 → the run still advan
     targetSlug: k.slug,
     status: "FAILED",
     payloadJson: "{}",
+    updatedAt: at(0),
   }));
 
   const { seedScheduledGeneration } = await load();
@@ -390,6 +417,7 @@ test("REGRESSION: consecutive runs keep advancing past a permanent-failure backl
     targetSlug: k.slug,
     status: "FAILED",
     payloadJson: "{}",
+    updatedAt: at(0),
   }));
   const failedHead = new Set(keywords.slice(0, 25).map((k) => k.slug));
 
@@ -414,7 +442,12 @@ test("REGRESSION: consecutive runs keep advancing past a permanent-failure backl
 
 test("all slugs attempted-and-failed → retries fill the whole batch", async () => {
   keywords = slugs(60);
-  itemRows = keywords.map((k) => ({ targetSlug: k.slug, status: "FAILED", payloadJson: "{}" }));
+  itemRows = keywords.map((k, i) => ({
+    targetSlug: k.slug,
+    status: "FAILED",
+    payloadJson: "{}",
+    updatedAt: at(i),
+  }));
   const { seedScheduledGeneration } = await load();
   const result = await seedScheduledGeneration(25);
   assert.equal(result.enqueued, 25, "retry still works when there is nothing new");
@@ -429,6 +462,7 @@ test("the retry quota is respected when both pools are non-empty", async () => {
     targetSlug: k.slug,
     status: "FAILED",
     payloadJson: "{}",
+    updatedAt: at(0),
   }));
   const { seedScheduledGeneration, CONTENT_SEED_RETRY_QUOTA_FRACTION } = await load();
   const result = await seedScheduledGeneration(25);
@@ -451,11 +485,155 @@ test("a CANCELED or SUCCEEDED-without-article slug is a retry, not new work", as
   // mid-flight has consumed an attempt and must not compete as never-attempted.
   keywords = slugs(30);
   itemRows = [
-    { targetSlug: "kw-1", status: "CANCELED", payloadJson: "{}" },
-    { targetSlug: "kw-2", status: "FAILED", payloadJson: "{}" },
+    { targetSlug: "kw-1", status: "CANCELED", payloadJson: "{}", updatedAt: at(0) },
+    { targetSlug: "kw-2", status: "FAILED", payloadJson: "{}", updatedAt: at(0) },
   ];
   const { seedScheduledGeneration } = await load();
   const result = await seedScheduledGeneration(25);
   assert.equal(result.enqueuedRetry, 2, "both previously-attempted slugs land in the retry pool");
   assert.equal(result.enqueuedNew, 23);
+});
+
+// ── Retry rotation: the retry quota must not burn on the same slugs forever ───
+//
+// Without ordering, the retry pool is walked in keyword order, so the same
+// `quota` slugs are retried every single run — ~5 Groq calls a day forever for
+// zero output — while a transient failure deeper in the list is NEVER retried,
+// which turns a recoverable failure into a permanent one. Ordering the pool by
+// each slug's most recent attempt (ascending) rotates it.
+
+test("the item probe orders by updatedAt desc so the newest attempt per slug wins", async () => {
+  const { seedScheduledGeneration } = await load();
+  await seedScheduledGeneration(25);
+  assert.deepEqual(calls.itemOrderBy[0], { updatedAt: "desc" });
+});
+
+test("the retry pool is ordered least-recently-attempted first", async () => {
+  keywords = slugs(10);
+  // Keyword order is kw-1..kw-10; attempt order is the REVERSE, so a seeder that
+  // ignores timestamps would pick kw-1..kw-3 and one that rotates picks kw-10..kw-8.
+  itemRows = keywords.map((k, i) => ({
+    targetSlug: k.slug,
+    status: "FAILED",
+    payloadJson: "{}",
+    updatedAt: at(100 - i * 5), // kw-1 newest, kw-10 oldest
+  }));
+  const { seedScheduledGeneration } = await load();
+  const result = await seedScheduledGeneration(3);
+  assert.equal(result.enqueuedRetry, 3);
+  const created = (calls.jobCreate[0]!.items as { create: Array<{ targetSlug: string }> }).create;
+  assert.deepEqual(
+    created.map((i) => i.targetSlug),
+    ["kw-10", "kw-9", "kw-8"],
+    "oldest attempts first, not keyword order",
+  );
+});
+
+test("REGRESSION: two consecutive runs retry DISJOINT sets (20 attempted, quota 5)", async () => {
+  // A pool of never-attempted slugs must exist, or retries expand into the unused
+  // new-slug slots and the quota never binds.
+  keywords = slugs(120);
+  itemRows = keywords.slice(0, 20).map((k, i) => ({
+    targetSlug: k.slug,
+    status: "FAILED",
+    payloadJson: "{}",
+    updatedAt: at(i), // kw-1 oldest … kw-20 newest
+  }));
+
+  const { seedScheduledGeneration } = await load();
+
+  const first = await seedScheduledGeneration(25);
+  const second = await seedScheduledGeneration(25);
+
+  // `slugs` is [...newSlugs, ...retrySlugs], so the retries are the tail.
+  const retriesOf = (n: number, count: number) =>
+    (calls.jobCreate[n]!.items as { create: Array<{ targetSlug: string }> }).create
+      .map((i) => i.targetSlug)
+      .slice(-count);
+
+  assert.equal(first.enqueuedRetry, 5);
+  assert.equal(second.enqueuedRetry, 5);
+  const a = retriesOf(0, first.enqueuedRetry);
+  const b = retriesOf(1, second.enqueuedRetry);
+  assert.deepEqual(
+    a.filter((s) => b.includes(s)),
+    [],
+    "the second run must retry a different set of slugs",
+  );
+});
+
+test("REGRESSION: rotation holds even after the drain settles the first run's retries", async () => {
+  // The hard case. Without the in-flight skip masking it, a keyword-ordered pool
+  // re-picks the SAME slugs: run 1's retries come back FAILED (not in-flight), so
+  // only their fresher updatedAt can push them to the back of the queue.
+  keywords = slugs(120);
+  itemRows = keywords.slice(0, 20).map((k, i) => ({
+    targetSlug: k.slug,
+    status: "FAILED",
+    payloadJson: "{}",
+    updatedAt: at(i),
+  }));
+
+  const { seedScheduledGeneration } = await load();
+  const failedPool = new Set(keywords.slice(0, 20).map((k) => k.slug));
+
+  const first = await seedScheduledGeneration(25);
+  const firstRetries = (calls.jobCreate[0]!.items as { create: Array<{ targetSlug: string }> })
+    .create.map((i) => i.targetSlug)
+    .filter((s) => failedPool.has(s));
+
+  // Simulate the drain: run 1's retried items fail AGAIN, stamped at that moment.
+  clock += 60;
+  for (const row of itemRows) {
+    if (row.status === "QUEUED" && firstRetries.includes(row.targetSlug!)) {
+      row.status = "FAILED";
+      row.updatedAt = at(clock);
+    }
+  }
+
+  const second = await seedScheduledGeneration(25);
+  const secondRetries = (calls.jobCreate[1]!.items as { create: Array<{ targetSlug: string }> })
+    .create.map((i) => i.targetSlug)
+    .filter((s) => failedPool.has(s));
+
+  assert.equal(first.enqueuedRetry, 5);
+  assert.equal(second.enqueuedRetry, 5);
+  assert.deepEqual(
+    firstRetries.filter((s) => secondRetries.includes(s)),
+    [],
+    "a re-failed slug goes to the BACK of the retry queue, not the front",
+  );
+});
+
+test("every previously-attempted slug is eventually retried (no permanent skip)", async () => {
+  // 20 failed slugs, quota 5 → four runs must cover all 20 exactly once.
+  keywords = slugs(120);
+  itemRows = keywords.slice(0, 20).map((k, i) => ({
+    targetSlug: k.slug,
+    status: "FAILED",
+    payloadJson: "{}",
+    updatedAt: at(i),
+  }));
+  const { seedScheduledGeneration } = await load();
+  const failedPool = new Set(keywords.slice(0, 20).map((k) => k.slug));
+
+  const seen: string[] = [];
+  for (let run = 0; run < 4; run++) {
+    await seedScheduledGeneration(25);
+    const retries = (calls.jobCreate[run]!.items as { create: Array<{ targetSlug: string }> })
+      .create.map((i) => i.targetSlug)
+      .filter((s) => failedPool.has(s));
+    seen.push(...retries);
+    // Drain: this run's retries fail again with a fresh timestamp.
+    clock += 60;
+    for (const row of itemRows) {
+      if (row.status === "QUEUED" && retries.includes(row.targetSlug!)) {
+        row.status = "FAILED";
+        row.updatedAt = at(clock);
+      }
+    }
+  }
+
+  assert.equal(seen.length, 20, "four runs x quota 5");
+  assert.equal(new Set(seen).size, 20, "every failed slug retried exactly once — none starved");
 });
