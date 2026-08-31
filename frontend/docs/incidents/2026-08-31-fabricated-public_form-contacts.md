@@ -12,8 +12,11 @@ signature, **397** with `email IS NULL`.
 > The first report of this incident quoted *72 rows in 36 hours*. That was **one sampled window,
 > not the population**, and reading it as the population led to a materially wrong conclusion —
 > that the pattern began ~36h ago and that the cleanup should expect ~72 rows. Both are corrected
-> below. The pattern has been running since the scanner became reachable on **2026-08-23**:
-> 48/day × 8 days ≈ 384 expected against 366 observed, which reconciles.
+> below. The pattern has been running since the scanner became reachable on **2026-08-23**.
+> `d54131c` was committed **20:06:41 UTC**, so the first possible hourly run is **21:00 on
+> 2026-08-23**; to the 2026-08-31 measurement that is **194 runs**, a ceiling of **388** rows at
+> 2/run, against **366** observed — 94% of ceiling, i.e. ~11 runs that failed or found nothing.
+> (Do not compute this as "48/day × 8 days = 384": the window does not start at midnight.)
 >
 > Read the residual arithmetic too: 397 − 366 = **31 email-less rows that are NOT fabricated**
 > (legitimately SMS-originated — `01_phase1_foundation.sql` says so in situ: *"Nullable email is
@@ -128,11 +131,15 @@ The fail-open dedup has been latent since **2026-08-19**. It began *firing* on *
 when the inactivity scan moved onto Vercel Cron and the precondition was already present — a
 contact the scanner selects but `upsertContact` cannot resolve.
 
-**The corrupted window is ~8 days, not ~1.5.** 48 rows/day × 8 days ≈ 384 expected against **366**
-observed; the ~18-row shortfall is consistent with the cron not starting at midnight on 2026-08-23
-plus occasional failed or empty runs. An earlier draft of this document put the onset at 36–40
-hours ago by mistaking a 36-hour sample for the whole population — that error, uncorrected, would
-have made the cleanup's stop-condition reject a correct result. See Step 1.
+**The corrupted window is ~8 days, not ~1.5.** `d54131c` landed at **2026-08-23 20:06:41 UTC**, so
+the first hourly run it could have driven is **21:00 that day**. From there to the 2026-08-31
+measurement is **194 hourly runs** — a ceiling of **388** rows at 2 per run — against **366**
+observed. That is 94% of ceiling, leaving ~11 runs that failed, found nothing, or were skipped.
+The observed count sits *below* the ceiling, as it must.
+
+An earlier draft put the onset at 36–40 hours ago by mistaking a 36-hour sample for the whole
+population — that error, uncorrected, would have made the cleanup's stop-condition reject a correct
+result. See Step 1.
 
 Note the existing test `lib/services/crm/__tests__/inactivity-scanner.test.ts` mocks
 `emitDomainEvent` to return `contactId: input.domainEntityId` — it *assumes* the identity that
@@ -293,41 +300,78 @@ ORDER BY f.created_at;
 
 **Verify before deleting.**
 
-> **Corrected stop-condition.** An earlier draft told you to expect *"72, growing by 2/hour"* and
-> to stop if the count differed materially. That was wrong: 72 was a 36-hour sample, not the
-> population. Applied literally against production it would have halted on **366** — the correct
-> answer — and blocked a valid cleanup. Use the numbers below instead.
+> **Corrected twice.** The first draft said *"expect 72, growing 2/hour"* — 72 was a 36-hour
+> sample, so against production's **366** that would have halted a correct cleanup. The second
+> draft replaced it with a fixed band (340–450) and a fixed tripwire (397). Those are **absolute
+> numbers applied to a quantity that grows**, which reintroduces the same class of error from the
+> other side: 366 + 2h ≤ 450 silently expires after ~42 hours, and 397 is not a constant either.
+> The rule below is stated as **time-invariant invariants** instead, so it cannot go stale.
 
-**Expected: ≈366**, as measured on 2026-08-31, **plus ~2 per hour** for every hour between that
-measurement and the moment you run the query, until the fix (`c1cac50`) is deployed and the rate
-goes to zero. A sane acceptance band is **340–450**.
+Take all three counts in **one snapshot**, so they cannot drift relative to each other:
 
-Reconcile it three ways before deleting — a count alone is not enough:
+```sql
+SELECT
+  (SELECT count(*) FROM contacts WHERE deleted_at IS NULL)                        AS total_live,
+  (SELECT count(*) FROM contacts WHERE deleted_at IS NULL AND email IS NULL)      AS email_null,
+  (SELECT count(*) FROM ( /* the Step 1 SELECT */ ) m)                            AS matched;
+```
 
-1. **Magnitude.** Inside 340–450. Materially outside that band, stop and re-derive: the mechanism
-   may not be what this document describes, or a second source may be writing rows.
-2. **Residuals.** `SELECT count(*) FROM contacts WHERE deleted_at IS NULL` should be ≈415 (+2/hour),
-   and the matched set must leave **~31 email-less non-fabricated rows** (SMS-originated) and
-   **~18 rows with a real email** untouched. If the match count approaches 397 — the total
-   email-less population — the query is over-matching and eating legitimate SMS contacts. **Stop.**
-3. **Shape.** Every matched row's `created_at` sits within a few seconds of the top of an hour, and
-   every matched row carries `phone = '+19547562609'`. A matched row with a different phone means
-   a second affected number exists and the blast radius is larger than this document assumes.
+Then check the **gaps**, not the magnitudes. Every fabricated row is email-less by construction
+(the Step 1 signature requires `email IS NULL`), so `email_null` grows at exactly the same
++2/hour as `matched`. The difference between them does not grow — which is what makes it a usable
+tripwire at any point in the future:
 
-**Hard stop — any of these means do not delete:** a matched row with a non-NULL `email`; a matched
-row with a `contact_identities` link; a matched row with a timeline event outside
-`('stage_changed', 'domain_event')`. The query already excludes all three, so any of them
+| Invariant | Expected | Meaning if violated |
+| --- | --- | --- |
+| `email_null − matched` | **≈ 31** | Falling toward 0 ⇒ the query is **over-matching**, eating the legitimate SMS-originated contacts. **STOP.** |
+| `total_live − email_null` | **≈ 18** | The rows carrying a real email. Should not move at all. |
+| `matched` | **≥ 366** | Nothing in the system deletes contact rows, so the fabricated population is monotonically non-decreasing from the 2026-08-31 measurement. **Below 366 means under-matching — STOP**, do not "clean up what you can". |
+| `matched` growth | ≈ **+2/hour** from 366 until `c1cac50` is deployed, then flat | Materially faster ⇒ a second affected number or a second writer. Slower ⇒ the scan is erroring; check the logs. |
+
+There is deliberately **no upper bound in absolute rows**: at 2/hour the count is a function of how
+long the fix takes to deploy, and any fixed ceiling would expire silently. If you want a sanity
+figure, compute it at query time as `366 + 2 × (hours since 2026-08-31 23:00 UTC, capped at the
+deploy of c1cac50)`.
+
+**Shape checks, independent of any count:** every matched row's `created_at` sits within a few
+seconds of the top of an hour, and every matched row carries `phone = '+19547562609'`. A matched
+row with a different phone means a second number is affected and the blast radius is wider than
+this document assumes — **STOP and re-derive**.
+
+**Hard stop — any one of these means do not delete:** a matched row with a non-NULL `email`; a
+matched row with a `contact_identities` link; a matched row with a timeline event outside
+`('stage_changed', 'domain_event')`. The Step 1 query already excludes all three, so any of them
 appearing means the query was edited or the schema moved.
 
 ### Step 2 — remove them (prefer soft delete)
 
+**Freeze the id set first.** Do *not* inline the Step 1 SELECT as a subquery in the UPDATE: the
+predicate would be re-evaluated at UPDATE time, so if an hourly boundary is crossed between
+verifying and deleting, the UPDATE touches rows Step 1 never showed you — and the "rollback if the
+count differs" rule below would then reject a *correct* cleanup. Materialise the ids, verify
+against that frozen list, and delete from it.
+
 ```sql
 BEGIN;
+
+-- 1. Freeze exactly the rows you verified.
+CREATE TEMP TABLE fabricated_ids ON COMMIT DROP AS
+SELECT id FROM ( /* the Step 1 SELECT */ ) m;
+
+-- 2. Re-run the Step 1 invariant checks against THIS frozen set before deleting.
+SELECT count(*) FROM fabricated_ids;   -- this is the number you are about to soft-delete
+
+-- 3. Delete only from the frozen set.
 UPDATE contacts SET deleted_at = now(), updated_at = now()
-WHERE id IN ( /* the SELECT above, id only */ );
--- expect: ~366 (+ ~2 per hour elapsed since 2026-08-31, until c1cac50 is deployed)
-COMMIT;   -- ROLLBACK if the count is not what Step 1 showed
+WHERE id IN (SELECT id FROM fabricated_ids);
+-- rows updated MUST equal the count from step 2 exactly
+
+COMMIT;   -- ROLLBACK on any mismatch
 ```
+
+Rows created by the scanner *between* the freeze and the commit are simply not in the frozen set;
+they are picked up by a second pass, which is correct and safe. Once `c1cac50` is deployed no new
+rows are produced at all, so a single pass suffices.
 
 Soft delete is sufficient and is the safer default: every application read path and both dedup
 lookups filter `deleted_at IS NULL`, and the unique email index is likewise partial on it. So
@@ -335,7 +379,7 @@ soft-deleting the duplicates **also resolves the phone ambiguity** that triggers
 is reversible. A hard `DELETE` also works — `contact_identities` and `contact_timeline_events`
 are `ON DELETE CASCADE` — but discards the evidence and is not reversible.
 
-### Step 3 — REQUIRED. Confirm the phone resolves to exactly one live row.
+### Step 3 — REQUIRED. Reduce the phone to exactly one live row (expect to find 2+).
 
 **Deleting the 366 fabricated rows may not, on its own, restore contact resolution for
 `+19547562609`. Do not close this out after Step 2 without running this check.**
@@ -351,7 +395,7 @@ closed, and that real person is *still* unresolvable — with the cleanup appear
 succeeded. Inbound SMS from them stays broken.
 
 ```sql
--- Run AFTER Step 2 commits. Expected: exactly 1.
+-- Run AFTER Step 2 commits. The EXPECTED result is 2 or more, not 1 — see below.
 SELECT id, email, first_name, last_name, source, lifecycle_stage,
        consent_sms, consent_email, created_at, updated_at
 FROM contacts
@@ -360,13 +404,24 @@ WHERE phone = '+19547562609'
 ORDER BY created_at;
 ```
 
-- **Exactly 1 row** → resolution is restored. On the next hourly scan the row resolves to itself,
-  the stage advance lands on it, it moves to `inactive`, and it leaves the scan. Done.
+**Expect 2 or more — that is success, not failure.** The seed rows are what the model predicts
+survive Step 2, and two independent facts pin the number at ~2: the loop cannot start below two,
+and the steady rate of **2 rows/hour** means exactly two scanned-but-unresolvable rows are
+producing duplicates each run. Step 1 cannot have removed them, because it requires
+`lifecycle_stage = 'inactive'` and these are precisely the rows that never advance.
+
+- **2 or more rows** → **the expected outcome.** The seed. These are real rows, so this is a
+  **merge, not a delete** — proceed to the merge below. Resolution is *not* yet restored.
+- **Exactly 1 row** → possible but unexpected: the seed was already reduced (a prior manual
+  merge, or one row soft-deleted). Resolution is restored — on the next hourly scan the row
+  resolves to itself, the advance lands on it, it moves to `inactive`, and it leaves the scan.
+  Satisfy yourself as to *why* it is 1 before closing out; under this document's model it should
+  have been ≥2.
 - **0 rows** → Step 2 over-matched and removed a real contact. **Roll back** and re-derive Step 1.
-- **2 or more rows** → the seed. These are real rows, so they are a **merge, not a delete**. Keep
-  the one that best represents the person — richest identity, earliest `created_at`, any
-  `contact_identities` link — and soft-delete the others *after* re-pointing anything that
-  references them:
+
+To merge: keep the row that best represents the person — richest identity, earliest `created_at`,
+any `contact_identities` link — and soft-delete the others *after* re-pointing what references
+them:
 
 **Nine tables reference `contacts(id)`, not two.** Because the losers are *soft*-deleted, no
 `ON DELETE CASCADE` ever fires, so nothing is destroyed — but every child row stays attached to a
