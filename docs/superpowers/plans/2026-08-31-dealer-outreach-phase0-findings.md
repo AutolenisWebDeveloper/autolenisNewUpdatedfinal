@@ -90,3 +90,89 @@ contactability concept, no SMS, and no Apollo control surface.
 | Unconditional write | **REUSE** the `withCronRun()` pattern | `cron-monitor.service.ts` |
 | Playwright | **EXTEND** the existing e2e config | `playwright.e2e.config.ts` |
 | Queue read-model | **CREATE** — nothing equivalent exists | `outreach-queue.service.ts` |
+
+---
+
+# Addendum — STOP CONDITION #1 TRIGGERED (owner-defined)
+
+Owner instruction: *"If Phase 0 inspection shows the current page ALREADY writes to
+`dealer_outreach_log` and simply never executes, stop and report — the root cause is an
+unreached code path, not a missing one."*
+
+**It does. Reporting.**
+
+## The write exists and is fully wired end to end — VERIFIED
+
+| Layer | Evidence |
+| --- | --- |
+| UI | `OutreachActions.tsx` — Preview modal + Send + Send Followup buttons |
+| Rendered | `DealerPipelineClient.tsx:405` renders `<OutreachActions>` per row |
+| Route | `POST /api/admin/dealer-outreach/send` → `sendDealerEmail` (`send/route.ts:43`) |
+| Service | `dealer-email-send.service.ts:329` — `prisma.dealerOutreachLog.create` |
+| Other callers | `post-intake-outreach.service.ts:274`, `dealer-followup.service.ts:186`, `send-batch/route.ts:58` |
+
+Four independent call paths reach the same writer. **Nothing about the log write is
+missing.** The 0-row table is an execution fact, not a code gap.
+
+## Why it never executes — the gate ordering, VERIFIED by line number
+
+```
+dealer-email-send.service.ts
+  L192  missingEmailEnvVars()  → returns `not_configured`   ← BEFORE any DB access
+  L251  suppression gate
+  L314  issueProspectClaimToken(prospect.id)                ← mints claim_token
+  L329  prisma.dealerOutreachLog.create(...)                ← the log write
+```
+
+`claim_token` is minted at **L314**, seventeen lines *before* the log write at **L329**.
+Production has `claim_token` NULL on **0/1,532** rows. Therefore **no send has ever
+reached L314**, which places the failure at or before the L192 env gate, the L251
+suppression gate, or the intervening prospect-load / deliverability / rate-limit gates —
+never at the writer itself.
+
+## Prime suspect: `.env.example` contradicts `REQUIRED_EMAIL_ENV_VARS` — VERIFIED
+
+`lib/services/dealer-recruitment/email-channel-config.ts:12`
+
+```ts
+export const REQUIRED_EMAIL_ENV_VARS = [
+  "DEALER_OUTREACH_FROM_EMAIL",
+  "DEALER_OUTREACH_REPLY_TO",
+  "AUTOLENIS_PHYSICAL_ADDRESS",
+  "RESEND_API_KEY",
+] as const;
+```
+
+`frontend/.env.example:70-71`
+
+```
+DEALER_OUTREACH_FROM_EMAIL=   # optional
+DEALER_OUTREACH_REPLY_TO=     # optional
+```
+
+The env template tells the operator two of the four **required** vars are **optional**.
+An operator who followed the template left them blank; `missingEmailEnvVars()` then
+returns non-empty and **every send on all four call paths returns `not_configured` at
+L192**, before Prisma is touched. That single config contradiction fully explains 0 log
+rows, 0 `contacted_at`, and 0 `claim_token` simultaneously.
+
+**Status: ASSUMPTION, not verified.** Confirming it requires reading the deployed Vercel
+environment, which this session cannot do. It is the highest-probability cause consistent
+with every production number given, but the gate could equally be L251 (suppression) or
+the `no_email` return at L~230 (1,365/1,532 prospects have no email at all — that return
+is also log-less).
+
+## What this changes in the plan
+
+- **Task 6 shrinks.** It is no longer "build the log writer" — the writer exists. It
+  becomes (a) move the write ahead of the gates so blocked attempts are recorded, and
+  (b) fix `.env.example` so the required set stops being described as optional. The
+  derived-read helpers and the idempotency index are unaffected.
+- **A one-line fix may unblock outreach entirely**, independent of everything else in
+  this PR. That is worth knowing before 13 tasks are built on the assumption that
+  outreach is structurally absent. It is not structurally absent — it is gated shut.
+- **The diagnostic gap is the real defect.** A send that fails at L192 returns a
+  structured reason to the caller and logs a `warn`, but leaves no durable trace
+  anywhere. Nobody could tell "never attempted" from "attempted and blocked" — which is
+  precisely why this went unnoticed. Task 6's unconditional write is the permanent fix;
+  the env correction is the immediate one.

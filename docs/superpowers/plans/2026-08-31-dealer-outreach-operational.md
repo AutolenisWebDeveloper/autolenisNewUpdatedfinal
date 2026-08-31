@@ -50,6 +50,14 @@ Supabase Postgres · Apollo REST · Resend · Twilio · Playwright · `node:test
 - **Every test is `node:test` via `tsx`**, registered in a `test:*` script in
   `package.json` so `pnpm test:coverage-check` can reach it, and appended to
   `test:all`.
+- **Commit per task, with the TDD boundary visible in history** — the red commit (failing
+  test) and the green commit (implementation) are separate, so the PR reads
+  commit-by-commit rather than as one diff.
+- **`consent_basis = NONE` always refuses SMS.** No combination of DNC-clear, phone-type
+  allowed, suppression-clear or flag-enabled may override it. Dealer prospects are NONE
+  today, so SMS correctly reaches zero of them — the intended outcome, not a bug to route
+  around.
+- **`phone_type` gates independently of DNC.** `mobile_phone` is blocked by default.
 - **Never fabricate a contact.** Apollo returning nothing means the field stays NULL and
   contactability becomes `UNREACHABLE`.
 
@@ -163,6 +171,20 @@ test("apollo_person_id is unique — the idempotency key for spend", () => {
   );
 });
 
+test("phone_type and consent_basis exist and are separate fields", () => {
+  for (const col of ["phone_type", "consent_basis", "consent_basis_set_at", "consent_basis_source"]) {
+    assert.ok(SCHEMA.includes(col), `schema.prisma missing ${col}`);
+    assert.ok(MIGRATION.includes(col), `migration.sql missing ${col}`);
+  }
+  assert.match(MIGRATION, /consent_basis[^;]*DEFAULT\s+'NONE'/i, "consent_basis must default to NONE (fail closed)");
+});
+
+test("call-channel columns exist on the outreach log", () => {
+  for (const col of ["call_disposition", "call_duration_seconds"]) {
+    assert.ok(MIGRATION.includes(col), `migration.sql missing ${col}`);
+  }
+});
+
 test("outreach log gains SMS columns without losing email columns", () => {
   for (const col of ["to_phone", "from_phone", "twilio_sid"]) {
     assert.ok(MIGRATION.includes(col), `migration.sql missing ${col}`);
@@ -231,6 +253,31 @@ Append to `model DealerContactProfile` (before the `@@index` block):
   phoneType     String?   @map("phone_type")
 
   isPrimaryContact Boolean @default(false) @map("is_primary_contact")
+
+  // Owner direction: phone_type gates INDEPENDENTLY of DNC. mobile_phone carries
+  // materially higher risk than a corporate line, so the send service must be able
+  // to allow one and block the other. Never collapsed into a single "phone" field.
+  // Values are Apollo's, verbatim: mobile_phone | direct_phone | corporate_phone.
+  //
+  // consentBasis is the TCPA basis for the phone channel:
+  //   EXPRESS_WRITTEN | EXPRESS | EXISTING_BUSINESS_RELATIONSHIP | NONE
+  // It defaults to NONE and nothing in this PR sets it to anything else — so SMS
+  // correctly reaches zero prospects today. That is the intended outcome.
+  consentBasis        String    @default("NONE") @map("consent_basis")
+  consentBasisSetAt   DateTime? @map("consent_basis_set_at")
+  consentBasisSource  String?   @map("consent_basis_source")
+```
+
+Append to `model DealerOutreachLog` as well (call-channel columns — the Phase 3
+shipping deliverable):
+
+```prisma
+  // Phase 3 — manual call logging. `channel` carries "CALL"; these are its payload.
+  callDisposition     String? @map("call_disposition")
+  callDurationSeconds Int?    @map("call_duration_seconds")
+  // The consent basis in force at SEND time, recorded on every phone-channel row so
+  // an audit can reconstruct why a message was or was not permitted.
+  consentBasis        String? @map("consent_basis")
 ```
 
 Append to `model DealerOutreachLog` (before the relation block):
@@ -823,11 +870,20 @@ git commit -am "feat(apollo): distinct persisted terminal states for async revea
   `outreachIdempotencyKey(prospectId: string, step: number, channel: string): string`,
   `deriveContactState(prospectId, deps?): Promise<{ contactedAt: Date|null; repliedAt: Date|null; sequencePausedAt: Date|null; lastTouch: OutreachTouch|null }>`.
 
-**Why this exists:** `sendDealerEmail` currently has SEVEN early returns
-(`not_configured`, `not_found`, `no_email`, `already_contacted`, `suppressed`,
-`undeliverable`, `rate_limited`) that return before the `dealerOutreachLog.create` at
-step 5. Six of them are real attempts that leave no trace — the log under-reports every
-blocked send. That is the defect this task fixes.
+**Why this exists (REVISED after stop condition #1 — the writer already exists):**
+`dealer-email-send.service.ts:329` already calls `prisma.dealerOutreachLog.create`, and
+four call paths reach it. The defect is not a missing writer, it is *gate ordering*:
+SEVEN early returns (`not_configured` at L192, `not_found`, `no_email`,
+`already_contacted`, `suppressed` at L251, `undeliverable`, `rate_limited`) return before
+L329, so six real attempts leave no trace at all. Nobody can tell "never attempted" from
+"attempted and blocked" — which is why 0 rows went unnoticed.
+
+**This task is therefore smaller than originally scoped.** It does not build a writer. It
+(a) moves the write ahead of the gates so a blocked attempt is recorded, (b) adds the
+derived-read helpers, and (c) fixes `frontend/.env.example:70-71`, which labels
+`DEALER_OUTREACH_FROM_EMAIL` and `DEALER_OUTREACH_REPLY_TO` `# optional` while
+`REQUIRED_EMAIL_ENV_VARS` lists both as required — the most likely reason every send has
+returned `not_configured` at L192.
 
 - [ ] **Step 1: Write the failing test:**
 
@@ -902,6 +958,29 @@ test("replied_at is derived from the log's replied rows", async () => {
 ```
 
 - [ ] **Step 2: Run — expect FAIL.**
+- [ ] **Step 2b: Fix `frontend/.env.example`** so the template stops contradicting the
+  code. Both vars are required by `REQUIRED_EMAIL_ENV_VARS`:
+
+```diff
+-DEALER_OUTREACH_FROM_EMAIL=   # optional
+-DEALER_OUTREACH_REPLY_TO=     # optional
++DEALER_OUTREACH_FROM_EMAIL=   # REQUIRED before any dealer send (REQUIRED_EMAIL_ENV_VARS)
++DEALER_OUTREACH_REPLY_TO=     # REQUIRED before any dealer send (REQUIRED_EMAIL_ENV_VARS)
+```
+
+  Add a guard test so the template and the code cannot drift again:
+
+```ts
+test(".env.example does not describe a REQUIRED_EMAIL_ENV_VAR as optional", () => {
+  const example = readFileSync(join(process.cwd(), ".env.example"), "utf8");
+  for (const key of REQUIRED_EMAIL_ENV_VARS) {
+    const line = example.split("\n").find((l) => l.startsWith(`${key}=`));
+    if (!line) continue;
+    assert.doesNotMatch(line, /#\s*optional/i, `${key} is required by the send path but .env.example calls it optional`);
+  }
+});
+```
+
 - [ ] **Step 3: Implement `recordOutreachAttempt`** as the ONE writer. Modelled on
   `withCronRun()`'s unconditional-write pattern: the row is created FIRST (status
   `queued`), the attempt runs, and the row is updated to its terminal status — so a
@@ -1034,121 +1113,227 @@ git commit -am "feat(dealer-outreach): guarded status machine with mandatory dea
 
 ---
 
-## Task 8: SMS channel + the DNC gate enforced server-side
+## Task 8: Call logging (ships ENABLED) + consent-gated SMS (ships OFF)
+
+**Owner direction, 2026-08-31 — three constraints that override the original Task 8:**
+
+1. **No second SMS send path.** Building one would bypass `sendCrmSms`'s
+   `consent_sms` gate — a consent bypass implemented in architecture, and exactly the
+   parallel system the repo forbids. EXTEND the existing path instead.
+2. **Phase 3's shipping deliverable is MANUAL CALL LOGGING, not SMS.** `channel="CALL"`
+   with disposition, duration and notes, plus click-to-call in the queue. This ships
+   ENABLED and is what actually turns 1,527 phone numbers into real outreach.
+3. **`phone_type` is gated independently of DNC.** `mobile_phone` carries materially
+   higher risk than `corporate_phone`; the send service must be able to allow one and
+   block the other. Do not collapse phone types into one field.
 
 **Files:**
-- Create: `lib/services/dealer-recruitment/dealer-sms-send.service.ts`
+- Modify: `lib/services/sms/crm-sms.ts` (add the `consent_basis` gate)
+- Create: `lib/services/dealer-recruitment/dealer-call-log.service.ts`
+- Create: `app/api/admin/dealer-outreach/log-call/route.ts`
 - Create: `app/api/admin/dealer-outreach/send-sms/route.ts`
-- Test: `lib/services/dealer-recruitment/__tests__/dealer-sms-send.test.ts`
+- Test: `lib/services/dealer-recruitment/__tests__/dealer-call-log.test.ts`
+- Test: `lib/services/sms/__tests__/consent-basis-gate.test.ts`
 
 **Interfaces:**
-- Consumes: `sendCrmSms`'s Twilio client pattern, `SuppressionService.isSmsSuppressed`,
-  `isRecipientInQuietHours`, `normalizePhone`, `recordOutreachAttempt`.
-- Produces: `sendDealerSms(input, deps?): Promise<DealerSmsResult>` with
-  `reason: "dnc_blocked" | "suppressed" | "quiet_hours" | "invalid_phone" | "not_configured" | "send_disabled" | "already_contacted" | "send_error"`.
+- Produces:
+  `type ConsentBasis = "EXPRESS_WRITTEN" | "EXPRESS" | "EXISTING_BUSINESS_RELATIONSHIP" | "NONE"`,
+  `evaluateConsentBasis(input): { allowed: boolean; basis: ConsentBasis; reason?: string }`,
+  `type PhoneType = "mobile_phone" | "direct_phone" | "corporate_phone" | "unknown"`,
+  `type CallDisposition = "CONNECTED" | "VOICEMAIL" | "NO_ANSWER" | "WRONG_NUMBER" | "GATEKEEPER" | "NOT_INTERESTED" | "CALLBACK_REQUESTED"`,
+  `logDealerCall(input: { prospectId; disposition; durationSeconds; notes; actorId }, deps?): Promise<{ logId: string }>`,
+  `sendDealerSms(input, deps?): Promise<DealerSmsResult>`.
 
-**Compliance note for the owner (raised, not silently resolved):** `sendCrmSms` hard-gates
-on `contact.consent_sms`. Dealer prospects carry **no consent record**, and
-Apollo-sourced direct dials are vendor-sourced, not consented. This service therefore
-gates on DNC + suppression + quiet hours + an explicit
-`DEALER_OUTREACH_SMS_ENABLED` flag, and records consent basis on every row — but it does
-**not** manufacture consent. Whether B2B dealer SMS on vendor-sourced numbers is
-permissible is an owner/counsel decision; the flag stays OFF until they make it.
+### 8a — the `consent_basis` gate on the EXISTING SMS path
 
-- [ ] **Step 1: Write the failing test:**
+- [ ] **Step 1: Write the failing test** (`lib/services/sms/__tests__/consent-basis-gate.test.ts`):
 
 ```ts
-test("dnc_status 'found' blocks the send server-side", async () => {
-  const d = fakeSmsDeps({ dncStatus: "found" });
-  const r = await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never);
-  assert.equal(r.success, false);
-  assert.equal(r.reason, "dnc_blocked");
-  assert.equal(d.twilioSends(), 0, "no message may reach Twilio");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { evaluateConsentBasis } from "../crm-sms";
+
+test("NONE always refuses, whatever else is true", () => {
+  const r = evaluateConsentBasis({ basis: "NONE", dncStatus: "not_found", phoneType: "corporate_phone" });
+  assert.equal(r.allowed, false);
+  assert.equal(r.reason, "NO_CONSENT_BASIS");
 });
 
-test("dnc_status 'pending' is NOT clear and also blocks", async () => {
-  const d = fakeSmsDeps({ dncStatus: "pending" });
-  const r = await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never);
-  assert.equal(r.reason, "dnc_blocked");
-  assert.equal(d.twilioSends(), 0);
+test("NONE refuses even when every other signal is maximally permissive", () => {
+  const r = evaluateConsentBasis({
+    basis: "NONE", dncStatus: "not_found", phoneType: "corporate_phone",
+    suppressed: false, quietHours: false, sendEnabled: true,
+  });
+  assert.equal(r.allowed, false, "no combination of other signals may manufacture consent");
 });
 
-test("a null dnc_status is treated as unchecked and blocks", async () => {
-  const d = fakeSmsDeps({ dncStatus: null });
-  const r = await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never);
-  assert.equal(r.reason, "dnc_blocked");
-  assert.equal(d.twilioSends(), 0);
+test("EXPRESS_WRITTEN is permitted when nothing else blocks", () => {
+  assert.equal(evaluateConsentBasis({ basis: "EXPRESS_WRITTEN", dncStatus: "not_found", phoneType: "corporate_phone" }).allowed, true);
 });
 
-test("only dnc_status 'not_found' clears the phone channel", async () => {
-  const d = fakeSmsDeps({ dncStatus: "not_found" });
-  const r = await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never);
-  assert.equal(r.success, true);
-  assert.equal(d.twilioSends(), 1);
+test("EXPRESS is permitted when nothing else blocks", () => {
+  assert.equal(evaluateConsentBasis({ basis: "EXPRESS", dncStatus: "not_found", phoneType: "direct_phone" }).allowed, true);
 });
 
-test("a DNC block still writes exactly one log row", async () => {
-  const d = fakeSmsDeps({ dncStatus: "found" });
-  await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never);
-  assert.equal(d.logRows().length, 1);
-  assert.equal(d.logRows()[0].channel, "sms");
-  assert.equal(d.logRows()[0].status, "failed");
+test("EXISTING_BUSINESS_RELATIONSHIP is permitted when nothing else blocks", () => {
+  assert.equal(evaluateConsentBasis({ basis: "EXISTING_BUSINESS_RELATIONSHIP", dncStatus: "not_found", phoneType: "corporate_phone" }).allowed, true);
 });
 
-test("suppression is checked at SEND time, not queue-build time", async () => {
-  const d = fakeSmsDeps({ dncStatus: "not_found", suppressedAtSend: true });
-  const r = await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never);
-  assert.equal(r.reason, "suppressed");
-  assert.equal(d.twilioSends(), 0);
+test("an unrecognised basis value fails closed as NONE", () => {
+  const r = evaluateConsentBasis({ basis: "SOMETHING_ELSE" as never, dncStatus: "not_found", phoneType: "corporate_phone" });
+  assert.equal(r.allowed, false);
 });
 
-test("quiet hours block the send", async () => {
-  const d = fakeSmsDeps({ dncStatus: "not_found", quietHours: true });
-  assert.equal((await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never)).reason, "quiet_hours");
+test("DNC blocks independently of a valid consent basis", () => {
+  const r = evaluateConsentBasis({ basis: "EXPRESS_WRITTEN", dncStatus: "found", phoneType: "corporate_phone" });
+  assert.equal(r.allowed, false);
+  assert.equal(r.reason, "DNC_BLOCKED");
 });
 
-test("the send flag is OFF by default and blocks before Twilio", async () => {
-  const d = fakeSmsDeps({ dncStatus: "not_found", sendEnabled: false });
-  const r = await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never);
-  assert.equal(r.reason, "send_disabled");
-  assert.equal(d.twilioSends(), 0);
+test("DNC 'pending' is not clear and blocks", () => {
+  assert.equal(evaluateConsentBasis({ basis: "EXPRESS", dncStatus: "pending", phoneType: "corporate_phone" }).allowed, false);
 });
 
-test("a Twilio failure writes one failed row carrying the error", async () => {
-  const d = fakeSmsDeps({ dncStatus: "not_found", twilioThrows: "21610 unsubscribed" });
-  await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never);
-  assert.equal(d.logRows().length, 1);
-  assert.match(d.logRows()[0].errorMessage, /21610/);
+test("a null dnc_status is unchecked and blocks", () => {
+  assert.equal(evaluateConsentBasis({ basis: "EXPRESS", dncStatus: null, phoneType: "corporate_phone" }).allowed, false);
 });
 
-test("a successful send persists the twilio_sid on the log row", async () => {
-  const d = fakeSmsDeps({ dncStatus: "not_found" });
-  await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never);
-  assert.equal(d.logRows()[0].twilioSid, "SM_fake_sid");
+test("phone_type gates INDEPENDENTLY of DNC — mobile is blocked by default", () => {
+  const r = evaluateConsentBasis({ basis: "EXPRESS_WRITTEN", dncStatus: "not_found", phoneType: "mobile_phone" });
+  assert.equal(r.allowed, false);
+  assert.equal(r.reason, "PHONE_TYPE_BLOCKED", "mobile carries higher risk than a corporate line");
 });
 
-test("the sms idempotency key is distinct from the email one for the same step", async () => {
-  const d = fakeSmsDeps({ dncStatus: "not_found", existingEmailLogAtStep: 1 });
-  const r = await sendDealerSms({ prospectId: "p1", body: "hi", step: 1 }, d as never);
-  assert.equal(r.success, true, "an email at step 1 must not block an SMS at step 1");
+test("mobile is permitted only when explicitly allowed by config", () => {
+  const r = evaluateConsentBasis(
+    { basis: "EXPRESS_WRITTEN", dncStatus: "not_found", phoneType: "mobile_phone" },
+    { allowedPhoneTypes: ["mobile_phone", "direct_phone", "corporate_phone"] },
+  );
+  assert.equal(r.allowed, true);
+});
+
+test("an unknown phone_type is blocked", () => {
+  assert.equal(evaluateConsentBasis({ basis: "EXPRESS", dncStatus: "not_found", phoneType: "unknown" }).allowed, false);
+});
+
+test("every dealer prospect resolves to NONE today — SMS reaches zero of them", async () => {
+  // The intended outcome, not a bug: nothing in this PR creates a consent record.
+  const basis = await resolveProspectConsentBasis("p1", fakeDeps({ noConsentRecord: true }) as never);
+  assert.equal(basis, "NONE");
 });
 ```
 
 - [ ] **Step 2: Run — expect FAIL.**
-- [ ] **Step 3: Implement.** Gate order, all BEFORE any Twilio call:
-  `send flag → phone valid → DNC (only "not_found" clears) → suppression → quiet hours`.
-  Every outcome routes through `recordOutreachAttempt` with `channel: "sms"`.
-  Reuse the Twilio client construction pattern from `crm-sms.ts` — no new SDK wrapper,
-  no new queue, no new scheduler.
-- [ ] **Step 4: Run — expect PASS.**
-- [ ] **Step 5: Add the route** with admin auth, mirroring `send/route.ts`.
-- [ ] **Step 6: Commit**
+- [ ] **Step 3: Implement `evaluateConsentBasis` in `crm-sms.ts`** and route the existing
+  `consent_sms` check through it: `consent_sms === true` maps to `EXPRESS`,
+  `do_not_contact === true` maps to `NONE`. This is a widening of the same gate, not a
+  new one — existing CRM callers keep their exact current behaviour, proven by re-running
+  `pnpm test:crm-services` and `pnpm test:comms-outbox`.
+- [ ] **Step 4: Run — expect PASS, and re-run the existing CRM suites for regressions.**
 
-```bash
-git commit -am "feat(dealer-outreach): SMS channel with server-side DNC gate, flag-gated OFF"
+### 8b — dealer call logging (the shipping deliverable, ENABLED)
+
+- [ ] **Step 5: Write the failing test** (`dealer-call-log.test.ts`):
+
+```ts
+test("a logged call writes exactly one CALL row with disposition, duration and notes", async () => {
+  const d = fakeCallDeps({});
+  await logDealerCall({ prospectId: "p1", disposition: "CONNECTED", durationSeconds: 214, notes: "Spoke to GM", actorId: "admin-1" }, d as never);
+  const rows = d.logRows();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].channel, "CALL");
+  assert.equal(rows[0].status, "sent");
+  assert.equal(rows[0].callDisposition, "CONNECTED");
+  assert.equal(rows[0].callDurationSeconds, 214);
+  assert.equal(rows[0].body, "Spoke to GM");
+});
+
+test("call logging does NOT require the send flag — it records a human action", async () => {
+  const d = fakeCallDeps({ sendEnabled: false });
+  const r = await logDealerCall({ prospectId: "p1", disposition: "VOICEMAIL", durationSeconds: 0, notes: "", actorId: "admin-1" }, d as never);
+  assert.ok(r.logId);
+  assert.equal(d.logRows().length, 1);
+});
+
+test("call logging is NOT blocked by DNC — DNC blocks DIALING, not recording a call that happened", async () => {
+  const d = fakeCallDeps({ dncStatus: "found" });
+  const r = await logDealerCall({ prospectId: "p1", disposition: "WRONG_NUMBER", durationSeconds: 12, notes: "", actorId: "admin-1" }, d as never);
+  assert.ok(r.logId, "recording history must never be gated on a send-time control");
+});
+
+test("an invalid disposition is rejected without writing", async () => {
+  const d = fakeCallDeps({});
+  await assert.rejects(
+    () => logDealerCall({ prospectId: "p1", disposition: "MADE_UP" as never, durationSeconds: 0, notes: "", actorId: "admin-1" }, d as never),
+  );
+  assert.equal(d.logRows().length, 0);
+});
+
+test("a negative duration is rejected without writing", async () => {
+  const d = fakeCallDeps({});
+  await assert.rejects(
+    () => logDealerCall({ prospectId: "p1", disposition: "CONNECTED", durationSeconds: -5, notes: "", actorId: "admin-1" }, d as never),
+  );
+  assert.equal(d.logRows().length, 0);
+});
+
+test("two calls to the same prospect both log — calls are not idempotent by step", async () => {
+  const d = fakeCallDeps({});
+  await logDealerCall({ prospectId: "p1", disposition: "NO_ANSWER", durationSeconds: 0, notes: "", actorId: "admin-1" }, d as never);
+  await logDealerCall({ prospectId: "p1", disposition: "CONNECTED", durationSeconds: 90, notes: "", actorId: "admin-1" }, d as never);
+  assert.equal(d.logRows().length, 2, "a second real call is a second real event");
+});
+
+test("a CONNECTED call advances DISCOVERED/SCRIPTED to CONTACTED", async () => {
+  const d = fakeCallDeps({ currentStatus: "SCRIPTED" });
+  await logDealerCall({ prospectId: "p1", disposition: "CONNECTED", durationSeconds: 90, notes: "", actorId: "admin-1" }, d as never);
+  assert.equal(d.statusTransitions()[0]?.to, "CONTACTED");
+});
+
+test("a NO_ANSWER call does NOT advance status", async () => {
+  const d = fakeCallDeps({ currentStatus: "SCRIPTED" });
+  await logDealerCall({ prospectId: "p1", disposition: "NO_ANSWER", durationSeconds: 0, notes: "", actorId: "admin-1" }, d as never);
+  assert.equal(d.statusTransitions().length, 0);
+});
 ```
 
----
+- [ ] **Step 6: Run — expect FAIL. Step 7: Implement** through
+  `recordOutreachAttempt` with `channel: "CALL"`. Step 8: Run — expect PASS.
+- [ ] **Step 9: Add `POST /api/admin/dealer-outreach/log-call`** with admin auth.
+
+### 8c — `sendDealerSms`, built fully, flag OFF
+
+- [ ] **Step 10: Write the failing test.** Same gate coverage as before —
+  `dnc_blocked` for `found` / `pending` / `null`; `suppressed` checked at SEND time;
+  `quiet_hours`; `send_disabled` by default; a Twilio failure writing one failed row with
+  the error; `twilio_sid` persisted on success; the SMS idempotency key distinct from the
+  email one at the same step — **plus**:
+
+```ts
+test("sendDealerSms delegates the consent decision to evaluateConsentBasis, never its own copy", async () => {
+  const d = fakeSmsDeps({ dncStatus: "not_found", basis: "NONE" });
+  const r = await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never);
+  assert.equal(r.reason, "no_consent_basis");
+  assert.equal(d.twilioSends(), 0);
+  assert.equal(d.consentEvaluations(), 1, "the shared gate must be the one that decided");
+});
+
+test("every dealer SMS attempt records its consent_basis on the log row", async () => {
+  const d = fakeSmsDeps({ dncStatus: "not_found", basis: "NONE" });
+  await sendDealerSms({ prospectId: "p1", body: "hi" }, d as never);
+  assert.equal(d.logRows()[0].consentBasis, "NONE");
+});
+```
+
+- [ ] **Step 11: Run — expect FAIL. Step 12: Implement**, delegating to
+  `evaluateConsentBasis` and reusing the Twilio client from `crm-sms.ts`. No new SDK
+  wrapper, no new queue, no new scheduler. Step 13: Run — expect PASS.
+- [ ] **Step 14: Add `POST /api/admin/dealer-outreach/send-sms`.**
+- [ ] **Step 15: Commit**
+
+```bash
+git commit -am "feat(dealer-outreach): call logging (enabled) + consent-basis-gated SMS (off by default)"
+```
 
 ## Task 9: Contactability resolver for the queue read-model
 
