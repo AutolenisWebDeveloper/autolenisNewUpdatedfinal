@@ -142,10 +142,16 @@ test("resolveChannels only allows SMS when the flag is on AND the plan has an SM
   assert.equal(resolveChannels({ plan: smsPlan, inAppEnabled: true, smsFeatureEnabled: false }).sms, false);
 });
 
-test("caller-owned in-app statuses are exactly the six verified duplicates", () => {
+test("caller-owned in-app statuses are exactly the five verified duplicates", () => {
+  // SIGNED was removed from this set. It was listed as caller-owned on the basis
+  // that esign.service created the notification, but that DocuSign-era handler was
+  // deleted and the ownership entry outlived it — so the orchestrator skipped
+  // SIGNED and NOTHING created a notification. With sms:null on the SIGNED plan the
+  // buyer got no signal at all at the moment their contract became binding. This
+  // assertion previously pinned that bug in place; it now pins the fix.
   assert.deepEqual(
     [...INAPP_OWNED_BY_CALLERS].sort(),
-    ["CANCELLED", "COMPLETED", "CONTRACT_APPROVED", "PICKUP_SCHEDULED", "REFUNDED", "SIGNED"].sort(),
+    ["CANCELLED", "COMPLETED", "CONTRACT_APPROVED", "PICKUP_SCHEDULED", "REFUNDED"].sort(),
   );
   for (const s of INAPP_OWNED_BY_CALLERS) {
     assert.equal(isInAppOwnedByCaller(s), true, `${s} should be caller-owned`);

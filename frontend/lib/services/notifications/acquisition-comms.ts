@@ -278,7 +278,6 @@ export function dealCommsIdempotencyKey(
 /**
  * DealStatus transitions whose buyer IN-APP notification is already created by an
  * existing caller CO-LOCATED with the transition (verified against the codebase):
- *   - SIGNED            → esign.service.handleEnvelopeCompleted
  *   - PICKUP_SCHEDULED  → pickup.service.schedulePickup
  *   - COMPLETED         → pickup.service.completePickup / admin deals action /
  *                         admin pickup-complete route
@@ -291,7 +290,13 @@ export function dealCommsIdempotencyKey(
  * stops creating its own in-app notification for one of these transitions.
  */
 export const INAPP_OWNED_BY_CALLERS: ReadonlySet<DealStatus> = new Set<DealStatus>([
-  "SIGNED",
+  // SIGNED is deliberately ABSENT. It used to be delegated to a DocuSign-era
+  // esign.service handler that was deleted with the provider — the ownership entry
+  // outlived its owner, so the orchestrator skipped the in-app
+  // notification and nothing created one. Combined with `sms: null` on the SIGNED
+  // plan, the moment a buyer's contract became binding produced no notification on
+  // any channel. The orchestrator now owns it, as it does for every other
+  // genuinely-silent transition.
   "PICKUP_SCHEDULED",
   "COMPLETED",
   "CANCELLED",
