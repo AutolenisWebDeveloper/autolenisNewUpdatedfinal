@@ -168,7 +168,7 @@ test("personnel come from the contact profile, never the unprovenanced prospect 
   // 1,532 — zero provenance. Showing those as if they were verified contacts
   // would present a guess as a fact.
   const deps = fakeQueue({
-    rows: [row({ contactName: null, contactSource: null })],
+    rows: [row({ contactName: null, contactSource: null, phone: "+15125551212" })],
     profiles: { p1: { name: "Dana Reyes", title: "General Manager", contactSource: "apollo", contactConfidence: "high", apolloLastSyncedAt: new Date("2026-08-01") } },
   });
   const q = await loadOutreachQueue({}, deps);
@@ -177,7 +177,10 @@ test("personnel come from the contact profile, never the unprovenanced prospect 
 });
 
 test("a prospect with no profile shows NO contact rather than an unprovenanced one", async () => {
-  const deps = fakeQueue({ rows: [row({ contactName: "Legacy Name", contactTitle: "Legacy Title" })], profiles: {} });
+  const deps = fakeQueue({
+    rows: [row({ contactName: "Legacy Name", contactTitle: "Legacy Title", phone: "+15125551212" })],
+    profiles: {},
+  });
   const q = await loadOutreachQueue({}, deps);
   assert.equal(q.rows[0].contactName, null);
   assert.equal(q.rows[0].contactSource, null);
