@@ -78,6 +78,10 @@ export interface QueueRow extends ContactabilityResult {
   state: string | null;
   status: string;
   score: number | null;
+  /** The number to dial. Manual calling is the only outreach that ships
+   *  enabled, so withholding it here would send the operator on a second
+   *  lookup for every row in the queue. */
+  phone: string | null;
   contactName: string | null;
   contactTitle: string | null;
   contactSource: string | null;
@@ -350,6 +354,7 @@ export async function loadOutreachQueue(
       state: row.state,
       status: row.status,
       score: row.score,
+      phone: row.phone,
       // Provenance-bearing profile data only. Never the prospect's own
       // contact_* columns, which have no source recorded anywhere.
       contactName: profile?.name ?? null,

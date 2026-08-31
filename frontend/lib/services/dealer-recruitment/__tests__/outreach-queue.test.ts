@@ -262,3 +262,21 @@ test("the DNC-blocked count is reported separately from unreachable", async () =
   assert.equal(q.counts.dncBlocked, 1);
   assert.equal(q.counts.unreachable, 0, "a DNC number is still callable and must not be hidden");
 });
+
+// ─── the number the operator actually dials ─────────────────────────────────
+
+test("the row carries the phone number, because the queue's one live action dials it", async () => {
+  // Manual calling is the only outreach that ships enabled, and the queue is
+  // where it starts. A read model that resolves "CALL_READY" but withholds the
+  // number forces the operator into a second lookup for every single row.
+  const deps = fakeQueue({ rows: [row({ phone: "+15125551212" })] });
+  const q = await loadOutreachQueue({}, deps);
+  assert.equal(q.rows[0].phone, "+15125551212");
+});
+
+test("a prospect with no phone reports null rather than an empty string", async () => {
+  // telHref distinguishes the two; an empty string would render a dead tel: link.
+  const deps = fakeQueue({ rows: [row({ phone: null, email: "a@b.com", emailVerificationStatus: "VERIFIED" })] });
+  const q = await loadOutreachQueue({}, deps);
+  assert.equal(q.rows[0].phone, null);
+});
