@@ -27,27 +27,52 @@ export class ContactService {
   // arrives so the latest disclosure context is what's on record.
   static async upsertContact(supabase: SupabaseClient, input: ContactInput): Promise<Contact> {
     const cleanEmail = normalizeEmail(input.email ?? null);
-    const standardizedPhone = input.phone ? normalizePhone(input.phone) : null;
+    // `normalizePhone` returns '' for anything it cannot put in E.164. '' is
+    // falsy, so it used to SKIP the phone lookup and then get written to the
+    // row — an identity that matches nothing and therefore mints a fresh
+    // duplicate on every later call. Collapse it to null so it is absent, not
+    // empty.
+    const standardizedPhone = (input.phone ? normalizePhone(input.phone) : '') || null;
+
+    // No email and no E.164 phone means there is nothing to dedup on: every
+    // call would insert another unmergeable row. The admin create route already
+    // rejects this (EMAIL_OR_PHONE_REQUIRED); enforcing it at the funnel makes
+    // it true for all ~20 call sites.
+    if (!cleanEmail && !standardizedPhone) {
+      throw new Error(
+        'contact identity missing: upsertContact requires an email or an E.164 phone',
+      );
+    }
 
     let existing: Contact | null = null;
 
     if (cleanEmail) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('contacts')
         .select('*')
         .eq('email', cleanEmail)
         .is('deleted_at', null)
         .maybeSingle();
+      // FAIL CLOSED. A failed lookup is not 'no match'. Swallowing this error
+      // turned every ambiguous or transient failure into a fabricated contact.
+      if (error) throw new Error(`contact dedup lookup by email failed: ${error.message}`);
       existing = data;
     }
 
     if (!existing && standardizedPhone) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('contacts')
         .select('*')
         .eq('phone', standardizedPhone)
         .is('deleted_at', null)
         .maybeSingle();
+      // `.maybeSingle()` errors when the phone matches MORE THAN ONE live row.
+      // That is the exact production trigger: `contacts` has a unique partial
+      // index on lower(email) but only a plain index on phone, so a phone can
+      // legitimately end up on two rows — after which the old code inserted a
+      // new contact on every single call. Halt instead; the ambiguity is a data
+      // problem to resolve, never a licence to duplicate.
+      if (error) throw new Error(`contact dedup lookup by phone failed: ${error.message}`);
       existing = data;
     }
 
