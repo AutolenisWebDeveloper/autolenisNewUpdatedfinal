@@ -89,9 +89,22 @@ CREATE INDEX IF NOT EXISTS "dealer_outreach_log_prospect_step_channel_idx" ON "d
 -- attempt stays retriable — which is exactly what makes the unconditional
 -- failure logging safe to combine with this index.
 --
--- NOTE: this index can only be created once any pre-existing duplicates are
--- resolved. dealer_outreach_log currently holds zero rows, so on the target
--- database it is trivially satisfiable.
+-- PRE-FLIGHT, required before applying. CREATE UNIQUE INDEX FAILS if the table
+-- already contains a duplicate. dealer_outreach_log held zero rows when this was
+-- written, but the unconditional-logging change ships ahead of this migration
+-- and the application-level idempotency check it relies on is read-then-write —
+-- so by the time this is applied, duplicates are possible. Run this first and
+-- expect zero rows:
+--
+--   SELECT dealer_prospect_id, outreach_sequence_step, channel, count(*)
+--     FROM dealer_outreach_log
+--    WHERE status <> 'failed'
+--    GROUP BY 1, 2, 3
+--   HAVING count(*) > 1;
+--
+-- Any row returned is a real duplicate send that must be reconciled by hand
+-- before this index can be created. Do not resolve it by deleting log rows
+-- blindly: each one records a message that was actually dispatched.
 CREATE UNIQUE INDEX IF NOT EXISTS "dealer_outreach_log_live_attempt_key" ON "dealer_outreach_log"("dealer_prospect_id", "outreach_sequence_step", "channel") WHERE "status" <> 'failed';
 
 -- ────────────────────────────────────────────────── apollo_person_candidates
