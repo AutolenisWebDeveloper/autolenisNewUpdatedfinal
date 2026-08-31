@@ -36,15 +36,23 @@ export const CALL_DISPOSITIONS = [
 export type CallDisposition = (typeof CALL_DISPOSITIONS)[number];
 
 /**
- * Dispositions that mean a human actually spoke to someone at the dealership.
- * Only these advance the prospect — a voicemail is an attempt, not a contact,
- * and treating it as one would inflate the funnel with unanswered calls.
+ * Dispositions that CLOSE the attempt, and so advance the prospect.
+ *
+ * Two conditions, both required: a human spoke to someone, AND there is nothing
+ * left to dial. A voicemail fails the first — it is an attempt, not a contact,
+ * and counting it would inflate the funnel with unanswered calls.
+ *
+ * CALLBACK_REQUESTED fails the SECOND, which is why it is not here. It was, and
+ * the effect was backwards: advancing sets CONTACTED, the queue's workable set
+ * is [DISCOVERED, SCRIPTED, DRAFTED], so logging "they asked us to call back"
+ * removed that dealer from the call list. The one disposition that means call
+ * again was the one that guaranteed nobody would. It stays a selectable
+ * disposition and still writes its row — it just leaves the prospect workable.
  */
 export const CONNECTED_DISPOSITIONS: readonly CallDisposition[] = [
   "CONNECTED",
   "GATEKEEPER",
   "NOT_INTERESTED",
-  "CALLBACK_REQUESTED",
 ];
 
 /** Statuses a connecting call may advance FROM. Never moves a prospect back. */
