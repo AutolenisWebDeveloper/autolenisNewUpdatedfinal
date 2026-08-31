@@ -30,9 +30,22 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   const deal = await prisma.deal.findFirst({
     where: { id: dealId, buyerId: buyer.id },
-    include: { eSignEnvelope: true },
+    include: { eSignEnvelope: true, offer: { select: { dealerId: true } } },
   });
   if (!deal) return errorResponse("NOT_FOUND", "Deal not found", 404);
+
+  // A concierge (vehicle-request) deal has no Offer, and VehicleRequestOffer carries
+  // no dealer identity — so no dealership exists to confirm a proposed time. Letting
+  // the proposal through would park the pickup in PROPOSED permanently: only
+  // confirmPickup/counterAsDealer can move it, and both require a dealerId that is
+  // null here. Concierge handovers are coordinated by AutoLenis staff instead.
+  if (!deal.offer?.dealerId) {
+    return errorResponse(
+      "NO_DEALER_ON_DEAL",
+      "This is a concierge-coordinated pickup. Our team arranges the handover with you directly — no scheduling needed here.",
+      409,
+    );
+  }
 
   if (deal.eSignEnvelope?.status !== "COMPLETED") {
     return errorResponse(

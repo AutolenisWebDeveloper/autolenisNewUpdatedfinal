@@ -33,8 +33,10 @@ export async function GET(request: NextRequest) {
     // into the contract stage. This converges deals that reached a satisfied
     // insurance state by a path that did not itself advance them. Idempotent and
     // non-throwing — a no-op for every deal that is not in exactly that state.
+    // Attributed to SYSTEM, not BUYER: reading a status page is not the buyer
+    // performing the transition.
     if (activeDeal?.status === "INSURANCE_PENDING") {
-      await advanceOnInsuranceSatisfied(activeDeal.id, { actorId: buyer.id, actorRole: "BUYER" });
+      await advanceOnInsuranceSatisfied(activeDeal.id);
     }
 
     // Single fact-derived machine (lib/services/buyer/journey) — same logic the

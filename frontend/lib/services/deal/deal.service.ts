@@ -76,6 +76,18 @@ interface AdvanceOptions {
   force?: boolean;
   /** Extra deal fields to write atomically alongside the status change. */
   data?: Prisma.DealUpdateInput;
+  /**
+   * Only advance when the deal is in THIS state; otherwise no-op.
+   *
+   * Without it a caller that observed state X and then called in is re-resolved
+   * against whatever the deal became — and if that new state also legally reaches
+   * `newStatus`, the deal is written BACKWARDS. Concretely: an insurance-gate
+   * driver that observed INSURANCE_PENDING could pull a deal that had already
+   * reached CONTRACT_REVIEW back to CONTRACT_PENDING, because contract re-submit
+   * makes that transition legal. Set this whenever the advance is only correct
+   * from a specific observed state.
+   */
+  expectedFrom?: DealStatus;
 }
 
 /**
@@ -83,20 +95,29 @@ interface AdvanceOptions {
  * - Rejects illegal transitions with DealTransitionError unless `force` is set.
  * - Enforces the insurance hard-gate before COMPLETED unless `force` is set.
  * - Writes DealStatusHistory + a buyer activity event.
+ *
+ * Resolves to TRUE only when this call performed the transition; FALSE on every
+ * no-op path (already in the target state, or `expectedFrom` did not match). Most
+ * callers can ignore it; drivers that report whether they advanced must not.
  */
 export async function advanceDealStatus(
   dealId: string,
   newStatus: DealStatus,
   opts: AdvanceOptions = {},
-): Promise<void> {
+): Promise<boolean> {
   const deal = await prisma.deal.findUnique({ where: { id: dealId } });
   if (!deal) throw new Error("Deal not found");
 
   // Idempotent no-op when already in the target state (still merge extra data).
   if (deal.status === newStatus) {
     if (opts.data) await prisma.deal.update({ where: { id: dealId }, data: opts.data });
-    return;
+    return false;
   }
+
+  // From-guard: the caller asserted this advance is only correct out of a specific
+  // state. Checked here AND on the post-race re-resolve below, so a deal that moved
+  // on under us is never dragged backwards into `newStatus`.
+  if (opts.expectedFrom && deal.status !== opts.expectedFrom) return false;
 
   if (!opts.force && !canTransition(deal.status, newStatus)) {
     throw new DealTransitionError(deal.status, newStatus);
@@ -166,6 +187,7 @@ export async function advanceDealStatus(
   if (newStatus === DealStatus.COMPLETED) {
     await emitDealCompletionEvent(dealId);
   }
+  return true;
 }
 
 /**
@@ -203,12 +225,18 @@ export async function advanceOnInsuranceSatisfied(
     if (deal.status !== DealStatus.INSURANCE_PENDING) return false;
     if (!INSURANCE_SATISFIED.includes(deal.insuranceStatus)) return false;
 
-    await advanceDealStatus(dealId, DealStatus.CONTRACT_PENDING, {
+    const advanced = await advanceDealStatus(dealId, DealStatus.CONTRACT_PENDING, {
       actorId: opts.actorId,
       actorRole: opts.actorRole ?? "SYSTEM",
       reason: `Insurance proof on file (${deal.insuranceStatus})`,
+      // Only out of INSURANCE_PENDING. CONTRACT_REVIEW → CONTRACT_PENDING is also
+      // legal (contract re-submit), so without this a concurrent writer that had
+      // already carried the deal into review would see it dragged back here.
+      expectedFrom: DealStatus.INSURANCE_PENDING,
     });
-    return true;
+    // Report what actually happened: the from-guard may have declined the advance
+    // because a concurrent writer already carried the deal forward.
+    return advanced;
   } catch (err) {
     logger.error("[deal] insurance-gate advance failed (non-fatal):", err);
     return false;

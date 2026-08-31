@@ -57,6 +57,10 @@ mock.module("@/lib/auth/dealer-api", {
   },
 });
 
+mock.module("@/lib/logger", {
+  namedExports: { logger: { error: () => {}, warn: () => {}, info: () => {} } },
+});
+
 mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
@@ -148,20 +152,27 @@ test("another dealer's QR is rejected and completes nothing (IDOR blocked)", asy
   assert.equal(advanceCalls.length, 0);
 });
 
-test("CONCIERGE deal (no dealer on the deal) is rejected TRUTHFULLY, not as a wrong-dealer error", async () => {
+test("CONCIERGE deal (no dealer on the deal) can never be completed by a dealer scan", async () => {
   pickupRow = conciergePickup();
   const res = await scan();
   assert.equal(advanceCalls.length, 0, "a dealer must never complete a deal that has no dealer");
+  assert.equal(txCalls, 0, "and must never mark the pickup row complete");
+  assert.equal(res.status, 422);
   const body = await res.json();
-  assert.equal(
-    body.error.code,
-    "NO_DEALER_ON_DEAL",
-    "a dealer-less (concierge) deal must report its own distinct reason, not INVALID_TOKEN",
-  );
-  assert.match(
-    body.error.message,
-    /concierge/i,
-    "the message must explain this pickup is concierge-coordinated, not a permissions failure",
+  // Deliberately the SAME response as a wrong-dealer token: a distinguishable
+  // "no dealer on this deal" answer, returned ahead of the ownership check, would
+  // make this endpoint a state oracle for anyone holding a QR token. The concierge
+  // distinction is logged server-side instead.
+  assert.equal(body.error.code, "INVALID_TOKEN", "must not leak the dealer-less state to the caller");
+  const wrongDealerBody = await (async () => {
+    pickupRow = dealerPickup();
+    authedDealer = { id: "dealer_2" };
+    return (await scan()).json();
+  })();
+  assert.deepEqual(
+    body.error,
+    wrongDealerBody.error,
+    "concierge and wrong-dealer rejections must be indistinguishable to the caller",
   );
 });
 

@@ -210,3 +210,28 @@ test("never throws — a DB failure while driving the gate is swallowed", async 
   const { advanceOnInsuranceSatisfied } = await load();
   assert.equal(await advanceOnInsuranceSatisfied("d1"), false, "returns false instead of throwing");
 });
+
+test("NEVER rewinds: losing the race to a deal that moved on to CONTRACT_REVIEW must not pull it back", async () => {
+  // CONTRACT_REVIEW → CONTRACT_PENDING is a LEGAL transition (contract re-submit),
+  // so without a from-guard the race loser re-resolves against the fresh state and
+  // legally writes the deal BACKWARDS — stranding a passing Contract Shield deal.
+  ctrl.deal.status = "INSURANCE_PENDING";
+  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  ctrl.raceTo = "CONTRACT_REVIEW"; // another writer advances past us mid-flight
+  const { advanceOnInsuranceSatisfied } = await load();
+  await advanceOnInsuranceSatisfied("d1");
+  assert.equal(ctrl.deal.status, "CONTRACT_REVIEW", "the deal must stay where the winner put it");
+  assert.equal(
+    ctrl.historyCreates.length,
+    0,
+    "no history row claiming an insurance-driven advance that never legitimately happened",
+  );
+});
+
+test("expectedFrom guards advanceDealStatus against advancing from any other state", async () => {
+  ctrl.deal.status = "CONTRACT_REVIEW";
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "CONTRACT_PENDING", { expectedFrom: "INSURANCE_PENDING" });
+  assert.equal(ctrl.deal.status, "CONTRACT_REVIEW", "no write when the deal is not in the expected state");
+  assert.equal(ctrl.updateManyCalls.length, 0);
+});

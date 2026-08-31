@@ -112,10 +112,18 @@ export default async function PickupPage() {
         <div className="bg-al-surface border border-al-border rounded-al-lg p-6 shadow-al-1" data-testid="pickup-proposed">
           <div className="flex items-center gap-2 mb-2">
             <Hourglass size={18} className="text-al-warning" aria-hidden="true" />
-            <h2 className="font-display text-lg font-semibold text-al-text">Waiting for the dealership</h2>
+            <h2 className="font-display text-lg font-semibold text-al-text">
+              {hasDealer ? "Waiting for the dealership" : "Your concierge is confirming"}
+            </h2>
           </div>
+          {/* A dealer-less deal can only have reached PROPOSED before concierge
+              deals were excluded from the dealer round-trip. No dealership will
+              ever respond to it, so don't promise one. */}
           <p className="text-sm text-al-text-muted">
-            You proposed <span className="font-medium text-al-text">{fmt(pickup?.proposedTime)}</span>. The dealership will confirm it or suggest another time — we&apos;ll let you know as soon as they respond.
+            You proposed <span className="font-medium text-al-text">{fmt(pickup?.proposedTime)}</span>.{" "}
+            {hasDealer
+              ? "The dealership will confirm it or suggest another time — we'll let you know as soon as they respond."
+              : "Our concierge team is confirming the handover directly and will be in touch shortly."}
           </p>
         </div>
 

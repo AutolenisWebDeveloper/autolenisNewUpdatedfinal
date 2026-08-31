@@ -4,6 +4,7 @@
 // BuyerActivityEvent emitted, Resend completion email fired (best-effort).
 
 import { NextRequest } from "next/server";
+import { logger } from "@/lib/logger";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
 import {
@@ -40,22 +41,23 @@ export async function POST(request: NextRequest) {
     return errorResponse("INVALID_TOKEN", "QR code not found or invalid.", 422);
   }
 
-  // A concierge (vehicle-request) deal has no Offer, and VehicleRequestOffer carries
-  // no dealer identity — so there is NO dealer who can authorize this scan. Reject
-  // it on its own terms: reporting "not valid for this dealer" would send a
-  // legitimate dealer chasing a permissions problem that does not exist. These
-  // pickups are concierge-coordinated and completed by AutoLenis staff via
-  // POST /api/admin/deals/[dealId]/pickup/complete.
-  if (!pickup.deal.offer?.dealerId) {
-    return errorResponse(
-      "NO_DEALER_ON_DEAL",
-      "This is a concierge-coordinated pickup with no assigned dealership, so it can't be completed by dealer scan. Our concierge team finalizes it — contact support@autolenis.com if you're expecting to hand this vehicle over.",
-      409,
-    );
-  }
-
-  // Token must belong to one of this dealer's offers
-  if (pickup.deal.offer.dealerId !== dealer.id) {
+  // Authorization: the token must belong to THIS dealer's deal. A concierge
+  // (vehicle-request) deal has no Offer, and VehicleRequestOffer carries no dealer
+  // identity — so it has no dealer at all and can never be scanned by anyone; it is
+  // completed by AutoLenis staff via the admin pickup-completion route.
+  //
+  // Both cases return the SAME response on purpose. Answering "this deal has no
+  // dealer" distinctly would make the scan endpoint a state oracle for anyone
+  // holding a token, ahead of the ownership check — and the QR nonce is not
+  // cryptographically strong (Math.random + a timestamp). The distinction is
+  // logged server-side instead, where support can actually use it.
+  const dealDealerId = pickup.deal.offer?.dealerId ?? null;
+  if (dealDealerId !== dealer.id) {
+    if (dealDealerId === null) {
+      logger.warn(
+        `[pickup/scan] dealer ${dealer.id} scanned concierge deal ${pickup.dealId} — no dealer on deal; completed by AutoLenis staff`,
+      );
+    }
     return errorResponse("INVALID_TOKEN", "QR code is not valid for this dealer.", 422);
   }
 
