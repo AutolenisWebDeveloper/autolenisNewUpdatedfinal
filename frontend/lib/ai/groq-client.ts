@@ -13,15 +13,10 @@
 // module's defaults.
 
 import { complete, completeStream, type ChatMessage as ProviderChatMessage } from "@/lib/ai/provider";
+import { CHAT_TRANSPORT_POLICY } from "@/lib/ai/transport-policy";
 
 const PRIMARY_MODEL = "openai/gpt-oss-120b" as const;
 const FALLBACK_MODEL = "openai/gpt-oss-20b" as const;
-
-// The groq-sdk applied these to every request this helper made
-// (`core.js`: `maxRetries = 2, timeout = 60000`). The SDK is gone from the call
-// path, so they are declared here rather than silently lost.
-const SDK_MAX_RETRIES = 2;
-const SDK_TIMEOUT_MS = 60_000;
 
 export type ChatMessage = ProviderChatMessage;
 
@@ -56,14 +51,30 @@ export async function groqChat(
     temperature: options.temperature ?? 0.7,
     topP: 1.0,
     // The groq-sdk defaults this helper's callers were built against, restored
-    // explicitly now that the transport is a bare fetch.
-    maxRetries: SDK_MAX_RETRIES,
-    timeoutMs: SDK_TIMEOUT_MS,
+    // explicitly now that the transport is a bare fetch. Shared with the Zura
+    // chat service, which serves the same surfaces through a different entry.
+    maxRetries: CHAT_TRANSPORT_POLICY.maxRetries,
+    timeoutMs: CHAT_TRANSPORT_POLICY.timeoutMs,
   });
   return { content: result.content, model: result.model, tokensUsed: result.tokensUsed };
 }
 
-/** Streaming completion (returns async iterable). No fallback, as before. */
+/**
+ * Streaming completion (returns async iterable). No fallback, as before.
+ *
+ * DIVERGENCE FROM THE SDK, stated rather than hidden: the groq-sdk cleared its
+ * timeout once response HEADERS arrived, so its 60s bounded time-to-first-byte
+ * and never truncated a long body. The timeout here is per-attempt and would
+ * abort a stream still producing tokens at 60s. It is kept because it is the
+ * strictly safer direction (a stalled stream is bounded rather than infinite)
+ * and because this function currently has NO production callers — the streaming
+ * path in use is `streamConcierge`, which passes no timeout at all and so is
+ * unchanged. A future caller streaming a long completion should ask for a
+ * time-to-first-byte bound instead of inheriting this one.
+ *
+ * No `maxRetries`: retrying a partially-consumed stream would replay tokens the
+ * caller already yielded.
+ */
 export async function* groqChatStream(
   messages: ChatMessage[],
   options: GroqChatOptions = {},
@@ -74,6 +85,6 @@ export async function* groqChatStream(
     messages,
     maxTokens: options.maxTokens ?? 1024,
     temperature: options.temperature ?? 0.7,
-    timeoutMs: SDK_TIMEOUT_MS,
+    timeoutMs: CHAT_TRANSPORT_POLICY.timeoutMs,
   });
 }

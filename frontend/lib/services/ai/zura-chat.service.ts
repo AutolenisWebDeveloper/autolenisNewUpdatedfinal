@@ -35,6 +35,7 @@
 import { createHash, randomUUID } from "crypto";
 import { logger } from "@/lib/logger";
 import { complete, type ChatMessage, type ChatModelId } from "@/lib/ai/provider";
+import { CHAT_TRANSPORT_POLICY } from "@/lib/ai/transport-policy";
 import { ZURA_SYSTEM_PROMPT } from "@/lib/ai/zura-knowledge";
 import {
   buildAdminContext,
@@ -483,6 +484,15 @@ export async function runZuraTurn(
       maxTokens: def.maxTokens,
       temperature: def.temperature,
       topP: 1.0,
+      // Every surface this service now serves previously reached the model
+      // through `groqChat` -> the groq-sdk, which bounded each request at 60s
+      // and retried a transient failure twice. The SDK is no longer in this
+      // path and `complete()` injects no defaults (bare-fetch callers must not
+      // gain retries they never had), so the policy is carried explicitly.
+      // Without it a stalled provider socket pins the lambda — holding the
+      // Prisma connection `buildContext` opened — until the platform timeout.
+      maxRetries: CHAT_TRANSPORT_POLICY.maxRetries,
+      timeoutMs: CHAT_TRANSPORT_POLICY.timeoutMs,
     });
   } catch (err) {
     const msg = String(err);
