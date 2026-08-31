@@ -35,7 +35,7 @@
     "test:dealer": "tsx --test lib/services/dealer/__tests__/*.test.ts",
     "test:amips": "tsx --test lib/amips/intelligence/__tests__/*.test.ts",
     "test:admin-deals": "tsx --test --experimental-test-module-mocks app/api/admin/deals/__tests__/*.test.ts",
-    "test:admin-dealers": "tsx --test --experimental-test-module-mocks app/api/admin/dealers/__tests__/*.test.ts",
+    "test:admin-dealers": "tsx --test --experimental-test-module-mocks app/api/admin/dealers/__tests__/*.test.ts app/api/admin/dealer-outreach/__tests__/*.test.ts",
     "test:affiliate-routes": "tsx --test --experimental-test-module-mocks app/api/affiliate/__tests__/*.test.ts",
     "test:admin-authz": "tsx --test --experimental-test-module-mocks app/api/admin/affiliates/__tests__/*.test.ts app/api/admin/buyers/__tests__/*.test.ts app/api/admin/crm/__tests__/*.test.ts",
     "test:admin-auctions": "tsx --test --experimental-test-module-mocks app/api/admin/auctions/__tests__/*.test.ts",
