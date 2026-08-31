@@ -370,3 +370,18 @@ never executes. Import-time coupling is coupling.
 **Suggested improvement:** Add a two-line rule to the testing skill: before adding a `test:*` script for a new suite, check whether an existing script already globs that `__tests__` directory and whether that script is chained in `test:all`; add a new script only for a genuinely new directory. Either way, prove it by running `pnpm test:coverage-check` rather than reasoning about it.
 
 **Principle:** When a guard is executable, the answer to "is this registered?" is the guard's output, not an inspection of the manifest. Document the cheap way to ask the guard, so contributors verify instead of pre-emptively adding redundant configuration.
+
+### Observation 23: A repeating scheduler's skip rules must guarantee forward progress, not just prevent duplicates
+
+**Status:** OPEN
+**Date:** 2026-08-31
+**Session context:** Building a daily cron that seeds article-generation work from a fixed-order keyword list. The spec named two skip rules (already-produced, currently-in-flight) and a per-run cap; I implemented exactly those and shipped a starvation bug that the owner caught in review.
+**Skill:** autolenis-system-architecture
+**Type:** open-source
+**Phase/Area:** Designing a repeating scheduler / queue seeder
+
+**Issue:** The two skip rules covered "don't redo finished work" and "don't double-enqueue work in flight", but nothing covered permanently-failed work. A terminally-failed item was neither in-flight nor did it leave a completed-work row, so it returned to the eligible pool every run — and because candidates were selected in fixed source order with `slice(0, cap)`, failures near the head of the list re-filled the entire batch forever. With roughly `cap` permanent failures the queue would spend its whole daily budget re-running the same doomed items and never reach new work. I noticed the daily-retry behaviour while writing it, documented it in a comment as intended, and moved on — treating an unbounded, order-biased, budget-consuming loop as a characteristic instead of a defect. The fix was to partition the eligible pool into never-attempted and previously-attempted, fill new-first, and bound retries to a fraction of the cap so each pool absorbs the other's unused slots.
+
+**Suggested improvement:** Add a checklist item to the background-jobs / scheduler guidance: for any repeating selector over a bounded batch, state explicitly what happens to permanently-failed items on the NEXT run, and prove forward progress is guaranteed regardless of the failure count. Concretely — if selection is `filter(...).slice(0, cap)` over a fixed-order source, ask whether a stuck item can reoccupy its slot indefinitely; if so, partition the pool and reserve the majority of the cap for un-attempted work. Also worth a rule: emit per-pool counters (new vs retry) rather than one total, so the pathology is visible in the run record.
+
+**Principle:** Idempotence and progress are different properties, and a repeating job needs both. Skip rules written to prevent duplicate work only establish "nothing is done twice concurrently"; they say nothing about whether the frontier advances. Any bounded, repeating selector over an ordered candidate set needs an explicit liveness argument — and when a known-bad item can consume the same slot every cycle, documenting it as intended behaviour is not a substitute for bounding it.

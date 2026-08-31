@@ -65,18 +65,12 @@ mock.module("@/lib/prisma", {
         },
       },
       contentGenerationJobItem: {
-        findMany: async ({
-          where,
-        }: {
-          where: { targetSlug?: { in?: string[] }; status?: { in?: string[] } };
-        }) => {
+        findMany: async ({ where }: { where: { targetSlug?: { in?: string[] } } }) => {
           calls.itemWhere.push(where);
           const wanted = new Set(where.targetSlug?.in ?? []);
-          const statuses = new Set(where.status?.in ?? []);
           return itemRows
             .filter((i) => i.targetSlug !== null && wanted.has(i.targetSlug))
-            .filter((i) => statuses.has(i.status))
-            .map((i) => ({ targetSlug: i.targetSlug }));
+            .map((i) => ({ targetSlug: i.targetSlug, status: i.status }));
         },
       },
       contentGenerationJob: {
@@ -184,12 +178,18 @@ test("skips slugs with an in-flight job item (QUEUED / PROCESSING / PAUSED)", as
   );
 });
 
-test("the in-flight query filters on exactly QUEUED, PROCESSING and PAUSED", async () => {
+test("exactly QUEUED, PROCESSING and PAUSED count as in-flight", async () => {
+  const { IN_FLIGHT_STATUSES } = await load();
+  assert.deepEqual([...IN_FLIGHT_STATUSES].sort(), ["PAUSED", "PROCESSING", "QUEUED"]);
+});
+
+test("one item probe per run serves both the in-flight and the attempted check", async () => {
   const { seedScheduledGeneration } = await load();
   await seedScheduledGeneration(25);
-  assert.equal(calls.itemWhere.length, 1, "one in-flight probe per run");
-  const status = (calls.itemWhere[0] as { status?: { in?: string[] } }).status;
-  assert.deepEqual([...(status?.in ?? [])].sort(), ["PAUSED", "PROCESSING", "QUEUED"]);
+  assert.equal(calls.itemWhere.length, 1, "a single query, not one per rule");
+  // It must NOT filter on status: the attempted/never-attempted partition needs
+  // settled rows (FAILED especially) that an in-flight-only filter would hide.
+  assert.equal((calls.itemWhere[0] as { status?: unknown }).status, undefined);
 });
 
 test("a settled item (SUCCEEDED / FAILED / CANCELED) does NOT block a slug", async () => {
@@ -315,6 +315,8 @@ test("returns the full diagnosable shape for the cron-monitor run record", async
     skippedExisting: 1,
     skippedInFlight: 1,
     enqueued: 3,
+    enqueuedNew: 3,
+    enqueuedRetry: 0,
     jobId: "job-1",
   });
 });
@@ -327,4 +329,133 @@ test("an empty keyword database is a clean no-op, not a throw", async () => {
   assert.equal(result.enqueued, 0);
   assert.equal(result.jobId, null);
   assert.equal(calls.jobCreate.length, 0);
+});
+
+// ── Starvation: forward progress must survive a permanent-failure backlog ─────
+//
+// The defect these pin: FAILED is not an in-flight status and a terminally-failed
+// item leaves no ContentArticle row, so neither skip rule excludes it. With
+// `eligible` walked in fixed CONTENT_KEYWORDS order, a deterministically-failing
+// slug returned to the eligible pool every run AT ITS ORIGINAL POSITION — ~25
+// permanent failures near the head of the list re-filled the whole daily batch
+// forever and the corpus never advanced.
+
+test("30 never-attempted slugs, cap 25 → 25 new enqueued and zero retries", async () => {
+  keywords = slugs(30);
+  const { seedScheduledGeneration } = await load();
+  const result = await seedScheduledGeneration(25);
+  assert.equal(result.enqueued, 25);
+  assert.equal(result.enqueuedNew, 25, "a clean pool spends the whole cap on new work");
+  assert.equal(result.enqueuedRetry, 0, "no retry slots are reserved when nothing has failed");
+});
+
+test("REGRESSION: 25 FAILED head slugs + 100 new, cap 25 → the run still advances", async () => {
+  // 125 keywords: the first 25 are permanently failed, the rest never attempted.
+  keywords = slugs(125);
+  itemRows = keywords.slice(0, 25).map((k) => ({
+    targetSlug: k.slug,
+    status: "FAILED",
+    payloadJson: "{}",
+  }));
+
+  const { seedScheduledGeneration } = await load();
+  const result = await seedScheduledGeneration(25);
+
+  const failedHead = new Set(keywords.slice(0, 25).map((k) => k.slug));
+  const created = (calls.jobCreate[0]!.items as { create: Array<{ targetSlug: string }> }).create;
+  const enqueuedSlugs = created.map((i) => i.targetSlug);
+  const newlySeeded = enqueuedSlugs.filter((s) => !failedHead.has(s));
+
+  assert.equal(result.enqueued, 25);
+  assert.ok(
+    result.enqueuedNew > result.enqueuedRetry,
+    `the batch must be predominantly never-attempted (new=${result.enqueuedNew}, retry=${result.enqueuedRetry})`,
+  );
+  assert.equal(newlySeeded.length, result.enqueuedNew);
+  assert.ok(
+    newlySeeded.length >= 20,
+    `forward progress: expected >=20 never-attempted slugs, got ${newlySeeded.length}`,
+  );
+  // The precise starvation assertion: the batch is NOT the failed head over again.
+  assert.notDeepEqual(
+    [...enqueuedSlugs].sort(),
+    [...failedHead].sort(),
+    "the run must not re-enqueue the same failed head every day",
+  );
+});
+
+test("REGRESSION: consecutive runs keep advancing past a permanent-failure backlog", async () => {
+  keywords = slugs(125);
+  itemRows = keywords.slice(0, 25).map((k) => ({
+    targetSlug: k.slug,
+    status: "FAILED",
+    payloadJson: "{}",
+  }));
+  const failedHead = new Set(keywords.slice(0, 25).map((k) => k.slug));
+
+  const { seedScheduledGeneration } = await load();
+  const first = await seedScheduledGeneration(25);
+  // Run 2 sees run 1's items as in-flight (no drain in between), exactly as production would.
+  const second = await seedScheduledGeneration(25);
+
+  const batch = (n: number) =>
+    (calls.jobCreate[n]!.items as { create: Array<{ targetSlug: string }> }).create.map(
+      (i) => i.targetSlug,
+    );
+  const newIn = (n: number) => batch(n).filter((s) => !failedHead.has(s));
+
+  assert.ok(first.enqueuedNew >= 20 && second.enqueuedNew >= 20, "both runs seed new slugs");
+  assert.equal(
+    newIn(0).filter((s) => newIn(1).includes(s)).length,
+    0,
+    "the second run seeds DIFFERENT new slugs — the corpus is advancing",
+  );
+});
+
+test("all slugs attempted-and-failed → retries fill the whole batch", async () => {
+  keywords = slugs(60);
+  itemRows = keywords.map((k) => ({ targetSlug: k.slug, status: "FAILED", payloadJson: "{}" }));
+  const { seedScheduledGeneration } = await load();
+  const result = await seedScheduledGeneration(25);
+  assert.equal(result.enqueued, 25, "retry still works when there is nothing new");
+  assert.equal(result.enqueuedNew, 0);
+  assert.equal(result.enqueuedRetry, 25, "retries expand into the unused new-slug slots");
+});
+
+test("the retry quota is respected when both pools are non-empty", async () => {
+  keywords = slugs(110);
+  // 10 failed, 100 never attempted — retries must take the quota, not all 10.
+  itemRows = keywords.slice(0, 10).map((k) => ({
+    targetSlug: k.slug,
+    status: "FAILED",
+    payloadJson: "{}",
+  }));
+  const { seedScheduledGeneration, CONTENT_SEED_RETRY_QUOTA_FRACTION } = await load();
+  const result = await seedScheduledGeneration(25);
+  const quota = Math.floor(25 * CONTENT_SEED_RETRY_QUOTA_FRACTION);
+  assert.equal(quota, 5, "20% of a 25-item cap");
+  assert.equal(result.enqueuedRetry, quota, "retries are capped at the quota, not the pool size");
+  assert.equal(result.enqueuedNew, 25 - quota);
+});
+
+test("the retry quota is at most 20% of the cap", async () => {
+  const { CONTENT_SEED_RETRY_QUOTA_FRACTION } = await load();
+  assert.ok(
+    CONTENT_SEED_RETRY_QUOTA_FRACTION > 0 && CONTENT_SEED_RETRY_QUOTA_FRACTION <= 0.2,
+    "a larger share would let retries crowd out forward progress",
+  );
+});
+
+test("a CANCELED or SUCCEEDED-without-article slug is a retry, not new work", async () => {
+  // "Attempted" is ANY job item, not just a failed one — a slug that was canceled
+  // mid-flight has consumed an attempt and must not compete as never-attempted.
+  keywords = slugs(30);
+  itemRows = [
+    { targetSlug: "kw-1", status: "CANCELED", payloadJson: "{}" },
+    { targetSlug: "kw-2", status: "FAILED", payloadJson: "{}" },
+  ];
+  const { seedScheduledGeneration } = await load();
+  const result = await seedScheduledGeneration(25);
+  assert.equal(result.enqueuedRetry, 2, "both previously-attempted slugs land in the retry pool");
+  assert.equal(result.enqueuedNew, 23);
 });

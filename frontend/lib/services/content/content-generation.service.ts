@@ -162,7 +162,9 @@ export function isContentAutopilotEnabled(): boolean {
  * raises Groq spend LINEARLY: 25 items/day is 25 generations/day. 25 is the
  * batch size scripts/generate-articles.ts already chose as "cheap and
  * reviewable"; CONTENT_KEYWORDS holds 900 slugs, so at this cap a full corpus
- * seeds over ~36 days.
+ * seeds in ~36 days with no failures, or ~45 days if the retry quota
+ * (CONTENT_SEED_RETRY_QUOTA_FRACTION) is fully claimed every run — 20 new slugs
+ * per run instead of 25.
  */
 export const CONTENT_SEED_MAX_PER_RUN = 25;
 
@@ -185,12 +187,36 @@ export interface SeedScheduledGenerationResult {
   skippedInFlight: number;
   /** Slugs actually enqueued this run (never more than maxPerRun). */
   enqueued: number;
+  /** Of `enqueued`, slugs never attempted before — this is forward progress. */
+  enqueuedNew: number;
+  /** Of `enqueued`, previously-attempted slugs being retried (quota-bounded). */
+  enqueuedRetry: number;
   /** The ContentGenerationJob created, or null when nothing was enqueued. */
   jobId: string | null;
 }
 
 /** Item statuses that mean a slug is already being worked on. */
-const IN_FLIGHT_STATUSES = ["QUEUED", "PROCESSING", "PAUSED"] as const;
+export const IN_FLIGHT_STATUSES = ["QUEUED", "PROCESSING", "PAUSED"] as const;
+
+/**
+ * Share of each batch that previously-attempted (i.e. failed or canceled) slugs
+ * may claim while never-attempted slugs remain.
+ *
+ * Without this bound the seeder STARVES. FAILED is not an in-flight status and a
+ * terminally-failed item leaves no ContentArticle row, so neither skip rule
+ * excludes it — and because candidates are walked in fixed CONTENT_KEYWORDS
+ * order, a deterministically-failing slug returned to the eligible pool every run
+ * at its ORIGINAL POSITION. Roughly `maxPerRun` permanent failures near the head
+ * of the keyword list would re-fill the entire daily batch forever: 25 Groq calls
+ * a day, and a corpus that never advances. Fewer failures still permanently
+ * occupied a slot each, decaying throughput.
+ *
+ * Reserving the rest of the batch for never-attempted slugs makes forward
+ * progress unconditional, whatever the failure count, while retries still happen.
+ * Retries expand into unused new-slug slots, so when nothing new is left the
+ * whole batch is retries.
+ */
+export const CONTENT_SEED_RETRY_QUOTA_FRACTION = 0.2;
 
 /**
  * Seed a day's worth of article generation from the keyword database.
@@ -205,15 +231,24 @@ const IN_FLIGHT_STATUSES = ["QUEUED", "PROCESSING", "PAUSED"] as const;
  *      such rule because it is one-shot; a REPEATING cron needs it, or every run
  *      re-enqueues the slugs the previous run left in the queue and burns Groq
  *      budget on duplicate work;
- *   4. capped at maxPerRun.
+ *   4. what remains is partitioned into never-attempted and previously-attempted
+ *      (any ContentGenerationJobItem at all means attempted), and the batch is
+ *      filled new-first with retries bounded by CONTENT_SEED_RETRY_QUOTA_FRACTION.
  *
  * A settled item (SUCCEEDED/FAILED/CANCELED) does not block a slug: SUCCEEDED
  * always left an article row (rule 2 stops it), while FAILED/CANCELED slugs are
- * genuinely un-generated and are meant to be re-attempted on a later day — that
- * is the only retry path for a cron-seeded item, since no admin is watching to
- * press "retry failed". A slug whose generation throws deterministically will
- * therefore be re-attempted daily; `considered`/`skippedExisting`/`enqueued` in
- * the cron-monitor run record are what make that visible.
+ * genuinely un-generated. Retrying them is the only retry path for a cron-seeded
+ * item, since no admin is watching to press "retry failed" — but it is a QUOTA,
+ * not a free pass, precisely so a deterministically-failing slug can never crowd
+ * out new work (see CONTENT_SEED_RETRY_QUOTA_FRACTION). `enqueuedNew` vs
+ * `enqueuedRetry` in the cron-monitor run record is how a growing failure
+ * backlog shows up.
+ *
+ * Fairness within the retry pool is deliberately NOT solved here: retries are
+ * taken in keyword order, so with more failures than the quota the same slugs are
+ * retried each run. That is bounded waste (<=20% of the cap), not starvation —
+ * ordering the pool by least-recently-attempted would need per-slug attempt
+ * timestamps and is a separate change.
  *
  * Concurrency: two overlapping seed runs could both read "not in flight" and
  * enqueue the same slugs, costing a duplicate generation each. The window is the
@@ -234,6 +269,8 @@ export async function seedScheduledGeneration(
     skippedExisting: 0,
     skippedInFlight: 0,
     enqueued: 0,
+    enqueuedNew: 0,
+    enqueuedRetry: 0,
     jobId: null,
   };
 
@@ -243,6 +280,7 @@ export async function seedScheduledGeneration(
   const candidateSlugs = CONTENT_KEYWORDS.map((k) => k.slug);
   const considered = candidateSlugs.length;
   const empty: SeedScheduledGenerationResult = { ...inert, enabled: true, considered };
+  // NOTE: `inert` supplies enqueuedNew/enqueuedRetry = 0 for every early return.
   // A non-finite or negative cap is clamped to 0 — a spend cap must fail toward
   // spending nothing, explicitly rather than by accident.
   const cap = Number.isFinite(maxPerRun) ? Math.max(0, Math.trunc(maxPerRun)) : 0;
@@ -255,19 +293,30 @@ export async function seedScheduledGeneration(
   });
   const haveArticle = new Set(existing.map((e) => e.slug));
 
-  // Rule 3 — the check the one-shot CLI does not need.
-  const inFlight = await prisma.contentGenerationJobItem.findMany({
-    where: {
-      targetSlug: { in: candidateSlugs },
-      status: { in: [...IN_FLIGHT_STATUSES] },
-    },
-    select: { targetSlug: true },
+  // Rules 3 + 4 in ONE probe: every job item for a candidate slug, whatever its
+  // status. An in-flight-only filter would hide exactly the settled rows (FAILED,
+  // CANCELED) the never-attempted/previously-attempted partition depends on.
+  // content_generation_job_items has no index on target_slug, so this is a scan —
+  // fine for a once-a-day run against a table of this size; if it ever grows an
+  // order of magnitude, an index on target_slug is the fix (needs a migration).
+  const items = await prisma.contentGenerationJobItem.findMany({
+    where: { targetSlug: { in: candidateSlugs } },
+    select: { targetSlug: true, status: true },
+    distinct: ["targetSlug", "status"],
   });
-  const queued = new Set(inFlight.map((i) => i.targetSlug).filter((s): s is string => !!s));
+  const inFlightSet: ReadonlySet<string> = new Set(IN_FLIGHT_STATUSES);
+  const queued = new Set<string>();
+  const attempted = new Set<string>();
+  for (const item of items) {
+    if (!item.targetSlug) continue;
+    attempted.add(item.targetSlug);
+    if (inFlightSet.has(item.status)) queued.add(item.targetSlug);
+  }
 
   let skippedExisting = 0;
   let skippedInFlight = 0;
-  const eligible: string[] = [];
+  const neverAttempted: string[] = [];
+  const previouslyAttempted: string[] = [];
   for (const slug of candidateSlugs) {
     // Checked in order so a slug matching both rules is counted exactly once.
     if (haveArticle.has(slug)) {
@@ -278,10 +327,18 @@ export async function seedScheduledGeneration(
       skippedInFlight += 1;
       continue;
     }
-    eligible.push(slug);
+    (attempted.has(slug) ? previouslyAttempted : neverAttempted).push(slug);
   }
 
-  const slugs = eligible.slice(0, cap);
+  // Never-attempted slugs get the batch minus the retry quota, so forward
+  // progress is guaranteed however long the failure backlog grows. Each pool then
+  // absorbs whatever the other leaves unused: a clean corpus spends the whole cap
+  // on new work, and a fully-attempted one spends it all on retries.
+  const retryQuota = Math.floor(cap * CONTENT_SEED_RETRY_QUOTA_FRACTION);
+  const reservedForRetry = Math.min(previouslyAttempted.length, retryQuota);
+  const newSlugs = neverAttempted.slice(0, cap - reservedForRetry);
+  const retrySlugs = previouslyAttempted.slice(0, cap - newSlugs.length);
+  const slugs = [...newSlugs, ...retrySlugs];
   // `enqueueGeneration` throws on an empty batch; a fully-seeded corpus is a
   // normal quiet run, not an error, and must not leave an empty job row behind.
   if (slugs.length === 0) {
@@ -308,6 +365,8 @@ export async function seedScheduledGeneration(
     // The count actually PERSISTED, not the count we asked for — enqueueGeneration
     // de-duplicates its input, so this is the honest number for the run record.
     enqueued: job.items.length,
+    enqueuedNew: newSlugs.length,
+    enqueuedRetry: retrySlugs.length,
     jobId: job.id,
   };
 }

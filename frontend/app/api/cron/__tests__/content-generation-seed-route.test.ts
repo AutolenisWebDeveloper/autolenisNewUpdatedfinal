@@ -29,6 +29,8 @@ mock.module("@/lib/services/content/content-generation.service", {
             skippedExisting: 870,
             skippedInFlight: 5,
             enqueued: 25,
+            enqueuedNew: 20,
+            enqueuedRetry: 5,
             jobId: "job-1",
           }
         : {
@@ -37,6 +39,8 @@ mock.module("@/lib/services/content/content-generation.service", {
             skippedExisting: 0,
             skippedInFlight: 0,
             enqueued: 0,
+            enqueuedNew: 0,
+            enqueuedRetry: 0,
             jobId: null,
           };
     },
@@ -99,6 +103,8 @@ test("accepts a valid cron secret and returns the seed summary", async () => {
   assert.equal(body.data.jobId, "job-1");
   assert.equal(body.data.skippedExisting, 870);
   assert.equal(body.data.skippedInFlight, 5);
+  assert.equal(body.data.enqueuedNew, 20, "forward progress is visible in the run record");
+  assert.equal(body.data.enqueuedRetry, 5);
 });
 
 test("passes the 25-item per-run cap to the seeder", async () => {
