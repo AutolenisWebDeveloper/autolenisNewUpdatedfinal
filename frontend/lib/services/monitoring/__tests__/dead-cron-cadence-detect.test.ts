@@ -175,16 +175,21 @@ describe("fast crons keep their existing behaviour", () => {
     assert.equal(alerted, 1);
   });
 
-  test("a RUNNING row still clears the streak (known, unchanged)", async () => {
+  test("an in-flight RUNNING row no longer masks the streak behind it", async () => {
     const { detectFailedCrons } = await import(SERVICE);
-    // Documented on leadingFailedStreak: orphaned RUNNING rows are a separate
-    // open defect in cron-monitor's lifecycle, deliberately not changed here.
+    // This test previously asserted the opposite and was marked "known,
+    // unchanged". The defect is now fixed: a 3-minute-old RUNNING row is still
+    // within the platform ceiling, so its outcome is unknown and it is skipped —
+    // the two real failures behind it stand.
     state.runRows = [
       run("esign-artifact-reconcile", "RUNNING", 3),
       run("esign-artifact-reconcile", "FAILED", 8, "42703"),
       run("esign-artifact-reconcile", "FAILED", 13, "42703"),
     ];
-    assert.equal((await detectFailedCrons(NOW)).length, 0);
+    const signals = await detectFailedCrons(NOW);
+    assert.equal(signals.length, 1);
+    assert.equal(signals[0].consecutiveFailures, 2);
+    assert.equal(signals[0].lastError, "42703", "reports the newest COUNTED run");
   });
 });
 

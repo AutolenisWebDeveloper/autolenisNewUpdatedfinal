@@ -139,6 +139,41 @@ function slowCronNames(): string[] {
   );
 }
 
+// ── Orphaned RUNNING rows ────────────────────────────────────────────────────
+//
+// THE DEFECT
+// startCronRun writes a RUNNING row and only completeCronRun/failCronRun move it
+// (cron-monitor.service.ts). A run killed mid-flight — a maxDuration timeout, an
+// OOM, a deploy landing mid-execution — therefore leaves RUNNING behind forever,
+// and nothing reaps it.
+//
+// That row then read as "not a failure" and CLEARED the failed streak, exactly as
+// a COMPLETED run does. Two consequences, both silent:
+//   - a cron alternating FAILED / killed never reaches a streak of 2;
+//   - a cron that is killed on EVERY run has no FAILED rows at all, so it is
+//     invisible here — while dead-cron detection reads its fresh RUNNING row as
+//     proof of life. Neither detector sees it.
+//
+// A RUNNING row means "outcome unknown", never "succeeded", and past a bound it
+// means "this run died".
+//
+// THE BOUND
+// 300 seconds is Vercel's maximum function duration and the highest maxDuration
+// any route in this repo declares, so no run can legitimately still be executing
+// beyond it. Ten minutes is double that ceiling — margin for clock skew between
+// the DB-assigned startedAt and the moment we observe it. Anything older is
+// orphaned by construction, not by guess.
+export const ORPHANED_RUNNING_AFTER_MINUTES = 10;
+
+/** True when a RUNNING row is too old to still be executing — the run died. */
+export function isOrphanedRunning(
+  run: { status: string; startedAt: Date },
+  now: Date,
+): boolean {
+  if (run.status !== "RUNNING") return false;
+  return now.getTime() - run.startedAt.getTime() > ORPHANED_RUNNING_AFTER_MINUTES * 60_000;
+}
+
 // Bound on the bulk recent-runs query. The fleet currently writes roughly 1,300
 // rows per 180 minutes, so this is ~3x headroom; rows are ordered newest-first
 // and only the leading streak per cron is read, so truncation would drop the
@@ -153,6 +188,14 @@ export interface FailedCronSignal {
   consecutiveFailures: number;
   lastError: string | null;
   lastRunAt: Date | null;
+  /**
+   * How many runs in the streak were orphaned RUNNING rows rather than recorded
+   * failures. Optional so existing callers that hand-build a signal still
+   * type-check; absent means none. Worth reporting because it separates two very
+   * different root causes: a handler that throws, versus runs being killed
+   * mid-flight (timeout / OOM / deploy).
+   */
+  abandonedRuns?: number;
 }
 
 // NOTE: the per-cron threshold is deliberately NOT carried on the signal. It is
@@ -168,31 +211,54 @@ interface RunRow {
 }
 
 /**
- * Count the leading consecutive-FAILED streak in a newest-first run list.
+ * Count the leading unsuccessful streak in a newest-first run list.
  *
- * NOTE: a RUNNING row breaks the streak exactly as a COMPLETED one does. That is
- * unchanged here and is a separate, still-open defect — nothing reaps orphaned
- * RUNNING rows (startCronRun writes RUNNING and only completeCronRun/failCronRun
- * move it), so a run killed mid-flight can mask a real streak. Fixing that is a
- * change to cron-monitor's lifecycle, not to cadence handling.
+ * Three dispositions, because a run has three meanings and not two:
+ *
+ *   FAILED             the handler threw — counts toward the streak.
+ *   RUNNING, orphaned  the run died mid-flight (see ORPHANED_RUNNING_AFTER_MINUTES)
+ *                      — counts toward the streak. It is an unsuccessful run whose
+ *                      error was never recorded, not a success.
+ *   RUNNING, in flight the outcome is not known yet — SKIPPED, neither counting
+ *                      nor clearing. An in-flight run is not evidence of recovery,
+ *                      and treating it as one is what let an alternating
+ *                      FAILED/killed cron sit permanently below the threshold.
+ *                      It also matters for health-check itself: its own row is
+ *                      RUNNING while this very scan executes, so breaking on it
+ *                      meant health-check could never report itself as failing.
+ *   anything else      COMPLETED/SKIPPED — a real outcome that clears the streak.
  */
-function leadingFailedStreak(runs: readonly Omit<RunRow, "cronName">[]): {
+function leadingFailedStreak(
+  runs: readonly Omit<RunRow, "cronName">[],
+  now: Date,
+): {
   streak: number;
+  abandoned: number;
   lastError: string | null;
   lastRunAt: Date | null;
 } {
   let streak = 0;
+  let abandoned = 0;
   let lastError: string | null = null;
   let lastRunAt: Date | null = null;
+
   for (const run of runs) {
-    if (run.status !== "FAILED") break; // a COMPLETED/RUNNING run clears the streak
+    if (run.status === "RUNNING") {
+      // Still within the platform's execution ceiling: unknown, not recovered.
+      if (!isOrphanedRunning(run, now)) continue;
+      abandoned += 1;
+    } else if (run.status !== "FAILED") {
+      break; // a genuine non-failure outcome clears the streak
+    }
+    // Capture from the newest COUNTED run, not the newest run — an in-flight run
+    // that was skipped above must not become the reported one.
     if (streak === 0) {
       lastError = run.error;
       lastRunAt = run.startedAt;
     }
     streak += 1;
   }
-  return { streak, lastError, lastRunAt };
+  return { streak, abandoned, lastError, lastRunAt };
 }
 
 /**
@@ -263,9 +329,15 @@ export async function detectFailedCrons(now: Date = new Date()): Promise<FailedC
 
   const out: FailedCronSignal[] = [];
   for (const [cronName, runs] of byName) {
-    const { streak, lastError, lastRunAt } = leadingFailedStreak(runs);
+    const { streak, abandoned, lastError, lastRunAt } = leadingFailedStreak(runs, now);
     if (streak > 0) {
-      out.push({ cronName, consecutiveFailures: streak, lastError, lastRunAt });
+      out.push({
+        cronName,
+        consecutiveFailures: streak,
+        lastError,
+        lastRunAt,
+        abandonedRuns: abandoned,
+      });
     }
   }
   return out;
@@ -275,6 +347,38 @@ export async function detectFailedCrons(now: Date = new Date()): Promise<FailedC
 // immediately rather than being suppressed by the first's still-open alert.
 function failedCronAlertTitle(cronName: string): string {
   return `Failing cron: ${cronName}`;
+}
+
+// Describe the streak in the terms an operator needs to start debugging: a
+// handler that throws and a run that is killed mid-flight look identical in the
+// count but have completely different causes (a bug vs a timeout/OOM/deploy).
+//
+// Two forms of the same three cases, because they serve two surfaces: this
+// compact one goes in the health report's one-line alert list, and the verbose
+// describeUnsuccessfulRuns() below goes in the out-of-band notification body,
+// where the operator has no other context and the jargon needs unpacking. Both
+// must name mid-flight deaths whenever abandonedRuns > 0 — saying "failed" of a
+// run that recorded no error sends the reader hunting for a FAILED row that does
+// not exist. A test pins that agreement.
+export function unsuccessfulRunSummary(c: FailedCronSignal): string {
+  const n = c.consecutiveFailures;
+  const abandoned = c.abandonedRuns ?? 0;
+  if (abandoned === 0) return `${n} consecutive failed run(s)`;
+  if (abandoned === n) return `${n} consecutive run(s) killed mid-flight (no error recorded)`;
+  return `${n} consecutive unsuccessful run(s), ${abandoned} killed mid-flight`;
+}
+
+function describeUnsuccessfulRuns(c: FailedCronSignal): string {
+  const n = c.consecutiveFailures;
+  const abandoned = c.abandonedRuns ?? 0;
+  if (abandoned === 0) return `failed ${n} run(s) in a row`;
+  if (abandoned === n) {
+    return (
+      `${n} run(s) in a row that started and never finished — no error was ` +
+      `recorded, so they were killed mid-flight (timeout / OOM / deploy), not thrown`
+    );
+  }
+  return `failed ${n} run(s) in a row, ${abandoned} of which died mid-flight without recording an error`;
 }
 
 // Trim a handler error to a bounded, operator-readable summary for the alert body.
@@ -316,10 +420,10 @@ export async function reportFailedCrons(
         data: {
           title,
           body:
-            `Cron '${c.cronName}' has failed ${c.consecutiveFailures} run(s) in a row ` +
+            `Cron '${c.cronName}' has ${describeUnsuccessfulRuns(c)} ` +
             `(alert threshold ${failedStreakThresholdFor(c.cronName)} for its ` +
             `${CRON_STALENESS[c.cronName]?.intervalMinutes ?? "unknown"}-minute cadence) — ` +
-            `its handler is throwing, not merely not firing. ` +
+            `it is firing, not merely absent. ` +
             `Last error: ${sanitizeCronError(c.lastError)}. Review via /admin/operations.`,
           type: "SYSTEM_ALERT",
           actionUrl: "/admin/operations",
@@ -346,9 +450,11 @@ export async function reportFailedCrons(
  * does not block the others. Returns the count of fresh alerts raised.
  *
  * NOTE: the phrasing is deliberately "no run recorded" — this detects a cron that
- * did not FIRE (its latest run is stale). A cron that fires but its handler throws
- * still writes a recent (FAILED) run, so it reads as alive here; that failure mode
- * surfaces via the FAILED status on the run itself, not via dead-cron detection.
+ * did not FIRE (its latest run is stale). A cron that fires but does not succeed
+ * still writes a recent run, so it reads as alive here — whether that run is FAILED
+ * (the handler threw) or a RUNNING row left behind by a run killed mid-flight.
+ * Both failure modes surface via detectFailedCrons(), which reads the run's status
+ * rather than merely its freshness; neither is dead-cron detection's to catch.
  */
 export async function reportOverdueCrons(
   overdue: CronLiveness[],

@@ -678,7 +678,7 @@ the fleet was structurally unalertable, `prequal-sla-escalation` and `prequal-pu
 
 Owner-verified proof case: **`social-market-index` (weekly) has failed 100% of its recorded runs
 and never produced a signal.** Dead-cron detection does not cover it either — that module's own
-note (`dead-cron.service.ts:199-202`) says a cron that fires and throws "reads as alive here".
+note (`dead-cron.service.ts:452-457`) says a cron that fires but does not succeed "reads as alive here".
 
 **The rule.** The threshold-of-2 exists to avoid paging on a blip "the next scheduled run clears".
 That is a *time* argument, not a *count* argument: it only holds if the next run arrives soon.
@@ -698,7 +698,7 @@ plus a late fire; further back and a cron is OVERDUE, which dead-cron detection 
 | --- | --- |
 | `failedStreakThresholdFor()`, `failedLookbackMinutesFor()` | `dead-cron.service.ts` |
 | Two bounded queries (base window + a slow-cron window), deduped and filtered per-cron | `dead-cron.service.ts` → `detectFailedCrons` |
-| Reporter and health cycle derive the threshold per cron | `dead-cron.service.ts` → `reportFailedCrons`; `health.service.ts:262` |
+| Reporter and health cycle derive the threshold per cron | `dead-cron.service.ts` → `reportFailedCrons`; `health.service.ts:265` |
 | Alert body names the threshold and cadence, so a "1 run in a row" alert reads correctly | `dead-cron.service.ts` |
 
 The threshold is **not** carried on `FailedCronSignal`. It is derived from the registry at each
@@ -717,11 +717,65 @@ form the streak". That is no longer true, and both the comment
 decision itself is unchanged: reasons 1 and 2 (it would be untrue; `failCronRun` destroys the
 payload) never depended on it and were always the stronger two.
 
-**Still open, deliberately untouched:** a `RUNNING` row clears the failure streak
-(`leadingFailedStreak`), and nothing reaps orphaned `RUNNING` rows — `startCronRun` writes
-RUNNING and only `completeCronRun`/`failCronRun` move it, so a run killed mid-flight can mask a
-real streak. That is a change to cron-monitor's lifecycle, not to cadence handling, and it is
-pinned by a test recording the current behaviour.
+**Deferred here, fixed next** — see the following section. The `RUNNING`-row half of this was
+recorded as still open when the cadence fix landed; it is no longer.
+
+### Orphaned RUNNING rows no longer clear the failure streak
+
+The second defect in the same detector, fixed on this branch after the cadence fix.
+
+`startCronRun` writes a `RUNNING` row and only `completeCronRun`/`failCronRun` move it
+(`cron-monitor.service.ts`). Nothing reaps it. So a run killed mid-flight — a `maxDuration`
+timeout, an OOM, a deploy landing mid-execution — leaves `RUNNING` behind permanently.
+`leadingFailedStreak` then read that row as "not a failure" and **cleared the streak, exactly as
+a `COMPLETED` run does.**
+
+Two consequences, both silent:
+
+- a cron alternating FAILED / killed never reaches a streak of 2, so it never alerts;
+- a cron killed on **every** run has no `FAILED` rows at all — invisible to failing-cron
+  detection — while dead-cron detection reads its fresh `RUNNING` row as proof of life.
+  **Neither detector sees it.** This is the exact gap the cadence fix was meant to close, reached
+  by a different route.
+
+**The rule.** A `RUNNING` row means *outcome unknown*, never *succeeded*; past a bound it means
+*this run died*. Three dispositions replace two:
+
+| Row | Disposition | Why |
+| --- | --- | --- |
+| `FAILED` | counts | the handler threw |
+| `RUNNING`, older than the bound | counts, and is tallied as abandoned | an unsuccessful run whose error was never recorded |
+| `RUNNING`, within the bound | **skipped** — neither counts nor clears | the outcome is not known yet; in-flight is not evidence of recovery |
+| `COMPLETED` / `SKIPPED` | clears | a genuine non-failure outcome |
+
+**The bound: `ORPHANED_RUNNING_AFTER_MINUTES = 10`.** 300 seconds is Vercel's maximum function
+duration and the highest `maxDuration` any route in this repo declares (measured across 70 cron
+routes), so no run can legitimately still be executing beyond it. Ten minutes is double that
+ceiling — margin for clock skew between the DB-assigned `startedAt` and the moment it is
+observed. Every writer of a `RUNNING` row reaches the DB through a cron route, so the ceiling
+binds all of them; the bound is derived, not guessed.
+
+A consequence worth naming: `detectFailedCrons` executes *inside* the health cycle, so
+**`health-check`'s own row is always `RUNNING` at scan time.** Breaking the streak on it meant
+health-check could never report itself as failing, however many times it had. Skipping in-flight
+rows fixes that too.
+
+| Change | File |
+| --- | --- |
+| `ORPHANED_RUNNING_AFTER_MINUTES`, `isOrphanedRunning()` | `dead-cron.service.ts` |
+| `leadingFailedStreak(runs, now)` — three dispositions; `lastError`/`lastRunAt` captured from the newest *counted* run, not the newest row | `dead-cron.service.ts` |
+| `abandonedRuns?: number` on `FailedCronSignal` (optional, so hand-built signals still type-check) | `dead-cron.service.ts` |
+| `describeUnsuccessfulRuns()` (verbose, notification body) and `unsuccessfulRunSummary()` (compact, health report line) | `dead-cron.service.ts`; consumed by `health.service.ts` |
+
+**Why the run count is reported by cause.** A thrown handler and a killed run are identical in
+the count and completely different in the fix — a bug versus a timeout/OOM/deploy. Both alert
+surfaces now say which. Calling a mid-flight death a "failure" would send an operator hunting for
+a `FAILED` row that was never written; a test pins that the two message forms agree on naming it.
+
+**Not done, and still open: nothing reaps the orphaned rows.** This change corrects how they are
+*interpreted*; the rows themselves still sit in `cron_job_logs` as `RUNNING` forever. Reaping
+them is a change to cron-monitor's run lifecycle — a different surface, and not what was asked
+for here.
 
 ### Branch-by-branch closure — answering V-2's goal directly
 

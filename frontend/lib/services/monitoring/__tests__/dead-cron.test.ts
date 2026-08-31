@@ -185,10 +185,31 @@ test("detectFailedCrons counts the trailing consecutive-FAILED streak per cron",
   assert.equal(byName.has("health-check"), false, "a cron whose latest run COMPLETED is not failing");
 });
 
-test("detectFailedCrons: a RUNNING latest run clears the streak (not counted as failure)", async () => {
+// CORRECTED: this test previously asserted that ANY RUNNING row clears the
+// streak, which pinned a defect. A run still in flight has an UNKNOWN outcome —
+// it is not evidence of recovery — so it is now skipped rather than treated as a
+// success. Two real failures behind it still meet the threshold. Under the old
+// behaviour a cron failing every run went unreported whenever a scan happened to
+// catch a fresh RUNNING row, which for a frequent cron is most of the time.
+test("detectFailedCrons: an in-flight RUNNING run is skipped, not treated as recovery", async () => {
   const { detectFailedCrons } = await import("@/lib/services/monitoring/dead-cron.service");
   state.runRows = [
     run("sla-check", "RUNNING", 1),
+    run("sla-check", "FAILED", 6),
+    run("sla-check", "FAILED", 11),
+  ];
+  const failing = await detectFailedCrons(NOW);
+  const s = failing.find((c) => c.cronName === "sla-check");
+  assert.ok(s, "two real failures behind an in-flight run still report");
+  assert.equal(s.consecutiveFailures, 2);
+  assert.equal(s.abandonedRuns, 0, "the in-flight run is not counted as a failure");
+});
+
+test("detectFailedCrons: a COMPLETED latest run does clear the streak", async () => {
+  // The legitimate clearing case, unchanged: a real success ends the streak.
+  const { detectFailedCrons } = await import("@/lib/services/monitoring/dead-cron.service");
+  state.runRows = [
+    run("sla-check", "COMPLETED", 1),
     run("sla-check", "FAILED", 6),
     run("sla-check", "FAILED", 11),
   ];
