@@ -130,7 +130,11 @@ const prismaMock = {
     },
     count: async () => cap.providerFailureCounts,
   },
-  buyer: { findUnique: async () => null },
+  buyer: {
+    findUnique: async () => null,
+    // Fix 1 — the orchestrator backfills city/state/zip via conditional updateMany.
+    updateMany: async () => ({ count: 1 }),
+  },
   $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
     const { prisma } = await import("@/lib/prisma");
     return fn(prisma);

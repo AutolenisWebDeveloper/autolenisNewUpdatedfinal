@@ -194,11 +194,16 @@ describe("admin IA — page inventory", () => {
     //   /admin                            — Batch 2 root redirect.
     //   /admin/dealer-outreach/coverage   — dealer contact-coverage census
     //     (HUB under /admin/dealer-outreach; read-only ops readout).
+    //   /admin/dealer-outreach/queue      — prioritized outreach work queue
+    //     (RAIL entry under Dealers, beside Dealer Recruitment). It is its own
+    //     rail item rather than a hub page because it is a daily working
+    //     surface, not a readout: the pipeline page answers "what do we have",
+    //     this one answers "who do I contact right now".
     const baseline = new Set(BASELINE_ADMIN_ROUTES);
     const added = ROUTES.filter((r) => !baseline.has(r));
     assert.deepEqual(
       added,
-      ["/admin", "/admin/dealer-outreach/coverage"],
+      ["/admin", "/admin/dealer-outreach/coverage", "/admin/dealer-outreach/queue"],
       "an unlisted admin page appeared — add it here deliberately, with its IA placement",
     );
   });

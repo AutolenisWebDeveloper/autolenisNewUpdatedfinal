@@ -20,14 +20,28 @@ export async function GET(request: NextRequest, { params }: Props) {
   return adminSuccess(data);
 }
 
+// Location validation at parity with the buyer-facing prequal route
+// (app/api/buyer/prequal/route.ts). This is the path the buyer-location
+// backfill runs through, and `dealer-invitation.service` resolves coordinates
+// via `lookupZip` (first 5 chars) then `lookupCity` (keyed "city,state"). An
+// unvalidated "Texas" or "787" resolves to null there, so the row would look
+// backfilled while the auction still invited zero dealers.
+const STATE_RE = /^[A-Za-z]{2}$/;
+const ZIP_RE = /^\d{5}(-\d{4})?$/;
+
 const patchSchema = z.object({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   phone: z.string().optional(),
   address: z.string().optional(),
   city: z.string().optional(),
-  state: z.string().optional(),
-  zip: z.string().optional(),
+  // `""` is permitted and means "not provided / clear this field", matching
+  // app/api/buyer/profile/route.ts. The admin edit form seeds itself from
+  // `buyer.state ?? ""` and submits every field on each save, so rejecting the
+  // empty string would 400 every save for a buyer whose location is NULL —
+  // exactly the rows the backfill exists to repair.
+  state: z.string().regex(STATE_RE, "State must be a 2-letter code").optional().or(z.literal("")),
+  zip: z.string().regex(ZIP_RE, "ZIP must be 5 digits (or ZIP+4)").optional().or(z.literal("")),
   employmentStatus: z.string().optional(),
   incomeRange: z.string().optional(),
   reason: z.string().min(1, "Reason is required for profile updates"),

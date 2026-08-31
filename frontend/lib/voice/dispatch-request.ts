@@ -7,6 +7,7 @@
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { normalizePhone } from "@/lib/utils/phone";
 import { UserRole } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
@@ -134,7 +135,7 @@ export async function dispatchVehicleRequest(
       buyerId = existingUser.buyer.id;
     } else if (existingUser && !existingUser.buyer) {
       const buyer = await prisma.buyer.create({
-        data: { userId: existingUser.id, firstName, lastName, phone: callerPhone || null },
+        data: { userId: existingUser.id, firstName, lastName, phone: normalizePhone(callerPhone) || null },
       });
       buyerId = buyer.id;
     } else {
@@ -157,7 +158,7 @@ export async function dispatchVehicleRequest(
             data: { supabaseId, email, role: UserRole.BUYER, requiresPasswordChange: true },
           });
           return tx.buyer.create({
-            data: { userId: user.id, firstName, lastName, phone: callerPhone || null },
+            data: { userId: user.id, firstName, lastName, phone: normalizePhone(callerPhone) || null },
           });
         });
         buyerId = buyer.id;

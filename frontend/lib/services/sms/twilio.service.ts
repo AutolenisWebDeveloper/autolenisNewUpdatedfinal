@@ -15,10 +15,10 @@ function getTwilioClient(): ReturnType<typeof twilio> | null {
   return _client;
 }
 
-// A US number in strict E.164 form: "+1" followed by 10 digits = 12 chars.
-export function isValidUsPhone(phone: string | null | undefined): boolean {
-  return !!phone && phone.startsWith("+1") && phone.length === 12;
-}
+// Re-exported from lib/utils/phone so existing callers keep working. The
+// definition moved there because it is pure and client-reachable, and this
+// module is not: importing it from here drags the Twilio SDK along.
+export { isValidUsPhone } from "@/lib/utils/phone";
 
 // Send an SMS. Returns true on success. Never throws — send failures and a
 // missing Twilio config are logged and swallowed so callers can fire-and-forget.
