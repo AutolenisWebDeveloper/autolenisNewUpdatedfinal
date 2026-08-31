@@ -34,8 +34,8 @@ holds if the key is unset.
 
 | Table | Entries | Notes |
 | --- | --- | --- |
-| `ZIP_COORDS` | **173** | `lookupZip` slices to the first 5 chars |
-| `CITY_COORDS` | **127** | keyed `"city,state"` lowercased; `lookupCity` requires **both** |
+| `ZIP_COORDS` | **178** | 173 baseline + 75034/75035 (Frisco) + 33064/33068/33069 (Broward) |
+| `CITY_COORDS` | **130** | 127 baseline + `frisco,tx` + `pompano beach,fl` + `margate,fl`; keyed `"city,state"` lowercased, `lookupCity` requires **both** |
 
 Enumerate either with `npx tsx scripts/check-buyer-location-backfill.ts --coverage`.
 
@@ -166,6 +166,43 @@ Three properties matter more than the convenience:
 It sources **ZIP only**, because `buyer_opportunities` has no city or state
 column. Claiming to fill those would be fabricating.
 
+## 2b. Full production ZIP distribution — coverage verified
+
+The four recoverable rows were only part of the picture. Checked against the
+whole `buyer_opportunities` ZIP distribution (verified production counts,
+supplied by the owner and not re-derived here):
+
+| ZIP | City | Opportunities | Before | After |
+| --- | --- | --- | --- | --- |
+| `75024` | Plano, TX | 15 | `PLACES_BY_ZIP` | `PLACES_BY_ZIP` |
+| `75035` | Frisco, TX | 10 | `WILL_NOT_PLACE` | `PLACES_BY_ZIP` |
+| `33068` | Margate, FL | 5 | `WILL_NOT_PLACE` | `PLACES_BY_ZIP` |
+| `33069` | Pompano Beach, FL | 1 | `WILL_NOT_PLACE` | `PLACES_BY_ZIP` |
+| `75034` | Frisco, TX | 1 | `WILL_NOT_PLACE` | `PLACES_BY_ZIP` |
+| `30301` | Atlanta, GA | 1 | `PLACES_BY_ZIP` | `PLACES_BY_ZIP` |
+| `33064` | Pompano Beach, FL | (buyers.zip) | `WILL_NOT_PLACE` | `PLACES_BY_ZIP` |
+
+`75024` and `30301` were already covered. The three Broward ZIPs were not, and
+neither was `margate,fl` or `pompano beach,fl` in `CITY_COORDS` — Florida
+coverage stopped at Fort Lauderdale, Miami, Orlando, Tampa, Jacksonville and
+Tallahassee.
+
+Same provenance rule as Frisco: each ZIP carries its **city centroid**, not a
+per-ZIP centroid, because this table feeds a 50–150 mile radius filter and a
+documented city-level approximation beats a per-ZIP figure that cannot be
+sourced. `33064` and `33069` are both Pompano Beach ZIPs and share its centroid;
+`33068` is Margate.
+
+`lib/utils/__tests__/zip-coords-backfill-coverage.test.ts` pins a Broward
+bounding box, the north-of-Fort-Lauderdale ordering, and Margate-inland-of-
+coastal-Pompano. It also carries a cross-region guard asserting the Florida
+entries are not in Texas and the Texas entries are not in Florida — the two
+rounds of additions sit in the same file, so a copy-paste between them would be
+invisible to a bounding-box test that only checked one region. Both guards were
+verified non-vacuous by injecting the fault and confirming the failure.
+
+**Every ZIP in the production distribution now resolves.**
+
 ## 3. Sources, best first
 
 `PreQualification` is **not** a source — it has no location columns; that is the
@@ -290,13 +327,40 @@ carrying `activeDealersConsidered`, `dealersInRadius`, and `radiusMiles`. If
 that is what appears after the backfill, **the backfill worked and the platform
 needs dealers** — do not treat it as a failed backfill.
 
+### Expect this for every Florida and Georgia opportunity
+
+**Both dealers are in `75035` (Frisco, TX).** The Broward cluster is ~1,100
+miles away and Atlanta ~700; the widest invite radius is
+`MAX_DISTANCE_MILES = 150` (`dealer-invitation.service.ts:21`). So once
+geocoding resolves, a Florida or Georgia buyer will place successfully and then
+return **zero invitations with cause `NO_DEALER_IN_RANGE`**.
+
+**That is correct behaviour, not a defect, and not a failed backfill.** It is
+the fail-closed matcher doing its job: there is genuinely no dealer within range
+to invite, and inviting a Frisco dealer to a Margate buyer would be the
+reputational failure the geo-filter exists to prevent.
+
+What the geocoding additions buy is an **honest diagnosis**. Before them, a
+Florida buyer reported `BUYER_NOT_GEOCODABLE` — pointing at missing buyer data,
+which would have sent someone hunting for an address that was already on file.
+Now the same auction reports `NO_DEALER_IN_RANGE` with
+`activeDealersConsidered` and `radiusMiles` in the metadata, pointing at the
+real constraint: **dealer supply outside Texas**. Those two causes lead to
+completely different work, and only one of them is actionable by a backfill.
+
+Concretely, of the 33 opportunities in the distribution, ~25 are in the Frisco/
+Plano corridor where the dealers actually are, and ~7 are in Florida or Georgia
+where no amount of buyer-data repair will produce an invitation.
+
 ---
 
 ## 8. Verification status
 
 | Claim | Status |
 | --- | --- |
-| Static tables hold 173 ZIPs / 127 city-state pairs | `CODE-VERIFIED` — enumerated via the checker |
+| Static tables hold 178 ZIPs / 130 city-state pairs | `CODE-VERIFIED` — enumerated via the checker |
+| Every ZIP in the production distribution resolves | `CODE-VERIFIED` — checker run, 5/5 after the Broward additions (2/5 before) |
+| FL/GA opportunities will return `NO_DEALER_IN_RANGE` | `CODE-VERIFIED` by distance: both dealers in 75035, `MAX_DISTANCE_MILES = 150` (`dealer-invitation.service.ts:21`) |
 | Matcher resolves `geocodeZip(zip) ?? lookupCity(city, state)` | `CODE-VERIFIED` — `dealer-invitation.service.ts:181-186` |
 | `geocodeZip` returns null without the Google key | `CODE-VERIFIED` — `geocoding.service.ts:153` |
 | A real ZIP (`78745`) can be absent from the static table | `CODE-VERIFIED` — checker output |

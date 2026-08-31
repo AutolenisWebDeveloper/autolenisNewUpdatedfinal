@@ -7,11 +7,17 @@
 // production value is unverified. The static tables are therefore the worst
 // case, and the case this guard pins.
 //
-// The four recoverable buyers in docs/plans/BUYER-LOCATION-BACKFILL.md carry
-// 75035 (x3) and 75034 — both Frisco, TX. Before this change both MISSED the
-// static ZIP table and `frisco,tx` missed CITY_COORDS, so writing those ZIPs
-// would have resolved to null and the auctions would still have invited zero
-// dealers. The backfill would have looked done and changed nothing.
+// It pins every ZIP in the production buyer_opportunities distribution, not just
+// the ones a given backfill batch happens to write. Two rounds of additions so
+// far, each caught by the checker BEFORE any row was written:
+//
+//   Frisco, TX     75034, 75035        — the four recoverable buyers
+//   Broward, FL    33064, 33068, 33069 — the Florida opportunity cluster
+//
+// In both cases the ZIPs missed the static table and their cities missed
+// CITY_COORDS, so writing them would have resolved to null and the auctions
+// would still have invited zero dealers — a backfill that looked done and
+// changed nothing.
 //
 // Run: pnpm test:utils
 
@@ -97,4 +103,80 @@ test("no duplicate keys were introduced into the source literals", () => {
     const dupes = keys.filter((k, i) => keys.indexOf(k) !== i);
     assert.deepEqual(dupes, [], `duplicate ${label} keys in zip-coords.ts: ${dupes.join(", ")}`);
   }
+});
+
+// ─── Broward County, FL — the Florida opportunity cluster ────────────────────
+// Production buyer_opportunities distribution: 33068 Margate x5, 33069 Pompano
+// x1; buyers.zip also carries 33064 (a Pompano Beach ZIP). All three missed the
+// static table before this change.
+//
+// These resolve so the DIAGNOSIS is honest, not because a dealer will be found:
+// both dealers sit in 75035 (Frisco, TX), so a placeable Florida buyer returns
+// NO_DEALER_IN_RANGE rather than BUYER_NOT_GEOCODABLE. That distinction is the
+// whole point of Fix 2 — a dealer-supply gap must not masquerade as a
+// buyer-data gap.
+
+const BROWARD_ZIPS = ["33064", "33068", "33069"] as const;
+
+test("every Florida cluster ZIP resolves in the static table", () => {
+  for (const zip of BROWARD_ZIPS) {
+    assert.ok(
+      lookupZip(zip),
+      `${zip} must resolve without GOOGLE_GEOCODING_API_KEY — otherwise a Florida buyer reports BUYER_NOT_GEOCODABLE when the real cause is dealer supply`,
+    );
+  }
+});
+
+test("the city/state fallback resolves for the Florida cities", () => {
+  assert.ok(lookupCity("Margate", "FL"), "margate,fl must be in CITY_COORDS");
+  assert.ok(lookupCity("Pompano Beach", "FL"), "pompano beach,fl must be in CITY_COORDS");
+  // lookupCity lowercases both sides; the two-word city name must survive it.
+  assert.ok(lookupCity("pompano beach", "fl"));
+  assert.ok(lookupCity("POMPANO BEACH", "Fl"));
+});
+
+test("the Broward coordinates are in the right place", () => {
+  // Same discipline as Frisco: a wrong coordinate silently selects the wrong
+  // dealers. Broward County spans roughly 25.9-26.4N, 80.0-80.5W.
+  for (const zip of BROWARD_ZIPS) {
+    const c = lookupZip(zip)!;
+    assert.ok(c.lat > 25.9 && c.lat < 26.5, `${zip} latitude ${c.lat} is not in Broward County`);
+    assert.ok(c.lng > -80.5 && c.lng < -80.0, `${zip} longitude ${c.lng} is not in Broward County`);
+  }
+  for (const [city, st] of [["Margate", "FL"], ["Pompano Beach", "FL"]] as const) {
+    const c = lookupCity(city, st)!;
+    assert.ok(c.lat > 25.9 && c.lat < 26.5, `${city} latitude ${c.lat} is not in Broward County`);
+    assert.ok(c.lng > -80.5 && c.lng < -80.0, `${city} longitude ${c.lng} is not in Broward County`);
+  }
+});
+
+test("Broward geography: both cities north of Fort Lauderdale, Margate inland of Pompano", () => {
+  // Catches a coordinate pasted from the wrong row. Margate and Pompano Beach
+  // are both ~10-14mi north of Fort Lauderdale; Pompano Beach is coastal and
+  // Margate is inland, so Margate must sit further west.
+  const ftl = lookupCity("Fort Lauderdale", "FL")!;
+  const margate = lookupCity("Margate", "FL")!;
+  const pompano = lookupCity("Pompano Beach", "FL")!;
+
+  assert.ok(margate.lat > ftl.lat, "Margate must be north of Fort Lauderdale");
+  assert.ok(pompano.lat > ftl.lat, "Pompano Beach must be north of Fort Lauderdale");
+  assert.ok(margate.lng < pompano.lng, "Margate is inland, so west of coastal Pompano Beach");
+});
+
+test("the Florida ZIPs are not accidentally mapped to Texas", () => {
+  // The two rounds of additions sit in the same file; a copy-paste between them
+  // would be invisible to a bounding-box test that only checked one region.
+  for (const zip of BROWARD_ZIPS) {
+    assert.ok(lookupZip(zip)!.lng > -85, `${zip} must be in Florida, not Texas`);
+  }
+  for (const zip of BACKFILL_ZIPS) {
+    assert.ok(lookupZip(zip)!.lng < -90, `${zip} must be in Texas, not Florida`);
+  }
+});
+
+test("the already-covered distribution ZIPs still resolve", () => {
+  // 75024 (Plano x15) and 30301 (Atlanta x1) were already present. Pinned so a
+  // future edit to this table cannot silently drop them.
+  assert.ok(lookupZip("75024"), "75024 Plano must stay covered");
+  assert.ok(lookupZip("30301"), "30301 Atlanta must stay covered");
 });
