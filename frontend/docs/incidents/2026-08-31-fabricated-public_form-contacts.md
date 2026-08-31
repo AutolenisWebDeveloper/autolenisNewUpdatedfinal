@@ -237,15 +237,23 @@ What that costs, by caller:
 
 | Path | Behaviour while duplicates remain |
 | --- | --- |
-| `app/api/webhooks/twilio/inbound` | **Worst case.** `findContactByPhone` also uses `.maybeSingle()`, returns null on the multi-row error, so the route falls through to `upsertContact`, which throws. The outer handler (line 166) returns **HTTP 500**. `claimProviderEvent` has already claimed the `MessageSid`, so Twilio's retry hits the `duplicate` branch and returns empty TwiML — **the inbound SMS is dropped, not queued.** |
+| `app/api/webhooks/twilio/inbound` | `findContactByPhone` also uses `.maybeSingle()`, returns null on the multi-row error, so the route falls through to `upsertContact`, which throws. The outer handler (line 166) returns **HTTP 500**. The claim is **not** settled — `inboxClaim.settle()` is line 163, *after* the throw at 101 — so `processed` stays false and a Twilio redelivery returns `claimed`, **re-drives the handler, and fails again**. Every retry in Twilio's schedule 500s. The message never lands, but it fails **loudly and repeatedly**, not silently. |
 | `/api/cron/inactivity-scan` | `emitDomainEvent` catches, logs `contact resolve failed`, returns `contactId: null`. Degraded, not user-facing. This is the intended visible failure. |
-| `app/api/public/crm/partial-lead` | Email is matched first, so this only breaks when the email is *also* new. Narrower, but returns 500 when it does. |
+| `app/api/public/crm/partial-lead` | **Quietest, and worst for data integrity.** Email is matched first, so it only breaks when the email is *also* new — but its catch returns **HTTP 200 `{ ok: true }`**, so the browser is told the lead was captured while no contact row exists. A silently lost lead, with no error surfaced anywhere but the log. |
 | `request-vehicle`, `dealer-fee-lead`, `prequal`, `trade-in`, `buyer/searches`, `voice/dispatch-request` | Each wraps the call in `try/catch` and continues; the CRM contact is simply not created or updated. |
 
 **Note the pre-fix behaviour was not better — only quieter.** Before the fix, an inbound SMS from
 this person landed on a brand-new duplicate contact every time, fragmenting their conversation
 history across hundreds of rows. The fix converts silent fragmentation into a loud failure. Both
 are broken; only one is visible.
+
+> **Two corrections to an earlier draft of this table.** It claimed the Twilio retry was *deduped
+> and dropped* — that is backwards. `claimProviderEvent` returns `duplicate` only when `processed`
+> is true, and `settle()` (route line 163) runs *after* the throwing upsert (line 101), so the flag
+> is never set and the retry **re-drives**. It also claimed `partial-lead` returns 500; it returns
+> **200 `{ ok: true }`**. The corrected reading inverts which path is most dangerous: the SMS path
+> is noisy and self-evident in logs, while the lead-capture path fails **silently and reports
+> success**.
 
 **Recommendation: run the cleanup promptly after the fix deploys — do not queue it for a later
 maintenance window.** The deploy and the cleanup should be treated as one operation. If they must
@@ -260,8 +268,9 @@ That single property, plus the absence of every field a genuine capture writes, 
 
 ```sql
 WITH fabricated AS (
-  SELECT c.id, c.phone, c.created_at, t.created_at AS advanced_at
-  FROM contacts c
+  SELECT DISTINCT ON (c.id)          -- a contact with >1 matching stage_changed row would
+         c.id, c.phone, c.created_at, t.created_at AS advanced_at   -- otherwise fan out and
+  FROM contacts c                    -- inflate the count above the rows Step 2 updates
   JOIN contact_timeline_events t
     ON  t.contact_id      = c.id
     AND t.event_type      = 'stage_changed'
@@ -297,6 +306,36 @@ WHERE NOT EXISTS (                        -- never linked to a buyer/dealer/affi
           AND t2.event_type NOT IN ('stage_changed', 'domain_event'))
 ORDER BY f.created_at;
 ```
+
+> **`DISTINCT ON (c.id)` requires `ORDER BY c.id` inside the CTE.** Add it there if your client
+> rejects the statement; the outer `ORDER BY f.created_at` is only for reading the output.
+
+**This query under-matches by design, and the residual is not zero.** Both of its defining
+predicates depend on writes that `emit.ts` performs **best-effort inside `try/catch`** — the
+`stage_changed` timeline row and the `lifecycle_stage` advance. A fabricated row whose stage
+advance failed carries neither, so it is invisible to this query *and* it stayed in an early
+lifecycle stage, which means the scanner keeps selecting it. Expect a small residue. After Step 2,
+sweep for it explicitly rather than assuming it away:
+
+```sql
+-- Fabricated rows the main query cannot see: same signature, but the spine's
+-- best-effort stage write did not land. Review by hand — do NOT bulk-delete.
+SELECT c.id, c.lifecycle_stage, c.created_at
+FROM contacts c
+WHERE c.deleted_at IS NULL
+  AND c.email IS NULL
+  AND c.phone = '+19547562609'
+  AND c.source = 'public_form'
+  AND c.ip_address IS NULL
+  AND c.consent_sms = false AND c.consent_email = false
+  AND coalesce(array_length(c.tags, 1), 0) = 0
+  AND NOT EXISTS (SELECT 1 FROM contact_identities ci WHERE ci.contact_id = c.id)
+ORDER BY c.created_at;
+```
+
+The rows this returns that are **not** in the Step 1 set are either that residue or the seed rows
+from Step 3 — distinguish them by `lifecycle_stage` and `created_at`, and treat any row you cannot
+positively classify as real.
 
 **Verify before deleting.**
 
@@ -417,11 +456,61 @@ producing duplicates each run. Step 1 cannot have removed them, because it requi
   resolves to itself, the advance lands on it, it moves to `inactive`, and it leaves the scan.
   Satisfy yourself as to *why* it is 1 before closing out; under this document's model it should
   have been ≥2.
-- **0 rows** → Step 2 over-matched and removed a real contact. **Roll back** and re-derive Step 1.
+- **0 rows** → Step 2 over-matched and soft-deleted a real contact. Step 2 has **already
+  committed**, so there is nothing to `ROLLBACK`; the repair is a compensating **un-delete**. This
+  is why Step 2 keeps its frozen id list — restore from it, then re-derive Step 1:
+
+  ```sql
+  -- Only valid if the temp table still exists in this session; otherwise restore by
+  -- the exact deleted_at timestamp Step 2 stamped.
+  UPDATE contacts SET deleted_at = NULL, updated_at = now()
+  WHERE id IN (SELECT id FROM fabricated_ids);
+  ```
+
+  If the session is gone, `deleted_at` is your key: every row Step 2 touched carries the identical
+  `now()` value from that one statement. **Record that timestamp when you run Step 2.**
 
 To merge: keep the row that best represents the person — richest identity, earliest `created_at`,
-any `contact_identities` link — and soft-delete the others *after* re-pointing what references
-them:
+any `contact_identities` link.
+
+> **Merge the row-level state first, or the merge loses consent.** Re-pointing child rows moves
+> *history*; it does not move anything stored **on** the loser. `contacts.do_not_contact` is the
+> one that matters: if a loser carries `do_not_contact = true` and the keeper does not, soft-
+> deleting the loser **silently discards an opt-out** and the surviving row is contactable. The
+> same applies to `consent_sms` / `consent_email` (merge upward — `upsertContact` never downgrades
+> consent, and neither should this), and to `lead_score` / `lead_temperature`, which are
+> denormalised columns on `contacts`: re-pointing `lead_scoring_events` moves the ledger but does
+> **not** recompute the score on the keeper.
+
+```sql
+-- Merge row-level state onto the keeper BEFORE touching the children.
+-- Restrictive wins for suppression; permissive never overwrites restrictive.
+UPDATE contacts k SET
+  do_not_contact = k.do_not_contact OR l.dnc,
+  consent_sms    = k.consent_sms   OR l.sms,
+  consent_email  = k.consent_email OR l.email_ok,
+  first_name     = coalesce(k.first_name, l.first_name),
+  last_name      = coalesce(k.last_name,  l.last_name),
+  email          = coalesce(k.email,      l.email),
+  updated_at     = now()
+FROM (
+  SELECT bool_or(do_not_contact) AS dnc,
+         bool_or(consent_sms)    AS sms,
+         bool_or(consent_email)  AS email_ok,
+         min(first_name)         AS first_name,
+         min(last_name)          AS last_name,
+         min(email)              AS email
+  FROM contacts WHERE id = ANY(:loser_ids)
+) l
+WHERE k.id = :keep_id;
+```
+
+`email` can only ever be merged when the keeper's is NULL — the unique partial index on
+`lower(email)` guarantees no two live rows hold the same address, so there is nothing to
+reconcile. Re-derive `lead_score` from `lead_scoring_events` after the re-point if the score
+matters operationally; this document does not attempt it.
+
+Then re-point what references the losers:
 
 **Nine tables reference `contacts(id)`, not two.** Because the losers are *soft*-deleted, no
 `ON DELETE CASCADE` ever fires, so nothing is destroyed — but every child row stays attached to a
@@ -474,10 +563,23 @@ UPDATE contact_identities i SET contact_id = :keep_id
                     WHERE k.entity_type = i.entity_type AND k.entity_id = i.entity_id
                       AND k.contact_id = :keep_id);
 
-UPDATE contacts SET deleted_at = now(), updated_at = now() WHERE id = ANY(:loser_ids);
+UPDATE contacts SET deleted_at = now(), updated_at = now()
+ WHERE id = ANY(:loser_ids)
+   AND id <> :keep_id;          -- belt and braces: never soft-delete the row you kept
 
 COMMIT;
 ```
+
+**Re-verify after the merge** — the same query from the top of this step must now return exactly
+one row, and that row must carry the merged `do_not_contact` / consent flags:
+
+```sql
+SELECT id, email, first_name, do_not_contact, consent_sms, consent_email, lifecycle_stage
+FROM contacts WHERE phone = '+19547562609' AND deleted_at IS NULL;
+-- expect exactly 1 row
+```
+
+Only when that returns one row is contact resolution for this person actually restored.
 
 Do **not** hard-delete the losers: every CASCADE child above would be destroyed, including the
 real person's conversation and timeline history.
