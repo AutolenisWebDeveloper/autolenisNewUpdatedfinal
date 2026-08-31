@@ -30,6 +30,39 @@ const SCHEMA = readFileSync(join(ROOT, "schema.prisma"), "utf8");
 const MIGRATION = readFileSync(join(MIGRATION_DIR, "migration.sql"), "utf8");
 const ROLLBACK = readFileSync(join(MIGRATION_DIR, "rollback.sql"), "utf8");
 
+/**
+ * The migration with `--` comments removed.
+ *
+ * Safety assertions MUST run against this, not the raw file. A comment
+ * explaining why the migration contains no CREATE POLICY would otherwise fail a
+ * naive text match on "CREATE POLICY" — a false positive that pressures the
+ * author to delete the explanation rather than keep the guarantee. Only
+ * executable SQL can create a policy or drop a column.
+ */
+const MIGRATION_SQL = MIGRATION.split("\n")
+  .map((line) => line.split("--")[0])
+  .join("\n");
+
+/**
+ * Statement-initial lines of executable SQL, excluding anything inside a
+ * `DO $$ ... END $$` block. Those blocks carry their own guard (an EXCEPTION
+ * handler), which is checked separately — `ADD CONSTRAINT` has no
+ * `IF NOT EXISTS` form in postgres, so the block IS the idempotency mechanism.
+ */
+function guardableStatements(): string[] {
+  const out: string[] = [];
+  let inDoBlock = false;
+  for (const raw of MIGRATION_SQL.split("\n")) {
+    if (/^\s*DO \$\$/.test(raw)) inDoBlock = true;
+    if (inDoBlock) {
+      if (/END \$\$/.test(raw)) inDoBlock = false;
+      continue;
+    }
+    if (/^\s*(ALTER TABLE|CREATE)/i.test(raw)) out.push(raw);
+  }
+  return out;
+}
+
 /** The body of `model <name> { ... }` from schema.prisma. */
 function model(name: string): string {
   const m = SCHEMA.match(new RegExp(`^model ${name} \\{([\\s\\S]*?)^\\}`, "m"));
@@ -159,25 +192,27 @@ describe("new tables", () => {
 describe("migration safety", () => {
   test("adds no RLS policy — these tables are deny-all by having none", () => {
     assert.doesNotMatch(
-      MIGRATION,
+      MIGRATION_SQL,
       /CREATE POLICY/i,
       "adding a policy to a zero-policy RLS table OPENS access rather than hardening it",
     );
     assert.doesNotMatch(
-      MIGRATION,
-      /ENABLE ROW LEVEL SECURITY/i,
+      MIGRATION_SQL,
+      /ROW LEVEL SECURITY/i,
       "RLS state on these tables is not this migration's to change",
     );
   });
 
   test("is additive only — no column or table is dropped", () => {
-    assert.doesNotMatch(MIGRATION, /DROP COLUMN/i);
-    assert.doesNotMatch(MIGRATION, /DROP TABLE/i);
+    assert.doesNotMatch(MIGRATION_SQL, /DROP COLUMN/i);
+    assert.doesNotMatch(MIGRATION_SQL, /DROP TABLE/i);
+    assert.doesNotMatch(MIGRATION_SQL, /TRUNCATE/i);
+    assert.doesNotMatch(MIGRATION_SQL, /\bDELETE\s+FROM\b/i);
   });
 
   test("is idempotent — safe to re-run against a database that already has it", () => {
-    const statements = MIGRATION.split("\n").filter((l) => /^\s*(ALTER TABLE|CREATE)/i.test(l));
-    assert.ok(statements.length > 0, "expected some DDL");
+    const statements = guardableStatements();
+    assert.ok(statements.length > 0, "expected some DDL outside DO blocks");
     for (const stmt of statements) {
       assert.match(
         stmt,
@@ -185,14 +220,22 @@ describe("migration safety", () => {
         `every statement must be guarded so re-running is a no-op: ${stmt.trim()}`,
       );
     }
+    // ADD CONSTRAINT has no IF NOT EXISTS form, so any DO block standing in for
+    // one must actually swallow the duplicate — otherwise a re-run throws.
+    for (const block of MIGRATION_SQL.match(/DO \$\$[\s\S]*?END \$\$/g) ?? []) {
+      assert.match(
+        block,
+        /EXCEPTION[\s\S]*?duplicate_object/i,
+        "a DO block substituting for IF NOT EXISTS must handle duplicate_object",
+      );
+    }
   });
 
   test("declares no postgres UUID column — ids are cuid TEXT here", () => {
     // Enforced repo-wide by migration-chain.test.ts; asserted locally so a
     // failure names this migration rather than the whole chain.
-    for (const line of MIGRATION.split("\n")) {
-      const code = line.split("--")[0];
-      assert.doesNotMatch(code, /\bUUID\b/, `UUID column type in: ${line.trim()}`);
+    for (const line of MIGRATION_SQL.split("\n")) {
+      assert.doesNotMatch(line, /\bUUID\b/, `UUID column type in: ${line.trim()}`);
     }
   });
 
