@@ -1,9 +1,24 @@
 # Fabricated `public_form` contacts — root cause, fix, and cleanup
 
-**Status:** cause identified · fix on branch · **cleanup NOT executed**
-**Observed:** 72 contacts in 36h, 2/hour at `:00:04–:00:05`; `contacts` 375 → 413 in ~19h;
-403 of 413 rows `source = 'public_form'`; every fabricated row `email NULL`, `first_name`
-blank, identical phone, no `ip_address`, no `consent_sms`; 0 distinct emails across all 72.
+**Status:** cause identified · fix merged (`c1cac50`, PR #382) · Step 0 **resolved by production
+query** · **cleanup NOT executed**
+
+**Rate:** 2 rows/hour at `:00:04–:00:05` — every fabricated row `email NULL`, `first_name` blank,
+the same phone, no `ip_address`, no `consent_sms`, `source = 'public_form'`.
+
+**Population (production, 2026-08-31):** **415** contacts total, **366** matching the fabricated
+signature, **397** with `email IS NULL`.
+
+> The first report of this incident quoted *72 rows in 36 hours*. That was **one sampled window,
+> not the population**, and reading it as the population led to a materially wrong conclusion —
+> that the pattern began ~36h ago and that the cleanup should expect ~72 rows. Both are corrected
+> below. The pattern has been running since the scanner became reachable on **2026-08-23**:
+> 48/day × 8 days ≈ 384 expected against 366 observed, which reconciles.
+>
+> Read the residual arithmetic too: 397 − 366 = **31 email-less rows that are NOT fabricated**
+> (legitimately SMS-originated — `01_phase1_foundation.sql` says so in situ: *"Nullable email is
+> intentional: SMS-originated contacts may not have one"*), and 415 − 397 = **18 rows carrying a
+> real email**. Neither group may be touched by the cleanup.
 
 ## The writer
 
@@ -109,17 +124,21 @@ public form", and the 403/413 concentration is partly this artifact.
 | `contact.service.ts` (fail-open dedup) + `lib/events/emit.ts` | `8b3d8b8` (merge of #316) | 2026-08-19 |
 | `inactivity-scanner.service.ts` (the hourly driver) | `d54131c` — *migrate campaign fan-out + scheduled cron off Inngest (Batch 8)* | 2026-08-23 |
 
-The fail-open dedup has been latent since **2026-08-19**. It became reachable on a schedule on
-**2026-08-23**, when the inactivity scan moved onto Vercel Cron. It only began *firing* when the
-precondition appeared — a contact the scanner selects but `upsertContact` cannot resolve — which
-the row timestamps put at roughly **36–40 hours ago**. The code was vulnerable for 12 days; the
-data has been corrupted for ~1.5.
+The fail-open dedup has been latent since **2026-08-19**. It began *firing* on **2026-08-23**,
+when the inactivity scan moved onto Vercel Cron and the precondition was already present — a
+contact the scanner selects but `upsertContact` cannot resolve.
+
+**The corrupted window is ~8 days, not ~1.5.** 48 rows/day × 8 days ≈ 384 expected against **366**
+observed; the ~18-row shortfall is consistent with the cron not starting at midnight on 2026-08-23
+plus occasional failed or empty runs. An earlier draft of this document put the onset at 36–40
+hours ago by mistaking a 36-hour sample for the whole population — that error, uncorrected, would
+have made the cleanup's stop-condition reject a correct result. See Step 1.
 
 Note the existing test `lib/services/crm/__tests__/inactivity-scanner.test.ts` mocks
 `emitDomainEvent` to return `contactId: input.domainEntityId` — it *assumes* the identity that
 production violates, so the suite could never have caught this.
 
-## The fix (smallest correct)
+## The fix (smallest correct) — merged as `c1cac50` (PR #382)
 
 `lib/services/contact.service.ts` only — the funnel all ~20 call sites share:
 
@@ -134,9 +153,14 @@ production violates, so the suite could never have caught this.
 This stops the writes on its own: `upsertContact` throws, `emitDomainEvent` catches it at
 `emit.ts:88`, logs `contact resolve failed`, and returns `contactId: null` — **no row**. The
 scanner will log one error per hour for each unresolvable contact until the cleanup runs, which
-is the correct visible failure in place of a silent fabrication. After cleanup, the phone
-matches exactly one row again, `upsertContact` resolves to the original, the stage advance
-lands on it, and it drops out of the scan as designed.
+is the correct visible failure in place of a silent fabrication. Once the phone matches exactly
+one live row again, `upsertContact` resolves to that row, the stage advance lands on it, and it
+drops out of the scan as designed — but **Step 2 alone does not guarantee that state**; the seed
+rows survive it. See Step 3, which is required.
+
+Because the fix fails closed, it also makes the affected number *unresolvable* rather than merely
+duplicated until the cleanup runs. That is why the cleanup is time-sensitive and not a queued
+chore — see the `+19547562609` note below.
 
 Covered by `lib/services/__tests__/contact-dedup-fail-closed.test.ts` (6 tests, written
 red-first: 4 of 6 failed before the change; the two that passed are the
@@ -154,12 +178,30 @@ folded into a containment fix.
 
 ## Cleanup — **NOT EXECUTED**
 
-### Step 0 — confirm which variant is live (read-only)
+### Step 0 — RESOLVED by production query. No action needed.
+
+**The live trigger is the multi-row `.maybeSingle()` error.** The `normalizePhone` `''` variant is
+*not* what is happening here.
+
+| Question | Production answer |
+| --- | --- |
+| What phone do the fabricated rows carry? | **`+19547562609`** — a well-formed E.164 value, on all 72 sampled rows |
+| Empty-string phones? | **zero** |
+| NULL phones? | **zero** |
+| `idx_contacts_email_unique_not_null` | **UNIQUE** on `lower(email)` `WHERE email IS NOT NULL AND deleted_at IS NULL` |
+| `idx_contacts_phone` | **plain btree** — no uniqueness |
+
+So the index asymmetry described above is confirmed *in production*, not merely inferred from the
+migration file, and it is the reason every fabricated row is email-less: the database rejected
+every duplicate that carried an email and permitted every duplicate that did not.
+
+The `''` variant remains a real hole in `normalizePhone` and is closed by the same fix, but it is
+not the cause of these rows and no cleanup step should look for empty-string phones.
+
+<details>
+<summary>The query that resolved this (kept for the record — already run)</summary>
 
 ```sql
--- Which phone values carry more than one live row, and what do they look like?
--- A valid E.164 value with >1 row  ⇒ the multi-row `.maybeSingle()` trigger.
--- An empty-string ('') phone       ⇒ the normalizePhone '' trigger.
 SELECT phone,
        count(*)                              AS live_rows,
        count(*) FILTER (WHERE email IS NULL) AS email_null_rows,
@@ -171,6 +213,37 @@ GROUP BY phone
 HAVING count(*) > 1
 ORDER BY live_rows DESC;
 ```
+</details>
+
+### ⚠ `+19547562609` is a real person — cleanup is time-sensitive
+
+That number is **not** a placeholder or a test value. It belongs to a real person who is also
+present as **3 rows in `buyers`**.
+
+This changes the urgency of the cleanup, because of how the merged fix behaves. `upsertContact`
+now **fails closed**: while more than one live `contacts` row carries `+19547562609`,
+every attempt to resolve that number raises `contact dedup lookup by phone failed` instead of
+silently minting a duplicate. Until the cleanup completes, **that person cannot be resolved to a
+contact at all**, on any path.
+
+What that costs, by caller:
+
+| Path | Behaviour while duplicates remain |
+| --- | --- |
+| `app/api/webhooks/twilio/inbound` | **Worst case.** `findContactByPhone` also uses `.maybeSingle()`, returns null on the multi-row error, so the route falls through to `upsertContact`, which throws. The outer handler (line 166) returns **HTTP 500**. `claimProviderEvent` has already claimed the `MessageSid`, so Twilio's retry hits the `duplicate` branch and returns empty TwiML — **the inbound SMS is dropped, not queued.** |
+| `/api/cron/inactivity-scan` | `emitDomainEvent` catches, logs `contact resolve failed`, returns `contactId: null`. Degraded, not user-facing. This is the intended visible failure. |
+| `app/api/public/crm/partial-lead` | Email is matched first, so this only breaks when the email is *also* new. Narrower, but returns 500 when it does. |
+| `request-vehicle`, `dealer-fee-lead`, `prequal`, `trade-in`, `buyer/searches`, `voice/dispatch-request` | Each wraps the call in `try/catch` and continues; the CRM contact is simply not created or updated. |
+
+**Note the pre-fix behaviour was not better — only quieter.** Before the fix, an inbound SMS from
+this person landed on a brand-new duplicate contact every time, fragmenting their conversation
+history across hundreds of rows. The fix converts silent fragmentation into a loud failure. Both
+are broken; only one is visible.
+
+**Recommendation: run the cleanup promptly after the fix deploys — do not queue it for a later
+maintenance window.** The deploy and the cleanup should be treated as one operation. If they must
+be separated, the cleanup should follow within hours, not days, and inbound SMS from
+`+19547562609` should be treated as lost for the gap.
 
 ### Step 1 — identify the fabricated rows
 
@@ -218,11 +291,33 @@ WHERE NOT EXISTS (                        -- never linked to a buyer/dealer/affi
 ORDER BY f.created_at;
 ```
 
-**Verify before deleting:** the count should match the fabricated population (72 at time of
-report, growing by 2/hour until the fix deploys), every `created_at` should sit within a few
-seconds of the top of an hour, and the set must contain **no** row with an email, an identity
-link, or a message/note event. If the count is materially different, stop — the mechanism is not
-what this document describes.
+**Verify before deleting.**
+
+> **Corrected stop-condition.** An earlier draft told you to expect *"72, growing by 2/hour"* and
+> to stop if the count differed materially. That was wrong: 72 was a 36-hour sample, not the
+> population. Applied literally against production it would have halted on **366** — the correct
+> answer — and blocked a valid cleanup. Use the numbers below instead.
+
+**Expected: ≈366**, as measured on 2026-08-31, **plus ~2 per hour** for every hour between that
+measurement and the moment you run the query, until the fix (`c1cac50`) is deployed and the rate
+goes to zero. A sane acceptance band is **340–450**.
+
+Reconcile it three ways before deleting — a count alone is not enough:
+
+1. **Magnitude.** Inside 340–450. Materially outside that band, stop and re-derive: the mechanism
+   may not be what this document describes, or a second source may be writing rows.
+2. **Residuals.** `SELECT count(*) FROM contacts WHERE deleted_at IS NULL` should be ≈415 (+2/hour),
+   and the matched set must leave **~31 email-less non-fabricated rows** (SMS-originated) and
+   **~18 rows with a real email** untouched. If the match count approaches 397 — the total
+   email-less population — the query is over-matching and eating legitimate SMS contacts. **Stop.**
+3. **Shape.** Every matched row's `created_at` sits within a few seconds of the top of an hour, and
+   every matched row carries `phone = '+19547562609'`. A matched row with a different phone means
+   a second affected number exists and the blast radius is larger than this document assumes.
+
+**Hard stop — any of these means do not delete:** a matched row with a non-NULL `email`; a matched
+row with a `contact_identities` link; a matched row with a timeline event outside
+`('stage_changed', 'domain_event')`. The query already excludes all three, so any of them
+appearing means the query was edited or the schema moved.
 
 ### Step 2 — remove them (prefer soft delete)
 
@@ -230,7 +325,7 @@ what this document describes.
 BEGIN;
 UPDATE contacts SET deleted_at = now(), updated_at = now()
 WHERE id IN ( /* the SELECT above, id only */ );
--- expect: 72 (or 72 + 2 per hour elapsed since this report)
+-- expect: ~366 (+ ~2 per hour elapsed since 2026-08-31, until c1cac50 is deployed)
 COMMIT;   -- ROLLBACK if the count is not what Step 1 showed
 ```
 
@@ -240,8 +335,111 @@ soft-deleting the duplicates **also resolves the phone ambiguity** that triggers
 is reversible. A hard `DELETE` also works — `contact_identities` and `contact_timeline_events`
 are `ON DELETE CASCADE` — but discards the evidence and is not reversible.
 
+### Step 3 — REQUIRED. Confirm the phone resolves to exactly one live row.
+
+**Deleting the 366 fabricated rows may not, on its own, restore contact resolution for
+`+19547562609`. Do not close this out after Step 2 without running this check.**
+
+The reasoning is forced by the mechanism. A *single* live row cannot start the loop: the scanner
+would find it, `.maybeSingle()` would match exactly one, `upsertContact` would UPDATE it, the stage
+advance would land on it, and it would drop out of the scan. The loop can only begin when **two or
+more** live rows already share the phone. Those seed rows are not fabricated — they predate the
+first duplicate, so they do **not** match the Step 1 signature and Step 2 will **not** remove them.
+
+If two or more remain afterwards, `.maybeSingle()` still errors, `upsertContact` still fails
+closed, and that real person is *still* unresolvable — with the cleanup appearing to have
+succeeded. Inbound SMS from them stays broken.
+
+```sql
+-- Run AFTER Step 2 commits. Expected: exactly 1.
+SELECT id, email, first_name, last_name, source, lifecycle_stage,
+       consent_sms, consent_email, created_at, updated_at
+FROM contacts
+WHERE phone = '+19547562609'
+  AND deleted_at IS NULL
+ORDER BY created_at;
+```
+
+- **Exactly 1 row** → resolution is restored. On the next hourly scan the row resolves to itself,
+  the stage advance lands on it, it moves to `inactive`, and it leaves the scan. Done.
+- **0 rows** → Step 2 over-matched and removed a real contact. **Roll back** and re-derive Step 1.
+- **2 or more rows** → the seed. These are real rows, so they are a **merge, not a delete**. Keep
+  the one that best represents the person — richest identity, earliest `created_at`, any
+  `contact_identities` link — and soft-delete the others *after* re-pointing anything that
+  references them:
+
+**Nine tables reference `contacts(id)`, not two.** Because the losers are *soft*-deleted, no
+`ON DELETE CASCADE` ever fires, so nothing is destroyed — but every child row stays attached to a
+contact that all application reads filter out. Left unmoved, the person's SMS thread vanishes from
+the inbox, their tasks and campaign history detach, and their lead score stops accruing to the
+surviving row.
+
+| Table | FK rule | Re-point? | Note |
+| --- | --- | --- | --- |
+| `contact_timeline_events` | CASCADE | yes | no unique constraint — safe bulk update |
+| `conversations` | CASCADE | yes | the SMS inbox thread; safe bulk update |
+| `crm_tasks` | CASCADE | yes | nullable FK, no unique constraint |
+| `lead_scoring_events` | CASCADE | yes | unique index is on `idempotency_key` only — cannot collide |
+| `contact_identities` | CASCADE | **guarded** | `UNIQUE(entity_type, entity_id)` |
+| `workflow_enrollments` | CASCADE | **guarded** | `UNIQUE(workflow_id, contact_id)` |
+| `campaign_recipients` | CASCADE | **guarded** | `UNIQUE(campaign_id, contact_id)` |
+| `email_suppression` | SET NULL | **no** | keyed on `email` (`NOT NULL UNIQUE`) |
+| `sms_suppression` | SET NULL | **no** | keyed on `phone` (`NOT NULL UNIQUE`) |
+
+**The two suppression tables need no action and must not be re-pointed.** Their `contact_id` is
+decorative provenance; `SuppressionService` looks opt-outs up by address and number, both of which
+are independently unique. A soft-deleted loser therefore cannot lose someone's STOP or
+unsubscribe — worth stating plainly, because getting this wrong would be a consent violation.
+
+```sql
+BEGIN;
+
+-- Unconstrained children: plain re-point.
+UPDATE contact_timeline_events SET contact_id = :keep_id WHERE contact_id = ANY(:loser_ids);
+UPDATE conversations           SET contact_id = :keep_id WHERE contact_id = ANY(:loser_ids);
+UPDATE crm_tasks               SET contact_id = :keep_id WHERE contact_id = ANY(:loser_ids);
+UPDATE lead_scoring_events     SET contact_id = :keep_id WHERE contact_id = ANY(:loser_ids);
+
+-- Constrained children: move only where the keeper does not already hold the row,
+-- otherwise the unique index rejects the whole statement. What stays behind is a
+-- duplicate of something the keeper already has, so leaving it is correct.
+UPDATE workflow_enrollments w SET contact_id = :keep_id
+ WHERE w.contact_id = ANY(:loser_ids)
+   AND NOT EXISTS (SELECT 1 FROM workflow_enrollments k
+                    WHERE k.workflow_id = w.workflow_id AND k.contact_id = :keep_id);
+
+UPDATE campaign_recipients r SET contact_id = :keep_id
+ WHERE r.contact_id = ANY(:loser_ids)
+   AND NOT EXISTS (SELECT 1 FROM campaign_recipients k
+                    WHERE k.campaign_id = r.campaign_id AND k.contact_id = :keep_id);
+
+UPDATE contact_identities i SET contact_id = :keep_id
+ WHERE i.contact_id = ANY(:loser_ids)
+   AND NOT EXISTS (SELECT 1 FROM contact_identities k
+                    WHERE k.entity_type = i.entity_type AND k.entity_id = i.entity_id
+                      AND k.contact_id = :keep_id);
+
+UPDATE contacts SET deleted_at = now(), updated_at = now() WHERE id = ANY(:loser_ids);
+
+COMMIT;
+```
+
+Do **not** hard-delete the losers: every CASCADE child above would be destroyed, including the
+real person's conversation and timeline history.
+
+**Related, and out of scope here:** the same person has **3 rows in `buyers`**. That is a separate
+duplication in a different table which this incident does not cover and this cleanup must not
+touch. It is worth its own investigation — it may share a root cause with the seed rows.
+
 ## Boundary
 
-No schema change. No production mutation. No cron disabled — `inactivity-scan` is still
+No schema change. No production mutation by this document or the change that accompanies it —
+**the cleanup in Steps 1–3 has NOT been run.** No cron disabled: `inactivity-scan` is still
 scheduled and, with the fix deployed, fails loudly instead of fabricating. Disabling it needs
 owner approval and, given the fix, should not be necessary.
+
+The production figures in this document (the `+19547562609` value, 415/366/397, the index
+definitions, the 3 `buyers` rows) were supplied from queries run by the owner against production.
+No session authoring this document has had database access; nothing here was measured by the
+author, and every count in the stop-condition must be re-measured at cleanup time rather than
+trusted from this page.
