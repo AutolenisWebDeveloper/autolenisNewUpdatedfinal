@@ -21,7 +21,7 @@
 import { SEND_SAFE_STATUSES } from "./contact-resolution.service";
 import { evaluateConsentBasis, type ConsentBasis } from "@/lib/services/sms/consent-basis";
 import { normalizePhone } from "@/lib/utils/phone";
-import type { PrismaClient } from "@prisma/client";
+import { DealerProspectStatus, type PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 
 export type Contactability =
@@ -116,7 +116,11 @@ export interface OutreachQueueDeps {
 }
 
 /** The default statuses a work queue shows: not yet contacted. */
-const WORKABLE_STATUSES = ["DISCOVERED", "SCRIPTED", "DRAFTED"];
+const WORKABLE_STATUSES: DealerProspectStatus[] = [
+  DealerProspectStatus.DISCOVERED,
+  DealerProspectStatus.SCRIPTED,
+  DealerProspectStatus.DRAFTED,
+];
 
 /**
  * Which channels are open for one prospect, and which single action to offer.
@@ -225,13 +229,87 @@ async function defaultLoadProfiles(
   return out;
 }
 
+/**
+ * The real queue query.
+ *
+ * Reads the prospect, its rooftop's best contact profile, and the most recent
+ * outreach_log row. Last touch comes from the LOG rather than from
+ * dealer_prospects.contacted_at: the column is derived and, on this data, has
+ * never been written — the log is the source of truth for what actually happened.
+ */
+async function defaultLoadRows(prisma: PrismaClient): Promise<QueueSourceRow[]> {
+  const prospects = await prisma.dealerProspect.findMany({
+    where: { status: { in: WORKABLE_STATUSES } },
+    select: {
+      id: true,
+      name: true,
+      city: true,
+      state: true,
+      status: true,
+      searchScore: true,
+      email: true,
+      emailVerificationStatus: true,
+      phone: true,
+      rooftop: {
+        select: {
+          contacts: {
+            orderBy: [{ isPrimaryContact: "desc" }, { apolloLastSyncedAt: "desc" }],
+            take: 1,
+            select: { consentBasis: true, dncStatus: true, phoneType: true },
+          },
+        },
+      },
+      outreachLog: {
+        // Most recent real touch. A `failed` row is an attempt, not a touch, so
+        // it does not become the "last contacted" the operator reads.
+        where: { status: { in: ["sent", "delivered", "replied"] } },
+        orderBy: { sentAt: "desc" },
+        take: 1,
+        select: { sentAt: true, channel: true },
+      },
+    },
+    take: 500,
+  });
+
+  return prospects.map((p) => {
+    const contact = p.rooftop?.contacts?.[0];
+    const touch = p.outreachLog?.[0];
+    return {
+      prospectId: p.id,
+      name: p.name,
+      city: p.city,
+      state: p.state,
+      status: p.status,
+      score: p.searchScore,
+      email: p.email,
+      emailVerificationStatus: p.emailVerificationStatus,
+      // Suppression is a SEND-time check against Supabase, not a column on this
+      // row. The queue shows the channel as open and the send service refuses if
+      // it must — the alternative is a per-row remote lookup on every page load.
+      emailSuppressed: false,
+      phone: p.phone,
+      phoneSuppressed: false,
+      consentBasis: contact?.consentBasis ?? "NONE",
+      dncStatus: contact?.dncStatus ?? null,
+      phoneType: contact?.phoneType ?? null,
+      contactName: null,
+      contactTitle: null,
+      contactSource: null,
+      contactConfidence: null,
+      apolloLastSyncedAt: null,
+      lastTouchAt: touch?.sentAt ?? null,
+      lastTouchChannel: touch?.channel ?? null,
+    };
+  });
+}
+
 /** Load the work queue with its channel counts. */
 export async function loadOutreachQueue(
   filters: QueueFilters,
   deps?: Partial<OutreachQueueDeps>,
 ): Promise<{ rows: QueueRow[]; counts: QueueCounts }> {
   const prisma = deps?.prisma ?? defaultPrisma;
-  const loadRows = deps?.loadRows ?? (async () => []);
+  const loadRows = deps?.loadRows ?? (() => defaultLoadRows(prisma));
   const loadProfiles = deps?.loadProfiles ?? ((ids: string[]) => defaultLoadProfiles(ids, prisma));
 
   const source = await loadRows();
@@ -252,7 +330,10 @@ export async function loadOutreachQueue(
   const visible = resolved.filter(({ row, contact }) => {
     if (bucket === "unreachable") return contact.contactability === "UNREACHABLE";
     if (bucket === "all") return true;
-    return contact.contactability !== "UNREACHABLE" && WORKABLE_STATUSES.includes(row.status);
+    return (
+      contact.contactability !== "UNREACHABLE" &&
+      (WORKABLE_STATUSES as string[]).includes(row.status)
+    );
   });
 
   // Highest score first. A null score sorts LAST — an unscored prospect is not
