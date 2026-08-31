@@ -8,8 +8,7 @@
 // exactly the shape /api/admin/dealer-outreach/log-call accepts, or refuses it
 // with a message that names the field.
 
-import { normalizePhone } from "@/lib/utils/phone";
-import { isValidUsPhone } from "@/lib/services/sms/twilio.service";
+import { normalizePhone, isValidUsPhone } from "@/lib/utils/phone";
 import { CALL_DISPOSITIONS, type CallDisposition } from "./dealer-call-log.service";
 
 /**

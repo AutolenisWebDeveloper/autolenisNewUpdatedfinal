@@ -280,3 +280,17 @@ test("a prospect with no phone reports null rather than an empty string", async 
   const q = await loadOutreachQueue({}, deps);
   assert.equal(q.rows[0].phone, null);
 });
+
+// ─── truncation ─────────────────────────────────────────────────────────────
+
+test("the row cap is applied to the BEST rows, not to an arbitrary page", async () => {
+  // defaultLoadRows takes 500 rows. With no ORDER BY, which 500 Postgres
+  // returns is unspecified and changes between calls — so on 1,532 production
+  // prospects roughly a thousand were invisible, a different thousand each
+  // load, and the "highest score first" sort below ran over whatever arbitrary
+  // subset had come back. Sorting has to happen in the DATABASE, before the
+  // cap, or the cap decides the ranking.
+  const { QUEUE_ROW_CAP, defaultQueueOrderBy } = await import("../outreach-queue.service");
+  assert.equal(typeof QUEUE_ROW_CAP, "number");
+  assert.deepEqual(defaultQueueOrderBy, [{ searchScore: { sort: "desc", nulls: "last" } }, { id: "asc" }]);
+});

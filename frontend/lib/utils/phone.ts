@@ -34,3 +34,16 @@ export function normalizeEmail(raw: string | null | undefined): string | null {
   const cleaned = String(raw).trim().toLowerCase();
   return cleaned || null;
 }
+
+/**
+ * A US number in strict E.164 form: "+1" followed by 10 digits = 12 chars.
+ *
+ * Lives HERE, next to normalizePhone, and not beside the Twilio client, because
+ * it is pure and client-reachable. Importing it from sms/twilio.service pulled
+ * the entire Twilio SDK into a browser bundle through one client component —
+ * a build failure that, had it resolved, would have shipped a vendor SDK to the
+ * browser. twilio.service re-exports this one; there is no second copy.
+ */
+export function isValidUsPhone(phone: string | null | undefined): boolean {
+  return !!phone && phone.startsWith('+1') && phone.length === 12;
+}

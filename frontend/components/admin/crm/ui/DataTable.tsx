@@ -209,14 +209,40 @@ export function DataTable<T>({
                   const id = getRowId(row);
                   const active = activeRowId === id;
                   return (
+                    // A SELECTABLE ROW IS OPERABLE BY KEYBOARD.
+                    //
+                    // Selectable rows were <tr onClick> with no tabIndex and no
+                    // key handler, so opening a detail panel required a mouse —
+                    // in every CRM table in the admin. That is a WCAG 2.1.1
+                    // failure, and it also meant focus had nowhere to return to
+                    // when the panel closed.
+                    //
+                    // tabIndex + Enter/Space keeps <tr> semantics intact (a
+                    // role="button" here would stop it being announced as a row)
+                    // and makes the row reachable. Rows without onSelect are
+                    // untouched: no tab stop is added to a table you cannot
+                    // click into.
                     <tr
                       key={id}
                       data-testid={testId ? `${testId}-row` : undefined}
                       data-row-id={id}
                       onClick={onSelect ? () => onSelect(row) : undefined}
+                      tabIndex={onSelect ? 0 : undefined}
+                      onKeyDown={
+                        onSelect
+                          ? (e) => {
+                              if (e.key !== 'Enter' && e.key !== ' ') return;
+                              // Space scrolls the page by default; a row that
+                              // both opens and jumps is worse than either.
+                              e.preventDefault();
+                              onSelect(row);
+                            }
+                          : undefined
+                      }
                       className={cn(
                         'border-b border-[var(--crm-border)] crm-hairline last:border-b-0 transition-colors',
-                        onSelect && 'cursor-pointer',
+                        onSelect &&
+                          'cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--crm-ring)]',
                         active
                           ? 'bg-[var(--crm-primary-subtle)]'
                           : 'hover:bg-[var(--crm-bg-secondary)]',

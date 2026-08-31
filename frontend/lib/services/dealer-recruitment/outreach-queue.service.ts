@@ -21,7 +21,7 @@
 import { SEND_SAFE_STATUSES } from "./contact-resolution.service";
 import { evaluateConsentBasis, type ConsentBasis } from "@/lib/services/sms/consent-basis";
 import { normalizePhone } from "@/lib/utils/phone";
-import { DealerProspectStatus, type PrismaClient } from "@prisma/client";
+import { DealerProspectStatus, type Prisma, type PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 
 export type Contactability =
@@ -241,9 +241,32 @@ async function defaultLoadProfiles(
  * dealer_prospects.contacted_at: the column is derived and, on this data, has
  * never been written — the log is the source of truth for what actually happened.
  */
+/**
+ * How many prospects one queue load pulls.
+ *
+ * The cap is fine; an unordered cap is not. Postgres makes no promise about
+ * which rows a LIMIT without ORDER BY returns, so on 1,532 prospects this query
+ * hid roughly a thousand of them — a DIFFERENT thousand on each load — and the
+ * score sort further down ran over whatever arbitrary subset came back. The
+ * ranking was decided by the truncation, not by the score.
+ */
+export const QUEUE_ROW_CAP = 500;
+
+/**
+ * Best first, in the DATABASE, so the cap keeps the rows worth working.
+ * `id` breaks ties so the page is stable across reloads rather than merely
+ * ordered; an unscored prospect sorts last, matching the in-memory rule that a
+ * null score is not a zero score.
+ */
+export const defaultQueueOrderBy = [
+  { searchScore: { sort: "desc", nulls: "last" } },
+  { id: "asc" },
+] as const;
+
 async function defaultLoadRows(prisma: PrismaClient): Promise<QueueSourceRow[]> {
   const prospects = await prisma.dealerProspect.findMany({
     where: { status: { in: WORKABLE_STATUSES } },
+    orderBy: defaultQueueOrderBy as unknown as Prisma.DealerProspectOrderByWithRelationInput[],
     select: {
       id: true,
       name: true,
@@ -272,7 +295,7 @@ async function defaultLoadRows(prisma: PrismaClient): Promise<QueueSourceRow[]> 
         select: { sentAt: true, channel: true },
       },
     },
-    take: 500,
+    take: QUEUE_ROW_CAP,
   });
 
   return prospects.map((p) => {
