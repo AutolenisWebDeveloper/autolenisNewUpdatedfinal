@@ -8,6 +8,7 @@ import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { prepareBuyerSigningEnvelope } from "@/lib/services/esign/buyer-signing.service";
+import { approveContractVersionByAdmin } from "@/lib/services/dealer/dealer-contract.service";
 import { advanceDealStatus } from "@/lib/services/deal/deal.service";
 import {
   sendContractApprovedEmail,
@@ -82,12 +83,27 @@ export async function POST(request: NextRequest, { params }: Props) {
         data: { contractShieldStatus: "PASS", contractShieldScore: scan.score },
       });
 
+      // The admin is overriding a fail-closed scan verdict, which left the backing
+      // ContractVersion REJECTED. prepareBuyerSigningEnvelope requires an APPROVED
+      // version, so without this the override advanced the deal, told the buyer to
+      // sign, and then produced NO envelope — a permanent dead end at
+      // CONTRACT_APPROVED. Approve the version through the service that owns it.
+      const approvedVersionId = await approveContractVersionByAdmin(deal.id);
+      if (!approvedVersionId) {
+        logger.error(`[contract-shield] APPROVE on deal ${deal.id}: no ContractVersion to approve — signing cannot be prepared`);
+      }
+
       // Prepare the in-house signing envelope (buyer signs in-app). Bound to the
       // approved contract by hash; safe under re-run (dealId-unique upsert).
       let envelopeId: string | null = null;
       const prepared = await prepareBuyerSigningEnvelope(deal.id, { signerName: buyerName, signerEmail: buyerEmail })
         .catch(err => { logger.error("[contract-shield] prepare signing envelope failed:", err); return null; });
       envelopeId = prepared?.envelopeId ?? null;
+      if (!envelopeId) {
+        // Do not tell the buyer to sign something that has no envelope. Surface it
+        // to the admin instead of silently completing the action.
+        logger.error(`[contract-shield] APPROVE on deal ${deal.id}: signing envelope was not prepared`);
+      }
 
       await prisma.notification.create({
         data: {
