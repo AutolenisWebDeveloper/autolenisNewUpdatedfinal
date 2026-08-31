@@ -322,3 +322,25 @@ test("one ordering decides the primary contact, shared by the queue and the send
   );
   assert.equal(queue.PRIMARY_CONTACT_ORDER, wiring.PRIMARY_CONTACT_ORDER);
 });
+
+// ─── why a status advance is a queue exit ───────────────────────────────────
+
+test("CONTACTED leaves the work bucket — which is why a callback request must not advance", async () => {
+  // The other half of the CALLBACK_REQUESTED fix, asserted where the
+  // consequence actually lives. dealer-call-log knows only that it advances a
+  // status; this is the test that says what advancing COSTS. Without it the two
+  // facts sit in separate files and nothing connects them.
+  const deps = fakeQueue({
+    rows: [
+      row({ prospectId: "workable", status: "SCRIPTED", phone: "+15125551212" }),
+      row({ prospectId: "contacted", status: "CONTACTED", phone: "+15125551213" }),
+    ],
+  });
+  const q = await loadOutreachQueue({}, deps);
+  const ids = q.rows.map((r) => r.prospectId);
+  assert.ok(ids.includes("workable"), "a SCRIPTED prospect is workable");
+  assert.ok(
+    !ids.includes("contacted"),
+    "a CONTACTED prospect is gone from the queue — so advancing is irreversible from the operator's chair",
+  );
+});

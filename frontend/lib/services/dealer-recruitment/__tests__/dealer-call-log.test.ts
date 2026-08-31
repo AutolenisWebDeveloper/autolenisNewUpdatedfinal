@@ -182,3 +182,48 @@ test("the row records consent_basis so a phone-channel audit can reconstruct it"
   // than left null — null would be indistinguishable from "never considered".
   assert.equal(h.rows()[0].consentBasis, "MANUAL_CALL");
 });
+
+// ─── a callback request must not end the call ───────────────────────────────
+
+test("CALLBACK_REQUESTED does NOT advance status — it is the one disposition that means call again", async () => {
+  // Named explicitly rather than derived from CONNECTED_DISPOSITIONS, which
+  // would make this test agree with whatever the constant happens to say.
+  //
+  // The defect: CALLBACK_REQUESTED sat in CONNECTED_DISPOSITIONS, so logging it
+  // advanced the prospect to CONTACTED. The queue's workable set is
+  // [DISCOVERED, SCRIPTED, DRAFTED], so the prospect left the queue the moment
+  // an operator recorded that the dealer had asked to be called back — removing
+  // from the call list exactly the person who asked to be called.
+  for (const from of ["DISCOVERED", "SCRIPTED", "DRAFTED"]) {
+    const h = harness({ currentStatus: from });
+    const res = await logDealerCall({ ...CALL, disposition: "CALLBACK_REQUESTED" }, h.deps);
+    assert.equal(res.ok, true, "the call is still logged");
+    assert.equal(h.rows().length, 1, "the row is written either way");
+    assert.equal(
+      h.transitions().length,
+      0,
+      `CALLBACK_REQUESTED from ${from} must leave the prospect workable`,
+    );
+  }
+});
+
+test("CONNECTED, GATEKEEPER and NOT_INTERESTED still advance to CONTACTED", async () => {
+  // The other side of the same fix: narrowing the set must not stop the three
+  // dispositions that genuinely end the attempt from advancing.
+  for (const disposition of ["CONNECTED", "GATEKEEPER", "NOT_INTERESTED"] as const) {
+    const h = harness({ currentStatus: "SCRIPTED" });
+    await logDealerCall({ ...CALL, disposition }, h.deps);
+    assert.deepEqual(h.transitions(), [{ to: "CONTACTED" }], `${disposition} should advance`);
+  }
+});
+
+test("CALLBACK_REQUESTED is a recognised disposition, just not a connecting one", async () => {
+  assert.ok(
+    (CALL_DISPOSITIONS as readonly string[]).includes("CALLBACK_REQUESTED"),
+    "still selectable by an operator",
+  );
+  assert.ok(
+    !CONNECTED_DISPOSITIONS.includes("CALLBACK_REQUESTED"),
+    "but never one that closes the prospect out of the queue",
+  );
+});
