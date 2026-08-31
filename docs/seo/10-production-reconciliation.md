@@ -664,6 +664,65 @@ scope.
 **Not built, by instruction: the refresh cron itself.** That remains an owner decision. The signal
 tells you when it is needed; it does not decide for you.
 
+### Cadence-aware failing-cron detection
+
+Found while investigating cron-fleet health, and fixed on this branch. It is the same
+class of error as the AMIPS staleness bound: **a fixed time window cannot express a
+per-run condition for jobs whose period exceeds it.**
+
+`detectFailedCrons` demanded `FAILED_CRON_STREAK_THRESHOLD` (2) consecutive failures inside
+`FAILED_CRON_LOOKBACK_MINUTES` (180). **34 of the 67 scheduled crons have a worst-case inter-run
+gap larger than that window** — 18 daily, 10 weekly, 5 six-hourly, 1 four-hourly — so at most one
+of their runs was ever in scope and the streak could never reach 2. Every daily and weekly job in
+the fleet was structurally unalertable, `prequal-sla-escalation` and `prequal-purge` among them.
+
+Owner-verified proof case: **`social-market-index` (weekly) has failed 100% of its recorded runs
+and never produced a signal.** Dead-cron detection does not cover it either — that module's own
+note (`dead-cron.service.ts:199-202`) says a cron that fires and throws "reads as alive here".
+
+**The rule.** The threshold-of-2 exists to avoid paging on a blip "the next scheduled run clears".
+That is a *time* argument, not a *count* argument: it only holds if the next run arrives soon.
+So demand a second failure only when the second run lands inside the base window.
+
+| Cadence | Threshold | Lookback |
+| --- | --- | --- |
+| ≤ 180 min (33 crons) | **2 — unchanged** | 180 min — unchanged |
+| > 180 min (34 crons) | **1** | `max(180, interval × 2)` |
+
+Cadence comes from `CRON_STALENESS`, the registry dead-cron detection already uses and which
+`cron-schedule.test.ts` pins to `vercel.json` in both directions — so a newly-scheduled cron
+cannot escape this either. Two cadences of history is enough for the runs the threshold needs
+plus a late fire; further back and a cron is OVERDUE, which dead-cron detection owns.
+
+| Change | File |
+| --- | --- |
+| `failedStreakThresholdFor()`, `failedLookbackMinutesFor()` | `dead-cron.service.ts` |
+| Two bounded queries (base window + a slow-cron window), deduped and filtered per-cron | `dead-cron.service.ts` → `detectFailedCrons` |
+| Reporter and health cycle derive the threshold per cron | `dead-cron.service.ts` → `reportFailedCrons`; `health.service.ts:262` |
+| Alert body names the threshold and cadence, so a "1 run in a row" alert reads correctly | `dead-cron.service.ts` |
+
+The threshold is **not** carried on `FailedCronSignal`. It is derived from the registry at each
+point of use — storing it beside its source is what let the three tier sets drift apart earlier
+in this audit.
+
+**Query shape:** two queries, not a per-cron fan-out (~34 round trips on every 5-minute health
+cycle). The slow query is name-scoped and backed by `cron_job_logs_cron_name_started_at_idx`;
+it returns roughly 640 rows across 14 days. The base query's cap was raised 2000 → 4000 (~3×
+current fleet volume).
+
+**Cross-reference corrected.** This fix invalidates the third justification recorded last batch
+for not marking the runway cron FAILED — "it would not page anyway, because a daily cron cannot
+form the streak". That is no longer true, and both the comment
+(`staleness-runway.service.ts`) and the test asserting it have been rewritten to say so. The
+decision itself is unchanged: reasons 1 and 2 (it would be untrue; `failCronRun` destroys the
+payload) never depended on it and were always the stronger two.
+
+**Still open, deliberately untouched:** a `RUNNING` row clears the failure streak
+(`leadingFailedStreak`), and nothing reaps orphaned `RUNNING` rows — `startCronRun` writes
+RUNNING and only `completeCronRun`/`failCronRun` move it, so a run killed mid-flight can mask a
+real streak. That is a change to cron-monitor's lifecycle, not to cadence handling, and it is
+pinned by a test recording the current behaviour.
+
 ### Branch-by-branch closure — answering V-2's goal directly
 
 V-2 warned that closing one expression must not leave another open. Against the six branches

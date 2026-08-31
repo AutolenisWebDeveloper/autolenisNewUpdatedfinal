@@ -12,11 +12,13 @@
 //   2. It would destroy the payload. failCronRun() REPLACES `result` with
 //      `{ build }` (cron-monitor.service.ts:143-154), so throwing would discard
 //      the runway figures this signal exists to publish.
-//   3. It would not page anyway. detectFailedCrons() requires
-//      FAILED_CRON_STREAK_THRESHOLD (2) failures inside
-//      FAILED_CRON_LOOKBACK_MINUTES (180) — dead-cron.service.ts:77-79. A DAILY
-//      cron's runs are 24h apart, so a daily job failing once per day can never
-//      form a 2-in-3-hours streak and never alerts.
+//   3. SUPERSEDED — it used to be that a FAILED daily cron would not page at all,
+//      because detectFailedCrons() demanded 2 failures inside a fixed 180-minute
+//      window that a daily cron's runs could never both occupy. That gap has
+//      since been fixed: failedStreakThresholdFor() now returns 1 for any cron
+//      whose cadence outruns the window, so a daily job failing once DOES alert.
+//      Reasons 1 and 2 are unaffected and remain the basis for this decision —
+//      they were always the stronger two.
 //
 // So the run stays COMPLETED with the runway in its result JSONB (queryable, no
 // new table), and escalation goes through the platform's actual alerting path —

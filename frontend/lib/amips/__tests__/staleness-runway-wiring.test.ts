@@ -18,6 +18,7 @@ import type { StalenessRunway } from "@/lib/amips/staleness-runway";
 import {
   FAILED_CRON_STREAK_THRESHOLD,
   FAILED_CRON_LOOKBACK_MINUTES,
+  failedStreakThresholdFor,
 } from "@/lib/services/monitoring/dead-cron.service";
 
 const runway = (over: Partial<StalenessRunway>): StalenessRunway => ({
@@ -100,15 +101,24 @@ describe("the signal is carried by a DAILY cron, in the existing result JSONB", 
 });
 
 describe("why the cron is not marked FAILED", () => {
-  test("a daily cron can never form the failure streak that pages", () => {
-    // This is the decisive reason, and it is a property of the existing
-    // detector rather than an opinion: two failures must land inside the
-    // lookback window, and a daily cron's runs are 1440 minutes apart.
+  test("a daily cron DOES now page — the third reason is superseded", () => {
+    // This test previously asserted the OPPOSITE: that a daily cron could never
+    // form the 2-in-180-minutes streak, so marking the run FAILED would alert
+    // nobody. That gap has since been closed — failedStreakThresholdFor() returns
+    // 1 for any cron whose cadence outruns the base window — so the claim no
+    // longer holds, and the comment it justified has been corrected in
+    // staleness-runway.service.ts.
+    //
+    // The DECISION is unchanged, because reasons 1 and 2 never depended on it:
+    // marking the run FAILED would be untrue (the work succeeds) and would
+    // destroy the payload (failCronRun replaces `result`).
     const dailyGapMinutes = 24 * 60;
-    assert.equal(FAILED_CRON_STREAK_THRESHOLD, 2);
-    assert.ok(
-      dailyGapMinutes > FAILED_CRON_LOOKBACK_MINUTES,
-      "a daily cron cannot produce 2 failures within the lookback window",
+    assert.ok(dailyGapMinutes > FAILED_CRON_LOOKBACK_MINUTES, "premise: daily outruns the window");
+    assert.equal(FAILED_CRON_STREAK_THRESHOLD, 2, "the base threshold is unchanged");
+    assert.equal(
+      failedStreakThresholdFor("amips-snapshot"),
+      1,
+      "a daily cron now alerts on a single failed run",
     );
   });
 

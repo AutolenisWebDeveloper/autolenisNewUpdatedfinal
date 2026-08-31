@@ -11,7 +11,7 @@ import {
   reportOverdueCrons,
   detectFailedCrons,
   reportFailedCrons,
-  FAILED_CRON_STREAK_THRESHOLD,
+  failedStreakThresholdFor,
 } from "./dead-cron.service";
 import type { CronLiveness } from "./cron-schedule";
 
@@ -257,7 +257,9 @@ export async function runHealthCheckCycle(
   try {
     const failing = await detectFailedCrons(now);
     for (const c of failing) {
-      if (c.consecutiveFailures >= FAILED_CRON_STREAK_THRESHOLD) {
+      // Per-cron threshold: a daily or weekly job alerts on its FIRST failed run,
+      // because its second run is a cadence away. See failedStreakThresholdFor.
+      if (c.consecutiveFailures >= failedStreakThresholdFor(c.cronName)) {
         report.alerts.push(
           `P1: cron '${c.cronName}' failing — ${c.consecutiveFailures} consecutive failed run(s)`,
         );
