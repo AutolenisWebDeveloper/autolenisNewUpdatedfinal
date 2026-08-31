@@ -106,9 +106,18 @@ test("a failed flag read is not cached — the next call retries", async () => {
 });
 
 test("a successful flag read IS cached for the cache window", async () => {
+  const startedAt = Date.now();
   await ks.isAiEnabledAsync();
   const after = flagReads;
   await ks.isAiEnabledAsync();
+  const elapsed = Date.now() - startedAt;
+
+  if (elapsed >= ks.KILL_FLAG_CACHE_MS) {
+    // The premise did not hold — this process stalled past the cache window
+    // between the two calls, so a second read is CORRECT and asserting against
+    // it would be a spurious failure rather than a real finding.
+    return;
+  }
   assert.equal(flagReads, after, "the flag must not be re-read on every model call");
 });
 
