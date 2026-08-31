@@ -231,6 +231,11 @@ export function DataTable<T>({
                       onKeyDown={
                         onSelect
                           ? (e) => {
+                              // Only the ROW. Without this, Space inside a
+                              // leading checkbox toggles the box and opens the
+                              // panel, and Enter in a filter input does the
+                              // same — keydown from a child bubbles here.
+                              if (e.target !== e.currentTarget) return;
                               if (e.key !== 'Enter' && e.key !== ' ') return;
                               // Space scrolls the page by default; a row that
                               // both opens and jumps is worse than either.

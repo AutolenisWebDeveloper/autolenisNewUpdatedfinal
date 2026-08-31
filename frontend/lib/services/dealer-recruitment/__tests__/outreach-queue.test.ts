@@ -18,7 +18,7 @@
 //   call   a valid phone — a human dialling needs no consent basis
 //   sms    the full shared consent gate: basis, DNC, phone type
 
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -293,4 +293,32 @@ test("the row cap is applied to the BEST rows, not to an arbitrary page", async 
   const { QUEUE_ROW_CAP, defaultQueueOrderBy } = await import("../outreach-queue.service");
   assert.equal(typeof QUEUE_ROW_CAP, "number");
   assert.deepEqual(defaultQueueOrderBy, [{ searchScore: { sort: "desc", nulls: "last" } }, { id: "asc" }]);
+});
+
+// ─── the queue and the send path must read the SAME contact ─────────────────
+
+test("one ordering decides the primary contact, shared by the queue and the send path", async () => {
+  // A rooftop can hold several contact profiles, and consent basis, DNC status
+  // and phone type all hang off the one chosen. The queue read model ordered by
+  // [isPrimaryContact desc, apolloLastSyncedAt desc]; the SMS send wiring
+  // ordered by [isPrimaryContact desc, createdAt asc]. On any rooftop with two
+  // profiles those can disagree, so the queue could show "SMS ready" from one
+  // person's record while the send service evaluated someone else's — the UI
+  // and the gate reasoning about different facts, which is exactly the class of
+  // bug consent gates exist to prevent.
+  // dealer-sms-wiring reaches two `server-only` modules at import time, which
+  // this transform refuses to load. Neither is used by the constant under test.
+  mock.module("@/lib/supabase-service", { namedExports: { getServiceSupabase: () => null } });
+  mock.module("@/lib/crm/recipient-timezone", {
+    namedExports: { isRecipientInQuietHours: () => true },
+  });
+
+  const queue = await import("../outreach-queue.service");
+  const wiring = await import("../dealer-sms-wiring");
+  assert.deepEqual(
+    queue.PRIMARY_CONTACT_ORDER,
+    wiring.PRIMARY_CONTACT_ORDER,
+    "both paths must import ONE ordering, not keep two that happen to match",
+  );
+  assert.equal(queue.PRIMARY_CONTACT_ORDER, wiring.PRIMARY_CONTACT_ORDER);
 });

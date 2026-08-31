@@ -12,7 +12,8 @@
 // consent module. Re-implementing any of them here would create the second
 // enforcement plane this branch exists to avoid.
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, getAdminWithRole, adminSuccess, adminError, OPERATIONAL_ROLES } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminSuccess, adminError, OPERATIONAL_ROLES } from "@/lib/auth/admin-api";
+import type { AdminRole } from "@prisma/client";
 import {
   sendDealerSms,
   type DealerSmsReason,
@@ -47,10 +48,12 @@ interface Body {
 }
 
 export async function POST(request: NextRequest) {
-  if (!(await getAdminFromRequest(request))) {
-    return adminError("UNAUTHORIZED", "Not authenticated", 401);
-  }
-  if (!(await getAdminWithRole(request, OPERATIONAL_ROLES))) {
+  // One session lookup, two outcomes. getAdminWithRole re-runs
+  // getAdminFromRequest internally, so calling both cost an extra database
+  // round trip per request and still could not tell 401 from 403 on its own.
+  const admin = await getAdminFromRequest(request);
+  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  if (!OPERATIONAL_ROLES.includes(admin.role as AdminRole)) {
     return adminError("FORBIDDEN", "This role cannot send dealer outreach", 403);
   }
 

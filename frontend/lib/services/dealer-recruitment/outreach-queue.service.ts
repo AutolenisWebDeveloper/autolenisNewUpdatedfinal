@@ -253,6 +253,25 @@ async function defaultLoadProfiles(
 export const QUEUE_ROW_CAP = 500;
 
 /**
+ * Which contact profile speaks for a rooftop.
+ *
+ * A rooftop can hold several. Consent basis, DNC status and phone type all come
+ * from the one chosen, so the queue and the SMS send path MUST choose the same
+ * one — otherwise the queue can show "SMS ready" from one person's record while
+ * the gate evaluates another's, and the screen and the control are reasoning
+ * about different facts. dealer-sms-wiring imports this constant rather than
+ * keeping its own copy; a test asserts they are the same object.
+ *
+ * Explicitly flagged primary first, then most recently synced, then oldest
+ * created as a deterministic tiebreak.
+ */
+export const PRIMARY_CONTACT_ORDER = [
+  { isPrimaryContact: "desc" },
+  { apolloLastSyncedAt: "desc" },
+  { createdAt: "asc" },
+] as const;
+
+/**
  * Best first, in the DATABASE, so the cap keeps the rows worth working.
  * `id` breaks ties so the page is stable across reloads rather than merely
  * ordered; an unscored prospect sorts last, matching the in-memory rule that a
@@ -280,7 +299,7 @@ async function defaultLoadRows(prisma: PrismaClient): Promise<QueueSourceRow[]> 
       rooftop: {
         select: {
           contacts: {
-            orderBy: [{ isPrimaryContact: "desc" }, { apolloLastSyncedAt: "desc" }],
+            orderBy: PRIMARY_CONTACT_ORDER as unknown as Prisma.DealerContactProfileOrderByWithRelationInput[],
             take: 1,
             select: { consentBasis: true, dncStatus: true, phoneType: true },
           },

@@ -303,6 +303,25 @@ test("submitting without a disposition is refused in the form and writes nothing
   expect(rows).toBe(0);
 });
 
+test("typing in the panel does not lose focus", async ({ page }) => {
+  needsInfra();
+  const { stamp } = await seedQueueFixtures();
+  await blockVendors(page);
+
+  await page.goto("/admin/dealer-outreach/queue");
+  await queueRow(page, stamp, "Call Ready Motors").click();
+
+  // pressSequentially, not fill(): fill() sets the value in one operation and
+  // would sail past a focus bug that a real typist hits on every character.
+  // SlideOver moves focus into the panel when its effect runs, so an effect
+  // that re-runs on a parent render steals focus mid-word.
+  const notes = page.getByLabel(/notes/i);
+  await notes.click();
+  await notes.pressSequentially("Spoke with the GM about inventory", { delay: 10 });
+  await expect(notes).toBeFocused();
+  await expect(notes).toHaveValue("Spoke with the GM about inventory");
+});
+
 // ─── 5. the status machine ──────────────────────────────────────────────────
 
 test("status machine walkthrough including DEAD requiring a reason", async ({ page }) => {

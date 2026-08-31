@@ -5,7 +5,8 @@
 // concurrency guard all live in the service, and this route only maps their
 // structured reasons onto status codes.
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, getAdminWithRole, adminSuccess, adminError, OPERATIONAL_ROLES } from "@/lib/auth/admin-api";
+import { getAdminFromRequest, adminSuccess, adminError, OPERATIONAL_ROLES } from "@/lib/auth/admin-api";
+import type { AdminRole } from "@prisma/client";
 import {
   transitionProspect,
   TRANSITIONS,
@@ -32,9 +33,12 @@ interface Body {
 }
 
 export async function POST(request: NextRequest) {
+  // One session lookup, two outcomes. getAdminWithRole re-runs
+  // getAdminFromRequest internally, so calling both cost an extra database
+  // round trip per request and returned null for BOTH failure modes.
   const admin = await getAdminFromRequest(request);
   if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
-  if (!(await getAdminWithRole(request, OPERATIONAL_ROLES))) {
+  if (!OPERATIONAL_ROLES.includes(admin.role as AdminRole)) {
     return adminError("FORBIDDEN", "This role cannot change prospect status", 403);
   }
 

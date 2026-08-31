@@ -101,9 +101,10 @@ mock.module("@/lib/auth/admin-api", {
     OPERATIONAL_ROLES,
     getClientIp: () => null,
     createAuditLog: async () => ({ id: "audit_1" }),
+    // ONLY the session lookup is faked. The routes now check the role against
+    // the real OPERATIONAL_ROLES themselves, so the authorization rule under
+    // test is the real one rather than a second copy living in this mock.
     getAdminFromRequest: async () => caller,
-    getAdminWithRole: async (_req: unknown, roles: string[]) =>
-      caller && roles.includes(caller.role) ? caller : null,
   },
 });
 

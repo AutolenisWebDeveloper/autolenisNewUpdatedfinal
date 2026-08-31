@@ -49,6 +49,17 @@ export function SlideOver({
   const returnFocusRef = React.useRef<HTMLElement | null>(null);
   const titleId = React.useId();
 
+  // onClose held in a ref so the effect below depends ONLY on `open`. Callers
+  // pass an inline arrow, which is a new identity every render, and an effect
+  // keyed on it re-runs whenever the parent renders — cleanup restores focus to
+  // the trigger, the body moves it back into the panel, and a user typing in
+  // the panel loses their cursor mid-word. Today's callers hold their state
+  // below this component so it does not fire, which is luck, not design.
+  const onCloseRef = React.useRef(onClose);
+  React.useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   React.useEffect(() => {
     if (!open) return;
 
@@ -70,7 +81,7 @@ export function SlideOver({
 
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== 'Tab') return;
@@ -106,7 +117,7 @@ export function SlideOver({
       // change must not leave focus nowhere either.
       returnFocusRef.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

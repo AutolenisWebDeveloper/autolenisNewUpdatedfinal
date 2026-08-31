@@ -16,11 +16,16 @@
 
 import { logger } from "@/lib/logger";
 import { prisma as defaultPrisma } from "@/lib/prisma";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { isRecipientInQuietHours } from "@/lib/crm/recipient-timezone";
 import { SuppressionService } from "@/lib/services/suppression.service";
 import { getServiceSupabase } from "@/lib/supabase-service";
 import type { DealerSmsDeps, DealerSmsTarget } from "./dealer-sms-send.service";
+// ONE ordering for both paths — see the constant's own note. Re-exported so a
+// caller reaching for it here finds the same object the queue uses.
+import { PRIMARY_CONTACT_ORDER } from "./outreach-queue.service";
+
+export { PRIMARY_CONTACT_ORDER };
 
 /**
  * Resolve the consent facts for a prospect.
@@ -47,7 +52,7 @@ export async function loadDealerSmsTarget(
   const profile = prospect.rooftopId
     ? await prisma.dealerContactProfile.findFirst({
         where: { rooftopId: prospect.rooftopId },
-        orderBy: [{ isPrimaryContact: "desc" }, { createdAt: "asc" }],
+        orderBy: PRIMARY_CONTACT_ORDER as unknown as Prisma.DealerContactProfileOrderByWithRelationInput[],
         select: { consentBasis: true, dncStatus: true, phoneType: true },
       })
     : null;
