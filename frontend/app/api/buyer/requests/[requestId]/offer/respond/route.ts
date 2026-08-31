@@ -44,20 +44,29 @@ export async function POST(request: NextRequest, { params }: Props) {
     ? VehicleRequestStatus.OFFER_ACCEPTED
     : VehicleRequestStatus.OFFER_DECLINED;
 
-  // Core transaction: mark offer + request status
-  await prisma.$transaction([
-    prisma.vehicleRequest.update({
+  // Core transaction: mark offer + request status, and — on ACCEPT — create the
+  // Deal in the SAME transaction.
+  //
+  // The Deal used to be created after this transaction committed, with only a
+  // catch() that logged and returned a friendly message. So a failure there left
+  // the request OFFER_ACCEPTED and the offer ACCEPTED with no Deal and no
+  // compensating rollback: the buyer had accepted an offer that existed nowhere in
+  // the deal spine, nothing downstream could pick it up, and the only admin
+  // affordance for that state does not actually create a Deal. Accepting an offer
+  // and creating its Deal are one atomic fact — either both happen or neither does.
+  const createdDeal = await prisma.$transaction(async (tx) => {
+    await tx.vehicleRequest.update({
       where: { id: requestId },
       data:  { status: newRequestStatus },
-    }),
-    prisma.vehicleRequestOffer.update({
+    });
+    await tx.vehicleRequestOffer.update({
       where: { id: offerId },
       data:  {
         status:      response === "ACCEPT" ? "ACCEPTED" : "DECLINED",
         respondedAt: new Date(),
       },
-    }),
-    prisma.vehicleRequestEvent.create({
+    });
+    await tx.vehicleRequestEvent.create({
       data: {
         requestId,
         eventType: `OFFER_${response}ED`,
@@ -65,8 +74,19 @@ export async function POST(request: NextRequest, { params }: Props) {
         actorRole: "BUYER",
         payload:   { offerId, response },
       },
-    }),
-  ]);
+    });
+    if (response !== "ACCEPT") return null;
+    // offerId is nullable on Deal; concierge deals carry vehicleRequestOfferId.
+    // Same entry status as the auction path (select-offer.service).
+    return tx.deal.create({
+      data: {
+        buyerId:               buyer.id,
+        vehicleRequestOfferId: offerId,
+        status:                "FINANCING_PENDING",
+      },
+      select: { id: true },
+    });
+  });
 
   // DECLINE: return immediately
   if (response === "DECLINE") {
@@ -77,44 +97,23 @@ export async function POST(request: NextRequest, { params }: Props) {
     });
   }
 
-  // ACCEPT: create Deal and move buyer into buying journey
-
-  // Idempotency: don't create a second deal if one already exists
-  const existingDeal = await prisma.deal.findUnique({
-    where:  { vehicleRequestOfferId: offerId },
-    select: { id: true },
-  });
-
-  if (existingDeal) {
-    return successResponse({
-      status:   newRequestStatus,
-      message:  "Your deal is ready. Continue with financing.",
-      redirect: "/buyer/deal",
-      dealId:   existingDeal.id,
-    });
-  }
-
-  // Create Deal — mirrors select-offer pattern exactly.
-  // offerId is nullable; vehicleRequestOfferId is used for concierge deals.
-  let deal: { id: string } | null = null;
-
-  try {
-    deal = await prisma.deal.create({
-      data: {
-        buyerId:               buyer.id,
-        vehicleRequestOfferId: offerId,
-        status:                "FINANCING_PENDING",
-      },
+  // ACCEPT: the Deal was created atomically with the acceptance above.
+  //
+  // Idempotency: a replayed accept finds the existing deal rather than creating a
+  // second one (vehicleRequestOfferId is @unique, so a duplicate would throw).
+  const deal =
+    createdDeal ??
+    (await prisma.deal.findUnique({
+      where: { vehicleRequestOfferId: offerId },
       select: { id: true },
-    });
-  } catch (err) {
-    logger.error("[offer/respond] Deal creation failed:", err);
-    // Degrade gracefully: buyer still sees OFFER_ACCEPTED
-    return successResponse({
-      status:  newRequestStatus,
-      message: "Offer accepted. Our team will be in touch to finalize your deal.",
-      redirect: null,
-    });
+    }));
+
+  if (!deal) {
+    // Unreachable in practice: the transaction either created the deal or rolled
+    // the acceptance back. Fail loudly rather than reporting a success the deal
+    // spine cannot honour.
+    logger.error(`[offer/respond] accepted offer ${offerId} has no deal after commit`);
+    return errorResponse("DEAL_CREATE_FAILED", "We couldn't finalize your deal. Please contact support.", 500);
   }
 
   // In-app notification with actionUrl

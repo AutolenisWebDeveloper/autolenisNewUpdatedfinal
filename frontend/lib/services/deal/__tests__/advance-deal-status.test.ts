@@ -16,6 +16,7 @@ interface DealRow {
   status: DealStatus;
   buyerId: string;
   insuranceStatus: InsuranceStatus;
+  feePaidAt: Date | null;
 }
 
 interface Ctrl {
@@ -80,7 +81,7 @@ async function load() { return import("../deal.service"); }
 
 beforeEach(() => {
   ctrl = {
-    deal: { id: "d1", status: "PICKUP_SCHEDULED", buyerId: "b1", insuranceStatus: InsuranceStatus.VERIFIED },
+    deal: { id: "d1", status: "PICKUP_SCHEDULED", buyerId: "b1", insuranceStatus: InsuranceStatus.VERIFIED, feePaidAt: null },
     raceTo: null,
     throwOnFind: false,
     updateManyCalls: [],
@@ -260,4 +261,51 @@ test("expectedFrom guards advanceDealStatus against advancing from any other sta
   await advanceDealStatus("d1", "CONTRACT_PENDING", { expectedFrom: "INSURANCE_PENDING" });
   assert.equal(ctrl.deal.status, "CONTRACT_REVIEW", "no write when the deal is not in the expected state");
   assert.equal(ctrl.updateManyCalls.length, 0);
+});
+
+// ── Fee ladder: self-completing on arrival ──────────────────────────────────
+// The only driver of FEE_PAID -> INSURANCE_PENDING was the Stripe webhook, so an
+// admin "mark fee paid" stranded the deal at FEE_PAID forever. And a fee paid while
+// the deal was still BEFORE FEE_PENDING was banked (feePaidAt set, which is also the
+// duplicate-charge guard) but never advanced — wedging the deal permanently.
+
+test("arriving at FEE_PAID with the fee already recorded continues to INSURANCE_PENDING", async () => {
+  ctrl.deal.status = "FEE_PENDING";
+  ctrl.deal.feePaidAt = new Date();
+  ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "FEE_PAID", { actorRole: "ADMIN", force: true });
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "a paid fee must not strand the deal at FEE_PAID");
+});
+
+test("arriving at FEE_PENDING with the fee ALREADY paid settles the whole ladder", async () => {
+  ctrl.deal.status = "FEE_PAID";
+  ctrl.deal.status = "FINANCING_PENDING";
+  ctrl.deal.feePaidAt = new Date();
+  ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "SYSTEM" });
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "a fee paid before the fee stage must not wedge the deal");
+  assert.deepEqual(
+    ctrl.historyCreates.map((h) => h.toStatus),
+    ["FEE_PENDING", "FEE_PAID", "INSURANCE_PENDING"],
+    "every hop is recorded truthfully rather than force-skipped",
+  );
+});
+
+test("arriving at FEE_PENDING with NO fee paid parks the deal there (still awaiting payment)", async () => {
+  ctrl.deal.status = "FINANCING_PENDING";
+  ctrl.deal.feePaidAt = null;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "SYSTEM" });
+  assert.equal(ctrl.deal.status, "FEE_PENDING", "no payment, no advance");
+});
+
+test("the fee ladder chains into the insurance gate when proof is already on file", async () => {
+  ctrl.deal.status = "FINANCING_PENDING";
+  ctrl.deal.feePaidAt = new Date();
+  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "SYSTEM" });
+  assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "fee ladder then insurance gate, both already satisfied");
 });

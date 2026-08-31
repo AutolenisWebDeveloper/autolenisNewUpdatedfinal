@@ -199,7 +199,60 @@ export async function advanceDealStatus(
   if (newStatus === DealStatus.INSURANCE_PENDING) {
     await advanceOnInsuranceSatisfied(dealId, { actorId: opts.actorId, actorRole: opts.actorRole });
   }
+
+  // Fee ladder, settled ON ARRIVAL. The only driver of FEE_PAID → INSURANCE_PENDING
+  // was the Stripe webhook, so an admin "mark fee paid" stranded the deal at
+  // FEE_PAID forever; and a fee paid while the deal was still BEFORE the fee stage
+  // was banked (feePaidAt is also the duplicate-charge guard) but never advanced,
+  // wedging the deal. Settling here means every driver — webhook, admin override,
+  // repair route — completes the ladder identically. Each hop is a real recorded
+  // transition rather than a forced skip. Bounded: FEE_PENDING → FEE_PAID →
+  // INSURANCE_PENDING, and INSURANCE_PENDING cannot re-enter this branch.
+  if (newStatus === DealStatus.FEE_PENDING || newStatus === DealStatus.FEE_PAID) {
+    await settleFeeLadderIfPaid(dealId, { actorId: opts.actorId, actorRole: opts.actorRole });
+  }
   return true;
+}
+
+/**
+ * Fee-ladder driver: once the concierge fee is recorded as paid, carry the deal
+ * from FEE_PENDING through FEE_PAID to INSURANCE_PENDING.
+ *
+ * `feePaidAt` is the authoritative "fee received" fact (written by the verified
+ * Stripe webhook or by the audited admin override) and doubles as the
+ * duplicate-charge guard — so a deal carrying it must never sit on an unpaid-fee
+ * stage. Narrow and idempotent: acts only from FEE_PENDING/FEE_PAID, only when
+ * feePaidAt is set, and each hop is guarded by expectedFrom so a concurrent writer
+ * that moved the deal on is never dragged backwards. Never throws.
+ */
+export async function settleFeeLadderIfPaid(
+  dealId: string,
+  opts: { actorId?: string; actorRole?: string } = {},
+): Promise<boolean> {
+  try {
+    const deal = await prisma.deal.findUnique({
+      where: { id: dealId },
+      select: { status: true, feePaidAt: true },
+    });
+    if (!deal?.feePaidAt) return false;
+
+    const actor = { actorId: opts.actorId, actorRole: opts.actorRole ?? "SYSTEM", reason: "Concierge fee received" };
+    let moved = false;
+
+    if (deal.status === DealStatus.FEE_PENDING) {
+      moved = await advanceDealStatus(dealId, DealStatus.FEE_PAID, { ...actor, expectedFrom: DealStatus.FEE_PENDING });
+      // FEE_PAID re-enters this driver via the seam, which carries it to
+      // INSURANCE_PENDING — so there is nothing further to do here.
+      return moved;
+    }
+    if (deal.status === DealStatus.FEE_PAID) {
+      moved = await advanceDealStatus(dealId, DealStatus.INSURANCE_PENDING, { ...actor, expectedFrom: DealStatus.FEE_PAID });
+    }
+    return moved;
+  } catch (err) {
+    logger.error("[deal] fee-ladder settle failed (non-fatal):", err);
+    return false;
+  }
 }
 
 /**
