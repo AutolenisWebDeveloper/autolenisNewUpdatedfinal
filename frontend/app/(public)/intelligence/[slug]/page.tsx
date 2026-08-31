@@ -3,7 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
-import { SERVABLE_LIFECYCLE_STATUSES } from "@/lib/amips/tiers";
+import {
+  SERVABLE_LIFECYCLE_STATUSES,
+  isPastWithholdBound,
+  oldestApplicableDataAsOf,
+} from "@/lib/amips/tiers";
 import { buildPageMetadata } from "@/lib/seo/metadata";
 import { JsonLd, faqSchema, breadcrumbSchema } from "@/lib/seo/jsonld";
 import ContentTracker from "@/components/analytics/ContentTracker";
@@ -35,12 +39,20 @@ type AmipsPage = NonNullable<Awaited<ReturnType<typeof loadPage>>>;
 
 async function loadPage(slug: string) {
   try {
-    return await prisma.amipsPage.findFirst({
+    const page = await prisma.amipsPage.findFirst({
       // ACTIVE + REFRESH_REQUIRED. REFRESH_REQUIRED means "the underlying data
       // is aging", not "unfit to serve" — 404ing it destroyed ranking equity for
       // a page that is still substantially correct. See lib/amips/tiers.ts.
       where: { slug, lifecycleStatus: { in: [...SERVABLE_LIFECYCLE_STATUSES] } },
     });
+    if (!page) return null;
+    // Outer staleness backstop. Dropping staleness as a withholding condition
+    // removed the upper bound entirely, and these are pricing pages: past
+    // STALE_WITHHOLD_DAYS the numbers are wrong, not merely aged. The bound is
+    // the publication gate reused as the serving floor — we serve only what we
+    // would still be willing to publish.
+    if (isPastWithholdBound(page, Date.now())) return null;
+    return page;
   } catch {
     // DB unavailable (e.g. at build time) — treat as not found.
     return null;
@@ -105,8 +117,16 @@ export default async function IntelligenceArticlePage({ params }: PageProps) {
       ? `${page.metro}, ${page.state}`
       : page.metro
     : null;
-  const asOf = (page.marketDataAsOf ?? page.vehicleDataAsOf ?? page.publishedAt)
+  // Disclose the OLDEST applicable timestamp, not the first non-null one.
+  // `marketDataAsOf ?? vehicleDataAsOf` reported whichever existed first by
+  // priority, which understated staleness whenever vehicle data was older than
+  // market data — against owner-verified production (market 66d, vehicle 85d)
+  // it advertised 66 days for a page whose oldest load-bearing figure was 85.
+  const asOf = (oldestApplicableDataAsOf(page) ?? page.publishedAt)
     ?.toISOString()
+    .slice(0, 10);
+  const lastUpdated = (page.lastRefreshedAt ?? page.updatedAt)
+    .toISOString()
     .slice(0, 10);
 
   return (
@@ -178,10 +198,21 @@ export default async function IntelligenceArticlePage({ params }: PageProps) {
         )}
 
         {/* Freshness footer */}
+        {/* Freshness disclosure. Both dates are machine-readable <time> elements
+            so the as-of date is extractable, not just human-visible prose. */}
         <p className="mt-12 text-xs text-[#9CA3AF]" data-testid="intelligence-freshness">
           Last Updated:{" "}
-          {(page.lastRefreshedAt ?? page.updatedAt).toISOString().slice(0, 10)}
-          {asOf ? ` · Data as of: ${asOf}` : ""}
+          <time dateTime={lastUpdated} data-testid="intelligence-last-updated">
+            {lastUpdated}
+          </time>
+          {asOf ? (
+            <>
+              {" · Data as of: "}
+              <time dateTime={asOf} data-testid="intelligence-data-as-of">
+                {asOf}
+              </time>
+            </>
+          ) : null}
         </p>
       </article>
     </>

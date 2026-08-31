@@ -8,7 +8,7 @@
 // so the four tier routes and the index stay in lockstep.
 
 import { prisma } from "@/lib/prisma";
-import { SERVABLE_LIFECYCLE_STATUSES } from "@/lib/amips/tiers";
+import { SERVABLE_LIFECYCLE_STATUSES, isPastWithholdBound } from "@/lib/amips/tiers";
 
 const BASE = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -47,6 +47,10 @@ export async function buildTierSitemap(tier: string): Promise<string> {
     lastRefreshedAt: Date | null;
     publishedAt: Date | null;
     updatedAt: Date;
+    contentTier: string;
+    vehicleDataAsOf: Date | null;
+    dealerDataAsOf: Date | null;
+    marketDataAsOf: Date | null;
   }> = [];
   try {
     rows = await prisma.amipsPage.findMany({
@@ -56,6 +60,12 @@ export async function buildTierSitemap(tier: string): Promise<string> {
         lastRefreshedAt: true,
         publishedAt: true,
         updatedAt: true,
+        // The as-of columns drive the outer staleness bound below. Applied here
+        // as well as at the route so a withheld page is never advertised.
+        contentTier: true,
+        vehicleDataAsOf: true,
+        dealerDataAsOf: true,
+        marketDataAsOf: true,
       },
       orderBy: { updatedAt: "desc" },
       take: MAX_URLS,
@@ -64,6 +74,10 @@ export async function buildTierSitemap(tier: string): Promise<string> {
     // DB unavailable (e.g. at build time) — emit an empty but valid sitemap.
     rows = [];
   }
+
+  // Same predicate the route serves by: listed exactly when servable.
+  const now = Date.now();
+  rows = rows.filter((r) => !isPastWithholdBound(r, now));
 
   const urls = rows
     .map((r) => {

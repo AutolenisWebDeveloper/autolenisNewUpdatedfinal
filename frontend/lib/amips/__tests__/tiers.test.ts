@@ -8,7 +8,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { FRESHNESS_DAYS } from "@/lib/amips/assembler";
 import {
+  STALE_WITHHOLD_DAYS,
   MARKET_DATA_TIERS,
   METRO_ASSEMBLY_TIERS,
   requiresMarketData,
@@ -53,4 +55,11 @@ test("REFRESH_REQUIRED is servable; UNDER_REVIEW and RETIRED are not", () => {
 
 test("SERVABLE_LIFECYCLE_STATUSES is exactly the two servable states", () => {
   assert.deepEqual([...SERVABLE_LIFECYCLE_STATUSES].sort(), ["ACTIVE", "REFRESH_REQUIRED"]);
+});
+
+test("STALE_WITHHOLD_DAYS is pinned to the publication gate", () => {
+  // tiers.ts defines it locally to avoid an import cycle with the assembler.
+  // This assertion is the only thing keeping the two from drifting apart —
+  // the same failure mode as the three tier sets this module exists to fix.
+  assert.equal(STALE_WITHHOLD_DAYS, FRESHNESS_DAYS.vehicle);
 });

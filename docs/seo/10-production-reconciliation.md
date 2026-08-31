@@ -494,7 +494,7 @@ change, no migration.** `pipeline.ts`'s `/intelligence/` filter remains untouche
 | **1a** | `buildQueueDrafts()` now collapses drafts sharing a `keywordTarget`, keeping the highest-priority one. Root cause: `VEHICLE_SEEDS` carries one row per **trim** (Ford F-150 XL + XLT) and neither keyword template includes the trim, so both seeds produced one keyword; `seedContentQueue()` filtered against keywords already in the DB but never against its own batch, and `content_queue` has no unique constraint. **Measured: 1000 → 955 drafts, 45 duplicate rows eliminated.** | `lib/amips/seed/content-queue.seed.ts` |
 | **1b** | New exported `findEntityConflict()`, checked before the quality gates: a second page for an existing `(make, model, metro)` now fails the queue item with `duplicate_entity` instead of publishing. Reuses the Gate-2 query (widened `select`), so no extra round trip. Scoped to pages carrying a metro, matching the lifecycle cluster key, so Tier A/B angles are unaffected. | `lib/amips/amips-generator.ts` |
 | **2** | New `lib/amips/tiers.ts` is the single authority. `MARKET_DATA_TIERS` = {C,D,E,**F**} now drives **both** Gate 5 and the lifecycle staleness check; `METRO_ASSEMBLY_TIERS` = {C,D,E} is documented as assembler routing only. The Tier F assembler return now populates `dealerDataAsOf` / `marketDataAsOf`. | `lib/amips/tiers.ts`, `assembler.ts`, `quality-gate.ts`, `lifecycle-manager.ts` |
-| **3** | **Chosen: stop treating absent refresh as a de-indexing condition.** `REFRESH_REQUIRED` is now servable and sitemap-listed via one shared `SERVABLE_LIFECYCLE_STATUSES`. Rationale: providing a refresh path would need a new cron (out of scope) and would still leave a 30-day 404 window; a page whose market data is 31 days old is materially better than a 404, and de-indexing destroys ranking equity for an editorial signal. Serving and sitemap inclusion now derive from **one** constant, so a page can never be live-but-unlisted or listed-but-404. | `tiers.ts`, `intelligence/[slug]/page.tsx`, `lib/amips/sitemap.ts`, `sitemap-intelligence.xml/route.ts` |
+| **3** | **Chosen: stop treating absent refresh as a de-indexing condition.** `REFRESH_REQUIRED` is now servable and sitemap-listed via one shared `SERVABLE_LIFECYCLE_STATUSES`; de-indexing destroys ranking equity for what is an editorial signal. Serving and sitemap inclusion derive from **one** constant, so a page can never be live-but-unlisted or listed-but-404. **⚠ The rationale first given here cited 31-day-old data; production is 66–85 days and was unbounded. Corrected under BLOCKER 2 below, which adds `STALE_WITHHOLD_DAYS` as the outer bound.** | `tiers.ts`, `intelligence/[slug]/page.tsx`, `lib/amips/sitemap.ts`, `sitemap-intelligence.xml/route.ts` |
 | **4** | New exported `shouldFlagLowConversion()`. A corpus-level `leadsTrackingActive` probe gates the branch: while no page reports a lead, the ratio is treated as **unknown**, not zero. The branch resumes working automatically once a writer exists. | `lib/amips/lifecycle-manager.ts` |
 | **5** | `runLifecycleReview()` now returns `transitions[]` (`slug`, `from`, `to`, `reason`), capped at `MAX_LOGGED_TRANSITIONS` with a `transitionsTruncated` flag, plus `leadsTrackingActive`. `withCronRun` persists it to `cron_job_logs.result` (already `Json`) — **no new table**. The five reasons are distinct, so `duplicate_cluster` vs `low_conversion_90d` — the exact distinction that was unanswerable this batch — is now recorded. | `lib/amips/lifecycle-manager.ts` |
 
@@ -502,6 +502,94 @@ change, no migration.** `pipeline.ts`'s `/intelligence/` filter remains untouche
 Tier C `REFRESH_REQUIRED` pages return to the index with no data change. The 401 that remain are
 `UNDER_REVIEW` (370 awaiting human review on their own merits + 31 duplicate demotions) and stay
 correctly withheld pending the repair script.
+
+### Owner verification round 2 — two blocking findings, both correct
+
+Both were found in production data after the first remediation and both are fixed on this branch.
+
+#### BLOCKER 1 — the repair script would have re-created all 31 duplicates
+
+Owner-verified across the 31 `UNDER_REVIEW + PUBLISHED` clusters: **0** have an `ACTIVE` sibling,
+**31** have a `REFRESH_REQUIRED` sibling, **0** are fully dark.
+
+The script asked `lifecycleStatus === LIFECYCLE_ACTIVE`. Pre-FIX-3 that was equivalent to "is
+anything live here?" — post-FIX-3 it is not, because `REFRESH_REQUIRED` now serves. All 31
+clusters therefore already have a **live canonical**, and promoting a demoted sibling would put
+two live pages on one `(make, model, metro)` — re-creating exactly the duplication the lifecycle
+manager correctly resolved.
+
+**This is the same ACTIVE-literal-vs-servability assumption the first batch's second review caught
+in the clustering path. The script carried a second copy of it, and I did not check for one.**
+The lesson is that the assumption was a *class* of defect, not a single site; the fix is now a
+shared predicate (`isServableLifecycleStatus`) with no remaining literal comparisons.
+
+| Change | Detail |
+| --- | --- |
+| New `lib/amips/lifecycle-repair.ts` | `planClusterRepair()` + `rankCanonical()`, pure and unit-tested. Extracted from the script so the rule is testable at all — it previously lived inside a `main()` that could not be imported |
+| Rule corrected | `siblings.find(s => isServableLifecycleStatus(s.lifecycleStatus))` |
+| Script header + summary | State explicitly that **promote-nothing is the expected and correct output**, and print that conclusion at runtime when `promoted === 0` |
+
+**Output against the verified state: 0 promotions, 31 clusters skipped.** There is nothing to
+repair — FIX 3 already returned the 208 `REFRESH_REQUIRED` pages to the index, and *those pages
+are the canonicals*. A repair that correctly does nothing is the right outcome.
+
+#### BLOCKER 2 — FIX 3 had no upper staleness bound
+
+Owner-verified Tier C staleness: **market 66d, dealer 66d, vehicle 85d**. The original
+justification assumed 31 days, which was wrong — it took the *threshold* (30) for the *actual*
+age. With no refresh path and staleness no longer withholding, the bound was infinite on vehicle
+pricing and dealer pages.
+
+**(a) Disclosure — partly pre-existing, two real gaps closed.**
+
+| Surface | Before | Status |
+| --- | --- | --- |
+| `intelligence/[slug]/page.tsx:181-185` freshness footer | "Last Updated … · Data as of …", plain text | **existed, visible** |
+| `components/amips/MarketScoreTable.tsx:69` | "Computed from market data, never estimated. Data as of …", plain text | **existed, visible** (market tiers only) |
+| Machine-readable | neither used `<time dateTime>` | **added to both** |
+| Correct date | `marketDataAsOf ?? vehicleDataAsOf` took the first non-null **by priority, not the oldest** | **fixed** — now `oldestApplicableDataAsOf()` |
+
+That second gap was itself an accuracy defect: against production the page advertised **66 days**
+for a page whose oldest load-bearing figure was **85** — understating staleness by 19 days on a
+pricing page, in the very disclosure meant to make staleness legible.
+
+**(b) Outer bound: `STALE_WITHHOLD_DAYS = 180`, keyed on the oldest applicable timestamp.**
+
+It is not a new number. It is `FRESHNESS_DAYS.vehicle` — the age at which **Quality Gate 5 already
+refuses to generate a page**. The invariant is the coherent one:
+
+> **serve only what we would still be willing to publish.**
+
+Continuing to serve pricing we would refuse to publish today is indefensible; that argument needs
+no independent threshold, which is why no round number was invented.
+
+| Property | Value |
+| --- | --- |
+| Multiple of the market gate (30d) | **6×** |
+| Multiple of the dealer gate (90d) | **2×** |
+| Current worst case | 85 days |
+| Headroom today | **~95 days — nothing withholds now** |
+
+That headroom is what makes it a backstop rather than a re-run of the 30-day defect, where pages
+went dark almost immediately. Why not 365: a year guarantees crossing a model-year rollover, so
+the page would quote prior-model-year MSRP as current. Why not tighter: the system is willing to
+*publish* at 180, so withholding sooner would dark freshly-publishable pages.
+
+Enforced at the route (`loadPage`) **and both sitemaps**, using one predicate — the same
+discipline as `SERVABLE_LIFECYCLE_STATUSES`, so a withheld page is never advertised.
+
+**THE BOUND HAS A DEADLINE — this is the operational consequence to act on.** Vehicle data is 85
+days old, so it crosses 180 on approximately **2026-12-04**. There is **no scheduled refresh** for
+any source: `VehicleIntelligence` is written only by the manual seed
+(`lib/amips/seed/vehicle-intelligence.seed.ts:97`) and `MarketIntelligence` only by the pipeline
+behind `POST /api/admin/amips/sync-market-intelligence` — no cron drives either. Unless the source
+data is refreshed, the corpus goes dark that day.
+
+This does not create a new cliff. Gate 5 already refuses to generate or regenerate past the same
+threshold (`assembler.ts:115`), so past 180 days the system can neither publish nor regenerate
+these pages — **serving was the only place still ignoring it**. Regeneration will not clear the
+bound either, since the as-of dates come from the source rows. Scheduling the refresh is a cron
+change and deliberately out of scope for this batch.
 
 ### Branch-by-branch closure — answering V-2's goal directly
 

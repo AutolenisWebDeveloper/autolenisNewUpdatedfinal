@@ -80,3 +80,109 @@ export const SERVABLE_LIFECYCLE_STATUSES: readonly string[] = [
 export function isServableLifecycleStatus(status: string): boolean {
   return (SERVABLE_LIFECYCLE_STATUSES as readonly string[]).includes(status);
 }
+
+// ── Outer staleness bound (serving backstop) ───────────────────────────────
+
+/**
+ * The age past which a page stops being served, however fresh its lifecycle
+ * status says it is.
+ *
+ * WHY A BOUND EXISTS AT ALL
+ * SERVABLE_LIFECYCLE_STATUSES deliberately stopped treating staleness as a
+ * withholding condition, because a 404 is worse than slightly-aged data. But
+ * with no refresh path in place that removed the upper bound entirely: a page
+ * could serve MSRP, fair-market pricing and dealer counts of unbounded age.
+ * These are vehicle-pricing and dealer pages, so past some age the numbers stop
+ * being merely aged and start being wrong.
+ *
+ * WHY 180 DAYS, AND NOT A ROUND NUMBER PICKED FOR ITS OWN SAKE
+ * This is not a new threshold — it is `FRESHNESS_DAYS.vehicle`, the age at which
+ * Quality Gate 5 already REFUSES TO GENERATE a page. The invariant it creates is
+ * the coherent one:
+ *
+ *     serve only what we would still be willing to publish.
+ *
+ * Continuing to serve pricing we would not publish today is indefensible; that
+ * is the whole argument, and it needs no independent number.
+ *
+ * It is a backstop, not a refresh trigger:
+ *   - 6x the market gate (30d) and 2x the dealer gate (90d), so a page must be
+ *     six market-refresh cycles overdue before it goes dark.
+ *   - Against owner-verified production (market 66d, dealer 66d, vehicle 85d)
+ *     nothing withholds today, with ~95 days of headroom. It cannot re-create
+ *     the 30-day defect, where pages went dark almost immediately.
+ *
+ * Why not longer (365d): a year guarantees crossing a model-year rollover, so
+ * the page would quote prior-model-year MSRP as current — a factual-accuracy
+ * failure on a car-buying platform, not a freshness nit.
+ * Why not shorter (e.g. 120d): the system is willing to PUBLISH at 180d, so a
+ * withholding bound tighter than the publication bound would dark pages that are
+ * freshly publishable.
+ *
+ * THE BOUND HAS A DEADLINE — READ THIS BEFORE DEPLOYING
+ * Owner-verified vehicle data is 85 days old (2026-08-31), so it crosses 180
+ * days on approximately **2026-12-04**. There is NO scheduled refresh for any of
+ * the three sources: VehicleIntelligence is written only by the manual seed
+ * (lib/amips/seed/vehicle-intelligence.seed.ts:97) and MarketIntelligence only
+ * by the pipeline behind POST /api/admin/amips/sync-market-intelligence — no
+ * cron drives either. Unless that source data is refreshed before then, the
+ * corpus goes dark on that date.
+ *
+ * That is the correct outcome, not a regression, and it does not create a new
+ * cliff. Quality Gate 5 ALREADY refuses to generate or regenerate past this same
+ * threshold (assembler.ts: `isFresh(vehicleRow.lastUpdated, FRESHNESS_DAYS.vehicle)`
+ * returns null, sending the queue item to pending_enrichment). Past 180 days the
+ * system can neither publish nor regenerate these pages — serving was the only
+ * place still ignoring that. Regenerating will NOT clear the bound either, since
+ * the as-of dates come from the source rows; only refreshing the source data
+ * will. Scheduling that refresh is a cron change, deliberately out of scope here.
+ *
+ * Kept here rather than imported from the assembler to avoid an import cycle
+ * (the assembler imports this module). `tiers.test.ts` asserts the two stay
+ * equal, so they cannot drift.
+ */
+export const STALE_WITHHOLD_DAYS = 180;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface DataAsOfBearing {
+  contentTier: string;
+  vehicleDataAsOf: Date | null;
+  dealerDataAsOf: Date | null;
+  marketDataAsOf: Date | null;
+}
+
+/**
+ * The OLDEST applicable data timestamp on a page — the worst case, which is what
+ * both the disclosure and the withholding bound must key on.
+ *
+ * Applicability follows the same rule as the lifecycle staleness check: vehicle
+ * data applies to every tier; dealer and market data apply only to market-data
+ * tiers. Returns null when nothing applicable is populated.
+ */
+export function oldestApplicableDataAsOf(page: DataAsOfBearing): Date | null {
+  const dates: Date[] = [];
+  if (page.vehicleDataAsOf) dates.push(page.vehicleDataAsOf);
+  if (requiresMarketData(page.contentTier)) {
+    if (page.dealerDataAsOf) dates.push(page.dealerDataAsOf);
+    if (page.marketDataAsOf) dates.push(page.marketDataAsOf);
+  }
+  if (dates.length === 0) return null;
+  return dates.reduce((oldest, d) => (d.getTime() < oldest.getTime() ? d : oldest));
+}
+
+/**
+ * True when a page's oldest applicable data has passed STALE_WITHHOLD_DAYS and
+ * the page must stop being served and listed.
+ *
+ * A page with NO applicable timestamp is NOT withheld. The generator sets
+ * `vehicleDataAsOf` on every path and Gate 5 requires it, so this case does not
+ * arise for generated pages; withholding on it would dark rows for an
+ * unprovable reason rather than a measured one. It matches `hasStaleData`,
+ * which likewise treats a null vehicle date as not-applicable rather than stale.
+ */
+export function isPastWithholdBound(page: DataAsOfBearing, now: number): boolean {
+  const oldest = oldestApplicableDataAsOf(page);
+  if (!oldest) return false;
+  return now - oldest.getTime() > STALE_WITHHOLD_DAYS * DAY_MS;
+}

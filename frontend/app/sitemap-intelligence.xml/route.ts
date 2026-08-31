@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
-import { SERVABLE_LIFECYCLE_STATUSES } from "@/lib/amips/tiers";
+import { SERVABLE_LIFECYCLE_STATUSES, isPastWithholdBound } from "@/lib/amips/tiers";
 import { NextResponse } from "next/server";
 
 const BASE = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -29,6 +29,10 @@ export async function GET() {
     lastRefreshedAt: Date | null;
     publishedAt: Date | null;
     updatedAt: Date;
+    contentTier: string;
+    vehicleDataAsOf: Date | null;
+    dealerDataAsOf: Date | null;
+    marketDataAsOf: Date | null;
   }> = [];
   try {
     rows = await prisma.amipsPage.findMany({
@@ -38,6 +42,11 @@ export async function GET() {
         lastRefreshedAt: true,
         publishedAt: true,
         updatedAt: true,
+        // Drives the outer staleness bound applied below.
+        contentTier: true,
+        vehicleDataAsOf: true,
+        dealerDataAsOf: true,
+        marketDataAsOf: true,
       },
       orderBy: { updatedAt: "desc" },
       take: MAX_URLS,
@@ -47,6 +56,10 @@ export async function GET() {
     logger.error("[sitemap-intelligence] error:", err);
     rows = [];
   }
+
+  // Same predicate the route serves by: listed exactly when servable.
+  const nowMs = Date.now();
+  rows = rows.filter((r) => !isPastWithholdBound(r, nowMs));
 
   const urls = rows
     .map((r) => {

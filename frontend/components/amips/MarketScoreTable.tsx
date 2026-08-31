@@ -66,7 +66,11 @@ export default function MarketScoreTable({
           AutoLenis Market Score — {vehicle} in {metro}
         </h2>
         <p className="text-xs text-[#6B7280] mt-1">
-          Computed from market data, never estimated. Data as of {asOfLabel}.
+          Computed from market data, never estimated. Data as of{" "}
+          <time dateTime={asOfLabel} data-testid="market-score-as-of">
+            {asOfLabel}
+          </time>
+          .
         </p>
       </div>
 
