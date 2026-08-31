@@ -412,3 +412,419 @@ statement; the unguarded-DDL scan across all 32; `vercel.json` build configurati
 - **Behaviour of the proposed sequence.** Nothing here has been executed against any
   database, production or otherwise. The `42701`/`42P07` failure predictions in §2a are
   derived from statement text plus measured object presence, not from an observed run.
+
+---
+
+# 7. §5.1 execution attempt, 2026-08-31 — HALTED. Six stale checksums found.
+
+**Nothing was written to production.** This section was produced by a session asked to
+execute §5.1. It re-verified the audit's premises (all still true), then found a
+condition §1–§6 did not record, and stopped before any write. The Supabase MCP's
+read-only-for-production designation (`.claude/MCP_INVENTORY.md:27`) was honoured
+throughout; every statement below came from a `SELECT`, from `sha256sum`, or from `git`.
+
+## 7.1 Why the §5.1 sequence did not run
+
+Two reasons, in order of importance.
+
+1. **Six already-recorded migrations have a stored checksum that no longer matches
+   their repo file.** §5.3.5's stated post-condition — "`prisma migrate status` should
+   report only the three excluded migrations as pending" — is **already unachievable**,
+   before the 29 are touched. Detail in §7.3.
+2. **The named instrument cannot connect from a Claude Code session.** There is no
+   `DATABASE_URL`/`DIRECT_URL` in the session environment (`frontend/.env.example` only),
+   so `prisma migrate resolve --applied` has no production target. The only production
+   channel available is the Supabase MCP, which is designated **read-only for prod**.
+   Substituting a hand-written `INSERT` for the named instrument was considered and
+   **rejected by the owner**; the read-only designation stands.
+
+The §5.1 sequence itself is still correct. §7.2 re-verifies it.
+
+## 7.2 Re-verification of the audit's premises (2026-08-31, read-only)
+
+The audit was written 2026-08-31. Confirming nothing changed:
+
+| Check | Audit | Re-verified | Result |
+| --- | --- | --- | --- |
+| Ledger row count | 67 | 67 | **unchanged** |
+| Unfinished / rolled back | 0 / 0 | 0 / 0 | **unchanged** |
+| §1b probe objects for the 29 (28 direct probes) | all PRESENT | **28 of 28 PRESENT** | **unchanged** |
+| `20261013000000` extras — `ESignStatus.EXPIRED`, `e_sign_envelopes_document_version_id_idx` | PRESENT | PRESENT | **unchanged** |
+| `20261102000000` extras — `apollo_enrichment_runs`, `dealer_outreach_log_live_attempt_key` | PRESENT | PRESENT | **unchanged** |
+| `20261018000000` guard shape — `conversations` has `contact_id`, lacks `session_id`, 10 cols; `acquisition_conversations` exists | verified no-op | `contact_id`=true, `session_id`=false, 10 cols, `acquisition_conversations`=true | **still a verified no-op** |
+| Any of the 29 already recorded | 0 | 0 | **unchanged** |
+| §4 drift — `e_sign_envelope_history`, `e_sign_envelopes.executed_document_key`, `ai_action_intents` | all PRESENT | all PRESENT | **drift persists** |
+
+**The 29 remain factually correct to record.** Nothing in §5.1 needs revision.
+
+## 7.3 The six stale checksums
+
+Prisma stores `_prisma_migrations.checksum` as the SHA-256 of `migration.sql`.
+**Method proof:** recomputing it for all 67 recorded migrations reproduces the stored
+value for **61**. The 6 below are the exceptions, and in each case the repo file was
+edited *after* the migration was recorded — so the ledger's checksum is a fossil of the
+pre-edit file.
+
+| # | Migration | `applied_steps_count` | Stored checksum (ledger) | Current file checksum | File edited after apply? |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `20260507000000_add_prequal_consent_accepted_at` | 1 | `a09e083de0bf67e6…cee2754d` | `d842256d5e577bd1…0025a004` | **Yes** |
+| 2 | `20260702000000_add_admin_mfa_rate_limit` | 0 | `9910a58db7535217…f17c426a` | `636dcba9d1672c61…fbb93f34` | **Yes** |
+| 3 | `20260703000000_add_admin_pending_recovery_codes` | 0 | `1650510530b5acee…75e1923f` | `f6d278bae9d44e80…b280bb2c4` | **Yes** |
+| 4 | `20260703000000_add_pending_recovery_codes` | 0 | `871edd0862ddf712…077a6ac690` | `3185ff8775c1b82f…890918d18e` | **Yes** |
+| 5 | `20260801000005_affiliate_onboarding` | 0 | `b47a1af251221fc1…c7ca74f2268f` | `fc6927793889d755…e1898a9c4a` | **Yes** |
+| 6 | `20260911000000_add_acquisition_system` | 1 | `4a84c5454786399d…d994ae08c10` | `4b522ab8d95f1d2a…4b13f396e23db` | **Yes** |
+
+Full values are recoverable with `sha256sum frontend/prisma/migrations/<name>/migration.sql`
+and `SELECT migration_name, checksum FROM _prisma_migrations`.
+
+This violates the standing rule in `.claude/skills/autolenis-supabase-postgres`
+("Never edit an already-applied migration; add a new one"). It was not caught because
+nothing compares repo checksums to ledger checksums — CI cannot see it (§7.5).
+
+### 7.3.1 Editing commits, authorship, and the 2026-08-29 → 2026-08-31 window
+
+| Migrations | Commit | Author | Authored (UTC) | Subject |
+| --- | --- | --- | --- | --- |
+| 1, 2, 3, 4, 5 | `f2032cf` | `Claude <noreply@anthropic.com>` | **2026-08-29T00:29:12Z** | `fix(prisma): make the migration chain able to build the database from zero` |
+| 6 | `599b5a8` | `Claude <noreply@anthropic.com>` | **2026-08-29T01:01:44Z** | `fix(prisma): make the FULL provisioning runbook work from zero, not just the chain` |
+
+**Do these commits fall in the attribution window? Stated plainly: yes by date, no by
+content — they are not the mechanism.**
+
+- Both are dated **2026-08-29**, the opening day of the window in which
+  `e_sign_envelope_history` and the seven gated `e_sign_envelopes` columns appeared on
+  production outside the migration trail (§4).
+- **Neither commit touches `20261014000000`, `20261015000000`, or `20261016000000`.**
+  `f2032cf` edits migrations 1–5 above plus `20261017000000`; `599b5a8` edits migration 6
+  plus `20261018000000`. The three gated directories were last modified on
+  **2026-08-26/27** (`015ec91`, `a1bd6f8`, `be41e53`), before the window opened.
+- Both are **repo file edits, not production DDL**. Editing a `migration.sql` in git
+  cannot create a table in Supabase.
+
+**The window narrows, and the real lead is elsewhere.** `4f2e3a6`
+(*"docs(ops): disable the production runbook — its premise was disproven"*,
+**2026-08-29T22:58:29Z**) still asserts the gated objects were ABSENT. The audit found
+them PRESENT on 2026-08-31. So the objects appeared **between 2026-08-29T22:58Z and the
+2026-08-31 audit** — *after* both editing commits.
+
+Two facts bound who could have done it:
+
+1. **A session with production write access existed on 2026-08-29.** The ledger's two
+   newest rows — `20261101000000_affiliate_correctness` (`finished_at`
+   2026-08-29T21:57:59.717039Z) and `20261101000001_affiliate_rls`
+   (2026-08-29T22:01:41.770409Z) — were genuinely applied, ~18 minutes after `961e03a`
+   authored them against "VERIFIED live production state". That session predates the
+   22:58 absence claim, so it is **not** the cause, but it establishes that a working
+   production `DATABASE_URL` was in circulation that day.
+2. **The same out-of-band signature appears again inside the narrowed window.**
+   `20261102000000_dealer_outreach_apollo_operational` was authored on
+   **2026-08-31T01:54–02:05Z** (`7e537d2`, `2c67005`, `5fb4314`, `45c419e`). Its objects
+   — `apollo_person_candidates`, `apollo_enrichment_runs`, the outreach columns and
+   indexes — are **PRESENT in production and UNRECORDED in the ledger**. That is the same
+   pattern as the gated e-sign objects: DDL reached production without a ledger row,
+   inside the same window.
+
+**This is the only attribution lead available, and it is circumstantial.** It shows a
+practice of applying DDL to production outside the migration trail during 2026-08-29 →
+2026-08-31; it does not identify the operator or the command. Establishing that requires
+Supabase logs for the window, which this session did not query.
+
+## 7.4 Do the six block `migrate deploy` and `migrate status` independently of the 29?
+
+**Yes — the two problems are independent, and the six are the harder blocker.**
+
+| | The 29 unrecorded | The 6 stale checksums |
+| --- | --- | --- |
+| What Prisma sees | migrations pending | migrations *modified after being applied* |
+| Fixed by | `migrate resolve --applied` | **no Prisma CLI command exists** (§7.6) |
+| `migrate status` | lists them as pending | reports them as modified; non-zero exit |
+| `migrate deploy` | would try to run them, and abort at `20260920000000` on a bare `ADD COLUMN` for a column that exists (§2a) | fails on the checksum mismatch |
+
+Consequences:
+
+- **Recording the 29 does not clear `migrate status`.** After a successful §5.1, status
+  would report 3 pending (the gated ones, as intended) **plus 6 modified**. §5.3.5's
+  expected clean result cannot be reached by §5.1 alone.
+- **The six are already blocking today**, before any reconciliation, and would keep
+  blocking after it.
+
+> **Evidence class.** The checksum divergence is **VERIFIED** (61/67 reproduce, 6 do not;
+> recomputed this session). The `migrate status` / `migrate deploy` *consequences* are
+> stated from Prisma's documented behaviour and are **NOT VERIFIED** here — no production
+> `DATABASE_URL` exists in this environment, so neither command was run. §2a's
+> abort-at-`20260920000000` prediction carries the same caveat it always did.
+
+## 7.5 Production ledger facts (owner-supplied; not re-derived here)
+
+Recorded so later readers have them in one place. Where the snapshot this session
+captured adds precision, that is noted — it is not a contradiction of the figures.
+
+| Fact | Value |
+| --- | --- |
+| Ledger rows | **67** |
+| Unfinished (`finished_at IS NULL`) | **0** |
+| Rolled back | **0** |
+| Duplicate `migration_name` | **0** |
+| Rows with `applied_steps_count = 0` | **13** |
+| Rows sharing `finished_at` to the microsecond | **12** at `2026-06-20T03:15:16.662615Z` |
+| Rows with a non-null `logs` value | **25** |
+| Do names track application order? | **No** |
+| Name-prefix collisions | `20260703000000`, `20260915000000` |
+
+Three refinements from the captured snapshot:
+
+1. **The 25 rows with `logs` split cleanly into two populations**, and the split is
+   informative: **13** carry an empty string `''` — and they are *exactly* the 13 rows
+   with `applied_steps_count = 0`; the other **12** carry prose from the 2026-06-20
+   schema audit. So "has logs" is not one phenomenon but two.
+2. **The 2026-06-20 audit touched 12 rows, of which 11 share the microsecond.** Eleven
+   carry `Reconciled by schema audit 2026-06-20: … (equivalent to prisma migrate resolve
+   --applied)` at `03:15:16.662615Z`; the twelfth, `20260918000000_enable_rls_manual_tables`,
+   carries `Applied via schema audit 2026-06-20: enabled RLS on 9 out-of-band tables` at
+   `03:23:45.319623Z` — it actually ran DDL, which is why its timestamp differs.
+3. **There is a third name-prefix collision:** `20260702000000` (`_add_admin_mfa_lockout`
+   and `_add_admin_mfa_rate_limit`), alongside the two listed. The CI workflow already
+   names this one as a known defect class (`.github/workflows/ci.yml:162`).
+
+**Precedent worth naming:** those 12 rows are hand-written reconciliation, not CLI
+output — `logs` says so explicitly. Raw-SQL reconciliation of this table is an
+established practice in this repository. That is context for §7.6, **not** a licence for
+an agent session to write production; the owner's instruction is that the read-only
+designation stands and reconciliation is run by a human with a real `DATABASE_URL`.
+
+## 7.6 Re-baseline, or keep patching?
+
+13 of 67 rows are already resolve-only. §5.1 would add 29 more, taking the ledger to
+**42 of 96 rows** (`applied_steps_count = 0`) that assert an application which never ran
+against this database — plus the 12 hand-written rows that claim
+`applied_steps_count = 1` without having run either. **54 of 96 rows would be attestation
+rather than record.** That is the honest framing of the question.
+
+### Option A — patch: resolve the 29, realign the 6 checksums
+
+- **Migration count:** 99 directories, 96 recorded, 3 gated pending. Unchanged shape.
+- **Blast radius:** the `_prisma_migrations` table only. No schema change, no DDL, no
+  application behaviour. Reversible by deleting 29 rows and restoring 6 checksum values —
+  both single statements, and the pre-change snapshot exists.
+- **CI empty-DB chain job:** **unaffected.** The job provisions a fresh `postgres:16.4`,
+  asserts zero `public` tables, then runs `prisma migrate deploy` from empty
+  (`ci.yml:145-160`). It builds its own ledger, so it computes checksums fresh and can
+  never observe the production ledger's staleness. It is green today and stays green.
+- **Cost:** leaves 54/96 rows as attestation. The §5.3.2 hazard is unchanged — the next
+  `migrate deploy` targets exactly the 3 gated migrations.
+
+### Option B — revert the six file edits
+
+- **Migration count:** unchanged.
+- **Blast radius:** **breaks CI.** `f2032cf` and `599b5a8` exist precisely to make the
+  chain build from zero; the CI job exists precisely to gate that
+  (`ci.yml:85-92`: *"`prisma migrate deploy` failed at migration 22 of 94 on a fresh
+  provision"*). Reverting restores checksum agreement by reintroducing the defect the
+  gate was built to catch.
+- **CI empty-DB chain job:** **goes red.**
+- **Verdict: disqualified.** It trades a working chain for tidy metadata.
+
+### Option C — re-baseline against current production schema
+
+- **Migration count:** 99 → **1** baseline (generated from live schema), plus whatever
+  follows. A ~98-file archive.
+- **Blast radius:** **highest, and it dissolves the compliance boundary.** A baseline
+  generated from *current production* necessarily contains
+  `e_sign_envelope_history`, the seven gated `e_sign_envelopes` columns, and
+  `ai_action_intents` — because §4 established they are physically present. Re-baselining
+  would absorb all three owner-gated migrations into an "already applied" baseline,
+  silently converting the deliberate exclusion in §5.2 into a fait accompli. §4 records
+  that the boundary's defence-in-depth is already down from two layers to one
+  (`ESIGN_EXECUTED_ARTIFACT_ENABLED`); this would remove the paper trail as well.
+- **CI empty-DB chain job:** survives mechanically but **loses its purpose.** It would
+  validate that one squashed file applies to an empty database — which is nearly
+  tautological — instead of that 99 historical migrations apply in order. The
+  "migration 22 of 94" defect class becomes undetectable. The `migrations/*.sql` CRM
+  runbook steps (`ci.yml:183-198`) are unaffected either way.
+- **Verdict: rejected**, primarily on the compliance-boundary point, secondarily on
+  losing the chain gate.
+
+### Recommendation — one, not a menu
+
+> **Take Option A. Resolve the 29 and realign the 6 ledger checksums to the current
+> files. Do not re-baseline, and do not revert the file edits.**
+
+Reasoning, in order:
+
+1. **Re-baselining is disqualified on compliance grounds, not on effort.** Any baseline
+   taken from current production swallows the three gated migrations. Until the owner has
+   deliberately decided the e-sign boundary is over, re-baselining decides it by accident.
+2. **The chain has real, currently-enforced value.** CI proves 99 migrations build a
+   database from zero and that the result does not drift from `schema.prisma`. That is a
+   stronger guarantee than a squashed baseline, and it was expensive to earn.
+3. **Realign checksums toward the files, not the files toward the checksums.** The edited
+   files are the *correct* SQL — they are what makes the chain work from zero, and they
+   are idempotent. The ledger checksum records "what we ran"; production already has the
+   objects either way. Making the ledger agree with the repo is the change that makes
+   `migrate status` usable again.
+4. **54/96 attestation rows is a real cost, and Option A does not fix it.** It is
+   accepted deliberately: the alternative that *would* fix it is Option C, and Option C
+   costs the compliance boundary. Revisit re-baselining only after the owner has settled
+   the e-sign gate (§4) — at that point it becomes a clean decision rather than a
+   side effect.
+
+## 7.7 The consolidated write — for an owner with a real `DATABASE_URL`
+
+Fixes the checksums and the unrecorded rows together. `20261014` / `20261015` /
+`20261016` stay excluded in both forms. **Neither has been executed.**
+
+**Take a snapshot first** (§5.3.4). One statement, and it is the whole undo:
+
+```sql
+CREATE TABLE _prisma_migrations_backup_20260831 AS SELECT * FROM _prisma_migrations;
+```
+
+### 7.7.1 SQL — single atomic statement, guarded
+
+Guards abort the whole block rather than leaving a partial state. Substitute the real
+checksums (`sha256sum frontend/prisma/migrations/<name>/migration.sql`) for the six
+`<sha256-of-…>` placeholders; the 29 `INSERT` checksums must be generated the same way.
+
+```sql
+DO $reconcile$
+DECLARE before_ct int; after_ct int; upd_ct int; ins_ct int;
+BEGIN
+  SELECT count(*) INTO before_ct FROM _prisma_migrations;
+  IF before_ct <> 67 THEN
+    RAISE EXCEPTION 'ledger not at verified baseline 67, found %', before_ct;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM _prisma_migrations WHERE migration_name IN (
+      '20261014000000_esign_envelope_history',
+      '20261015000000_esign_consent_and_executed_artifact',
+      '20261016000000_ai_action_intent_lifecycle')) THEN
+    RAISE EXCEPTION 'an owner-gated migration is already recorded — stop and investigate';
+  END IF;
+
+  -- (a) Realign the six stale checksums to the current repo files.
+  UPDATE _prisma_migrations SET checksum = v.sum
+  FROM (VALUES
+    ('20260507000000_add_prequal_consent_accepted_at',   '<sha256-of-file>'),
+    ('20260702000000_add_admin_mfa_rate_limit',          '<sha256-of-file>'),
+    ('20260703000000_add_admin_pending_recovery_codes',  '<sha256-of-file>'),
+    ('20260703000000_add_pending_recovery_codes',        '<sha256-of-file>'),
+    ('20260801000005_affiliate_onboarding',              '<sha256-of-file>'),
+    ('20260911000000_add_acquisition_system',            '<sha256-of-file>')
+  ) AS v(name, sum)
+  WHERE _prisma_migrations.migration_name = v.name;
+  GET DIAGNOSTICS upd_ct = ROW_COUNT;
+  IF upd_ct <> 6 THEN RAISE EXCEPTION 'updated % checksums, expected 6', upd_ct; END IF;
+
+  -- (b) Record the 29 verified-present migrations. One row per §5.1 entry.
+  INSERT INTO _prisma_migrations
+    (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count)
+  VALUES
+    (gen_random_uuid(), '<sha256-of-file>', now(), '20260828000000_dealer_invitation_token_hash',
+     'Reconciled per MIGRATION-LEDGER-RECONCILIATION.md 5.1: objects verified physically present; equivalent to prisma migrate resolve --applied.',
+     NULL, now(), 0)
+    -- … the remaining 28 rows from the §5.1 list, same shape …
+  ;
+  GET DIAGNOSTICS ins_ct = ROW_COUNT;
+  IF ins_ct <> 29 THEN RAISE EXCEPTION 'inserted % rows, expected 29', ins_ct; END IF;
+
+  SELECT count(*) INTO after_ct FROM _prisma_migrations;
+  IF after_ct <> 96 THEN RAISE EXCEPTION 'post-write count %, expected 96', after_ct; END IF;
+
+  RAISE NOTICE 'ledger reconciled: % -> % (% checksums realigned, % rows recorded)',
+    before_ct, after_ct, upd_ct, ins_ct;
+END
+$reconcile$;
+```
+
+`applied_steps_count` is set to **0**, which is what `migrate resolve --applied`
+records — deliberately *not* the `1` the 2026-06-20 rows used, so these rows are honest
+about never having run a step.
+
+**Undo:**
+
+```sql
+DELETE FROM _prisma_migrations WHERE migration_name IN ( /* the 29 names */ );
+UPDATE _prisma_migrations m SET checksum = b.checksum
+  FROM _prisma_migrations_backup_20260831 b
+ WHERE b.migration_name = m.migration_name AND m.migration_name IN ( /* the 6 names */ );
+```
+
+### 7.7.2 Prisma CLI — covers the 29 only
+
+```bash
+# From frontend/. Export the production URL once; do not paste it into shell history.
+#   export DB="postgresql://…"
+for m in \
+  20260828000000_dealer_invitation_token_hash \
+  20260919000005_add_esign_envelope_document_key \
+  20260919000006_add_referral_milestone_config \
+  20260920000000_add_buyer_opportunity_intake_processed_at \
+  20260921000000_add_funnel_stage_snapshot \
+  20260922000000_add_dealer_prospect_email_verification \
+  20260923000000_add_dealer_and_prospect_coordinates \
+  20260924000000_add_dealer_rooftop \
+  20260925000000_add_dealer_contact_profile \
+  20260926000000_add_apollo_credit_ledger \
+  20260927000000_add_auction_anti_snipe \
+  20260928000000_add_outside_invite_rooftop_expiry \
+  20260929000000_add_vehicle_request_coverage_hold \
+  20260930000000_add_dealer_availability \
+  20261001000000_pickup_confirm_roundtrip \
+  20261002000000_cron_job_logs_index \
+  20261003000000_auction_vehicle_request_fk \
+  20261004000000_phase5_block1_rules_audit \
+  20261005000000_phase5_block3_credit_application \
+  20261006000000_phase5_block4_review_queue \
+  20261007000000_phase5_credit_app_one_active_per_deal \
+  20261008000000_add_buyer_opportunity_intake_retry_terminal \
+  20261009000000_add_deal_dealer_award_dispatch \
+  20261010000000_batch1_inventory_matching_truthfulness \
+  20261012000000_add_buyer_request_claim_token \
+  20261013000000_esign_inhouse_evidence \
+  20261017000000_migration_chain_functional_reconciliation \
+  20261018000000_retire_misnamed_conversations_table \
+  20261102000000_dealer_outreach_apollo_operational \
+; do
+  DATABASE_URL="$DB" DIRECT_URL="$DB" pnpm exec prisma migrate resolve --applied "$m"
+done
+```
+
+> **Prisma has no command that repairs a checksum.** `migrate resolve` only takes
+> `--applied` and `--rolled-back`; neither rewrites the stored checksum of a row that is
+> already applied. The `--rolled-back` → `--applied` pair is *not* a substitute: it leaves
+> a rolled-back row behind and, between the two commands, a `migrate deploy` would attempt
+> to **re-run** the migration against production. **Step (a) must be the SQL `UPDATE`.**
+> Run (a) first, then this loop, or run the single statement in §7.7.1 — do not run this
+> loop and leave the checksums for later.
+
+### 7.7.3 Verification after the write
+
+```bash
+DATABASE_URL="$DB" DIRECT_URL="$DB" pnpm exec prisma migrate status
+```
+
+Expected: **96** ledger rows, **0** unfinished, **0** rolled back, **no** "modified after
+applied" report, and exactly **three** pending —
+`20261014000000_esign_envelope_history`,
+`20261015000000_esign_consent_and_executed_artifact`,
+`20261016000000_ai_action_intent_lifecycle`.
+
+**§5.3.2 still applies, and matters more once status is clean:** the next
+`migrate deploy` would target exactly those three, all effectively idempotent, and would
+record them as applied — flipping the compliance boundary in the ledger as a near-no-op.
+**`ESIGN_EXECUTED_ARTIFACT_ENABLED` remains the enforcement mechanism. The ledger cannot
+hold that line.**
+
+## 7.8 What this session did not do
+
+- **No production write of any kind.** No `INSERT`, `UPDATE`, `DELETE`, or DDL. The
+  Supabase MCP was used read-only, per `.claude/MCP_INVENTORY.md:27`.
+- **No `prisma migrate` command was run** — not `resolve`, not `deploy`, not `status`.
+  No production `DATABASE_URL` exists in this environment.
+- **The three gated migrations were not touched**, recorded, or reasoned about beyond
+  confirming their objects are still present (§7.2) and that no editing commit reached
+  them (§7.3.1).
+- **The six stale checksums were not repaired**, and the files were not reverted.
+- **Attribution was not established.** §7.3.1 narrows the window and names the only
+  available lead; identifying the operator needs Supabase logs for
+  2026-08-29T22:58Z → 2026-08-31, which were not queried.
