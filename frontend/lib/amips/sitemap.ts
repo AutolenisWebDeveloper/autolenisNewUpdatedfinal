@@ -1,12 +1,14 @@
 // AMIPS Phase 2 — tier-segmented sitemap builders.
 //
 // Each content tier gets its own sitemap so cohorts can be submitted and
-// indexation tracked per tier (the AMIPS-3 indexation gate). Only ACTIVE pages
-// appear — retiring a page (lifecycle_status != ACTIVE) removes it from the
-// sitemap automatically. Shared here so the four tier routes and the index stay
-// in lockstep.
+// indexation tracked per tier (the AMIPS-3 indexation gate). Only SERVABLE pages
+// appear (ACTIVE + REFRESH_REQUIRED) — the same set the public route serves, so
+// a page can never be live but unlisted, or listed but 404. Withdrawing a page
+// (UNDER_REVIEW / RETIRED) removes it from the sitemap automatically. Shared here
+// so the four tier routes and the index stay in lockstep.
 
 import { prisma } from "@/lib/prisma";
+import { SERVABLE_LIFECYCLE_STATUSES } from "@/lib/amips/tiers";
 
 const BASE = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
 
@@ -48,7 +50,7 @@ export async function buildTierSitemap(tier: string): Promise<string> {
   }> = [];
   try {
     rows = await prisma.amipsPage.findMany({
-      where: { contentTier: tier, lifecycleStatus: "ACTIVE" },
+      where: { contentTier: tier, lifecycleStatus: { in: [...SERVABLE_LIFECYCLE_STATUSES] } },
       select: {
         slug: true,
         lastRefreshedAt: true,

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { prisma } from "@/lib/prisma";
+import { SERVABLE_LIFECYCLE_STATUSES } from "@/lib/amips/tiers";
 import { buildPageMetadata } from "@/lib/seo/metadata";
 import { JsonLd, faqSchema, breadcrumbSchema } from "@/lib/seo/jsonld";
 import ContentTracker from "@/components/analytics/ContentTracker";
@@ -35,7 +36,10 @@ type AmipsPage = NonNullable<Awaited<ReturnType<typeof loadPage>>>;
 async function loadPage(slug: string) {
   try {
     return await prisma.amipsPage.findFirst({
-      where: { slug, lifecycleStatus: "ACTIVE" },
+      // ACTIVE + REFRESH_REQUIRED. REFRESH_REQUIRED means "the underlying data
+      // is aging", not "unfit to serve" — 404ing it destroyed ranking equity for
+      // a page that is still substantially correct. See lib/amips/tiers.ts.
+      where: { slug, lifecycleStatus: { in: [...SERVABLE_LIFECYCLE_STATUSES] } },
     });
   } catch {
     // DB unavailable (e.g. at build time) — treat as not found.

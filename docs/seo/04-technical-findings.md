@@ -17,7 +17,8 @@ end and is **not estimated**.
 > 794 pages, so this branch has never fired.** It is latent, not active. The mechanism stands.
 >
 > **The active de-indexing paths are different and worse** — `10`, V-2: 609 of 794 pages (76.7%)
-> return HTTP 404 today via the staleness branches, including two new HIGH findings (Tier C/D/E
+> return HTTP 404 today via the staleness branches (call path verified in `10`, STEP 0; **FIX 3
+> reduces this to 401/794**), including two new HIGH findings (Tier C/D/E
 > pages expire 30 days after generation with no refresh path; Tier F is stale from birth because
 > `isTierCPlus` includes `"F"` while the assembler never populates F's as-of dates). A third
 > branch (`noImpressions`, 180d) arms **2026-12-05** and reads an empty table, which would flag

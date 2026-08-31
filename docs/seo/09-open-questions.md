@@ -50,7 +50,7 @@ The original framing — that the leads-ratio branch was de-indexing pages weekl
 Owner-verified state (`clicks = 0` corpus-wide) proves that branch has never fired (`10`, V-3).
 
 What is actually true, and worse: **609 of 794 pages (76.7%) return HTTP 404 and are in no
-sitemap today**, via the staleness branches (`10`, V-2) — Tier C/D/E pages expire 30 days after
+sitemap today** — call path verified in `10`, STEP 0 — via the staleness branches (`10`, V-2) — Tier C/D/E pages expire 30 days after
 generation with no refresh path, and Tier F is stale from birth. A third branch
 (`noImpressions`, 180 days) **arms 2026-12-05** reading an empty `search_intelligence`, which
 would flag every remaining `ACTIVE` page at once.

@@ -176,8 +176,8 @@ not supported by the data; the metric is simply never recorded.
 > Two consequences the original framing missed, both in `10`:
 > - **The 31 demoted pages were not caused by this branch.** They came from the `duplicate`
 >   branch at `lifecycle-manager.ts:206` (V-1).
-> - **The real, present-tense damage is larger:** 609 of 794 pages (76.7%) are non-servable now,
->   via the staleness branches (V-2), not this one.
+> - **The real, present-tense damage is larger:** 609 of 794 pages (76.7%) are non-servable now — **verified call path**: `intelligence/[slug]/page.tsx:88 → :90 loadPage → :35-44 findFirst(lifecycleStatus:"ACTIVE") → :91 notFound()`; both AMIPS sitemaps filter the same way (`lib/amips/sitemap.ts:51`, `app/sitemap-intelligence.xml/route.ts:33`). **FIX 3 in the remediation batch reduces this to 401/794** by making `REFRESH_REQUIRED` servable, via the staleness branches (V-2), not
+>   this one.
 >
 > This branch arms itself when the GSC sync starts returning rows — see V-3 for the dates.
 

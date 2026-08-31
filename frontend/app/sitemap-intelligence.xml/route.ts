@@ -1,11 +1,13 @@
-// Intelligence sitemap — every ACTIVE AMIPS market-intelligence page across all
-// tiers, served as a single <urlset>. URLs mirror the /intelligence/[slug] route
-// loader (prisma.amipsPage), so retiring a page (lifecycleStatus != ACTIVE)
-// removes it from the sitemap automatically. Public route — see proxy.ts.
+// Intelligence sitemap — every SERVABLE AMIPS market-intelligence page across
+// all tiers, served as a single <urlset>. URLs mirror the /intelligence/[slug] route
+// loader (prisma.amipsPage) — both use SERVABLE_LIFECYCLE_STATUSES, so a page is
+// listed here exactly when it serves. Withdrawing a page (UNDER_REVIEW /
+// RETIRED) removes it automatically. Public route — see proxy.ts.
 export const dynamic = "force-dynamic";
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
+import { SERVABLE_LIFECYCLE_STATUSES } from "@/lib/amips/tiers";
 import { NextResponse } from "next/server";
 
 const BASE = (process.env.NEXT_PUBLIC_APP_URL ?? "https://autolenis.com").trim();
@@ -30,7 +32,7 @@ export async function GET() {
   }> = [];
   try {
     rows = await prisma.amipsPage.findMany({
-      where: { lifecycleStatus: "ACTIVE" },
+      where: { lifecycleStatus: { in: [...SERVABLE_LIFECYCLE_STATUSES] } },
       select: {
         slug: true,
         lastRefreshedAt: true,

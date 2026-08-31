@@ -143,7 +143,33 @@ by `clicks = 0`, and the generator is excluded by the atomic
 
 ## The serving and sitemap gates
 
-| Surface | Gate | File:line |
+> **STEP 0 — does `REFRESH_REQUIRED` serve? VERIFIED: no, it 404s.** The 76.7% figure
+> below rests on this and was previously asserted without a complete call path. Traced
+> against the pre-remediation code:
+>
+> 1. `GET /intelligence/<slug>` → `app/(public)/intelligence/[slug]/page.tsx:88`
+>    `IntelligenceArticlePage`
+> 2. → `:90` `loadPage(slug)`
+> 3. → `:35-44` `prisma.amipsPage.findFirst({ where: { slug, lifecycleStatus: "ACTIVE" } })`
+> 4. `REFRESH_REQUIRED !== "ACTIVE"` ⇒ returns `null`
+> 5. → `:91` `if (!page) notFound()` ⇒ **HTTP 404**
+> 6. `generateMetadata` (`:72-74`) calls the same `loadPage` and returns
+>    `robots: { index: false, follow: false }` (`:78`) on miss
+>
+> `app/` contains exactly **two** consumers of `prisma.amipsPage`
+> (`sitemap-intelligence.xml/route.ts:32`, `intelligence/[slug]/page.tsx:37`) and both were
+> `ACTIVE`-only, so no other route served these pages.
+>
+> **∴ 609/794 (76.7%) is correct as documented against pre-remediation code.** The
+> alternative reading — that `REFRESH_REQUIRED` still serves, giving 401/794 — is refuted
+> by step 4.
+>
+> **Post-remediation this becomes 401/794.** FIX 3 in this batch makes `REFRESH_REQUIRED`
+> servable (`lib/amips/tiers.ts` → `SERVABLE_LIFECYCLE_STATUSES`), returning the 208 Tier C
+> pages to the index with no data change. The figure below describes the state this batch
+> corrects, not the state after it ships.
+
+| Surface | Gate (pre-remediation) | File:line |
 | --- | --- | --- |
 | `/intelligence/[slug]` | `where: { slug, lifecycleStatus: "ACTIVE" }` → `notFound()` | `app/(public)/intelligence/[slug]/page.tsx:38, 91` |
 | `sitemap-amips-{a..d}.xml` | `contentTier: tier, lifecycleStatus: "ACTIVE"` | `lib/amips/sitemap.ts:51` |
@@ -155,8 +181,11 @@ four generator writes (`amips-generator.ts:218,221,241,244`). **There is no toke
 threshold and no quality-gate re-evaluation at serve time.** So *any* non-`ACTIVE` status ⇒ 404 +
 delisted, with no gradation.
 
-**Present-tense impact (VERIFIED state):** 370 + 208 + 31 = **609 of 794 pages (76.7%) return
-HTTP 404 and appear in no sitemap.** 185 are servable.
+**Present-tense impact (VERIFIED state, pre-remediation):** 370 + 208 + 31 = **609 of 794 pages
+(76.7%) return HTTP 404 and appear in no sitemap.** 185 are servable.
+**After FIX 3: 401 of 794 (50.5%)** — the 208 `REFRESH_REQUIRED` Tier C pages become servable
+again. The remaining 401 are `UNDER_REVIEW` (370 awaiting human review + 31 duplicate
+demotions), which correctly stay withheld.
 
 ## Every condition producing a non-ACTIVE status
 
@@ -454,6 +483,70 @@ member of each cluster deserves to be canonical.
 4. **Note the same question applies to the 208**, which are a larger population and were removed
    by a mechanism (V2-A) that will simply re-fire unless C-4 ships first. **Restoring them before
    C-4 would be undone at the next Tuesday run.**
+
+## Remediation applied on this branch
+
+Implemented under owner authorization. **No deploy, no production data mutation, no cron config
+change, no migration.** `pipeline.ts`'s `/intelligence/` filter remains untouched.
+
+| Fix | Change | Files |
+| --- | --- | --- |
+| **1a** | `buildQueueDrafts()` now collapses drafts sharing a `keywordTarget`, keeping the highest-priority one. Root cause: `VEHICLE_SEEDS` carries one row per **trim** (Ford F-150 XL + XLT) and neither keyword template includes the trim, so both seeds produced one keyword; `seedContentQueue()` filtered against keywords already in the DB but never against its own batch, and `content_queue` has no unique constraint. **Measured: 1000 → 955 drafts, 45 duplicate rows eliminated.** | `lib/amips/seed/content-queue.seed.ts` |
+| **1b** | New exported `findEntityConflict()`, checked before the quality gates: a second page for an existing `(make, model, metro)` now fails the queue item with `duplicate_entity` instead of publishing. Reuses the Gate-2 query (widened `select`), so no extra round trip. Scoped to pages carrying a metro, matching the lifecycle cluster key, so Tier A/B angles are unaffected. | `lib/amips/amips-generator.ts` |
+| **2** | New `lib/amips/tiers.ts` is the single authority. `MARKET_DATA_TIERS` = {C,D,E,**F**} now drives **both** Gate 5 and the lifecycle staleness check; `METRO_ASSEMBLY_TIERS` = {C,D,E} is documented as assembler routing only. The Tier F assembler return now populates `dealerDataAsOf` / `marketDataAsOf`. | `lib/amips/tiers.ts`, `assembler.ts`, `quality-gate.ts`, `lifecycle-manager.ts` |
+| **3** | **Chosen: stop treating absent refresh as a de-indexing condition.** `REFRESH_REQUIRED` is now servable and sitemap-listed via one shared `SERVABLE_LIFECYCLE_STATUSES`. Rationale: providing a refresh path would need a new cron (out of scope) and would still leave a 30-day 404 window; a page whose market data is 31 days old is materially better than a 404, and de-indexing destroys ranking equity for an editorial signal. Serving and sitemap inclusion now derive from **one** constant, so a page can never be live-but-unlisted or listed-but-404. | `tiers.ts`, `intelligence/[slug]/page.tsx`, `lib/amips/sitemap.ts`, `sitemap-intelligence.xml/route.ts` |
+| **4** | New exported `shouldFlagLowConversion()`. A corpus-level `leadsTrackingActive` probe gates the branch: while no page reports a lead, the ratio is treated as **unknown**, not zero. The branch resumes working automatically once a writer exists. | `lib/amips/lifecycle-manager.ts` |
+| **5** | `runLifecycleReview()` now returns `transitions[]` (`slug`, `from`, `to`, `reason`), capped at `MAX_LOGGED_TRANSITIONS` with a `transitionsTruncated` flag, plus `leadsTrackingActive`. `withCronRun` persists it to `cron_job_logs.result` (already `Json`) — **no new table**. The five reasons are distinct, so `duplicate_cluster` vs `low_conversion_90d` — the exact distinction that was unanswerable this batch — is now recorded. | `lib/amips/lifecycle-manager.ts` |
+
+**Effect on the corpus once deployed:** non-servable drops from **609/794 to 401/794**. The 208
+Tier C `REFRESH_REQUIRED` pages return to the index with no data change. The 401 that remain are
+`UNDER_REVIEW` (370 awaiting human review on their own merits + 31 duplicate demotions) and stay
+correctly withheld pending the repair script.
+
+### Branch-by-branch closure — answering V-2's goal directly
+
+V-2 warned that closing one expression must not leave another open. Against the six branches
+enumerated there:
+
+| Branch | Before | After | How |
+| --- | --- | --- | --- |
+| S-1 vehicle > 180d | → 404 | **harm closed** | still flags `REFRESH_REQUIRED`, which now serves |
+| S-2 Tier C+ dealer null/>90d | → 404 | **closed** | Tier F dates populated (FIX 2); `REFRESH_REQUIRED` serves (FIX 3) |
+| S-3 Tier C+ market null/>30d | → 404 (the 208) | **closed** | as S-2 |
+| S-4 `noImpressions` 180d, armed 2026-12-05 | → 404 en masse | **harm closed** | it routes to `REFRESH_REQUIRED`, which no longer 404s. The mass event still fires as a *refresh flag*, which is the correct meaning |
+| S-5 duplicate cluster | → 404 (the 31) | **cause removed** | FIX 1 stops the duplicate being emitted. The demotion itself was correct and is retained — now audited with reason `duplicate_cluster` |
+| S-6 leads ratio | latent, would arm with the GSC sync | **closed** | FIX 4 gates on measurement availability |
+| S-7 `RETIRED` 365d | keyed on always-zero traffic | **OPEN — out of authorized scope** | see below |
+
+**S-7 is the one branch this batch does not close.** `traffic365`, `p.impressions` and `p.clicks`
+all read zero for every page while the Search Console sync returns `synced: 0`, so it cannot
+distinguish "no traffic" from "no measurement" — the same defect FIX 4 corrects for S-6. It is
+unreachable until a page is 365 days old (earliest cohort **2027-06-08**) and only applies to
+pages already withheld from the index, so nothing is at risk today. It is flagged in-code at the
+branch and needs the same measurement-available guard before that date.
+
+Note the shape of the FIX 3 result: because S-1…S-4 all route to `REFRESH_REQUIRED`, making that
+status servable closed four branches with one change rather than four separate guards.
+
+**Deliberately NOT changed** (out of the authorized scope): the `/intelligence/` filter at
+`pipeline.ts:172`; the `/g`-flag regex defect in `quality-gate.ts:37,39`; the `content-validation`
+duplicate layer (`05`, R-2); the `amips-lifecycle` cron schedule.
+
+### Regression coverage
+
+42 tests across 6 suites in `lib/amips/__tests__/`, wired into `test:amips`
+(`test:coverage-check` green: 272/272 reachable). **Three suites were proven failing-first by
+reverting the corresponding fix and re-running:**
+
+| Suite | Against pre-fix code | Failure surfaced |
+| --- | --- | --- |
+| `duplicate-emission.test.ts` | **1 fail / 9** | `duplicate keywordTargets: Ford F-150 deals in New York, …` |
+| `lifecycle-staleness.test.ts` | **1 fail / 14** | `Tier F return omits dealerDataAsOf` |
+| `lifecycle-audit.test.ts` | **4 fail / 5** | `lifecycleStatus write to REFRESH_REQUIRED has no record() call` |
+
+`tiers.test.ts` pins the three tier sets together so they cannot drift apart again.
+
+---
 
 ## Required tests
 | Test | Asserts |

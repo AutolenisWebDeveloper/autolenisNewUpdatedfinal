@@ -34,14 +34,15 @@ are scheduled to.
 
 | # | Defect | Effect | Fix |
 | --- | --- | --- | --- |
-| **0.1** | Lifecycle staleness branches: Tier C/D/E expire 30d after generation with no refresh path; Tier F stale from birth (`isTierCPlus` includes `"F"`, assembler never sets F's as-of dates) | **609 of 794 pages (76.7%) return HTTP 404 and are in no sitemap — today** | See `10`, C-3/C-4. Decouple `REFRESH_REQUIRED` from non-servable |
+| **0.1** | Lifecycle staleness branches: Tier C/D/E expire 30d after generation with no refresh path; Tier F stale from birth (`isTierCPlus` includes `"F"`, assembler never sets F's as-of dates) | **609 of 794 pages (76.7%) return HTTP 404 and are in no sitemap — today** (call path verified in `10`, STEP 0; FIX 3 → 401/794) | See `10`, C-3/C-4. Decouple `REFRESH_REQUIRED` from non-servable |
 | **0.1b** | `noImpressions` (180d) and `RETIRED` (365d) read an **empty** `search_intelligence` | Arms **2026-12-05**: flags every remaining `ACTIVE` page at once | See `10`, C-2. Treat absent data as unknown, never zero |
 | **0.1c** | `AmipsPage.leadsGenerated` never written; `lifecycle-manager.ts:196-201` divides it by clicks | **Latent** — `clicks = 0` corpus-wide closes it. Arms when the GSC sync starts writing | See `10`, C-1. Gate on the metric being populated |
 | **0.2** | `content-validation.service.ts:245` `required:false` + corpus scoped to `cluster + city` | Near-duplicate buying-guide articles publish unchecked across cities | Make `duplicate` REQUIRED; widen the corpus across cities within a cluster |
 | **0.3** | `quality-gate.ts:37,39` module-level `/g` regexes used with `.test()` | Roughly every second AMIPS page containing "guaranteed" passes the compliance gate | Drop the `/g` flag |
 
 **Nothing in this proposal should be built before 0.1/0.1b/0.1c.** Adding pages to a system in
-which 76.7% of the existing corpus already 404s compounds the loss.
+which 76.7% of the existing corpus already 404s compounds the loss. (0.1, 0.1b and 0.1c are
+implemented on this branch; see `10` → Remediation applied.)
 
 > **Revised 2026-08-31 against owner-verified production state — see
 > `10-production-reconciliation.md`.** The original 0.1 described the leads-ratio branch as
