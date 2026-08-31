@@ -340,3 +340,48 @@ never executes. Import-time coupling is coupling.
 **Suggested improvement:** When a preservation fixture is built by hand, derive the baseline mechanically rather than from memory — enumerate the identifiers present at the base commit (e.g. extract them from `git show BASE:file`) and diff that set against the fixture, failing on any baseline identifier the fixture does not mention. The fixture then cannot be quietly incomplete.
 
 **Principle:** A hand-written allow-list cannot prove completeness, only conformance to itself. Any test asserting that nothing was lost must derive its baseline from the artifact being preserved, not from the author's recollection of it.
+
+### Observation 21: env.d.ts required vars make `delete process.env.X` a typecheck error in tests
+
+**Status:** OPEN
+**Date:** 2026-08-31
+**Session context:** Adding a cron-triggered content-generation seeder; writing a route test that needed CRON_SECRET unset to prove the fail-closed 500 path.
+**Skill:** autolenis-testing-quality-gates
+**Type:** open-source
+**Phase/Area:** Writing route/cron tests that manipulate environment variables
+
+**Issue:** `delete process.env.CRON_SECRET` in a test compiles under `tsx --test` and the test passes, but `pnpm typecheck` fails with TS2790 ("The operand of a 'delete' operator must be optional") because env.d.ts declares CRON_SECRET as a required `string`. The failure surfaces only at the typecheck gate, after the suite is already green — a misleading signal that costs a debug cycle. The repo already has two different established workarounds (`process.env.X = ""` in the sibling cron route tests, `delete (process.env as Record<string, string | undefined>).X` in lib/security tests) but neither is written down.
+
+**Suggested improvement:** In the testing skill's test-authoring guidance, add a short rule: to unset a declared-required env var in a test, assign the empty string (preferred where the reader treats empty as unset, which `evaluateCronAuth` does) or cast through `Record<string, string | undefined>`; never `delete process.env.X` directly. Note that a green suite does not imply a green typecheck when env vars are manipulated.
+
+**Principle:** When a project narrows an ambient type (here, NodeJS.ProcessEnv) to make required configuration explicit, it also removes operations the ambient type allowed. Document the sanctioned replacement operations at the point of narrowing, or every consumer rediscovers the restriction at a later gate than the one they are working in.
+
+### Observation 22: Directory-glob test scripts already cover new files — no package.json edit needed
+
+**Status:** OPEN
+**Date:** 2026-08-31
+**Session context:** Task spec required registering two new test files in a `test:*` script and in `test:all`, or `scripts/check-test-coverage.ts` would fail the build.
+**Skill:** autolenis-testing-quality-gates
+**Type:** open-source
+**Phase/Area:** Test registration / test-reachability guard
+
+**Issue:** Most `test:*` scripts are directory globs (`lib/services/content/__tests__/*.test.ts`, `app/api/cron/__tests__/*.test.ts`). A new test file placed in an already-globbed directory is automatically reachable and already inside `test:all`, so no package.json change is required — but this is not stated anywhere, so a task spec (and an implementer) can reasonably assume every new suite needs manual registration and add a redundant script. The distinction that matters is whether the target directory is already globbed by a script that `test:all` chains.
+
+**Suggested improvement:** Add a two-line rule to the testing skill: before adding a `test:*` script for a new suite, check whether an existing script already globs that `__tests__` directory and whether that script is chained in `test:all`; add a new script only for a genuinely new directory. Either way, prove it by running `pnpm test:coverage-check` rather than reasoning about it.
+
+**Principle:** When a guard is executable, the answer to "is this registered?" is the guard's output, not an inspection of the manifest. Document the cheap way to ask the guard, so contributors verify instead of pre-emptively adding redundant configuration.
+
+### Observation 23: A repeating scheduler's skip rules must guarantee forward progress, not just prevent duplicates
+
+**Status:** OPEN
+**Date:** 2026-08-31
+**Session context:** Building a daily cron that seeds article-generation work from a fixed-order keyword list. The spec named two skip rules (already-produced, currently-in-flight) and a per-run cap; I implemented exactly those and shipped a starvation bug that the owner caught in review.
+**Skill:** autolenis-system-architecture
+**Type:** open-source
+**Phase/Area:** Designing a repeating scheduler / queue seeder
+
+**Issue:** The two skip rules covered "don't redo finished work" and "don't double-enqueue work in flight", but nothing covered permanently-failed work. A terminally-failed item was neither in-flight nor did it leave a completed-work row, so it returned to the eligible pool every run — and because candidates were selected in fixed source order with `slice(0, cap)`, failures near the head of the list re-filled the entire batch forever. With roughly `cap` permanent failures the queue would spend its whole daily budget re-running the same doomed items and never reach new work. I noticed the daily-retry behaviour while writing it, documented it in a comment as intended, and moved on — treating an unbounded, order-biased, budget-consuming loop as a characteristic instead of a defect. The fix was to partition the eligible pool into never-attempted and previously-attempted, fill new-first, and bound retries to a fraction of the cap so each pool absorbs the other's unused slots.
+
+**Suggested improvement:** Add a checklist item to the background-jobs / scheduler guidance: for any repeating selector over a bounded batch, state explicitly what happens to permanently-failed items on the NEXT run, and prove forward progress is guaranteed regardless of the failure count. Concretely — if selection is `filter(...).slice(0, cap)` over a fixed-order source, ask whether a stuck item can reoccupy its slot indefinitely; if so, partition the pool and reserve the majority of the cap for un-attempted work. Also worth a rule: emit per-pool counters (new vs retry) rather than one total, so the pathology is visible in the run record.
+
+**Principle:** Idempotence and progress are different properties, and a repeating job needs both. Skip rules written to prevent duplicate work only establish "nothing is done twice concurrently"; they say nothing about whether the frontier advances. Any bounded, repeating selector over an ordered candidate set needs an explicit liveness argument — and when a known-bad item can consume the same slot every cycle, documenting it as intended behaviour is not a substitute for bounding it.
