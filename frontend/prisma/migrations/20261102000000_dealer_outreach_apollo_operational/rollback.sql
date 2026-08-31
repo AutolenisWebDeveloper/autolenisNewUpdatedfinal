@@ -12,7 +12,7 @@ DROP TABLE IF EXISTS "apollo_enrichment_runs";
 DROP TABLE IF EXISTS "apollo_person_candidates";
 
 DROP INDEX IF EXISTS "dealer_outreach_log_live_attempt_key";
-DROP INDEX IF EXISTS "dealer_outreach_log_prospect_step_channel_idx";
+DROP INDEX IF EXISTS "dealer_outreach_log_dealer_prospect_id_outreach_sequence_st_idx";
 
 ALTER TABLE "dealer_outreach_log" DROP COLUMN IF EXISTS "consent_basis";
 ALTER TABLE "dealer_outreach_log" DROP COLUMN IF EXISTS "call_duration_seconds";

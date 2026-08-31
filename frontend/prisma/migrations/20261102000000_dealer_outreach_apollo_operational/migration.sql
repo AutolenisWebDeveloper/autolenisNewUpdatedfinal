@@ -78,7 +78,12 @@ ALTER TABLE "dealer_outreach_log" ADD COLUMN IF NOT EXISTS "call_duration_second
 -- suppression govern instead.
 ALTER TABLE "dealer_outreach_log" ADD COLUMN IF NOT EXISTS "consent_basis" TEXT;
 
-CREATE INDEX IF NOT EXISTS "dealer_outreach_log_prospect_step_channel_idx" ON "dealer_outreach_log"("dealer_prospect_id", "outreach_sequence_step", "channel");
+-- Name matches what Prisma generates for @@index([dealerProspectId,
+-- outreachSequenceStep, channel]) — postgres truncates identifiers at 63
+-- characters, so the generated name is elided mid-word. A different name here
+-- is not cosmetic: prisma migrate diff reports it as an ALTER INDEX ... RENAME,
+-- which the drift ratchet counts as structural drift and fails the build on.
+CREATE INDEX IF NOT EXISTS "dealer_outreach_log_dealer_prospect_id_outreach_sequence_st_idx" ON "dealer_outreach_log"("dealer_prospect_id", "outreach_sequence_step", "channel");
 
 -- ONE live attempt per (prospect, step, channel).
 --
