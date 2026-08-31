@@ -107,15 +107,33 @@ mock.module("@/lib/auth/admin-api", {
   },
 });
 
-// Suppression and quiet hours are consulted by the SMS wiring. Neither may be
-// reached in these tests — the consent gate refuses first — so they are mocked
-// to throw. A test that passes here proves the gate ran BEFORE them.
+// Suppression and quiet hours are consulted by the SMS wiring AFTER the consent
+// gate. Neither may be reached in these tests, so both are mocked to throw: a
+// test that passes here has proved the gate ran BEFORE them, which is the whole
+// ordering contract. (They are also `server-only` modules, which cannot be
+// loaded under this transform at all — the same mock solves both problems.)
 mock.module("@/lib/services/suppression.service", {
   namedExports: {
     SuppressionService: {
       isSmsSuppressed: async () => {
         throw new Error("suppression must not be consulted before the consent gate");
       },
+    },
+  },
+});
+
+mock.module("@/lib/supabase-service", {
+  namedExports: {
+    getServiceSupabase: () => {
+      throw new Error("the service-role client must not be built before the consent gate");
+    },
+  },
+});
+
+mock.module("@/lib/crm/recipient-timezone", {
+  namedExports: {
+    isRecipientInQuietHours: () => {
+      throw new Error("quiet hours must not be evaluated before the consent gate");
     },
   },
 });
