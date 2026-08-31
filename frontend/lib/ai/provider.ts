@@ -90,6 +90,19 @@ export interface CompletionRequest {
   fallbackModel?: ChatModelId;
   /** Request-level abort/timeout, passed straight to `fetch`. */
   signal?: AbortSignal;
+  /**
+   * Retries on a TRANSIENT failure (429 / 5xx / network), with backoff.
+   * Defaults to 0 — the direct-`fetch` call sites this adapter absorbed never
+   * retried, and inventing retries for them would change their behaviour. The
+   * `groq-client` facade sets 2, restoring the groq-sdk default its own callers
+   * relied on.
+   */
+  maxRetries?: number;
+  /**
+   * Per-attempt timeout in ms. Defaults to none, for the same reason. The
+   * `groq-client` facade sets 60_000, the groq-sdk default.
+   */
+  timeoutMs?: number;
   /** Provider-native extras with no cross-provider meaning. */
   providerOptions?: {
     /** Gemini `tools` array (e.g. `[{ googleMaps: {} }]`, `[{ googleSearch: {} }]`). */

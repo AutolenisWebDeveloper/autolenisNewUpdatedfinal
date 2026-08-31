@@ -64,14 +64,33 @@ function body(req: CompletionRequest, model: string, stream: boolean): Record<st
   return out;
 }
 
-/** True for the transient conditions the original fallback chain reacted to. */
+/**
+ * Exactly the conditions the original `groqChat` fallback reacted to: its
+ * predicate was `String(err)` containing "429", "rate_limit" or "overloaded".
+ *
+ * 503 is deliberately NOT here. Adding it would silently downgrade an answer to
+ * the smaller model during an outage the original surfaced as an error — a
+ * behaviour change, and this migration changes transport only.
+ */
 function isOverloaded(status: number, detail: string): boolean {
-  if (status === 429 || status === 503) return true;
+  if (status === 429) return true;
   const s = detail.toLowerCase();
   return s.includes("rate_limit") || s.includes("overloaded");
 }
 
-async function post(req: CompletionRequest, model: string, stream: boolean): Promise<Response> {
+/** Transient conditions worth another attempt — the groq-sdk's own set. */
+function isRetryable(status: number): boolean {
+  return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function postOnce(
+  req: CompletionRequest,
+  model: string,
+  stream: boolean,
+  signal: AbortSignal | undefined,
+): Promise<Response> {
   return fetch(GROQ_CHAT_URL, {
     method: "POST",
     headers: {
@@ -79,8 +98,45 @@ async function post(req: CompletionRequest, model: string, stream: boolean): Pro
       Authorization: `Bearer ${apiKey()}`,
     },
     body: JSON.stringify(body(req, model, stream)),
-    ...(req.signal ? { signal: req.signal } : {}),
+    ...(signal ? { signal } : {}),
   });
+}
+
+/**
+ * One request, with the caller's declared retry and timeout policy.
+ *
+ * `maxRetries` and `timeoutMs` both default to absent, so a call site that
+ * previously used a bare `fetch` keeps exactly the behaviour it had. Only
+ * `lib/ai/groq-client.ts` opts in, restoring the groq-sdk defaults (2 retries,
+ * 60s per attempt) that its fourteen callers were built against.
+ */
+async function post(req: CompletionRequest, model: string, stream: boolean): Promise<Response> {
+  const attempts = (req.maxRetries ?? 0) + 1;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    // A per-attempt timeout, combined with any caller-supplied signal so an
+    // explicit abort still wins immediately.
+    const timer = req.timeoutMs ? AbortSignal.timeout(req.timeoutMs) : undefined;
+    const signal =
+      timer && req.signal
+        ? AbortSignal.any([timer, req.signal])
+        : (timer ?? req.signal);
+
+    try {
+      const res = await postOnce(req, model, stream, signal);
+      if (res.ok || !isRetryable(res.status) || attempt === attempts - 1) return res;
+      // Drain the body so the connection can be reused before retrying.
+      await res.text().catch(() => "");
+    } catch (err) {
+      lastError = err;
+      if (attempt === attempts - 1) throw err;
+    }
+    // Exponential backoff with a small floor, as the SDK does.
+    await sleep(Math.min(500 * 2 ** attempt, 4_000));
+  }
+
+  throw lastError ?? new Error("Groq request failed with no response");
 }
 
 export async function chat(req: CompletionRequest): Promise<CompletionResult> {

@@ -17,6 +17,12 @@ import { complete, completeStream, type ChatMessage as ProviderChatMessage } fro
 const PRIMARY_MODEL = "openai/gpt-oss-120b" as const;
 const FALLBACK_MODEL = "openai/gpt-oss-20b" as const;
 
+// The groq-sdk applied these to every request this helper made
+// (`core.js`: `maxRetries = 2, timeout = 60000`). The SDK is gone from the call
+// path, so they are declared here rather than silently lost.
+const SDK_MAX_RETRIES = 2;
+const SDK_TIMEOUT_MS = 60_000;
+
 export type ChatMessage = ProviderChatMessage;
 
 export interface CompletionResult {
@@ -49,6 +55,10 @@ export async function groqChat(
     maxTokens: options.maxTokens ?? 1024,
     temperature: options.temperature ?? 0.7,
     topP: 1.0,
+    // The groq-sdk defaults this helper's callers were built against, restored
+    // explicitly now that the transport is a bare fetch.
+    maxRetries: SDK_MAX_RETRIES,
+    timeoutMs: SDK_TIMEOUT_MS,
   });
   return { content: result.content, model: result.model, tokensUsed: result.tokensUsed };
 }
@@ -64,5 +74,6 @@ export async function* groqChatStream(
     messages,
     maxTokens: options.maxTokens ?? 1024,
     temperature: options.temperature ?? 0.7,
+    timeoutMs: SDK_TIMEOUT_MS,
   });
 }

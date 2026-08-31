@@ -16,6 +16,7 @@ import {
   INTENT_ENVELOPE_OPEN,
   INTENT_ENVELOPE_CLOSE,
   MAX_RATIONALE_LENGTH,
+  MAX_INTENT_TYPE_LENGTH,
 } from "../extract";
 
 function envelope(json: string): string {
@@ -151,6 +152,24 @@ test("an unknown intentType is carried through — the CATALOG rejects it, not t
   const result = extractProposal(envelope('{"intentType":"buyer.totally_made_up","parameters":{}}'));
   assert.ok(result);
   assert.equal(result.proposal.intentType, "buyer.totally_made_up");
+});
+
+test("an over-long intentType is REFUSED — the audit trail is not a content channel", () => {
+  // `intentType` is carried into `audit_logs.metadata`, whose contract is
+  // "message length, never message content". An uncapped field would let a
+  // prompt-injected reply smuggle the conversation into it.
+  const smuggled = `buyer.x${"A".repeat(MAX_INTENT_TYPE_LENGTH)}`;
+  assert.equal(
+    extractProposal(envelope(JSON.stringify({ intentType: smuggled, parameters: {} }))),
+    null,
+  );
+});
+
+test("an intentType at the cap is still accepted", () => {
+  const atCap = "b".repeat(MAX_INTENT_TYPE_LENGTH);
+  const result = extractProposal(envelope(JSON.stringify({ intentType: atCap, parameters: {} })));
+  assert.ok(result);
+  assert.equal(result.proposal.intentType, atCap);
 });
 
 test("rationale is carried but capped", () => {

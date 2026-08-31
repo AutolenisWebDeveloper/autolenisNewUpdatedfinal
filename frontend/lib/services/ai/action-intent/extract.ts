@@ -45,6 +45,18 @@ export const INTENT_ENVELOPE_CLOSE = "<<<END_AUTOLENIS_ACTION_INTENT>>>";
 /** Rationale is audited, never trusted. Cap it so a reply cannot bloat a row. */
 export const MAX_RATIONALE_LENGTH = 500;
 
+/**
+ * Cap on the model-authored intent type.
+ *
+ * The longest catalog entry is 28 characters, so this is generous. It exists
+ * because `intentType` is carried into the AI audit trail, whose contract is
+ * that it records message LENGTH and never message CONTENT — an uncapped field
+ * would let a prompt-injected reply smuggle the conversation into it. Anything
+ * longer is refused rather than truncated: a truncated intent name is not a
+ * name, and the catalog would reject it anyway.
+ */
+export const MAX_INTENT_TYPE_LENGTH = 100;
+
 /** A proposal with every server-authoritative field structurally absent. */
 export type ExtractedProposal = Omit<ActionIntentProposal, "actor" | "idempotencyKey">;
 
@@ -136,7 +148,10 @@ export function extractProposal(replyText: string): ExtractionResult | null {
   if (!isPlainObject(parsed)) return null;
 
   const intentType = parsed.intentType;
-  if (typeof intentType !== "string" || intentType.trim().length === 0) return null;
+  if (typeof intentType !== "string") return null;
+  const trimmedIntentType = intentType.trim();
+  if (trimmedIntentType.length === 0) return null;
+  if (trimmedIntentType.length > MAX_INTENT_TYPE_LENGTH) return null;
 
   // `parameters` must be an object. A missing one is read as "no parameters",
   // which the four zero-parameter READ intents legitimately produce; anything
@@ -154,7 +169,7 @@ export function extractProposal(replyText: string): ExtractionResult | null {
   // unrepresentable in the return type. Both belt and braces: the type stops a
   // caller forwarding one, and this stops the value existing at runtime.
   const proposal: ExtractedProposal = {
-    intentType: intentType.trim(),
+    intentType: trimmedIntentType,
     parameters,
     ...(rationale ? { rationale } : {}),
   };
