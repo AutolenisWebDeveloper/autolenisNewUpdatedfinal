@@ -772,6 +772,46 @@ the count and completely different in the fix — a bug versus a timeout/OOM/dep
 surfaces now say which. Calling a mid-flight death a "failure" would send an operator hunting for
 a `FAILED` row that was never written; a test pins that the two message forms agree on naming it.
 
+### Tier F freshness: a hole FIX 2 opened, found in review
+
+Raised by the Vercel review bot on the PR, verified against the code, and fixed here. It is a
+regression **this branch introduced**, not a pre-existing defect.
+
+FIX 2 unified the tier sets by adding F to `MARKET_DATA_TIERS`. Both freshness paths read that
+set — Quality Gate 5 (`quality-gate.ts:23`, `METRO_TIERS = MARKET_DATA_TIERS`) and
+`hasStaleData` (`lifecycle-manager.ts:122`) — so Tier F pages began to be checked against
+`dealerDataAsOf` / `marketDataAsOf`.
+
+**But Tier F is the one tier in that set whose source rows are optional.** It qualifies on the
+transaction record alone: `tier-f-threshold.pipeline.ts:107-125` seeds its queue items from a
+≥50-transaction count and never consults `amipsMarketScore` or `marketIntelligence`. The
+assembler says so in its own comment — the score row is fetched "if available (not
+freshness-gated for Tier F — the proven transaction record is the source of authority)" — and
+`dealerCount` carries an explicit fallback for its absence. For C/D/E the question never arises:
+a missing row means the page is not assembled at all (`assembler.ts:291,305` return `null`).
+
+So `dealerDataAsOf: scoreRow?.computedAt` yielded `undefined` for any Tier F combo lacking those
+rows, and that is fatal twice over:
+
+- `isFresh(undefined)` returns `false` → Gate 5 scores 4 → **REVIEW_NEEDED at generation**;
+- `ageDays(null)` returns `null` and `hasStaleData` returns `true` on it → **REFRESH_REQUIRED on
+  every lifecycle run**, permanently, for a page whose data is current.
+
+**The fix is a fallback, not an exemption.** `tierFDataAsOf()` (in `tiers.ts`, beside the set
+whose change created the need) falls back to the transaction record's timestamp, which is
+always present — `AutolenisIntelligence.lastUpdated` is `DateTime @default(now())` — and which
+the pipeline rewrites on every aggregation. A Tier F page therefore still ages out honestly if
+that aggregation stalls. Exempting F from staleness instead would have re-split the tier sets
+that `tiers.ts` exists to unify.
+
+**The test that should have caught it, didn't — and why.** `lifecycle-staleness.test.ts`
+asserted the literal keys `dealerDataAsOf:` / `marketDataAsOf:` appeared in the Tier F branch.
+That pins the *syntax*, not the guarantee: `dealerDataAsOf: scoreRow?.computedAt` matched it
+while still yielding `undefined`. The assertion now requires the branch to route through
+`tierFDataAsOf()`, which cannot return a null — verified to be strictly stronger by running the
+corrected assertion against the original defective code, where it fails and the old one passed.
+Behaviour is covered directly in `tier-f-freshness-fallback.test.ts`.
+
 **Not done, and still open: nothing reaps the orphaned rows.** This change corrects how they are
 *interpreted*; the rows themselves still sit in `cron_job_logs` as `RUNNING` forever. Reaping
 them is a change to cron-monitor's run lifecycle — a different surface, and not what was asked

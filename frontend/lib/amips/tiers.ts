@@ -47,6 +47,42 @@ export function requiresMarketData(tier: string): boolean {
   return MARKET_DATA_TIERS.has(tier);
 }
 
+/**
+ * Dealer/market as-of dates for a Tier F page, falling back to the transaction
+ * record when the optional market rows are absent.
+ *
+ * Tier F is the one tier in MARKET_DATA_TIERS whose source rows are OPTIONAL.
+ * It qualifies on the AutoLenis transaction record alone — tier-f-threshold
+ * .pipeline.ts seeds its queue items from a >=50-transaction count and never
+ * consults amipsMarketScore / marketIntelligence — and the assembler treats
+ * both rows as context "if available", with an explicit dealerCount fallback
+ * for their absence. For C/D/E a missing row means the page is not assembled
+ * at all, so the question never arises there.
+ *
+ * Including F in MARKET_DATA_TIERS is what makes this function necessary: it
+ * pointed both freshness paths at dates the Tier F branch had no obligation to
+ * populate. Left null that is fatal twice — Gate 5 scores 4 (REVIEW_NEEDED) at
+ * generation, and hasStaleData returns true on every lifecycle run, holding a
+ * current page at REFRESH_REQUIRED for rows it never needed.
+ *
+ * The transaction timestamp is a fallback, not an exemption. It is always
+ * present (AutolenisIntelligence.lastUpdated is DateTime @default(now())) and
+ * the pipeline rewrites it on every aggregation, so a Tier F page still ages
+ * out honestly if that aggregation stalls — which exempting F from staleness
+ * would have prevented, and which would have re-split the tier sets this
+ * module exists to unify.
+ */
+export function tierFDataAsOf(sources: {
+  scoreComputedAt: Date | null | undefined;
+  marketLastUpdated: Date | null | undefined;
+  transactionLastUpdated: Date;
+}): { dealerDataAsOf: Date; marketDataAsOf: Date } {
+  return {
+    dealerDataAsOf: sources.scoreComputedAt ?? sources.transactionLastUpdated,
+    marketDataAsOf: sources.marketLastUpdated ?? sources.transactionLastUpdated,
+  };
+}
+
 // ── Lifecycle status vocabulary ────────────────────────────────────────────
 
 export const LIFECYCLE_ACTIVE = "ACTIVE";

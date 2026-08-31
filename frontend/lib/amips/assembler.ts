@@ -16,7 +16,7 @@ import {
   type NegotiationDifficulty,
 } from "@/lib/amips/market-score.service";
 import { TIER_F_TRANSACTION_THRESHOLD } from "@/lib/amips/pipelines/tier-f-threshold.pipeline";
-import { METRO_ASSEMBLY_TIERS } from "@/lib/amips/tiers";
+import { METRO_ASSEMBLY_TIERS, tierFDataAsOf } from "@/lib/amips/tiers";
 
 // Tiers routed down the metro-assembly branch below. Tier F returns earlier
 // from its own transaction-backed branch, so it is deliberately absent here.
@@ -255,8 +255,16 @@ export async function assembleAmipsPageData(
       // Tier F is a market-backed tier (MARKET_DATA_TIERS), so it must carry
       // these. Omitting them made every Tier F page read as permanently stale
       // to the lifecycle manager, which de-indexed it on its first run.
-      dealerDataAsOf: scoreRow?.computedAt,
-      marketDataAsOf: marketRow?.lastUpdated,
+      //
+      // Both source rows are OPTIONAL for Tier F, though — it qualifies on the
+      // transaction record alone — so passing them through raw would reproduce
+      // the same defect for any combo lacking them. tierFDataAsOf() falls back
+      // to the always-present transaction timestamp; see its note in tiers.ts.
+      ...tierFDataAsOf({
+        scoreComputedAt: scoreRow?.computedAt,
+        marketLastUpdated: marketRow?.lastUpdated,
+        transactionLastUpdated: al.lastUpdated,
+      }),
     };
   }
 

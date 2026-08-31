@@ -180,7 +180,18 @@ describe("FIX 2 — every market-data tier's assembler return populates the as-o
     "utf8",
   );
 
-  test("the Tier F branch returns both as-of dates", () => {
+  // ASSERTION CORRECTED. This originally required the literal keys
+  // `dealerDataAsOf:` / `marketDataAsOf:` to appear in the Tier F branch. That
+  // pinned the SYNTAX, not the guarantee: `dealerDataAsOf: scoreRow?.computedAt`
+  // matched it while still yielding undefined whenever the optional score row was
+  // absent — which is legal for Tier F, since it qualifies on the transaction
+  // record alone. So the branch satisfied this test and still handed the
+  // lifecycle manager a null to read as permanently stale.
+  //
+  // The branch now delegates to tierFDataAsOf(), which cannot return a null for
+  // either date. Asserting the delegation is the stronger check, and the
+  // behaviour behind it is covered directly in tier-f-freshness-fallback.test.ts.
+  test("the Tier F branch supplies both as-of dates, and cannot supply a null", () => {
     const start = SOURCE.indexOf('if (tier === "F")');
     assert.ok(start > 0, "Tier F branch not found — has the assembler been restructured?");
     // The Tier F branch ends where the non-metro (Tier B) branch begins.
@@ -189,12 +200,15 @@ describe("FIX 2 — every market-data tier's assembler return populates the as-o
     const branch = SOURCE.slice(start, end);
 
     assert.ok(
-      /dealerDataAsOf:/.test(branch),
-      "Tier F return omits dealerDataAsOf — lifecycle will read null as permanently stale",
+      /\.\.\.tierFDataAsOf\(/.test(branch),
+      "Tier F return no longer routes its as-of dates through tierFDataAsOf() — " +
+        "a missing amipsMarketScore / marketIntelligence row would persist a null " +
+        "and the lifecycle manager would read it as permanently stale",
     );
     assert.ok(
-      /marketDataAsOf:/.test(branch),
-      "Tier F return omits marketDataAsOf — lifecycle will read null as permanently stale",
+      /transactionLastUpdated:\s*al\.lastUpdated/.test(branch),
+      "the fallback must be the transaction record's timestamp — the only " +
+        "always-present freshness source for a Tier F page",
     );
   });
 
