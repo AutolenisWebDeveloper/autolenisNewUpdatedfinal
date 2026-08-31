@@ -1,7 +1,10 @@
 import { logger } from "@/lib/logger";
+import { complete } from "@/lib/ai/provider"
 import type { DiscoveredDealer } from "./compound-search.service"
 
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+// The Gemini endpoint itself lives in `lib/ai/providers/gemini.ts` — the only
+// module permitted to name it. Here we name only the model.
+const GEMINI_MODEL = "gemini-2.5-flash"
 
 interface GeminiGroundingChunk {
   maps?: {
@@ -65,43 +68,24 @@ export async function discoverDealersViaGeminiMaps(params: {
   const userPrompt = `Find ${params.make} dealerships within ${radiusMiles} miles of US ZIP code ${params.zip}. Use Google Maps to verify each dealer. Return up to 12 verified dealers as JSON with placeId for each.`
 
   try {
-    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: userPrompt }],
-          },
-        ],
-        systemInstruction: {
-          parts: [{ text: systemPrompt }],
-        },
-        tools: [
-          {
-            googleMaps: {},
-          },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 5000,
-        },
-      }),
+    // Transport only — model, prompts, Maps grounding tool, temperature and
+    // output cap unchanged. `result.raw` carries the full Gemini body so the
+    // groundingMetadata read below is byte-for-byte the same as before.
+    const completion = await complete({
+      purpose: "acquisition.gemini_maps_discovery",
+      model: GEMINI_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.1,
+      maxTokens: 5000,
+      providerOptions: { geminiTools: [{ googleMaps: {} }] },
     })
 
-    if (!response.ok) {
-      const errBody = await response.text()
-      logger.error(
-        `[gemini-maps] Gemini API failed: ${response.status}`,
-        errBody.substring(0, 500)
-      )
-      return []
-    }
-
-    const data: GeminiResponse = await response.json()
+    // A non-2xx now throws a ProviderHttpError, which the outer catch logs and
+    // turns into the same empty-array result this block produced.
+    const data = completion.raw as GeminiResponse
     const content = data.candidates?.[0]?.content?.parts?.[0]?.text ?? ""
     const groundingChunks = data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []
     const groundingSupports = data.candidates?.[0]?.groundingMetadata?.groundingSupports ?? []
@@ -424,27 +408,21 @@ localDealers: return up to 8 dealers within 50 miles. If no grounded data found,
     // Note: Gemini does not allow responseMimeType=application/json together
     // with the googleSearch tool, so we instruct JSON in the prompt and parse
     // the brace block from the text response instead.
-    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-        systemInstruction: { parts: [{ text: GEMINI_MARKET_SYSTEM_PROMPT }] },
-        tools: [{ googleSearch: {} }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 4000 },
-      }),
+    // Transport only — model, prompts, Search grounding tool, temperature and
+    // output cap unchanged.
+    const completion = await complete({
+      purpose: "acquisition.gemini_market_enrichment",
+      model: GEMINI_MODEL,
+      messages: [
+        { role: "system", content: GEMINI_MARKET_SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.1,
+      maxTokens: 4000,
+      providerOptions: { geminiTools: [{ googleSearch: {} }] },
     })
 
-    if (!response.ok) {
-      const errBody = await response.text()
-      logger.error(
-        `[change-1] Gemini market enrichment failed: ${response.status}`,
-        errBody.substring(0, 400)
-      )
-      return null
-    }
-
-    const data: GeminiResponse = await response.json()
+    const data = completion.raw as GeminiResponse
     const content = data.candidates?.[0]?.content?.parts?.[0]?.text ?? ""
     const groundingChunks =
       data.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []

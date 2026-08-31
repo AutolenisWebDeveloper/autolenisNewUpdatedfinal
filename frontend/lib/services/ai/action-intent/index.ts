@@ -15,6 +15,7 @@ export {
   ACTION_INTENT_CATALOG,
   getIntentDefinition,
   listIntentsForActor,
+  riskClassFor,
   allIntentTypes,
 } from "./catalog";
 export { authorizeProposal, type AuthorizationResult } from "./authorize";
@@ -47,6 +48,16 @@ export {
   type ProposalOutcome,
 } from "./engine";
 export { buildActorGuidance } from "./guidance";
+export {
+  extractProposal,
+  containsIntentEnvelope,
+  stripIntentEnvelopes,
+  INTENT_ENVELOPE_OPEN,
+  INTENT_ENVELOPE_CLOSE,
+  MAX_RATIONALE_LENGTH,
+  type ExtractedProposal,
+  type ExtractionResult,
+} from "./extract";
 export {
   PrismaActionIntentStore,
   createDurableEngineDeps,

@@ -280,7 +280,6 @@ export default async function BuyerLayout({ children }: { children: React.ReactN
           {/* System 16 ENH — AI Concierge (Groq ONLY, kill switch checked) */}
           <ChatWidget
             buyerId={buyer.id}
-            agentType="general"
             initialGreeting={`Hi ${buyer.firstName}! I'm Zura, your AutoLenis concierge. How can I help you today?`}
           />
           <SessionExpiryWatcher />

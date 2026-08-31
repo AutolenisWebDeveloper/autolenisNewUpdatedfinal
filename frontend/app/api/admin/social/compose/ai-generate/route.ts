@@ -7,6 +7,8 @@ import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getAdminFromRequest, adminSuccess, adminError } from "@/lib/auth/admin-api";
 import { prisma } from "@/lib/prisma";
+import { complete } from "@/lib/ai/provider";
+import { ProviderHttpError } from "@/lib/ai/provider-errors";
 
 interface AIGenerateBody {
   platform?: string;
@@ -123,27 +125,27 @@ Return ONLY valid JSON, no markdown, no other text:
 }`;
 
   try {
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    // Transport only — model, prompt and token cap unchanged. Routing through
+    // the provider chokepoint is what brings this route under the kill switch.
+    let result;
+    try {
+      result = await complete({
+        purpose: "social.compose.ai_generate",
         model: "llama-3.3-70b-versatile",
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 1200,
-      }),
-    });
-
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => "");
-      logger.error(`[ai-generate] Groq ${res.status}: ${errBody.slice(0, 300)}`);
-      return adminError("AI_GENERATION_FAILED", "AI generation upstream failed", 502);
+        maxTokens: 1200,
+      });
+    } catch (err) {
+      // An upstream (auth/quota/5xx) failure stays a 502, distinct from the
+      // 500 the outer catch returns — the original behaviour.
+      if (err instanceof ProviderHttpError) {
+        logger.error(`[ai-generate] Groq ${err.status}: ${err.detail.slice(0, 300)}`);
+        return adminError("AI_GENERATION_FAILED", "AI generation upstream failed", 502);
+      }
+      throw err;
     }
 
-    const data = await res.json();
-    const raw = data?.choices?.[0]?.message?.content ?? "{}";
+    const raw = result.content || "{}";
     const cleaned = raw.replace(/```json|```/g, "").trim();
     const generated = JSON.parse(cleaned);
 

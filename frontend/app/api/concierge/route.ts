@@ -28,16 +28,44 @@ import {
 import { CONCIERGE_SYSTEM_PROMPT } from "@/lib/ai/concierge-prompt";
 import { promoteOpportunity } from "@/lib/services/acquisition/unified-buyer-intake.service";
 import { decideIntakeTurnActions } from "@/lib/services/acquisition/intake-turn";
+import { isAiEnabledAsync } from "@/lib/ai/kill-switch";
+import { clientIpKey, limitGeneral } from "@/lib/security/rate-limit";
+import { recordAiEvent } from "@/lib/services/ai/ai-audit.service";
+import {
+  SESSION_HANDLE_HEADER,
+  isSessionHandleConfigured,
+  mintSessionHandle,
+  startSession,
+  validateGateSubmission,
+  verifySessionHandle,
+  type ZuraSessionClaims,
+} from "@/lib/services/ai/zura-session-handle";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 interface ConciergeRequest {
-  sessionId: string;
+  /**
+   * IGNORED. The session id used to come from the browser, which meant the only
+   * identity this endpoint had was one an attacker could choose (Phase 2 §5.4).
+   * The id now lives inside the server-issued, HMAC-signed handle in the
+   * `X-Zura-Session` header. The field is declared here only to document that a
+   * stale client sending it changes nothing.
+   */
+  sessionId?: string;
   userMessage: string;
-  firstName?: string; // Sent only on first turn after lead gate
-  email?: string; // Sent only on first turn after lead gate
+  firstName?: string; // Sent only on first turn, with the lead gate
+  email?: string; // Sent only on first turn, with the lead gate
 }
+
+// Per-IP caps. The first is the exact call the (dormant, best-guarded)
+// `/api/public/ai/chat` already made; the second bounds the one action on this
+// surface that reaches OUTSIDE AutoLenis — promotion into the sourcing pipeline,
+// which triggers dealer discovery and outreach.
+const TURN_LIMIT = { tokens: 20, window: "1 h" } as const;
+const PROMOTION_LIMIT = { tokens: 5, window: "24 h" } as const;
+/** Turns one anonymous session may take before it must start a new one. */
+const MAX_TURNS_PER_SESSION = 40;
 
 // Lead-gate disclosure shown in the public ChatWidget before name/email is
 // collected ("By continuing you agree to receive messages from AutoLenis").
@@ -57,7 +85,65 @@ function getConsentIp(request: NextRequest): string | undefined {
   return undefined;
 }
 
+// CSRF EXEMPTION — a deliberate NON-change (Phase 2 §5.4).
+//
+// `proxy.ts` exempts this route from CSRF. That stays, and the reason is stated
+// here rather than left as an omission: CSRF protects a session-bearing request
+// from being forged by another origin. This endpoint has NO authenticated
+// session to protect — it is an anonymous public surface — so a CSRF token would
+// add a hurdle for legitimate visitors while closing nothing. The controls that
+// actually bound abuse here are the per-IP rate limit, the server-issued session
+// handle, and the promotion cap below.
+
+const MAX_USER_MESSAGE_LENGTH = 2000;
+
+/**
+ * Header telling the client whether THIS session is gate-verified.
+ *
+ * The handle is opaque, so a client cannot read the claim out of it. Without
+ * this the widget cannot tell a gated session from an un-gated one, and a lost
+ * turn-1 response would strand a visitor in a session that can never promote —
+ * the widget re-sends its gate payload until it sees a "1" here.
+ */
+const GATE_STATUS_HEADER = "X-Zura-Gate";
+
+/** Attach the session handle and the gate status to every response. */
+function withSession(response: Response, handle: string | null, gate: boolean): Response {
+  if (handle) response.headers.set(SESSION_HANDLE_HEADER, handle);
+  response.headers.set(GATE_STATUS_HEADER, gate ? "1" : "0");
+  return response;
+}
+
 export async function POST(request: NextRequest) {
+  const ip = clientIpKey(request.headers);
+
+  // ── Kill switch, first. A disabled AI must answer 503 AI_DISABLED, not stream
+  //    a friendly sentence that hides the outage from an operator.
+  if (!(await isAiEnabledAsync())) {
+    await recordAiEvent({
+      actor: { actorType: "SYSTEM", actorId: `ip:${ip}`, authenticatedRole: null },
+      surface: "public-web",
+      purpose: "zura.public.concierge",
+      outcome: "AI_DISABLED",
+      messageLength: 0,
+    });
+    return new Response("AI_DISABLED", { status: 503 });
+  }
+
+  // ── Durable per-IP turn limit. Anonymous and un-rate-limited was the finding;
+  //    this is the same limiter the guarded public route already used.
+  const rl = await limitGeneral(`zura:public:ip:${ip}`, TURN_LIMIT);
+  if (!rl.ok) {
+    await recordAiEvent({
+      actor: { actorType: "SYSTEM", actorId: `ip:${ip}`, authenticatedRole: null },
+      surface: "public-web",
+      purpose: "zura.public.concierge",
+      outcome: "RATE_LIMITED",
+      messageLength: 0,
+    });
+    return new Response("RATE_LIMITED", { status: 429 });
+  }
+
   let body: ConciergeRequest;
   try {
     body = (await request.json()) as ConciergeRequest;
@@ -65,22 +151,57 @@ export async function POST(request: NextRequest) {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  const { sessionId, userMessage } = body;
+  const { userMessage } = body;
 
   // Captured at request time so the post-stream after() block can attach it as
   // CRM consent provenance (the request object isn't safe to read once the
   // response has flushed).
   const consentIp = getConsentIp(request);
 
-  if (!sessionId || typeof sessionId !== "string") {
-    return new Response("sessionId required", { status: 400 });
-  }
-
   if (!userMessage || typeof userMessage !== "string") {
     return new Response("userMessage required", { status: 400 });
   }
+  if (userMessage.length > MAX_USER_MESSAGE_LENGTH) {
+    return new Response("userMessage is too long", { status: 400 });
+  }
 
-  // Load or create BuyerOpportunity row keyed on sessionId.
+  // ── Identity. The handle is the ONLY source of the session id; `body.sessionId`
+  //    is ignored entirely. A missing or invalid handle starts a NEW session
+  //    rather than adopting whatever the caller named.
+  if (!isSessionHandleConfigured()) {
+    // Fail closed and diagnosably. Proceeding would silently reduce the session
+    // control to the client-chosen id this change exists to remove.
+    logger.error("[concierge] no ZURA_SESSION_SECRET/CRON_SECRET — refusing to run unauthenticated");
+    return new Response("SESSION_NOT_CONFIGURED", { status: 503 });
+  }
+
+  const presented = verifySessionHandle(request.headers.get(SESSION_HANDLE_HEADER));
+
+  // The lead gate is validated HERE, server-side. Consent was previously written
+  // because an email was merely PRESENT in the body — no validation at all.
+  const gateSubmission = validateGateSubmission(body);
+
+  let claims: ZuraSessionClaims;
+  let issuedHandle: string | null = null;
+
+  if (presented) {
+    claims = presented;
+    // A gate accepted on a later turn upgrades the handle, and only the server
+    // can mint the upgraded one.
+    if (!claims.gate && gateSubmission) {
+      claims = { ...claims, gate: true };
+      issuedHandle = mintSessionHandle({ sid: claims.sid, gate: true });
+    }
+  } else {
+    const started = startSession(!!gateSubmission);
+    if (!started) return new Response("SESSION_NOT_CONFIGURED", { status: 503 });
+    claims = started.claims;
+    issuedHandle = started.handle;
+  }
+
+  const sessionId = claims.sid;
+
+  // Load or create BuyerOpportunity row keyed on the SERVER-issued session id.
   let opportunity = await prisma.buyerOpportunity.findUnique({
     where: { sessionId },
   });
@@ -90,21 +211,36 @@ export async function POST(request: NextRequest) {
       data: {
         sessionId,
         messages: [],
-        firstName: body.firstName ?? null,
-        email: body.email ?? null,
+        // Only a SERVER-VALIDATED gate submission may seed name/email. An
+        // unvalidated body value is discarded.
+        firstName: gateSubmission?.firstName ?? null,
+        email: gateSubmission?.email ?? null,
       },
     });
-  } else if (body.firstName || body.email) {
+  } else if (gateSubmission) {
     // Backfill name/email on an existing row only when they're currently null.
     const patch: { firstName?: string; email?: string } = {};
-    if (body.firstName && !opportunity.firstName) patch.firstName = body.firstName;
-    if (body.email && !opportunity.email) patch.email = body.email;
+    if (!opportunity.firstName) patch.firstName = gateSubmission.firstName;
+    if (!opportunity.email) patch.email = gateSubmission.email;
     if (Object.keys(patch).length > 0) {
       opportunity = await prisma.buyerOpportunity.update({
         where: { id: opportunity.id },
         data: patch,
       });
     }
+  }
+
+  // ── Per-session turn cap. A SECONDARY bound: the per-IP limit above is the
+  //    primary one. This counts messages the post-stream block writes, so
+  //    concurrent turns in one session can read a stale count and slip past by a
+  //    few. That is accepted rather than fixed with new state — the cap exists to
+  //    stop one conversation growing without limit, not to be exact, and the IP
+  //    limit already bounds the rate at which anyone can try.
+  const storedTurnCount = Math.floor(
+    ((opportunity.messages as unknown as ConciergeMessage[]) ?? []).length / 2,
+  );
+  if (storedTurnCount >= MAX_TURNS_PER_SESSION) {
+    return withSession(new Response("SESSION_TURN_LIMIT", { status: 429 }), issuedHandle, claims.gate);
   }
 
   // Load existing messages to include in prompt context
@@ -322,16 +458,59 @@ CRITICAL RULES:
     // (intakeProcessFn) is the single owner of market enrichment, dealer
     // discovery, phone-scripts, scoring, alerts, and outreach — the inline
     // compound searches were retired so there is one discovery path.
-    if (actions.promote) {
+    // Promotion is bounded by three independent conditions. Each one only
+    // suppresses THE PROMOTION — never the rest of the post-stream work. An
+    // early `return` here would silently skip Stage 5 (the CRM contact-plane
+    // mirror), which is additive, has its own trigger, and is not what any of
+    // these bounds are about.
+    let mayPromote = actions.promote;
+
+    // BOUND 1 — promotion requires a SERVER-VERIFIED lead gate. Promotion
+    // creates a VehicleRequest and starts dealer discovery and outreach; it is
+    // the one action on this anonymous surface that reaches outside AutoLenis,
+    // so it must not fire for a visitor who never accepted the disclosure.
+    if (mayPromote && !claims.gate) {
+      logger.warn("[concierge] promotion skipped — no server-verified lead gate", {
+        opportunityId: opportunitySnapshot.id,
+      });
+      mayPromote = false;
+    }
+
+    // BOUND 2 — per-IP daily promotion cap.
+    if (mayPromote) {
+      const promoteRl = await limitGeneral(`zura:public:promote:${ip}`, PROMOTION_LIMIT);
+      if (!promoteRl.ok) {
+        logger.warn("[concierge] promotion skipped — per-IP daily cap reached", {
+          opportunityId: opportunitySnapshot.id,
+        });
+        mayPromote = false;
+      }
+    }
+
+    // BOUND 3 — idempotency. The completion flag flip is a CONDITIONAL update:
+    // exactly one writer sees `count === 1`, every replay sees `0`. A replayed
+    // `after()` block therefore cannot promote twice. This is the same claim
+    // shape the webhook path uses (`updateMany(processed:false→true)`), rather
+    // than a new mechanism.
+    if (mayPromote) {
+      let claimedCompletion = false;
       try {
-        await prisma.buyerOpportunity.update({
-          where: { id: opportunitySnapshot.id },
+        const claimed = await prisma.buyerOpportunity.updateMany({
+          where: { id: opportunitySnapshot.id, completed: false },
           data: { completed: true },
         });
-        logger.info("[concierge] STAGE 3 (completion flag) OK");
+        claimedCompletion = claimed.count === 1;
+        logger.info("[concierge] STAGE 3 (completion flag) OK", { claimed: claimedCompletion });
       } catch (err) {
         logger.error("[concierge] STAGE 3 (completion flag) FAILED:", err);
       }
+      if (!claimedCompletion) {
+        logger.info("[concierge] promotion already claimed for this opportunity — skipping");
+        mayPromote = false;
+      }
+    }
+
+    if (mayPromote) {
       try {
         await promoteOpportunity(opportunitySnapshot.id, {
           firstName: updated.firstName ?? undefined,
@@ -375,11 +554,11 @@ CRITICAL RULES:
         const phone = updated.phone ?? null;
         const firstName = updated.firstName ?? opportunitySnapshot.firstName ?? undefined;
 
-        // Consent is gated on the explicit lead-gate opt-in, never defaulted.
-        // In public streaming mode the gate is mandatory and name/email arrive
-        // only after the disclosure is accepted, so a captured email is the
-        // opt-in signal for the "receive messages" disclosure (email + SMS).
-        const gateOptIn = !!email;
+        // Consent comes from the SERVER-VERIFIED gate claim on this session's
+        // signed handle — never from the mere presence of an email in the
+        // request body, which is what it used to mean. A caller cannot forge the
+        // claim, because it is covered by the HMAC.
+        const gateOptIn = claims.gate && !!email;
 
         const { getServiceSupabase } = await import("@/lib/supabase-service");
         const { ContactService } = await import("@/lib/services/contact.service");
@@ -423,11 +602,27 @@ CRITICAL RULES:
     }
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache",
-      "X-Content-Type-Options": "nosniff",
-    },
+  // The public surface now writes to the unified AI audit trail like every other
+  // Zura surface. Message LENGTH only — never the body; the transcript store is
+  // the body of record and has its own retention.
+  await recordAiEvent({
+    actor: { actorType: "SYSTEM", actorId: `session:${sessionId}`, authenticatedRole: null },
+    surface: "public-web",
+    purpose: "zura.public.concierge",
+    outcome: "ANSWERED",
+    messageLength: userMessage.length,
+    chatSessionId: sessionId,
   });
+
+  return withSession(
+    new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "X-Content-Type-Options": "nosniff",
+      },
+    }),
+    issuedHandle,
+    claims.gate,
+  );
 }

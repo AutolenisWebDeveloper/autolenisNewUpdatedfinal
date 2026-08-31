@@ -10,7 +10,7 @@
 // re-asked with the standard <Gather> STT — Whisper never breaks the call.
 
 import { logger } from "@/lib/logger";
-import OpenAI, { toFile } from "openai";
+import { transcribeAudio as providerTranscribe } from "@/lib/ai/provider";
 
 const WHISPER_MODEL = "whisper-1";
 
@@ -34,17 +34,6 @@ export interface WhisperTranscriptResult {
   confidence: "high" | "low";
   durationSeconds: number;
   provider: "whisper" | "twilio_fallback";
-}
-
-let _client: OpenAI | null = null;
-
-function getOpenAI(): OpenAI {
-  if (!_client) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("[zura-p4] OPENAI_API_KEY not configured");
-    _client = new OpenAI({ apiKey });
-  }
-  return _client;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -123,20 +112,24 @@ export async function transcribeAudio(
       return fallback;
     }
 
-    const file = await toFile(Buffer.from(audio), `${recordingSid}.mp3`, {
-      type: "audio/mpeg",
-    });
-
-    const result = await getOpenAI().audio.transcriptions.create({
-      file,
+    // Transport only — model, language, prompt hint and verbose_json response
+    // format unchanged. Routing through the provider chokepoint is what brings
+    // Whisper under the AI kill switch; every failure path below still returns
+    // provider: "twilio_fallback", so a disabled kill switch degrades the call
+    // to Twilio's own STT rather than breaking it.
+    const result = await providerTranscribe({
+      purpose: "voice.whisper_transcription",
       model: WHISPER_MODEL,
+      audio: Buffer.from(audio),
+      filename: `${recordingSid}.mp3`,
+      mimeType: "audio/mpeg",
       language: "en",
       prompt: WHISPER_PROMPT_HINT,
-      response_format: "verbose_json",
+      responseFormat: "verbose_json",
     });
 
     // verbose_json widens the return type; read the fields defensively.
-    const raw = result as unknown as {
+    const raw = result.raw as {
       text?: string;
       duration?: number;
       segments?: Array<{ avg_logprob?: number }>;

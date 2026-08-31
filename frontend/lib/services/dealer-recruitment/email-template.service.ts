@@ -10,6 +10,7 @@
 
 import { logger } from "@/lib/logger";
 import { GROQ_REASONING } from "@/lib/ai/acquisition"
+import { complete } from "@/lib/ai/provider"
 
 export interface EmailTemplateInput {
   dealerName: string
@@ -48,40 +49,22 @@ async function callGroq(options: {
   temperature?: number
   maxTokens?: number
 }): Promise<string> {
-  const apiKey = process.env.GROQ_API_KEY
-  if (!apiKey || apiKey.startsWith("gsk_placeholder")) {
-    throw new Error("GROQ_API_KEY is not configured")
-  }
-
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: GROQ_REASONING, // openai/gpt-oss-120b
-      messages: [
-        { role: "system", content: options.systemPrompt },
-        { role: "user", content: options.userPrompt },
-      ],
-      max_tokens: options.maxTokens ?? 900,
-      temperature: options.temperature ?? 0.6,
-      top_p: 1.0,
-    }),
+  // Transport only — model, prompts, token cap, temperature and top_p unchanged.
+  const result = await complete({
+    purpose: "dealer_recruitment.email_template",
+    model: GROQ_REASONING, // openai/gpt-oss-120b
+    messages: [
+      { role: "system", content: options.systemPrompt },
+      { role: "user", content: options.userPrompt },
+    ],
+    maxTokens: options.maxTokens ?? 900,
+    temperature: options.temperature ?? 0.6,
+    topP: 1.0,
     // Request-level timeout so a hung upstream can't stall the whole batch
     // send — the generator already has a deterministic fallback on failure.
     signal: AbortSignal.timeout(25_000),
   })
-
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "")
-    throw new Error(`Groq HTTP ${res.status}: ${detail.slice(0, 300)}`)
-  }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>
-  }
-  return data.choices?.[0]?.message?.content ?? ""
+  return result.content
 }
 
 async function callGroqWithRetry(

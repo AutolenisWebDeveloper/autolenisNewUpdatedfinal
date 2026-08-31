@@ -32,6 +32,7 @@ import {
 import { ZURA_VOICE_PROMPT } from "@/lib/ai/zura-voice";
 import type { BuyerLookupResult } from "@/lib/services/voice/buyer-lookup.service";
 import { groqChat, type ChatMessage } from "@/lib/ai/groq-client";
+import { recordAiEvent } from "@/lib/services/ai/ai-audit.service";
 import { dispatch } from "@/lib/qstash/dispatch";
 import { isValidUsPhone } from "@/lib/services/sms/twilio.service";
 import { sendTransactionalSmsIfAllowed } from "@/lib/voice/transactional-sms";
@@ -257,7 +258,7 @@ async function extractCallData(history: ChatMessage[]): Promise<ExtractedCall | 
   try {
     const result = await groqChat(
       [{ role: "system", content: EXTRACTOR_PROMPT }, ...history],
-      { maxTokens: 400, temperature: 0 },
+      { maxTokens: 400, temperature: 0, purpose: "zura.voice.extract_call_data" },
     );
     const match = result.content.match(/\{[\s\S]*\}/);
     if (!match) return null;
@@ -494,12 +495,39 @@ export async function handleVoiceTurn(input: VoiceTurnInput): Promise<string> {
     { role: "user", content: speech },
   ];
 
+  // The voice surface folds into the unified design PARTIALLY (Phase 2 §3.3):
+  // it keeps its own turn handler, TwiML transport, conversation store and
+  // latency budget, and it SHARES the prompt core, the provider adapter, the
+  // kill switch (both asserted once inside `groqChat` → `lib/ai/provider.ts`)
+  // and — from here — the AI audit trail. Without this write the trail would
+  // have a hole at exactly the surface with no session and no UI.
+  const auditActor = {
+    actorType: "SYSTEM" as const,
+    actorId: `call:${callSid}`,
+    authenticatedRole: null,
+  };
+
   let aiText: string;
+  let answeredBy: string;
   try {
-    const result = await groqChat(messages, { maxTokens: 120, temperature: 0.85 });
+    const result = await groqChat(messages, {
+      maxTokens: 120,
+      temperature: 0.85,
+      purpose: "zura.voice.turn",
+    });
     aiText = sanitizeForSpeech(result.content) || "I am sorry, could you say that again?";
+    answeredBy = result.model;
   } catch (err) {
     logger.error("[voice/turn] Groq call failed:", err);
+    const killed = String(err).includes("AI_KILL_SWITCH");
+    await recordAiEvent({
+      actor: auditActor,
+      surface: "voice",
+      purpose: "zura.voice.turn",
+      outcome: killed ? "AI_DISABLED" : "ERROR",
+      messageLength: speech.length,
+      chatSessionId: callSid,
+    });
     const twiml = new VoiceResponse();
     await speakWithFallback(
       twiml,
@@ -507,6 +535,17 @@ export async function handleVoiceTurn(input: VoiceTurnInput): Promise<string> {
     );
     return twiml.toString();
   }
+
+  await recordAiEvent({
+    actor: auditActor,
+    surface: "voice",
+    purpose: "zura.voice.turn",
+    outcome: "ANSWERED",
+    model: answeredBy,
+    // Length only — the spoken transcript is never copied into the audit trail.
+    messageLength: speech.length,
+    chatSessionId: callSid,
+  });
 
   // Persist the turn.
   const newHistory = [

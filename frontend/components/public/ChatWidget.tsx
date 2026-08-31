@@ -3,13 +3,24 @@
 import { logger } from "@/lib/logger";
 import { useState, useRef, useEffect } from "react";
 import { MessageCircle, X, Send, Loader2, Bot } from "lucide-react";
-import { isAiEnabled } from "@/lib/ai/kill-switch";
 
 interface Message { role: "user" | "assistant"; content: string }
 
+// NOTE — `agentType` is GONE from this component and from the wire (Phase 2
+// §5.3 / §8.5 #1). It routed nothing: it was written into activity-event
+// metadata and discarded. It was also the client-supplied agent selector Phase 1
+// §D.9 named as the latent escalation shape — the one input that, wired to the
+// (defective) `routeToAgent` dispatcher, would have let a caller choose which
+// brain answered it. The surface is now derived SERVER-SIDE from the route the
+// request arrives on, so there is no client-controlled input to leak through.
+//
+// The kill switch is likewise no longer consulted here. `isAiEnabled()` read
+// `process.env.AI_KILL_SWITCH`, which is not a `NEXT_PUBLIC_*` var, so in the
+// browser it was always `undefined` and the function always returned `true` —
+// the check never once did anything. Availability now comes from the server's
+// `AI_DISABLED` response, which is the only thing that was ever authoritative.
 interface ChatWidgetProps {
   buyerId?: string;
-  agentType?: "general" | "prequal" | "search" | "auction" | "deal";
   initialGreeting?: string;
   placeholder?: string;
   // Optional override for admin/dealer/affiliate portals that hit their own
@@ -25,7 +36,6 @@ const PUBLIC_PLACEHOLDER = "Tell me what you're looking for...";
 
 export default function ChatWidget({
   buyerId,
-  agentType = "general",
   initialGreeting,
   placeholder,
   chatEndpoint,
@@ -36,9 +46,12 @@ export default function ChatWidget({
   const useStreaming = !buyerId && !chatEndpoint;
   const isPublic = useStreaming;
 
+  // The fallback greeting used to introduce "Alex" — a second persona name in a
+  // one-brand product, masked only because every layout happens to pass
+  // `initialGreeting`. One brand, one name (Phase 2 §8.5 #2).
   const greeting = initialGreeting ?? (isPublic
     ? PUBLIC_GREETING
-    : "Hi! I'm Alex, your AutoLenis concierge. How can I help you today?"
+    : "Hi! I'm Zura, your AutoLenis concierge. How can I help you today?"
   );
 
   const placeholderText = placeholder ?? (isPublic
@@ -47,7 +60,19 @@ export default function ChatWidget({
   );
 
   const [open, setOpen] = useState(false);
-  const [sessionId, setSessionId] = useState<string>("");
+  // The public session HANDLE is issued by the server on the first turn and
+  // presented on every later one. The widget no longer mints its own id: an
+  // attacker-chosen UUID used to be the only identity the public concierge had,
+  // so unlimited parallel sessions could be opened from one origin (Phase 2 §5.4).
+  const [sessionHandle, setSessionHandle] = useState<string>("");
+  // Has the SERVER confirmed this session is gate-verified? The handle is opaque,
+  // so the server reports it in a header. Until it says yes, the gate payload is
+  // re-sent — otherwise a dropped first response, or a handle that outlives its
+  // TTL, would strand the visitor in a session that can never capture their lead.
+  const [gateConfirmed, setGateConfirmed] = useState(false);
+  // Correlates an authenticated conversation across turns, so the transcript and
+  // audit rows for one conversation share an id. Server-issued.
+  const [chatSessionId, setChatSessionId] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", content: greeting },
   ]);
@@ -62,15 +87,10 @@ export default function ChatWidget({
   const [leadName, setLeadName] = useState("");
   const [leadEmail, setLeadEmail] = useState("");
   const [leadError, setLeadError] = useState("");
-  const isFirstMessageRef = useRef(true);
 
-  // Initialize session ID for public mode
-  useEffect(() => {
-    if (isPublic) {
-      setSessionId(crypto.randomUUID());
-    }
-    setAiAvailable(isAiEnabled());
-  }, [isPublic]);
+  // No client-side session minting and no client-side kill-switch check: both
+  // were doing nothing, and one of them was a security hole. See the note above
+  // the props interface.
 
   useEffect(() => {
     if (open) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -78,7 +98,6 @@ export default function ChatWidget({
 
   async function sendMessage() {
     if (!input.trim() || loading || streaming || !aiAvailable) return;
-    if (isPublic && !sessionId) return;
 
     const userMsg = input.trim();
     setInput("");
@@ -89,22 +108,53 @@ export default function ChatWidget({
 
     if (useStreaming) {
       // ─── PUBLIC CONCIERGE — STREAMING ───────────────────
-      const isFirstMessage = isFirstMessageRef.current;
-      isFirstMessageRef.current = false;
+      // The gate payload rides along on every turn until the server confirms the
+      // session is gated. It is idempotent server-side: a gate submission is
+      // ignored once the session already carries the claim.
+      const sendGate = leadGatePassed && !gateConfirmed;
 
       try {
         const response = await fetch("/api/concierge", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            // Absent on turn 1; the server issues one in the response.
+            ...(sessionHandle ? { "X-Zura-Session": sessionHandle } : {}),
+          },
           body: JSON.stringify({
-            sessionId,
             userMessage: userMsg,
-            ...(isFirstMessage && {
+            ...(sendGate && {
               firstName: leadName.trim(),
               email: leadEmail.trim().toLowerCase(),
             }),
           }),
         });
+
+        // Adopt the server-issued handle and gate status BEFORE reading the
+        // body, so a handle issued on turn 1 is presented on turn 2 even if the
+        // stream itself fails.
+        const issued = response.headers.get("X-Zura-Session");
+        if (issued) setSessionHandle(issued);
+        setGateConfirmed(response.headers.get("X-Zura-Gate") === "1");
+
+        if (response.status === 503) {
+          setAiAvailable(false);
+          setMessages([
+            ...newMessages,
+            { role: "assistant", content: "The AI concierge is temporarily unavailable. Please contact support@autolenis.com for assistance." },
+          ]);
+          setLoading(false);
+          return;
+        }
+
+        if (response.status === 429) {
+          setMessages([
+            ...newMessages,
+            { role: "assistant", content: "We've had a lot of messages from this connection. Please wait a little while and try again." },
+          ]);
+          setLoading(false);
+          return;
+        }
 
         if (!response.ok || !response.body) {
           setMessages([
@@ -168,22 +218,31 @@ export default function ChatWidget({
         const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          // No `agentType` and no `buyerId`: the surface is derived from the
+          // route server-side, and the buyer is resolved from the session. A
+          // client can no longer name which brain answers it, nor whose account
+          // it answers about.
           body: JSON.stringify({
             message: userMsg,
             history,
-            agentType,
-            ...(buyerId && { buyerId }),
+            ...(chatSessionId && { chatSessionId }),
           }),
         });
 
         const data = await res.json() as {
           success?: boolean;
-          data?: { content: string };
+          data?: { content: string; chatSessionId?: string };
           error?: { code: string };
         };
 
         if (res.ok && data.success && data.data) {
+          if (data.data.chatSessionId) setChatSessionId(data.data.chatSessionId);
           setMessages([...newMessages, { role: "assistant", content: data.data.content }]);
+        } else if (data.error?.code === "RATE_LIMITED") {
+          setMessages([
+            ...newMessages,
+            { role: "assistant", content: "You've sent a lot of messages recently. Please wait a little while and try again." },
+          ]);
         } else if (data.error?.code === "AI_DISABLED") {
           setAiAvailable(false);
           setMessages([

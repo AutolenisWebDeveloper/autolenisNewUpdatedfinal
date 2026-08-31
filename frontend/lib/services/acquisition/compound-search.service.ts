@@ -1,5 +1,6 @@
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma"
+import { complete } from "@/lib/ai/provider"
 import {
   discoverDealersViaGeminiMaps,
   enrichMarketViaGemini,
@@ -10,10 +11,12 @@ import {
 const MARKET_ENRICHMENT_TTL_HOURS = 24
 const DEALER_DISCOVERY_TTL_HOURS = 24 * 7  // 7 days
 
-// Groq Compound endpoints
-const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+// Groq Compound models. The endpoint itself lives in `lib/ai/providers/groq.ts`
+// — the only module permitted to name it.
 const GROQ_COMPOUND_MODEL = "groq/compound"
 const GROQ_COMPOUND_MINI_MODEL = "groq/compound-mini"
+
+type GroqCompoundModel = typeof GROQ_COMPOUND_MODEL | typeof GROQ_COMPOUND_MINI_MODEL
 
 // ───────────────────────────────────────────────────
 // CACHE HELPERS
@@ -101,7 +104,7 @@ interface CompoundResult {
 }
 
 async function callCompound(
-  model: string,
+  model: GroqCompoundModel,
   systemPrompt: string,
   userPrompt: string,
   options: {
@@ -109,46 +112,37 @@ async function callCompound(
     maxTokens?: number
   } = {}
 ): Promise<CompoundResult | null> {
-  const apiKey = process.env.GROQ_API_KEY
-  if (!apiKey) {
+  if (!process.env.GROQ_API_KEY) {
     logger.error("[compound-search] GROQ_API_KEY not configured")
     return null
   }
 
   try {
-    const response = await fetch(GROQ_API_URL, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+    // Transport only — model, prompts and every Compound knob
+    // (`max_completion_tokens`, `compound_custom.tools.enabled_tools`,
+    // `search_settings.country`) are unchanged; they travel as
+    // provider-native options so the executed-tool results still come back.
+    const result = await complete({
+      purpose: "acquisition.compound_search",
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      providerOptions: {
+        groqCompound: {
+          maxCompletionTokens: options.maxTokens ?? 3000,
+          enabledTools: options.enabledTools ?? ["web_search"],
+          searchCountry: "united states",
+        },
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        max_completion_tokens: options.maxTokens ?? 3000,
-        compound_custom: {
-          tools: {
-            enabled_tools: options.enabledTools ?? ["web_search"],
-          },
-        },
-        search_settings: {
-          country: "united states",
-        },
-      }),
     })
 
-    if (!response.ok) {
-      const errBody = await response.text()
-      logger.error(`[compound-search] ${model} failed:`, response.status, errBody)
-      return null
+    const data = result.raw as {
+      choices?: Array<{ message?: Record<string, unknown> }>
     }
-
-    const data = await response.json()
     const message = data.choices?.[0]?.message
-    const content: string = message?.content ?? ""
+    const content: string = result.content
 
     // Extract search results from executed_tools
     const executedTools = message?.executed_tools as Array<{

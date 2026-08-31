@@ -13,6 +13,7 @@ import twilio from "twilio";
 import { normalizePhone } from "@/lib/utils/phone";
 import { SuppressionService } from "@/lib/services/suppression.service";
 import { getServiceSupabase } from "@/lib/supabase-service";
+import { complete } from "@/lib/ai/provider";
 
 export class TwilioSendError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -81,9 +82,6 @@ export async function notifyFounderHotLead(lead: HotLeadData): Promise<void> {
 // It must always send. On any Anthropic failure we fall through to the
 // deterministic template — the buyer never gets silence.
 
-interface AnthropicResponse {
-  content?: Array<{ type?: string; text?: string }>;
-}
 
 function buildFallbackBuyerSms(lead: HotLeadData): string {
   const name = lead.firstName?.trim() || "there";
@@ -118,33 +116,20 @@ ZIP: ${lead.zip}`;
 - Never uses exclamation marks more than once`;
 
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5",
-        max_tokens: 160,
-        system,
-        messages: [{ role: "user", content: userPrompt }],
-      }),
+    // Transport only — model, system prompt, user prompt and token cap
+    // unchanged. Routing through the provider chokepoint is what brings the
+    // Anthropic path under the AI kill switch.
+    const result = await complete({
+      purpose: "acquisition.hot_lead_buyer_sms",
+      model: "claude-haiku-4-5",
+      maxTokens: 160,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: userPrompt },
+      ],
     });
-
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      logger.error("[twilio.sendHotLeadBuyerSms] anthropic HTTP error", {
-        status: res.status,
-        detail: detail.slice(0, 300),
-      });
-      return null;
-    }
-
-    const data = (await res.json()) as AnthropicResponse;
-    const text = data.content?.find((b) => b.type === "text")?.text?.trim();
-    return text && text.length > 0 ? text : null;
+    const text = result.content.trim();
+    return text.length > 0 ? text : null;
   } catch (err) {
     logger.error("[twilio.sendHotLeadBuyerSms] anthropic call failed", err);
     return null;

@@ -15,9 +15,11 @@
 
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma"
+import { complete } from "@/lib/ai/provider"
 
-const GEMINI_API_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+// The Gemini endpoint itself lives in `lib/ai/providers/gemini.ts` — the only
+// module permitted to name it. Here we name only the model.
+const GEMINI_MODEL = "gemini-2.5-flash"
 
 // Skip re-enriching a prospect attempted within this window (unless forced).
 const ENRICHMENT_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
@@ -192,27 +194,21 @@ async function callGemini(prompt: string): Promise<GeminiResponse> {
     throw new Error("GEMINI_API_KEY is not configured")
   }
 
-  const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      // Google Search grounding — lets Gemini verify a real, current address.
-      tools: [{ googleSearch: {} }],
-      generationConfig: {
-        temperature: 0.1, // deterministic
-        maxOutputTokens: 1024,
-      },
-    }),
+  // Transport only — model, prompt, Search grounding tool, temperature and
+  // output cap unchanged. The retry wrapper below matches "429"/"503" in the
+  // error message, and ProviderHttpError keeps the `Gemini HTTP <status>:`
+  // prefix that produced.
+  const completion = await complete({
+    purpose: "dealer_recruitment.email_enrichment",
+    model: GEMINI_MODEL,
+    messages: [{ role: "user", content: prompt }],
+    // Google Search grounding — lets Gemini verify a real, current address.
+    providerOptions: { geminiTools: [{ googleSearch: {} }] },
+    temperature: 0.1, // deterministic
+    maxTokens: 1024,
   })
 
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "")
-    // Surface the status code in the message so the retry wrapper can match it.
-    throw new Error(`Gemini HTTP ${response.status}: ${detail.slice(0, 300)}`)
-  }
-
-  return (await response.json()) as GeminiResponse
+  return completion.raw as GeminiResponse
 }
 
 // ─── Retry wrapper with exponential backoff ──────────────────────────────────

@@ -13,6 +13,7 @@ import "server-only";
 import sharp from "sharp";
 import type { ContentFranchise, SocialPost } from "@prisma/client";
 import { GROQ_SUMMARY } from "@/lib/ai/acquisition";
+import { complete } from "@/lib/ai/provider";
 import { getServiceSupabase } from "@/lib/supabase-service";
 
 const STORAGE_BUCKET = "social-media-assets";
@@ -27,33 +28,26 @@ export interface CarouselInput {
 
 // ─── Groq: extract 5 bullet points ───────────────────────────────────────────
 async function extractBullets(script: string): Promise<string[]> {
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey || apiKey.startsWith("gsk_placeholder")) {
-    throw new Error("GROQ_API_KEY is not configured");
-  }
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: GROQ_SUMMARY,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You extract concise carousel bullet points for social media. Return ONLY a JSON array of strings. No markdown.",
-        },
-        {
-          role: "user",
-          content: `Extract 5 key bullet points from this script. Each bullet max 10 words. Return as JSON array.\n\nScript:\n${script}`,
-        },
-      ],
-      max_tokens: 400,
-      temperature: 0.5,
-    }),
+  // Transport only — model, prompts, token cap and temperature unchanged.
+  // `top_p` was not sent before and is still not sent.
+  const result = await complete({
+    purpose: "social.carousel.extract_bullets",
+    model: GROQ_SUMMARY,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You extract concise carousel bullet points for social media. Return ONLY a JSON array of strings. No markdown.",
+      },
+      {
+        role: "user",
+        content: `Extract 5 key bullet points from this script. Each bullet max 10 words. Return as JSON array.\n\nScript:\n${script}`,
+      },
+    ],
+    maxTokens: 400,
+    temperature: 0.5,
   });
-  if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
-  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const raw = (data.choices?.[0]?.message?.content ?? "").trim();
+  const raw = result.content.trim();
   const first = raw.indexOf("[");
   const last = raw.lastIndexOf("]");
   const json = first >= 0 && last > first ? raw.slice(first, last + 1) : raw;
