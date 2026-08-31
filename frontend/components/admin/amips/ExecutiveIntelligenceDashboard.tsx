@@ -22,6 +22,7 @@ import type {
   OperationsSnapshot, TrendInfo,
 } from "@/lib/amips/intelligence/executive-intelligence";
 import type { IndexationDecision } from "@/lib/amips/indexation-gate";
+import type { StalenessRunway, RunwaySeverity } from "@/lib/amips/staleness-runway";
 
 const metroHref = (metro: string) => `/admin/amips/metro/${encodeURIComponent(metro)}`;
 const vehicleHref = (make: string, model: string) =>
@@ -330,7 +331,80 @@ const DECISION_CHIP: Record<IndexationDecision, string> = {
   pause: "bg-[#FEF2F2] text-[#DC2626] border-[#FECACA]",
 };
 
-function ContentPerformancePanel({ content }: { content: ContentPerformance }) {
+// Same chip vocabulary as the indexation decision above, so runway severity
+// reads on a scale the operator already knows.
+const RUNWAY_CHIP: Record<RunwaySeverity, string> = {
+  OK: "bg-[#ECFDF5] text-[#059669] border-[#A7F3D0]",
+  NOTICE: "bg-[#EFF6FF] text-[#1D4ED8] border-[#BFDBFE]",
+  WARN: "bg-[#FFFBEB] text-[#D97706] border-[#FDE68A]",
+  CRITICAL: "bg-[#FEF2F2] text-[#DC2626] border-[#FECACA]",
+};
+
+function StalenessRunwayRow({ runway }: { runway: StalenessRunway }) {
+  const days = runway.minDaysToWithhold;
+  // Nothing dated cannot withhold. Said explicitly, because a reassuring green
+  // figure that actually means "not measured" is the failure mode this whole
+  // audit has been correcting.
+  if (days === null) {
+    return (
+      <div className="border-t border-[#F1F5F9] px-5 py-3" data-testid="amips-staleness-runway">
+        <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.12em] mb-1">Staleness Runway</p>
+        <p className="text-xs text-[#94A3B8]">No dated pages — nothing is scheduled to withhold.</p>
+      </div>
+    );
+  }
+  const dark = days <= 0;
+  return (
+    <div className="border-t border-[#F1F5F9] px-5 py-3" data-testid="amips-staleness-runway">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.12em]">Staleness Runway</p>
+        <span
+          className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${RUNWAY_CHIP[runway.severity]}`}
+          data-testid="amips-runway-severity"
+        >
+          {runway.severity}
+        </span>
+      </div>
+      <p className="text-xs text-[#475569]">
+        {dark ? (
+          <>
+            <span className="font-mono font-semibold text-[#DC2626]">{fmtNum(runway.alreadyWithheld)}</span>
+            {" page(s) are past the staleness bound and returning 404 now."}
+          </>
+        ) : (
+          <>
+            <span className="font-mono font-semibold text-[#0F172A]">{fmtNum(days)}</span>
+            {" day(s) until the first page stops serving"}
+            {runway.firstWithholdDate ? (
+              <>
+                {" — "}
+                <time dateTime={runway.firstWithholdDate}>{runway.firstWithholdDate}</time>
+              </>
+            ) : null}
+            .
+          </>
+        )}
+      </p>
+      <p className="text-[10px] text-[#94A3B8] mt-1 leading-snug">
+        {runway.isSingleDayCliff
+          ? `All ${fmtNum(runway.servablePages)} servable pages share this date — the corpus goes dark in one day, not gradually.`
+          : `${fmtNum(runway.within30)} within 30d · ${fmtNum(runway.within60)} within 60d · ${fmtNum(runway.within90)} within 90d`}
+      </p>
+      <p className="text-[10px] text-[#94A3B8] mt-1 leading-snug">
+        Refresh is manual: run the vehicle-intelligence seed, or sync market intelligence.
+        Regenerating pages does not clear it.
+      </p>
+    </div>
+  );
+}
+
+function ContentPerformancePanel({
+  content,
+  runway,
+}: {
+  content: ContentPerformance;
+  runway: StalenessRunway;
+}) {
   const stats: Array<{ label: string; value: string; caption: string }> = [
     { label: "Active Pages", value: fmtNum(content.activePages), caption: `${content.published30d} published / 30d` },
     { label: "Impressions", value: fmtNum(content.impressions), caption: `${fmtNum(content.clicks)} clicks` },
@@ -359,6 +433,7 @@ function ContentPerformancePanel({ content }: { content: ContentPerformance }) {
           </div>
         ))}
       </div>
+      <StalenessRunwayRow runway={runway} />
       {content.topPages.length > 0 && (
         <div className="border-t border-[#F1F5F9] px-5 py-3">
           <p className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-[0.12em] mb-2">Top Pages by Leads</p>
@@ -579,7 +654,7 @@ export default function ExecutiveIntelligenceDashboard({ data }: { data: Executi
 
       {/* Content Performance */}
       <section id="content" className="scroll-mt-6 mb-7">
-        <ContentPerformancePanel content={data.content} />
+        <ContentPerformancePanel content={data.content} runway={data.stalenessRunway} />
       </section>
 
       {/* Operations (demoted) */}

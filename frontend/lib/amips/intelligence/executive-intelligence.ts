@@ -13,6 +13,7 @@
 import { prisma } from "@/lib/prisma";
 import { haversineMiles } from "@/lib/utils/zip-coords";
 import { getMetroDefs, METRO_MEMBERSHIP_RADIUS_MILES } from "@/lib/amips/metros";
+import { loadStalenessRunway, type StalenessRunway } from "@/lib/amips/staleness-runway.service";
 import {
   computeIndexationGates,
   decideFromRate,
@@ -184,6 +185,12 @@ export interface ExecutiveIntelligence {
   healthTrend?: TrendInfo;
   /** ISO date of the baseline snapshot used for all trend deltas. */
   trendSince?: string;
+  /**
+   * Countdown to the staleness bound across the servable corpus. Surfaced beside
+   * the corpus counts because it is a property OF those counts: it says how long
+   * the pages the dashboard is reporting on will keep serving.
+   */
+  stalenessRunway: StalenessRunway;
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +322,16 @@ function emptyIntelligence(): ExecutiveIntelligence {
       freshnessPct: 0,
       queue: { pending: 0, inProgress: 0, complete: 0, failed: 0 },
       indexationGates: [],
+    },
+    // No corpus, so nothing can withhold. Explicit rather than optional: the
+    // dashboard should never have to guess whether a missing runway means
+    // "healthy" or "not computed".
+    stalenessRunway: {
+      servablePages: 0, undatedPages: 0,
+      minDaysToWithhold: null, firstWithholdDate: null,
+      isSingleDayCliff: false,
+      within30: 0, within60: 0, within90: 0, alreadyWithheld: 0,
+      severity: "OK",
     },
   };
 }
@@ -698,8 +715,11 @@ async function loadInner(): Promise<ExecutiveIntelligence> {
     },
   ];
 
+  const stalenessRunway = await loadStalenessRunway();
+
   const payload: ExecutiveIntelligence = {
     generatedAt: new Date().toISOString(),
+    stalenessRunway,
     hasData: totalRecords > 0 || content.activePages > 0,
     health,
     headline,

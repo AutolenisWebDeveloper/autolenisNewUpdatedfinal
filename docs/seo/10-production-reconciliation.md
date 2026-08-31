@@ -591,6 +591,79 @@ these pages — **serving was the only place still ignoring it**. Regeneration w
 bound either, since the as-of dates come from the source rows. Scheduling the refresh is a cron
 change and deliberately out of scope for this batch.
 
+### Staleness runway — making the bound fire with warning
+
+Owner verification established the shape of the cliff: **all 393 servable pages share a withhold
+date of 2026-12-04.** Tier B is included — its market and dealer dates are null, but
+`vehicle_data_as_of` is populated on all 185 ACTIVE Tier B pages and vehicle data applies to every
+tier. Every page was generated from one `VehicleIntelligence` seed run, so the corpus does not
+decay page by page; it goes to 404 in a single day.
+
+The bound is correct. The gap was that it fired silently.
+
+| Piece | Where | Detail |
+| --- | --- | --- |
+| Computation | `lib/amips/staleness-runway.ts` | `computeStalenessRunway()` — pure. Min days to withhold, first withhold date, cumulative 30/60/90-day buckets, `alreadyWithheld`, and `isSingleDayCliff` |
+| Emission | `app/api/cron/amips-snapshot/route.ts` | Rides in the existing `withCronRun` result JSONB → `cron_job_logs.result`. **No new table** |
+| Escalation | `lib/amips/staleness-runway.service.ts` | `createAlertOnce()` + `notifyOncall()` — the platform's existing alert path |
+| Admin surface | `ExecutiveIntelligenceDashboard.tsx` → `StalenessRunwayRow` | Rendered inside the Content Performance panel, beside the corpus counts |
+
+**`isSingleDayCliff` is reported on its own** because a ramp and a cliff demand different
+responses: a ramp can be absorbed page by page, a cliff cannot, and an operator reading "95 days"
+should not have to infer which one they are looking at.
+
+#### Why these thresholds — lead time is the whole point
+
+Refreshing the source data is **not automated, and this batch does not automate it**. It requires
+either running `lib/amips/seed/vehicle-intelligence.seed.ts` against production (a person, a
+terminal, production DB access) or an authenticated admin `POST` to
+`/api/admin/amips/sync-market-intelligence`. So the ladder is sized to **human scheduling**, not
+machine reaction: each rung marks the point at which the remaining runway still permits a
+particular kind of response.
+
+| Runway | Severity | Alert level | Why this number, not a round one |
+| --- | --- | --- | --- |
+| > 90d | OK | none | Beyond a quarter. Alerting this far out teaches people to ignore the alert |
+| ≤ 90d | NOTICE | `INFO` | One quarter — the first point at which the refresh can go **into** a planning cycle rather than interrupt one |
+| ≤ 45d | WARN | `P2` | A monthly cycle **plus half**. 30 would be exactly one cycle with zero slack if that cycle is already committed |
+| ≤ 21d | CRITICAL | `P1` | Three weeks covers a standard two-week absence **plus a week to act**. This is why it is not 14: a single vacation would otherwise consume the entire window |
+| ≤ 0d | CRITICAL | `P0` | Pages are dark now |
+
+`P0` is reserved for "production is degraded now". Before the cliff the platform is serving
+correctly and the problem is impending, so `P1` pages without crying wolf. Escalation is expressed
+through the alert **title**, which is how `health-alert.service.ts` documents breaking through an
+already-open lower-severity alert.
+
+Against the verified corpus the runway is **95 days → OK today**, tipping to `NOTICE` five days
+later. The first rung fires almost immediately without any fabricated urgency.
+
+#### Why the cron run is NOT marked FAILED
+
+The literal reading of "escalate through cron status" is to throw so the run records `FAILED`.
+Three reasons that is the wrong mechanism, in increasing order of decisiveness:
+
+1. **It would be untrue.** The snapshot work succeeds; only a data condition is concerning. A
+   `FAILED` row makes a healthy job look broken and trains operators to ignore this cron.
+2. **It would destroy the payload.** `failCronRun()` **replaces** `result` with `{ build }`
+   (`cron-monitor.service.ts:143-154`), discarding the very figures the signal exists to publish.
+3. **It would not page anyway.** `detectFailedCrons()` requires `FAILED_CRON_STREAK_THRESHOLD`
+   (2) failures inside `FAILED_CRON_LOOKBACK_MINUTES` (180) — `dead-cron.service.ts:77-79`. A
+   **daily** cron's runs are 1440 minutes apart, so it can never form a 2-in-3-hours streak.
+   A daily job failing once a day alerts nobody.
+
+Reason 3 is a property of the existing detector, not an opinion, and it is pinned by a test. So
+the run stays `COMPLETED` with the runway in its result, and escalation goes through
+`createAlertOnce` + `notifyOncall` — the same combination `dead-cron.service.ts` uses for exactly
+this shape of problem: a scheduled job surfacing a condition nobody is watching for.
+
+`amips-snapshot` hosts it because it is the **only daily AMIPS cron**. `amips-lifecycle` is
+weekly, and a weekly countdown to a single-day cliff could report "7 days left" and not fire again
+until after the cliff had passed. **No cron was added** — that would be a schedule change, out of
+scope.
+
+**Not built, by instruction: the refresh cron itself.** That remains an owner decision. The signal
+tells you when it is needed; it does not decide for you.
+
 ### Branch-by-branch closure — answering V-2's goal directly
 
 V-2 warned that closing one expression must not leave another open. Against the six branches
