@@ -6,7 +6,12 @@
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { prisma } from "@/lib/prisma";
-import { INSURANCE_SATISFIED, advanceDealStatus, DealTransitionError } from "@/lib/services/deal/deal.service";
+import {
+  INSURANCE_SATISFIED,
+  advanceDealStatus,
+  DealTransitionError,
+  InsuranceRequiredError,
+} from "@/lib/services/deal/deal.service";
 import { Resend } from "resend";
 
 // Lazy Resend client — constructed on first use. Prevents Next.js build-time
@@ -35,8 +40,22 @@ export async function POST(request: NextRequest) {
     return errorResponse("INVALID_TOKEN", "QR code not found or invalid.", 422);
   }
 
+  // A concierge (vehicle-request) deal has no Offer, and VehicleRequestOffer carries
+  // no dealer identity — so there is NO dealer who can authorize this scan. Reject
+  // it on its own terms: reporting "not valid for this dealer" would send a
+  // legitimate dealer chasing a permissions problem that does not exist. These
+  // pickups are concierge-coordinated and completed by AutoLenis staff via
+  // POST /api/admin/deals/[dealId]/pickup/complete.
+  if (!pickup.deal.offer?.dealerId) {
+    return errorResponse(
+      "NO_DEALER_ON_DEAL",
+      "This is a concierge-coordinated pickup with no assigned dealership, so it can't be completed by dealer scan. Our concierge team finalizes it — contact support@autolenis.com if you're expecting to hand this vehicle over.",
+      409,
+    );
+  }
+
   // Token must belong to one of this dealer's offers
-  if (pickup.deal.offer?.dealerId !== dealer.id) {
+  if (pickup.deal.offer.dealerId !== dealer.id) {
     return errorResponse("INVALID_TOKEN", "QR code is not valid for this dealer.", 422);
   }
 
@@ -70,6 +89,16 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     if (err instanceof DealTransitionError) {
       return errorResponse("NOT_READY_FOR_PICKUP", "This deal is not ready for pickup completion.", 409);
+    }
+    // The seam re-checks the insurance hard gate at write time. Proof can be
+    // withdrawn between our pre-check above and the advance, so map that rejection
+    // to the same truthful 409 rather than letting it surface as a 500.
+    if (err instanceof InsuranceRequiredError) {
+      return errorResponse(
+        "INSURANCE_REQUIRED",
+        "Insurance proof is required before this pickup can be completed.",
+        409,
+      );
     }
     throw err;
   }

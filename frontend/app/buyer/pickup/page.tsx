@@ -51,6 +51,12 @@ export default async function PickupPage() {
 
   const noOpenPickup = !pickup || status === "NOT_SCHEDULED";
   const isConfirmed = status === "SCHEDULED" || status === "RESCHEDULED" || status === "CHECKED_IN";
+  // A concierge (vehicle-request) deal has no Offer, and VehicleRequestOffer carries
+  // no dealer identity — so there is no dealership to confirm a proposed time and no
+  // dealer account that can scan the pickup QR. Those flows are dealer-only; a
+  // dealer-less pickup is coordinated and completed by the AutoLenis concierge team.
+  // Showing the dealer flow here would promise a counterparty that does not exist.
+  const hasDealer = !!deal?.offer?.dealerId;
 
   return (
     <div className="p-6 md:p-8 max-w-xl" data-testid="pickup-page">
@@ -62,7 +68,17 @@ export default async function PickupPage() {
       {/* ── No open pickup: propose a time (dealer confirms) ─────────────────── */}
       {noOpenPickup ? (
         <div data-testid="pickup-not-scheduled">
-          {eSignCompleted && deal ? (
+          {eSignCompleted && deal && !hasDealer ? (
+            <div className="bg-al-surface border border-al-border rounded-al-lg p-6 shadow-al-1" data-testid="pickup-concierge-coordinated">
+              <h2 className="font-display text-lg font-semibold text-al-text mb-1">Your concierge is arranging pickup</h2>
+              <p className="text-sm text-al-text-muted mb-5">
+                This vehicle was sourced by our concierge team rather than through a dealership on the platform, so we
+                coordinate the handover for you directly. We&apos;ll reach out to confirm a time that works — no action
+                needed from you right now.
+              </p>
+              <Button href="/buyer/messages" variant="secondary" size="sm">Message your concierge</Button>
+            </div>
+          ) : eSignCompleted && deal ? (
             <div className="bg-al-surface border border-al-border rounded-al-lg p-6 shadow-al-1" data-testid="pickup-schedule-container">
               <h2 className="font-display text-lg font-semibold text-al-text mb-1">Propose a pickup time</h2>
               <p className="text-sm text-al-text-muted mb-5">
@@ -140,7 +156,20 @@ export default async function PickupPage() {
             </div>
           )}
 
-          {pickup?.qrCodeImage && (
+          {/* The QR is a DEALER credential — it is completed by a dealer scanning it.
+              A concierge pickup has no dealership, so presenting it would be a
+              dead end; the concierge team confirms that handover instead. */}
+          {!hasDealer && (
+            <div className="bg-al-surface border border-al-border rounded-al-lg p-6 mb-6" data-testid="pickup-concierge-handover">
+              <p className="text-sm font-semibold text-al-text mb-1">Concierge-coordinated handover</p>
+              <p className="text-sm text-al-text-muted">
+                Your concierge confirms this handover directly — there&apos;s no dealership code to present. We&apos;ll
+                mark your deal complete once the vehicle is with you.
+              </p>
+            </div>
+          )}
+
+          {hasDealer && pickup?.qrCodeImage && (
             <div className="text-center bg-al-surface border border-al-border rounded-al-lg p-8 mb-6" data-testid="pickup-qr-code">
               <QrCode size={32} className="text-al-primary mx-auto mb-3" />
               <p className="text-sm text-al-text-muted mb-4">Present this QR code at the lot</p>
@@ -164,7 +193,9 @@ export default async function PickupPage() {
             <PickupRescheduleButton dealId={deal!.id} currentDate={pickup?.scheduledAt?.toISOString() ?? ""} location={pickup?.location ?? ""} />
           )}
 
-          <p className="text-xs text-al-text-subtle text-center">Your pickup QR code is unique and single-use.</p>
+          {hasDealer && (
+            <p className="text-xs text-al-text-subtle text-center">Your pickup QR code is unique and single-use.</p>
+          )}
         </div>
       ) : null}
     </div>

@@ -5,6 +5,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { DealStatus, InsuranceStatus, Prisma } from "@prisma/client";
+import { logger } from "@/lib/logger";
 import { emitDealStatusComms } from "../notifications/acquisition-comms";
 import { emitDealCompletionEvent } from "./deal-completion-event.service";
 
@@ -164,6 +165,53 @@ export async function advanceDealStatus(
   // Best-effort: emitDealCompletionEvent never throws (the deal is committed).
   if (newStatus === DealStatus.COMPLETED) {
     await emitDealCompletionEvent(dealId);
+  }
+}
+
+/**
+ * Insurance-gate driver: once proof of insurance is on file, release the deal from
+ * INSURANCE_PENDING into CONTRACT_PENDING — the stage where the dealer is asked to
+ * upload the purchase contract.
+ *
+ * This edge previously had no automatic driver. The admin repair route set
+ * insuranceStatus and advanced explicitly, but the only buyer-facing insurance path
+ * (POST /api/buyer/insurance/upload-proof) wrote insuranceStatus directly and never
+ * advanced — so every self-service deal stalled at INSURANCE_PENDING until a human
+ * noticed. This is the seam that closes that gap.
+ *
+ * Deliberately narrow and self-healing:
+ *  • advances ONLY from INSURANCE_PENDING (never skips a stage, never rewinds one),
+ *  • only when insuranceStatus is in INSURANCE_SATISFIED (the gate still holds),
+ *  • routed through advanceDealStatus, so the CAS, history, and comms all apply,
+ *  • idempotent — a second call is a no-op,
+ *  • never throws: capturing the buyer's insurance proof must not fail because the
+ *    follow-on advance did. Safe to call after any insurance write and on any later
+ *    read, so a deal that reached a satisfied state by another path still converges.
+ *
+ * Returns true only when THIS call performed the advance.
+ */
+export async function advanceOnInsuranceSatisfied(
+  dealId: string,
+  opts: { actorId?: string; actorRole?: string } = {},
+): Promise<boolean> {
+  try {
+    const deal = await prisma.deal.findUnique({
+      where: { id: dealId },
+      select: { status: true, insuranceStatus: true },
+    });
+    if (!deal) return false;
+    if (deal.status !== DealStatus.INSURANCE_PENDING) return false;
+    if (!INSURANCE_SATISFIED.includes(deal.insuranceStatus)) return false;
+
+    await advanceDealStatus(dealId, DealStatus.CONTRACT_PENDING, {
+      actorId: opts.actorId,
+      actorRole: opts.actorRole ?? "SYSTEM",
+      reason: `Insurance proof on file (${deal.insuranceStatus})`,
+    });
+    return true;
+  } catch (err) {
+    logger.error("[deal] insurance-gate advance failed (non-fatal):", err);
+    return false;
   }
 }
 

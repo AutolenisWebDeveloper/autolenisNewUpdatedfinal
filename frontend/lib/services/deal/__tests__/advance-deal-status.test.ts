@@ -24,6 +24,8 @@ interface Ctrl {
   // (simulating another writer winning the race) and mutates the row to
   // `raceTo` before the caller re-reads.
   raceTo: DealStatus | null;
+  /** When true, deal.findUnique throws — simulates a DB failure mid-drive. */
+  throwOnFind: boolean;
   updateManyCalls: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>;
   updateCalls: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>;
   historyCreates: Array<Record<string, unknown>>;
@@ -36,7 +38,10 @@ mock.module("@/lib/prisma", {
   namedExports: {
     prisma: {
       deal: {
-        findUnique: async () => ({ ...ctrl.deal }),
+        findUnique: async () => {
+          if (ctrl.throwOnFind) throw new Error("simulated DB failure");
+          return { ...ctrl.deal };
+        },
         update: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
           ctrl.updateCalls.push(args);
           Object.assign(ctrl.deal, args.data);
@@ -77,6 +82,7 @@ beforeEach(() => {
   ctrl = {
     deal: { id: "d1", status: "PICKUP_SCHEDULED", buyerId: "b1", insuranceStatus: InsuranceStatus.VERIFIED },
     raceTo: null,
+    throwOnFind: false,
     updateManyCalls: [],
     updateCalls: [],
     historyCreates: [],
@@ -140,4 +146,67 @@ test("insurance hard-gate blocks COMPLETED without proof on file", async () => {
   const { advanceDealStatus, InsuranceRequiredError } = await load();
   await assert.rejects(() => advanceDealStatus("d1", "COMPLETED"), (e: unknown) => e instanceof InsuranceRequiredError);
   assert.deepEqual(ctrl.completionEmits, []);
+});
+
+// ── Insurance-gate driver: INSURANCE_PENDING → CONTRACT_PENDING ──────────────
+// This edge previously had NO automatic driver: the only buyer-facing insurance
+// path (upload-proof) wrote insuranceStatus directly and never advanced, so every
+// self-service deal stranded at INSURANCE_PENDING until an admin intervened.
+
+test("proof on file advances INSURANCE_PENDING → CONTRACT_PENDING through the guarded seam", async () => {
+  ctrl.deal.status = "INSURANCE_PENDING";
+  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  const { advanceOnInsuranceSatisfied } = await load();
+  const advanced = await advanceOnInsuranceSatisfied("d1");
+  assert.equal(advanced, true);
+  assert.equal(ctrl.deal.status, "CONTRACT_PENDING");
+  // Went through advanceDealStatus: CAS + history + comms, not a raw write.
+  assert.equal(ctrl.updateManyCalls[0]?.where.status, "INSURANCE_PENDING");
+  assert.equal(ctrl.historyCreates.length, 1);
+  assert.deepEqual(ctrl.commsCalls, [{ dealId: "d1", status: "CONTRACT_PENDING" }]);
+});
+
+for (const satisfied of [InsuranceStatus.VERIFIED, InsuranceStatus.POLICY_BOUND, InsuranceStatus.EXTERNAL_UPLOADED]) {
+  test(`every INSURANCE_SATISFIED value releases the gate (${satisfied})`, async () => {
+    ctrl.deal.status = "INSURANCE_PENDING";
+    ctrl.deal.insuranceStatus = satisfied;
+    const { advanceOnInsuranceSatisfied } = await load();
+    assert.equal(await advanceOnInsuranceSatisfied("d1"), true);
+    assert.equal(ctrl.deal.status, "CONTRACT_PENDING");
+  });
+}
+
+test("unsatisfied insurance does NOT advance — the gate holds", async () => {
+  ctrl.deal.status = "INSURANCE_PENDING";
+  ctrl.deal.insuranceStatus = InsuranceStatus.QUOTE_REQUESTED;
+  const { advanceOnInsuranceSatisfied } = await load();
+  assert.equal(await advanceOnInsuranceSatisfied("d1"), false);
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING");
+  assert.equal(ctrl.updateManyCalls.length, 0, "no swap attempted while proof is missing");
+});
+
+test("no-op when the deal is not at INSURANCE_PENDING (never skips or rewinds a stage)", async () => {
+  ctrl.deal.status = "FEE_PAID";
+  ctrl.deal.insuranceStatus = InsuranceStatus.VERIFIED;
+  const { advanceOnInsuranceSatisfied } = await load();
+  assert.equal(await advanceOnInsuranceSatisfied("d1"), false);
+  assert.equal(ctrl.deal.status, "FEE_PAID");
+  assert.equal(ctrl.updateManyCalls.length, 0);
+});
+
+test("idempotent — re-driving an already-advanced deal does nothing", async () => {
+  ctrl.deal.status = "INSURANCE_PENDING";
+  ctrl.deal.insuranceStatus = InsuranceStatus.EXTERNAL_UPLOADED;
+  const { advanceOnInsuranceSatisfied } = await load();
+  assert.equal(await advanceOnInsuranceSatisfied("d1"), true);
+  const swapsAfterFirst = ctrl.updateManyCalls.length;
+  assert.equal(await advanceOnInsuranceSatisfied("d1"), false, "second call is a no-op");
+  assert.equal(ctrl.updateManyCalls.length, swapsAfterFirst, "no second swap");
+  assert.equal(ctrl.historyCreates.length, 1, "exactly one history row");
+});
+
+test("never throws — a DB failure while driving the gate is swallowed", async () => {
+  ctrl.throwOnFind = true;
+  const { advanceOnInsuranceSatisfied } = await load();
+  assert.equal(await advanceOnInsuranceSatisfied("d1"), false, "returns false instead of throwing");
 });
