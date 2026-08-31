@@ -5,6 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizePhone } from '@/lib/utils/phone';
 import { SuppressionService } from '@/lib/services/suppression.service';
 import { isRecipientInQuietHours } from '@/lib/crm/recipient-timezone';
+import { evaluateConsentBasis, crmContactConsentBasis } from './consent-basis';
 import type { Contact } from '@/lib/types/crm';
 
 // ---------------------------------------------------------------------------
@@ -72,8 +73,20 @@ export async function sendCrmSms(params: {
   const phone = normalizePhone(contact.phone ?? '');
   if (!phone) return { status: 'invalid_phone' };
 
-  // TCPA hard gate — explicit consent + not globally opted out.
-  if (!contact.consent_sms || contact.do_not_contact) {
+  // TCPA hard gate, now expressed as an explicit consent BASIS so this path and
+  // the dealer path evaluate the same rule rather than two lookalike checks.
+  //
+  // Behaviour here is unchanged: consent_sms with no global opt-out maps to
+  // EXPRESS (permitted before, permitted now); anything else maps to NONE
+  // (refused before, refused now). screenPhone is false because CRM contacts
+  // carry no vendor phone provenance — no dnc_status, no phone_type — and
+  // screening on absent data would block every CRM send. The consent gate
+  // itself is not optional and still applies.
+  const consent = evaluateConsentBasis(
+    { basis: crmContactConsentBasis(contact), dncStatus: null, phoneType: null },
+    { screenPhone: false },
+  );
+  if (!consent.allowed) {
     return { status: 'no_consent', reason: 'TCPA_CONSENT_REQUIRED' };
   }
 
