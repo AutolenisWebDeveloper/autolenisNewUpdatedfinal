@@ -146,11 +146,24 @@ export const CONTENT_AUTOPILOT_FLAG = "CONTENT_AUTOPILOT_ENABLED";
  *
  * Merging and deploying the autopilot must NOT start publishing to the public
  * site. The owner turns it on by setting CONTENT_AUTOPILOT_ENABLED=true in the
- * Vercel project, and off by unsetting it — no deploy either way, because the
- * value is read at CALL time, never at module load. An unset, empty, "1" or
- * "TRUE" value all read as disabled, so the gate can only be opened
- * deliberately. Follows the established CRM_INAPP_ENGINE_ENABLED /
- * ESIGN_EXECUTED_ARTIFACT_ENABLED cutover-flag pattern.
+ * Vercel project. An unset, empty, "1" or "TRUE" value all read as disabled, so
+ * the gate can only be opened deliberately. Follows the established
+ * CRM_INAPP_ENGINE_ENABLED / ESIGN_EXECUTED_ARTIFACT_ENABLED cutover-flag pattern.
+ *
+ * ⚠ THIS IS NOT AN INSTANT OFF SWITCH. The value is read at CALL time, so nothing
+ * is cached at module load — but Vercel applies an environment-variable change
+ * only to NEW deployments, never to the one already running. Setting or unsetting
+ * this in the dashboard therefore changes nothing until production is redeployed,
+ * in BOTH directions.
+ *
+ * To stop an in-flight autopilot WITHOUT a deploy:
+ *   1. pause the /api/cron/content-generation-seed cron in the Vercel dashboard —
+ *      that stops new work being enqueued immediately; then
+ *   2. cancel the outstanding job (POST /api/admin/content/jobs/[id]
+ *      { action: "cancel" }), because items already QUEUED are still drained by
+ *      content-generation-drain every 2 minutes and can still publish. Pausing
+ *      that cron too also works, at the cost of stalling admin-triggered work.
+ * Unsetting the variable is the DURABLE off, and it needs a production redeploy.
  */
 export function isContentAutopilotEnabled(): boolean {
   return process.env[CONTENT_AUTOPILOT_FLAG] === "true";
