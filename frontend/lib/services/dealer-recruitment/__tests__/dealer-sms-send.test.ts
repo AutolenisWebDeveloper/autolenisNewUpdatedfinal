@@ -124,9 +124,21 @@ test("this module contains no consent logic of its own", () => {
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .split("\n").map((l) => l.split("//")[0]).join("\n");
   assert.ok(src.includes("evaluateConsentBasis"), "must delegate to the shared gate");
-  for (const forbidden of ["consent_sms", "EXPRESS_WRITTEN", "EXISTING_BUSINESS_RELATIONSHIP", "not_found"]) {
-    assert.ok(!src.includes(forbidden), `must not re-implement consent: found ${forbidden}`);
+
+  // No affirmative-basis literals: deciding which bases permit contact is the
+  // shared gate's job, and a second list here is what would drift.
+  for (const literal of ["EXPRESS_WRITTEN", "EXISTING_BUSINESS_RELATIONSHIP", "consent_sms"]) {
+    assert.ok(!src.includes(literal), `must not re-implement consent: found ${literal}`);
   }
+
+  // No local re-implementation of the DNC or phone-type RULES. Checked as
+  // comparisons rather than as bare strings: "not_found" is also this service's
+  // own prospect-missing reason, and forbidding the substring would fail a
+  // correct file for an unrelated word.
+  assert.doesNotMatch(src, /dncStatus\s*[!=]==?\s*["']/, "must not compare dncStatus to a literal");
+  assert.doesNotMatch(src, /phoneType\s*[!=]==?\s*["']/, "must not compare phoneType to a literal");
+  assert.doesNotMatch(src, /DNC_CLEAR_STATUS\s*=/, "must not declare its own DNC constant");
+  assert.doesNotMatch(src, /ALLOWED_PHONE_TYPES\s*=/, "must not declare its own phone-type allow-list");
 });
 
 test("DNC and phone-type blocks come through the shared gate too", async () => {
