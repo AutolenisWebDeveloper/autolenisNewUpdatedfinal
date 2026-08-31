@@ -111,6 +111,44 @@ function parseArticle(raw: string): GeneratedAmipsArticle {
   };
 }
 
+/** A page already covering the same (make, model, metro) under a different slug. */
+export interface EntityConflict {
+  slug: string;
+  lifecycleStatus: string;
+}
+
+/**
+ * Entity-uniqueness check: is another page already covering this exact
+ * (make, model, metro)?
+ *
+ * WHY THIS EXISTS
+ * The generator's only duplicate defences were (a) the `slug` unique constraint,
+ * which catches an identical keywordTarget, and (b) Quality Gate 2, which
+ * compares BODY TEXT by Jaccard similarity. Neither is an ENTITY check. Two
+ * queue items targeting the same vehicle+metro under differently-phrased
+ * keywords produce two different slugs, and Gate 2 passes them both whenever the
+ * generated prose happens to differ by more than 20%.
+ *
+ * The result is two live pages competing for one entity. The lifecycle manager
+ * then correctly identifies them as a duplicate cluster and demotes the later
+ * one to UNDER_REVIEW — which, before this batch, meant a 404. The demotion was
+ * right; emitting the second page was the defect.
+ *
+ * Scoped to pages that carry a metro, matching the lifecycle manager's cluster
+ * key (`make|model|metro`, skipped when any part is null). Tier A/B pages have
+ * no metro and legitimately share a (make, model) across angles, so they are
+ * never in conflict.
+ *
+ * Pure and synchronous so it can be tested without a database or a model call.
+ */
+export function findEntityConflict(
+  candidates: readonly EntityConflict[],
+  self: { slug: string; metro: string | null | undefined },
+): EntityConflict | null {
+  if (!self.metro) return null; // no metro => no cluster => no conflict
+  return candidates.find((c) => c.slug !== self.slug) ?? null;
+}
+
 /**
  * Generate one AMIPS page from a content-queue item. Persists an AmipsPage on
  * PUBLISHED/REVIEW_NEEDED and updates the queue item's status throughout.
@@ -133,6 +171,42 @@ export async function generateAmipsPage(
       `[amips-generator] tier=${queueItem.contentTier} status=pending_enrichment keyword="${queueItem.keywordTarget}"`,
     );
     return { status: "pending_enrichment" };
+  }
+
+  // 1a — Entity uniqueness, BEFORE the model call.
+  //
+  // A second page for the same (make, model, metro) is a duplicate however
+  // differently it is written, so this is an entity check, not a text check —
+  // Quality Gate 2 compares bodies and passes two same-entity pages whenever the
+  // prose differs by more than 20%. Running it here also avoids paying for a
+  // generation whose output we would refuse to persist.
+  //
+  // The query doubles as Gate 2's comparison corpus further down.
+  const existing = await prisma.amipsPage.findMany({
+    where: {
+      make: data.vehicle.make,
+      model: data.vehicle.model,
+      metro: data.market?.metro ?? null,
+    },
+    select: { body: true, slug: true, lifecycleStatus: true },
+    take: 25,
+  });
+
+  const slug = slugify(data.keywordTarget);
+  const conflict = findEntityConflict(existing, { slug, metro: data.market?.metro });
+  if (conflict) {
+    await prisma.contentQueue.update({
+      where: { id: queueItem.id },
+      data: {
+        status: "failed",
+        attempts: { increment: 1 },
+        failureReason: `Duplicate entity: ${conflict.slug} already covers ${data.vehicle.make} ${data.vehicle.model} in ${data.market?.metro}`,
+      },
+    });
+    logger.info(
+      `[amips-generator] tier=${data.tier} status=failed reason=duplicate_entity existing="${conflict.slug}" keyword="${data.keywordTarget}"`,
+    );
+    return { status: "failed", reason: "duplicate_entity" };
   }
 
   // 2 — Narrate the data object.
@@ -160,17 +234,8 @@ export async function generateAmipsPage(
     return { status: "failed", reason: "parse_error" };
   }
 
-  // 4 — Quality gates. Uniqueness compares against existing pages for the same
-  // make + model + metro.
-  const existing = await prisma.amipsPage.findMany({
-    where: {
-      make: data.vehicle.make,
-      model: data.vehicle.model,
-      metro: data.market?.metro ?? null,
-    },
-    select: { body: true },
-    take: 25,
-  });
+  // 4 — Quality gates. Gate 2 compares bodies against the same-entity corpus
+  // fetched above.
   const gate = runQualityGates(
     article,
     data,
@@ -196,7 +261,6 @@ export async function generateAmipsPage(
   // 6 — Persist the page. PUBLISHED → ACTIVE & live; REVIEW_NEEDED → held for
   // human review (the public route only serves ACTIVE pages).
   const published = gate.status === "PUBLISHED";
-  const slug = slugify(data.keywordTarget);
   const now = new Date();
   const bodyHtml = markdownToHtml(gate.cleanedBody);
 
