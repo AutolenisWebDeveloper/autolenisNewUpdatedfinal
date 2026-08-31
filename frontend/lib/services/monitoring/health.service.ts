@@ -10,8 +10,9 @@ import {
   overdueCrons,
   reportOverdueCrons,
   detectFailedCrons,
+  unsuccessfulRunSummary,
   reportFailedCrons,
-  FAILED_CRON_STREAK_THRESHOLD,
+  failedStreakThresholdFor,
 } from "./dead-cron.service";
 import type { CronLiveness } from "./cron-schedule";
 
@@ -250,16 +251,20 @@ export async function runHealthCheckCycle(
     logger.warn("[health] dead-cron detection failed (best-effort):", e);
   }
 
-  // Failing-cron detection: a cron that FIRES but throws (a reconciler returning
-  // HTTP 500 every tick) is invisible to dead-cron detection. Surface a persistent
-  // FAILED streak as a P1 alert so the reconciler's only human-escalation channel
-  // actually reaches an operator. Best-effort and independently guarded.
+  // Failing-cron detection: a cron that FIRES but does not succeed is invisible to
+  // dead-cron detection, which only asks whether a run started. Two shapes of that
+  // — a reconciler returning HTTP 500 every tick, and a run killed mid-flight that
+  // leaves an orphaned RUNNING row behind — surface here as a P1 alert, so the
+  // handler's only human-escalation channel actually reaches an operator.
+  // Best-effort and independently guarded.
   try {
     const failing = await detectFailedCrons(now);
     for (const c of failing) {
-      if (c.consecutiveFailures >= FAILED_CRON_STREAK_THRESHOLD) {
+      // Per-cron threshold: a daily or weekly job alerts on its FIRST unsuccessful
+      // run, because its second run is a cadence away. See failedStreakThresholdFor.
+      if (c.consecutiveFailures >= failedStreakThresholdFor(c.cronName)) {
         report.alerts.push(
-          `P1: cron '${c.cronName}' failing — ${c.consecutiveFailures} consecutive failed run(s)`,
+          `P1: cron '${c.cronName}' failing — ${unsuccessfulRunSummary(c)}`,
         );
       }
     }

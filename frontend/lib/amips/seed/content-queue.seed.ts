@@ -297,7 +297,25 @@ export function buildQueueDrafts(): QueueDraft[] {
 
   // Highest priority first.
   drafts.sort((a, b) => b.priorityScore - a.priorityScore);
-  return drafts;
+
+  // Collapse drafts that resolve to the same keywordTarget, keeping the
+  // highest-priority one (the sort above puts it first).
+  //
+  // VEHICLE_SEEDS carries one row per TRIM, so a make+model with two trims
+  // (today: Ford F-150 XL and XLT) yields two seeds. Neither the Tier B keyword
+  // (`${year} ${make} ${model} ${angle}`) nor the Tier C keyword
+  // (`${make} ${model} deals in ${metro}`) includes the trim, so both seeds
+  // produce an identical keyword. seedContentQueue() filters against keywords
+  // ALREADY IN THE DATABASE but never against the batch it is inserting, and
+  // content_queue has no unique constraint on keyword_target — so createMany
+  // inserted both, and the generator then ran twice for the same slug.
+  const seen = new Set<string>();
+  const deduped = drafts.filter((d) => {
+    if (seen.has(d.keywordTarget)) return false;
+    seen.add(d.keywordTarget);
+    return true;
+  });
+  return deduped;
 }
 
 /**

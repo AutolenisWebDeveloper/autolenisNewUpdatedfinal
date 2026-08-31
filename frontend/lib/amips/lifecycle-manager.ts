@@ -19,11 +19,44 @@
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/prisma";
 import { slugFromUrl } from "@/lib/amips/pipelines/search-intelligence.pipeline";
+import {
+  requiresMarketData,
+  isServableLifecycleStatus,
+  SERVABLE_LIFECYCLE_STATUSES,
+  LIFECYCLE_UNDER_REVIEW,
+} from "@/lib/amips/tiers";
+
+/**
+ * One recorded lifecycle transition. Persisted inside the cron result JSON so a
+ * demotion can be dated and attributed after the fact.
+ *
+ * The absence of this record cost a full investigation round trip: 31 pages were
+ * found demoted with no way to determine which run did it or why, because the
+ * three status writes below left no trace and cron_job_logs had aged out.
+ */
+export interface LifecycleTransition {
+  slug: string;
+  from: string;
+  to: string;
+  reason: string;
+}
+
+/** Cap on transitions embedded in the cron result, to bound the JSON payload. */
+export const MAX_LOGGED_TRANSITIONS = 500;
 
 export interface LifecycleResult {
   flaggedForRefresh: number;
   flaggedForReview: number;
   retired: number;
+  /** Every transition this run applied, capped at MAX_LOGGED_TRANSITIONS. */
+  transitions: LifecycleTransition[];
+  /** True when more transitions occurred than are listed above. */
+  transitionsTruncated: boolean;
+  /**
+   * Whether any page in the corpus has a nonzero leadsGenerated. When false the
+   * conversion branch is skipped entirely — see the comment at its call site.
+   */
+  leadsTrackingActive: boolean;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -35,19 +68,46 @@ const LOW_CONVERSION_DAYS = 90;
 const ZERO_TRAFFIC_DAYS = 365;
 const LOW_CONVERSION_THRESHOLD = 0.001; // 0.1%
 
+/**
+ * Should this page be demoted for sustained low conversion?
+ *
+ * `leadsTrackingActive` is the guard that separates "measured zero" from "never
+ * measured". Nothing writes AmipsPage.leadsGenerated today, so without it the
+ * ratio is 0/clicks for every page that has ever been clicked — which reads as
+ * catastrophic conversion and demotes precisely the pages that earn traffic.
+ *
+ * Pure and synchronous so the decision can be tested without a database.
+ */
+export function shouldFlagLowConversion(input: {
+  leadsTrackingActive: boolean;
+  clicks: number;
+  leadsGenerated: number;
+  pubAgeDays: number | null;
+}): boolean {
+  const { leadsTrackingActive, clicks, leadsGenerated, pubAgeDays } = input;
+  if (!leadsTrackingActive) return false; // signal unavailable, not zero
+  if (clicks <= 0) return false;
+  if (pubAgeDays === null || pubAgeDays < LOW_CONVERSION_DAYS) return false;
+  return leadsGenerated / clicks < LOW_CONVERSION_THRESHOLD;
+}
+
 function ageDays(from: Date | null | undefined, now: number): number | null {
   if (!from) return null;
   return (now - new Date(from).getTime()) / DAY_MS;
 }
 
+// Staleness applies to the tiers that carry market data. This is the SAME
+// authoritative set Quality Gate 5 uses (lib/amips/tiers.ts) — the two must
+// never diverge, or a tier gets certified fresh at generation and de-indexed as
+// stale a week later.
 function isTierCPlus(tier: string): boolean {
-  return tier === "C" || tier === "D" || tier === "E" || tier === "F";
+  return requiresMarketData(tier);
 }
 
 // A page's data is stale if any applicable source has aged past its threshold.
 // A missing date is only treated as failure when the tier requires that source;
 // otherwise (e.g. a Tier A page with no market date) it is simply not applicable.
-function hasStaleData(
+export function hasStaleData(
   page: {
     contentTier: string;
     vehicleDataAsOf: Date | null;
@@ -121,8 +181,14 @@ export async function runLifecycleReview(): Promise<LifecycleResult> {
   logger.info("[amips-p3-lifecycle] starting lifecycle review");
   const now = Date.now();
 
+  // Servable statuses are loaded so a live REFRESH_REQUIRED page counts toward
+  // duplicate clustering (it is public since FIX 3, so it competes for the
+  // entity), plus UNDER_REVIEW for the retirement branch. Pages in a servable
+  // state other than ACTIVE fall through both branches below without a write.
   const pages = await prisma.amipsPage.findMany({
-    where: { lifecycleStatus: { in: ["ACTIVE", "UNDER_REVIEW"] } },
+    where: {
+      lifecycleStatus: { in: [...SERVABLE_LIFECYCLE_STATUSES, LIFECYCLE_UNDER_REVIEW] },
+    },
     select: {
       id: true,
       slug: true,
@@ -143,12 +209,20 @@ export async function runLifecycleReview(): Promise<LifecycleResult> {
 
   const { imp180, traffic365 } = await loadTraffic(now);
 
-  // Duplicate-cluster detection over the ACTIVE set: pages sharing the same
+  // Duplicate-cluster detection over the SERVABLE set: pages sharing the same
   // make+model+metro. The strongest page (most impressions, then earliest
   // published) is canonical; the rest are flagged for review.
+  //
+  // Servable, not ACTIVE: a REFRESH_REQUIRED page is public, so it occupies its
+  // entity and must be able to win canonical. Clustering only ACTIVE pages would
+  // leave an ACTIVE duplicate live alongside it, undetected.
   const clusters = new Map<string, typeof pages>();
   for (const p of pages) {
-    if (p.lifecycleStatus !== "ACTIVE") continue;
+    // Cluster on what is PUBLIC, not on what is ACTIVE. Since FIX 3 a
+    // REFRESH_REQUIRED page is served and listed, so it occupies the entity and
+    // must be able to win canonical — otherwise an ACTIVE duplicate would be
+    // left live alongside it, undetected.
+    if (!isServableLifecycleStatus(p.lifecycleStatus)) continue;
     if (!p.make || !p.model || !p.metro) continue;
     const key = `${p.make}|${p.model}|${p.metro}`.toLowerCase();
     const list = clusters.get(key) ?? [];
@@ -170,6 +244,28 @@ export async function runLifecycleReview(): Promise<LifecycleResult> {
   let flaggedForRefresh = 0;
   let flaggedForReview = 0;
   let retired = 0;
+  const transitions: LifecycleTransition[] = [];
+  let transitionsTruncated = false;
+
+  const record = (slug: string, from: string, to: string, reason: string): void => {
+    if (transitions.length < MAX_LOGGED_TRANSITIONS) {
+      transitions.push({ slug, from, to, reason });
+    } else {
+      transitionsTruncated = true;
+    }
+  };
+
+  // Nothing writes AmipsPage.leadsGenerated today, so a 0/clicks ratio measures
+  // the ABSENCE OF INSTRUMENTATION, not the absence of conversions. Treating the
+  // two as the same thing would de-index every page that earns a click the
+  // moment a click is ever recorded. Until at least one page reports a lead, the
+  // conversion signal is "unknown" and the branch below is skipped.
+  const leadsTrackingActive = pages.some((p) => p.leadsGenerated > 0);
+  if (!leadsTrackingActive) {
+    logger.info(
+      "[amips-p3-lifecycle] no page reports leadsGenerated > 0 — conversion review skipped (signal unavailable, not zero)",
+    );
+  }
 
   for (const p of pages) {
     const pubAge = ageDays(p.publishedAt, now);
@@ -188,17 +284,23 @@ export async function runLifecycleReview(): Promise<LifecycleResult> {
           data: { lifecycleStatus: "REFRESH_REQUIRED" },
         });
         flaggedForRefresh++;
+        record(
+          p.slug,
+          "ACTIVE",
+          "REFRESH_REQUIRED",
+          stale ? "stale_data" : "no_impressions_180d",
+        );
         continue;
       }
 
       // 2) Review — duplicate cluster or sustained low conversion.
       const duplicate = duplicateIds.has(p.id);
-      const conversion = p.clicks > 0 ? p.leadsGenerated / p.clicks : null;
-      const lowConversion =
-        pubAge !== null &&
-        pubAge >= LOW_CONVERSION_DAYS &&
-        conversion !== null &&
-        conversion < LOW_CONVERSION_THRESHOLD;
+      const lowConversion = shouldFlagLowConversion({
+        leadsTrackingActive,
+        clicks: p.clicks,
+        leadsGenerated: p.leadsGenerated,
+        pubAgeDays: pubAge,
+      });
 
       if (duplicate || lowConversion) {
         await prisma.amipsPage.update({
@@ -206,11 +308,27 @@ export async function runLifecycleReview(): Promise<LifecycleResult> {
           data: { lifecycleStatus: "UNDER_REVIEW" },
         });
         flaggedForReview++;
+        record(
+          p.slug,
+          "ACTIVE",
+          "UNDER_REVIEW",
+          duplicate ? "duplicate_cluster" : "low_conversion_90d",
+        );
       }
       continue;
     }
 
     // UNDER_REVIEW → RETIRED: no impressions AND no clicks for 365 days.
+    //
+    // KNOWN GAP (not in this batch's authorized scope): traffic365 is built from
+    // search_intelligence, which is empty while the Search Console sync returns
+    // synced: 0, and p.impressions/p.clicks are only written by that same sync.
+    // Every input therefore reads zero for every page regardless of real traffic,
+    // so this branch cannot currently distinguish "no traffic" from "no
+    // measurement". It is unreachable until a page is 365 days old (earliest
+    // cohort: 2027-06-08) and only applies to pages already withheld from the
+    // index, so no page is at risk today — but it needs the same
+    // measurement-available guard as shouldFlagLowConversion() before then.
     if (p.lifecycleStatus === "UNDER_REVIEW") {
       const win = traffic365.get(p.slug);
       const noTraffic =
@@ -227,12 +345,23 @@ export async function runLifecycleReview(): Promise<LifecycleResult> {
           data: { lifecycleStatus: "RETIRED" },
         });
         retired++;
+        record(p.slug, "UNDER_REVIEW", "RETIRED", "zero_traffic_365d");
       }
     }
   }
 
   logger.info(
-    `[amips-p3-lifecycle] done — refresh ${flaggedForRefresh}, review ${flaggedForReview}, retired ${retired}`,
+    `[amips-p3-lifecycle] done — refresh ${flaggedForRefresh}, review ${flaggedForReview}, retired ${retired}, leadsTracking=${leadsTrackingActive}`,
   );
-  return { flaggedForRefresh, flaggedForReview, retired };
+  // `transitions` rides in the cron result, which withCronRun persists to
+  // cron_job_logs.result (Json). No new table: the existing payload carries the
+  // audit trail, so every demotion is dateable and attributable from then on.
+  return {
+    flaggedForRefresh,
+    flaggedForReview,
+    retired,
+    transitions,
+    transitionsTruncated,
+    leadsTrackingActive,
+  };
 }
