@@ -106,7 +106,11 @@ const prismaMock = {
     create: async (a: { data: Record<string, unknown> }) => { cap.compliance.push(a.data); return {}; },
     count: async () => 0,
   },
-  buyer: { findUnique: async () => null }, // skip CRM sync block
+  buyer: {
+    findUnique: async () => null, // skip CRM sync block
+    // Fix 1 — the orchestrator backfills city/state/zip via conditional updateMany.
+    updateMany: async () => ({ count: 1 }),
+  },
   $transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
     const { prisma } = await import("@/lib/prisma");
     return fn(prisma);

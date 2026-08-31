@@ -147,6 +147,70 @@ export async function ensureAuctionVehicleFromRequest(
   };
 }
 
+// Why a zero-invitation outcome happened. Distinguishing these matters: the
+// first is a buyer-data gap (fixable by backfilling location), the second is a
+// dealer-supply gap (fixable only by recruiting or widening coverage).
+type ZeroInviteCause = "BUYER_NOT_GEOCODABLE" | "NO_DEALER_IN_RANGE";
+
+const ZERO_INVITE_ACTION = "AUCTION_ZERO_INVITATIONS";
+
+/**
+ * Record — durably — that an auction produced zero invitations.
+ *
+ * A 0 return is a SUCCESSFUL result, so the callers' `.catch()` never fires and
+ * a paid deposit could reach a dead auction with no operator-visible signal.
+ * This writes to AdminAuditLog scoped to the auction, which
+ * `app/admin/auctions/[auctionId]/page.tsx` already queries
+ * (`entityType: "Auction"`, newest 30) and `AdminAuctionDetail` already renders
+ * as `action — reason · adminEmail`. No new table, query, or UI wiring.
+ *
+ * Deduped on CAUSE, not on the reason text. `deposit-activation.service`
+ * re-invites on every cron tick while an ACTIVE auction has zero invitations, so
+ * an undeduped write floods the 30-row window the admin view shows. Keying on
+ * the cause rather than the rendered reason matters: the reason embeds the
+ * radius and the active-dealer count, either of which can move between ticks
+ * (the coverage ladder escalates, a dealer is onboarded) and would otherwise
+ * defeat the dedup on a string mismatch. Only a genuine CAUSE transition —
+ * "buyer unplaceable" becoming "no dealer in range" after a location backfill —
+ * writes a second row, which is precisely the transition an operator needs to
+ * see.
+ *
+ * Never throws: this is a diagnostic record, not a precondition of invitation.
+ */
+async function recordZeroInvitations(
+  auctionId: string,
+  buyerId: string,
+  cause: ZeroInviteCause,
+  reason: string,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const latest = await prisma.adminAuditLog.findFirst({
+      where: { entityType: "Auction", entityId: auctionId, action: ZERO_INVITE_ACTION },
+      orderBy: { createdAt: "desc" },
+      select: { metadata: true },
+    });
+    const previousCause = (latest?.metadata as { cause?: string } | null)?.cause;
+    if (previousCause === cause) return;
+
+    await prisma.adminAuditLog.create({
+      data: {
+        // System-actor sentinel — the same one dealer-agreement and
+        // buyer-signing use for non-admin-originated audit rows.
+        adminId: "system",
+        adminEmail: "system@autolenis.com",
+        action: ZERO_INVITE_ACTION,
+        entityType: "Auction",
+        entityId: auctionId,
+        reason,
+        metadata: { cause, buyerId, ...metadata },
+      },
+    });
+  } catch (err) {
+    logger.error(`[dealer-invitation] failed to record zero-invitation for auction ${auctionId}:`, err);
+  }
+}
+
 export async function inviteDealersToAuction(auctionId: string, _buyerId: string): Promise<number> {
   // _buyerId is part of the public signature for callers; buyer is resolved via the auction relation below.
 
@@ -206,6 +270,14 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
         `(zip=${buyerZip ?? "none"}, city=${buyerCity ?? "none"}, state=${buyerState ?? "none"}) — ` +
         `no dealers invited (fail closed). Set GOOGLE_GEOCODING_API_KEY to widen geocoding coverage.`,
     );
+    await recordZeroInvitations(
+      auctionId,
+      buyerId,
+      "BUYER_NOT_GEOCODABLE",
+      `No dealers invited — the buyer's location is not geocodable ` +
+        `(zip=${buyerZip ?? "none"}, city=${buyerCity ?? "none"}, state=${buyerState ?? "none"}).`,
+      { zip: buyerZip, city: buyerCity, state: buyerState },
+    );
     return 0;
   }
 
@@ -253,6 +325,28 @@ export async function inviteDealersToAuction(auctionId: string, _buyerId: string
     .filter(s => s.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, MAX_INVITATIONS_PER_AUCTION);
+
+  // The buyer IS placeable but nobody qualified — a dealer-supply gap, not a
+  // buyer-data gap. Recorded under its own cause so backfilling a location does
+  // not look like it fixed an auction it did not.
+  if (topDealers.length === 0) {
+    await recordZeroInvitations(
+      auctionId,
+      buyerId,
+      "NO_DEALER_IN_RANGE",
+      `No dealers invited — 0 of ${dealers.length} active dealers were within ${radiusMiles} miles ` +
+        `and scored above zero.`,
+      {
+        activeDealersConsidered: dealers.length,
+        dealersInRadius: nearbyDealers.length,
+        radiusMiles,
+        buyerZip,
+        buyerCity,
+        buyerState,
+      },
+    );
+    return 0;
+  }
 
   // Create invitations
   const invitations = await Promise.all(

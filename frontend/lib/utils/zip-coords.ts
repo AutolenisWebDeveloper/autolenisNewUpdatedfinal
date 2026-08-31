@@ -43,8 +43,27 @@ export const ZIP_COORDS: Record<string, LatLng> = {
   "33602": { lat: 27.9506, lng: -82.4572 }, "33606": { lat: 27.9434, lng: -82.4734 }, // Tampa
   "32202": { lat: 30.3322, lng: -81.6557 }, // Jacksonville
   "33301": { lat: 26.1224, lng: -80.1373 }, // Fort Lauderdale
+  // Broward County — added for the buyer-location backfill
+  // (docs/plans/BUYER-LOCATION-BACKFILL.md). Same provenance rule as the
+  // Frisco entries below: each ZIP carries its CITY centroid, not a per-ZIP
+  // centroid, because this table feeds a 50-150 mile radius filter and a
+  // documented city-level approximation beats a per-ZIP figure that cannot
+  // be sourced. 33064 and 33069 are both Pompano Beach ZIPs; 33068 is
+  // Margate. Set GOOGLE_GEOCODING_API_KEY to stop curating this by hand.
+  "33064": { lat: 26.2379, lng: -80.1248 }, // Pompano Beach
+  "33069": { lat: 26.2379, lng: -80.1248 }, // Pompano Beach
+  "33068": { lat: 26.2445, lng: -80.2064 }, // Margate
   // Texas
   "75024": { lat: 33.0795, lng: -96.8088 }, // Plano
+  // Frisco — added for the buyer-location backfill
+  // (docs/plans/BUYER-LOCATION-BACKFILL.md). Both ZIPs carry the Frisco
+  // city centroid rather than a per-ZIP centroid: this table feeds a
+  // 50-150 mile radius filter, the two ZIPs are ~5mi apart, and a
+  // documented city-level approximation is preferable to a per-ZIP figure
+  // that cannot be sourced. Set GOOGLE_GEOCODING_API_KEY to stop curating
+  // this table by hand.
+  "75034": { lat: 33.1507, lng: -96.8236 }, // Frisco
+  "75035": { lat: 33.1507, lng: -96.8236 }, // Frisco
   "75201": { lat: 32.7831, lng: -96.8067 }, "75204": { lat: 32.8025, lng: -96.7856 },
   "75080": { lat: 32.9756, lng: -96.7325 }, // Richardson
   "76102": { lat: 32.7531, lng: -97.3284 }, // Fort Worth
@@ -167,12 +186,15 @@ export const CITY_COORDS: Record<string, LatLng> = {
   "fort worth,tx": { lat: 32.7555, lng: -97.3308 },
   "el paso,tx": { lat: 31.7619, lng: -106.4850 },
   "plano,tx": { lat: 33.0198, lng: -96.6989 },
+  "frisco,tx": { lat: 33.1507, lng: -96.8236 },
   "miami,fl": { lat: 25.7617, lng: -80.1918 },
   "orlando,fl": { lat: 28.5383, lng: -81.3792 },
   "tampa,fl": { lat: 27.9506, lng: -82.4572 },
   "jacksonville,fl": { lat: 30.3322, lng: -81.6557 },
   "tallahassee,fl": { lat: 30.4383, lng: -84.2807 },
   "fort lauderdale,fl": { lat: 26.1224, lng: -80.1373 },
+  "pompano beach,fl": { lat: 26.2379, lng: -80.1248 },
+  "margate,fl": { lat: 26.2445, lng: -80.2064 },
   "new york,ny": { lat: 40.7128, lng: -74.0060 },
   "buffalo,ny": { lat: 42.8864, lng: -78.8784 },
   "rochester,ny": { lat: 43.1566, lng: -77.6088 },

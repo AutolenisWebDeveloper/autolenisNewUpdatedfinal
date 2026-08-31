@@ -6,6 +6,7 @@ import { z } from "zod";
 import { requireBuyer } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { successResponse, errorResponse } from "@/lib/auth/api";
+import { normalizePhone } from "@/lib/utils/phone";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +63,10 @@ export async function PATCH(request: NextRequest) {
     data: {
       ...(d.firstName ? { firstName: d.firstName } : {}),
       ...(d.lastName ? { lastName: d.lastName } : {}),
-      ...(d.phone !== undefined ? { phone: d.phone || null } : {}),
+      // Stored in E.164 so an inbound Twilio number matches. normalizePhone
+      // returns "" for unparseable input — persist NULL rather than "", which
+      // would make every unparseable-phone buyer collide under an equality match.
+      ...(d.phone !== undefined ? { phone: normalizePhone(d.phone) || null } : {}),
       ...(d.address !== undefined ? { address: d.address || null } : {}),
       ...(d.city !== undefined ? { city: d.city || null } : {}),
       ...(d.state !== undefined ? { state: d.state ? d.state.toUpperCase() : null } : {}),
