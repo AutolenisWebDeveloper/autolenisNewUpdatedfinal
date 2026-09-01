@@ -58,7 +58,11 @@ export type LifecycleWorkloadInput =
     };
 
 interface WorkloadPlan {
-  flag: string;
+  /** The cutover flag for this workload, or `null` when the internal plane is the
+   *  workload's DEFAULT and no flag is consulted at all. `null` exists because a
+   *  workload whose QStash target has been removed must not be able to fall back
+   *  to it — not on a missing flag row, and not on a flag-read error. */
+  flag: string | null;
   sequence: LifecycleSequence;
   /** null → the workload cannot use the internal path (no entity to key on);
    *  it stays on QStash regardless of the flag. */
@@ -80,14 +84,23 @@ function buildPlan(input: LifecycleWorkloadInput): WorkloadPlan {
   switch (input.workload) {
     case "deposit_reminder":
       return {
-        flag: FLAGS.LIFECYCLE_INTERNAL_DEPOSIT_REMINDER,
+        // INTERNAL BY DEFAULT (no flag). QStash has been removed from the stack,
+        // so the flag-gated fallback would enqueue into a service that no longer
+        // exists: dispatch throws, the error is swallowed into a dead-letter row,
+        // and the buyer is never reminded. Delivery must not hinge on a DB row
+        // nobody set — a missing, reset or unreadable flag cannot kill the circle.
+        flag: null,
         sequence: "deposit_reminder_1",
         entityId: input.buyerId,
         baseKey: `deposit-reminder:${input.buyerId}`,
         firstName: input.firstName,
         email: input.email,
         phone: input.phone ?? null,
-        initialDelaySeconds: 86400, // 24h — matches both deposit producers
+        // +1h — the internal chain's documented first-touch grace (never chase a
+        // buyer who may still be completing checkout); each touch then chains the
+        // next itself for +6h/+24h/+72h. This was 86400 to mirror the QStash job's
+        // own schedule, which would have shifted the whole chain by a day.
+        initialDelaySeconds: 3600,
         qstashPath: "/api/jobs/deposit-reminder",
         qstashBody: { buyerId: input.buyerId, firstName: input.firstName, email: input.email, touchNumber: 1 },
       };
@@ -208,7 +221,10 @@ async function internalEnabled(flag: string): Promise<boolean> {
 export async function scheduleLifecycleWorkload(input: LifecycleWorkloadInput): Promise<void> {
   try {
     const plan = buildPlan(input);
-    const useInternal = plan.entityId !== null && (await internalEnabled(plan.flag));
+    // `flag: null` marks a workload the internal plane owns outright — it is used
+    // without consulting (or being able to fail over from) a feature flag.
+    const useInternal =
+      plan.entityId !== null && (plan.flag === null || (await internalEnabled(plan.flag)));
 
     if (useInternal) {
       const { enqueueLifecycleTouch } = await import("@/lib/services/crm/lifecycle-touch-drain.service");

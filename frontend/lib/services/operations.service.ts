@@ -523,15 +523,16 @@ export class OperationsService {
       try {
         const payload = (row.payload ?? {}) as Record<string, unknown>;
         if (row.event_name.startsWith('qstash:')) {
-          // Re-publish the original QStash job. Payload carries { path, body, ... }.
-          const { dispatch } = await import('@/lib/qstash/dispatch');
-          await dispatch({
-            path: String(payload.path ?? ''),
-            body: (payload.body ?? {}) as Record<string, unknown>,
-          });
-        } else {
-          await reemitDeadLetterJob(row.event_name, payload);
+          // QStash has been REMOVED from the stack, so these rows have no owner.
+          // Re-publishing them was not merely useless, it was an unbounded loop:
+          // dispatch() swallows its own failure and writes a FRESH dead-letter row
+          // (auto_retry_count 0) while the drainer deleted the old one and counted
+          // a success — so maxAutoRetries never applied and every abandoned deposit
+          // left a row churning on each pass. Terminalize instead: the row is kept
+          // for operator visibility, pinned out of future scans, never dispatched.
+          throw new UnroutableDeadLetterError(row.event_name);
         }
+        await reemitDeadLetterJob(row.event_name, payload);
         // Success — remove the row.
         await this.supabase.from('jobs_dead_letter').delete().eq('id', row.id);
         reemitted += 1;
