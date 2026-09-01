@@ -109,8 +109,14 @@ export async function advanceDealStatus(
   if (!deal) throw new Error("Deal not found");
 
   // Idempotent no-op when already in the target state (still merge extra data).
+  // The arrival hooks below STILL run: `data` can carry the very fact they key on
+  // (mark-paid writes feePaidAt on a deal an admin already parked at FEE_PAID).
+  // Returning early here wrote the fact and never settled the ladder, stranding the
+  // deal. Both hooks are themselves guarded and idempotent, so re-running them on a
+  // no-op is free.
   if (deal.status === newStatus) {
     if (opts.data) await prisma.deal.update({ where: { id: dealId }, data: opts.data });
+    await runArrivalHooks(dealId, newStatus, opts);
     return false;
   }
 
@@ -143,9 +149,17 @@ export async function advanceDealStatus(
     data: { status: newStatus, ...(opts.data ?? {}) },
   });
   if (swap.count === 0) {
-    // Another writer moved the deal between our read and our write. Re-resolve
-    // against the fresh state: if it already reached the target this collapses to
-    // the idempotent no-op at the top; otherwise the guard re-checks legality.
+    // Another writer moved the deal between our read and our write. The winner's
+    // arrival hooks can carry it SEVERAL hops (fee ladder → insurance gate), so the
+    // target may no longer be reachable from where the deal now sits. That is not an
+    // error — the work we wanted done was done by someone else — so report "did not
+    // move" rather than throwing a DealTransitionError that would surface as a 500
+    // on, say, a buyer double-clicking Continue. A genuinely illegal FIRST call
+    // still throws at the guard above; only this lost-race path is forgiving.
+    const fresh = await prisma.deal.findUnique({ where: { id: dealId }, select: { status: true } });
+    if (!fresh) return false;
+    if (fresh.status === newStatus) return false;
+    if (!opts.force && !canTransition(fresh.status, newStatus)) return false;
     return advanceDealStatus(dealId, newStatus, opts);
   }
 
@@ -196,10 +210,22 @@ export async function advanceDealStatus(
   // of this edge (service-fee, the Stripe webhook, admin repair) are easy to add to
   // and easy to forget. Bounded: the follow-on advance targets CONTRACT_PENDING, so
   // it cannot re-enter this branch.
-  if (newStatus === DealStatus.INSURANCE_PENDING) {
-    await advanceOnInsuranceSatisfied(dealId, { actorId: opts.actorId, actorRole: opts.actorRole });
-  }
+  await runArrivalHooks(dealId, newStatus, opts);
+  return true;
+}
 
+/**
+ * Hooks that run when a deal ARRIVES on a stage whose gating fact may already be
+ * satisfied. Both are narrow, guarded and idempotent, and the hook graph is acyclic
+ * (FEE_PENDING → FEE_PAID → INSURANCE_PENDING → CONTRACT_PENDING), so the cascade
+ * terminates. `force` is deliberately NOT propagated: an admin override of one hop
+ * must not silently force the rest of the ladder.
+ */
+async function runArrivalHooks(dealId: string, newStatus: DealStatus, opts: AdvanceOptions): Promise<void> {
+  const actor = { actorId: opts.actorId, actorRole: opts.actorRole };
+  if (newStatus === DealStatus.INSURANCE_PENDING) {
+    await advanceOnInsuranceSatisfied(dealId, actor);
+  }
   // Fee ladder, settled ON ARRIVAL. The only driver of FEE_PAID → INSURANCE_PENDING
   // was the Stripe webhook, so an admin "mark fee paid" stranded the deal at
   // FEE_PAID forever; and a fee paid while the deal was still BEFORE the fee stage
@@ -209,9 +235,8 @@ export async function advanceDealStatus(
   // transition rather than a forced skip. Bounded: FEE_PENDING → FEE_PAID →
   // INSURANCE_PENDING, and INSURANCE_PENDING cannot re-enter this branch.
   if (newStatus === DealStatus.FEE_PENDING || newStatus === DealStatus.FEE_PAID) {
-    await settleFeeLadderIfPaid(dealId, { actorId: opts.actorId, actorRole: opts.actorRole });
+    await settleFeeLadderIfPaid(dealId, actor);
   }
-  return true;
 }
 
 /**
@@ -232,9 +257,12 @@ export async function settleFeeLadderIfPaid(
   try {
     const deal = await prisma.deal.findUnique({
       where: { id: dealId },
-      select: { status: true, feePaidAt: true },
+      select: { status: true, feePaidAt: true, feeRefundedAt: true },
     });
-    if (!deal?.feePaidAt) return false;
+    // A refunded fee is not a paid fee. The refund route deliberately leaves
+    // feePaidAt set, so without this an ops user could never park a refunded deal
+    // back on FEE_PENDING to re-collect — the ladder would instantly re-advance it.
+    if (!deal?.feePaidAt || deal.feeRefundedAt) return false;
 
     const actor = { actorId: opts.actorId, actorRole: opts.actorRole ?? "SYSTEM", reason: "Concierge fee received" };
     let moved = false;

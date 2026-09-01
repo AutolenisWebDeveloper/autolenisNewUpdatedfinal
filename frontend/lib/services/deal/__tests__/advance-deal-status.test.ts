@@ -17,6 +17,7 @@ interface DealRow {
   buyerId: string;
   insuranceStatus: InsuranceStatus;
   feePaidAt: Date | null;
+  feeRefundedAt: Date | null;
 }
 
 interface Ctrl {
@@ -81,7 +82,7 @@ async function load() { return import("../deal.service"); }
 
 beforeEach(() => {
   ctrl = {
-    deal: { id: "d1", status: "PICKUP_SCHEDULED", buyerId: "b1", insuranceStatus: InsuranceStatus.VERIFIED, feePaidAt: null },
+    deal: { id: "d1", status: "PICKUP_SCHEDULED", buyerId: "b1", insuranceStatus: InsuranceStatus.VERIFIED, feePaidAt: null, feeRefundedAt: null },
     raceTo: null,
     throwOnFind: false,
     updateManyCalls: [],
@@ -308,4 +309,43 @@ test("the fee ladder chains into the insurance gate when proof is already on fil
   const { advanceDealStatus } = await load();
   await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "SYSTEM" });
   assert.equal(ctrl.deal.status, "CONTRACT_PENDING", "fee ladder then insurance gate, both already satisfied");
+});
+
+// ── Cascade-safety regressions found in independent review ──────────────────
+
+test("a CAS loser whose winner CASCADED past the target no-ops instead of throwing", async () => {
+  // The winner's arrival hooks can carry the deal several hops. The loser then
+  // re-resolves against a state from which the original target is no longer
+  // reachable. That must be an idempotent no-op (someone else did the work), not a
+  // DealTransitionError surfacing as a 500 on a buyer's double-click.
+  ctrl.deal.status = "FINANCING_PENDING";
+  ctrl.deal.feePaidAt = new Date();
+  ctrl.raceTo = "INSURANCE_PENDING"; // winner cascaded well past FEE_PENDING
+  const { advanceDealStatus } = await load();
+  const moved = await advanceDealStatus("d1", "FEE_PENDING", { actorRole: "BUYER" });
+  assert.equal(moved, false, "the race loser reports it did not move the deal");
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "and must not drag the deal backwards");
+});
+
+test("the idempotent data-merge path still runs the arrival hooks", async () => {
+  // mark-paid calls advanceDealStatus(FEE_PAID, {data:{feePaidAt}}) on a deal an
+  // admin already parked at FEE_PAID. Returning early after merging `data` wrote
+  // feePaidAt but never settled the ladder — stranding the deal at FEE_PAID.
+  ctrl.deal.status = "FEE_PAID";
+  ctrl.deal.feePaidAt = null;
+  ctrl.deal.insuranceStatus = InsuranceStatus.NOT_STARTED;
+  const { advanceDealStatus } = await load();
+  await advanceDealStatus("d1", "FEE_PAID", { actorRole: "ADMIN", data: { feePaidAt: new Date() } });
+  assert.equal(ctrl.deal.status, "INSURANCE_PENDING", "recording the fee must settle the ladder even on the no-op path");
+});
+
+test("a REFUNDED fee does not re-drive the ladder", async () => {
+  // The refund route deliberately leaves feePaidAt set. Ops must be able to park a
+  // refunded deal back on FEE_PENDING to re-collect without it instantly advancing.
+  ctrl.deal.status = "FEE_PENDING";
+  ctrl.deal.feePaidAt = new Date();
+  ctrl.deal.feeRefundedAt = new Date();
+  const { settleFeeLadderIfPaid } = await load();
+  assert.equal(await settleFeeLadderIfPaid("d1"), false);
+  assert.equal(ctrl.deal.status, "FEE_PENDING", "a refunded fee is not a paid fee");
 });

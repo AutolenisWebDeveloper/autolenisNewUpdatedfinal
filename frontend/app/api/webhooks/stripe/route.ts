@@ -414,13 +414,18 @@ export async function POST(request: NextRequest) {
           if (feeDeal) {
             // Net of the $99 deposit credit — the amount actually captured.
             const feeData = { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_REMAINING_CENTS, stripeFeePIId: pi.id };
-            if (feeDeal.status === "FEE_PENDING") {
+            // Recording the fee is enough: advanceDealStatus settles the rest of
+            // the ladder on arrival (FEE_PAID → INSURANCE_PENDING, and on into the
+            // insurance gate when proof is already on file). Re-issuing an explicit
+            // forced INSURANCE_PENDING here used to drag a deal that had already
+            // cascaded to CONTRACT_PENDING back a stage, writing bogus history and
+            // duplicate customer notifications.
+            if (feeDeal.status === "FEE_PENDING" || feeDeal.status === "FEE_PAID") {
               await advanceDealStatus(feeDeal.id, "FEE_PAID", { actorRole: "SYSTEM", force: true, data: feeData });
-              await advanceDealStatus(feeDeal.id, "INSURANCE_PENDING", { actorRole: "SYSTEM", force: true });
-            } else if (feeDeal.status === "FEE_PAID") {
-              await advanceDealStatus(feeDeal.id, "INSURANCE_PENDING", { actorRole: "SYSTEM", force: true, data: feeData });
             } else {
-              // Already at/after INSURANCE_PENDING — record fee fields, do not regress status.
+              // Before the fee stage, or already past insurance — record the fee
+              // fields without touching status. The ladder settles it when the deal
+              // arrives at FEE_PENDING (see settleFeeLadderIfPaid).
               await prisma.deal.update({ where: { id: feeDeal.id }, data: feeData });
             }
 

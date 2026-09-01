@@ -60,9 +60,10 @@ export async function recordFeePayment(dealId: string, paymentIntentId: string) 
   const existing = await prisma.serviceFeePayment.findUnique({ where: { dealId } });
   if (existing) return existing;
   const payment = await writeServiceFeePayment(dealId, paymentIntentId);
-  // Route through the guarded seam: FEE_PENDING → FEE_PAID → INSURANCE_PENDING.
-  // force is used because fee receipt is an authoritative payment fact; the
-  // two-step keeps the lifecycle (and DealStatusHistory) consistent.
+  // Route through the guarded seam. Recording FEE_PAID is enough: the seam settles
+  // the rest of the ladder on arrival (→ INSURANCE_PENDING, and on into the
+  // insurance gate when proof is already on file). force is used because fee
+  // receipt is an authoritative payment fact.
   await advanceDealStatus(dealId, "FEE_PAID", {
     actorRole: "SYSTEM",
     force: true,
@@ -72,6 +73,5 @@ export async function recordFeePayment(dealId: string, paymentIntentId: string) 
     // reports (which sum deposits + fees) never double-count the deposit.
     data: { feePaidAt: new Date(), feeAmountCents: PREMIUM_FEE_REMAINING_CENTS, stripeFeePIId: paymentIntentId },
   });
-  await advanceDealStatus(dealId, "INSURANCE_PENDING", { actorRole: "SYSTEM", force: true });
   return payment;
 }
