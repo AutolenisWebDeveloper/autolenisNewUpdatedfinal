@@ -1,4 +1,4 @@
-// moveBuyerWorkflowStage must go through the guarded deal seam.
+// moveBuyerWorkflowStage AND cancelBuyerWorkflow must go through the guarded deal seam.
 //
 // The defect this pins: it wrote `prisma.deal.update({ data: { status } })`
 // directly — a second, unguarded state machine sitting beside advanceDealStatus.
@@ -26,6 +26,9 @@ let advanceCalls: Array<{ dealId: string; to: string; opts: Record<string, unkno
 let rawStatusWrites: Array<Record<string, unknown>> = [];
 let historyCreates: Array<Record<string, unknown>> = [];
 let auditCreates: Array<Record<string, unknown>> = [];
+let cancelDealCalls: Array<{ dealId: string; reason: string; actor?: Record<string, unknown> }> = [];
+// The seam declines when a concurrent writer moved the deal first.
+let cancelSucceeds = true;
 
 const TRANSITIONS: Record<string, string[]> = {
   SIGNED: ["PICKUP_SCHEDULED"],
@@ -59,6 +62,12 @@ mock.module("@/lib/services/deal/deal.service", {
       if (dealRow) dealRow.status = to;
       return true;
     },
+    cancelDeal: async (dealId: string, reason: string, actor?: Record<string, unknown>) => {
+      cancelDealCalls.push({ dealId, reason, actor });
+      if (!cancelSucceeds) return false;
+      if (dealRow) dealRow.status = "CANCELLED";
+      return true;
+    },
   },
 });
 
@@ -74,6 +83,8 @@ beforeEach(() => {
   rawStatusWrites = [];
   historyCreates = [];
   auditCreates = [];
+  cancelDealCalls = [];
+  cancelSucceeds = true;
 });
 
 test("completing a deal routes through advanceDealStatus, never a raw status write", async () => {
@@ -130,4 +141,84 @@ test("a deal that is already CANCELLED/COMPLETED is not movable", async () => {
     /no active deal/i,
   );
   assert.equal(advanceCalls.length, 0);
+});
+
+// ── cancelBuyerWorkflow: the last raw deal.status writer ────────────────────
+// It wrote `prisma.deal.update({ data: { status: CANCELLED } })` directly. Unlike
+// the move path it DID hand-write its DealStatusHistory row, so history was not the
+// gap — the guard was. The raw write skipped:
+//   • the compare-and-swap, so a cancel racing a concurrent advance overwrote the
+//     winner unconditionally and recorded a fromStatus that was already stale,
+//   • the BuyerActivityEvent (no buyer-visible record of the cancellation), and
+//   • emitDealStatusComms, so the buyer was never told their deal was cancelled.
+// The seam already exposed cancelDeal() — correctly routed, and with zero callers.
+
+test("cancelling routes through the seam's cancelDeal, never a raw status write", async () => {
+  const { cancelBuyerWorkflow } = await load();
+  await cancelBuyerWorkflow("buyer_1", "admin_1", "a@x.com", "deal_1", "buyer changed their mind");
+
+  assert.equal(rawStatusWrites.length, 0, "a raw deal.status write bypasses the CAS and the cancellation comms");
+  assert.equal(cancelDealCalls.length, 1, "cancellation must go through the seam's terminal path");
+  assert.equal(cancelDealCalls[0]!.dealId, "deal_1");
+  assert.equal(cancelDealCalls[0]!.reason, "buyer changed their mind");
+});
+
+test("ADMIN attribution survives the move to the seam", async () => {
+  const { cancelBuyerWorkflow } = await load();
+  await cancelBuyerWorkflow("buyer_1", "admin_1", "a@x.com", "deal_1", "cancelled by ops");
+
+  const actor = cancelDealCalls[0]!.actor ?? {};
+  assert.equal(actor.actorRole, "ADMIN", "the hand-written history recorded ADMIN; the seam-written row must too");
+  assert.equal(actor.actorId, "admin_1", "an admin cancellation must not be attributed to SYSTEM");
+});
+
+test("the seam owns the cancellation history row — none hand-written here", async () => {
+  const { cancelBuyerWorkflow } = await load();
+  await cancelBuyerWorkflow("buyer_1", "admin_1", "a@x.com", "deal_1", "x");
+  assert.equal(historyCreates.length, 0, "advanceDealStatus writes DealStatusHistory; a second row here duplicates it");
+});
+
+test("the admin audit log is still written for a cancellation", async () => {
+  const { cancelBuyerWorkflow } = await load();
+  await cancelBuyerWorkflow("buyer_1", "admin_1", "a@x.com", "deal_1", "x");
+  assert.equal(auditCreates.length, 1, "admin accountability is not the seam's job — it stays here");
+  assert.equal(auditCreates[0]!.action, "CANCEL");
+  assert.equal(auditCreates[0]!.adminId, "admin_1");
+});
+
+test("a deal already terminal is rejected before anything is cancelled", async () => {
+  dealRow = null; // findFirst excludes CANCELLED / COMPLETED / REFUNDED
+  const { cancelBuyerWorkflow } = await load();
+  await assert.rejects(
+    () => cancelBuyerWorkflow("buyer_1", "admin_1", "a@x.com", "deal_1", "x"),
+    /no active deal/i,
+  );
+  assert.equal(cancelDealCalls.length, 0);
+  assert.equal(rawStatusWrites.length, 0);
+});
+
+test("a cancel the seam DECLINED is reported as not cancelled, never as success", async () => {
+  // Routing through the seam introduced an outcome the raw write never had: a
+  // concurrent advance can win the race, leaving the deal uncancelled. Returning a
+  // hardcoded { cancelled: true } would tell the admin the deal was cancelled when
+  // it was not — the same class of untruth as a status message for a state the
+  // system is not in.
+  cancelSucceeds = false;
+  const { cancelBuyerWorkflow } = await load();
+  const result = await cancelBuyerWorkflow("buyer_1", "admin_1", "a@x.com", "deal_1", "raced");
+
+  assert.equal(result.cancelled, false, "the admin must be told the cancellation did not take effect");
+  assert.equal(auditCreates.length, 1, "the attempt is still audited");
+  assert.equal(
+    (auditCreates[0]!.metadata as Record<string, unknown>).cancelled,
+    false,
+    "and the audit row records the real outcome, not just the intent",
+  );
+});
+
+test("a successful cancel reports cancelled: true", async () => {
+  const { cancelBuyerWorkflow } = await load();
+  const result = await cancelBuyerWorkflow("buyer_1", "admin_1", "a@x.com", "deal_1", "ok");
+  assert.equal(result.cancelled, true);
+  assert.equal((auditCreates[0]!.metadata as Record<string, unknown>).cancelled, true);
 });

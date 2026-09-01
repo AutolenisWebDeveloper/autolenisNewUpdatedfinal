@@ -350,15 +350,50 @@ export async function getDealForBuyer(buyerId: string, dealId?: string) {
   });
 }
 
-export async function cancelDeal(dealId: string, reason: string): Promise<void> {
+/** Who cancelled. Defaults to SYSTEM so automated callers read unchanged. */
+export interface CancelActor {
+  actorId?: string | null;
+  actorRole?: string | null;
+}
+
+/**
+ * The ONE terminal cancellation path. Every cancel — automated or admin — goes
+ * through here so a deal's status has exactly one writer.
+ *
+ * `force` bypasses only canTransition and the insurance hard-gate; the
+ * compare-and-swap in advanceDealStatus runs regardless, so the guard that makes
+ * this worth routing is retained. What force alone does NOT cover is the
+ * lost-race branch: without a from-guard it re-resolves and would cancel a deal
+ * that had just been completed by a concurrent writer, silently undoing a
+ * finished purchase. `expectedFrom` pins the advance to the state actually
+ * observed here, so losing the race declines instead of clobbering the winner.
+ *
+ * Returns whether the deal was actually cancelled, so a caller cannot report a
+ * cancellation that a concurrent writer prevented.
+ */
+export async function cancelDeal(
+  dealId: string,
+  reason: string,
+  actor: CancelActor = {},
+): Promise<boolean> {
   const deal = await prisma.deal.findUnique({ where: { id: dealId } });
   if (!deal) throw new Error("Deal not found");
 
-  // Route the status change through the guarded seam (records DealStatusHistory).
-  // Force is used so an already-cancelled/terminal deal does not throw here.
-  await advanceDealStatus(dealId, DealStatus.CANCELLED, { reason, actorRole: "SYSTEM", force: true });
+  const cancelled = await advanceDealStatus(dealId, DealStatus.CANCELLED, {
+    reason,
+    actorId: actor.actorId ?? undefined,
+    actorRole: actor.actorRole ?? "SYSTEM",
+    force: true,
+    expectedFrom: deal.status,
+  });
+
+  // Nothing moved: the deal was already terminal, or another writer carried it
+  // elsewhere between the read above and the swap. Announcing a cancellation that
+  // did not happen is worse than staying quiet.
+  if (!cancelled) return false;
 
   await prisma.buyerActivityEvent.create({
     data: { buyerId: deal.buyerId, eventType: "DEAL_CANCELLED", title: "Deal cancelled", metadata: { reason } },
   }).catch(() => {});
+  return true;
 }
