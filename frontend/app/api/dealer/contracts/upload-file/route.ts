@@ -1,12 +1,24 @@
-// POST /api/dealer/contracts/upload-file — upload contract PDF to Supabase Storage.
+// POST /api/dealer/contracts/upload-file — attach a contract PDF to a deal.
 // Accepts multipart/form-data: file (PDF) + dealId (string).
-// Uploads to bucket "dealer-contracts" using service role client.
-// Returns { documentUrl, mimeType, sizeBytes }.
+//
+// Stores the PDF in the private bucket "dealer-contracts" via the service-role
+// client AND creates the ContractVersion, which starts the fail-closed Contract
+// Shield scan. Returns { contractVersion, documentUrl, mimeType, sizeBytes }.
+//
+// Creating the ContractVersion here is the point. Attachment used to be two steps
+// — this route, then POST /api/dealer/contracts/upload — and nothing ever took the
+// second one: ContractUploadButton stops after this call, and that JSON route had
+// no callers at all. So the PDF reached storage, the dealer was shown "Uploaded",
+// and no ContractVersion existed. With no ContractVersion there is no scan, no
+// APPROVED version and no signing envelope, so the deal dead-ended at
+// CONTRACT_PENDING; the contract-shield cron looks for `ContractVersion` rows in
+// status UPLOADED, found none, and reported healthy. One route that completes the
+// pipeline cannot be left half-done by a caller that forgets step two.
 import { logger } from "@/lib/logger";
 import { NextRequest } from "next/server";
 import { getRequestDealer, successResponse, errorResponse } from "@/lib/auth/dealer-api";
 import { createServiceSupabaseClient } from "@/lib/supabase";
-import { assertDealerOwnsDeal, DealOwnershipError } from "@/lib/services/dealer/dealer-contract.service";
+import { assertDealerOwnsDeal, uploadDealerContract, DealOwnershipError } from "@/lib/services/dealer/dealer-contract.service";
 
 const MAX_BYTES = 20 * 1024 * 1024; // 20 MB
 const BUCKET = "dealer-contracts";
@@ -56,9 +68,23 @@ export async function POST(request: NextRequest) {
     return errorResponse("STORAGE_ERROR", "File upload failed. Please try again.", 500);
   }
 
-  // The bucket is private; return the bare storage path (persisted on the
-  // ContractVersion and signed at read time). Never a public URL.
+  // Complete the pipeline: version the contract and start the fail-closed scan.
+  // The bucket is private, so what is persisted is the bare storage path (signed
+  // at read time), never a public URL. Ownership was already asserted above;
+  // uploadDealerContract re-asserts it, which is intentional — it is the service's
+  // own chokepoint and protects every caller, not just this route.
+  let cv;
+  try {
+    cv = await uploadDealerContract(dealId, dealer.id, path);
+  } catch (err) {
+    // Ownership was asserted above, but it is re-checked inside the service; if it
+    // changed in between, answer 403 like the pre-check rather than a bare 500.
+    if (err instanceof DealOwnershipError) return errorResponse("FORBIDDEN", err.message, 403);
+    throw err;
+  }
+
   return successResponse({
+    contractVersion: cv,
     documentUrl: path,
     mimeType: "application/pdf",
     sizeBytes: file.size,

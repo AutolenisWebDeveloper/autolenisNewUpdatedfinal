@@ -154,7 +154,10 @@ export function dealStatusCommsPlan(status: DealStatus): DealCommPlan | null {
       return {
         type: NotificationType.DEAL_STAGE_CHANGED,
         title: "Your contract is being prepared",
-        body: "The dealer is preparing your contract. We'll let you know the moment it's ready.",
+        // Track-neutral by necessity: a concierge deal has no dealer at all
+        // (Deal.offerId is null and VehicleRequestOffer carries no dealer
+        // identity), so naming one was false for that whole track.
+        body: "We're preparing your contract. We'll let you know the moment it's ready.",
         actionUrl: BUYER_DEAL,
         actionRequired: false,
         sms: null,

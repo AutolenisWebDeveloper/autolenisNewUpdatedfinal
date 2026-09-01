@@ -97,12 +97,21 @@ export async function runNudgeEngine(): Promise<number> {
       notifType: "INSURANCE_BOUND" as const,
     },
     {
+      // CONTRACT_PENDING means the contract has NOT been produced yet — that is
+      // the definition of the stage — and the buyer has nothing to do but wait.
+      // This nudge used to claim "Your contract is ready to review" and send the
+      // buyer to /buyer/contracts, which is false on every track and was false
+      // indefinitely on a concierge deal, where no ContractVersion could exist at
+      // all. Keep the reassurance (a quiet stall is its own problem) but state
+      // only what is true, and point at the deal, not at a contract page with
+      // nothing to show.
       status: "CONTRACT_PENDING" as const,
       thresholdHours: 24,
-      title: "Your contract is ready to review",
-      body: "Review your purchase contract to continue your deal.",
-      actionUrl: "/buyer/contracts",
-      notifType: "CONTRACT_READY" as const,
+      title: "We're preparing your purchase contract",
+      body: "Your deal is moving along. There's nothing you need to do right " +
+        "now — we'll notify you as soon as the next step is available.",
+      actionUrl: "/buyer/deal",
+      notifType: "DEAL_STAGE_CHANGED" as const,
     },
     {
       status: "SIGNING_PENDING" as const,

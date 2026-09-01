@@ -97,11 +97,10 @@ export async function approveContractVersionByAdmin(
     };
   }
 
-  // Upload-during-review race: the reviewed document is only approvable while it
-  // is still the deal's current one. Checked on `version` (monotonic per deal in
-  // createContractVersionAndScan) rather than on status, because a superseding
-  // upload only flips a PRIOR *APPROVED* row — a reviewed REJECTED row keeps its
-  // status and would otherwise look current.
+  // Upload-during-review pre-check: the reviewed document is only approvable while
+  // it is still the deal's current one. This gives the specific, actionable refusal
+  // in the ordinary (non-racing) case; the compare-and-set below is what actually
+  // decides a genuine race.
   const newest = await prisma.contractVersion.findMany({
     where: { dealId },
     orderBy: { version: "desc" },
@@ -117,16 +116,34 @@ export async function approveContractVersionByAdmin(
     };
   }
 
-  // Supersede any OTHER approved version first, so approving never leaves two.
+  // COMPARE-AND-SET. The pre-check above read the version list; an upload
+  // committing between that read and this write would otherwise slip through —
+  // the read says "still current", the write approves a document that was
+  // superseded a moment later. Claiming the row conditionally on
+  // `status != SUPERSEDED` lets the database settle that race: because
+  // createContractVersionAndScan supersedes EVERY other version, a concurrent
+  // upload marks this target SUPERSEDED, the claim matches zero rows, and the
+  // approval refuses instead of binding a buyer's signature to a stale document.
+  // This is also the first write in the function, so a refusal still writes nothing.
+  const claimed = await prisma.contractVersion.updateMany({
+    where: { id: target.id, status: { not: "SUPERSEDED" } },
+    data: { status: "APPROVED", rejectionReason: null },
+  });
+  if (claimed.count === 0) {
+    return {
+      ok: false,
+      code: "SUPERSEDED_BY_NEWER_UPLOAD",
+      message:
+        "A newer contract version was uploaded while this approval was being processed, so this verdict is stale. Review the latest scan instead.",
+    };
+  }
+
+  // Only now retire any OTHER approved version, so approving never leaves two.
   await prisma.contractVersion.updateMany({
     where: { dealId, status: "APPROVED", id: { not: target.id } },
     data: { status: "SUPERSEDED" },
   });
 
-  await prisma.contractVersion.update({
-    where: { id: target.id },
-    data: { status: "APPROVED", rejectionReason: null },
-  });
   return { ok: true, contractVersionId: target.id };
 }
 
@@ -143,11 +160,21 @@ async function createContractVersionAndScan(dealId: string, documentUrl: string,
   const existing = await prisma.contractVersion.findMany({ where: { dealId }, orderBy: { version: "desc" }, take: 1 });
   const version = (existing[0]?.version ?? 0) + 1;
 
-  // Supersede old versions
-  if (existing.length) await prisma.contractVersion.updateMany({ where: { dealId, status: "APPROVED" }, data: { status: "SUPERSEDED" } });
-
+  // Create the replacement BEFORE retiring what it replaces: superseding first
+  // would leave the deal with no live version at all if the create then failed.
   const cv = await prisma.contractVersion.create({
     data: { dealId, documentUrl, version, uploadedBy, status: "UPLOADED" },
+  });
+
+  // Supersede EVERY other version for this deal, not only the APPROVED one. A
+  // newer document makes each earlier one obsolete — a REJECTED row is not
+  // re-approvable and an UPLOADED row must not keep occupying the scan queue.
+  // It also makes SUPERSEDED a complete marker, which is what lets
+  // approveContractVersionByAdmin settle the approve/upload race with a
+  // conditional update instead of a read followed by an unguarded write.
+  await prisma.contractVersion.updateMany({
+    where: { dealId, id: { not: cv.id }, status: { not: "SUPERSEDED" } },
+    data: { status: "SUPERSEDED" },
   });
 
   // Trigger the automatic scan on the REAL contract text. Fail-closed: a scan

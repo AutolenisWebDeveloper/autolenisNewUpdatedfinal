@@ -13,13 +13,18 @@
 // parallel one. It is OPS-gated and audit-logged.
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { contractDocumentPathSchema } from "@/lib/services/contract-shield/contract-document-ref";
 import { requirePermission } from "@/lib/auth/permissions";
 import { adminSuccess, adminError, createAuditLog } from "@/lib/auth/admin-api";
 import { uploadContractForDealByAdmin, DealOwnershipError } from "@/lib/services/dealer/dealer-contract.service";
 
 interface Props { params: Promise<{ dealId: string }> }
 
-const schema = z.object({ documentUrl: z.string().url() });
+// documentUrl is a bare storage path in the private contracts bucket, NOT a URL.
+// `.url()` had this exactly backwards: it rejected the only format the system
+// produces and accepted absolute URLs, which extract-text then fetches
+// server-side with no host restriction (SSRF). See contract-document-ref.
+const schema = z.object({ documentUrl: contractDocumentPathSchema });
 
 export async function POST(request: NextRequest, { params }: Props) {
   const { dealId } = await params;

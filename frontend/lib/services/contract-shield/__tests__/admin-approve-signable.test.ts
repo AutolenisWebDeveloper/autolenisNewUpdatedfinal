@@ -37,6 +37,9 @@ interface CV { id: string; dealId: string; version: number; status: string; reje
 
 let versions: CV[] = [];
 let updates: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }> = [];
+// Fires once, after the approval gate's last READ and before its first WRITE, to
+// simulate a concurrent upload committing inside that window.
+let raceHook: (() => void) | null = null;
 
 mock.module("@/lib/prisma", {
   namedExports: {
@@ -45,7 +48,10 @@ mock.module("@/lib/prisma", {
         findMany: async ({ where, orderBy, take }: { where: { dealId: string }; orderBy?: unknown; take?: number }) => {
           void orderBy;
           const rows = versions.filter((v) => v.dealId === where.dealId).sort((a, b) => b.version - a.version);
-          return take ? rows.slice(0, take) : rows;
+          const out = take ? rows.slice(0, take) : rows;
+          const hook = raceHook;
+          if (hook) { raceHook = null; hook(); }
+          return out;
         },
         findUnique: async ({ where }: { where: { id: string } }) => versions.find((v) => v.id === where.id) ?? null,
         create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -61,15 +67,20 @@ mock.module("@/lib/prisma", {
         },
         updateMany: async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
           updates.push({ where, data });
+          const matches = (actual: string, filter: unknown): boolean => {
+            if (filter === undefined) return true;
+            if (typeof filter === "object" && filter !== null && "not" in filter) {
+              return actual !== (filter as { not: string }).not;
+            }
+            return actual === filter;
+          };
           let n = 0;
           for (const v of versions) {
-            if (v.dealId === where.dealId && (where.status === undefined || v.status === where.status)) {
-              if (where.id && typeof where.id === "object" && "not" in (where.id as object)) {
-                if (v.id === (where.id as { not: string }).not) continue;
-              }
-              Object.assign(v, data);
-              n++;
-            }
+            if (where.dealId !== undefined && v.dealId !== where.dealId) continue;
+            if (!matches(v.id, where.id)) continue;
+            if (!matches(v.status, where.status)) continue;
+            Object.assign(v, data);
+            n++;
           }
           return { count: n };
         },
@@ -91,6 +102,7 @@ async function load() { return import("@/lib/services/dealer/dealer-contract.ser
 beforeEach(() => {
   versions = [{ id: "cv_1", dealId: "deal_1", version: 1, status: "REJECTED", rejectionReason: "Contract Shield FAIL (score 40)." }];
   updates = [];
+  raceHook = null;
 });
 
 test("admin approval flips the REJECTED contract version to APPROVED so signing can proceed", async () => {
@@ -212,7 +224,76 @@ test("an admin can attach a contract to a dealer-less (concierge) deal", async (
 test("the admin path versions and supersedes exactly like the dealer path", async () => {
   versions = [{ id: "cv_1", dealId: "deal_1", version: 1, status: "APPROVED", rejectionReason: null }];
   const { uploadContractForDealByAdmin } = await load();
-  const cv = await uploadContractForDealByAdmin("deal_1", "https://x/c2.pdf", "admin_1");
+  const cv = await uploadContractForDealByAdmin("deal_1", "dealer_1/deal_1/c2.pdf", "admin_1");
   assert.equal(cv.version, 2, "version increments");
   assert.equal(versions.find((v) => v.id === "cv_1")!.status, "SUPERSEDED", "the prior approved version is superseded");
+});
+
+// ── Finding-1 TOCTOU residual, closed here ──────────────────────────────────
+// The approval gate read "is this still the newest version?" and then wrote in a
+// separate statement. An upload landing between the two slipped through: the read
+// said current, the write approved a version that was superseded a moment later.
+// Closing it needs BOTH halves, which is why it lives with the upload-path fix:
+//   (1) a new upload supersedes EVERY other version, not only APPROVED ones, so
+//       "superseded" is a reliable marker rather than one that skips REJECTED and
+//       UPLOADED rows, and
+//   (2) the approval claims its target with a conditional update
+//       (status != SUPERSEDED) and treats a 0-row result as the refusal — an
+//       atomic compare-and-set, so the database decides the race, not the gap
+//       between two queries.
+
+test("a new upload supersedes EVERY prior version, not just the APPROVED one", async () => {
+  versions = [
+    { id: "cv_1", dealId: "deal_1", version: 1, status: "REJECTED", rejectionReason: "FAIL" },
+    { id: "cv_2", dealId: "deal_1", version: 2, status: "UPLOADED", rejectionReason: null },
+    { id: "cv_3", dealId: "deal_1", version: 3, status: "APPROVED", rejectionReason: null },
+  ];
+  const { uploadContractForDealByAdmin } = await load();
+  const cv = await uploadContractForDealByAdmin("deal_1", "admin/deal_1/c4.pdf", "admin_1");
+
+  assert.equal(cv.version, 4);
+  for (const id of ["cv_1", "cv_2", "cv_3"]) {
+    assert.equal(
+      versions.find((v) => v.id === id)!.status,
+      "SUPERSEDED",
+      `${id} must be superseded — a stale REJECTED or UPLOADED row otherwise still looks approvable`,
+    );
+  }
+  assert.equal(versions.find((v) => v.id === cv.id)!.status, "UPLOADED", "the new version enters the scan pipeline");
+});
+
+test("the new version is created BEFORE the others are superseded (never a deal with zero live versions)", async () => {
+  versions = [{ id: "cv_1", dealId: "deal_1", version: 1, status: "APPROVED", rejectionReason: null }];
+  const { uploadContractForDealByAdmin } = await load();
+  await uploadContractForDealByAdmin("deal_1", "admin/deal_1/c2.pdf", "admin_1");
+
+  const supersedeIndex = updates.findIndex((u) => u.data.status === "SUPERSEDED");
+  assert.ok(supersedeIndex >= 0, "the supersede must happen");
+  assert.ok(
+    versions.some((v) => v.version === 2),
+    "the replacement exists; superseding first would leave the deal with no live version if the create failed",
+  );
+});
+
+test("TOCTOU: approval REFUSES when the target is superseded between the check and the write", async () => {
+  // Simulates the upload committing inside the gap: the pre-check sees cv_1 as the
+  // newest, then a concurrent upload supersedes it before the claim runs. The
+  // conditional update must match zero rows and refuse.
+  versions = [{ id: "cv_1", dealId: "deal_1", version: 1, status: "REJECTED", rejectionReason: "FAIL" }];
+  const { approveContractVersionByAdmin } = await load();
+
+  raceHook = () => {
+    versions.find((v) => v.id === "cv_1")!.status = "SUPERSEDED";
+    versions.push({ id: "cv_2", dealId: "deal_1", version: 2, status: "UPLOADED", rejectionReason: null });
+  };
+
+  const result = await approveContractVersionByAdmin("deal_1", "cv_1");
+
+  assert.equal(result.ok, false, "the database, not a stale read, must decide this race");
+  assert.equal(result.ok === false && result.code, "SUPERSEDED_BY_NEWER_UPLOAD");
+  assert.deepEqual(
+    versions.filter((v) => v.status === "APPROVED").map((v) => v.id),
+    [],
+    "a version superseded mid-approval must never end up APPROVED",
+  );
 });
