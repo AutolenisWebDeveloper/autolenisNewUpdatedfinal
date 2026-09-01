@@ -538,11 +538,13 @@ matters operationally; this document does not attempt it.
 
 Then re-point what references the losers:
 
-**Nine tables reference `contacts(id)`, not two.** Because the losers are *soft*-deleted, no
+**Ten places hold a contact id — nine by foreign key, one by a bare `text` column.** Because the losers are *soft*-deleted, no
 `ON DELETE CASCADE` ever fires, so nothing is destroyed — but every child row stays attached to a
-contact that all application reads filter out. Left unmoved, the person's SMS thread vanishes from
-the inbox, their tasks and campaign history detach, and their lead score stops accruing to the
-surviving row.
+contact that the contact-scoped reads filter out (`app/admin/crm/page.tsx` filters
+`deleted_at IS NULL` on every contact query). Left unmoved, their tasks and campaign history
+detach from the surviving row and their lead score stops accruing to it. Whether a given
+conversation still surfaces depends on how each view joins — verify in the inbox after merging
+rather than assuming either way.
 
 | Table | FK rule | Re-point? | Note |
 | --- | --- | --- | --- |
@@ -555,6 +557,34 @@ surviving row.
 | `campaign_recipients` | CASCADE | **guarded** | `UNIQUE(campaign_id, contact_id)` |
 | `email_suppression` | SET NULL | **no** | keyed on `email` (`NOT NULL UNIQUE`) |
 | `sms_suppression` | SET NULL | **no** | keyed on `phone` (`NOT NULL UNIQUE`) |
+| `lead_nurture_schedule` | **none** | **cancel** | `contact_id text NOT NULL`, **no FK at all** — see below |
+
+**`lead_nurture_schedule` is the dangerous one, and it is not a foreign key.** Its `contact_id` is
+a bare `text` column with no constraint, so it appears in no FK catalogue and no CASCADE or SET
+NULL ever touches it. Worse, **soft-deleting a loser does not stop its nurture sequence.** The
+drain's completion check reads the contact by id and does *not* filter `deleted_at`:
+
+```ts
+// lib/services/crm/lead-nurture.service.ts
+const { data } = await supabase.from("contacts")
+  .select("lifecycle_stage").eq("id", contactId).single();
+return !data || data.lifecycle_stage !== "lead";   // no `deleted_at` filter
+```
+
+A soft-deleted row still returns data, so if its `lifecycle_stage` is still `lead` the sequence is
+judged *not* complete and **keeps sending** — to the `contact_email` frozen on the schedule row,
+which may not even be the keeper's address. Cancel the losers' pending touches explicitly:
+
+```sql
+UPDATE lead_nurture_schedule
+   SET status = 'canceled', updated_at = now()
+ WHERE contact_id = ANY(:loser_ids::text[])     -- note: text, not uuid
+   AND status IN ('pending', 'sending');
+```
+
+Do **not** re-point these to the keeper: `uq_lead_nurture_key_step (idempotency_key, step)` would
+collide, and the keeper's own sequence — if any — is already correct. Cancelling is what stops mail
+going to a contact that no longer exists.
 
 **The two suppression tables need no action and must not be re-pointed.** Their `contact_id` is
 decorative provenance; `SuppressionService` looks opt-outs up by address and number, both of which
