@@ -128,22 +128,80 @@ test("store failure after a paid draw: KEEPS the credit (Apollo charged), releas
 
 test("adapter miss NOT billed (no match): credit is refunded and the claim marked EMPTY", async () => {
   const { prisma, ledger, reveals } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 5 });
-  const miss = (async () => ({ kind: "empty", billed: false })) as never;
+  const miss = (async () => ({ kind: "empty", billed: false, stage: "no_match" })) as never;
   const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: miss });
   assert.equal(r, null);
   assert.equal(ledger.spentCredits, 5); // drew 1 then refunded 1 (Apollo not charged)
   assert.equal(reveals[0]!.status, "EMPTY");
   assert.equal(reveals[0]!.creditsCost, 0);
+  assert.equal(reveals[0]!.emptyStage, "no_match"); // WHICH stage produced it
 });
 
 test("adapter miss BILLED (matched, no email): credit is KEPT, claim EMPTY at cost 1", async () => {
   const { prisma, ledger, reveals } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 5 });
-  const billedMiss = (async () => ({ kind: "empty", billed: true })) as never;
+  const billedMiss = (async () => ({ kind: "empty", billed: true, stage: "match_no_email" })) as never;
   const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: billedMiss });
   assert.equal(r, null);
   assert.equal(ledger.spentCredits, 6); // drew 1, NOT refunded — Apollo charged for the match
   assert.equal(reveals[0]!.status, "EMPTY");
   assert.equal(reveals[0]!.creditsCost, 1);
+  assert.equal(reveals[0]!.emptyStage, "match_no_email");
+});
+
+// The whole point of the column: a free-stage empty and a paid-stage empty are
+// the same EMPTY row today. These two prove the row now says which one it was,
+// while credits_cost keeps following `billed` alone.
+test("every empty stage lands on the row verbatim, and cost still follows billed alone", async () => {
+  for (const [stage, billed] of [
+    ["disabled", false],
+    ["no_org", false],
+    ["no_people", false],
+    ["free_stage_error", false],
+    ["no_match", false],
+    ["match_no_email", true],
+    ["match_error", true],
+  ] as const) {
+    const { prisma, ledger, reveals } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 0 });
+    const miss = (async () => ({ kind: "empty", billed, stage })) as never;
+    const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: miss });
+    assert.equal(r, null, `${stage} must not return a contact`);
+    assert.equal(reveals[0]!.status, "EMPTY", stage);
+    assert.equal(reveals[0]!.emptyStage, stage, `${stage} must be recorded verbatim`);
+    assert.equal(reveals[0]!.creditsCost, billed ? 1 : 0, `${stage} cost must follow billed`);
+    assert.equal(ledger.spentCredits, billed ? 1 : 0, `${stage} ledger must follow billed`);
+  }
+});
+
+test("adapter THROWS: recorded as match_error and the credit is KEPT (cannot know if charged)", async () => {
+  const { prisma, ledger, reveals } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 5 });
+  const boom = (async () => { throw new Error("adapter exploded"); }) as never;
+  const r = await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: boom });
+  assert.equal(r, null);
+  assert.equal(ledger.spentCredits, 6); // conservative: assume Apollo charged
+  assert.equal(reveals[0]!.status, "EMPTY");
+  assert.equal(reveals[0]!.creditsCost, 1);
+  assert.equal(reveals[0]!.emptyStage, "match_error");
+});
+
+test("the rooftop id reaches the adapter, so the free-stage funnel logs are keyed by it", async () => {
+  const { prisma } = fake({ cycleKey: "2026-08", capCredits: 100, spentCredits: 0 });
+  const seen: Array<Record<string, unknown>> = [];
+  const capture = (async (adapterInput: Record<string, unknown>) => {
+    seen.push(adapterInput);
+    return { kind: "empty", billed: false, stage: "no_org" };
+  }) as never;
+  await revealRooftopContact(input, { prisma, now: NOW, enabled: on, resolveAndReveal: capture });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]!.rooftopId, "rt1");
+  // ...and nothing else the adapter is given changed. rooftopId is additive:
+  // it feeds the logs, never an Apollo request.
+  assert.deepEqual(seen[0], {
+    rooftopId: "rt1",
+    name: "Toyota of Dallas",
+    website: "https://toyotaofdallas.com",
+    city: "Dallas",
+    state: "TX",
+  });
 });
 
 test("END-TO-END: a matched-but-emailless reveal through the REAL adapter keeps the credit", async () => {
@@ -163,6 +221,7 @@ test("END-TO-END: a matched-but-emailless reveal through the REAL adapter keeps 
   assert.equal(ledger.spentCredits, 1); // charged + kept (never refunded) end-to-end
   assert.equal(reveals[0]!.status, "EMPTY");
   assert.equal(reveals[0]!.creditsCost, 1);
+  assert.equal(reveals[0]!.emptyStage, "match_no_email"); // the real adapter named the stage
 });
 
 test("idempotency: a concurrent claim (unique conflict) does not double-draw", async () => {

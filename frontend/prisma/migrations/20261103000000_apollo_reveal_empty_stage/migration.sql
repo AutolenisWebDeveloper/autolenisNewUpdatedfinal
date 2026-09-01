@@ -1,0 +1,50 @@
+-- Apollo reveal — record WHICH stage produced an EMPTY outcome.
+--
+-- WRITTEN BUT NOT APPLIED. This ships for owner review alongside the rest of the
+-- unapplied chain. Nothing here has been run against any database.
+--
+-- WHY: an EMPTY row in apollo_reveals says a reveal produced nothing, but not
+-- where it stopped. A cycle that never resolved a single organization and a
+-- cycle whose paid matches all came back without a work email are the same row
+-- today, and they call for opposite fixes (better dealer domains vs. a plan or
+-- title problem). empty_stage names the drop-off point:
+--
+--   disabled | no_org | no_people | free_stage_error | no_match |
+--   match_no_email | match_error
+--
+-- DIAGNOSTIC ONLY. credits_cost is still decided solely by whether Apollo
+-- billed; this column feeds no ledger arithmetic, no refund decision, and no
+-- outbound Apollo request. Existing EMPTY rows keep empty_stage NULL — the
+-- column is deliberately nullable and is NOT backfilled, because the stage that
+-- produced a historical empty was never recorded and inventing one would be
+-- fabricated provenance.
+--
+-- SCOPE: ADDITIVE ONLY. One nullable column. No DROP, no data change, no
+-- constraint, no index (empty_stage is read by inspection, not by a hot query;
+-- an index can be added later if a dashboard needs one).
+--
+-- IDEMPOTENT: the single statement is guarded, so re-running is a no-op.
+--
+-- RLS: apollo_reveals already runs with RLS ENABLED and ZERO policies
+-- (deny-all for anon/authenticated, bypass for service_role) from
+-- 20260926000000_add_apollo_credit_ledger. Adding a policy to a zero-policy
+-- table OPENS access rather than hardening it, so this migration contains no
+-- CREATE POLICY and does not touch RLS state.
+--
+-- APPLY BEFORE (OR WITH) THE CODE. Prisma selects every column a model declares
+-- unless a query narrows it, so once schema.prisma carries emptyStage, every
+-- unnarrowed apollo_reveals query fails with P2022 against a database that lacks
+-- the column — including the reveal-cache findFirst at the top of
+-- revealRooftopContact, not just the new EMPTY write. (Queries that project
+-- explicitly keep working, which is why contact-coverage's groupBy and the
+-- backfill's `select: { rooftopId: true }` would still answer normally: green
+-- dashboards would NOT disconfirm this failure.) Deploying the code first
+-- therefore stops reveals outright rather than degrading them. The column is
+-- additive and idempotent, so applying it AHEAD of the code is safe and is the
+-- right order: an unread column costs nothing.
+--
+-- ROLLBACK: see rollback.sql in this directory. Roll the CODE back first, for
+-- the same reason — dropping the column under a running deployment that still
+-- declares it reintroduces the same P2022.
+
+ALTER TABLE "apollo_reveals" ADD COLUMN IF NOT EXISTS "empty_stage" TEXT;
