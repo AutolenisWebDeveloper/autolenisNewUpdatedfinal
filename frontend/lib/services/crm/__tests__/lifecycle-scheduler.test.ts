@@ -94,7 +94,6 @@ beforeEach(() => {
 // job's schedule, which no longer runs).
 test("deposit_reminder with the flag OFF still goes INTERNAL — QStash is never used", async () => {
   const { scheduleLifecycleWorkload } = await load();
-  const before = Date.now();
   await scheduleLifecycleWorkload({
     workload: "deposit_reminder",
     buyerId: "b1",
@@ -107,8 +106,11 @@ test("deposit_reminder with the flag OFF still goes INTERNAL — QStash is never
   assert.equal(e.sequence, "deposit_reminder_1");
   assert.equal(e.baseKey, "deposit-reminder:b1");
   assert.equal(e.entityId, "b1");
-  const runAt = (e.runAt as Date).getTime();
-  assert.ok(runAt >= before + 3600 * 1000 - 5000 && runAt <= Date.now() + 3600 * 1000 + 5000, "runAt ~ now+1h");
+  // CADENCE CHANGE (owner spec: immediate → +1h → +6h → +24h → +72h → day-7):
+  // touch 1 is the "here's your link back", enqueued with NO delay, so runAt is
+  // left undefined and enqueueLifecycleTouch defaults it to now. This previously
+  // asserted ~now+1h, the grace the owner overruled.
+  assert.equal(e.runAt, undefined, "the immediate touch carries no delay");
 });
 
 test("auction_active OFF → QStash dispatch, immediate", async () => {
@@ -170,7 +172,6 @@ test("deal_complete OFF → QStash dispatch with dealId", async () => {
 test("deposit_reminder with the flag ON behaves identically — the flag is irrelevant now", async () => {
   ctrl.enabled[MOCK_FLAGS.LIFECYCLE_INTERNAL_DEPOSIT_REMINDER] = true;
   const { scheduleLifecycleWorkload } = await load();
-  const before = Date.now();
   await scheduleLifecycleWorkload({
     workload: "deposit_reminder",
     buyerId: "b1",
@@ -183,8 +184,11 @@ test("deposit_reminder with the flag ON behaves identically — the flag is irre
   assert.equal(e.sequence, "deposit_reminder_1");
   assert.equal(e.baseKey, "deposit-reminder:b1");
   assert.equal(e.entityId, "b1");
-  const runAt = (e.runAt as Date).getTime();
-  assert.ok(runAt >= before + 3600 * 1000 - 5000 && runAt <= Date.now() + 3600 * 1000 + 5000, "runAt ~ now+1h");
+  // CADENCE CHANGE (owner spec: immediate → +1h → +6h → +24h → +72h → day-7):
+  // touch 1 is the "here's your link back", enqueued with NO delay, so runAt is
+  // left undefined and enqueueLifecycleTouch defaults it to now. This previously
+  // asserted ~now+1h, the grace the owner overruled.
+  assert.equal(e.runAt, undefined, "the immediate touch carries no delay");
 });
 
 test("auction_active ON → internal enqueue keyed on auction, immediate (runAt undefined)", async () => {

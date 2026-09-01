@@ -1,7 +1,7 @@
 // depositConversionResolved — the send-time STOP guard for the $99 abandoned-
-// deposit reminder chain (deposit_reminder_1..4).
+// deposit reminder chain (deposit_reminder_1..6).
 //
-// It is re-read immediately before every one of the four touches, so it is the
+// It is re-read immediately before every one of the six touches, so it is the
 // authoritative answer to "does this buyer still owe the $99?". Everything the
 // chain must NOT do is decided here.
 //

@@ -1,8 +1,10 @@
-// END-TO-END: an abandoned $99 deposit produces touch 1 at +1h.
+// END-TO-END: an abandoned $99 deposit walks the full six-touch chain.
 //
 // Answers the question the producer flip raises: with the internal
 // lifecycle_touch_schedule plane as the default, does an abandoned deposit
-// actually reach a send attempt? This exercises the REAL code at every step —
+// actually reach a send attempt — and does the whole owner-specified cadence
+// (immediate → +1h → +6h → +24h → +72h → day-7) run to its terminal notice?
+// This exercises the REAL code at every step —
 // scheduleLifecycleWorkload → enqueueLifecycleTouch → drainDueLifecycleTouches →
 // the depositConversionResolved guard → notifyContact. Only two things are faked:
 // the `lifecycle_touch_schedule` table (an in-memory shim with the same filter
@@ -166,7 +168,7 @@ beforeEach(() => {
   nextId = 1;
 });
 
-test("abandoned deposit → touch 1 is scheduled ~1h out, pending, and NOT yet sent", async () => {
+test("abandoned deposit → touch 1 is scheduled IMMEDIATELY and is due at once", async () => {
   const { scheduleLifecycleWorkload } = await import("@/lib/services/crm/lifecycle-scheduler");
   await scheduleLifecycleWorkload(BUYER);
 
@@ -175,37 +177,52 @@ test("abandoned deposit → touch 1 is scheduled ~1h out, pending, and NOT yet s
   assert.equal(table[0]!.status, "pending");
 
   const delayMin = (new Date(table[0]!.run_at).getTime() - Date.now()) / 60_000;
-  assert.ok(delayMin > 55 && delayMin <= 61, `expected ~60 minutes, got ${delayMin.toFixed(1)}`);
+  assert.ok(Math.abs(delayMin) < 1, `expected ~0 minutes, got ${delayMin.toFixed(2)}`);
 
+  // No fastForward(): the row is genuinely due on the drain's very next pass.
   const { drainDueLifecycleTouches } = await import("@/lib/services/crm/lifecycle-touch-drain.service");
-  const early = await drainDueLifecycleTouches();
-  assert.equal(early.status, "NO_DUE", "nothing is due yet — the 1h grace is real");
-  assert.deepEqual(notifies, [], "no buyer is chased inside the grace window");
-});
-
-test("at +1h the drain SENDS touch 1 and chains touch 2", async () => {
-  const { scheduleLifecycleWorkload } = await import("@/lib/services/crm/lifecycle-scheduler");
-  await scheduleLifecycleWorkload(BUYER);
-  fastForward();
-
-  const { drainDueLifecycleTouches } = await import("@/lib/services/crm/lifecycle-touch-drain.service");
-  const summary = await drainDueLifecycleTouches();
-
-  assert.equal(summary.sent, 1, `expected one send, got ${JSON.stringify(summary)}`);
+  const first = await drainDueLifecycleTouches();
+  assert.equal(first.sent, 1, "the immediate touch needs no wait");
   assert.equal(notifies.length, 1, "the send attempt reached notifyContact");
   assert.equal(notifies[0]!.entityId, "buyer_1");
-  assert.match(String(notifies[0]!.emailSubject), /saved/i, "the touch-1 copy was rendered");
-
-  assert.equal(table.find((r) => r.sequence === "deposit_reminder_1")!.status, "done");
-  const next = table.find((r) => r.sequence === "deposit_reminder_2");
-  assert.ok(next, "touch 2 must be chained by touch 1 — the chain is self-propelling");
-  assert.equal(next!.status, "pending");
+  assert.match(String(notifies[0]!.emailSubject), /link back/i, "the touch-1 copy is the link back, not a chase");
 });
 
-test("a buyer who PAID inside the grace window is never chased", async () => {
+test("the drain walks ALL SIX touches in order and stops at the day-7 final notice", async () => {
   const { scheduleLifecycleWorkload } = await import("@/lib/services/crm/lifecycle-scheduler");
   await scheduleLifecycleWorkload(BUYER);
-  deposits = [{ status: "PAID" }]; // paid before the drain runs
+
+  const { drainDueLifecycleTouches } = await import("@/lib/services/crm/lifecycle-touch-drain.service");
+
+  const EXPECTED = [
+    "deposit_reminder_1", "deposit_reminder_2", "deposit_reminder_3",
+    "deposit_reminder_4", "deposit_reminder_5", "deposit_reminder_6",
+  ];
+
+  for (const sequence of EXPECTED) {
+    const row = table.find((r) => r.sequence === sequence && r.status === "pending");
+    assert.ok(row, `${sequence} must be pending — the chain has a gap`);
+    fastForward();
+    const summary = await drainDueLifecycleTouches();
+    assert.equal(summary.sent, 1, `${sequence} must send, got ${JSON.stringify(summary)}`);
+    assert.equal(table.find((r) => r.sequence === sequence)!.status, "done");
+  }
+
+  assert.equal(notifies.length, 6, "a non-converting buyer receives exactly six touches");
+  assert.match(String(notifies[5]!.emailSubject), /final notice/i, "the last touch is the day-7 final notice");
+
+  // Terminal: nothing left scheduled, and no seventh touch invented.
+  fastForward();
+  const after = await drainDueLifecycleTouches();
+  assert.equal(after.status, "NO_DUE", "the chain is finished");
+  assert.equal(table.length, 6, "six rows, one per touch — UNIQUE(base_key, sequence) held throughout");
+  assert.equal(notifies.length, 6, "no duplicate send after the chain ended");
+});
+
+test("a buyer who PAID before the drain runs is never chased", async () => {
+  const { scheduleLifecycleWorkload } = await import("@/lib/services/crm/lifecycle-scheduler");
+  await scheduleLifecycleWorkload(BUYER);
+  deposits = [{ status: "PAID" }]; // paid between enrollment and the drain's pass
   fastForward();
 
   const { drainDueLifecycleTouches } = await import("@/lib/services/crm/lifecycle-touch-drain.service");

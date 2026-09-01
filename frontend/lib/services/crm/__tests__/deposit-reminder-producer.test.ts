@@ -12,10 +12,12 @@
 // consulted, and the QStash branch is unreachable for it — so a lost, reset or
 // never-created flag row cannot silently kill the circle again.
 //
-// The first-touch delay is pinned too: the internal chain's own sequence table
-// documents +1h/+6h/+24h/+72h and each touch chains the next itself, so the
-// producer must enqueue touch 1 at +1h. It previously enqueued at +24h (the QStash
-// job's schedule), which would have shifted the whole chain by a day.
+// The first-touch delay is pinned too. The owner's cadence is
+// immediate → +1h → +6h → +24h → +72h → day-7, and each touch chains the next
+// itself, so the producer must enqueue touch 1 with NO delay. It previously
+// enqueued at +24h (the QStash job's schedule) and then at +1h (the internal
+// chain's first-touch grace); the grace is overruled — touch 1 is a "here's your
+// link back", not a chase.
 //
 // Run with:
 //   npx tsx --test --experimental-test-module-mocks \
@@ -114,19 +116,17 @@ test("a feature-flag lookup FAILURE cannot divert the workload to the removed se
   assert.deepEqual(dispatched, []);
 });
 
-test("touch 1 is enqueued at +1h, matching the internal chain's own cadence", async () => {
-  const before = Date.now();
+test("touch 1 is enqueued IMMEDIATELY — no first-touch grace", async () => {
   const { scheduleLifecycleWorkload } = await load();
   await scheduleLifecycleWorkload(DEPOSIT);
-  const after = Date.now();
 
-  const runAt = enqueued[0]!.runAt;
-  assert.ok(runAt instanceof Date, "the first touch is scheduled, not immediate");
-  const delayMs = runAt.getTime() - before;
-  assert.ok(
-    delayMs >= 60 * 60_000 - 5_000 && delayMs <= 60 * 60_000 + (after - before) + 5_000,
-    `expected ~1h grace before the first chase, got ${Math.round(delayMs / 60_000)} minutes — ` +
-      `the sequence table documents +1h/+6h/+24h/+72h and each touch chains the next from there`,
+  // runAt is left undefined so enqueueLifecycleTouch defaults it to now; the row
+  // is therefore due on the drain's next pass. The chain then carries
+  // +1h/+6h/+24h/+72h/day-7 itself.
+  assert.equal(
+    enqueued[0]!.runAt,
+    undefined,
+    "the owner's cadence leads with an immediate touch; any delay here shifts all six",
   );
 });
 

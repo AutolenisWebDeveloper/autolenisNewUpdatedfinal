@@ -96,11 +96,13 @@ function buildPlan(input: LifecycleWorkloadInput): WorkloadPlan {
         firstName: input.firstName,
         email: input.email,
         phone: input.phone ?? null,
-        // +1h — the internal chain's documented first-touch grace (never chase a
-        // buyer who may still be completing checkout); each touch then chains the
-        // next itself for +6h/+24h/+72h. This was 86400 to mirror the QStash job's
-        // own schedule, which would have shifted the whole chain by a day.
-        initialDelaySeconds: 3600,
+        // IMMEDIATE (0) — the owner's cadence is 0/+1h/+6h/+24h/+72h/day-7, and
+        // the first touch is a "here's your link back", not a chase, so it leads
+        // rather than waits out the former +1h grace. Each touch then chains the
+        // next itself; the drain cron (every 15m) is what bounds actual delivery.
+        // ROUTING IS UNCHANGED by this edit — `flag: null` above still makes the
+        // internal plane the sole owner of this workload.
+        initialDelaySeconds: 0,
         qstashPath: "/api/jobs/deposit-reminder",
         qstashBody: { buyerId: input.buyerId, firstName: input.firstName, email: input.email, touchNumber: 1 },
       };
