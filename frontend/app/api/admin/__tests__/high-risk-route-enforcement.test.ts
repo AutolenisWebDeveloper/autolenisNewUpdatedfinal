@@ -74,6 +74,9 @@ mock.module("@/lib/services/dealer/dealer-contract.service", {
 mock.module("@/lib/supabase", {
   namedExports: { createServiceSupabaseClient: () => forbiddenService() },
 });
+mock.module("@/lib/services/email/resend.service", {
+  namedExports: new Proxy({}, { get: () => async () => forbiddenService() }) as Record<string, unknown>,
+});
 mock.module("@/lib/services/admin/admin-support.service", {
   namedExports: {
     startImpersonation: async () => forbiddenService(),
@@ -163,6 +166,98 @@ const CASES: Case[] = [
     module: "@/app/api/admin/deals/[dealId]/contract/upload-file/route",
     method: "POST", params: { dealId: "deal_1" }, allowedRole: "OPERATIONS_ADMIN",
   },
+
+// ── TIER 1 (Finding 5) — the ungated routes that move money, decide credit,
+// grant view-as-buyer access, or change account state. Every one was reachable by
+// ANY authenticated admin: 187 admin routes carried no role check at all, and
+// unlike the shadow-gated routes above they were not even recorded. Keys and role
+// tiers are the owner-approved mapping; the matrix is the single source, so no
+// route repeats a role list.
+  {
+    // THE LIVE BYPASS: mints a 5-minute JWT to view a buyer's pages. Its own audit
+    // action is BUYER_IMPERSONATION_PREVIEW_STARTED — the code already calls this
+    // impersonation, so it shares support.impersonate (SUPER). Narrowing the
+    // impersonate routes while this stayed open would have moved the exposure,
+    // not closed it.
+    name: "T1 buyer preview-token (view-as-buyer)",
+    module: "@/app/api/admin/buyers/[buyerId]/preview-token/route",
+    method: "POST", params: { buyerId: "b1" }, body: { stageRoute: "/buyer/dashboard" }, allowedRole: "SUPER_ADMIN",
+  },
+  {
+    name: "T1 external pre-approval approve (credit decision)",
+    module: "@/app/api/admin/external-preapprovals/[id]/approve/route",
+    method: "POST", params: { id: "pa1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "FINANCE_ADMIN",
+  },
+  {
+    name: "T1 external pre-approval reject (credit decision)",
+    module: "@/app/api/admin/external-preapprovals/[id]/reject/route",
+    method: "POST", params: { id: "pa1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "FINANCE_ADMIN",
+  },
+  {
+    name: "T1 concierge-fee payment link",
+    module: "@/app/api/admin/payments/concierge-fee/send-link/route",
+    method: "POST", body: { dealId: "deal_1" }, allowedRole: "FINANCE_ADMIN",
+  },
+  {
+    name: "T1 deposit payment link",
+    module: "@/app/api/admin/payments/deposit/send-link/route",
+    method: "POST", body: { buyerId: "b1" }, allowedRole: "FINANCE_ADMIN",
+  },
+  {
+    name: "T1 buyer suspend (freeze)",
+    module: "@/app/api/admin/buyers/[buyerId]/suspend/route",
+    method: "POST", params: { buyerId: "b1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "COMPLIANCE_ADMIN",
+  },
+  {
+    name: "T1 buyer disable (freeze)",
+    module: "@/app/api/admin/buyers/[buyerId]/disable/route",
+    method: "POST", params: { buyerId: "b1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "COMPLIANCE_ADMIN",
+  },
+  {
+    name: "T1 buyer archive (lifecycle)",
+    module: "@/app/api/admin/buyers/[buyerId]/archive/route",
+    method: "POST", params: { buyerId: "b1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "OPERATIONS_ADMIN",
+  },
+  {
+    name: "T1 buyer restore (lifecycle)",
+    module: "@/app/api/admin/buyers/[buyerId]/restore/route",
+    method: "POST", params: { buyerId: "b1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "OPERATIONS_ADMIN",
+  },
+  {
+    name: "T1 buyer unsuspend (lift a hold)",
+    module: "@/app/api/admin/buyers/[buyerId]/unsuspend/route",
+    method: "POST", params: { buyerId: "b1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "OPERATIONS_ADMIN",
+  },
+  {
+    name: "T1 buyer credential reset",
+    module: "@/app/api/admin/buyers/[buyerId]/reset-password/route",
+    method: "POST", params: { buyerId: "b1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "OPERATIONS_ADMIN",
+  },
+  {
+    name: "T1 affiliate approve",
+    module: "@/app/api/admin/affiliates/[affiliateId]/approve/route",
+    method: "POST", params: { affiliateId: "a1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "OPERATIONS_ADMIN",
+  },
+  {
+    name: "T1 affiliate reject",
+    module: "@/app/api/admin/affiliates/[affiliateId]/reject/route",
+    method: "POST", params: { affiliateId: "a1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "OPERATIONS_ADMIN",
+  },
+  {
+    name: "T1 affiliate suspend",
+    module: "@/app/api/admin/affiliates/[affiliateId]/suspend/route",
+    method: "POST", params: { affiliateId: "a1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "OPERATIONS_ADMIN",
+  },
+  {
+    name: "T1 affiliate reactivate",
+    module: "@/app/api/admin/affiliates/[affiliateId]/reactivate/route",
+    method: "POST", params: { affiliateId: "a1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "OPERATIONS_ADMIN",
+  },
+  {
+    name: "T1 cancel buyer deal",
+    module: "@/app/api/admin/buyers/[buyerId]/workflow/cancel/route",
+    method: "POST", params: { buyerId: "b1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "OPERATIONS_ADMIN",
+  },
 ];
 
 function makeRequest(c: Case) {
@@ -220,5 +315,44 @@ for (const c of CASES) {
       assert.notEqual(res.status, 403, `${c.allowedRole} must not be locked out of ${c.name}`);
       assert.notEqual(res.status, 401, `${c.allowedRole} is authenticated`);
     }
+  });
+}
+
+// ── buyers.freeze vs buyers.account_state — the owner's split ────────────────
+// Ruled policy 3 gives COMPLIANCE a narrow write: flag / freeze / hold. Suspending
+// or disabling a buyer IS a freeze, so compliance holds that power. Lifting
+// someone else's hold is not a freeze — unsuspend/restore stay OPS, so compliance
+// can place a hold but cannot lift one.
+
+const FREEZE_ROUTES = [
+  { name: "suspend", module: "@/app/api/admin/buyers/[buyerId]/suspend/route" },
+  { name: "disable", module: "@/app/api/admin/buyers/[buyerId]/disable/route" },
+];
+const LIFT_ROUTES = [
+  { name: "unsuspend", module: "@/app/api/admin/buyers/[buyerId]/unsuspend/route" },
+  { name: "restore", module: "@/app/api/admin/buyers/[buyerId]/restore/route" },
+  { name: "archive", module: "@/app/api/admin/buyers/[buyerId]/archive/route" },
+];
+
+for (const r of FREEZE_ROUTES) {
+  test(`buyers.freeze: COMPLIANCE_ADMIN CAN ${r.name} a buyer`, async () => {
+    currentAdmin = { adminId: "c1", email: "compliance@autolenis.com", role: "COMPLIANCE_ADMIN" };
+    const c: Case = { name: r.name, module: r.module, method: "POST", params: { buyerId: "b1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "COMPLIANCE_ADMIN" };
+    const res = await invoke(c).catch(() => null);
+    if (res) {
+      assert.notEqual(res.status, 403, `compliance must be able to freeze (${r.name}) — policy 3 grants hold`);
+      assert.notEqual(res.status, 401);
+    }
+  });
+}
+
+for (const r of LIFT_ROUTES) {
+  test(`buyers.account_state: COMPLIANCE_ADMIN CANNOT ${r.name} a buyer`, async () => {
+    currentAdmin = { adminId: "c1", email: "compliance@autolenis.com", role: "COMPLIANCE_ADMIN" };
+    const c: Case = { name: r.name, module: r.module, method: "POST", params: { buyerId: "b1" }, body: { reason: "a sufficiently long reason" }, allowedRole: "OPERATIONS_ADMIN" };
+    const res = await invoke(c);
+    assert.equal(res.status, 403, `lifting a hold (${r.name}) is OPS, not a compliance freeze power`);
+    assert.equal(errorCode(await res.text()), "FORBIDDEN");
+    assert.equal(businessLogicRan, false);
   });
 }

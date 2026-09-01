@@ -7,13 +7,15 @@
 // eventual flag flip is a measured change rather than a leap.
 //
 // They also pin requirePermissionStrict — the always-enforcing sibling used by the
-// high-risk money / e-sign / ops-replay routes. Two things make it different from
+// high-risk money / e-sign / ops-replay routes and by Tier 1 of the ungated-route
+// sweep (credit decisions, payment links, view-as-buyer, account state). Two things make it different from
 // bolting a hardcoded role set onto each route (the existing pattern):
 //
 //   • It derives the allowed roles from PERMISSION_ROLES, so a route's enforcement
-//     cannot drift from the matrix. That drift is not hypothetical — the
-//     impersonation routes allow SUPER_ADMIN or SUPPORT_ADMIN while the matrix says
-//     SUPER only, so the two disagree today.
+//     cannot drift from the matrix. That drift is not hypothetical: the
+//     impersonation routes used to admit SUPER_ADMIN *or* SUPPORT_ADMIN while the
+//     matrix said SUPER only, and under shadow mode the route's wider list won.
+//     Both now read the matrix, so they cannot disagree again.
 //   • It distinguishes "not signed in" (401) from "signed in, wrong role" (403).
 //     Every requirePermission caller answers 401 "Not authenticated" for both,
 //     which would misreport a role lockout as a session problem.
@@ -199,6 +201,15 @@ test("the money and ops permissions do NOT admit SUPPORT_ADMIN", async () => {
     "finance.refunds",
     "deals.esign.void",
     "ops.replay",
+    // Tier 1 (Finding 5)
+    "finance.preapproval.decide",
+    "finance.payment_link.send",
+    "support.impersonate",
+    "buyers.freeze",
+    "buyers.account_state",
+    "buyers.credential_reset",
+    "affiliates.account_state",
+    "deals.cancel",
   ] as const;
   for (const permission of mustExcludeSupport) {
     assert.equal(
@@ -206,5 +217,53 @@ test("the money and ops permissions do NOT admit SUPPORT_ADMIN", async () => {
       false,
       `${permission} must never admit read-only support staff (ruled policy 1)`,
     );
+  }
+});
+
+// ── Tier 1 key/role mapping (owner-approved) ────────────────────────────────
+
+test("credit and payment-link keys are FINANCE-tier, never operations or compliance", async () => {
+  const { rolesFor } = await loadModule();
+  for (const key of ["finance.preapproval.decide", "finance.payment_link.send"] as const) {
+    assert.deepEqual(
+      [...rolesFor(key)].sort(),
+      ["FINANCE_ADMIN", "SUPER_ADMIN"],
+      `${key} moves money or decides credit — policy 2 keeps it FINANCE-only`,
+    );
+  }
+});
+
+test("preview-as-buyer shares the impersonation key rather than getting a lower tier", async () => {
+  const { rolesFor, roleAllows } = await loadModule();
+  assert.deepEqual([...rolesFor("support.impersonate")], ["SUPER_ADMIN"]);
+  for (const role of ["SUPPORT_ADMIN", "OPERATIONS_ADMIN", "COMPLIANCE_ADMIN", "FINANCE_ADMIN"]) {
+    assert.equal(
+      roleAllows("support.impersonate", role),
+      false,
+      `${role} must not be able to view a buyer's pages as them — a second, lower-tier preview key would reopen the bypass`,
+    );
+  }
+});
+
+test("the freeze/lift split: compliance may place a hold but not release one", async () => {
+  const { roleAllows } = await loadModule();
+  assert.equal(roleAllows("buyers.freeze", "COMPLIANCE_ADMIN"), true, "freeze/hold is a policy-3 compliance power");
+  assert.equal(roleAllows("buyers.account_state", "COMPLIANCE_ADMIN"), false, "lifting someone else's hold is OPS");
+
+  // Both halves stay open to the operational roles above compliance.
+  for (const key of ["buyers.freeze", "buyers.account_state"] as const) {
+    assert.equal(roleAllows(key, "SUPER_ADMIN"), true);
+    assert.equal(roleAllows(key, "OPERATIONS_ADMIN"), true);
+    assert.equal(roleAllows(key, "FINANCE_ADMIN"), false, `${key} is not a finance power`);
+  }
+});
+
+test("every permission key admits at least one role and only known roles", async () => {
+  const { PERMISSION_ROLES } = await loadModule();
+  const KNOWN = new Set(["SUPER_ADMIN", "OPERATIONS_ADMIN", "COMPLIANCE_ADMIN", "FINANCE_ADMIN", "SUPPORT_ADMIN"]);
+  for (const [key, roles] of Object.entries(PERMISSION_ROLES)) {
+    assert.ok(roles.length > 0, `${key} would be unreachable by every role`);
+    for (const role of roles) assert.ok(KNOWN.has(role), `${key} names an unknown role: ${role}`);
+    assert.equal(new Set(roles).size, roles.length, `${key} lists a role twice`);
   }
 });

@@ -88,6 +88,12 @@ test.describe("authorization boundaries across the deal spine", () => {
     "/api/admin/affiliates/commissions/some-id/mark-paid",
     "/api/admin/buyers/some-buyer-id/deposit/override",
     "/api/admin/operations/dlq/some-id/retry",
+    // Tier 1 (Finding 5): view-as-buyer, credit decisions, account state.
+    "/api/admin/buyers/some-buyer-id/preview-token",
+    "/api/admin/external-preapprovals/some-id/approve",
+    "/api/admin/payments/deposit/send-link",
+    "/api/admin/buyers/some-buyer-id/suspend",
+    "/api/admin/buyers/some-buyer-id/unsuspend",
   ];
 
   for (const path of guardedPosts) {

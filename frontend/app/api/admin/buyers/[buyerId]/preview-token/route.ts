@@ -4,7 +4,8 @@
 // Expires in 5 minutes. Stateless JWT — no DB storage needed.
 
 import { NextRequest } from "next/server";
-import { getAdminFromRequest, adminError, adminSuccess, createAuditLog } from "@/lib/auth/admin-api";
+import { adminError, adminSuccess, createAuditLog } from "@/lib/auth/admin-api";
+import { requirePermissionStrict } from "@/lib/auth/permissions";
 import { prisma } from "@/lib/prisma";
 import { SignJWT } from "jose";
 import { z } from "zod";
@@ -27,8 +28,13 @@ function getSecret() {
 }
 
 export async function POST(request: NextRequest, { params }: Props) {
-  const admin = await getAdminFromRequest(request);
-  if (!admin) return adminError("UNAUTHORIZED", "Not authenticated", 401);
+  // Tier 1 (Finding 5): enforced directly from PERMISSION_ROLES.
+  // This mints a short-lived view-as-buyer token; its audit action is
+  // BUYER_IMPERSONATION_PREVIEW_STARTED, so it is impersonation and shares that
+  // SUPER-only key. It previously had no role check at all.
+  const adminCheck = await requirePermissionStrict(request, "support.impersonate");
+  if (!adminCheck.ok) return adminError(adminCheck.code, adminCheck.message, adminCheck.status);
+  const admin = adminCheck.admin;
 
   const { buyerId } = await params;
 

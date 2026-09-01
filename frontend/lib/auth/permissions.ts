@@ -37,6 +37,9 @@ const OPS: AdminRole[] = ["SUPER_ADMIN", "OPERATIONS_ADMIN"];
 // Support-inclusive outbound reply: support can reply without holding bulk
 // campaign authority (policy 1 — SUPPORT_ADMIN acts, doesn't blast).
 const SUPPORT_REPLY: AdminRole[] = ["SUPER_ADMIN", "OPERATIONS_ADMIN", "SUPPORT_ADMIN"];
+// Compliance-inclusive HOLD: policy 3 gives COMPLIANCE a narrow write —
+// flag / freeze / hold. Placing a hold is theirs; lifting someone else's is not.
+const FREEZE: AdminRole[] = ["SUPER_ADMIN", "OPERATIONS_ADMIN", "COMPLIANCE_ADMIN"];
 
 // Destructive-priority domains first (owner ruling: money + destructive gate
 // FIRST). Read-tier and remaining domains are appended as the shadow rollout
@@ -53,8 +56,36 @@ export const PERMISSION_ROLES = {
   "dealers.terminate": OPS,
   "deals.esign.void": OPS,
 
-  // Impersonation — policy 4 (single narrow role, never default admin)
+  // Impersonation — policy 4 (single narrow role, never default admin).
+  // ALSO gates buyers/[buyerId]/preview-token, which mints a short-lived
+  // view-as-buyer token: its own audit action is BUYER_IMPERSONATION_PREVIEW_STARTED,
+  // so it is the same capability and shares the same door. Giving preview its own
+  // lower tier would simply reopen the bypass this closed.
   "support.impersonate": SUPER,
+
+  // ── Tier 1 of the ungated-route sweep (Finding 5) ────────────────────────
+  // These routes previously carried NO role check at all — not even a shadow
+  // record — so every authenticated admin could reach them.
+
+  // Credit + money movement — policy 2, FINANCE-only. Never SUPPORT.
+  "finance.preapproval.decide": MONEY,   // approve/reject an external pre-approval
+  "finance.payment_link.send": MONEY,    // Stripe Checkout link to the buyer
+                                         // (amount is server-fixed from constants)
+
+  // Buyer account state, split by the owner's ruling:
+  //   freeze  — placing a hold, a policy-3 compliance power
+  //   lifecycle — archiving, restoring, and LIFTING a hold, which stays OPS so
+  //   compliance can hold an account but not release someone else's hold.
+  "buyers.freeze": FREEZE,               // suspend, disable
+  "buyers.account_state": OPS,           // archive, restore, unsuspend
+  "buyers.credential_reset": OPS,        // trigger buyer account recovery
+
+  // Affiliate account state — gates commission earning, adjacent to money but not
+  // a money movement (finance.commissions.* already owns payout).
+  "affiliates.account_state": OPS,
+
+  // Deal cancellation — same tier as the other deal-lifecycle keys.
+  "deals.cancel": OPS,
 
   // Outbound comms, tiered by blast radius:
   //  • bulk_send — mass/campaign fan-out (destructive-priority). Also covers
