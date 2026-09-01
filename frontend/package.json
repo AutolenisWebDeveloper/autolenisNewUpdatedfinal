@@ -33,7 +33,7 @@
     "test:admin-auctions": "tsx --test --experimental-test-module-mocks app/api/admin/auctions/__tests__/*.test.ts",
     "test:offer": "tsx --test --experimental-test-module-mocks lib/services/offer/__tests__/*.test.ts",
     "test:comms": "tsx --test --experimental-test-module-mocks lib/services/notifications/__tests__/*.test.ts",
-    "test:contract-shield": "tsx --test --experimental-test-module-mocks lib/services/contract-shield/__tests__/*.test.ts",
+    "test:contract-shield": "tsx --test --experimental-test-module-mocks lib/services/contract-shield/__tests__/*.test.ts app/api/admin/contract-shield/__tests__/*.test.ts",
     "test:pickup": "tsx --test --experimental-test-module-mocks lib/services/pickup/__tests__/*.test.ts app/api/buyer/pickup/__tests__/*.test.ts app/api/dealer/pickup/__tests__/*.test.ts",
     "test:monitoring": "tsx --test --experimental-test-module-mocks lib/services/monitoring/__tests__/*.test.ts",
     "test:financing": "tsx --test --experimental-test-module-mocks lib/services/financing/__tests__/*.test.ts",

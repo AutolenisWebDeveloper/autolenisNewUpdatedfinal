@@ -27,7 +27,20 @@ export async function assertDealerOwnsDeal(dealId: string, dealerId: string): Pr
 }
 
 /**
- * ADMIN OVERRIDE — mark the deal's current contract version APPROVED.
+ * Outcome of an admin Contract Shield approval. A refusal is a first-class,
+ * inspectable result rather than `null`, so the calling route can fail CLOSED
+ * with a specific reason instead of guessing why nothing was approved.
+ */
+export type AdminContractApproval =
+  | { ok: true; contractVersionId: string }
+  | {
+      ok: false;
+      code: "NO_LINKED_VERSION" | "VERSION_NOT_FOUND" | "SUPERSEDED_BY_NEWER_UPLOAD";
+      message: string;
+    };
+
+/**
+ * ADMIN OVERRIDE — mark the ContractVersion that a reviewed scan judged APPROVED.
  *
  * The automated scan is fail-closed: a WARNING/FAIL leaves the ContractVersion
  * REJECTED. When an admin overrides that verdict in the Contract Shield review
@@ -41,19 +54,68 @@ export async function assertDealerOwnsDeal(dealId: string, dealerId: string): Pr
  * supersede, scan verdict) — the override reuses that ownership rather than
  * re-implementing version bookkeeping in an admin route.
  *
- * Approves the LATEST version and supersedes any other approved one, preserving the
- * one-approved-version-per-deal invariant that uploadDealerContract maintains.
- * Idempotent. Returns the approved version id, or null when the deal has no
- * contract version at all (nothing to approve).
+ * COMPLIANCE GATE. Approval binds to `contractVersionId` — the exact document the
+ * reviewed scan ran against (ContractScan.contractVersionId), NOT "the newest
+ * version". Approving the newest was a fail-OPEN defect: a dealer revision
+ * uploaded while the scan sat in the review queue became APPROVED without ever
+ * being scanned, and buyer-signing.service binds the buyer's binding signature and
+ * tamper hash to whichever version is APPROVED.
+ *
+ * Refuses, never guesses:
+ *   • NO_LINKED_VERSION         — the scan predates the contract_version_id column
+ *     (or is an admin override row with no document). The admin must re-scan; a
+ *     heuristic here would reintroduce the defect.
+ *   • VERSION_NOT_FOUND         — the linked version is gone, or belongs to another deal.
+ *   • SUPERSEDED_BY_NEWER_UPLOAD — a newer version landed after the reviewed scan.
+ *     Approving the reviewed one would sign a superseded document and approving the
+ *     newer one would sign an unreviewed document, so neither happens. This is the
+ *     clause that closes the upload-during-review race, independently of the link.
+ *
+ * A refusal writes nothing. Success supersedes any other APPROVED version,
+ * preserving the one-approved-version-per-deal invariant that uploadDealerContract
+ * maintains, and is idempotent.
  */
-export async function approveContractVersionByAdmin(dealId: string): Promise<string | null> {
-  const latest = await prisma.contractVersion.findMany({
+export async function approveContractVersionByAdmin(
+  dealId: string,
+  contractVersionId: string | null | undefined,
+): Promise<AdminContractApproval> {
+  if (!contractVersionId) {
+    return {
+      ok: false,
+      code: "NO_LINKED_VERSION",
+      message:
+        "This review is not linked to a contract version, so we cannot tell which document was reviewed. Re-scan the contract and approve the new review.",
+    };
+  }
+
+  const target = await prisma.contractVersion.findUnique({ where: { id: contractVersionId } });
+  if (!target || target.dealId !== dealId) {
+    return {
+      ok: false,
+      code: "VERSION_NOT_FOUND",
+      message: "The contract version this review targeted no longer exists on this deal. Re-scan the contract.",
+    };
+  }
+
+  // Upload-during-review race: the reviewed document is only approvable while it
+  // is still the deal's current one. Checked on `version` (monotonic per deal in
+  // createContractVersionAndScan) rather than on status, because a superseding
+  // upload only flips a PRIOR *APPROVED* row — a reviewed REJECTED row keeps its
+  // status and would otherwise look current.
+  const newest = await prisma.contractVersion.findMany({
     where: { dealId },
     orderBy: { version: "desc" },
     take: 1,
   });
-  const target = latest[0];
-  if (!target) return null;
+  const latestVersion = newest[0]?.version ?? target.version;
+  if (latestVersion > target.version) {
+    return {
+      ok: false,
+      code: "SUPERSEDED_BY_NEWER_UPLOAD",
+      message:
+        "A newer contract version was uploaded after this review ran, so this verdict is stale. Review the latest scan instead.",
+    };
+  }
 
   // Supersede any OTHER approved version first, so approving never leaves two.
   await prisma.contractVersion.updateMany({
@@ -65,7 +127,7 @@ export async function approveContractVersionByAdmin(dealId: string): Promise<str
     where: { id: target.id },
     data: { status: "APPROVED", rejectionReason: null },
   });
-  return target.id;
+  return { ok: true, contractVersionId: target.id };
 }
 
 /**
@@ -151,7 +213,9 @@ export async function scanContractVersion(contractVersionId: string): Promise<vo
 
   try {
     const text = await extractContractText(cv.documentUrl);
-    const result = await scanContract(cv.dealId, text, cv.deal.offer?.dealerId ?? cv.uploadedBy);
+    // Pass cv.id so the ContractScan row records WHICH document it judged —
+    // the link the admin approval gate binds to.
+    const result = await scanContract(cv.dealId, text, cv.deal.offer?.dealerId ?? cv.uploadedBy, cv.id);
 
     if (result.status === "PASS") {
       await prisma.contractVersion.update({ where: { id: cv.id }, data: { status: "APPROVED", rejectionReason: null } });

@@ -74,6 +74,9 @@ test.describe("authorization boundaries across the deal spine", () => {
     "/api/dealer/pickup/scan",
     "/api/admin/deals/some-deal-id/contract",
     "/api/buyer/insurance/upload-proof",
+    // The Contract Shield APPROVE override — the compliance gate that binds a
+    // deal's signable contract to the exact version the reviewed scan judged.
+    "/api/admin/contract-shield/some-review-id",
   ];
 
   for (const path of guardedPosts) {

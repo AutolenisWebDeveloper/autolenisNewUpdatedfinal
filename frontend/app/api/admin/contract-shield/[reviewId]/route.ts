@@ -68,6 +68,29 @@ export async function POST(request: NextRequest, { params }: Props) {
 
   switch (action) {
     case "APPROVE": {
+      // COMPLIANCE GATE — FIRST, before any state changes.
+      //
+      // The admin is overriding a fail-closed scan verdict, which left the backing
+      // ContractVersion REJECTED. prepareBuyerSigningEnvelope requires an APPROVED
+      // version, so without this the override advanced the deal, told the buyer to
+      // sign, and then produced NO envelope — a permanent dead end at
+      // CONTRACT_APPROVED. Approve the version through the service that owns it.
+      //
+      // `scan.contractVersionId` — NOT deal.id alone — is what makes the approval
+      // bind to the exact document this review judged. Passing only the deal id let
+      // the service approve whichever version was newest, so a dealer revision
+      // uploaded while the review sat in the queue got approved unscanned and the
+      // buyer's binding signature attached to it.
+      //
+      // A refusal fails CLOSED: the scan is not marked PASS, the deal is not
+      // advanced, no envelope is prepared and the buyer is not told to sign. The
+      // admin is told why (409) instead of the failure being swallowed into a log.
+      const approval = await approveContractVersionByAdmin(deal.id, scan.contractVersionId);
+      if (!approval.ok) {
+        logger.error(`[contract-shield] APPROVE refused on deal ${deal.id} (${approval.code}) — nothing was changed`);
+        return adminError("CONTRACT_VERSION_NOT_APPROVABLE", approval.message, 409);
+      }
+
       await prisma.contractScan.update({
         where: { id: reviewId },
         data: { status: "PASS", changeLog: appendChangeLog(scan.changeLog, logEntry("APPROVED")) },
@@ -82,16 +105,6 @@ export async function POST(request: NextRequest, { params }: Props) {
         force: true,
         data: { contractShieldStatus: "PASS", contractShieldScore: scan.score },
       });
-
-      // The admin is overriding a fail-closed scan verdict, which left the backing
-      // ContractVersion REJECTED. prepareBuyerSigningEnvelope requires an APPROVED
-      // version, so without this the override advanced the deal, told the buyer to
-      // sign, and then produced NO envelope — a permanent dead end at
-      // CONTRACT_APPROVED. Approve the version through the service that owns it.
-      const approvedVersionId = await approveContractVersionByAdmin(deal.id);
-      if (!approvedVersionId) {
-        logger.error(`[contract-shield] APPROVE on deal ${deal.id}: no ContractVersion to approve — signing cannot be prepared`);
-      }
 
       // Prepare the in-house signing envelope (buyer signs in-app). Bound to the
       // approved contract by hash; safe under re-run (dealId-unique upsert).
@@ -130,7 +143,7 @@ export async function POST(request: NextRequest, { params }: Props) {
         }).catch(() => {});
       }
 
-      result = { approved: true, envelopeId };
+      result = { approved: true, envelopeId, contractVersionId: approval.contractVersionId };
       break;
     }
 

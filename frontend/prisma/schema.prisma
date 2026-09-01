@@ -634,6 +634,18 @@ model ContractScan {
   scannedAt DateTime @default(now()) @map("scanned_at")
   deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
+  // WHICH document this verdict judged. Without it a scan and a ContractVersion
+  // were associated only through the one-to-many dealId, so the admin APPROVE
+  // override could not tell the reviewed version from the newest one and
+  // approved whichever was newest — a document Contract Shield had never
+  // passed, which the buyer then signed. Nullable because pre-existing scan
+  // rows have no link and the CONTRACT_SHIELD_OVERRIDDEN admin action records a
+  // verdict with no document; approveContractVersionByAdmin hard-refuses on a
+  // null link rather than guessing.
+  contractVersionId String?          @map("contract_version_id")
+  contractVersion   ContractVersion? @relation(fields: [contractVersionId], references: [id], onDelete: SetNull)
+
+  @@index([contractVersionId])
   @@map("contract_scans")
 }
 
@@ -2558,6 +2570,7 @@ model ContractVersion {
   rejectedAt      DateTime?             @map("rejected_at")
   rejectionReason String?               @map("rejection_reason")
   uploadedAt      DateTime              @default(now()) @map("uploaded_at")
+  scans           ContractScan[]
 
   @@map("contract_versions")
 }
